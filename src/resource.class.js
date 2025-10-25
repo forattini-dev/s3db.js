@@ -1022,6 +1022,36 @@ export class Resource extends AsyncEventEmitter {
   }
 
   /**
+   * Emit events with backward compatibility support
+   * Emits both new standardized events and old deprecated events
+   *
+   * @private
+   * @param {string} oldEvent - Old event name (deprecated)
+   * @param {string} newEvent - New standardized event name
+   * @param {Object} payload - Event payload
+   * @param {string} [id] - Optional ID for ID-specific events
+   */
+  _emitWithDeprecation(oldEvent, newEvent, payload, id = null) {
+    // Emit new standardized event
+    this.emit(newEvent, payload);
+
+    // Emit ID-specific event if ID provided
+    if (id) {
+      this.emit(`${newEvent}:${id}`, payload);
+    }
+
+    // Emit old event with deprecation warning if anyone is listening
+    if (this.listenerCount(oldEvent) > 0) {
+      console.warn(
+        `[s3db.js] Event "${oldEvent}" is deprecated and will be removed in v14.0.0. ` +
+        `Use "${newEvent}" instead.` +
+        (id ? ` ID-specific events are also available: "${newEvent}:${id}"` : '')
+      );
+      this.emit(oldEvent, payload);
+    }
+  }
+
+  /**
    * Insert a new resource object
    * @param {Object} attributes - Resource attributes
    * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
@@ -1191,24 +1221,24 @@ export class Resource extends AsyncEventEmitter {
       }
 
       // Execute other afterInsert hooks synchronously (excluding partition hook)
-      const nonPartitionHooks = this.hooks.afterInsert.filter(hook => 
+      const nonPartitionHooks = this.hooks.afterInsert.filter(hook =>
         !hook.toString().includes('createPartitionReferences')
       );
       let finalResult = insertedObject;
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      
-      // Emit insert event
-      this.emit('insert', finalResult);
+
+      // Emit insert event with standardized naming
+      this._emitWithDeprecation('insert', 'inserted', finalResult, finalResult?.id || insertedObject?.id);
       return finalResult;
     } else {
       // Sync mode: execute all hooks including partition creation
       const finalResult = await this.executeHooks('afterInsert', insertedObject);
-      
-      // Emit insert event
-      this.emit('insert', finalResult);
-      
+
+      // Emit insert event with standardized naming
+      this._emitWithDeprecation('insert', 'inserted', finalResult, finalResult?.id || insertedObject?.id);
+
       // Return the final object
       return finalResult;
     }
@@ -1304,7 +1334,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterGet hooks
     data = await this.executeHooks('afterGet', data);
 
-    this.emit("get", data);
+    this._emitWithDeprecation("get", "fetched", data, data.id);
     const value = data;
     return value;
   }
@@ -1579,28 +1609,28 @@ export class Resource extends AsyncEventEmitter {
       }
 
       // Execute other afterUpdate hooks synchronously (excluding partition hook)
-      const nonPartitionHooks = this.hooks.afterUpdate.filter(hook => 
+      const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
         !hook.toString().includes('handlePartitionReferenceUpdates')
       );
       let finalResult = updatedData;
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      
-      this.emit('update', {
+
+      this._emitWithDeprecation('update', 'updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
       return finalResult;
     } else {
       // Sync mode: execute all hooks including partition updates
       const finalResult = await this.executeHooks('afterUpdate', updatedData);
-      this.emit('update', {
+      this._emitWithDeprecation('update', 'updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
       return finalResult;
     }
   }
@@ -2125,11 +2155,11 @@ export class Resource extends AsyncEventEmitter {
         finalResult = await hook(finalResult);
       }
 
-      this.emit('update', {
+      this._emitWithDeprecation('update', 'updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
 
       return {
         success: true,
@@ -2141,11 +2171,11 @@ export class Resource extends AsyncEventEmitter {
       await this.handlePartitionReferenceUpdates(oldData, newData);
       const finalResult = await this.executeHooks('afterUpdate', updatedData);
 
-      this.emit('update', {
+      this._emitWithDeprecation('update', 'updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
 
       return {
         success: true,
@@ -2182,13 +2212,13 @@ export class Resource extends AsyncEventEmitter {
     await this.executeHooks('beforeDelete', objectData);
     const key = this.getResourceKey(id);
     const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
-    
+
     // Always emit delete event for audit purposes, even if delete fails
-    this.emit("delete", {
+    this._emitWithDeprecation("delete", "deleted", {
       ...objectData,
       $before: { ...objectData },
       $after: null
-    });
+    }, id);
     
     // If we had an error getting the object, throw it now (after emitting the event)
     if (deleteError) {
@@ -2339,7 +2369,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterCount hooks
     await this.executeHooks('afterCount', { count, partition, partitionValues });
 
-    this.emit("count", count);
+    this._emitWithDeprecation("count", "counted", count);
     return count;
   }
 
@@ -2367,7 +2397,7 @@ export class Resource extends AsyncEventEmitter {
         return result;
       });
 
-    this.emit("insertMany", objects.length);
+    this._emitWithDeprecation("insertMany", "inserted-many", objects.length);
     return results;
   }
 
@@ -2417,7 +2447,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterDeleteMany hooks
     await this.executeHooks('afterDeleteMany', { ids, results });
 
-    this.emit("deleteMany", ids.length);
+    this._emitWithDeprecation("deleteMany", "deleted-many", ids.length);
     return results;
   }
 
@@ -2431,7 +2461,7 @@ export class Resource extends AsyncEventEmitter {
     const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
 
-    this.emit("deleteAll", {
+    this._emitWithDeprecation("deleteAll", "deleted-all", {
       version: this.version,
       prefix,
       deletedCount
@@ -2454,7 +2484,7 @@ export class Resource extends AsyncEventEmitter {
     const prefix = `resource=${this.name}`;
     const deletedCount = await this.client.deleteAll({ prefix });
 
-    this.emit("deleteAllData", {
+    this._emitWithDeprecation("deleteAllData", "deleted-all-data", {
       resource: this.name,
       prefix,
       deletedCount
@@ -2532,7 +2562,7 @@ export class Resource extends AsyncEventEmitter {
       const idPart = parts.find(part => part.startsWith('id='));
       return idPart ? idPart.replace('id=', '') : null;
     }).filter(Boolean);
-    this.emit("listIds", ids.length);
+    this._emitWithDeprecation("listIds", "listed-ids", ids.length);
     return ids;
   }
 
@@ -2580,13 +2610,13 @@ export class Resource extends AsyncEventEmitter {
     const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
     if (!ok) throw err;
     const results = await this.processListResults(ids, 'main');
-    this.emit("list", { count: results.length, errors: 0 });
+    this._emitWithDeprecation("list", "listed", { count: results.length, errors: 0 });
     return results;
   }
 
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
     if (!this.config.partitions?.[partition]) {
-      this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+      this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
     const partitionDef = this.config.partitions[partition];
@@ -2596,7 +2626,7 @@ export class Resource extends AsyncEventEmitter {
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-    this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
+    this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
   }
 
@@ -2652,7 +2682,7 @@ export class Resource extends AsyncEventEmitter {
         }
         return this.handleResourceError(err, id, context);
       });
-    this.emit("list", { count: results.length, errors: 0 });
+    this._emitWithDeprecation("list", "listed", { count: results.length, errors: 0 });
     return results;
   }
 
@@ -2725,11 +2755,11 @@ export class Resource extends AsyncEventEmitter {
    */
   handleListError(error, { partition, partitionValues }) {
     if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+      this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
 
-    this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+    this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
     return [];
   }
 
@@ -2771,7 +2801,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterGetMany hooks
     const finalResults = await this.executeHooks('afterGetMany', results);
 
-    this.emit("getMany", ids.length);
+    this._emitWithDeprecation("getMany", "fetched-many", ids.length);
     return finalResults;
   }
 
@@ -2862,7 +2892,7 @@ export class Resource extends AsyncEventEmitter {
           hasTotalItems: totalItems !== null
         }
       };
-      this.emit("page", result);
+      this._emitWithDeprecation("page", "paginated", result);
       return result;
     });
     if (ok) return result;
@@ -2936,7 +2966,7 @@ export class Resource extends AsyncEventEmitter {
       contentType
     }));
     if (!ok2) throw err2;
-    this.emit("setContent", { id, contentType, contentLength: buffer.length });
+    this._emitWithDeprecation("setContent", "content-set", { id, contentType, contentLength: buffer.length }, id);
     return updatedData;
   }
 
@@ -2966,7 +2996,7 @@ export class Resource extends AsyncEventEmitter {
     }
     const buffer = Buffer.from(await response.Body.transformToByteArray());
     const contentType = response.ContentType || null;
-    this.emit("content", id, buffer.length, contentType);
+    this._emitWithDeprecation("content", "content-fetched", { id, contentLength: buffer.length, contentType }, id);
     return {
       buffer,
       contentType
@@ -3000,7 +3030,7 @@ export class Resource extends AsyncEventEmitter {
       metadata: existingMetadata,
     }));
     if (!ok2) throw err2;
-    this.emit("deleteContent", id);
+    this._emitWithDeprecation("deleteContent", "content-deleted", id, id);
     return response;
   }
 
@@ -3410,7 +3440,7 @@ export class Resource extends AsyncEventEmitter {
     data._partition = partitionName;
     data._partitionValues = partitionValues;
 
-    this.emit("getFromPartition", data);
+    this._emitWithDeprecation("getFromPartition", "partition-fetched", data, data.id);
     return data;
   }
 

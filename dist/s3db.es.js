@@ -23856,11 +23856,11 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult.id);
+      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult?.id || insertedObject?.id);
       return finalResult;
     } else {
       const finalResult = await this.executeHooks("afterInsert", insertedObject);
-      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult.id);
+      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult?.id || insertedObject?.id);
       return finalResult;
     }
   }
@@ -24762,7 +24762,7 @@ ${errorDetails}`,
     }
     const count = await this.client.count({ prefix });
     await this.executeHooks("afterCount", { count, partition, partitionValues });
-    this.emit("count", count);
+    this._emitWithDeprecation("count", "counted", count);
     return count;
   }
   /**
@@ -24785,7 +24785,7 @@ ${errorDetails}`,
       const result = await this.insert(attributes);
       return result;
     });
-    this.emit("insertMany", objects.length);
+    this._emitWithDeprecation("insertMany", "inserted-many", objects.length);
     return results;
   }
   /**
@@ -24820,7 +24820,7 @@ ${errorDetails}`,
       return response;
     });
     await this.executeHooks("afterDeleteMany", { ids, results });
-    this.emit("deleteMany", ids.length);
+    this._emitWithDeprecation("deleteMany", "deleted-many", ids.length);
     return results;
   }
   async deleteAll() {
@@ -24829,7 +24829,7 @@ ${errorDetails}`,
     }
     const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
-    this.emit("deleteAll", {
+    this._emitWithDeprecation("deleteAll", "deleted-all", {
       version: this.version,
       prefix,
       deletedCount
@@ -24846,7 +24846,7 @@ ${errorDetails}`,
     }
     const prefix = `resource=${this.name}`;
     const deletedCount = await this.client.deleteAll({ prefix });
-    this.emit("deleteAllData", {
+    this._emitWithDeprecation("deleteAllData", "deleted-all-data", {
       resource: this.name,
       prefix,
       deletedCount
@@ -24916,7 +24916,7 @@ ${errorDetails}`,
       const idPart = parts.find((part) => part.startsWith("id="));
       return idPart ? idPart.replace("id=", "") : null;
     }).filter(Boolean);
-    this.emit("listIds", ids.length);
+    this._emitWithDeprecation("listIds", "listed-ids", ids.length);
     return ids;
   }
   /**
@@ -24958,12 +24958,12 @@ ${errorDetails}`,
     const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
     if (!ok) throw err;
     const results = await this.processListResults(ids, "main");
-    this.emit("list", { count: results.length, errors: 0 });
+    this._emitWithDeprecation("list", "listed", { count: results.length, errors: 0 });
     return results;
   }
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
     if (!this.config.partitions?.[partition]) {
-      this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+      this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
     const partitionDef = this.config.partitions[partition];
@@ -24973,7 +24973,7 @@ ${errorDetails}`,
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-    this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
+    this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
   }
   /**
@@ -25018,7 +25018,7 @@ ${errorDetails}`,
       }
       return this.handleResourceError(err, id, context);
     });
-    this.emit("list", { count: results.length, errors: 0 });
+    this._emitWithDeprecation("list", "listed", { count: results.length, errors: 0 });
     return results;
   }
   /**
@@ -25081,10 +25081,10 @@ ${errorDetails}`,
    */
   handleListError(error, { partition, partitionValues }) {
     if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+      this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
-    this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+    this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
     return [];
   }
   /**
@@ -25117,7 +25117,7 @@ ${errorDetails}`,
       throw err;
     });
     const finalResults = await this.executeHooks("afterGetMany", results);
-    this.emit("getMany", ids.length);
+    this._emitWithDeprecation("getMany", "fetched-many", ids.length);
     return finalResults;
   }
   /**
@@ -25203,7 +25203,7 @@ ${errorDetails}`,
           hasTotalItems: totalItems !== null
         }
       };
-      this.emit("page", result2);
+      this._emitWithDeprecation("page", "paginated", result2);
       return result2;
     });
     if (ok) return result;
@@ -25273,7 +25273,7 @@ ${errorDetails}`,
       contentType
     }));
     if (!ok2) throw err2;
-    this.emit("setContent", { id, contentType, contentLength: buffer.length });
+    this._emitWithDeprecation("setContent", "content-set", { id, contentType, contentLength: buffer.length }, id);
     return updatedData;
   }
   /**
@@ -25302,7 +25302,7 @@ ${errorDetails}`,
     }
     const buffer = Buffer.from(await response.Body.transformToByteArray());
     const contentType = response.ContentType || null;
-    this.emit("content", id, buffer.length, contentType);
+    this._emitWithDeprecation("content", "content-fetched", { id, contentLength: buffer.length, contentType }, id);
     return {
       buffer,
       contentType
@@ -25334,7 +25334,7 @@ ${errorDetails}`,
       metadata: existingMetadata
     }));
     if (!ok2) throw err2;
-    this.emit("deleteContent", id);
+    this._emitWithDeprecation("deleteContent", "content-deleted", id, id);
     return response;
   }
   /**
@@ -25646,7 +25646,7 @@ ${errorDetails}`,
     const data = await this.get(id);
     data._partition = partitionName;
     data._partitionValues = partitionValues;
-    this.emit("getFromPartition", data);
+    this._emitWithDeprecation("getFromPartition", "partition-fetched", data, data.id);
     return data;
   }
   /**
