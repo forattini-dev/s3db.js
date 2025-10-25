@@ -19,6 +19,7 @@ s3db.js provides **two client implementations** for different use cases:
 - 💯 **100% API compatible** with S3Client
 - 💾 **Snapshot/restore** - instant test state management
 - 📦 **Optional persistence** - save/load to disk
+- 🔄 **BackupPlugin compatible** - export/import JSONL format
 
 📚 **[Full MemoryClient Documentation](../src/clients/memory-client.md)**
 
