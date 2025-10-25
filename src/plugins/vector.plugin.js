@@ -1035,5 +1035,3 @@ export class VectorPlugin extends Plugin {
     return findOptimalK(vectors, options);
   }
 }
-
-export default VectorPlugin;

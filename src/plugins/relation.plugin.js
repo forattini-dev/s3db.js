@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import {
   RelationError,
@@ -1373,5 +1373,3 @@ export class RelationPlugin extends Plugin {
     this.clearCache();
   }
 }
-
-export default RelationPlugin;

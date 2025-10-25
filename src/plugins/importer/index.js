@@ -1016,5 +1016,3 @@ export const Transformers = {
     return String(value).trim();
   }
 };
-
-export default ImporterPlugin;

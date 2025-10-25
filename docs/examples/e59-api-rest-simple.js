@@ -18,7 +18,7 @@
  */
 
 import { Database } from '../../src/index.js';
-import APIPlugin from '../../src/plugins/api/index.js';
+import { APIPlugin } from '../../src/plugins/api/index.js';
 
 console.log('\n🚀 Simple REST API Example\n');
 

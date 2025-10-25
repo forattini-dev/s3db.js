@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 
@@ -673,5 +673,3 @@ export class S3QueuePlugin extends Plugin {
     }
   }
 }
-
-export default S3QueuePlugin;

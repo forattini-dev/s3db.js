@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
 import { ReplicationError } from "./replicator.errors.js";
@@ -777,6 +777,4 @@ export class ReplicatorPlugin extends Plugin {
       });
     }
   }
-}
-
-export default ReplicatorPlugin; 
+} 

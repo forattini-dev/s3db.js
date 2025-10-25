@@ -16,7 +16,7 @@
  */
 
 import { Database } from '../../src/index.js';
-import APIPlugin from '../../src/plugins/api/index.js';
+import { APIPlugin } from '../../src/plugins/api/index.js';
 
 const BASE_URL = 'http://localhost:3001';
 

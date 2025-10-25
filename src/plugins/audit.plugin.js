@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 
 export class AuditPlugin extends Plugin {
@@ -420,6 +420,4 @@ export class AuditPlugin extends Plugin {
 
     return deletedCount;
   }
-}
-
-export default AuditPlugin; 
+} 

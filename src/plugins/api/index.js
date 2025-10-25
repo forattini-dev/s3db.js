@@ -546,5 +546,3 @@ export class ApiPlugin extends Plugin {
     return this.server ? this.server.getApp() : null;
   }
 }
-
-export default ApiPlugin;

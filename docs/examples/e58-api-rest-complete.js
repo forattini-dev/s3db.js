@@ -17,8 +17,8 @@
  */
 
 import { Database } from '../../src/index.js';
-import APIPlugin from '../../src/plugins/api/index.js';
-import MetricsPlugin from '../../src/plugins/metrics.plugin.js';
+import { APIPlugin } from '../../src/plugins/api/index.js';
+import { MetricsPlugin } from '../../src/plugins/metrics.plugin.js';
 
 // ============================================================================
 // 1. DATABASE SETUP

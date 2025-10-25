@@ -3,10 +3,10 @@ import { ENV, S3db, CostsPlugin } from './concerns.js';
 import Multiprogress from 'multi-progress';
 
 async function main() {
-  const s3db = await setupDatabase();
-  
-  // Add costs plugin
-  s3db.use(CostsPlugin);
+  // Setup database with CostsPlugin to track read operations
+  const s3db = await setupDatabase({
+    plugins: [new CostsPlugin()]
+  });
   
   const total = await s3db.resources.leads.count();
 

@@ -20,8 +20,8 @@
  */
 
 import { Database } from '../../src/index.js';
-import ApiPlugin from '../../src/plugins/api/index.js';
-import RelationPlugin from '../../src/plugins/relation.plugin.js';
+import { ApiPlugin } from '../../src/plugins/api/index.js';
+import { RelationPlugin } from '../../src/plugins/relation.plugin.js';
 
 console.log('\n🚀 API Plugin - Relations & Descriptions Demo\n');
 

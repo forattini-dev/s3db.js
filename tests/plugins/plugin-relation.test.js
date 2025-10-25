@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
-import RelationPlugin from '../../src/plugins/relation.plugin.js';
+import { RelationPlugin } from '../../src/plugins/relation.plugin.js';
 import {
   RelationConfigError,
   UnsupportedRelationTypeError,

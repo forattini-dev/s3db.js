@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
-import GeoPlugin from '../../src/plugins/geo.plugin.js';
+import { GeoPlugin } from '../../src/plugins/geo.plugin.js';
 
 describe('GeoPlugin', () => {
   let database;

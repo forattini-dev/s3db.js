@@ -8,11 +8,12 @@ const createPrefix = () => join('s3db', 'examples', new Date().toISOString().sub
 
 let database;
 
-const setupDatabase = async () => {
+const setupDatabase = async (options = {}) => {
   // Create database with real connection using test prefix
   database = new S3db({
     verbose: true,
-    connectionString: process.env.BUCKET_CONNECTION_STRING + `/${createPrefix()}`
+    connectionString: process.env.BUCKET_CONNECTION_STRING + `/${createPrefix()}`,
+    plugins: options.plugins || []
   });
 
   await database.connect();

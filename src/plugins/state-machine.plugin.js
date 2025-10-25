@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { StateMachineError } from "./state-machine.errors.js";
 
@@ -685,5 +685,3 @@ export class StateMachinePlugin extends Plugin {
     this.removeAllListeners();
   }
 }
-
-export default StateMachinePlugin;

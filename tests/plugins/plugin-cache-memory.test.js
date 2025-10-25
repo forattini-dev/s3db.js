@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
-import CachePlugin from '../../src/plugins/cache.plugin.js';
+import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { MemoryCache } from '../../src/plugins/cache/index.js';
 
 describe('Cache Plugin - MemoryCache Driver', () => {

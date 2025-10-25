@@ -12,7 +12,7 @@
  */
 
 import { Database } from '../../src/database.class.js';
-import EventualConsistencyPlugin from '../../src/plugins/eventual-consistency/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/eventual-consistency.plugin.js';
 
 async function main() {
   console.log('=== Isolated Plugin Testing Demo ===\n');

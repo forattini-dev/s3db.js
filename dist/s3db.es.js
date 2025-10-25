@@ -13204,7 +13204,10 @@ class MLPlugin extends Plugin {
     this.config = {
       models: options.models || {},
       verbose: options.verbose || false,
-      minTrainingSamples: options.minTrainingSamples || 10
+      minTrainingSamples: options.minTrainingSamples || 10,
+      saveModel: options.saveModel !== false,
+      // Default true
+      saveTrainingData: options.saveTrainingData || false
     };
     requirePluginDependency("@tensorflow/tfjs-node", "MLPlugin");
     this.models = {};
@@ -13281,9 +13284,10 @@ class MLPlugin extends Plugin {
     if (options.purgeData) {
       for (const modelName of Object.keys(this.models)) {
         await this._deleteModel(modelName);
+        await this._deleteTrainingData(modelName);
       }
       if (this.config.verbose) {
-        console.log("[MLPlugin] Purged all model data");
+        console.log("[MLPlugin] Purged all model data and training data");
       }
     }
   }
@@ -13437,12 +13441,31 @@ class MLPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[MLPlugin] Fetching training data for "${modelName}"...`);
       }
-      const [ok, err, data] = await tryFn(() => resource.list());
-      if (!ok) {
-        throw new TrainingError(
-          `Failed to fetch training data: ${err.message}`,
-          { modelName, resource: modelConfig.resource, originalError: err.message }
+      let data;
+      const partition = modelConfig.partition;
+      if (partition && partition.name) {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Using partition "${partition.name}" with values:`, partition.values);
+        }
+        const [ok, err, partitionData] = await tryFn(
+          () => resource.listPartition(partition.name, partition.values)
         );
+        if (!ok) {
+          throw new TrainingError(
+            `Failed to fetch training data from partition: ${err.message}`,
+            { modelName, resource: modelConfig.resource, partition: partition.name, originalError: err.message }
+          );
+        }
+        data = partitionData;
+      } else {
+        const [ok, err, allData] = await tryFn(() => resource.list());
+        if (!ok) {
+          throw new TrainingError(
+            `Failed to fetch training data: ${err.message}`,
+            { modelName, resource: modelConfig.resource, originalError: err.message }
+          );
+        }
+        data = allData;
       }
       if (!data || data.length < this.config.minTrainingSamples) {
         throw new TrainingError(
@@ -13453,8 +13476,15 @@ class MLPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[MLPlugin] Training "${modelName}" with ${data.length} samples...`);
       }
+      const shouldSaveTrainingData = modelConfig.saveTrainingData !== void 0 ? modelConfig.saveTrainingData : this.config.saveTrainingData;
+      if (shouldSaveTrainingData) {
+        await this._saveTrainingData(modelName, data);
+      }
       const result = await model.train(data);
-      await this._saveModel(modelName);
+      const shouldSaveModel = modelConfig.saveModel !== void 0 ? modelConfig.saveModel : this.config.saveModel;
+      if (shouldSaveModel) {
+        await this._saveModel(modelName);
+      }
       this.stats.totalTrainings++;
       if (this.config.verbose) {
         console.log(`[MLPlugin] Training completed for "${modelName}":`, result);
@@ -13619,14 +13649,56 @@ class MLPlugin extends Plugin {
       }
       await storage.patch(`model_${modelName}`, {
         modelName,
+        type: "model",
         data: JSON.stringify(exportedModel),
         savedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
       if (this.config.verbose) {
-        console.log(`[MLPlugin] Saved model "${modelName}" to plugin storage`);
+        console.log(`[MLPlugin] Saved model "${modelName}" to plugin storage (S3)`);
       }
     } catch (error) {
       console.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
+    }
+  }
+  /**
+   * Save intermediate training data to plugin storage
+   * @private
+   */
+  async _saveTrainingData(modelName, rawData) {
+    try {
+      const storage = this.getStorage();
+      const model = this.models[modelName];
+      const modelConfig = this.config.models[modelName];
+      const trainingData = {
+        samples: rawData.length,
+        features: modelConfig.features,
+        target: modelConfig.target,
+        data: rawData.map((item) => {
+          const features = {};
+          modelConfig.features.forEach((feature) => {
+            features[feature] = item[feature];
+          });
+          return {
+            features,
+            target: item[modelConfig.target]
+          };
+        }),
+        savedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      await storage.patch(`training_data_${modelName}`, {
+        modelName,
+        type: "training_data",
+        samples: trainingData.samples,
+        features: JSON.stringify(trainingData.features),
+        target: trainingData.target,
+        data: JSON.stringify(trainingData.data),
+        savedAt: trainingData.savedAt
+      });
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Saved training data for "${modelName}" (${trainingData.samples} samples) to plugin storage (S3)`);
+      }
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to save training data for "${modelName}":`, error.message);
     }
   }
   /**
@@ -13646,10 +13718,38 @@ class MLPlugin extends Plugin {
       const modelData = JSON.parse(record.data);
       await this.models[modelName].import(modelData);
       if (this.config.verbose) {
-        console.log(`[MLPlugin] Loaded model "${modelName}" from plugin storage`);
+        console.log(`[MLPlugin] Loaded model "${modelName}" from plugin storage (S3)`);
       }
     } catch (error) {
       console.error(`[MLPlugin] Failed to load model "${modelName}":`, error.message);
+    }
+  }
+  /**
+   * Load training data from plugin storage
+   * @param {string} modelName - Model name
+   * @returns {Object|null} Training data or null if not found
+   */
+  async getTrainingData(modelName) {
+    try {
+      const storage = this.getStorage();
+      const [ok, err, record] = await tryFn(() => storage.get(`training_data_${modelName}`));
+      if (!ok || !record) {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] No saved training data found for "${modelName}"`);
+        }
+        return null;
+      }
+      return {
+        modelName: record.modelName,
+        samples: record.samples,
+        features: JSON.parse(record.features),
+        target: record.target,
+        data: JSON.parse(record.data),
+        savedAt: record.savedAt
+      };
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to load training data for "${modelName}":`, error.message);
+      return null;
     }
   }
   /**
@@ -13666,6 +13766,23 @@ class MLPlugin extends Plugin {
     } catch (error) {
       if (this.config.verbose) {
         console.log(`[MLPlugin] Could not delete model "${modelName}": ${error.message}`);
+      }
+    }
+  }
+  /**
+   * Delete training data from plugin storage
+   * @private
+   */
+  async _deleteTrainingData(modelName) {
+    try {
+      const storage = this.getStorage();
+      await storage.delete(`training_data_${modelName}`);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Deleted training data for "${modelName}" from plugin storage`);
+      }
+    } catch (error) {
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Could not delete training data "${modelName}": ${error.message}`);
       }
     }
   }

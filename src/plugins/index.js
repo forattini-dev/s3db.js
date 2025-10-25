@@ -1,6 +1,5 @@
 export * from './plugin.class.js'
 export * from './plugin.obj.js'
-export { default as Plugin } from './plugin.class.js'
 
 // plugins:
 // ApiPlugin is exported separately to avoid bundling hono dependencies
