@@ -125,23 +125,23 @@ console.log(`Valid events: ${validEvents.join(', ')}`);
 // Transition to new state (OLD vs NEW)
 console.log('\n--- Trigger Transition ---');
 console.log('OLD API: await db.stateMachine("orderWorkflow").send(id, "CONFIRM")');
-console.log('NEW API: await ordersResource.state.move(id, "CONFIRM")');
+console.log('NEW API: await ordersResource.state.send(id, "CONFIRM")');
 
-await ordersResource.state.move(order.id, 'CONFIRM');
+await ordersResource.state.send(order.id, 'CONFIRM');
 
 currentState = await ordersResource.state.get(order.id);
 console.log(`New state: ${currentState}`);
 
 // Ship the order
 console.log('\n--- Ship Order ---');
-await ordersResource.state.move(order.id, 'SHIP');
+await ordersResource.state.send(order.id, 'SHIP');
 
 currentState = await ordersResource.state.get(order.id);
 console.log(`State after shipping: ${currentState}`);
 
 // Deliver the order
 console.log('\n--- Deliver Order ---');
-await ordersResource.state.move(order.id, 'DELIVER');
+await ordersResource.state.send(order.id, 'DELIVER');
 
 currentState = await ordersResource.state.get(order.id);
 console.log(`Final state: ${currentState}`);
@@ -178,7 +178,7 @@ const history = await machine.getTransitionHistory(id);
 NEW API (intuitive + namespaced):
 -----------------------------------------
 await ordersResource.state.initialize(id, context);
-await ordersResource.state.move(id, 'CONFIRM');
+await ordersResource.state.send(id, 'CONFIRM');
 const state = await ordersResource.state.get(id);
 const events = await ordersResource.state.getValidEvents(id);
 const history = await ordersResource.state.history(id);
@@ -189,7 +189,7 @@ KEY BENEFITS:
 ✅ Namespaced - clean organization under .state
 ✅ Consistent - same pattern as insert/update/delete
 ✅ Better DX - easier to discover and use
-✅ Semantic - move() is clearer than send()
+✅ Semantic - send() is standard for state machines
 `);
 
 // ============================================================================
@@ -209,7 +209,7 @@ const usersResource = await database.createResource({
 });
 
 try {
-  await usersResource.state.move('user-123', 'ACTIVATE');
+  await usersResource.state.send('user-123', 'ACTIVATE');
 } catch (error) {
   console.log('\n✅ Expected error:', error.message);
 }
@@ -228,10 +228,10 @@ KEY TAKEAWAYS:
 1. Namespaced API:
    - State machine methods under resource.state.*
    - Clean organization and better discoverability
-   - Semantic method names (move, get, initialize, history)
+   - Semantic method names (send, get, initialize, history)
 
 2. Available Methods:
-   - resource.state.move(id, event, eventData) - Trigger transition
+   - resource.state.send(id, event, eventData) - Trigger transition
    - resource.state.get(id) - Get current state
    - resource.state.canTransition(id, event) - Check if valid
    - resource.state.getValidEvents(id) - Get available events
@@ -250,7 +250,7 @@ KEY TAKEAWAYS:
 
 5. Benefits:
    - ✅ Namespaced - organized under .state
-   - ✅ Semantic - move() instead of send()
+   - ✅ Semantic - send() for state transitions
    - ✅ Intuitive - operations on resource itself
    - ✅ Discoverable - easy to find with autocomplete
    - ✅ Consistent - same pattern as other operations
