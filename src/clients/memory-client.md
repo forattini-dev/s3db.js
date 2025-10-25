@@ -136,7 +136,11 @@ await client.loadFromDisk('/tmp/my-snapshot.json');
 
 ### BackupPlugin Compatibility
 
-Export and import data in BackupPlugin format (JSONL + s3db.json):
+MemoryClient supports **two ways** to backup and restore data in BackupPlugin format:
+
+#### Method 1: Direct MemoryClient Methods (Recommended for MemoryClient)
+
+Use `exportBackup()` and `importBackup()` directly on the MemoryClient:
 
 ```javascript
 import { S3db, MemoryClient } from 's3db.js';
@@ -154,7 +158,7 @@ const users = await db.createResource({
 await users.insert({ id: 'u1', name: 'Alice', email: 'alice@test.com' });
 await users.insert({ id: 'u2', name: 'Bob', email: 'bob@test.com' });
 
-// Export to BackupPlugin format
+// ✅ METHOD 1: Export using MemoryClient directly
 await client.exportBackup('/tmp/backup', {
   compress: true,        // Use gzip compression (.jsonl.gz)
   database: db,          // Include resource schemas in s3db.json
@@ -166,7 +170,7 @@ await client.exportBackup('/tmp/backup', {
 //   ├── s3db.json        - Metadata with schemas and stats
 //   └── users.jsonl.gz   - Compressed data (one JSON per line)
 
-// Import from BackupPlugin format
+// ✅ METHOD 1: Import using MemoryClient directly
 const importStats = await client.importBackup('/tmp/backup', {
   clear: true,           // Clear existing data first
   database: db,          // Recreate resources from schemas
@@ -181,9 +185,82 @@ console.log(importStats);
 // }
 ```
 
+#### Method 2: Using BackupPlugin (Works with MemoryClient AND S3Client)
+
+Use the BackupPlugin for advanced features like scheduling, rotation, and multi-driver support:
+
+```javascript
+import { S3db, MemoryClient, BackupPlugin } from 's3db.js';
+
+const client = new MemoryClient();
+const db = new S3db({
+  client,
+  plugins: [
+    new BackupPlugin({
+      driver: 'filesystem',
+      backupDir: '/tmp/backups',
+      compress: true,
+      schedule: '0 2 * * *',  // Daily at 2 AM
+      retention: 7            // Keep 7 backups
+    })
+  ]
+});
+
+await db.connect();
+
+// Create resources and data...
+const users = await db.createResource({
+  name: 'users',
+  attributes: { id: 'string', name: 'string', email: 'string' }
+});
+
+await users.insert({ id: 'u1', name: 'Alice', email: 'alice@test.com' });
+
+// ✅ METHOD 2: Backup using BackupPlugin
+const backupPath = await db.plugins.backup.backup();
+console.log(`Backup created: ${backupPath}`);
+// Output: /tmp/backups/backup-2025-10-25T14-30-00-abc123/
+
+// ✅ METHOD 2: Restore using BackupPlugin
+await db.plugins.backup.restore(backupPath);
+console.log('Database restored!');
+
+// List all backups
+const backups = await db.plugins.backup.listBackups();
+console.log('Available backups:', backups);
+```
+
+**Comparison:**
+
+| Feature | MemoryClient Direct | BackupPlugin |
+|---------|-------------------|--------------|
+| **Export/Import** | ✅ Manual control | ✅ Manual + Scheduled |
+| **Compression** | ✅ Gzip | ✅ Gzip |
+| **Resource Filtering** | ✅ Yes | ✅ Yes |
+| **Scheduling** | ❌ No | ✅ Cron support |
+| **Retention/Rotation** | ❌ No | ✅ Auto-cleanup |
+| **Multi-Driver** | ❌ Filesystem only | ✅ S3 + Filesystem |
+| **Works with S3Client** | ❌ No | ✅ Yes |
+| **Simplicity** | ✅ Simpler API | ⚠️ More features |
+
+**When to use each:**
+
+- **Use MemoryClient Direct** when:
+  - Working exclusively with MemoryClient
+  - Need simple one-time exports/imports
+  - Testing or development scenarios
+  - Want minimal configuration
+
+- **Use BackupPlugin** when:
+  - Need scheduled backups
+  - Want automatic retention/rotation
+  - Need to backup to S3 or multiple locations
+  - Working with real S3Client (production)
+  - Need consistent backup strategy across environments
+
 **BackupPlugin Format Details:**
 
-The export creates a directory structure compatible with BackupPlugin:
+Both methods create the **same directory structure**, ensuring full compatibility:
 
 ```
 /backup-directory/
@@ -196,23 +273,80 @@ The export creates a directory structure compatible with BackupPlugin:
   │     "compressed": true,
   │     "resources": {
   │       "users": {
-  │         "schema": { ... },
-  │         "stats": { recordCount: 2, fileSize: 1024 }
+  │         "schema": {
+  │           "attributes": {...},
+  │           "partitions": {...},
+  │           "behavior": "body-overflow"
+  │         },
+  │         "stats": {
+  │           "recordCount": 2,
+  │           "fileSize": 1024
+  │         }
   │       }
-  │     }
+  │     },
+  │     "totalRecords": 2,
+  │     "totalSize": 1024
   │   }
   │
-  └── users.jsonl.gz      # Compressed JSON Lines
+  └── users.jsonl.gz      # Compressed JSON Lines (newline-delimited)
       {"id":"u1","name":"Alice","email":"alice@test.com"}
       {"id":"u2","name":"Bob","email":"bob@test.com"}
 ```
 
+**Cross-Compatibility Examples:**
+
+```javascript
+// Example 1: Export with MemoryClient, Import with BackupPlugin
+const memClient = new MemoryClient();
+const memDb = new S3db({ client: memClient });
+await memDb.connect();
+
+// Create data in memory
+const users = await memDb.createResource({
+  name: 'users',
+  attributes: { id: 'string', name: 'string' }
+});
+await users.insert({ id: 'u1', name: 'Alice' });
+
+// Export using MemoryClient
+await memClient.exportBackup('/tmp/backup');
+
+// Import using BackupPlugin on a different database
+const s3Db = new S3db({
+  connectionString: 's3://...',
+  plugins: [new BackupPlugin({ driver: 'filesystem' })]
+});
+await s3Db.connect();
+await s3Db.plugins.backup.restore('/tmp/backup');
+// ✅ Data now in S3!
+
+// Example 2: Backup S3 with BackupPlugin, Test with MemoryClient
+const prodDb = new S3db({
+  connectionString: 's3://prod-bucket',
+  plugins: [new BackupPlugin({ driver: 'filesystem', backupDir: '/backups' })]
+});
+await prodDb.connect();
+
+// Create production backup
+const backupPath = await prodDb.plugins.backup.backup();
+
+// Load backup into MemoryClient for local testing
+const testClient = new MemoryClient();
+const testDb = new S3db({ client: testClient });
+await testDb.connect();
+
+await testClient.importBackup(backupPath, { database: testDb });
+// ✅ Production data now in memory for testing!
+```
+
 **Use Cases:**
-- Migrate data between MemoryClient and real S3
-- Share test fixtures between projects
-- Debug production data locally
-- Create portable database snapshots
-- Analyze data with BigQuery/Athena/Spark
+- **Migrate data** between MemoryClient and real S3
+- **Share test fixtures** between projects and developers
+- **Debug production data** locally without AWS access
+- **Create portable snapshots** for CI/CD pipelines
+- **Test with real data** in fast in-memory client
+- **Disaster recovery** with automated backups
+- **Analyze data** with BigQuery/Athena/Spark (JSONL format)
 
 ### Enforce S3 Limits
 
@@ -406,6 +540,245 @@ const db = new S3db({
 // Show off s3db.js features instantly
 // No AWS credentials or infrastructure needed
 // Perfect for workshops, tutorials, demos
+```
+
+### 6. Backup & Restore Production Data Locally
+
+Export production S3 data and test locally with MemoryClient:
+
+```javascript
+// Step 1: Backup production database (run on server)
+import { S3db, BackupPlugin } from 's3db.js';
+
+const prodDb = new S3db({
+  connectionString: process.env.PROD_S3_CONNECTION,
+  plugins: [
+    new BackupPlugin({
+      driver: 'filesystem',
+      backupDir: '/backups',
+      compress: true
+    })
+  ]
+});
+
+await prodDb.connect();
+const backupPath = await prodDb.plugins.backup.backup();
+// Creates: /backups/backup-2025-10-25T14-30-00-abc123/
+
+// Step 2: Download backup to local machine
+// $ scp -r server:/backups/backup-2025-10-25T14-30-00-abc123/ ./local-backup/
+
+// Step 3: Load into MemoryClient for local testing
+import { S3db, MemoryClient } from 's3db.js';
+
+const localClient = new MemoryClient();
+const localDb = new S3db({ client: localClient });
+await localDb.connect();
+
+// Import production backup
+await localClient.importBackup('./local-backup/backup-2025-10-25T14-30-00-abc123/', {
+  database: localDb
+});
+
+// Now test against real production data locally!
+const users = localDb.resources.users;
+const user = await users.get('prod-user-id-123');
+console.log('Testing with real production user:', user);
+
+// Runs 100x faster than S3, no AWS costs, perfect for debugging!
+```
+
+### 7. Share Test Fixtures Between Teams
+
+Create reusable test data for the entire team:
+
+```javascript
+// Create test fixture (run once by one developer)
+import { S3db, MemoryClient } from 's3db.js';
+
+const client = new MemoryClient();
+const db = new S3db({ client });
+await db.connect();
+
+// Create comprehensive test data
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    name: 'string|required',
+    email: 'string|required|email',
+    role: 'string|required'
+  }
+});
+
+const posts = await db.createResource({
+  name: 'posts',
+  attributes: {
+    id: 'string|required',
+    userId: 'string|required',
+    title: 'string|required',
+    content: 'string|required'
+  }
+});
+
+// Add test data
+await users.insert({ id: 'admin', name: 'Admin User', email: 'admin@test.com', role: 'admin' });
+await users.insert({ id: 'user1', name: 'John Doe', email: 'john@test.com', role: 'user' });
+await posts.insert({ id: 'post1', userId: 'user1', title: 'First Post', content: 'Hello!' });
+
+// Export fixture
+await client.exportBackup('./fixtures/test-data-v1', {
+  database: db,
+  compress: true
+});
+
+// Commit to repo
+// $ git add fixtures/test-data-v1
+// $ git commit -m "Add test fixtures v1"
+
+// Now any team member can use it:
+// In any test file
+const testClient = new MemoryClient();
+const testDb = new S3db({ client: testClient });
+await testDb.connect();
+
+await testClient.importBackup('./fixtures/test-data-v1', {
+  database: testDb
+});
+
+// All tests start with the same clean data!
+const admin = await testDb.resources.users.get('admin');
+expect(admin.role).toBe('admin');
+```
+
+### 8. Migrate Between Environments
+
+Seamlessly move data between development, staging, and production:
+
+```javascript
+// Scenario: Migrate staging data to new production instance
+
+// Step 1: Export from staging
+import { S3db, BackupPlugin } from 's3db.js';
+
+const stagingDb = new S3db({
+  connectionString: 's3://staging-bucket',
+  plugins: [new BackupPlugin({ driver: 'filesystem' })]
+});
+await stagingDb.connect();
+
+const stagingBackup = await stagingDb.plugins.backup.backup();
+// Output: /backups/staging-backup-2025-10-25.../
+
+// Step 2: Test migration locally first (recommended!)
+import { MemoryClient } from 's3db.js';
+
+const testClient = new MemoryClient();
+const testDb = new S3db({ client: testClient });
+await testDb.connect();
+
+await testClient.importBackup(stagingBackup, { database: testDb });
+
+// Run validation scripts
+const recordCount = testClient.getStats().objectCount;
+console.log(`Testing ${recordCount} records...`);
+
+// Verify data integrity
+const users = testDb.resources.users;
+const allUsers = await users.query({});
+console.log(`Found ${allUsers.length} users`);
+
+// Step 3: If tests pass, import to production
+const prodDb = new S3db({
+  connectionString: 's3://prod-bucket',
+  plugins: [new BackupPlugin({ driver: 'filesystem' })]
+});
+await prodDb.connect();
+
+await prodDb.plugins.backup.restore(stagingBackup);
+console.log('✅ Migration complete!');
+```
+
+### 9. CI/CD with Real Test Data
+
+Use production snapshots in CI without exposing credentials:
+
+```javascript
+// .github/workflows/test.yml
+// - name: Download fixtures
+//   run: |
+//     curl -L https://fixtures.example.com/prod-snapshot.tar.gz | tar xz
+//
+// - name: Run tests
+//   run: pnpm test
+
+// In your test suite:
+import { S3db, MemoryClient } from 's3db.js';
+
+describe('Business Logic Tests', () => {
+  let db;
+
+  beforeAll(async () => {
+    const client = new MemoryClient();
+    db = new S3db({ client });
+    await db.connect();
+
+    // Load production snapshot (sanitized, of course!)
+    await client.importBackup('./fixtures/prod-snapshot', {
+      database: db
+    });
+  });
+
+  it('should handle real-world user data', async () => {
+    const users = db.resources.users;
+    const activeUsers = await users.query({ status: 'active' });
+
+    // Test against real production patterns
+    expect(activeUsers.length).toBeGreaterThan(0);
+  });
+
+  it('should calculate metrics correctly', async () => {
+    // Test business logic against production data distribution
+    const orders = db.resources.orders;
+    const totalRevenue = await calculateRevenue(orders);
+
+    expect(totalRevenue).toBeGreaterThan(0);
+  });
+});
+```
+
+### 10. Cross-Format Data Analysis
+
+Export for analysis in BigQuery, Athena, Spark:
+
+```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
+const client = new MemoryClient();
+const db = new S3db({ client });
+await db.connect();
+
+// Load your data...
+const users = await db.createResource({
+  name: 'users',
+  attributes: { id: 'string', name: 'string', signupDate: 'string' }
+});
+
+// ... populate data ...
+
+// Export to JSONL for BigQuery
+await client.exportBackup('/tmp/bigquery-import', {
+  compress: false,  // BigQuery prefers uncompressed JSONL
+  database: db
+});
+
+// Now load users.jsonl into BigQuery:
+// $ bq load --source_format=NEWLINE_DELIMITED_JSON \
+//     mydataset.users \
+//     /tmp/bigquery-import/users.jsonl
+
+// Or use with Athena, Spark, pandas, DuckDB, etc.
+// The JSONL format is universally supported!
 ```
 
 ## Compatibility
