@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createBackupDriver, validateBackupConfig } from "./backup/index.js";
 import { StreamingExporter } from "./backup/streaming-exporter.js";
@@ -983,5 +983,3 @@ export class BackupPlugin extends Plugin {
     }
   }
 }
-
-export default BackupPlugin;

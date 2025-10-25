@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 
 export class MetricsPlugin extends Plugin {
@@ -831,6 +831,4 @@ export class MetricsPlugin extends Plugin {
       console.error('[Metrics Plugin] Standalone metrics server error:', err);
     });
   }
-}
-
-export default MetricsPlugin; 
+} 

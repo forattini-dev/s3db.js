@@ -433,4 +433,280 @@ describe('MLPlugin', () => {
       expect(newStats.trainedAt).not.toBe(oldStats.trainedAt);
     });
   });
+
+  describe('Model Persistence', () => {
+    let persistPlugin;
+    let testResource;
+
+    beforeAll(async () => {
+      // Create test resource for persistence
+      testResource = await db.createResource({
+        name: 'test_persist',
+        attributes: {
+          x: 'number|required',
+          y: 'number|required',
+          z: 'number|required'
+        }
+      });
+
+      // Insert training data
+      for (let i = 0; i < 30; i++) {
+        const x = Math.random() * 10;
+        const y = Math.random() * 10;
+        const z = 2 * x + 3 * y + 5;
+        await testResource.insert({ x, y, z });
+      }
+
+      // Create plugin with saveModel enabled
+      persistPlugin = new MLPlugin({
+        models: {
+          persistModel: {
+            type: 'regression',
+            resource: 'test_persist',
+            features: ['x', 'y'],
+            target: 'z',
+            saveModel: true,
+            saveTrainingData: true,
+            autoTrain: false,
+            modelConfig: {
+              epochs: 10,
+              batchSize: 8
+            }
+          }
+        },
+        saveModel: true,
+        saveTrainingData: true,
+        verbose: false
+      });
+
+      await db.install(persistPlugin);
+    });
+
+    it('should save model to S3 after training', async () => {
+      await persistPlugin.train('persistModel');
+
+      // Check that model was saved to plugin storage
+      const storage = persistPlugin.getStorage();
+      const savedModel = await storage.get('model_persistModel');
+
+      expect(savedModel).toBeDefined();
+      expect(savedModel.modelName).toBe('persistModel');
+      expect(savedModel.type).toBe('model');
+      expect(savedModel.data).toBeDefined();
+      expect(savedModel.savedAt).toBeDefined();
+    });
+
+    it('should save training data to S3', async () => {
+      // Training data should have been saved during previous test
+      const trainingData = await persistPlugin.getTrainingData('persistModel');
+
+      expect(trainingData).toBeDefined();
+      expect(trainingData.modelName).toBe('persistModel');
+      expect(trainingData.samples).toBe(30);
+      expect(trainingData.features).toEqual(['x', 'y']);
+      expect(trainingData.target).toBe('z');
+      expect(trainingData.data).toHaveLength(30);
+      expect(trainingData.savedAt).toBeDefined();
+    });
+
+    it('should load model from S3 on start', async () => {
+      // Create new plugin instance (simulating restart)
+      const newPlugin = new MLPlugin({
+        models: {
+          persistModel: {
+            type: 'regression',
+            resource: 'test_persist',
+            features: ['x', 'y'],
+            target: 'z',
+            saveModel: true,
+            autoTrain: false,
+            modelConfig: {
+              epochs: 10,
+              batchSize: 8
+            }
+          }
+        },
+        verbose: false
+      });
+
+      await db.install(newPlugin);
+      await newPlugin.onStart(); // This should load the saved model
+
+      // Model should be trained (loaded from S3)
+      const model = newPlugin.models.persistModel;
+      expect(model.isTrained).toBe(true);
+      expect(model.stats.trainedAt).toBeDefined();
+
+      // Should be able to make predictions
+      const { prediction } = await newPlugin.predict('persistModel', { x: 5, y: 3 });
+      expect(prediction).toBeDefined();
+      expect(typeof prediction).toBe('number');
+    });
+
+    it('should respect per-model saveModel override', async () => {
+      // Create plugin with global saveModel=false but model-level override
+      const overridePlugin = new MLPlugin({
+        models: {
+          overrideModel: {
+            type: 'regression',
+            resource: 'test_persist',
+            features: ['x', 'y'],
+            target: 'z',
+            saveModel: true, // Override global setting
+            saveTrainingData: false,
+            autoTrain: false,
+            modelConfig: {
+              epochs: 5,
+              batchSize: 8
+            }
+          }
+        },
+        saveModel: false, // Global setting
+        saveTrainingData: false,
+        verbose: false
+      });
+
+      await db.install(overridePlugin);
+      await overridePlugin.train('overrideModel');
+
+      // Model should be saved (override)
+      const storage = overridePlugin.getStorage();
+      const savedModel = await storage.get('model_overrideModel');
+      expect(savedModel).toBeDefined();
+
+      // Training data should NOT be saved (not overridden)
+      const trainingData = await overridePlugin.getTrainingData('overrideModel');
+      expect(trainingData).toBeNull();
+    });
+  });
+
+  describe('Partition Filtering', () => {
+    let partitionResource;
+    let partitionPlugin;
+
+    beforeAll(async () => {
+      // Create resource with partitions
+      partitionResource = await db.createResource({
+        name: 'test_partitioned',
+        attributes: {
+          category: 'string|required',
+          x: 'number|required',
+          y: 'number|required',
+          z: 'number|required'
+        },
+        partitions: {
+          byCategory: {
+            fields: {
+              category: 'string'
+            }
+          }
+        }
+      });
+
+      // Insert data for category A: z = 2x + y
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * 10;
+        const y = Math.random() * 10;
+        const z = 2 * x + y;
+        await partitionResource.insert({ category: 'A', x, y, z });
+      }
+
+      // Insert data for category B: z = x + 3y (different pattern)
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * 10;
+        const y = Math.random() * 10;
+        const z = x + 3 * y;
+        await partitionResource.insert({ category: 'B', x, y, z });
+      }
+
+      // Create plugin with partition-specific models
+      partitionPlugin = new MLPlugin({
+        models: {
+          modelA: {
+            type: 'regression',
+            resource: 'test_partitioned',
+            features: ['x', 'y'],
+            target: 'z',
+            partition: {
+              name: 'byCategory',
+              values: { category: 'A' }
+            },
+            autoTrain: false,
+            modelConfig: {
+              epochs: 20,
+              batchSize: 8
+            }
+          },
+          modelB: {
+            type: 'regression',
+            resource: 'test_partitioned',
+            features: ['x', 'y'],
+            target: 'z',
+            partition: {
+              name: 'byCategory',
+              values: { category: 'B' }
+            },
+            autoTrain: false,
+            modelConfig: {
+              epochs: 20,
+              batchSize: 8
+            }
+          },
+          modelAll: {
+            type: 'regression',
+            resource: 'test_partitioned',
+            features: ['x', 'y'],
+            target: 'z',
+            // No partition - uses all data
+            autoTrain: false,
+            modelConfig: {
+              epochs: 20,
+              batchSize: 8
+            }
+          }
+        },
+        verbose: false
+      });
+
+      await db.install(partitionPlugin);
+    });
+
+    it('should train model on specific partition', async () => {
+      const result = await partitionPlugin.train('modelA');
+
+      expect(result).toBeDefined();
+      expect(result.samples).toBe(20); // Only category A data
+      expect(result.loss).toBeDefined();
+    });
+
+    it('should train different models on different partitions', async () => {
+      await partitionPlugin.train('modelA');
+      await partitionPlugin.train('modelB');
+
+      const statsA = partitionPlugin.getModelStats('modelA');
+      const statsB = partitionPlugin.getModelStats('modelB');
+
+      expect(statsA.samples).toBe(20);
+      expect(statsB.samples).toBe(20);
+    });
+
+    it('should train model on all data when no partition specified', async () => {
+      const result = await partitionPlugin.train('modelAll');
+
+      expect(result).toBeDefined();
+      expect(result.samples).toBe(40); // Both categories
+    });
+
+    it('should make accurate predictions with partition-trained models', async () => {
+      // Model A: z = 2x + y
+      const { prediction: predA } = await partitionPlugin.predict('modelA', { x: 5, y: 3 });
+      const expectedA = 2 * 5 + 3; // 13
+      expect(Math.abs(predA - expectedA)).toBeLessThan(2);
+
+      // Model B: z = x + 3y
+      const { prediction: predB } = await partitionPlugin.predict('modelB', { x: 5, y: 3 });
+      const expectedB = 5 + 3 * 3; // 14
+      expect(Math.abs(predB - expectedB)).toBeLessThan(2);
+    });
+  });
 });

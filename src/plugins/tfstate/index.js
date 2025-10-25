@@ -2630,5 +2630,3 @@ export class TfStatePlugin extends Plugin {
     };
   }
 }
-
-export default TfStatePlugin;

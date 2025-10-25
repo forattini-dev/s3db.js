@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
-import GeoPlugin from '../../src/plugins/geo.plugin.js';
+import { GeoPlugin } from '../../src/plugins/geo.plugin.js';
 
 describe('GeoPlugin - Configuration and Validation Tests', () => {
   test('should create GeoPlugin with valid config', () => {

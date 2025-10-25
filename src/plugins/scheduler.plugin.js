@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { SchedulerError } from "./scheduler.errors.js";
@@ -922,5 +922,3 @@ export class SchedulerPlugin extends Plugin {
     this.removeAllListeners();
   }
 }
-
-export default SchedulerPlugin;

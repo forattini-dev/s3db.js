@@ -18,7 +18,7 @@
 import { performance } from 'perf_hooks';
 import { writeFileSync } from 'fs';
 import { createDatabaseForTest } from '../../tests/config.js';
-import VectorPlugin from '../../src/plugins/vector.plugin.js';
+import { VectorPlugin } from '../../src/plugins/vector.plugin.js';
 
 // ANSI colors for output
 const colors = {

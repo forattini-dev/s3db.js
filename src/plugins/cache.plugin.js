@@ -2,7 +2,7 @@ import { join } from "path";
 import jsonStableStringify from "json-stable-stringify";
 import crypto from 'crypto';
 
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import S3Cache from "./cache/s3-cache.class.js";
 import MemoryCache from "./cache/memory-cache.class.js";
 import { FilesystemCache } from "./cache/filesystem-cache.class.js";
@@ -781,5 +781,3 @@ export class CachePlugin extends Plugin {
     return parts.join(' ');
   }
 }
-
-export default CachePlugin;

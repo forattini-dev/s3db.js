@@ -1,6 +1,20 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
+
+// Time constants (in seconds)
+const ONE_MINUTE_SEC = 60;
+const ONE_HOUR_SEC = 3600;
+const ONE_DAY_SEC = 86400;
+const THIRTY_DAYS_SEC = 2592000;
+
+// Time constants (in milliseconds)
+const TEN_SECONDS_MS = 10000;
+const ONE_MINUTE_MS = 60000;
+const TEN_MINUTES_MS = 600000;
+const ONE_HOUR_MS = 3600000;
+const ONE_DAY_MS = 86400000;
+const ONE_WEEK_MS = 604800000;
 
 /**
  * TTLPlugin - Time-To-Live Auto-Cleanup System v2
@@ -707,5 +721,3 @@ export class TTLPlugin extends Plugin {
     }
   }
 }
-
-export default TTLPlugin;
