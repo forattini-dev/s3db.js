@@ -1189,6 +1189,154 @@ pnpm add @google-cloud/bigquery
 }
 ```
 
+#### Mutability Modes
+
+BigQuery has a **90-minute streaming buffer window** where recently inserted data cannot be updated or deleted. To handle this, the BigQuery replicator supports three mutability modes:
+
+**⚡ append-only** (default) - **Most performant, no streaming buffer issues**
+- Updates and deletes become INSERT operations with change tracking
+- Adds fields: `_operation_type`, `_operation_timestamp`
+- Perfect for analytics workloads where you want history
+- Zero waiting for streaming buffer
+
+```javascript
+{
+  driver: 'bigquery',
+  config: {
+    projectId: 'analytics',
+    datasetId: 'events',
+    mutability: 'append-only'  // Default
+  },
+  resources: {
+    users: 'users_table'
+  }
+}
+
+// Result in BigQuery:
+// | id | name  | _operation_type | _operation_timestamp |
+// |----|-------|-----------------|---------------------|
+// | u1 | John  | insert          | 2024-01-01 10:00:00 |
+// | u1 | Jane  | update          | 2024-01-01 11:00:00 |
+// | u1 | null  | delete          | 2024-01-01 12:00:00 |
+```
+
+**🔄 mutable** - Traditional UPDATE/DELETE behavior
+- Uses standard SQL UPDATE and DELETE statements
+- Includes retry logic for streaming buffer errors (30s delay, 2 attempts)
+- May fail or delay if data is in streaming buffer
+
+```javascript
+{
+  driver: 'bigquery',
+  config: {
+    projectId: 'analytics',
+    datasetId: 'events',
+    mutability: 'mutable'
+  },
+  resources: {
+    users: 'users_table'
+  }
+}
+```
+
+**📜 immutable** - Full audit trail
+- All operations (insert/update/delete) tracked as INSERTs
+- Adds fields: `_operation_type`, `_operation_timestamp`, `_is_deleted`, `_version`
+- Complete version history with automatic version counter
+- Perfect for compliance and audit requirements
+
+```javascript
+{
+  driver: 'bigquery',
+  config: {
+    projectId: 'analytics',
+    datasetId: 'audit',
+    mutability: 'immutable'
+  },
+  resources: {
+    transactions: 'transactions_history'
+  }
+}
+
+// Result in BigQuery:
+// | id | amount | _operation_type | _operation_timestamp | _is_deleted | _version |
+// |----|--------|-----------------|---------------------|-------------|----------|
+// | t1 | 100    | insert          | 2024-01-01 10:00:00 | false       | 1        |
+// | t1 | 150    | update          | 2024-01-01 11:00:00 | false       | 2        |
+// | t1 | 150    | delete          | 2024-01-01 12:00:00 | true        | 3        |
+```
+
+**Per-Resource Override:**
+```javascript
+{
+  driver: 'bigquery',
+  config: {
+    projectId: 'analytics',
+    datasetId: 'mixed',
+    mutability: 'append-only'  // Global default
+  },
+  resources: {
+    // Use default append-only
+    events: 'events_table',
+
+    // Override to immutable for audit trail
+    transactions: {
+      table: 'transactions_audit',
+      mutability: 'immutable',
+      actions: ['insert', 'update', 'delete']
+    },
+
+    // Override to mutable for traditional behavior
+    cache: {
+      table: 'cache_table',
+      mutability: 'mutable',
+      actions: ['insert', 'update', 'delete']
+    }
+  }
+}
+```
+
+**Schema Sync:**
+
+When `schemaSync.enabled: true`, tracking fields are automatically added based on mutability mode:
+
+```javascript
+{
+  driver: 'bigquery',
+  config: {
+    projectId: 'analytics',
+    datasetId: 'events',
+    mutability: 'append-only',
+    schemaSync: {
+      enabled: true,
+      strategy: 'alter',
+      autoCreateTable: true,
+      autoCreateColumns: true
+    }
+  },
+  resources: {
+    users: 'users_table'
+  }
+}
+
+// Table schema will include:
+// - id (STRING, REQUIRED)
+// - ...user attributes...
+// - _operation_type (STRING, NULLABLE)      // Added for append-only/immutable
+// - _operation_timestamp (TIMESTAMP, NULLABLE)  // Added for append-only/immutable
+// - _is_deleted (BOOL, NULLABLE)            // Added for immutable only
+// - _version (INT64, NULLABLE)              // Added for immutable only
+```
+
+**Best Practices:**
+
+| Use Case | Recommended Mode | Why |
+|----------|-----------------|-----|
+| Analytics/Events | `append-only` | Track all changes, no streaming buffer issues |
+| Audit/Compliance | `immutable` | Complete history with version tracking |
+| Cache/Session | `mutable` | Traditional behavior, data can be updated |
+| Real-time Dashboard | `append-only` | No delays from streaming buffer |
+
 ---
 
 ### 🐬 MySQL / MariaDB Replicator

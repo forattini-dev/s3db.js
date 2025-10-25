@@ -74,6 +74,12 @@ await db.uploadMetadataFile();
 
 **Performance**: Use `patch()` for metadata-only behaviors (`enforce-limits`, `truncate-data`) in plugin internal resources for 40-60% faster updates.
 
+**BigQuery Mutability Modes** (`src/plugins/replicators/bigquery-replicator.class.js`):
+- `append-only` (default): Updates/deletes → inserts with `_operation_type`, `_operation_timestamp`. No streaming buffer issues.
+- `mutable`: Traditional UPDATE/DELETE with retry logic (90-minute streaming buffer window)
+- `immutable`: Full audit trail with `_operation_type`, `_operation_timestamp`, `_is_deleted`, `_version`
+- Configure globally or per-resource: `{ mutability: 'append-only' }`
+
 ### Utilities
 
 | Function | Location | Purpose |
@@ -241,6 +247,15 @@ s3db insert <resource> -d '<json>'  # Insert
   - `e41-e43`: Vectors/RAG
   - `e44`: Orphaned partitions recovery
   - `e50`: patch/replace/update comparison
+
+### Client Implementations
+- **S3Client**: `src/clients/s3-client.class.js` (Production - AWS S3, MinIO, LocalStack)
+- **MemoryClient**: `src/clients/memory-client.class.js` (Testing - 100-1000x faster, zero dependencies)
+  - Pure in-memory implementation
+  - Snapshot/restore for test isolation
+  - Optional persistence to disk
+  - Full S3 API compatibility
+  - Use for: tests, development, CI/CD (not production)
 
 ### Key Files
 - **Calculator**: `src/concerns/calculator.js` (UTF-8 byte counting)

@@ -1,6 +1,6 @@
-# S3DB Emulator - In-Memory S3 Client
+# MemoryClient - Ultra-Fast In-Memory Client
 
-Ultra-fast in-memory S3 client for blazing-fast tests and development. Zero dependencies on Docker, LocalStack, or AWS.
+Pure in-memory S3-compatible client for blazing-fast tests and development. **100-1000x faster** than LocalStack with zero dependencies on Docker, LocalStack, or AWS.
 
 ## Features
 
@@ -15,11 +15,10 @@ Ultra-fast in-memory S3 client for blazing-fast tests and development. Zero depe
 ## Quick Start
 
 ```javascript
-import { Database } from 's3db.js';
-import { MemoryClient } from 's3db.js/plugins/emulator';
+import { S3db, MemoryClient } from 's3db.js';
 
 // Create database with memory client
-const db = new Database({
+const db = new S3db({
   client: new MemoryClient()
 });
 
@@ -44,7 +43,7 @@ const user = await users.get('u1');
 ### Basic Usage
 
 ```javascript
-import { MemoryClient } from 's3db.js/plugins/emulator';
+import { S3db, MemoryClient } from 's3db.js';
 
 const client = new MemoryClient({
   bucket: 'my-bucket',
@@ -52,7 +51,7 @@ const client = new MemoryClient({
   verbose: true
 });
 
-const db = new Database({ client });
+const db = new S3db({ client });
 await db.connect();
 ```
 
@@ -95,8 +94,10 @@ describe('My Tests', () => {
 Perfect for test isolation and state management:
 
 ```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
 const client = new MemoryClient();
-const db = new Database({ client });
+const db = new S3db({ client });
 await db.connect();
 
 // ... create resources and insert data ...
@@ -306,8 +307,10 @@ it('should handle complex workflow', async () => {
 
 ### 4. Local Development
 ```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
 // Instant startup, no waiting for Docker
-const db = new Database({
+const db = new S3db({
   client: new MemoryClient({ verbose: true })
 });
 
@@ -360,16 +363,20 @@ Use Real S3 Client for:
 
 **Before:**
 ```javascript
+import { S3db } from 's3db.js';
+
 // Required: Docker, LocalStack running
-const db = new Database({
+const db = new S3db({
   connectionString: 'http://test:test@localhost:4566/bucket'
 });
 ```
 
 **After:**
 ```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
 // Zero infrastructure!
-const db = new Database({
+const db = new S3db({
   client: new MemoryClient()
 });
 ```
@@ -378,20 +385,24 @@ const db = new Database({
 
 **Before:**
 ```javascript
-const db = new Database({
+import { S3db } from 's3db.js';
+
+const db = new S3db({
   connectionString: process.env.BUCKET_CONNECTION_STRING
 });
 ```
 
 **After:**
 ```javascript
+import { createMemoryDatabaseForTest } from './tests/config.js';
+
 // Use helper
 const db = createMemoryDatabaseForTest('my-test');
 ```
 
 ## Examples
 
-See `tests/plugins/emulator/memory-client.test.js` for comprehensive examples.
+See `tests/clients/memory-client.test.js` for comprehensive examples.
 
 ## Troubleshooting
 

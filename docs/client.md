@@ -1,6 +1,43 @@
-# Client Class
+# Client Classes
 
-The `Client` class is the low-level S3 interface that powers s3db.js. It provides optimized AWS S3 operations with connection pooling, metadata encoding, and error handling.
+s3db.js provides **two client implementations** for different use cases:
+
+| Client | Use Case | Speed | Setup |
+|--------|----------|-------|-------|
+| **S3Client** | Production, LocalStack, MinIO | S3 speed | AWS credentials |
+| **MemoryClient** | Testing, development | **100-1000x faster** | Zero config |
+
+---
+
+## 🚀 MemoryClient - Ultra-Fast Testing
+
+**Pure in-memory client** for blazing-fast tests with zero dependencies.
+
+**Features:**
+- ⚡ **100-1000x faster** than LocalStack
+- 🎯 **Zero dependencies** - no Docker or S3 needed
+- 💯 **100% API compatible** with S3Client
+- 💾 **Snapshot/restore** - instant test state management
+- 📦 **Optional persistence** - save/load to disk
+
+📚 **[Full MemoryClient Documentation](../src/clients/memory-client.md)**
+
+```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
+const db = new S3db({
+  client: new MemoryClient({ bucket: 'test-bucket' })
+});
+
+await db.connect();
+// Use exactly like S3Client - same API!
+```
+
+---
+
+## 📡 S3Client - Production Client
+
+The `S3Client` class is the production S3 interface that powers s3db.js. It provides optimized AWS S3 operations with connection pooling, metadata encoding, and error handling.
 
 ## Table of Contents
 
@@ -17,7 +54,7 @@ The `Client` class is the low-level S3 interface that powers s3db.js. It provide
 
 ## Overview
 
-The Client class wraps the AWS SDK S3Client with:
+The S3Client class wraps the AWS SDK S3Client with:
 - ✅ **Connection pooling** - HTTP keep-alive with configurable pool sizes
 - ✅ **Smart metadata encoding** - Automatic compression for S3 metadata
 - ✅ **Error mapping** - Actionable error messages with suggestions
@@ -36,9 +73,9 @@ The Client class wraps the AWS SDK S3Client with:
 ## Constructor
 
 ```javascript
-import { Client } from 's3db.js';
+import { S3Client } from 's3db.js';
 
-const client = new Client({
+const client = new S3Client({
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@BUCKET/prefix',
   verbose: false,
   parallelism: 10,

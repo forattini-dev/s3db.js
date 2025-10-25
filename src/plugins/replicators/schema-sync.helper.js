@@ -413,7 +413,7 @@ export function generateMySQLAlterTable(tableName, attributes, existingSchema) {
 /**
  * Generate BigQuery table schema from S3DB resource schema
  */
-export function generateBigQuerySchema(attributes) {
+export function generateBigQuerySchema(attributes, mutability = 'append-only') {
   const fields = [];
 
   // Always add id field
@@ -444,6 +444,18 @@ export function generateBigQuerySchema(attributes) {
   }
   if (!attributes.updatedAt) {
     fields.push({ name: 'updated_at', type: 'TIMESTAMP', mode: 'NULLABLE' });
+  }
+
+  // Add tracking fields for append-only and immutable modes
+  if (mutability === 'append-only' || mutability === 'immutable') {
+    fields.push({ name: '_operation_type', type: 'STRING', mode: 'NULLABLE' });
+    fields.push({ name: '_operation_timestamp', type: 'TIMESTAMP', mode: 'NULLABLE' });
+  }
+
+  // Add additional fields for immutable mode
+  if (mutability === 'immutable') {
+    fields.push({ name: '_is_deleted', type: 'BOOL', mode: 'NULLABLE' });
+    fields.push({ name: '_version', type: 'INT64', mode: 'NULLABLE' });
   }
 
   return fields;
@@ -478,7 +490,7 @@ export async function getBigQueryTableSchema(bigqueryClient, datasetId, tableId)
 /**
  * Generate BigQuery schema update (add missing fields)
  */
-export function generateBigQuerySchemaUpdate(attributes, existingSchema) {
+export function generateBigQuerySchemaUpdate(attributes, existingSchema, mutability = 'append-only') {
   const newFields = [];
 
   for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
@@ -494,6 +506,26 @@ export function generateBigQuerySchemaUpdate(attributes, existingSchema) {
       type: bqType,
       mode: required ? 'REQUIRED' : 'NULLABLE'
     });
+  }
+
+  // Add tracking fields for append-only and immutable modes if they don't exist
+  if (mutability === 'append-only' || mutability === 'immutable') {
+    if (!existingSchema['_operation_type']) {
+      newFields.push({ name: '_operation_type', type: 'STRING', mode: 'NULLABLE' });
+    }
+    if (!existingSchema['_operation_timestamp']) {
+      newFields.push({ name: '_operation_timestamp', type: 'TIMESTAMP', mode: 'NULLABLE' });
+    }
+  }
+
+  // Add additional fields for immutable mode if they don't exist
+  if (mutability === 'immutable') {
+    if (!existingSchema['_is_deleted']) {
+      newFields.push({ name: '_is_deleted', type: 'BOOL', mode: 'NULLABLE' });
+    }
+    if (!existingSchema['_version']) {
+      newFields.push({ name: '_version', type: 'INT64', mode: 'NULLABLE' });
+    }
   }
 
   return newFields;
