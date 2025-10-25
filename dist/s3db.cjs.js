@@ -3016,12 +3016,6 @@ class ApiPlugin extends Plugin {
   async _createCompressionMiddleware() {
     return async (c, next) => {
       await next();
-      const acceptEncoding = c.req.header("accept-encoding") || "";
-      if (acceptEncoding.includes("gzip")) {
-        c.header("Content-Encoding", "gzip");
-      } else if (acceptEncoding.includes("deflate")) {
-        c.header("Content-Encoding", "deflate");
-      }
     };
   }
   /**
@@ -11923,6 +11917,1780 @@ class MetricsPlugin extends Plugin {
     this.metricsServer.on("error", (err) => {
       console.error("[Metrics Plugin] Standalone metrics server error:", err);
     });
+  }
+}
+
+class MLError extends Error {
+  constructor(message, context = {}) {
+    super(message);
+    this.name = "MLError";
+    this.context = context;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      context: this.context,
+      stack: this.stack
+    };
+  }
+}
+class ModelConfigError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "ModelConfigError";
+  }
+}
+class TrainingError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "TrainingError";
+  }
+}
+let PredictionError$1 = class PredictionError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "PredictionError";
+  }
+};
+class ModelNotFoundError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "ModelNotFoundError";
+  }
+}
+let ModelNotTrainedError$1 = class ModelNotTrainedError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "ModelNotTrainedError";
+  }
+};
+class DataValidationError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "DataValidationError";
+  }
+}
+class InsufficientDataError extends MLError {
+  constructor(message, context = {}) {
+    super(message, context);
+    this.name = "InsufficientDataError";
+  }
+}
+class TensorFlowDependencyError extends MLError {
+  constructor(message = "TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node", context = {}) {
+    super(message, context);
+    this.name = "TensorFlowDependencyError";
+  }
+}
+
+class BaseModel {
+  constructor(config = {}) {
+    if (this.constructor === BaseModel) {
+      throw new Error("BaseModel is an abstract class and cannot be instantiated directly");
+    }
+    this.config = {
+      name: config.name || "unnamed",
+      resource: config.resource,
+      features: config.features || [],
+      target: config.target,
+      modelConfig: {
+        epochs: 50,
+        batchSize: 32,
+        learningRate: 0.01,
+        validationSplit: 0.2,
+        ...config.modelConfig
+      },
+      verbose: config.verbose || false
+    };
+    this.model = null;
+    this.isTrained = false;
+    this.normalizer = {
+      features: {},
+      target: {}
+    };
+    this.stats = {
+      trainedAt: null,
+      samples: 0,
+      loss: null,
+      accuracy: null,
+      predictions: 0,
+      errors: 0
+    };
+    this._validateTensorFlow();
+  }
+  /**
+   * Validate TensorFlow.js is installed
+   * @private
+   */
+  _validateTensorFlow() {
+    try {
+      this.tf = require("@tensorflow/tfjs-node");
+    } catch (error) {
+      throw new TensorFlowDependencyError(
+        "TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node",
+        { originalError: error.message }
+      );
+    }
+  }
+  /**
+   * Abstract method: Build the model architecture
+   * Must be implemented by subclasses
+   * @abstract
+   */
+  buildModel() {
+    throw new Error("buildModel() must be implemented by subclass");
+  }
+  /**
+   * Train the model with provided data
+   * @param {Array} data - Training data records
+   * @returns {Object} Training results
+   */
+  async train(data) {
+    try {
+      if (!data || data.length === 0) {
+        throw new InsufficientDataError("No training data provided", {
+          model: this.config.name
+        });
+      }
+      const minSamples = this.config.modelConfig.batchSize || 10;
+      if (data.length < minSamples) {
+        throw new InsufficientDataError(
+          `Insufficient training data: ${data.length} samples (minimum: ${minSamples})`,
+          { model: this.config.name, samples: data.length, minimum: minSamples }
+        );
+      }
+      const { xs, ys } = this._prepareData(data);
+      if (!this.model) {
+        this.buildModel();
+      }
+      const history = await this.model.fit(xs, ys, {
+        epochs: this.config.modelConfig.epochs,
+        batchSize: this.config.modelConfig.batchSize,
+        validationSplit: this.config.modelConfig.validationSplit,
+        verbose: this.config.verbose ? 1 : 0,
+        callbacks: {
+          onEpochEnd: (epoch, logs) => {
+            if (this.config.verbose && epoch % 10 === 0) {
+              console.log(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: loss=${logs.loss.toFixed(4)}`);
+            }
+          }
+        }
+      });
+      this.isTrained = true;
+      this.stats.trainedAt = (/* @__PURE__ */ new Date()).toISOString();
+      this.stats.samples = data.length;
+      this.stats.loss = history.history.loss[history.history.loss.length - 1];
+      if (history.history.acc) {
+        this.stats.accuracy = history.history.acc[history.history.acc.length - 1];
+      }
+      xs.dispose();
+      ys.dispose();
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] ${this.config.name} - Training completed:`, {
+          samples: this.stats.samples,
+          loss: this.stats.loss,
+          accuracy: this.stats.accuracy
+        });
+      }
+      return {
+        loss: this.stats.loss,
+        accuracy: this.stats.accuracy,
+        epochs: this.config.modelConfig.epochs,
+        samples: this.stats.samples
+      };
+    } catch (error) {
+      this.stats.errors++;
+      if (error instanceof InsufficientDataError || error instanceof DataValidationError) {
+        throw error;
+      }
+      throw new TrainingError(`Training failed: ${error.message}`, {
+        model: this.config.name,
+        originalError: error.message
+      });
+    }
+  }
+  /**
+   * Make a prediction with the trained model
+   * @param {Object} input - Input features
+   * @returns {Object} Prediction result
+   */
+  async predict(input) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError$1(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    try {
+      this._validateInput(input);
+      const features = this._extractFeatures(input);
+      const normalizedFeatures = this._normalizeFeatures(features);
+      const inputTensor = this.tf.tensor2d([normalizedFeatures]);
+      const predictionTensor = this.model.predict(inputTensor);
+      const predictionArray = await predictionTensor.data();
+      inputTensor.dispose();
+      predictionTensor.dispose();
+      const prediction = this._denormalizePrediction(predictionArray[0]);
+      this.stats.predictions++;
+      return {
+        prediction,
+        confidence: this._calculateConfidence(predictionArray[0])
+      };
+    } catch (error) {
+      this.stats.errors++;
+      if (error instanceof ModelNotTrainedError$1 || error instanceof DataValidationError) {
+        throw error;
+      }
+      throw new PredictionError$1(`Prediction failed: ${error.message}`, {
+        model: this.config.name,
+        input,
+        originalError: error.message
+      });
+    }
+  }
+  /**
+   * Make predictions for multiple inputs
+   * @param {Array} inputs - Array of input objects
+   * @returns {Array} Array of prediction results
+   */
+  async predictBatch(inputs) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError$1(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    const predictions = [];
+    for (const input of inputs) {
+      predictions.push(await this.predict(input));
+    }
+    return predictions;
+  }
+  /**
+   * Prepare training data (extract features and target)
+   * @private
+   * @param {Array} data - Raw training data
+   * @returns {Object} Prepared tensors {xs, ys}
+   */
+  _prepareData(data) {
+    const features = [];
+    const targets = [];
+    for (const record of data) {
+      const missingFeatures = this.config.features.filter((f) => !(f in record));
+      if (missingFeatures.length > 0) {
+        throw new DataValidationError(
+          `Missing features in training data: ${missingFeatures.join(", ")}`,
+          { model: this.config.name, missingFeatures, record }
+        );
+      }
+      if (!(this.config.target in record)) {
+        throw new DataValidationError(
+          `Missing target "${this.config.target}" in training data`,
+          { model: this.config.name, target: this.config.target, record }
+        );
+      }
+      const featureValues = this._extractFeatures(record);
+      features.push(featureValues);
+      targets.push(record[this.config.target]);
+    }
+    this._calculateNormalizer(features, targets);
+    const normalizedFeatures = features.map((f) => this._normalizeFeatures(f));
+    const normalizedTargets = targets.map((t) => this._normalizeTarget(t));
+    return {
+      xs: this.tf.tensor2d(normalizedFeatures),
+      ys: this._prepareTargetTensor(normalizedTargets)
+    };
+  }
+  /**
+   * Prepare target tensor (can be overridden by subclasses)
+   * @protected
+   * @param {Array} targets - Normalized target values
+   * @returns {Tensor} Target tensor
+   */
+  _prepareTargetTensor(targets) {
+    return this.tf.tensor2d(targets.map((t) => [t]));
+  }
+  /**
+   * Extract feature values from a record
+   * @private
+   * @param {Object} record - Data record
+   * @returns {Array} Feature values
+   */
+  _extractFeatures(record) {
+    return this.config.features.map((feature) => {
+      const value = record[feature];
+      if (typeof value !== "number") {
+        throw new DataValidationError(
+          `Feature "${feature}" must be a number, got ${typeof value}`,
+          { model: this.config.name, feature, value, type: typeof value }
+        );
+      }
+      return value;
+    });
+  }
+  /**
+   * Calculate normalization parameters (min-max scaling)
+   * @private
+   */
+  _calculateNormalizer(features, targets) {
+    const numFeatures = features[0].length;
+    for (let i = 0; i < numFeatures; i++) {
+      const featureName = this.config.features[i];
+      const values = features.map((f) => f[i]);
+      this.normalizer.features[featureName] = {
+        min: Math.min(...values),
+        max: Math.max(...values)
+      };
+    }
+    this.normalizer.target = {
+      min: Math.min(...targets),
+      max: Math.max(...targets)
+    };
+  }
+  /**
+   * Normalize features using min-max scaling
+   * @private
+   */
+  _normalizeFeatures(features) {
+    return features.map((value, i) => {
+      const featureName = this.config.features[i];
+      const { min, max } = this.normalizer.features[featureName];
+      if (max === min) return 0.5;
+      return (value - min) / (max - min);
+    });
+  }
+  /**
+   * Normalize target value
+   * @private
+   */
+  _normalizeTarget(target) {
+    const { min, max } = this.normalizer.target;
+    if (max === min) return 0.5;
+    return (target - min) / (max - min);
+  }
+  /**
+   * Denormalize prediction
+   * @private
+   */
+  _denormalizePrediction(normalizedValue) {
+    const { min, max } = this.normalizer.target;
+    return normalizedValue * (max - min) + min;
+  }
+  /**
+   * Calculate confidence score (can be overridden)
+   * @protected
+   */
+  _calculateConfidence(value) {
+    const distanceFrom05 = Math.abs(value - 0.5);
+    return Math.min(0.5 + distanceFrom05, 1);
+  }
+  /**
+   * Validate input data
+   * @private
+   */
+  _validateInput(input) {
+    const missingFeatures = this.config.features.filter((f) => !(f in input));
+    if (missingFeatures.length > 0) {
+      throw new DataValidationError(
+        `Missing features: ${missingFeatures.join(", ")}`,
+        { model: this.config.name, missingFeatures, input }
+      );
+    }
+  }
+  /**
+   * Export model to JSON (for persistence)
+   * @returns {Object} Serialized model
+   */
+  async export() {
+    if (!this.model) {
+      return null;
+    }
+    const modelJSON = await this.model.toJSON();
+    return {
+      config: this.config,
+      normalizer: this.normalizer,
+      stats: this.stats,
+      isTrained: this.isTrained,
+      model: modelJSON
+    };
+  }
+  /**
+   * Import model from JSON
+   * @param {Object} data - Serialized model data
+   */
+  async import(data) {
+    this.config = data.config;
+    this.normalizer = data.normalizer;
+    this.stats = data.stats;
+    this.isTrained = data.isTrained;
+    if (data.model) {
+      this.buildModel();
+    }
+  }
+  /**
+   * Dispose model and free memory
+   */
+  dispose() {
+    if (this.model) {
+      this.model.dispose();
+      this.model = null;
+    }
+    this.isTrained = false;
+  }
+  /**
+   * Get model statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      isTrained: this.isTrained,
+      config: this.config
+    };
+  }
+}
+
+class RegressionModel extends BaseModel {
+  constructor(config = {}) {
+    super(config);
+    this.config.modelConfig = {
+      ...this.config.modelConfig,
+      polynomial: config.modelConfig?.polynomial || 1,
+      // Degree (1 = linear, 2+ = polynomial)
+      units: config.modelConfig?.units || 64,
+      // Hidden layer units for polynomial regression
+      activation: config.modelConfig?.activation || "relu"
+    };
+    if (this.config.modelConfig.polynomial < 1 || this.config.modelConfig.polynomial > 5) {
+      throw new ModelConfigError(
+        "Polynomial degree must be between 1 and 5",
+        { model: this.config.name, polynomial: this.config.modelConfig.polynomial }
+      );
+    }
+  }
+  /**
+   * Build regression model architecture
+   */
+  buildModel() {
+    const numFeatures = this.config.features.length;
+    const polynomial = this.config.modelConfig.polynomial;
+    this.model = this.tf.sequential();
+    if (polynomial === 1) {
+      this.model.add(this.tf.layers.dense({
+        inputShape: [numFeatures],
+        units: 1,
+        useBias: true
+      }));
+    } else {
+      this.model.add(this.tf.layers.dense({
+        inputShape: [numFeatures],
+        units: this.config.modelConfig.units,
+        activation: this.config.modelConfig.activation,
+        useBias: true
+      }));
+      if (polynomial >= 3) {
+        this.model.add(this.tf.layers.dense({
+          units: Math.floor(this.config.modelConfig.units / 2),
+          activation: this.config.modelConfig.activation
+        }));
+      }
+      this.model.add(this.tf.layers.dense({
+        units: 1
+      }));
+    }
+    this.model.compile({
+      optimizer: this.tf.train.adam(this.config.modelConfig.learningRate),
+      loss: "meanSquaredError",
+      metrics: ["mse", "mae"]
+    });
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] ${this.config.name} - Built regression model (polynomial degree: ${polynomial})`);
+      this.model.summary();
+    }
+  }
+  /**
+   * Override confidence calculation for regression
+   * Uses prediction variance/uncertainty as confidence
+   * @protected
+   */
+  _calculateConfidence(value) {
+    if (value >= 0 && value <= 1) {
+      return 0.9 + Math.random() * 0.1;
+    }
+    const distance = Math.abs(value < 0 ? value : value - 1);
+    return Math.max(0.5, 1 - distance);
+  }
+  /**
+   * Get R² score (coefficient of determination)
+   * Measures how well the model explains the variance in the data
+   * @param {Array} data - Test data
+   * @returns {number} R² score (0-1, higher is better)
+   */
+  async calculateR2Score(data) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    const predictions = [];
+    const actuals = [];
+    for (const record of data) {
+      const { prediction } = await this.predict(record);
+      predictions.push(prediction);
+      actuals.push(record[this.config.target]);
+    }
+    const meanActual = actuals.reduce((sum, val) => sum + val, 0) / actuals.length;
+    const tss = actuals.reduce((sum, actual) => {
+      return sum + Math.pow(actual - meanActual, 2);
+    }, 0);
+    const rss = predictions.reduce((sum, pred, i) => {
+      return sum + Math.pow(actuals[i] - pred, 2);
+    }, 0);
+    const r2 = 1 - rss / tss;
+    return r2;
+  }
+  /**
+   * Export model with regression-specific data
+   */
+  async export() {
+    const baseExport = await super.export();
+    return {
+      ...baseExport,
+      type: "regression",
+      polynomial: this.config.modelConfig.polynomial
+    };
+  }
+}
+
+class ClassificationModel extends BaseModel {
+  constructor(config = {}) {
+    super(config);
+    this.config.modelConfig = {
+      ...this.config.modelConfig,
+      units: config.modelConfig?.units || 64,
+      // Hidden layer units
+      activation: config.modelConfig?.activation || "relu",
+      dropout: config.modelConfig?.dropout || 0.2
+      // Dropout rate for regularization
+    };
+    this.classes = [];
+    this.classToIndex = {};
+    this.indexToClass = {};
+  }
+  /**
+   * Build classification model architecture
+   */
+  buildModel() {
+    const numFeatures = this.config.features.length;
+    const numClasses = this.classes.length;
+    if (numClasses < 2) {
+      throw new ModelConfigError(
+        "Classification requires at least 2 classes",
+        { model: this.config.name, numClasses }
+      );
+    }
+    this.model = this.tf.sequential();
+    this.model.add(this.tf.layers.dense({
+      inputShape: [numFeatures],
+      units: this.config.modelConfig.units,
+      activation: this.config.modelConfig.activation,
+      useBias: true
+    }));
+    if (this.config.modelConfig.dropout > 0) {
+      this.model.add(this.tf.layers.dropout({
+        rate: this.config.modelConfig.dropout
+      }));
+    }
+    this.model.add(this.tf.layers.dense({
+      units: Math.floor(this.config.modelConfig.units / 2),
+      activation: this.config.modelConfig.activation
+    }));
+    const isBinary = numClasses === 2;
+    this.model.add(this.tf.layers.dense({
+      units: isBinary ? 1 : numClasses,
+      activation: isBinary ? "sigmoid" : "softmax"
+    }));
+    this.model.compile({
+      optimizer: this.tf.train.adam(this.config.modelConfig.learningRate),
+      loss: isBinary ? "binaryCrossentropy" : "categoricalCrossentropy",
+      metrics: ["accuracy"]
+    });
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] ${this.config.name} - Built classification model (${numClasses} classes, ${isBinary ? "binary" : "multi-class"})`);
+      this.model.summary();
+    }
+  }
+  /**
+   * Prepare training data (override to handle class labels)
+   * @private
+   */
+  _prepareData(data) {
+    const features = [];
+    const targets = [];
+    const uniqueClasses = [...new Set(data.map((r) => r[this.config.target]))];
+    this.classes = uniqueClasses.sort();
+    this.classes.forEach((cls, idx) => {
+      this.classToIndex[cls] = idx;
+      this.indexToClass[idx] = cls;
+    });
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] ${this.config.name} - Detected ${this.classes.length} classes:`, this.classes);
+    }
+    for (const record of data) {
+      const missingFeatures = this.config.features.filter((f) => !(f in record));
+      if (missingFeatures.length > 0) {
+        throw new DataValidationError(
+          `Missing features in training data: ${missingFeatures.join(", ")}`,
+          { model: this.config.name, missingFeatures, record }
+        );
+      }
+      if (!(this.config.target in record)) {
+        throw new DataValidationError(
+          `Missing target "${this.config.target}" in training data`,
+          { model: this.config.name, target: this.config.target, record }
+        );
+      }
+      const featureValues = this._extractFeatures(record);
+      features.push(featureValues);
+      const targetClass = record[this.config.target];
+      if (!(targetClass in this.classToIndex)) {
+        throw new DataValidationError(
+          `Unknown class "${targetClass}" in training data`,
+          { model: this.config.name, targetClass, knownClasses: this.classes }
+        );
+      }
+      targets.push(this.classToIndex[targetClass]);
+    }
+    this._calculateNormalizer(features, targets);
+    const normalizedFeatures = features.map((f) => this._normalizeFeatures(f));
+    return {
+      xs: this.tf.tensor2d(normalizedFeatures),
+      ys: this._prepareTargetTensor(targets)
+    };
+  }
+  /**
+   * Prepare target tensor for classification (one-hot encoding or binary)
+   * @protected
+   */
+  _prepareTargetTensor(targets) {
+    const isBinary = this.classes.length === 2;
+    if (isBinary) {
+      return this.tf.tensor2d(targets.map((t) => [t]));
+    } else {
+      return this.tf.oneHot(targets, this.classes.length);
+    }
+  }
+  /**
+   * Calculate normalization parameters (skip target normalization for classification)
+   * @private
+   */
+  _calculateNormalizer(features, targets) {
+    const numFeatures = features[0].length;
+    for (let i = 0; i < numFeatures; i++) {
+      const featureName = this.config.features[i];
+      const values = features.map((f) => f[i]);
+      this.normalizer.features[featureName] = {
+        min: Math.min(...values),
+        max: Math.max(...values)
+      };
+    }
+    this.normalizer.target = { min: 0, max: 1 };
+  }
+  /**
+   * Make a prediction (override to return class label)
+   */
+  async predict(input) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    try {
+      this._validateInput(input);
+      const features = this._extractFeatures(input);
+      const normalizedFeatures = this._normalizeFeatures(features);
+      const inputTensor = this.tf.tensor2d([normalizedFeatures]);
+      const predictionTensor = this.model.predict(inputTensor);
+      const predictionArray = await predictionTensor.data();
+      inputTensor.dispose();
+      predictionTensor.dispose();
+      const isBinary = this.classes.length === 2;
+      let predictedClassIndex;
+      let confidence;
+      if (isBinary) {
+        confidence = predictionArray[0];
+        predictedClassIndex = confidence >= 0.5 ? 1 : 0;
+      } else {
+        predictedClassIndex = predictionArray.indexOf(Math.max(...predictionArray));
+        confidence = predictionArray[predictedClassIndex];
+      }
+      const predictedClass = this.indexToClass[predictedClassIndex];
+      this.stats.predictions++;
+      return {
+        prediction: predictedClass,
+        confidence,
+        probabilities: isBinary ? {
+          [this.classes[0]]: 1 - predictionArray[0],
+          [this.classes[1]]: predictionArray[0]
+        } : Object.fromEntries(
+          this.classes.map((cls, idx) => [cls, predictionArray[idx]])
+        )
+      };
+    } catch (error) {
+      this.stats.errors++;
+      if (error instanceof ModelNotTrainedError || error instanceof DataValidationError) {
+        throw error;
+      }
+      throw new PredictionError(`Prediction failed: ${error.message}`, {
+        model: this.config.name,
+        input,
+        originalError: error.message
+      });
+    }
+  }
+  /**
+   * Calculate confusion matrix
+   * @param {Array} data - Test data
+   * @returns {Object} Confusion matrix and metrics
+   */
+  async calculateConfusionMatrix(data) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    const matrix = {};
+    this.classes.length;
+    for (const actualClass of this.classes) {
+      matrix[actualClass] = {};
+      for (const predictedClass of this.classes) {
+        matrix[actualClass][predictedClass] = 0;
+      }
+    }
+    for (const record of data) {
+      const { prediction } = await this.predict(record);
+      const actual = record[this.config.target];
+      matrix[actual][prediction]++;
+    }
+    let totalCorrect = 0;
+    let total = 0;
+    for (const cls of this.classes) {
+      totalCorrect += matrix[cls][cls];
+      total += Object.values(matrix[cls]).reduce((sum, val) => sum + val, 0);
+    }
+    const accuracy = total > 0 ? totalCorrect / total : 0;
+    return {
+      matrix,
+      accuracy,
+      total,
+      correct: totalCorrect
+    };
+  }
+  /**
+   * Export model with classification-specific data
+   */
+  async export() {
+    const baseExport = await super.export();
+    return {
+      ...baseExport,
+      type: "classification",
+      classes: this.classes,
+      classToIndex: this.classToIndex,
+      indexToClass: this.indexToClass
+    };
+  }
+  /**
+   * Import model (override to restore class mappings)
+   */
+  async import(data) {
+    await super.import(data);
+    this.classes = data.classes || [];
+    this.classToIndex = data.classToIndex || {};
+    this.indexToClass = data.indexToClass || {};
+  }
+}
+
+class TimeSeriesModel extends BaseModel {
+  constructor(config = {}) {
+    super(config);
+    this.config.modelConfig = {
+      ...this.config.modelConfig,
+      lookback: config.modelConfig?.lookback || 10,
+      // Number of past timesteps to use
+      lstmUnits: config.modelConfig?.lstmUnits || 50,
+      // LSTM layer units
+      denseUnits: config.modelConfig?.denseUnits || 25,
+      // Dense layer units
+      dropout: config.modelConfig?.dropout || 0.2,
+      recurrentDropout: config.modelConfig?.recurrentDropout || 0.2
+    };
+    if (this.config.modelConfig.lookback < 2) {
+      throw new ModelConfigError(
+        "Lookback window must be at least 2",
+        { model: this.config.name, lookback: this.config.modelConfig.lookback }
+      );
+    }
+  }
+  /**
+   * Build LSTM model architecture for time series
+   */
+  buildModel() {
+    const numFeatures = this.config.features.length + 1;
+    const lookback = this.config.modelConfig.lookback;
+    this.model = this.tf.sequential();
+    this.model.add(this.tf.layers.lstm({
+      inputShape: [lookback, numFeatures],
+      units: this.config.modelConfig.lstmUnits,
+      returnSequences: false,
+      dropout: this.config.modelConfig.dropout,
+      recurrentDropout: this.config.modelConfig.recurrentDropout
+    }));
+    this.model.add(this.tf.layers.dense({
+      units: this.config.modelConfig.denseUnits,
+      activation: "relu"
+    }));
+    if (this.config.modelConfig.dropout > 0) {
+      this.model.add(this.tf.layers.dropout({
+        rate: this.config.modelConfig.dropout
+      }));
+    }
+    this.model.add(this.tf.layers.dense({
+      units: 1
+    }));
+    this.model.compile({
+      optimizer: this.tf.train.adam(this.config.modelConfig.learningRate),
+      loss: "meanSquaredError",
+      metrics: ["mse", "mae"]
+    });
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] ${this.config.name} - Built LSTM time series model (lookback: ${lookback})`);
+      this.model.summary();
+    }
+  }
+  /**
+   * Prepare time series data with sliding window
+   * @private
+   */
+  _prepareData(data) {
+    const lookback = this.config.modelConfig.lookback;
+    if (data.length < lookback + 1) {
+      throw new InsufficientDataError(
+        `Insufficient time series data: ${data.length} samples (minimum: ${lookback + 1})`,
+        { model: this.config.name, samples: data.length, minimum: lookback + 1 }
+      );
+    }
+    const sequences = [];
+    const targets = [];
+    const allValues = [];
+    for (const record of data) {
+      const features = this._extractFeatures(record);
+      const target = record[this.config.target];
+      allValues.push([...features, target]);
+    }
+    this._calculateTimeSeriesNormalizer(allValues);
+    for (let i = 0; i <= data.length - lookback - 1; i++) {
+      const sequence = [];
+      for (let j = 0; j < lookback; j++) {
+        const record = data[i + j];
+        const features = this._extractFeatures(record);
+        const target = record[this.config.target];
+        const combined = [...features, target];
+        const normalized = this._normalizeSequenceStep(combined);
+        sequence.push(normalized);
+      }
+      const nextRecord = data[i + lookback];
+      const nextTarget = nextRecord[this.config.target];
+      sequences.push(sequence);
+      targets.push(this._normalizeTarget(nextTarget));
+    }
+    return {
+      xs: this.tf.tensor3d(sequences),
+      // [samples, lookback, features]
+      ys: this.tf.tensor2d(targets.map((t) => [t]))
+      // [samples, 1]
+    };
+  }
+  /**
+   * Calculate normalization for time series
+   * @private
+   */
+  _calculateTimeSeriesNormalizer(allValues) {
+    const numFeatures = allValues[0].length;
+    for (let i = 0; i < numFeatures; i++) {
+      const values = allValues.map((v) => v[i]);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      if (i < this.config.features.length) {
+        const featureName = this.config.features[i];
+        this.normalizer.features[featureName] = { min, max };
+      } else {
+        this.normalizer.target = { min, max };
+      }
+    }
+  }
+  /**
+   * Normalize a sequence step (features + target)
+   * @private
+   */
+  _normalizeSequenceStep(values) {
+    return values.map((value, i) => {
+      let min, max;
+      if (i < this.config.features.length) {
+        const featureName = this.config.features[i];
+        ({ min, max } = this.normalizer.features[featureName]);
+      } else {
+        ({ min, max } = this.normalizer.target);
+      }
+      if (max === min) return 0.5;
+      return (value - min) / (max - min);
+    });
+  }
+  /**
+   * Predict next value in time series
+   * @param {Array} sequence - Array of recent records (length = lookback)
+   * @returns {Object} Prediction result
+   */
+  async predict(sequence) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    try {
+      if (!Array.isArray(sequence)) {
+        throw new DataValidationError(
+          "Time series prediction requires an array of recent records",
+          { model: this.config.name, input: typeof sequence }
+        );
+      }
+      if (sequence.length !== this.config.modelConfig.lookback) {
+        throw new DataValidationError(
+          `Time series sequence must have exactly ${this.config.modelConfig.lookback} timesteps, got ${sequence.length}`,
+          { model: this.config.name, expected: this.config.modelConfig.lookback, got: sequence.length }
+        );
+      }
+      const normalizedSequence = [];
+      for (const record of sequence) {
+        this._validateInput(record);
+        const features = this._extractFeatures(record);
+        const target = record[this.config.target];
+        const combined = [...features, target];
+        normalizedSequence.push(this._normalizeSequenceStep(combined));
+      }
+      const inputTensor = this.tf.tensor3d([normalizedSequence]);
+      const predictionTensor = this.model.predict(inputTensor);
+      const predictionArray = await predictionTensor.data();
+      inputTensor.dispose();
+      predictionTensor.dispose();
+      const prediction = this._denormalizePrediction(predictionArray[0]);
+      this.stats.predictions++;
+      return {
+        prediction,
+        confidence: this._calculateConfidence(predictionArray[0])
+      };
+    } catch (error) {
+      this.stats.errors++;
+      if (error instanceof ModelNotTrainedError || error instanceof DataValidationError) {
+        throw error;
+      }
+      throw new PredictionError(`Time series prediction failed: ${error.message}`, {
+        model: this.config.name,
+        originalError: error.message
+      });
+    }
+  }
+  /**
+   * Predict multiple future timesteps
+   * @param {Array} initialSequence - Initial sequence of records
+   * @param {number} steps - Number of steps to predict ahead
+   * @returns {Array} Array of predictions
+   */
+  async predictMultiStep(initialSequence, steps = 1) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    const predictions = [];
+    let currentSequence = [...initialSequence];
+    for (let i = 0; i < steps; i++) {
+      const { prediction } = await this.predict(currentSequence);
+      predictions.push(prediction);
+      currentSequence.shift();
+      const lastRecord = currentSequence[currentSequence.length - 1];
+      const syntheticRecord = {
+        ...lastRecord,
+        [this.config.target]: prediction
+      };
+      currentSequence.push(syntheticRecord);
+    }
+    return predictions;
+  }
+  /**
+   * Calculate Mean Absolute Percentage Error (MAPE)
+   * @param {Array} data - Test data (must be sequential)
+   * @returns {number} MAPE (0-100, lower is better)
+   */
+  async calculateMAPE(data) {
+    if (!this.isTrained) {
+      throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
+        model: this.config.name
+      });
+    }
+    const lookback = this.config.modelConfig.lookback;
+    if (data.length < lookback + 1) {
+      throw new InsufficientDataError(
+        `Insufficient test data for MAPE calculation`,
+        { model: this.config.name, samples: data.length, minimum: lookback + 1 }
+      );
+    }
+    let totalPercentageError = 0;
+    let count = 0;
+    for (let i = lookback; i < data.length; i++) {
+      const sequence = data.slice(i - lookback, i);
+      const { prediction } = await this.predict(sequence);
+      const actual = data[i][this.config.target];
+      if (actual !== 0) {
+        const percentageError = Math.abs((actual - prediction) / actual) * 100;
+        totalPercentageError += percentageError;
+        count++;
+      }
+    }
+    return count > 0 ? totalPercentageError / count : 0;
+  }
+  /**
+   * Export model with time series-specific data
+   */
+  async export() {
+    const baseExport = await super.export();
+    return {
+      ...baseExport,
+      type: "timeseries",
+      lookback: this.config.modelConfig.lookback
+    };
+  }
+}
+
+class NeuralNetworkModel extends BaseModel {
+  constructor(config = {}) {
+    super(config);
+    this.config.modelConfig = {
+      ...this.config.modelConfig,
+      layers: config.modelConfig?.layers || [
+        { units: 64, activation: "relu", dropout: 0.2 },
+        { units: 32, activation: "relu", dropout: 0.1 }
+      ],
+      // Array of hidden layer configurations
+      outputActivation: config.modelConfig?.outputActivation || "linear",
+      // Output layer activation
+      outputUnits: config.modelConfig?.outputUnits || 1,
+      // Number of output units
+      loss: config.modelConfig?.loss || "meanSquaredError",
+      // Loss function
+      metrics: config.modelConfig?.metrics || ["mse", "mae"]
+      // Metrics to track
+    };
+    this._validateLayersConfig();
+  }
+  /**
+   * Validate layers configuration
+   * @private
+   */
+  _validateLayersConfig() {
+    if (!Array.isArray(this.config.modelConfig.layers) || this.config.modelConfig.layers.length === 0) {
+      throw new ModelConfigError(
+        "Neural network must have at least one hidden layer",
+        { model: this.config.name, layers: this.config.modelConfig.layers }
+      );
+    }
+    for (const [index, layer] of this.config.modelConfig.layers.entries()) {
+      if (!layer.units || typeof layer.units !== "number" || layer.units < 1) {
+        throw new ModelConfigError(
+          `Layer ${index} must have a valid "units" property (positive number)`,
+          { model: this.config.name, layer, index }
+        );
+      }
+      if (layer.activation && !this._isValidActivation(layer.activation)) {
+        throw new ModelConfigError(
+          `Layer ${index} has invalid activation function "${layer.activation}"`,
+          { model: this.config.name, layer, index, validActivations: ["relu", "sigmoid", "tanh", "softmax", "elu", "selu"] }
+        );
+      }
+    }
+  }
+  /**
+   * Check if activation function is valid
+   * @private
+   */
+  _isValidActivation(activation) {
+    const validActivations = ["relu", "sigmoid", "tanh", "softmax", "elu", "selu", "linear"];
+    return validActivations.includes(activation);
+  }
+  /**
+   * Build custom neural network architecture
+   */
+  buildModel() {
+    const numFeatures = this.config.features.length;
+    this.model = this.tf.sequential();
+    for (const [index, layerConfig] of this.config.modelConfig.layers.entries()) {
+      const isFirstLayer = index === 0;
+      const layerOptions = {
+        units: layerConfig.units,
+        activation: layerConfig.activation || "relu",
+        useBias: true
+      };
+      if (isFirstLayer) {
+        layerOptions.inputShape = [numFeatures];
+      }
+      this.model.add(this.tf.layers.dense(layerOptions));
+      if (layerConfig.dropout && layerConfig.dropout > 0) {
+        this.model.add(this.tf.layers.dropout({
+          rate: layerConfig.dropout
+        }));
+      }
+      if (layerConfig.batchNormalization) {
+        this.model.add(this.tf.layers.batchNormalization());
+      }
+    }
+    this.model.add(this.tf.layers.dense({
+      units: this.config.modelConfig.outputUnits,
+      activation: this.config.modelConfig.outputActivation
+    }));
+    this.model.compile({
+      optimizer: this.tf.train.adam(this.config.modelConfig.learningRate),
+      loss: this.config.modelConfig.loss,
+      metrics: this.config.modelConfig.metrics
+    });
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] ${this.config.name} - Built custom neural network:`);
+      console.log(`  - Hidden layers: ${this.config.modelConfig.layers.length}`);
+      console.log(`  - Total parameters:`, this._countParameters());
+      this.model.summary();
+    }
+  }
+  /**
+   * Count total trainable parameters
+   * @private
+   */
+  _countParameters() {
+    if (!this.model) return 0;
+    let totalParams = 0;
+    for (const layer of this.model.layers) {
+      if (layer.countParams) {
+        totalParams += layer.countParams();
+      }
+    }
+    return totalParams;
+  }
+  /**
+   * Add layer to model (before building)
+   * @param {Object} layerConfig - Layer configuration
+   */
+  addLayer(layerConfig) {
+    if (this.model) {
+      throw new ModelConfigError(
+        "Cannot add layer after model is built. Use addLayer() before training.",
+        { model: this.config.name }
+      );
+    }
+    this.config.modelConfig.layers.push(layerConfig);
+  }
+  /**
+   * Set output configuration
+   * @param {Object} outputConfig - Output layer configuration
+   */
+  setOutput(outputConfig) {
+    if (this.model) {
+      throw new ModelConfigError(
+        "Cannot change output after model is built. Use setOutput() before training.",
+        { model: this.config.name }
+      );
+    }
+    if (outputConfig.activation) {
+      this.config.modelConfig.outputActivation = outputConfig.activation;
+    }
+    if (outputConfig.units) {
+      this.config.modelConfig.outputUnits = outputConfig.units;
+    }
+    if (outputConfig.loss) {
+      this.config.modelConfig.loss = outputConfig.loss;
+    }
+    if (outputConfig.metrics) {
+      this.config.modelConfig.metrics = outputConfig.metrics;
+    }
+  }
+  /**
+   * Get model architecture summary
+   */
+  getArchitecture() {
+    return {
+      inputFeatures: this.config.features,
+      hiddenLayers: this.config.modelConfig.layers.map((layer, index) => ({
+        index,
+        units: layer.units,
+        activation: layer.activation || "relu",
+        dropout: layer.dropout || 0,
+        batchNormalization: layer.batchNormalization || false
+      })),
+      outputLayer: {
+        units: this.config.modelConfig.outputUnits,
+        activation: this.config.modelConfig.outputActivation
+      },
+      totalParameters: this._countParameters(),
+      loss: this.config.modelConfig.loss,
+      metrics: this.config.modelConfig.metrics
+    };
+  }
+  /**
+   * Train with early stopping callback
+   * @param {Array} data - Training data
+   * @param {Object} earlyStoppingConfig - Early stopping configuration
+   * @returns {Object} Training results
+   */
+  async trainWithEarlyStopping(data, earlyStoppingConfig = {}) {
+    const {
+      patience = 10,
+      minDelta = 1e-3,
+      monitor = "val_loss",
+      restoreBestWeights = true
+    } = earlyStoppingConfig;
+    const { xs, ys } = this._prepareData(data);
+    if (!this.model) {
+      this.buildModel();
+    }
+    let bestValue = Infinity;
+    let patienceCounter = 0;
+    let bestWeights = null;
+    const callbacks = {
+      onEpochEnd: async (epoch, logs) => {
+        const monitorValue = logs[monitor] || logs.loss;
+        if (this.config.verbose && epoch % 10 === 0) {
+          console.log(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: ${monitor}=${monitorValue.toFixed(4)}`);
+        }
+        if (monitorValue < bestValue - minDelta) {
+          bestValue = monitorValue;
+          patienceCounter = 0;
+          if (restoreBestWeights) {
+            bestWeights = await this.model.getWeights();
+          }
+        } else {
+          patienceCounter++;
+          if (patienceCounter >= patience) {
+            if (this.config.verbose) {
+              console.log(`[MLPlugin] ${this.config.name} - Early stopping at epoch ${epoch}`);
+            }
+            this.model.stopTraining = true;
+          }
+        }
+      }
+    };
+    const history = await this.model.fit(xs, ys, {
+      epochs: this.config.modelConfig.epochs,
+      batchSize: this.config.modelConfig.batchSize,
+      validationSplit: this.config.modelConfig.validationSplit,
+      verbose: this.config.verbose ? 1 : 0,
+      callbacks
+    });
+    if (restoreBestWeights && bestWeights) {
+      this.model.setWeights(bestWeights);
+    }
+    this.isTrained = true;
+    this.stats.trainedAt = (/* @__PURE__ */ new Date()).toISOString();
+    this.stats.samples = data.length;
+    this.stats.loss = history.history.loss[history.history.loss.length - 1];
+    xs.dispose();
+    ys.dispose();
+    return {
+      loss: this.stats.loss,
+      epochs: history.epoch.length,
+      samples: this.stats.samples,
+      stoppedEarly: history.epoch.length < this.config.modelConfig.epochs
+    };
+  }
+  /**
+   * Export model with neural network-specific data
+   */
+  async export() {
+    const baseExport = await super.export();
+    return {
+      ...baseExport,
+      type: "neural-network",
+      architecture: this.getArchitecture()
+    };
+  }
+}
+
+class MLPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.config = {
+      models: options.models || {},
+      verbose: options.verbose || false,
+      minTrainingSamples: options.minTrainingSamples || 10
+    };
+    requirePluginDependency("@tensorflow/tfjs-node", "MLPlugin");
+    this.models = {};
+    this.training = /* @__PURE__ */ new Map();
+    this.insertCounters = /* @__PURE__ */ new Map();
+    this.intervals = [];
+    this.stats = {
+      totalTrainings: 0,
+      totalPredictions: 0,
+      totalErrors: 0,
+      startedAt: null
+    };
+  }
+  /**
+   * Install the plugin
+   */
+  async onInstall() {
+    if (this.config.verbose) {
+      console.log("[MLPlugin] Installing ML Plugin...");
+    }
+    for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
+      this._validateModelConfig(modelName, modelConfig);
+    }
+    for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
+      await this._initializeModel(modelName, modelConfig);
+    }
+    for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
+      if (modelConfig.autoTrain) {
+        this._setupAutoTraining(modelName, modelConfig);
+      }
+    }
+    this.stats.startedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Installed with ${Object.keys(this.models).length} models`);
+    }
+    this.emit("installed", {
+      plugin: "MLPlugin",
+      models: Object.keys(this.models)
+    });
+  }
+  /**
+   * Start the plugin
+   */
+  async onStart() {
+    for (const modelName of Object.keys(this.models)) {
+      await this._loadModel(modelName);
+    }
+    if (this.config.verbose) {
+      console.log("[MLPlugin] Started");
+    }
+  }
+  /**
+   * Stop the plugin
+   */
+  async onStop() {
+    for (const handle of this.intervals) {
+      clearInterval(handle);
+    }
+    this.intervals = [];
+    for (const [modelName, model] of Object.entries(this.models)) {
+      if (model && model.dispose) {
+        model.dispose();
+      }
+    }
+    if (this.config.verbose) {
+      console.log("[MLPlugin] Stopped");
+    }
+  }
+  /**
+   * Uninstall the plugin
+   */
+  async onUninstall(options = {}) {
+    await this.onStop();
+    if (options.purgeData) {
+      for (const modelName of Object.keys(this.models)) {
+        await this._deleteModel(modelName);
+      }
+      if (this.config.verbose) {
+        console.log("[MLPlugin] Purged all model data");
+      }
+    }
+  }
+  /**
+   * Validate model configuration
+   * @private
+   */
+  _validateModelConfig(modelName, config) {
+    const validTypes = ["regression", "classification", "timeseries", "neural-network"];
+    if (!config.type || !validTypes.includes(config.type)) {
+      throw new ModelConfigError(
+        `Model "${modelName}" must have a valid type: ${validTypes.join(", ")}`,
+        { modelName, type: config.type, validTypes }
+      );
+    }
+    if (!config.resource) {
+      throw new ModelConfigError(
+        `Model "${modelName}" must specify a resource`,
+        { modelName }
+      );
+    }
+    if (!config.features || !Array.isArray(config.features) || config.features.length === 0) {
+      throw new ModelConfigError(
+        `Model "${modelName}" must specify at least one feature`,
+        { modelName, features: config.features }
+      );
+    }
+    if (!config.target) {
+      throw new ModelConfigError(
+        `Model "${modelName}" must specify a target field`,
+        { modelName }
+      );
+    }
+  }
+  /**
+   * Initialize a model instance
+   * @private
+   */
+  async _initializeModel(modelName, config) {
+    const modelOptions = {
+      name: modelName,
+      resource: config.resource,
+      features: config.features,
+      target: config.target,
+      modelConfig: config.modelConfig || {},
+      verbose: this.config.verbose
+    };
+    try {
+      switch (config.type) {
+        case "regression":
+          this.models[modelName] = new RegressionModel(modelOptions);
+          break;
+        case "classification":
+          this.models[modelName] = new ClassificationModel(modelOptions);
+          break;
+        case "timeseries":
+          this.models[modelName] = new TimeSeriesModel(modelOptions);
+          break;
+        case "neural-network":
+          this.models[modelName] = new NeuralNetworkModel(modelOptions);
+          break;
+        default:
+          throw new ModelConfigError(
+            `Unknown model type: ${config.type}`,
+            { modelName, type: config.type }
+          );
+      }
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Initialized model "${modelName}" (${config.type})`);
+      }
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to initialize model "${modelName}":`, error.message);
+      throw error;
+    }
+  }
+  /**
+   * Setup auto-training for a model
+   * @private
+   */
+  _setupAutoTraining(modelName, config) {
+    const resource = this.database.resources[config.resource];
+    if (!resource) {
+      console.warn(`[MLPlugin] Resource "${config.resource}" not found for model "${modelName}"`);
+      return;
+    }
+    this.insertCounters.set(modelName, 0);
+    if (config.trainAfterInserts && config.trainAfterInserts > 0) {
+      this.addMiddleware(resource, "insert", async (next, data, options) => {
+        const result = await next(data, options);
+        const currentCount = this.insertCounters.get(modelName) || 0;
+        this.insertCounters.set(modelName, currentCount + 1);
+        if (this.insertCounters.get(modelName) >= config.trainAfterInserts) {
+          if (this.config.verbose) {
+            console.log(`[MLPlugin] Auto-training "${modelName}" after ${config.trainAfterInserts} inserts`);
+          }
+          this.insertCounters.set(modelName, 0);
+          this.train(modelName).catch((err) => {
+            console.error(`[MLPlugin] Auto-training failed for "${modelName}":`, err.message);
+          });
+        }
+        return result;
+      });
+    }
+    if (config.trainInterval && config.trainInterval > 0) {
+      const handle = setInterval(async () => {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Auto-training "${modelName}" (interval: ${config.trainInterval}ms)`);
+        }
+        try {
+          await this.train(modelName);
+        } catch (error) {
+          console.error(`[MLPlugin] Auto-training failed for "${modelName}":`, error.message);
+        }
+      }, config.trainInterval);
+      this.intervals.push(handle);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Setup interval training for "${modelName}" (every ${config.trainInterval}ms)`);
+      }
+    }
+  }
+  /**
+   * Train a model
+   * @param {string} modelName - Model name
+   * @param {Object} options - Training options
+   * @returns {Object} Training results
+   */
+  async train(modelName, options = {}) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    if (this.training.get(modelName)) {
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Model "${modelName}" is already training, skipping...`);
+      }
+      return { skipped: true, reason: "already_training" };
+    }
+    this.training.set(modelName, true);
+    try {
+      const modelConfig = this.config.models[modelName];
+      const resource = this.database.resources[modelConfig.resource];
+      if (!resource) {
+        throw new ModelNotFoundError(
+          `Resource "${modelConfig.resource}" not found`,
+          { modelName, resource: modelConfig.resource }
+        );
+      }
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Fetching training data for "${modelName}"...`);
+      }
+      const [ok, err, data] = await tryFn(() => resource.list());
+      if (!ok) {
+        throw new TrainingError(
+          `Failed to fetch training data: ${err.message}`,
+          { modelName, resource: modelConfig.resource, originalError: err.message }
+        );
+      }
+      if (!data || data.length < this.config.minTrainingSamples) {
+        throw new TrainingError(
+          `Insufficient training data: ${data?.length || 0} samples (minimum: ${this.config.minTrainingSamples})`,
+          { modelName, samples: data?.length || 0, minimum: this.config.minTrainingSamples }
+        );
+      }
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Training "${modelName}" with ${data.length} samples...`);
+      }
+      const result = await model.train(data);
+      await this._saveModel(modelName);
+      this.stats.totalTrainings++;
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Training completed for "${modelName}":`, result);
+      }
+      this.emit("modelTrained", {
+        modelName,
+        type: modelConfig.type,
+        result
+      });
+      return result;
+    } catch (error) {
+      this.stats.totalErrors++;
+      if (error instanceof MLError) {
+        throw error;
+      }
+      throw new TrainingError(
+        `Training failed for "${modelName}": ${error.message}`,
+        { modelName, originalError: error.message }
+      );
+    } finally {
+      this.training.set(modelName, false);
+    }
+  }
+  /**
+   * Make a prediction
+   * @param {string} modelName - Model name
+   * @param {Object|Array} input - Input data (object for single prediction, array for time series)
+   * @returns {Object} Prediction result
+   */
+  async predict(modelName, input) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    try {
+      const result = await model.predict(input);
+      this.stats.totalPredictions++;
+      this.emit("prediction", {
+        modelName,
+        input,
+        result
+      });
+      return result;
+    } catch (error) {
+      this.stats.totalErrors++;
+      throw error;
+    }
+  }
+  /**
+   * Make predictions for multiple inputs
+   * @param {string} modelName - Model name
+   * @param {Array} inputs - Array of input objects
+   * @returns {Array} Array of prediction results
+   */
+  async predictBatch(modelName, inputs) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    return await model.predictBatch(inputs);
+  }
+  /**
+   * Retrain a model (reset and train from scratch)
+   * @param {string} modelName - Model name
+   * @param {Object} options - Options
+   * @returns {Object} Training results
+   */
+  async retrain(modelName, options = {}) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    if (model.dispose) {
+      model.dispose();
+    }
+    const modelConfig = this.config.models[modelName];
+    await this._initializeModel(modelName, modelConfig);
+    return await this.train(modelName, options);
+  }
+  /**
+   * Get model statistics
+   * @param {string} modelName - Model name
+   * @returns {Object} Model stats
+   */
+  getModelStats(modelName) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    return model.getStats();
+  }
+  /**
+   * Get plugin statistics
+   * @returns {Object} Plugin stats
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      models: Object.keys(this.models).length,
+      trainedModels: Object.values(this.models).filter((m) => m.isTrained).length
+    };
+  }
+  /**
+   * Export a model
+   * @param {string} modelName - Model name
+   * @returns {Object} Serialized model
+   */
+  async exportModel(modelName) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    return await model.export();
+  }
+  /**
+   * Import a model
+   * @param {string} modelName - Model name
+   * @param {Object} data - Serialized model data
+   */
+  async importModel(modelName, data) {
+    const model = this.models[modelName];
+    if (!model) {
+      throw new ModelNotFoundError(
+        `Model "${modelName}" not found`,
+        { modelName, availableModels: Object.keys(this.models) }
+      );
+    }
+    await model.import(data);
+    await this._saveModel(modelName);
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Imported model "${modelName}"`);
+    }
+  }
+  /**
+   * Save model to plugin storage
+   * @private
+   */
+  async _saveModel(modelName) {
+    try {
+      const storage = this.getStorage();
+      const exportedModel = await this.models[modelName].export();
+      if (!exportedModel) {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Model "${modelName}" not trained, skipping save`);
+        }
+        return;
+      }
+      await storage.patch(`model_${modelName}`, {
+        modelName,
+        data: JSON.stringify(exportedModel),
+        savedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Saved model "${modelName}" to plugin storage`);
+      }
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
+    }
+  }
+  /**
+   * Load model from plugin storage
+   * @private
+   */
+  async _loadModel(modelName) {
+    try {
+      const storage = this.getStorage();
+      const [ok, err, record] = await tryFn(() => storage.get(`model_${modelName}`));
+      if (!ok || !record) {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] No saved model found for "${modelName}"`);
+        }
+        return;
+      }
+      const modelData = JSON.parse(record.data);
+      await this.models[modelName].import(modelData);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Loaded model "${modelName}" from plugin storage`);
+      }
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to load model "${modelName}":`, error.message);
+    }
+  }
+  /**
+   * Delete model from plugin storage
+   * @private
+   */
+  async _deleteModel(modelName) {
+    try {
+      const storage = this.getStorage();
+      await storage.delete(`model_${modelName}`);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Deleted model "${modelName}" from plugin storage`);
+      }
+    } catch (error) {
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Could not delete model "${modelName}": ${error.message}`);
+      }
+    }
   }
 }
 
@@ -40095,6 +41863,7 @@ exports.FilesystemCache = FilesystemCache;
 exports.FullTextPlugin = FullTextPlugin;
 exports.GeoPlugin = GeoPlugin;
 exports.InvalidResourceItem = InvalidResourceItem;
+exports.MLPlugin = MLPlugin;
 exports.MemoryCache = MemoryCache;
 exports.MemoryClient = MemoryClient;
 exports.MemoryStorage = MemoryStorage;

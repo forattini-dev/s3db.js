@@ -392,6 +392,9 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
         await storage.acquireLock(lockKey, { ttl: 1 });
       }
 
+      // Wait for lock creation to fully propagate
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       // Verify all locks exist
       let lockedCount = 0;
       for (const key of lockKeys) {
@@ -447,6 +450,9 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       ];
 
       await Promise.all(operations);
+
+      // Wait for async consolidation to complete (locks + processing)
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Check final result
       const url = await urls.get('url1');

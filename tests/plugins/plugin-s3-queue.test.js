@@ -330,8 +330,8 @@ describe('S3QueuePlugin', () => {
         throw new Error('Permanent failure');
       }, { concurrency: 1 });
 
-      // Wait for all retries
-      await new Promise(resolve => setTimeout(resolve, 2500));
+      // Wait for all retries and dead letter processing
+      await new Promise(resolve => setTimeout(resolve, 3500));
 
       await resource.stopProcessing();
 
