@@ -139,6 +139,7 @@ export class Resource extends AsyncEventEmitter {
       events = {},
       asyncEvents = true,
       asyncPartitions = true,
+      strictPartitions = false,
       createdBy = 'user'
     } = config;
 
@@ -183,6 +184,7 @@ export class Resource extends AsyncEventEmitter {
       allNestedObjectsOptional,
       asyncEvents,
       asyncPartitions,
+      strictPartitions,
       createdBy,
     };
 
@@ -1157,21 +1159,37 @@ export class Resource extends AsyncEventEmitter {
 
     // Get the inserted object
     const insertedObject = await this.get(finalId);
-    
-    // Handle partition indexing based on asyncPartitions config
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      // Async mode: create partition indexes in background
-      setImmediate(() => {
-        this.createPartitionReferences(insertedObject).catch(err => {
+
+    // Handle partition indexing based on strictPartitions and asyncPartitions config
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.strictPartitions) {
+        // Strict mode: await partition operations synchronously and throw on error
+        await this.createPartitionReferences(insertedObject);
+      } else if (this.config.asyncPartitions) {
+        // Async mode: create partition indexes in background
+        setImmediate(() => {
+          this.createPartitionReferences(insertedObject).catch(err => {
+            this.emit('partitionIndexError', {
+              operation: 'insert',
+              id: finalId,
+              error: err,
+              message: err.message
+            });
+          });
+        });
+      } else {
+        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
+        const [ok, err] = await tryFn(() => this.createPartitionReferences(insertedObject));
+        if (!ok) {
           this.emit('partitionIndexError', {
             operation: 'insert',
             id: finalId,
             error: err,
             message: err.message
           });
-        });
-      });
-      
+        }
+      }
+
       // Execute other afterInsert hooks synchronously (excluding partition hook)
       const nonPartitionHooks = this.hooks.afterInsert.filter(hook => 
         !hook.toString().includes('createPartitionReferences')
@@ -1530,20 +1548,36 @@ export class Resource extends AsyncEventEmitter {
       behavior: this.behavior
     });
     
-    // Handle partition updates based on asyncPartitions config
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      // Async mode: update partition indexes in background
-      setImmediate(() => {
-        this.handlePartitionReferenceUpdates(originalData, updatedData).catch(err => {
+    // Handle partition updates based on strictPartitions and asyncPartitions config
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.strictPartitions) {
+        // Strict mode: await partition operations synchronously and throw on error
+        await this.handlePartitionReferenceUpdates(originalData, updatedData);
+      } else if (this.config.asyncPartitions) {
+        // Async mode: update partition indexes in background
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates(originalData, updatedData).catch(err => {
+            this.emit('partitionIndexError', {
+              operation: 'update',
+              id,
+              error: err,
+              message: err.message
+            });
+          });
+        });
+      } else {
+        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
+        const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdates(originalData, updatedData));
+        if (!ok) {
           this.emit('partitionIndexError', {
             operation: 'update',
             id,
             error: err,
             message: err.message
           });
-        });
-      });
-      
+        }
+      }
+
       // Execute other afterUpdate hooks synchronously (excluding partition hook)
       const nonPartitionHooks = this.hooks.afterUpdate.filter(hook => 
         !hook.toString().includes('handlePartitionReferenceUpdates')
@@ -1701,7 +1735,10 @@ export class Resource extends AsyncEventEmitter {
       const oldData = { ...currentData, id };
       const newData = { ...mergedData, id };
 
-      if (this.config.asyncPartitions) {
+      if (this.config.strictPartitions) {
+        // Strict mode: await partition operations synchronously and throw on error
+        await this.handlePartitionReferenceUpdates(oldData, newData);
+      } else if (this.config.asyncPartitions) {
         // Async mode: update in background
         setImmediate(() => {
           this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
@@ -1872,7 +1909,10 @@ export class Resource extends AsyncEventEmitter {
 
     // Update partitions if needed
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      if (this.config.asyncPartitions) {
+      if (this.config.strictPartitions) {
+        // Strict mode: await partition operations synchronously and throw on error
+        await this.handlePartitionReferenceUpdates({}, replacedObject);
+      } else if (this.config.asyncPartitions) {
         // Async mode: update partition indexes in background
         setImmediate(() => {
           this.handlePartitionReferenceUpdates({}, replacedObject).catch(err => {
@@ -2043,22 +2083,38 @@ export class Resource extends AsyncEventEmitter {
       behavior: this.behavior
     });
 
-    // Handle partition updates (async if configured)
+    // Handle partition updates based on strictPartitions and asyncPartitions config
     const oldData = { ...originalData, id };
     const newData = { ...validatedAttributes, id };
 
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      // Async mode
-      setImmediate(() => {
-        this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.strictPartitions) {
+        // Strict mode: await partition operations synchronously and throw on error
+        await this.handlePartitionReferenceUpdates(oldData, newData);
+      } else if (this.config.asyncPartitions) {
+        // Async mode
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
+            this.emit('partitionIndexError', {
+              operation: 'updateConditional',
+              id,
+              error: err,
+              message: err.message
+            });
+          });
+        });
+      } else {
+        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
+        const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdates(oldData, newData));
+        if (!ok) {
           this.emit('partitionIndexError', {
             operation: 'updateConditional',
             id,
             error: err,
             message: err.message
           });
-        });
-      });
+        }
+      }
 
       // Execute non-partition hooks
       const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
@@ -2152,20 +2208,36 @@ export class Resource extends AsyncEventEmitter {
       id
     });
     
-    // Handle partition cleanup based on asyncPartitions config
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      // Async mode: delete partition indexes in background
-      setImmediate(() => {
-        this.deletePartitionReferences(objectData).catch(err => {
+    // Handle partition cleanup based on strictPartitions and asyncPartitions config
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
+      if (this.config.strictPartitions) {
+        // Strict mode: await partition operations synchronously and throw on error
+        await this.deletePartitionReferences(objectData);
+      } else if (this.config.asyncPartitions) {
+        // Async mode: delete partition indexes in background
+        setImmediate(() => {
+          this.deletePartitionReferences(objectData).catch(err => {
+            this.emit('partitionIndexError', {
+              operation: 'delete',
+              id,
+              error: err,
+              message: err.message
+            });
+          });
+        });
+      } else {
+        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
+        const [ok, err] = await tryFn(() => this.deletePartitionReferences(objectData));
+        if (!ok) {
           this.emit('partitionIndexError', {
             operation: 'delete',
             id,
             error: err,
             message: err.message
           });
-        });
-      });
-      
+        }
+      }
+
       // Execute other afterDelete hooks synchronously (excluding partition hook)
       const nonPartitionHooks = this.hooks.afterDelete.filter(hook => 
         !hook.toString().includes('deletePartitionReferences')

@@ -18457,6 +18457,7 @@ ${errorDetails}`,
       events = {},
       asyncEvents = true,
       asyncPartitions = true,
+      strictPartitions = false,
       createdBy = "user"
     } = config;
     this.name = name;
@@ -18488,6 +18489,7 @@ ${errorDetails}`,
       allNestedObjectsOptional,
       asyncEvents,
       asyncPartitions,
+      strictPartitions,
       createdBy
     };
     this.hooks = {
@@ -19240,17 +19242,31 @@ ${errorDetails}`,
       throw errPut;
     }
     const insertedObject = await this.get(finalId);
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      setImmediate(() => {
-        this.createPartitionReferences(insertedObject).catch((err) => {
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.strictPartitions) {
+        await this.createPartitionReferences(insertedObject);
+      } else if (this.config.asyncPartitions) {
+        setImmediate(() => {
+          this.createPartitionReferences(insertedObject).catch((err) => {
+            this.emit("partitionIndexError", {
+              operation: "insert",
+              id: finalId,
+              error: err,
+              message: err.message
+            });
+          });
+        });
+      } else {
+        const [ok, err] = await tryFn(() => this.createPartitionReferences(insertedObject));
+        if (!ok) {
           this.emit("partitionIndexError", {
             operation: "insert",
             id: finalId,
             error: err,
             message: err.message
           });
-        });
-      });
+        }
+      }
       const nonPartitionHooks = this.hooks.afterInsert.filter(
         (hook) => !hook.toString().includes("createPartitionReferences")
       );
@@ -19545,17 +19561,31 @@ ${errorDetails}`,
       body: finalBody,
       behavior: this.behavior
     });
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      setImmediate(() => {
-        this.handlePartitionReferenceUpdates(originalData, updatedData).catch((err2) => {
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.strictPartitions) {
+        await this.handlePartitionReferenceUpdates(originalData, updatedData);
+      } else if (this.config.asyncPartitions) {
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates(originalData, updatedData).catch((err2) => {
+            this.emit("partitionIndexError", {
+              operation: "update",
+              id,
+              error: err2,
+              message: err2.message
+            });
+          });
+        });
+      } else {
+        const [ok2, err2] = await tryFn(() => this.handlePartitionReferenceUpdates(originalData, updatedData));
+        if (!ok2) {
           this.emit("partitionIndexError", {
             operation: "update",
             id,
             error: err2,
             message: err2.message
           });
-        });
-      });
+        }
+      }
       const nonPartitionHooks = this.hooks.afterUpdate.filter(
         (hook) => !hook.toString().includes("handlePartitionReferenceUpdates")
       );
@@ -19668,7 +19698,9 @@ ${errorDetails}`,
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
       const oldData = { ...currentData, id };
       const newData = { ...mergedData, id };
-      if (this.config.asyncPartitions) {
+      if (this.config.strictPartitions) {
+        await this.handlePartitionReferenceUpdates(oldData, newData);
+      } else if (this.config.asyncPartitions) {
         setImmediate(() => {
           this.handlePartitionReferenceUpdates(oldData, newData).catch((err) => {
             this.emit("partitionIndexError", {
@@ -19798,7 +19830,9 @@ ${errorDetails}`,
     }
     const replacedObject = { id, ...validatedAttributes };
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      if (this.config.asyncPartitions) {
+      if (this.config.strictPartitions) {
+        await this.handlePartitionReferenceUpdates({}, replacedObject);
+      } else if (this.config.asyncPartitions) {
         setImmediate(() => {
           this.handlePartitionReferenceUpdates({}, replacedObject).catch((err) => {
             this.emit("partitionIndexError", {
@@ -19938,17 +19972,31 @@ ${errorDetails}`,
     });
     const oldData = { ...originalData, id };
     const newData = { ...validatedAttributes, id };
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      setImmediate(() => {
-        this.handlePartitionReferenceUpdates(oldData, newData).catch((err2) => {
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.strictPartitions) {
+        await this.handlePartitionReferenceUpdates(oldData, newData);
+      } else if (this.config.asyncPartitions) {
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates(oldData, newData).catch((err2) => {
+            this.emit("partitionIndexError", {
+              operation: "updateConditional",
+              id,
+              error: err2,
+              message: err2.message
+            });
+          });
+        });
+      } else {
+        const [ok2, err2] = await tryFn(() => this.handlePartitionReferenceUpdates(oldData, newData));
+        if (!ok2) {
           this.emit("partitionIndexError", {
             operation: "updateConditional",
             id,
             error: err2,
             message: err2.message
           });
-        });
-      });
+        }
+      }
       const nonPartitionHooks = this.hooks.afterUpdate.filter(
         (hook) => !hook.toString().includes("handlePartitionReferenceUpdates")
       );
@@ -20024,17 +20072,31 @@ ${errorDetails}`,
       operation: "delete",
       id
     });
-    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      setImmediate(() => {
-        this.deletePartitionReferences(objectData).catch((err3) => {
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
+      if (this.config.strictPartitions) {
+        await this.deletePartitionReferences(objectData);
+      } else if (this.config.asyncPartitions) {
+        setImmediate(() => {
+          this.deletePartitionReferences(objectData).catch((err3) => {
+            this.emit("partitionIndexError", {
+              operation: "delete",
+              id,
+              error: err3,
+              message: err3.message
+            });
+          });
+        });
+      } else {
+        const [ok3, err3] = await tryFn(() => this.deletePartitionReferences(objectData));
+        if (!ok3) {
           this.emit("partitionIndexError", {
             operation: "delete",
             id,
             error: err3,
             message: err3.message
           });
-        });
-      });
+        }
+      }
       const nonPartitionHooks = this.hooks.afterDelete.filter(
         (hook) => !hook.toString().includes("deletePartitionReferences")
       );
@@ -21405,7 +21467,10 @@ function validateResourceConfig(config) {
 class Database extends EventEmitter {
   constructor(options) {
     super();
-    this.id = idGenerator(7);
+    this.id = (() => {
+      const [ok, err, id] = tryFn(() => idGenerator(7));
+      return ok && id ? id : `db-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    })();
     this.version = "1";
     this.s3dbVersion = (() => {
       const [ok, err, version] = tryFn(() => true ? "12.4.0" : "latest");
@@ -21442,6 +21507,7 @@ class Database extends EventEmitter {
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false;
     this.strictValidation = options.strictValidation !== false;
+    this.strictHooks = options.strictHooks || false;
     this._initHooks();
     let connectionString = options.connectionString;
     if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
@@ -21472,18 +21538,25 @@ class Database extends EventEmitter {
     this.connectionString = connectionString;
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
-    if (!this._exitListenerRegistered) {
+    this._registerExitListener();
+  }
+  /**
+   * Register process exit listener for automatic cleanup
+   * @private
+   */
+  _registerExitListener() {
+    if (!this._exitListenerRegistered && typeof process !== "undefined") {
       this._exitListenerRegistered = true;
-      if (typeof process !== "undefined") {
-        process.on("exit", async () => {
-          if (this.isConnected()) {
-            await tryFn(() => this.disconnect());
-          }
-        });
-      }
+      this._exitListener = async () => {
+        if (this.isConnected()) {
+          await tryFn(() => this.disconnect());
+        }
+      };
+      process.on("exit", this._exitListener);
     }
   }
   async connect() {
+    this._registerExitListener();
     await this.startPlugins();
     let metadata = null;
     let needsHealing = false;
@@ -22446,11 +22519,16 @@ class Database extends EventEmitter {
       if (this.client && typeof this.client.removeAllListeners === "function") {
         this.client.removeAllListeners();
       }
+      await this.emit("disconnected", /* @__PURE__ */ new Date());
       this.removeAllListeners();
+      if (this._exitListener && typeof process !== "undefined") {
+        process.off("exit", this._exitListener);
+        this._exitListener = null;
+        this._exitListenerRegistered = false;
+      }
       this.savedMetadata = null;
       this.plugins = {};
       this.pluginList = [];
-      this.emit("disconnected", /* @__PURE__ */ new Date());
     });
   }
   /**
@@ -22554,6 +22632,13 @@ class Database extends EventEmitter {
       const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
       if (!ok) {
         this.emit("hookError", { event, error, context });
+        if (this.strictHooks) {
+          throw new DatabaseError(`Hook execution failed for event '${event}': ${error.message}`, {
+            event,
+            originalError: error,
+            context
+          });
+        }
       }
     }
   }
@@ -38881,30 +38966,42 @@ class MemoryClient extends EventEmitter {
     const resourceStats = {};
     for (const [resourceName, keys] of resourceMap.entries()) {
       const records = [];
+      const resource = database && database.resources && database.resources[resourceName];
       for (const key of keys) {
-        const obj = await this.getObject(key);
         const idMatch = key.match(/\/id=([^/]+)/);
         const recordId = idMatch ? idMatch[1] : null;
-        const record = { ...obj.Metadata };
-        if (recordId && !record.id) {
-          record.id = recordId;
-        }
-        if (obj.Body) {
-          const chunks = [];
-          for await (const chunk2 of obj.Body) {
-            chunks.push(chunk2);
+        let record;
+        if (resource && recordId) {
+          try {
+            record = await resource.get(recordId);
+          } catch (err) {
+            console.warn(`Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
+            record = null;
           }
-          const bodyBuffer = Buffer.concat(chunks);
-          const bodyStr = bodyBuffer.toString("utf-8");
-          if (bodyStr.startsWith("{") || bodyStr.startsWith("[")) {
-            try {
-              const bodyData = JSON.parse(bodyStr);
-              Object.assign(record, bodyData);
-            } catch {
+        }
+        if (!record) {
+          const obj = await this.getObject(key);
+          record = { ...obj.Metadata };
+          if (recordId && !record.id) {
+            record.id = recordId;
+          }
+          if (obj.Body) {
+            const chunks = [];
+            for await (const chunk2 of obj.Body) {
+              chunks.push(chunk2);
+            }
+            const bodyBuffer = Buffer.concat(chunks);
+            const bodyStr = bodyBuffer.toString("utf-8");
+            if (bodyStr.startsWith("{") || bodyStr.startsWith("[")) {
+              try {
+                const bodyData = JSON.parse(bodyStr);
+                Object.assign(record, bodyData);
+              } catch {
+                record._body = bodyStr;
+              }
+            } else if (bodyStr) {
               record._body = bodyStr;
             }
-          } else if (bodyStr) {
-            record._body = bodyStr;
           }
         }
         records.push(record);
