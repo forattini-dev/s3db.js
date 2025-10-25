@@ -2680,6 +2680,2037 @@ async function requirePluginDependency(pluginId, options = {}) {
   return { valid, missing, incompatible, messages };
 }
 
+function success(data, options = {}) {
+  const { status = 200, meta = {} } = options;
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      ...meta
+    },
+    _status: status
+  };
+}
+function error(error2, options = {}) {
+  const { status = 500, code = "INTERNAL_ERROR", details = {} } = options;
+  const errorMessage = error2 instanceof Error ? error2.message : error2;
+  const errorStack = error2 instanceof Error && process.env.NODE_ENV !== "production" ? error2.stack : void 0;
+  return {
+    success: false,
+    error: {
+      message: errorMessage,
+      code,
+      details,
+      stack: errorStack
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: status
+  };
+}
+function list(items, pagination = {}) {
+  const { total, page, pageSize, pageCount } = pagination;
+  return {
+    success: true,
+    data: items,
+    pagination: {
+      total: total || items.length,
+      page: page || 1,
+      pageSize: pageSize || items.length,
+      pageCount: pageCount || 1
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: 200
+  };
+}
+function created(data, location) {
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      location
+    },
+    _status: 201
+  };
+}
+function noContent() {
+  return {
+    success: true,
+    data: null,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: 204
+  };
+}
+function notFound(resource, id) {
+  return error(`${resource} with id '${id}' not found`, {
+    status: 404,
+    code: "NOT_FOUND",
+    details: { resource, id }
+  });
+}
+function payloadTooLarge(size, limit) {
+  return error("Request payload too large", {
+    status: 413,
+    code: "PAYLOAD_TOO_LARGE",
+    details: {
+      receivedSize: size,
+      maxSize: limit,
+      receivedMB: (size / 1024 / 1024).toFixed(2),
+      maxMB: (limit / 1024 / 1024).toFixed(2)
+    }
+  });
+}
+
+const errorStatusMap = {
+  "ValidationError": 400,
+  "InvalidResourceItem": 400,
+  "ResourceNotFound": 404,
+  "NoSuchKey": 404,
+  "NoSuchBucket": 404,
+  "PartitionError": 400,
+  "CryptoError": 500,
+  "SchemaError": 400,
+  "QueueError": 500,
+  "ResourceError": 500
+};
+function getStatusFromError(err) {
+  if (err.name && errorStatusMap[err.name]) {
+    return errorStatusMap[err.name];
+  }
+  if (err.constructor && err.constructor.name && errorStatusMap[err.constructor.name]) {
+    return errorStatusMap[err.constructor.name];
+  }
+  if (err.message) {
+    if (err.message.includes("not found") || err.message.includes("does not exist")) {
+      return 404;
+    }
+    if (err.message.includes("validation") || err.message.includes("invalid")) {
+      return 400;
+    }
+    if (err.message.includes("unauthorized") || err.message.includes("authentication")) {
+      return 401;
+    }
+    if (err.message.includes("forbidden") || err.message.includes("permission")) {
+      return 403;
+    }
+  }
+  return 500;
+}
+function errorHandler(err, c) {
+  const status = getStatusFromError(err);
+  const code = err.name || "INTERNAL_ERROR";
+  const details = {};
+  if (err.resource) details.resource = err.resource;
+  if (err.bucket) details.bucket = err.bucket;
+  if (err.key) details.key = err.key;
+  if (err.operation) details.operation = err.operation;
+  if (err.suggestion) details.suggestion = err.suggestion;
+  if (err.availableResources) details.availableResources = err.availableResources;
+  const response = error(err, {
+    status,
+    code,
+    details
+  });
+  if (status >= 500) {
+    console.error("[API Plugin] Error:", {
+      message: err.message,
+      code,
+      status,
+      stack: err.stack,
+      details
+    });
+  } else if (status >= 400 && status < 500 && c.get("verbose")) {
+    console.warn("[API Plugin] Client error:", {
+      message: err.message,
+      code,
+      status,
+      details
+    });
+  }
+  return c.json(response, response._status);
+}
+function asyncHandler(fn) {
+  return async (c) => {
+    try {
+      return await fn(c);
+    } catch (err) {
+      return errorHandler(err, c);
+    }
+  };
+}
+
+function parseCustomRoute(routeDef) {
+  let def = routeDef.trim();
+  const isAsync = def.startsWith("async ");
+  if (isAsync) {
+    def = def.substring(6).trim();
+  }
+  const parts = def.split(/\s+/);
+  if (parts.length < 2) {
+    throw new Error(`Invalid route definition: "${routeDef}". Expected format: "METHOD /path" or "async METHOD /path"`);
+  }
+  const method = parts[0].toUpperCase();
+  const path = parts.slice(1).join(" ").trim();
+  const validMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+  if (!validMethods.includes(method)) {
+    throw new Error(`Invalid HTTP method: "${method}". Must be one of: ${validMethods.join(", ")}`);
+  }
+  if (!path.startsWith("/")) {
+    throw new Error(`Invalid route path: "${path}". Path must start with "/"`);
+  }
+  return { method, path, isAsync };
+}
+function createResourceRoutes(resource, version, config = {}, Hono) {
+  const app = new Hono();
+  const {
+    methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    customMiddleware = [],
+    enableValidation = true
+  } = config;
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}`;
+  customMiddleware.forEach((middleware) => {
+    app.use("*", middleware);
+  });
+  if (resource.config?.api && typeof resource.config.api === "object") {
+    for (const [routeDef, handler] of Object.entries(resource.config.api)) {
+      try {
+        const { method, path } = parseCustomRoute(routeDef);
+        if (typeof handler !== "function") {
+          throw new Error(`Handler for route "${routeDef}" must be a function`);
+        }
+        app.on(method, path, asyncHandler(async (c) => {
+          const result = await handler(c, { resource, database: resource.database });
+          if (result && result.constructor && result.constructor.name === "Response") {
+            return result;
+          }
+          if (result !== void 0 && result !== null) {
+            return c.json(success(result));
+          }
+          return c.json(noContent(), 204);
+        }));
+        if (config.verbose || resource.database?.verbose) {
+          console.log(`[API Plugin] Registered custom route for ${resourceName}: ${method} ${path}`);
+        }
+      } catch (error) {
+        console.error(`[API Plugin] Error registering custom route "${routeDef}" for ${resourceName}:`, error.message);
+        throw error;
+      }
+    }
+  }
+  if (methods.includes("GET")) {
+    app.get("/", asyncHandler(async (c) => {
+      const query = c.req.query();
+      const limit = parseInt(query.limit) || 100;
+      const offset = parseInt(query.offset) || 0;
+      const partition = query.partition;
+      const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
+      const reservedKeys = ["limit", "offset", "partition", "partitionValues", "sort"];
+      const filters = {};
+      for (const [key, value] of Object.entries(query)) {
+        if (!reservedKeys.includes(key)) {
+          try {
+            filters[key] = JSON.parse(value);
+          } catch {
+            filters[key] = value;
+          }
+        }
+      }
+      let items;
+      let total;
+      if (Object.keys(filters).length > 0) {
+        items = await resource.query(filters, { limit: limit + offset });
+        items = items.slice(offset, offset + limit);
+        total = items.length;
+      } else if (partition && partitionValues) {
+        items = await resource.listPartition({
+          partition,
+          partitionValues,
+          limit: limit + offset
+        });
+        items = items.slice(offset, offset + limit);
+        total = items.length;
+      } else {
+        items = await resource.list({ limit: limit + offset });
+        items = items.slice(offset, offset + limit);
+        total = items.length;
+      }
+      const response = list(items, {
+        total,
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit,
+        pageCount: Math.ceil(total / limit)
+      });
+      c.header("X-Total-Count", total.toString());
+      c.header("X-Page-Count", Math.ceil(total / limit).toString());
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("GET")) {
+    app.get("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const query = c.req.query();
+      const partition = query.partition;
+      const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
+      let item;
+      if (partition && partitionValues) {
+        item = await resource.getFromPartition({
+          id,
+          partitionName: partition,
+          partitionValues
+        });
+      } else {
+        item = await resource.get(id);
+      }
+      if (!item) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      const response = success(item);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("POST")) {
+    app.post("/", asyncHandler(async (c) => {
+      const data = await c.req.json();
+      const item = await resource.insert(data);
+      const location = `${basePath}/${item.id}`;
+      const response = created(item, location);
+      c.header("Location", location);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("PUT")) {
+    app.put("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const data = await c.req.json();
+      const existing = await resource.get(id);
+      if (!existing) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      const updated = await resource.update(id, data);
+      const response = success(updated);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("PATCH")) {
+    app.patch("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const data = await c.req.json();
+      const existing = await resource.get(id);
+      if (!existing) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      const merged = { ...existing, ...data, id };
+      const updated = await resource.update(id, merged);
+      const response = success(updated);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("DELETE")) {
+    app.delete("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const existing = await resource.get(id);
+      if (!existing) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      await resource.delete(id);
+      const response = noContent();
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("HEAD")) {
+    app.on("HEAD", "/", asyncHandler(async (c) => {
+      const total = await resource.count();
+      const allItems = await resource.list({ limit: 1e3 });
+      const stats = {
+        total,
+        version: resource.config?.currentVersion || resource.version || "v1"
+      };
+      c.header("X-Total-Count", total.toString());
+      c.header("X-Resource-Version", stats.version);
+      c.header("X-Schema-Fields", Object.keys(resource.config?.attributes || {}).length.toString());
+      return c.body(null, 200);
+    }));
+    app.on("HEAD", "/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const item = await resource.get(id);
+      if (!item) {
+        return c.body(null, 404);
+      }
+      if (item.updatedAt) {
+        c.header("Last-Modified", new Date(item.updatedAt).toUTCString());
+      }
+      return c.body(null, 200);
+    }));
+  }
+  if (methods.includes("OPTIONS")) {
+    app.options("/", asyncHandler(async (c) => {
+      c.header("Allow", methods.join(", "));
+      const total = await resource.count();
+      const schema = resource.config?.attributes || {};
+      const version2 = resource.config?.currentVersion || resource.version || "v1";
+      const metadata = {
+        resource: resourceName,
+        version: version2,
+        totalRecords: total,
+        allowedMethods: methods,
+        schema: Object.entries(schema).map(([name, def]) => ({
+          name,
+          type: typeof def === "string" ? def.split("|")[0] : def.type,
+          rules: typeof def === "string" ? def.split("|").slice(1) : []
+        })),
+        endpoints: {
+          list: `/${version2}/${resourceName}`,
+          get: `/${version2}/${resourceName}/:id`,
+          create: `/${version2}/${resourceName}`,
+          update: `/${version2}/${resourceName}/:id`,
+          delete: `/${version2}/${resourceName}/:id`
+        },
+        queryParameters: {
+          limit: "number (1-1000, default: 100)",
+          offset: "number (min: 0, default: 0)",
+          partition: "string (partition name)",
+          partitionValues: "JSON string",
+          "[any field]": "any (filter by field value)"
+        }
+      };
+      return c.json(metadata);
+    }));
+    app.options("/:id", (c) => {
+      c.header("Allow", methods.filter((m) => m !== "POST").join(", "));
+      return c.body(null, 204);
+    });
+  }
+  return app;
+}
+function createRelationalRoutes(sourceResource, relationName, relationConfig, version, Hono) {
+  const app = new Hono();
+  const resourceName = sourceResource.name;
+  const relatedResourceName = relationConfig.resource;
+  app.get("/:id", asyncHandler(async (c) => {
+    const id = c.req.param("id");
+    const query = c.req.query();
+    const source = await sourceResource.get(id);
+    if (!source) {
+      const response = notFound(resourceName, id);
+      return c.json(response, response._status);
+    }
+    const result = await sourceResource.get(id, {
+      include: [relationName]
+    });
+    const relatedData = result[relationName];
+    if (!relatedData) {
+      if (relationConfig.type === "hasMany" || relationConfig.type === "belongsToMany") {
+        const response = list([], {
+          total: 0,
+          page: 1,
+          pageSize: 100,
+          pageCount: 0
+        });
+        return c.json(response, response._status);
+      } else {
+        const response = notFound(relatedResourceName, "related resource");
+        return c.json(response, response._status);
+      }
+    }
+    if (relationConfig.type === "hasMany" || relationConfig.type === "belongsToMany") {
+      const items = Array.isArray(relatedData) ? relatedData : [relatedData];
+      const limit = parseInt(query.limit) || 100;
+      const offset = parseInt(query.offset) || 0;
+      const paginatedItems = items.slice(offset, offset + limit);
+      const response = list(paginatedItems, {
+        total: items.length,
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit,
+        pageCount: Math.ceil(items.length / limit)
+      });
+      c.header("X-Total-Count", items.length.toString());
+      c.header("X-Page-Count", Math.ceil(items.length / limit).toString());
+      return c.json(response, response._status);
+    } else {
+      const response = success(relatedData);
+      return c.json(response, response._status);
+    }
+  }));
+  return app;
+}
+
+function mapFieldTypeToOpenAPI(fieldType) {
+  const type = fieldType.split("|")[0].trim();
+  const typeMap = {
+    "string": { type: "string" },
+    "number": { type: "number" },
+    "integer": { type: "integer" },
+    "boolean": { type: "boolean" },
+    "array": { type: "array", items: { type: "string" } },
+    "object": { type: "object" },
+    "json": { type: "object" },
+    "secret": { type: "string", format: "password" },
+    "email": { type: "string", format: "email" },
+    "url": { type: "string", format: "uri" },
+    "date": { type: "string", format: "date" },
+    "datetime": { type: "string", format: "date-time" },
+    "ip4": { type: "string", format: "ipv4", description: "IPv4 address" },
+    "ip6": { type: "string", format: "ipv6", description: "IPv6 address" },
+    "embedding": { type: "array", items: { type: "number" }, description: "Vector embedding" }
+  };
+  if (type.startsWith("embedding:")) {
+    const length = parseInt(type.split(":")[1]);
+    return {
+      type: "array",
+      items: { type: "number" },
+      minItems: length,
+      maxItems: length,
+      description: `Vector embedding (${length} dimensions)`
+    };
+  }
+  return typeMap[type] || { type: "string" };
+}
+function extractValidationRules(fieldDef) {
+  const rules = {};
+  const parts = fieldDef.split("|");
+  for (const part of parts) {
+    const [rule, value] = part.split(":").map((s) => s.trim());
+    switch (rule) {
+      case "required":
+        rules.required = true;
+        break;
+      case "min":
+        rules.minimum = parseFloat(value);
+        break;
+      case "max":
+        rules.maximum = parseFloat(value);
+        break;
+      case "minlength":
+        rules.minLength = parseInt(value);
+        break;
+      case "maxlength":
+        rules.maxLength = parseInt(value);
+        break;
+      case "pattern":
+        rules.pattern = value;
+        break;
+      case "enum":
+        rules.enum = value.split(",").map((v) => v.trim());
+        break;
+      case "default":
+        rules.default = value;
+        break;
+    }
+  }
+  return rules;
+}
+function generateResourceSchema(resource) {
+  const properties = {};
+  const required = [];
+  const allAttributes = resource.config?.attributes || resource.attributes || {};
+  const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+  const attributes = Object.fromEntries(
+    Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+  );
+  const resourceDescription = resource.config?.description;
+  const attributeDescriptions = typeof resourceDescription === "object" ? resourceDescription.attributes || {} : {};
+  properties.id = {
+    type: "string",
+    description: "Unique identifier for the resource",
+    example: "2_gDTpeU6EI0e8B92n_R3Y",
+    readOnly: true
+  };
+  for (const [fieldName, fieldDef] of Object.entries(attributes)) {
+    if (typeof fieldDef === "object" && fieldDef.type) {
+      const baseType = mapFieldTypeToOpenAPI(fieldDef.type);
+      properties[fieldName] = {
+        ...baseType,
+        description: fieldDef.description || attributeDescriptions[fieldName] || void 0
+      };
+      if (fieldDef.required) {
+        required.push(fieldName);
+      }
+      if (fieldDef.type === "object" && fieldDef.props) {
+        properties[fieldName].properties = {};
+        for (const [propName, propDef] of Object.entries(fieldDef.props)) {
+          const propType = typeof propDef === "string" ? propDef : propDef.type;
+          properties[fieldName].properties[propName] = mapFieldTypeToOpenAPI(propType);
+        }
+      }
+      if (fieldDef.type === "array" && fieldDef.items) {
+        properties[fieldName].items = mapFieldTypeToOpenAPI(fieldDef.items);
+      }
+    } else if (typeof fieldDef === "string") {
+      const baseType = mapFieldTypeToOpenAPI(fieldDef);
+      const rules = extractValidationRules(fieldDef);
+      properties[fieldName] = {
+        ...baseType,
+        ...rules,
+        description: attributeDescriptions[fieldName] || void 0
+      };
+      if (rules.required) {
+        required.push(fieldName);
+        delete properties[fieldName].required;
+      }
+    }
+  }
+  return {
+    type: "object",
+    properties,
+    required: required.length > 0 ? required : void 0
+  };
+}
+function generateResourcePaths(resource, version, config = {}) {
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}`;
+  const schema = generateResourceSchema(resource);
+  const methods = config.methods || ["GET", "POST", "PUT", "PATCH", "DELETE"];
+  const authMethods = config.auth || [];
+  const requiresAuth = authMethods && authMethods.length > 0;
+  const paths = {};
+  const security = [];
+  if (requiresAuth) {
+    if (authMethods.includes("jwt")) security.push({ bearerAuth: [] });
+    if (authMethods.includes("apiKey")) security.push({ apiKeyAuth: [] });
+    if (authMethods.includes("basic")) security.push({ basicAuth: [] });
+  }
+  const partitions = resource.config?.options?.partitions || resource.config?.partitions || resource.partitions || {};
+  const partitionNames = Object.keys(partitions);
+  const hasPartitions = partitionNames.length > 0;
+  let partitionDescription = "Partition name for filtering";
+  let partitionValuesDescription = "Partition values as JSON string";
+  let partitionExample = void 0;
+  let partitionValuesExample = void 0;
+  if (hasPartitions) {
+    const partitionDocs = partitionNames.map((name) => {
+      const partition = partitions[name];
+      const fields = Object.keys(partition.fields || {});
+      const fieldTypes = Object.entries(partition.fields || {}).map(([field, type]) => `${field}: ${type}`).join(", ");
+      return `- **${name}**: Filters by ${fields.join(", ")} (${fieldTypes})`;
+    }).join("\n");
+    partitionDescription = `Available partitions:
+${partitionDocs}`;
+    const examplePartition = partitionNames[0];
+    const exampleFields = partitions[examplePartition]?.fields || {};
+    Object.entries(exampleFields).map(([field, type]) => `"${field}": <${type} value>`).join(", ");
+    partitionValuesDescription = `Partition field values as JSON string. Must match the structure of the selected partition.
+
+Example for "${examplePartition}" partition: \`{"${Object.keys(exampleFields)[0]}": "value"}\``;
+    partitionExample = examplePartition;
+    const firstField = Object.keys(exampleFields)[0];
+    const firstFieldType = exampleFields[firstField];
+    let exampleValue = "example";
+    if (firstFieldType === "number" || firstFieldType === "integer") {
+      exampleValue = 123;
+    } else if (firstFieldType === "boolean") {
+      exampleValue = true;
+    }
+    partitionValuesExample = JSON.stringify({ [firstField]: exampleValue });
+  }
+  const attributeQueryParams = [];
+  if (hasPartitions) {
+    const partitionFieldsSet = /* @__PURE__ */ new Set();
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const fields = partition.fields || {};
+      for (const fieldName of Object.keys(fields)) {
+        partitionFieldsSet.add(fieldName);
+      }
+    }
+    const allAttributes = resource.config?.attributes || resource.attributes || {};
+    const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+    const attributes = Object.fromEntries(
+      Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+    );
+    for (const fieldName of partitionFieldsSet) {
+      const fieldDef = attributes[fieldName];
+      if (!fieldDef) continue;
+      let fieldType;
+      if (typeof fieldDef === "object" && fieldDef.type) {
+        fieldType = fieldDef.type;
+      } else if (typeof fieldDef === "string") {
+        fieldType = fieldDef.split("|")[0].trim();
+      } else {
+        fieldType = "string";
+      }
+      const openAPIType = mapFieldTypeToOpenAPI(fieldType);
+      attributeQueryParams.push({
+        name: fieldName,
+        in: "query",
+        description: `Filter by ${fieldName} field (indexed via partitions for efficient querying). Value will be parsed as JSON if possible, otherwise treated as string.`,
+        required: false,
+        schema: openAPIType
+      });
+    }
+  }
+  if (methods.includes("GET")) {
+    paths[basePath] = {
+      get: {
+        tags: [resourceName],
+        summary: `List ${resourceName}`,
+        description: `Retrieve a paginated list of ${resourceName}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.
+
+**Pagination**: Use \`limit\` and \`offset\` to paginate results. For example:
+- First page (10 items): \`?limit=10&offset=0\`
+- Second page: \`?limit=10&offset=10\`
+- Third page: \`?limit=10&offset=20\`
+
+The response includes pagination metadata in the \`pagination\` object with total count and page information.${hasPartitions ? "\n\n**Partitioning**: This resource supports partitioned queries for optimized filtering. Use the `partition` and `partitionValues` parameters together." : ""}`,
+        parameters: [
+          {
+            name: "limit",
+            in: "query",
+            description: "Maximum number of items to return per page (page size)",
+            schema: { type: "integer", default: 100, minimum: 1, maximum: 1e3 },
+            example: 10
+          },
+          {
+            name: "offset",
+            in: "query",
+            description: "Number of items to skip before starting to return results. Use for pagination: offset = (page - 1) * limit",
+            schema: { type: "integer", default: 0, minimum: 0 },
+            example: 0
+          },
+          ...hasPartitions ? [
+            {
+              name: "partition",
+              in: "query",
+              description: partitionDescription,
+              schema: {
+                type: "string",
+                enum: partitionNames
+              },
+              example: partitionExample
+            },
+            {
+              name: "partitionValues",
+              in: "query",
+              description: partitionValuesDescription,
+              schema: { type: "string" },
+              example: partitionValuesExample
+            }
+          ] : [],
+          ...attributeQueryParams
+        ],
+        responses: {
+          200: {
+            description: "Successful response",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "array",
+                      items: schema
+                    },
+                    pagination: {
+                      type: "object",
+                      description: "Pagination metadata for the current request",
+                      properties: {
+                        total: {
+                          type: "integer",
+                          description: "Total number of items available",
+                          example: 150
+                        },
+                        page: {
+                          type: "integer",
+                          description: "Current page number (1-indexed)",
+                          example: 1
+                        },
+                        pageSize: {
+                          type: "integer",
+                          description: "Number of items per page (same as limit parameter)",
+                          example: 10
+                        },
+                        pageCount: {
+                          type: "integer",
+                          description: "Total number of pages available",
+                          example: 15
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            headers: {
+              "X-Total-Count": {
+                description: "Total number of records",
+                schema: { type: "integer" }
+              },
+              "X-Page-Count": {
+                description: "Total number of pages",
+                schema: { type: "integer" }
+              }
+            }
+          }
+        },
+        security: security.length > 0 ? security : void 0
+      }
+    };
+  }
+  if (methods.includes("GET")) {
+    paths[`${basePath}/{id}`] = {
+      get: {
+        tags: [resourceName],
+        summary: `Get ${resourceName} by ID`,
+        description: `Retrieve a single ${resourceName} by its ID${hasPartitions ? ". Optionally specify a partition for more efficient retrieval." : ""}`,
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            description: `${resourceName} ID`,
+            schema: { type: "string" }
+          },
+          ...hasPartitions ? [
+            {
+              name: "partition",
+              in: "query",
+              description: partitionDescription,
+              schema: {
+                type: "string",
+                enum: partitionNames
+              },
+              example: partitionExample
+            },
+            {
+              name: "partitionValues",
+              in: "query",
+              description: partitionValuesDescription,
+              schema: { type: "string" },
+              example: partitionValuesExample
+            }
+          ] : []
+        ],
+        responses: {
+          200: {
+            description: "Successful response",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: schema
+                  }
+                }
+              }
+            }
+          },
+          404: {
+            description: "Resource not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" }
+              }
+            }
+          }
+        },
+        security: security.length > 0 ? security : void 0
+      }
+    };
+  }
+  if (methods.includes("POST")) {
+    if (!paths[basePath]) paths[basePath] = {};
+    paths[basePath].post = {
+      tags: [resourceName],
+      summary: `Create ${resourceName}`,
+      description: `Create a new ${resourceName}`,
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema
+          }
+        }
+      },
+      responses: {
+        201: {
+          description: "Resource created successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: schema
+                }
+              }
+            }
+          },
+          headers: {
+            Location: {
+              description: "URL of the created resource",
+              schema: { type: "string" }
+            }
+          }
+        },
+        400: {
+          description: "Validation error",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ValidationError" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("PUT")) {
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].put = {
+      tags: [resourceName],
+      summary: `Update ${resourceName} (full)`,
+      description: `Fully update a ${resourceName}`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: "Resource updated successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: schema
+                }
+              }
+            }
+          }
+        },
+        404: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("PATCH")) {
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].patch = {
+      tags: [resourceName],
+      summary: `Update ${resourceName} (partial)`,
+      description: `Partially update a ${resourceName}`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              ...schema,
+              required: void 0
+              // Partial updates don't require all fields
+            }
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: "Resource updated successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: schema
+                }
+              }
+            }
+          }
+        },
+        404: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("DELETE")) {
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].delete = {
+      tags: [resourceName],
+      summary: `Delete ${resourceName}`,
+      description: `Delete a ${resourceName} by ID`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      responses: {
+        204: {
+          description: "Resource deleted successfully"
+        },
+        404: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("HEAD")) {
+    if (!paths[basePath]) paths[basePath] = {};
+    paths[basePath].head = {
+      tags: [resourceName],
+      summary: `Get ${resourceName} statistics`,
+      description: `Get statistics about ${resourceName} collection without retrieving data. Returns statistics in response headers.`,
+      responses: {
+        200: {
+          description: "Statistics retrieved successfully",
+          headers: {
+            "X-Total-Count": {
+              description: "Total number of records",
+              schema: { type: "integer" }
+            },
+            "X-Resource-Version": {
+              description: "Current resource version",
+              schema: { type: "string" }
+            },
+            "X-Schema-Fields": {
+              description: "Number of schema fields",
+              schema: { type: "integer" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].head = {
+      tags: [resourceName],
+      summary: `Check if ${resourceName} exists`,
+      description: `Check if a ${resourceName} exists without retrieving its data`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      responses: {
+        200: {
+          description: "Resource exists",
+          headers: {
+            "Last-Modified": {
+              description: "Last modification date",
+              schema: { type: "string", format: "date-time" }
+            }
+          }
+        },
+        404: {
+          description: "Resource not found"
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("OPTIONS")) {
+    if (!paths[basePath]) paths[basePath] = {};
+    paths[basePath].options = {
+      tags: [resourceName],
+      summary: `Get ${resourceName} metadata`,
+      description: `Get complete metadata about ${resourceName} resource including schema, allowed methods, endpoints, and query parameters`,
+      responses: {
+        200: {
+          description: "Metadata retrieved successfully",
+          headers: {
+            "Allow": {
+              description: "Allowed HTTP methods",
+              schema: { type: "string", example: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS" }
+            }
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  resource: { type: "string" },
+                  version: { type: "string" },
+                  totalRecords: { type: "integer" },
+                  allowedMethods: {
+                    type: "array",
+                    items: { type: "string" }
+                  },
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        type: { type: "string" },
+                        rules: { type: "array", items: { type: "string" } }
+                      }
+                    }
+                  },
+                  endpoints: {
+                    type: "object",
+                    properties: {
+                      list: { type: "string" },
+                      get: { type: "string" },
+                      create: { type: "string" },
+                      update: { type: "string" },
+                      delete: { type: "string" }
+                    }
+                  },
+                  queryParameters: { type: "object" }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].options = {
+      tags: [resourceName],
+      summary: `Get allowed methods for ${resourceName} item`,
+      description: `Get allowed HTTP methods for individual ${resourceName} operations`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      responses: {
+        204: {
+          description: "Methods retrieved successfully",
+          headers: {
+            "Allow": {
+              description: "Allowed HTTP methods",
+              schema: { type: "string", example: "GET, PUT, PATCH, DELETE, HEAD, OPTIONS" }
+            }
+          }
+        }
+      }
+    };
+  }
+  return paths;
+}
+function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema) {
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}/{id}/${relationName}`;
+  relationConfig.resource;
+  const isToMany = relationConfig.type === "hasMany" || relationConfig.type === "belongsToMany";
+  const paths = {};
+  paths[basePath] = {
+    get: {
+      tags: [resourceName],
+      summary: `Get ${relationName} of ${resourceName}`,
+      description: `Retrieve ${relationName} (${relationConfig.type}) associated with this ${resourceName}. This endpoint uses the RelationPlugin to efficiently load related data` + (relationConfig.partitionHint ? ` via the '${relationConfig.partitionHint}' partition.` : "."),
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: `${resourceName} ID`,
+          schema: { type: "string" }
+        },
+        ...isToMany ? [
+          {
+            name: "limit",
+            in: "query",
+            description: "Maximum number of items to return",
+            schema: { type: "integer", default: 100, minimum: 1, maximum: 1e3 }
+          },
+          {
+            name: "offset",
+            in: "query",
+            description: "Number of items to skip",
+            schema: { type: "integer", default: 0, minimum: 0 }
+          }
+        ] : []
+      ],
+      responses: {
+        200: {
+          description: "Successful response",
+          content: {
+            "application/json": {
+              schema: isToMany ? {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "array",
+                    items: relatedSchema
+                  },
+                  pagination: {
+                    type: "object",
+                    properties: {
+                      total: { type: "integer" },
+                      page: { type: "integer" },
+                      pageSize: { type: "integer" },
+                      pageCount: { type: "integer" }
+                    }
+                  }
+                }
+              } : {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: relatedSchema
+                }
+              }
+            }
+          },
+          ...isToMany ? {
+            headers: {
+              "X-Total-Count": {
+                description: "Total number of related records",
+                schema: { type: "integer" }
+              },
+              "X-Page-Count": {
+                description: "Total number of pages",
+                schema: { type: "integer" }
+              }
+            }
+          } : {}
+        },
+        404: {
+          description: `${resourceName} not found` + (isToMany ? "" : " or no related resource exists"),
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      }
+    }
+  };
+  return paths;
+}
+function generateOpenAPISpec(database, config = {}) {
+  const {
+    title = "s3db.js API",
+    version = "1.0.0",
+    description = "Auto-generated REST API documentation for s3db.js resources",
+    serverUrl = "http://localhost:3000",
+    auth = {},
+    resources: resourceConfigs = {}
+  } = config;
+  const resourcesTableRows = [];
+  for (const [name, resource] of Object.entries(database.resources)) {
+    if (name.startsWith("plg_") && !resourceConfigs[name]) {
+      continue;
+    }
+    const version2 = resource.config?.currentVersion || resource.version || "v1";
+    const resourceDescription = resource.config?.description;
+    const descText = typeof resourceDescription === "object" ? resourceDescription.resource : resourceDescription || "No description";
+    resourcesTableRows.push(`| ${name} | ${descText} | \`/${version2}/${name}\` |`);
+  }
+  const enhancedDescription = `${description}
+
+## Available Resources
+
+| Resource | Description | Base Path |
+|----------|-------------|-----------|
+${resourcesTableRows.join("\n")}
+
+---
+
+For detailed information about each endpoint, see the sections below.`;
+  const spec = {
+    openapi: "3.1.0",
+    info: {
+      title,
+      version,
+      description: enhancedDescription,
+      contact: {
+        name: "s3db.js",
+        url: "https://github.com/forattini-dev/s3db.js"
+      }
+    },
+    servers: [
+      {
+        url: serverUrl,
+        description: "API Server"
+      }
+    ],
+    paths: {},
+    components: {
+      schemas: {
+        Error: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: false },
+            error: {
+              type: "object",
+              properties: {
+                message: { type: "string" },
+                code: { type: "string" },
+                details: { type: "object" }
+              }
+            }
+          }
+        },
+        ValidationError: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: false },
+            error: {
+              type: "object",
+              properties: {
+                message: { type: "string", example: "Validation failed" },
+                code: { type: "string", example: "VALIDATION_ERROR" },
+                details: {
+                  type: "object",
+                  properties: {
+                    errors: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          field: { type: "string" },
+                          message: { type: "string" },
+                          expected: { type: "string" },
+                          actual: {}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      securitySchemes: {}
+    },
+    tags: []
+  };
+  if (auth.jwt?.enabled) {
+    spec.components.securitySchemes.bearerAuth = {
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+      description: "JWT authentication"
+    };
+  }
+  if (auth.apiKey?.enabled) {
+    spec.components.securitySchemes.apiKeyAuth = {
+      type: "apiKey",
+      in: "header",
+      name: auth.apiKey.headerName || "X-API-Key",
+      description: "API Key authentication"
+    };
+  }
+  if (auth.basic?.enabled) {
+    spec.components.securitySchemes.basicAuth = {
+      type: "http",
+      scheme: "basic",
+      description: "HTTP Basic authentication"
+    };
+  }
+  const resources = database.resources;
+  const relationsPlugin = database.plugins?.relation || database.plugins?.RelationPlugin || null;
+  for (const [name, resource] of Object.entries(resources)) {
+    if (name.startsWith("plg_") && !resourceConfigs[name]) {
+      continue;
+    }
+    const config2 = resourceConfigs[name] || {
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      auth: false
+    };
+    const version2 = resource.config?.currentVersion || resource.version || "v1";
+    const paths = generateResourcePaths(resource, version2, config2);
+    Object.assign(spec.paths, paths);
+    const resourceDescription = resource.config?.description;
+    const tagDescription = typeof resourceDescription === "object" ? resourceDescription.resource : resourceDescription || `Operations for ${name} resource`;
+    spec.tags.push({
+      name,
+      description: tagDescription
+    });
+    spec.components.schemas[name] = generateResourceSchema(resource);
+    if (relationsPlugin && relationsPlugin.relations && relationsPlugin.relations[name]) {
+      const relationsDef = relationsPlugin.relations[name];
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        if (relationConfig.type === "belongsTo") {
+          continue;
+        }
+        const exposeRelation = config2?.relations?.[relationName]?.expose !== false;
+        if (!exposeRelation) {
+          continue;
+        }
+        const relatedResource = database.resources[relationConfig.resource];
+        if (!relatedResource) {
+          continue;
+        }
+        const relatedSchema = generateResourceSchema(relatedResource);
+        const relationalPaths = generateRelationalPaths(
+          resource,
+          relationName,
+          relationConfig,
+          version2,
+          relatedSchema
+        );
+        Object.assign(spec.paths, relationalPaths);
+      }
+    }
+  }
+  if (auth.jwt?.enabled || auth.apiKey?.enabled || auth.basic?.enabled) {
+    spec.paths["/auth/login"] = {
+      post: {
+        tags: ["Authentication"],
+        summary: "Login",
+        description: "Authenticate with username and password",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  username: { type: "string" },
+                  password: { type: "string", format: "password" }
+                },
+                required: ["username", "password"]
+              }
+            }
+          }
+        },
+        responses: {
+          200: {
+            description: "Login successful",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        token: { type: "string" },
+                        user: { type: "object" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          401: {
+            description: "Invalid credentials",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    };
+    spec.paths["/auth/register"] = {
+      post: {
+        tags: ["Authentication"],
+        summary: "Register",
+        description: "Register a new user",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  username: { type: "string", minLength: 3 },
+                  password: { type: "string", format: "password", minLength: 8 },
+                  email: { type: "string", format: "email" }
+                },
+                required: ["username", "password"]
+              }
+            }
+          }
+        },
+        responses: {
+          201: {
+            description: "User registered successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        token: { type: "string" },
+                        user: { type: "object" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    spec.tags.push({
+      name: "Authentication",
+      description: "Authentication endpoints"
+    });
+  }
+  spec.paths["/health"] = {
+    get: {
+      tags: ["Health"],
+      summary: "Generic Health Check",
+      description: "Generic health check endpoint that includes references to liveness and readiness probes",
+      responses: {
+        200: {
+          description: "API is healthy",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string", example: "ok" },
+                      uptime: { type: "number", description: "Process uptime in seconds" },
+                      timestamp: { type: "string", format: "date-time" },
+                      checks: {
+                        type: "object",
+                        properties: {
+                          liveness: { type: "string", example: "/health/live" },
+                          readiness: { type: "string", example: "/health/ready" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  spec.paths["/health/live"] = {
+    get: {
+      tags: ["Health"],
+      summary: "Liveness Probe",
+      description: "Kubernetes liveness probe - checks if the application is alive. If this fails, Kubernetes will restart the pod.",
+      responses: {
+        200: {
+          description: "Application is alive",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string", example: "alive" },
+                      timestamp: { type: "string", format: "date-time" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  spec.paths["/health/ready"] = {
+    get: {
+      tags: ["Health"],
+      summary: "Readiness Probe",
+      description: "Kubernetes readiness probe - checks if the application is ready to receive traffic. If this fails, Kubernetes will remove the pod from service endpoints.",
+      responses: {
+        200: {
+          description: "Application is ready to receive traffic",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string", example: "ready" },
+                      database: {
+                        type: "object",
+                        properties: {
+                          connected: { type: "boolean", example: true },
+                          resources: { type: "integer", example: 5 }
+                        }
+                      },
+                      timestamp: { type: "string", format: "date-time" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        503: {
+          description: "Application is not ready",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: false },
+                  error: {
+                    type: "object",
+                    properties: {
+                      message: { type: "string", example: "Service not ready" },
+                      code: { type: "string", example: "NOT_READY" },
+                      details: {
+                        type: "object",
+                        properties: {
+                          database: {
+                            type: "object",
+                            properties: {
+                              connected: { type: "boolean", example: false },
+                              resources: { type: "integer", example: 0 }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  spec.tags.push({
+    name: "Health",
+    description: "Health check endpoints for monitoring and Kubernetes probes"
+  });
+  const metricsPlugin = database.plugins?.metrics || database.plugins?.MetricsPlugin;
+  if (metricsPlugin && metricsPlugin.config?.prometheus?.enabled) {
+    const metricsPath = metricsPlugin.config.prometheus.path || "/metrics";
+    const isIntegrated = metricsPlugin.config.prometheus.mode !== "standalone";
+    if (isIntegrated) {
+      spec.paths[metricsPath] = {
+        get: {
+          tags: ["Monitoring"],
+          summary: "Prometheus Metrics",
+          description: "Exposes application metrics in Prometheus text-based exposition format for monitoring and observability. Metrics include operation counts, durations, errors, uptime, and resource statistics.",
+          responses: {
+            200: {
+              description: "Metrics in Prometheus format",
+              content: {
+                "text/plain": {
+                  schema: {
+                    type: "string",
+                    example: '# HELP s3db_operations_total Total number of operations by type and resource\n# TYPE s3db_operations_total counter\ns3db_operations_total{operation="insert",resource="cars"} 1523\ns3db_operations_total{operation="update",resource="cars"} 342\n\n# HELP s3db_operation_duration_seconds Average operation duration in seconds\n# TYPE s3db_operation_duration_seconds gauge\ns3db_operation_duration_seconds{operation="insert",resource="cars"} 0.045\n\n# HELP s3db_operation_errors_total Total number of operation errors\n# TYPE s3db_operation_errors_total counter\ns3db_operation_errors_total{operation="insert",resource="cars"} 12\n'
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      spec.tags.push({
+        name: "Monitoring",
+        description: "Monitoring and observability endpoints (Prometheus)"
+      });
+    }
+  }
+  return spec;
+}
+
+class ApiServer {
+  /**
+   * Create API server
+   * @param {Object} options - Server options
+   * @param {number} options.port - Server port
+   * @param {string} options.host - Server host
+   * @param {Object} options.database - s3db.js database instance
+   * @param {Object} options.resources - Resource configuration
+   * @param {Array} options.middlewares - Global middlewares
+   */
+  constructor(options = {}) {
+    this.options = {
+      port: options.port || 3e3,
+      host: options.host || "0.0.0.0",
+      database: options.database,
+      resources: options.resources || {},
+      middlewares: options.middlewares || [],
+      verbose: options.verbose || false,
+      auth: options.auth || {},
+      docsEnabled: options.docsEnabled !== false,
+      // Enable /docs by default
+      docsUI: options.docsUI || "redoc",
+      // 'swagger' or 'redoc'
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
+      // 10MB default
+      rootHandler: options.rootHandler,
+      // Custom handler for root path, if not provided redirects to /docs
+      apiInfo: {
+        title: options.apiTitle || "s3db.js API",
+        version: options.apiVersion || "1.0.0",
+        description: options.apiDescription || "Auto-generated REST API for s3db.js resources"
+      }
+    };
+    this.app = null;
+    this.server = null;
+    this.isRunning = false;
+    this.openAPISpec = null;
+    this.initialized = false;
+    this.relationsPlugin = this.options.database?.plugins?.relation || this.options.database?.plugins?.RelationPlugin || null;
+  }
+  /**
+   * Setup all routes
+   * @private
+   */
+  _setupRoutes() {
+    this.options.middlewares.forEach((middleware) => {
+      this.app.use("*", middleware);
+    });
+    this.app.use("*", async (c, next) => {
+      const method = c.req.method;
+      if (["POST", "PUT", "PATCH"].includes(method)) {
+        const contentLength = c.req.header("content-length");
+        if (contentLength) {
+          const size = parseInt(contentLength);
+          if (size > this.options.maxBodySize) {
+            const response = payloadTooLarge(size, this.options.maxBodySize);
+            c.header("Connection", "close");
+            return c.json(response, response._status);
+          }
+        }
+      }
+      await next();
+    });
+    this.app.get("/health/live", (c) => {
+      const response = success({
+        status: "alive",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/health/ready", (c) => {
+      const isReady = this.options.database && this.options.database.connected && Object.keys(this.options.database.resources).length > 0;
+      if (!isReady) {
+        const response2 = error("Service not ready", {
+          status: 503,
+          code: "NOT_READY",
+          details: {
+            database: {
+              connected: this.options.database?.connected || false,
+              resources: Object.keys(this.options.database?.resources || {}).length
+            }
+          }
+        });
+        return c.json(response2, 503);
+      }
+      const response = success({
+        status: "ready",
+        database: {
+          connected: true,
+          resources: Object.keys(this.options.database.resources).length
+        },
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/health", (c) => {
+      const response = success({
+        status: "ok",
+        uptime: process.uptime(),
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        checks: {
+          liveness: "/health/live",
+          readiness: "/health/ready"
+        }
+      });
+      return c.json(response);
+    });
+    this.app.get("/", (c) => {
+      if (this.options.rootHandler) {
+        return this.options.rootHandler(c);
+      }
+      return c.redirect("/docs", 302);
+    });
+    if (this.options.docsEnabled) {
+      this.app.get("/openapi.json", (c) => {
+        if (!this.openAPISpec) {
+          this.openAPISpec = this._generateOpenAPISpec();
+        }
+        return c.json(this.openAPISpec);
+      });
+      if (this.options.docsUI === "swagger") {
+        this.app.get("/docs", this.swaggerUI({
+          url: "/openapi.json"
+        }));
+      } else {
+        this.app.get("/docs", (c) => {
+          return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${this.options.apiInfo.title} - API Documentation</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+  <redoc spec-url="/openapi.json"></redoc>
+  <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"><\/script>
+</body>
+</html>`);
+        });
+      }
+    }
+    this._setupResourceRoutes();
+    if (this.relationsPlugin) {
+      this._setupRelationalRoutes();
+    }
+    this.app.onError((err, c) => {
+      return errorHandler(err, c);
+    });
+    this.app.notFound((c) => {
+      const response = error("Route not found", {
+        status: 404,
+        code: "NOT_FOUND",
+        details: {
+          path: c.req.path,
+          method: c.req.method
+        }
+      });
+      return c.json(response, 404);
+    });
+  }
+  /**
+   * Setup routes for all resources
+   * @private
+   */
+  _setupResourceRoutes() {
+    const { database, resources: resourceConfigs } = this.options;
+    const resources = database.resources;
+    for (const [name, resource] of Object.entries(resources)) {
+      if (name.startsWith("plg_") && !resourceConfigs[name]) {
+        continue;
+      }
+      const config = resourceConfigs[name] || {
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]};
+      const version = resource.config?.currentVersion || resource.version || "v1";
+      const resourceApp = createResourceRoutes(resource, version, {
+        methods: config.methods,
+        customMiddleware: config.customMiddleware || [],
+        enableValidation: config.validation !== false
+      }, this.Hono);
+      this.app.route(`/${version}/${name}`, resourceApp);
+      if (this.options.verbose) {
+        console.log(`[API Plugin] Mounted routes for resource '${name}' at /${version}/${name}`);
+      }
+    }
+  }
+  /**
+   * Setup relational routes (when RelationPlugin is active)
+   * @private
+   */
+  _setupRelationalRoutes() {
+    if (!this.relationsPlugin || !this.relationsPlugin.relations) {
+      return;
+    }
+    const { database } = this.options;
+    const relations = this.relationsPlugin.relations;
+    if (this.options.verbose) {
+      console.log("[API Plugin] Setting up relational routes...");
+    }
+    for (const [resourceName, relationsDef] of Object.entries(relations)) {
+      const resource = database.resources[resourceName];
+      if (!resource) {
+        if (this.options.verbose) {
+          console.warn(`[API Plugin] Resource '${resourceName}' not found for relational routes`);
+        }
+        continue;
+      }
+      if (resourceName.startsWith("plg_") && !this.options.resources[resourceName]) {
+        continue;
+      }
+      const version = resource.config?.currentVersion || resource.version || "v1";
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        if (relationConfig.type === "belongsTo") {
+          continue;
+        }
+        const resourceConfig = this.options.resources[resourceName];
+        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
+        if (!exposeRelation) {
+          continue;
+        }
+        const relationalApp = createRelationalRoutes(
+          resource,
+          relationName,
+          relationConfig,
+          version,
+          this.Hono
+        );
+        this.app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
+        if (this.options.verbose) {
+          console.log(
+            `[API Plugin] Mounted relational route: /${version}/${resourceName}/:id/${relationName} (${relationConfig.type} -> ${relationConfig.resource})`
+          );
+        }
+      }
+    }
+  }
+  /**
+   * Start the server
+   * @returns {Promise<void>}
+   */
+  async start() {
+    if (this.isRunning) {
+      console.warn("[API Plugin] Server is already running");
+      return;
+    }
+    if (!this.initialized) {
+      const { Hono } = await import('hono');
+      const { serve } = await import('@hono/node-server');
+      const { swaggerUI } = await import('@hono/swagger-ui');
+      this.Hono = Hono;
+      this.serve = serve;
+      this.swaggerUI = swaggerUI;
+      this.app = new Hono();
+      this._setupRoutes();
+      this.initialized = true;
+    }
+    const { port, host } = this.options;
+    return new Promise((resolve, reject) => {
+      try {
+        this.server = this.serve({
+          fetch: this.app.fetch,
+          port,
+          hostname: host
+        }, (info) => {
+          this.isRunning = true;
+          console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+          resolve();
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+  /**
+   * Stop the server
+   * @returns {Promise<void>}
+   */
+  async stop() {
+    if (!this.isRunning) {
+      console.warn("[API Plugin] Server is not running");
+      return;
+    }
+    if (this.server && typeof this.server.close === "function") {
+      await new Promise((resolve) => {
+        this.server.close(() => {
+          this.isRunning = false;
+          console.log("[API Plugin] Server stopped");
+          resolve();
+        });
+      });
+    } else {
+      this.isRunning = false;
+      console.log("[API Plugin] Server stopped");
+    }
+  }
+  /**
+   * Get server info
+   * @returns {Object} Server information
+   */
+  getInfo() {
+    return {
+      isRunning: this.isRunning,
+      port: this.options.port,
+      host: this.options.host,
+      resources: Object.keys(this.options.database.resources).length
+    };
+  }
+  /**
+   * Get Hono app instance
+   * @returns {Hono} Hono app
+   */
+  getApp() {
+    return this.app;
+  }
+  /**
+   * Generate OpenAPI specification
+   * @private
+   * @returns {Object} OpenAPI spec
+   */
+  _generateOpenAPISpec() {
+    const { port, host, database, resources, auth, apiInfo } = this.options;
+    return generateOpenAPISpec(database, {
+      title: apiInfo.title,
+      version: apiInfo.version,
+      description: apiInfo.description,
+      serverUrl: `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`,
+      auth,
+      resources
+    });
+  }
+}
+
 class ApiPlugin extends Plugin {
   /**
    * Create API Plugin instance
@@ -3002,11 +5033,6 @@ class ApiPlugin extends Plugin {
     if (this.config.verbose) {
       console.log("[API Plugin] Starting server...");
     }
-    const serverPath = "./server.js";
-    const { ApiServer } = await import(
-      /* @vite-ignore */
-      serverPath
-    );
     this.server = new ApiServer({
       port: this.config.port,
       host: this.config.host,
