@@ -217,7 +217,7 @@ const queue = new S3QueuePlugin({
   }
 });
 
-db.use(queue);
+await db.usePlugin(queue);
 
 // 4. Enqueue tasks
 await tasks.enqueue({
@@ -306,7 +306,7 @@ const emailQueue = new S3QueuePlugin({
   }
 });
 
-db.use(emailQueue);
+await db.usePlugin(emailQueue);
 
 // Listen to events
 emailQueue.on('message.completed', (event) => {
@@ -917,7 +917,7 @@ const orderQueue = new S3QueuePlugin({
   }
 });
 
-db.use(orderQueue);
+await db.usePlugin(orderQueue);
 ```
 
 ### Use Case 2: Webhook Delivery System
@@ -967,7 +967,7 @@ const webhookQueue = new S3QueuePlugin({
   }
 });
 
-db.use(webhookQueue);
+await db.usePlugin(webhookQueue);
 
 // Trigger webhooks from your app
 app.post('/api/users', async (req, res) => {
@@ -1037,7 +1037,7 @@ const imageQueue = new S3QueuePlugin({
   }
 });
 
-db.use(imageQueue);
+await db.usePlugin(imageQueue);
 ```
 
 ### Use Case 4: Data Export System
@@ -1110,7 +1110,7 @@ const exportQueue = new S3QueuePlugin({
   }
 });
 
-db.use(exportQueue);
+await db.usePlugin(exportQueue);
 ```
 
 ---
@@ -1599,8 +1599,8 @@ const lowPriorityQueue = new S3QueuePlugin({
   }
 });
 
-db.use(highPriorityQueue);
-db.use(lowPriorityQueue);
+await db.usePlugin(highPriorityQueue);
+await db.usePlugin(lowPriorityQueue);
 ```
 
 ### Pattern 4: Batch Processing
@@ -2317,7 +2317,7 @@ const videoQueue = new S3QueuePlugin({
   }
 });
 
-db.use(videoQueue);
+await db.usePlugin(videoQueue);
 
 // Step 3: Upload endpoint
 app.post('/api/videos/upload', async (req, res) => {
@@ -2391,7 +2391,7 @@ const jobQueue = new S3QueuePlugin({
   }
 });
 
-db.use(jobQueue);
+await db.usePlugin(jobQueue);
 
 // Scheduler loop (runs every minute)
 setInterval(async () => {
