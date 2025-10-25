@@ -388,7 +388,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
 
     await replicator.replicate('users', 'insert', { id: '1' }, '1');
     
-    expect(emitSpy).toHaveBeenCalledWith('replicated', expect.objectContaining({
+    expect(emitSpy).toHaveBeenCalledWith('plg:replicator:replicated', expect.objectContaining({
       replicator: replicator.name,
       resource: 'users',
       operation: 'insert',
@@ -410,7 +410,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
 
     await replicator.replicate('users', 'insert', { id: '1' }, '1');
     
-    expect(emitSpy).toHaveBeenCalledWith('replicator_error', expect.objectContaining({
+    expect(emitSpy).toHaveBeenCalledWith('plg:replicator:error', expect.objectContaining({
       replicator: replicator.name,
       resource: 'users',
       operation: 'insert',

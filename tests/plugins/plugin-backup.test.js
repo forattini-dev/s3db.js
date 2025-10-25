@@ -289,7 +289,7 @@ describe('BackupPlugin (New Driver API)', () => {
   describe('Events', () => {
     it('should emit backup_start event', async () => {
       const spy = jest.fn();
-      plugin.on('backup_start', spy);
+      plugin.on('plg:backup:start', spy);
       
       await plugin.backup('full');
       
@@ -300,7 +300,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
     it('should emit backup_complete event', async () => {
       const spy = jest.fn();
-      plugin.on('backup_complete', spy);
+      plugin.on('plg:backup:complete', spy);
       
       await plugin.backup('full');
       
@@ -312,7 +312,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
     it('should emit backup_error event on failure', async () => {
       const spy = jest.fn();
-      plugin.on('backup_error', spy);
+      plugin.on('plg:backup:error', spy);
       
       plugin.config.tempDir = '/invalid/path';
       
@@ -396,7 +396,7 @@ describe('BackupPlugin (New Driver API)', () => {
       plugin.activeBackups.add('test-backup');
       
       const cancelSpy = jest.fn();
-      plugin.on('backup_cancelled', cancelSpy);
+      plugin.on('plg:backup:cancelled', cancelSpy);
       
       await plugin.stop();
       

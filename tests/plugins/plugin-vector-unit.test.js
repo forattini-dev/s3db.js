@@ -49,7 +49,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       });
 
       const fixedEvents = [];
-      plugin.on('vector:behavior-fixed', (data) => fixedEvents.push(data));
+      plugin.on('plg:vector:behavior-fixed', (data) => fixedEvents.push(data));
 
       const mockResource = {
         name: 'testResource',
@@ -85,7 +85,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       });
 
       const warnings = [];
-      plugin.on('vector:storage-warning', (w) => warnings.push(w));
+      plugin.on('plg:vector:storage-warning', (w) => warnings.push(w));
 
       plugin.database = {
         resources: {
@@ -116,7 +116,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       });
 
       const warnings = [];
-      plugin.on('vector:storage-warning', (w) => warnings.push(w));
+      plugin.on('plg:vector:storage-warning', (w) => warnings.push(w));
 
       plugin.database = {
         resources: {
@@ -147,7 +147,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       });
 
       const warnings = [];
-      plugin.on('vector:storage-warning', (w) => warnings.push(w));
+      plugin.on('plg:vector:storage-warning', (w) => warnings.push(w));
 
       plugin.database = {
         resources: {
@@ -718,7 +718,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       const plugin = new VectorPlugin();
 
       const events = [];
-      plugin.on('started', (data) => events.push(data));
+      plugin.on('db:plugin:started', (data) => events.push(data));
 
       await plugin.onStart();
 
@@ -732,7 +732,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       const plugin = new VectorPlugin();
 
       const events = [];
-      plugin.on('stopped', (data) => events.push(data));
+      plugin.on('db:plugin:stopped', (data) => events.push(data));
 
       await plugin.onStop();
 

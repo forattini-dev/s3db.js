@@ -174,7 +174,7 @@ describe('StateMachinePlugin', () => {
 
     it('should emit initialized event', async () => {
       const initSpy = jest.fn();
-      plugin.on('initialized', initSpy);
+      plugin.on('db:plugin:initialized', initSpy);
       
       const newPlugin = new StateMachinePlugin({
         stateMachines: {
@@ -185,7 +185,7 @@ describe('StateMachinePlugin', () => {
         }
       });
       
-      newPlugin.on('initialized', initSpy);
+      newPlugin.on('db:plugin:initialized', initSpy);
       
       const newDb = createDatabaseForTest('suite=plugins/state-machine-init');
       

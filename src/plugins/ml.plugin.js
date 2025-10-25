@@ -136,7 +136,7 @@ export class MLPlugin extends Plugin {
       console.log(`[MLPlugin] Installed with ${Object.keys(this.models).length} models`);
     }
 
-    this.emit('installed', {
+    this.emit('db:plugin:installed', {
       plugin: 'MLPlugin',
       models: Object.keys(this.models)
     });
@@ -649,7 +649,7 @@ export class MLPlugin extends Plugin {
         console.log(`[MLPlugin] Training completed for "${modelName}":`, result);
       }
 
-      this.emit('modelTrained', {
+      this.emit('plg:ml:model-trained', {
         modelName,
         type: modelConfig.type,
         result
@@ -691,7 +691,7 @@ export class MLPlugin extends Plugin {
       const result = await model.predict(input);
       this.stats.totalPredictions++;
 
-      this.emit('prediction', {
+      this.emit('plg:ml:prediction', {
         modelName,
         input,
         result

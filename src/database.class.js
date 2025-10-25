@@ -255,13 +255,13 @@ export class Database extends EventEmitter {
 
     // Emit definition changes if any were detected
     if (definitionChanges.length > 0) {
-      this.emit("resourceDefinitionsChanged", {
+      this.emit("db:resource-definitions-changed", {
         changes: definitionChanges,
         metadata: this.savedMetadata
       });
     }
 
-    this.emit("connected", new Date());
+    this.emit("db:connected", new Date());
   }
 
   /**
@@ -527,7 +527,7 @@ export class Database extends EventEmitter {
       this.pluginList.splice(index, 1);
     }
 
-    this.emit('plugin.uninstalled', { name: pluginName, plugin });
+    this.emit('db:plugin:uninstalled', { name: pluginName, plugin });
   }
 
   async uploadMetadataFile() {
@@ -598,7 +598,7 @@ export class Database extends EventEmitter {
     });
 
     this.savedMetadata = metadata;
-    this.emit('metadataUploaded', metadata);
+    this.emit('db:metadata-uploaded', metadata);
   }
 
   blankMetadataStructure() {
@@ -918,7 +918,7 @@ export class Database extends EventEmitter {
         contentType: 'application/json'
       });
 
-      this.emit('metadataHealed', { healingLog, metadata });
+      this.emit('db:metadata-healed', { healingLog, metadata });
 
       if (this.verbose) {
         console.warn('S3DB: Successfully uploaded healed metadata');
@@ -1091,7 +1091,7 @@ export class Database extends EventEmitter {
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
       }
-      this.emit("s3db.resourceUpdated", name);
+      this.emit("db:resource:updated", name);
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -1131,7 +1131,7 @@ export class Database extends EventEmitter {
     }
 
     await this.uploadMetadataFile();
-    this.emit("s3db.resourceCreated", name);
+    this.emit("db:resource:created", name);
     return resource;
   }
 
@@ -1290,7 +1290,7 @@ export class Database extends EventEmitter {
 
       // 4. Emit disconnected event BEFORE removing database listeners (race condition fix)
       // This ensures listeners can actually receive the event
-      await this.emit('disconnected', new Date());
+      await this.emit('db:disconnected', new Date());
 
       // 5. Remove all listeners from the database itself
       this.removeAllListeners();
@@ -1427,7 +1427,7 @@ export class Database extends EventEmitter {
       const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
       if (!ok) {
         // Emit error event
-        this.emit('hookError', { event, error, context });
+        this.emit('db:hook-error', { event, error, context });
 
         // In strict mode, throw on first error instead of continuing
         if (this.strictHooks) {

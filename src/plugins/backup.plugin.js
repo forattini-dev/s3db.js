@@ -149,7 +149,7 @@ export class BackupPlugin extends Plugin {
       console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
     }
 
-    this.emit('initialized', {
+    this.emit('db:plugin:initialized', {
       driver: this.driver.getType(),
       config: this.driver.getStorageInfo()
     });
@@ -205,7 +205,7 @@ export class BackupPlugin extends Plugin {
         await this._executeHook(this.config.onBackupStart, type, { backupId });
       }
       
-      this.emit('backup_start', { id: backupId, type });
+      this.emit('plg:backup:start', { id: backupId, type });
       
       // Create backup metadata
       const metadata = await this._createBackupMetadata(backupId, type);
@@ -262,7 +262,7 @@ export class BackupPlugin extends Plugin {
           await this._executeHook(this.config.onBackupComplete, type, stats);
         }
         
-        this.emit('backup_complete', { 
+        this.emit('plg:backup:complete', { 
           id: backupId, 
           type, 
           size: totalSize, 
@@ -300,7 +300,7 @@ export class BackupPlugin extends Plugin {
         duration: Date.now() - startTime
       });
       
-      this.emit('backup_error', { id: backupId, type, error: error.message });
+      this.emit('plg:backup:error', { id: backupId, type, error: error.message });
       throw error;
       
     } finally {
@@ -579,7 +579,7 @@ export class BackupPlugin extends Plugin {
         await this._executeHook(this.config.onRestoreStart, backupId, options);
       }
       
-      this.emit('restore_start', { id: backupId, options });
+      this.emit('plg:backup:restore-start', { id: backupId, options });
       
       // Get backup metadata
       const backup = await this.getBackupStatus(backupId);
@@ -616,7 +616,7 @@ export class BackupPlugin extends Plugin {
           await this._executeHook(this.config.onRestoreComplete, backupId, { restored: restoredResources });
         }
         
-        this.emit('restore_complete', { 
+        this.emit('plg:backup:restore-complete', { 
           id: backupId, 
           restored: restoredResources 
         });
@@ -637,7 +637,7 @@ export class BackupPlugin extends Plugin {
         await this._executeHook(this.config.onRestoreError, backupId, { error });
       }
       
-      this.emit('restore_error', { id: backupId, error: error.message });
+      this.emit('plg:backup:restore-error', { id: backupId, error: error.message });
       throw error;
     }
   }
@@ -973,7 +973,7 @@ export class BackupPlugin extends Plugin {
   async stop() {
     // Cancel any active backups
     for (const backupId of this.activeBackups) {
-      this.emit('backup_cancelled', { id: backupId });
+      this.emit('plg:backup:cancelled', { id: backupId });
     }
     this.activeBackups.clear();
     

@@ -6628,7 +6628,7 @@ class BackupPlugin extends Plugin {
       const storageInfo = this.driver.getStorageInfo();
       console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
     }
-    this.emit("initialized", {
+    this.emit("db:plugin:initialized", {
       driver: this.driver.getType(),
       config: this.driver.getStorageInfo()
     });
@@ -6676,7 +6676,7 @@ class BackupPlugin extends Plugin {
       if (this.config.onBackupStart) {
         await this._executeHook(this.config.onBackupStart, type, { backupId });
       }
-      this.emit("backup_start", { id: backupId, type });
+      this.emit("plg:backup:start", { id: backupId, type });
       const metadata = await this._createBackupMetadata(backupId, type);
       const tempBackupDir = path$1.join(this.config.tempDir, backupId);
       await promises.mkdir(tempBackupDir, { recursive: true });
@@ -6709,7 +6709,7 @@ class BackupPlugin extends Plugin {
           const stats = { backupId, type, size: totalSize, duration, driverInfo: uploadResult };
           await this._executeHook(this.config.onBackupComplete, type, stats);
         }
-        this.emit("backup_complete", {
+        this.emit("plg:backup:complete", {
           id: backupId,
           type,
           size: totalSize,
@@ -6737,7 +6737,7 @@ class BackupPlugin extends Plugin {
         error: error.message,
         duration: Date.now() - startTime
       });
-      this.emit("backup_error", { id: backupId, type, error: error.message });
+      this.emit("plg:backup:error", { id: backupId, type, error: error.message });
       throw error;
     } finally {
       this.activeBackups.delete(backupId);
@@ -6958,7 +6958,7 @@ class BackupPlugin extends Plugin {
       if (this.config.onRestoreStart) {
         await this._executeHook(this.config.onRestoreStart, backupId, options);
       }
-      this.emit("restore_start", { id: backupId, options });
+      this.emit("plg:backup:restore-start", { id: backupId, options });
       const backup = await this.getBackupStatus(backupId);
       if (!backup) {
         throw new Error(`Backup '${backupId}' not found`);
@@ -6981,7 +6981,7 @@ class BackupPlugin extends Plugin {
         if (this.config.onRestoreComplete) {
           await this._executeHook(this.config.onRestoreComplete, backupId, { restored: restoredResources });
         }
-        this.emit("restore_complete", {
+        this.emit("plg:backup:restore-complete", {
           id: backupId,
           restored: restoredResources
         });
@@ -6996,7 +6996,7 @@ class BackupPlugin extends Plugin {
       if (this.config.onRestoreError) {
         await this._executeHook(this.config.onRestoreError, backupId, { error });
       }
-      this.emit("restore_error", { id: backupId, error: error.message });
+      this.emit("plg:backup:restore-error", { id: backupId, error: error.message });
       throw error;
     }
   }
@@ -7246,7 +7246,7 @@ class BackupPlugin extends Plugin {
   }
   async stop() {
     for (const backupId of this.activeBackups) {
-      this.emit("backup_cancelled", { id: backupId });
+      this.emit("plg:backup:cancelled", { id: backupId });
     }
     this.activeBackups.clear();
     if (this.driver) {
@@ -8770,7 +8770,7 @@ class CachePlugin extends Plugin {
         const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
         const [ok2, err2] = await this.clearCacheWithRetry(resource.cache, specificKey);
         if (!ok2) {
-          this.emit("cache_clear_error", {
+          this.emit("plg:cache:clear-error", {
             resource: resource.name,
             method,
             id: data.id,
@@ -8788,7 +8788,7 @@ class CachePlugin extends Plugin {
             const partitionKeyPrefix = path$1.join(keyPrefix, `partition=${partitionName}`);
             const [ok2, err2] = await this.clearCacheWithRetry(resource.cache, partitionKeyPrefix);
             if (!ok2) {
-              this.emit("cache_clear_error", {
+              this.emit("plg:cache:clear-error", {
                 resource: resource.name,
                 partition: partitionName,
                 error: err2.message
@@ -8803,7 +8803,7 @@ class CachePlugin extends Plugin {
     }
     const [ok, err] = await this.clearCacheWithRetry(resource.cache, keyPrefix);
     if (!ok) {
-      this.emit("cache_clear_error", {
+      this.emit("plg:cache:clear-error", {
         resource: resource.name,
         type: "broad",
         error: err.message
@@ -12703,7 +12703,7 @@ class GeoPlugin extends Plugin {
     if (this.verbose) {
       console.log(`[GeoPlugin] Installed with ${Object.keys(this.resources).length} resources`);
     }
-    this.emit("installed", {
+    this.emit("db:plugin:installed", {
       plugin: "GeoPlugin",
       resources: Object.keys(this.resources)
     });
@@ -13270,7 +13270,7 @@ class GeoPlugin extends Plugin {
     if (this.verbose) {
       console.log("[GeoPlugin] Uninstalled");
     }
-    this.emit("uninstalled", {
+    this.emit("db:plugin:uninstalled", {
       plugin: "GeoPlugin"
     });
     await super.uninstall();
@@ -15310,7 +15310,7 @@ class MLPlugin extends Plugin {
     if (this.config.verbose) {
       console.log(`[MLPlugin] Installed with ${Object.keys(this.models).length} models`);
     }
-    this.emit("installed", {
+    this.emit("db:plugin:installed", {
       plugin: "MLPlugin",
       models: Object.keys(this.models)
     });
@@ -15699,7 +15699,7 @@ class MLPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[MLPlugin] Training completed for "${modelName}":`, result);
       }
-      this.emit("modelTrained", {
+      this.emit("plg:ml:model-trained", {
         modelName,
         type: modelConfig.type,
         result
@@ -15735,7 +15735,7 @@ class MLPlugin extends Plugin {
     try {
       const result = await model.predict(input);
       this.stats.totalPredictions++;
-      this.emit("prediction", {
+      this.emit("plg:ml:prediction", {
         modelName,
         input,
         result
@@ -16900,7 +16900,7 @@ class RelationPlugin extends Plugin {
     if (this.verbose) {
       console.log(`[RelationPlugin] Installed with ${Object.keys(this.relations).length} resources`);
     }
-    this.emit("installed", {
+    this.emit("db:plugin:installed", {
       plugin: "RelationPlugin",
       resources: Object.keys(this.relations)
     });
@@ -20475,7 +20475,7 @@ class S3Client extends EventEmitter {
     return client;
   }
   async sendCommand(command) {
-    this.emit("command.request", command.constructor.name, command.input);
+    this.emit("cl:request", command.constructor.name, command.input);
     const [ok, err, response] = await tryFn(() => this.client.send(command));
     if (!ok) {
       const bucket = this.config.bucket;
@@ -20487,7 +20487,7 @@ class S3Client extends EventEmitter {
         commandInput: command.input
       });
     }
-    this.emit("command.response", command.constructor.name, response, command.input);
+    this.emit("cl:response", command.constructor.name, response, command.input);
     return response;
   }
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
@@ -20512,7 +20512,7 @@ class S3Client extends EventEmitter {
     if (contentLength !== void 0) options.ContentLength = contentLength;
     if (ifMatch !== void 0) options.IfMatch = ifMatch;
     const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.PutObjectCommand(options)));
-    this.emit("putObject", err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
+    this.emit("cl:PutObject", err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
@@ -20540,7 +20540,7 @@ class S3Client extends EventEmitter {
       }
       return res;
     });
-    this.emit("getObject", err || response, { key });
+    this.emit("cl:GetObject", err || response, { key });
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
@@ -20568,7 +20568,7 @@ class S3Client extends EventEmitter {
       }
       return res;
     });
-    this.emit("headObject", err || response, { key });
+    this.emit("cl:HeadObject", err || response, { key });
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
@@ -20601,7 +20601,7 @@ class S3Client extends EventEmitter {
       options.ContentType = contentType;
     }
     const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.CopyObjectCommand(options)));
-    this.emit("copyObject", err || response, { from, to, metadataDirective });
+    this.emit("cl:CopyObject", err || response, { from, to, metadataDirective });
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
@@ -20626,7 +20626,7 @@ class S3Client extends EventEmitter {
       Key: keyPrefix ? path$1.join(keyPrefix, key) : key
     };
     const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.DeleteObjectCommand(options)));
-    this.emit("deleteObject", err || response, { key });
+    this.emit("cl:DeleteObject", err || response, { key });
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
@@ -20666,7 +20666,7 @@ class S3Client extends EventEmitter {
       deleted: results,
       notFound: errors
     };
-    this.emit("deleteObjects", report, keys);
+    this.emit("cl:DeleteObjects", report, keys);
     return report;
   }
   /**
@@ -20696,7 +20696,7 @@ class S3Client extends EventEmitter {
         const deleteResponse = await this.client.send(deleteCommand);
         const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
         totalDeleted += deletedCount;
-        this.emit("deleteAll", {
+        this.emit("cl:DeleteAll", {
           prefix,
           batch: deletedCount,
           total: totalDeleted
@@ -20704,7 +20704,7 @@ class S3Client extends EventEmitter {
       }
       continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : void 0;
     } while (continuationToken);
-    this.emit("deleteAllComplete", {
+    this.emit("cl:DeleteAllComplete", {
       prefix,
       totalDeleted
     });
@@ -20735,7 +20735,7 @@ class S3Client extends EventEmitter {
     if (!ok) {
       throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
     }
-    this.emit("listObjects", response, options);
+    this.emit("cl:ListObjects", response, options);
     return response;
   }
   async count({ prefix } = {}) {
@@ -20752,7 +20752,7 @@ class S3Client extends EventEmitter {
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
     }
-    this.emit("count", count, { prefix });
+    this.emit("cl:Count", count, { prefix });
     return count;
   }
   async getAllKeys({ prefix } = {}) {
@@ -20774,7 +20774,7 @@ class S3Client extends EventEmitter {
     if (this.config.keyPrefix) {
       keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
     }
-    this.emit("getAllKeys", keys, { prefix });
+    this.emit("cl:GetAllKeys", keys, { prefix });
     return keys;
   }
   async getContinuationTokenAfterOffset(params = {}) {
@@ -20803,7 +20803,7 @@ class S3Client extends EventEmitter {
         break;
       }
     }
-    this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
+    this.emit("cl:GetContinuationTokenAfterOffset", continuationToken || null, params);
     return continuationToken || null;
   }
   async getKeysPage(params = {}) {
@@ -20821,7 +20821,7 @@ class S3Client extends EventEmitter {
         offset
       });
       if (!continuationToken) {
-        this.emit("getKeysPage", [], params);
+        this.emit("cl:GetKeysPage", [], params);
         return [];
       }
     }
@@ -20844,7 +20844,7 @@ class S3Client extends EventEmitter {
     if (this.config.keyPrefix) {
       keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
     }
-    this.emit("getKeysPage", keys, params);
+    this.emit("cl:GetKeysPage", keys, params);
     return keys;
   }
   async moveAllObjects({ prefixFrom, prefixTo }) {
@@ -20862,7 +20862,7 @@ class S3Client extends EventEmitter {
       }
       return to;
     });
-    this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+    this.emit("cl:MoveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
       throw new UnknownError("Some objects could not be moved", {
         bucket: this.config.bucket,
@@ -23718,25 +23718,17 @@ ${errorDetails}`,
     return Buffer.byteLength(String(body), "utf8");
   }
   /**
-   * Emit events with backward compatibility support
-   * Emits both new standardized events and old deprecated events
+   * Emit standardized events with optional ID-specific variant
    *
    * @private
-   * @param {string} oldEvent - Old event name (deprecated)
-   * @param {string} newEvent - New standardized event name
+   * @param {string} event - Event name
    * @param {Object} payload - Event payload
    * @param {string} [id] - Optional ID for ID-specific events
    */
-  _emitWithDeprecation(oldEvent, newEvent, payload, id = null) {
-    this.emit(newEvent, payload);
+  _emitStandardized(event, payload, id = null) {
+    this.emit(event, payload);
     if (id) {
-      this.emit(`${newEvent}:${id}`, payload);
-    }
-    if (this.listenerCount(oldEvent) > 0) {
-      console.warn(
-        `[s3db.js] Event "${oldEvent}" is deprecated and will be removed in v14.0.0. Use "${newEvent}" instead.` + (id ? ` ID-specific events are also available: "${newEvent}:${id}"` : "")
-      );
-      this.emit(oldEvent, payload);
+      this.emit(`${event}:${id}`, payload);
     }
   }
   /**
@@ -23879,11 +23871,11 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult?.id || insertedObject?.id);
+      this._emitStandardized("inserted", finalResult, finalResult?.id || insertedObject?.id);
       return finalResult;
     } else {
       const finalResult = await this.executeHooks("afterInsert", insertedObject);
-      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult?.id || insertedObject?.id);
+      this._emitStandardized("inserted", finalResult, finalResult?.id || insertedObject?.id);
       return finalResult;
     }
   }
@@ -24198,7 +24190,7 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this._emitWithDeprecation("update", "updated", {
+      this._emitStandardized("updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -24206,7 +24198,7 @@ ${errorDetails}`,
       return finalResult;
     } else {
       const finalResult = await this.executeHooks("afterUpdate", updatedData);
-      this._emitWithDeprecation("update", "updated", {
+      this._emitStandardized("updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -24609,7 +24601,7 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this._emitWithDeprecation("update", "updated", {
+      this._emitStandardized("updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -24622,7 +24614,7 @@ ${errorDetails}`,
     } else {
       await this.handlePartitionReferenceUpdates(oldData, newData);
       const finalResult = await this.executeHooks("afterUpdate", updatedData);
-      this._emitWithDeprecation("update", "updated", {
+      this._emitStandardized("updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -26248,12 +26240,12 @@ class Database extends EventEmitter {
       }
     }
     if (definitionChanges.length > 0) {
-      this.emit("resourceDefinitionsChanged", {
+      this.emit("db:resource-definitions-changed", {
         changes: definitionChanges,
         metadata: this.savedMetadata
       });
     }
-    this.emit("connected", /* @__PURE__ */ new Date());
+    this.emit("db:connected", /* @__PURE__ */ new Date());
   }
   /**
    * Detect changes in resource definitions compared to saved metadata
@@ -26467,7 +26459,7 @@ class Database extends EventEmitter {
     if (index > -1) {
       this.pluginList.splice(index, 1);
     }
-    this.emit("plugin.uninstalled", { name: pluginName, plugin });
+    this.emit("db:plugin:uninstalled", { name: pluginName, plugin });
   }
   async uploadMetadataFile() {
     const metadata = {
@@ -26526,7 +26518,7 @@ class Database extends EventEmitter {
       contentType: "application/json"
     });
     this.savedMetadata = metadata;
-    this.emit("metadataUploaded", metadata);
+    this.emit("db:metadata-uploaded", metadata);
   }
   blankMetadataStructure() {
     return {
@@ -26783,7 +26775,7 @@ class Database extends EventEmitter {
         body: JSON.stringify(metadata, null, 2),
         contentType: "application/json"
       });
-      this.emit("metadataHealed", { healingLog, metadata });
+      this.emit("db:metadata-healed", { healingLog, metadata });
       if (this.verbose) {
         console.warn("S3DB: Successfully uploaded healed metadata");
       }
@@ -26923,7 +26915,7 @@ class Database extends EventEmitter {
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
       }
-      this.emit("s3db.resourceUpdated", name);
+      this.emit("db:resource:updated", name);
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -26960,7 +26952,7 @@ class Database extends EventEmitter {
       this._applyMiddlewares(resource, middlewares);
     }
     await this.uploadMetadataFile();
-    this.emit("s3db.resourceCreated", name);
+    this.emit("db:resource:created", name);
     return resource;
   }
   /**
@@ -27124,7 +27116,7 @@ class Database extends EventEmitter {
       if (this.client && typeof this.client.removeAllListeners === "function") {
         this.client.removeAllListeners();
       }
-      await this.emit("disconnected", /* @__PURE__ */ new Date());
+      await this.emit("db:disconnected", /* @__PURE__ */ new Date());
       this.removeAllListeners();
       if (this._exitListener && typeof process !== "undefined") {
         process.off("exit", this._exitListener);
@@ -27236,7 +27228,7 @@ class Database extends EventEmitter {
     for (const hook of hooks) {
       const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
       if (!ok) {
-        this.emit("hookError", { event, error, context });
+        this.emit("db:hook-error", { event, error, context });
         if (this.strictHooks) {
           throw new DatabaseError(`Hook execution failed for event '${event}': ${error.message}`, {
             event,
@@ -28812,7 +28804,7 @@ class ReplicatorPlugin extends Plugin {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Insert event failed for resource ${resource.name}: ${error.message}`);
         }
-        this.emit("error", { operation: "insert", error: error.message, resource: resource.name });
+        this.emit("plg:replicator:error", { operation: "insert", error: error.message, resource: resource.name });
       }
     };
     const updateHandler = async (data, beforeData) => {
@@ -28825,7 +28817,7 @@ class ReplicatorPlugin extends Plugin {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Update event failed for resource ${resource.name}: ${error.message}`);
         }
-        this.emit("error", { operation: "update", error: error.message, resource: resource.name });
+        this.emit("plg:replicator:error", { operation: "update", error: error.message, resource: resource.name });
       }
     };
     const deleteHandler = async (data) => {
@@ -28836,7 +28828,7 @@ class ReplicatorPlugin extends Plugin {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Delete event failed for resource ${resource.name}: ${error.message}`);
         }
-        this.emit("error", { operation: "delete", error: error.message, resource: resource.name });
+        this.emit("plg:replicator:error", { operation: "delete", error: error.message, resource: resource.name });
       }
     };
     this.eventHandlers.set(resource.name, {
@@ -28957,7 +28949,7 @@ class ReplicatorPlugin extends Plugin {
       if (this.config.verbose) {
         console.warn(`[ReplicatorPlugin] Failed to log error for ${resourceName}: ${logError.message}`);
       }
-      this.emit("replicator_log_error", {
+      this.emit("plg:replicator:log-error", {
         replicator: replicator.name || replicator.id,
         resourceName,
         operation,
@@ -28982,7 +28974,7 @@ class ReplicatorPlugin extends Plugin {
           () => replicator.replicate(resourceName, operation, data, recordId, beforeData),
           this.config.maxRetries
         );
-        this.emit("replicated", {
+        this.emit("plg:replicator:replicated", {
           replicator: replicator.name || replicator.id,
           resourceName,
           operation,
@@ -28998,7 +28990,7 @@ class ReplicatorPlugin extends Plugin {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Replication failed for ${replicator.name || replicator.id} on ${resourceName}: ${error.message}`);
         }
-        this.emit("replicator_error", {
+        this.emit("plg:replicator:error", {
           replicator: replicator.name || replicator.id,
           resourceName,
           operation,
@@ -29030,7 +29022,7 @@ class ReplicatorPlugin extends Plugin {
           if (this.config.verbose) {
             console.warn(`[ReplicatorPlugin] Replicator item processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${err.message}`);
           }
-          this.emit("replicator_error", {
+          this.emit("plg:replicator:error", {
             replicator: replicator.name || replicator.id,
             resourceName: item.resourceName,
             operation: item.operation,
@@ -29042,7 +29034,7 @@ class ReplicatorPlugin extends Plugin {
           }
           return { success: false, error: err.message };
         }
-        this.emit("replicated", {
+        this.emit("plg:replicator:replicated", {
           replicator: replicator.name || replicator.id,
           resourceName: item.resourceName,
           operation: item.operation,
@@ -29058,7 +29050,7 @@ class ReplicatorPlugin extends Plugin {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Wrapper processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${wrapperError.message}`);
         }
-        this.emit("replicator_error", {
+        this.emit("plg:replicator:error", {
           replicator: replicator.name || replicator.id,
           resourceName: item.resourceName,
           operation: item.operation,
@@ -29076,7 +29068,7 @@ class ReplicatorPlugin extends Plugin {
   async logReplicator(item) {
     const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
     if (!logRes) {
-      this.emit("replicator.log.failed", { error: "replicator log resource not found", item });
+      this.emit("plg:replicator:log-failed", { error: "replicator log resource not found", item });
       return;
     }
     const logItem = {
@@ -29094,7 +29086,7 @@ class ReplicatorPlugin extends Plugin {
       if (this.config.verbose) {
         console.warn(`[ReplicatorPlugin] Failed to log replicator item: ${err.message}`);
       }
-      this.emit("replicator.log.failed", { error: err, item });
+      this.emit("plg:replicator:log-failed", { error: err, item });
     }
   }
   async updateReplicatorLog(logId, updates) {
@@ -29106,7 +29098,7 @@ class ReplicatorPlugin extends Plugin {
       });
     });
     if (!ok) {
-      this.emit("replicator.updateLog.failed", { error: err.message, logId, updates });
+      this.emit("plg:replicator:update-log-failed", { error: err.message, logId, updates });
     }
   }
   // Utility methods
@@ -29190,7 +29182,7 @@ class ReplicatorPlugin extends Plugin {
     for (const resourceName in this.database.resources) {
       if (normalizeResourceName(resourceName) === normalizeResourceName("plg_replicator_logs")) continue;
       if (replicator.shouldReplicateResource(resourceName)) {
-        this.emit("replicator.sync.resource", { resourceName, replicatorId });
+        this.emit("plg:replicator:sync-resource", { resourceName, replicatorId });
         const resource = this.database.resources[resourceName];
         let offset = 0;
         const pageSize = this.config.batchSize || 100;
@@ -29206,7 +29198,7 @@ class ReplicatorPlugin extends Plugin {
         }
       }
     }
-    this.emit("replicator.sync.completed", { replicatorId, stats: this.stats });
+    this.emit("plg:replicator:sync-completed", { replicatorId, stats: this.stats });
   }
   async stop() {
     const [ok, error] = await tryFn(async () => {
@@ -29221,7 +29213,7 @@ class ReplicatorPlugin extends Plugin {
             if (this.config.verbose) {
               console.warn(`[ReplicatorPlugin] Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
             }
-            this.emit("replicator_stop_error", {
+            this.emit("plg:replicator:stop-error", {
               replicator: replicator.name || replicator.id || "unknown",
               driver: replicator.driver || "unknown",
               error: replicatorError.message
@@ -29252,7 +29244,7 @@ class ReplicatorPlugin extends Plugin {
       if (this.config.verbose) {
         console.warn(`[ReplicatorPlugin] Failed to stop plugin: ${error.message}`);
       }
-      this.emit("replicator_plugin_stop_error", {
+      this.emit("plg:replicator:plugin-stop-error", {
         error: error.message
       });
     }
@@ -29409,7 +29401,7 @@ class S3QueuePlugin extends Plugin {
     if (this.config.verbose) {
       console.log(`[S3QueuePlugin] Started ${concurrency} workers`);
     }
-    this.emit("workers.started", { concurrency, workerId: this.workerId });
+    this.emit("plg:s3-queue:workers-started", { concurrency, workerId: this.workerId });
   }
   async stopProcessing() {
     if (!this.isRunning) return;
@@ -29424,7 +29416,7 @@ class S3QueuePlugin extends Plugin {
     if (this.config.verbose) {
       console.log("[S3QueuePlugin] Stopped all workers");
     }
-    this.emit("workers.stopped", { workerId: this.workerId });
+    this.emit("plg:s3-queue:workers-stopped", { workerId: this.workerId });
   }
   createWorker(handler, workerIndex) {
     return (async () => {
@@ -29592,7 +29584,7 @@ class S3QueuePlugin extends Plugin {
       });
       await this.completeMessage(message.queueId, result);
       const duration = Date.now() - startTime;
-      this.emit("message.completed", {
+      this.emit("plg:s3-queue:message-completed", {
         queueId: message.queueId,
         originalId: message.record.id,
         duration,
@@ -29605,7 +29597,7 @@ class S3QueuePlugin extends Plugin {
       const shouldRetry = message.attempts < message.maxAttempts;
       if (shouldRetry) {
         await this.retryMessage(message.queueId, message.attempts, error.message);
-        this.emit("message.retry", {
+        this.emit("plg:s3-queue:message-retry", {
           queueId: message.queueId,
           originalId: message.record.id,
           attempts: message.attempts,
@@ -29613,7 +29605,7 @@ class S3QueuePlugin extends Plugin {
         });
       } else {
         await this.moveToDeadLetter(message.queueId, message.record, error.message);
-        this.emit("message.dead", {
+        this.emit("plg:s3-queue:message-dead", {
           queueId: message.queueId,
           originalId: message.record.id,
           error: error.message
@@ -29845,7 +29837,7 @@ class SchedulerPlugin extends Plugin {
       });
     }
     await this._startScheduling();
-    this.emit("initialized", { jobs: this.jobs.size });
+    this.emit("db:plugin:initialized", { jobs: this.jobs.size });
   }
   async _createJobHistoryResource() {
     const [ok] = await tryFn(() => this.database.createResource({
@@ -29983,7 +29975,7 @@ class SchedulerPlugin extends Plugin {
       if (this.config.onJobStart) {
         await this._executeHook(this.config.onJobStart, jobName, context);
       }
-      this.emit("job_start", { jobName, executionId, startTime });
+      this.emit("plg:scheduler:job-start", { jobName, executionId, startTime });
       let attempt = 0;
       let lastError = null;
       let result = null;
@@ -30050,7 +30042,7 @@ class SchedulerPlugin extends Plugin {
       } else if (status !== "success" && this.config.onJobError) {
         await this._executeHook(this.config.onJobError, jobName, lastError, attempt);
       }
-      this.emit("job_complete", {
+      this.emit("plg:scheduler:job-complete", {
         jobName,
         executionId,
         status,
@@ -30136,7 +30128,7 @@ class SchedulerPlugin extends Plugin {
     }
     job.enabled = true;
     this._scheduleNextExecution(jobName);
-    this.emit("job_enabled", { jobName });
+    this.emit("plg:scheduler:job-enabled", { jobName });
   }
   /**
    * Disable a job
@@ -30157,7 +30149,7 @@ class SchedulerPlugin extends Plugin {
       clearTimeout(timer);
       this.timers.delete(jobName);
     }
-    this.emit("job_disabled", { jobName });
+    this.emit("plg:scheduler:job-disabled", { jobName });
   }
   /**
    * Get job status and statistics
@@ -30295,7 +30287,7 @@ class SchedulerPlugin extends Plugin {
     if (job.enabled) {
       this._scheduleNextExecution(jobName);
     }
-    this.emit("job_added", { jobName });
+    this.emit("plg:scheduler:job-added", { jobName });
   }
   /**
    * Remove a job
@@ -30318,7 +30310,7 @@ class SchedulerPlugin extends Plugin {
     this.jobs.delete(jobName);
     this.statistics.delete(jobName);
     this.activeJobs.delete(jobName);
-    this.emit("job_removed", { jobName });
+    this.emit("plg:scheduler:job-removed", { jobName });
   }
   /**
    * Get plugin instance by name (for job actions that need other plugins)
@@ -30629,7 +30621,7 @@ class StateMachinePlugin extends Plugin {
       });
     }
     await this._setupTriggers();
-    this.emit("initialized", { machines: Array.from(this.machines.keys()) });
+    this.emit("db:plugin:initialized", { machines: Array.from(this.machines.keys()) });
   }
   async _createStateResources() {
     const [logOk] = await tryFn(() => this.database.createResource({
@@ -30725,7 +30717,7 @@ class StateMachinePlugin extends Plugin {
       if (targetStateConfig && targetStateConfig.entry) {
         await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
       }
-      this.emit("transition", {
+      this.emit("plg:state-machine:transition", {
         machineId,
         entityId,
         from: currentState,
@@ -30766,7 +30758,7 @@ class StateMachinePlugin extends Plugin {
       try {
         const result = await action(context, event, { database: this.database, machineId, entityId });
         if (attempt > 0) {
-          this.emit("action_retry_success", {
+          this.emit("plg:state-machine:action-retry-success", {
             machineId,
             entityId,
             action: actionName,
@@ -30783,7 +30775,7 @@ class StateMachinePlugin extends Plugin {
           if (this.config.verbose) {
             console.error(`[StateMachinePlugin] Action '${actionName}' failed:`, error.message);
           }
-          this.emit("action_error", { actionName, error: error.message, machineId, entityId });
+          this.emit("plg:state-machine:action-error", { actionName, error: error.message, machineId, entityId });
           return;
         }
         const classification = ErrorClassifier.classify(error, {
@@ -30791,7 +30783,7 @@ class StateMachinePlugin extends Plugin {
           nonRetriableErrors: retryConfig.nonRetriableErrors
         });
         if (classification === "NON_RETRIABLE") {
-          this.emit("action_error_non_retriable", {
+          this.emit("plg:state-machine:action-error-non-retriable", {
             machineId,
             entityId,
             action: actionName,
@@ -30804,7 +30796,7 @@ class StateMachinePlugin extends Plugin {
           throw error;
         }
         if (attempt >= maxAttempts) {
-          this.emit("action_retry_exhausted", {
+          this.emit("plg:state-machine:action-retry-exhausted", {
             machineId,
             entityId,
             action: actionName,
@@ -30828,7 +30820,7 @@ class StateMachinePlugin extends Plugin {
             }
           }
         }
-        this.emit("action_retry_attempt", {
+        this.emit("plg:state-machine:action-retry-attempt", {
           machineId,
           entityId,
           action: actionName,
@@ -31089,7 +31081,7 @@ class StateMachinePlugin extends Plugin {
     if (initialStateConfig && initialStateConfig.entry) {
       await this._executeAction(initialStateConfig.entry, context, "INIT", machineId, entityId);
     }
-    this.emit("entity_initialized", { machineId, entityId, initialState });
+    this.emit("plg:state-machine:entity-initialized", { machineId, entityId, initialState });
     return initialState;
   }
   /**
@@ -31286,7 +31278,7 @@ class StateMachinePlugin extends Plugin {
                 triggerResult: result
               });
             }
-            this.emit("trigger_executed", {
+            this.emit("plg:state-machine:trigger-executed", {
               machineId,
               entityId: entity.entityId,
               state: stateName,
@@ -31340,7 +31332,7 @@ class StateMachinePlugin extends Plugin {
                 triggerResult: result
               });
             }
-            this.emit("trigger_executed", {
+            this.emit("plg:state-machine:trigger-executed", {
               machineId,
               entityId: entity.entityId,
               state: stateName,
@@ -31386,7 +31378,7 @@ class StateMachinePlugin extends Plugin {
                 triggerResult: result
               });
             }
-            this.emit("trigger_executed", {
+            this.emit("plg:state-machine:trigger-executed", {
               machineId,
               entityId: entity.entityId,
               state: stateName,
@@ -31441,7 +31433,7 @@ class StateMachinePlugin extends Plugin {
               eventData
             });
           }
-          this.emit("trigger_executed", {
+          this.emit("plg:state-machine:trigger-executed", {
             machineId,
             entityId: entity.entityId,
             state: stateName,
@@ -41754,7 +41746,7 @@ class TTLPlugin extends Plugin {
     if (this.verbose) {
       console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
     }
-    this.emit("installed", {
+    this.emit("db:plugin:installed", {
       plugin: "TTLPlugin",
       resources: Object.keys(this.resources)
     });
@@ -41991,7 +41983,7 @@ class TTLPlugin extends Plugin {
       }
       this.stats.lastScanAt = (/* @__PURE__ */ new Date()).toISOString();
       this.stats.lastScanDuration = Date.now() - startTime;
-      this.emit("scanCompleted", {
+      this.emit("plg:ttl:scan-completed", {
         granularity,
         duration: this.stats.lastScanDuration,
         cohorts
@@ -41999,7 +41991,7 @@ class TTLPlugin extends Plugin {
     } catch (error) {
       console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
       this.stats.totalErrors++;
-      this.emit("cleanupError", { granularity, error });
+      this.emit("plg:ttl:cleanup-error", { granularity, error });
     }
   }
   /**
@@ -42047,7 +42039,7 @@ class TTLPlugin extends Plugin {
       }
       await this.expirationIndex.delete(entry.id);
       this.stats.totalExpired++;
-      this.emit("recordExpired", { resource: entry.resourceName, record });
+      this.emit("plg:ttl:record-expired", { resource: entry.resourceName, record });
     } catch (error) {
       console.error(`[TTLPlugin] Error processing expired entry:`, error);
       this.stats.totalErrors++;
@@ -42518,15 +42510,15 @@ class VectorPlugin extends Plugin {
     this._throttleState = /* @__PURE__ */ new Map();
   }
   async onInstall() {
-    this.emit("installed", { plugin: "VectorPlugin" });
+    this.emit("db:plugin:installed", { plugin: "VectorPlugin" });
     this.validateVectorStorage();
     this.installResourceMethods();
   }
   async onStart() {
-    this.emit("started", { plugin: "VectorPlugin" });
+    this.emit("db:plugin:started", { plugin: "VectorPlugin" });
   }
   async onStop() {
-    this.emit("stopped", { plugin: "VectorPlugin" });
+    this.emit("db:plugin:stopped", { plugin: "VectorPlugin" });
   }
   async onUninstall(options) {
     for (const resource of Object.values(this.database.resources)) {
@@ -42537,7 +42529,7 @@ class VectorPlugin extends Plugin {
       delete resource.findSimilar;
       delete resource.distance;
     }
-    this.emit("uninstalled", { plugin: "VectorPlugin" });
+    this.emit("db:plugin:uninstalled", { plugin: "VectorPlugin" });
   }
   /**
    * Validate vector storage configuration for all resources
@@ -42566,10 +42558,10 @@ class VectorPlugin extends Plugin {
             currentBehavior: resource.behavior || "default",
             recommendation: "body-overflow"
           };
-          this.emit("vector:storage-warning", warning);
+          this.emit("plg:vector:storage-warning", warning);
           if (this.config.autoFixBehavior) {
             resource.behavior = "body-overflow";
-            this.emit("vector:behavior-fixed", {
+            this.emit("plg:vector:behavior-fixed", {
               resource: resource.name,
               newBehavior: "body-overflow"
             });
@@ -42601,7 +42593,7 @@ class VectorPlugin extends Plugin {
       const partitionName = `byHas${this.capitalize(vectorField.name.replace(/\./g, "_"))}`;
       const trackingFieldName = `_has${this.capitalize(vectorField.name.replace(/\./g, "_"))}`;
       if (resource.config.partitions && resource.config.partitions[partitionName]) {
-        this.emit("vector:partition-exists", {
+        this.emit("plg:vector:partition-exists", {
           resource: resource.name,
           vectorField: vectorField.name,
           partition: partitionName,
@@ -42624,7 +42616,7 @@ class VectorPlugin extends Plugin {
           default: false
         }, "VectorPlugin");
       }
-      this.emit("vector:partition-created", {
+      this.emit("plg:vector:partition-created", {
         resource: resource.name,
         vectorField: vectorField.name,
         partition: partitionName,
@@ -42699,7 +42691,7 @@ class VectorPlugin extends Plugin {
       }
       return updates;
     });
-    this.emit("vector:hooks-installed", {
+    this.emit("plg:vector:hooks-installed", {
       resource: resource.name,
       vectorField,
       trackingField,
@@ -42808,7 +42800,7 @@ class VectorPlugin extends Plugin {
     const vectorField = this._findEmbeddingField(resource.schema.attributes);
     this._vectorFieldCache.set(resource.name, vectorField);
     if (vectorField && this.config.emitEvents) {
-      this.emit("vector:field-detected", {
+      this.emit("plg:vector:field-detected", {
         resource: resource.name,
         vectorField,
         timestamp: Date.now()
@@ -43732,7 +43724,7 @@ class MemoryClient extends EventEmitter {
   async sendCommand(command) {
     const commandName = command.constructor.name;
     const input = command.input || {};
-    this.emit("command.request", commandName, input);
+    this.emit("cl:request", commandName, input);
     let response;
     try {
       switch (commandName) {
@@ -43760,7 +43752,7 @@ class MemoryClient extends EventEmitter {
         default:
           throw new Error(`Unsupported command: ${commandName}`);
       }
-      this.emit("command.response", commandName, response, input);
+      this.emit("cl:response", commandName, response, input);
       return response;
     } catch (error) {
       const mappedError = mapAwsError(error, {
@@ -43871,7 +43863,7 @@ class MemoryClient extends EventEmitter {
       contentLength,
       ifMatch
     });
-    this.emit("putObject", null, { key, metadata, contentType, body, contentEncoding, contentLength });
+    this.emit("cl:PutObject", null, { key, metadata, contentType, body, contentEncoding, contentLength });
     return response;
   }
   /**
@@ -43886,7 +43878,7 @@ class MemoryClient extends EventEmitter {
         decodedMetadata[k] = metadataDecode(v);
       }
     }
-    this.emit("getObject", null, { key });
+    this.emit("cl:GetObject", null, { key });
     return {
       ...response,
       Metadata: decodedMetadata
@@ -43904,7 +43896,7 @@ class MemoryClient extends EventEmitter {
         decodedMetadata[k] = metadataDecode(v);
       }
     }
-    this.emit("headObject", null, { key });
+    this.emit("cl:HeadObject", null, { key });
     return {
       ...response,
       Metadata: decodedMetadata
@@ -43929,7 +43921,7 @@ class MemoryClient extends EventEmitter {
       metadataDirective,
       contentType
     });
-    this.emit("copyObject", null, { from, to, metadata, metadataDirective });
+    this.emit("cl:CopyObject", null, { from, to, metadata, metadataDirective });
     return response;
   }
   /**
@@ -43945,7 +43937,7 @@ class MemoryClient extends EventEmitter {
   async deleteObject(key) {
     const fullKey = this.keyPrefix ? path$1.join(this.keyPrefix, key) : key;
     const response = await this.storage.delete(fullKey);
-    this.emit("deleteObject", null, { key });
+    this.emit("cl:DeleteObject", null, { key });
     return response;
   }
   /**
@@ -43978,7 +43970,7 @@ class MemoryClient extends EventEmitter {
       maxKeys,
       continuationToken
     });
-    this.emit("listObjects", null, { prefix, count: response.Contents.length });
+    this.emit("cl:ListObjects", null, { prefix, count: response.Contents.length });
     return response;
   }
   /**
@@ -44018,7 +44010,7 @@ class MemoryClient extends EventEmitter {
     if (this.keyPrefix) {
       keys = keys.map((x) => x.replace(this.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace("/", "") : x);
     }
-    this.emit("getKeysPage", keys, params);
+    this.emit("cl:GetKeysPage", keys, params);
     return keys;
   }
   /**
@@ -44035,7 +44027,7 @@ class MemoryClient extends EventEmitter {
     if (this.keyPrefix) {
       keys = keys.map((x) => x.replace(this.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace("/", "") : x);
     }
-    this.emit("getAllKeys", keys, { prefix });
+    this.emit("cl:GetAllKeys", keys, { prefix });
     return keys;
   }
   /**
@@ -44044,7 +44036,7 @@ class MemoryClient extends EventEmitter {
   async count({ prefix = "" } = {}) {
     const keys = await this.getAllKeys({ prefix });
     const count = keys.length;
-    this.emit("count", count, { prefix });
+    this.emit("cl:Count", count, { prefix });
     return count;
   }
   /**
@@ -44056,13 +44048,13 @@ class MemoryClient extends EventEmitter {
     if (keys.length > 0) {
       const result = await this.deleteObjects(keys);
       totalDeleted = result.Deleted.length;
-      this.emit("deleteAll", {
+      this.emit("cl:DeleteAll", {
         prefix,
         batch: totalDeleted,
         total: totalDeleted
       });
     }
-    this.emit("deleteAllComplete", {
+    this.emit("cl:DeleteAllComplete", {
       prefix,
       totalDeleted
     });
@@ -44075,11 +44067,11 @@ class MemoryClient extends EventEmitter {
     if (offset === 0) return null;
     const keys = await this.getAllKeys({ prefix });
     if (offset >= keys.length) {
-      this.emit("getContinuationTokenAfterOffset", null, { prefix, offset });
+      this.emit("cl:GetContinuationTokenAfterOffset", null, { prefix, offset });
       return null;
     }
     const token = keys[offset];
-    this.emit("getContinuationTokenAfterOffset", token, { prefix, offset });
+    this.emit("cl:GetContinuationTokenAfterOffset", token, { prefix, offset });
     return token;
   }
   /**
@@ -44109,7 +44101,7 @@ class MemoryClient extends EventEmitter {
         });
       }
     }
-    this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+    this.emit("cl:MoveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
       const error = new Error("Some objects could not be moved");
       error.context = {

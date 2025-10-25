@@ -194,7 +194,7 @@ export class StateMachinePlugin extends Plugin {
     // Setup trigger system if enabled
     await this._setupTriggers();
 
-    this.emit('initialized', { machines: Array.from(this.machines.keys()) });
+    this.emit('db:plugin:initialized', { machines: Array.from(this.machines.keys()) });
   }
 
   async _createStateResources() {
@@ -310,7 +310,7 @@ export class StateMachinePlugin extends Plugin {
         await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
       }
 
-      this.emit('transition', {
+      this.emit('plg:state-machine:transition', {
         machineId,
         entityId,
         from: currentState,
@@ -363,7 +363,7 @@ export class StateMachinePlugin extends Plugin {
 
         // Success - log retry statistics if retried
         if (attempt > 0) {
-          this.emit('action_retry_success', {
+          this.emit('plg:state-machine:action-retry-success', {
             machineId,
             entityId,
             action: actionName,
@@ -386,7 +386,7 @@ export class StateMachinePlugin extends Plugin {
           if (this.config.verbose) {
             console.error(`[StateMachinePlugin] Action '${actionName}' failed:`, error.message);
           }
-          this.emit('action_error', { actionName, error: error.message, machineId, entityId });
+          this.emit('plg:state-machine:action-error', { actionName, error: error.message, machineId, entityId });
           return; // Don't throw, continue execution
         }
 
@@ -398,7 +398,7 @@ export class StateMachinePlugin extends Plugin {
 
         // Non-retriable error - fail immediately
         if (classification === 'NON_RETRIABLE') {
-          this.emit('action_error_non_retriable', {
+          this.emit('plg:state-machine:action-error-non-retriable', {
             machineId,
             entityId,
             action: actionName,
@@ -415,7 +415,7 @@ export class StateMachinePlugin extends Plugin {
 
         // Max attempts reached
         if (attempt >= maxAttempts) {
-          this.emit('action_retry_exhausted', {
+          this.emit('plg:state-machine:action-retry-exhausted', {
             machineId,
             entityId,
             action: actionName,
@@ -448,7 +448,7 @@ export class StateMachinePlugin extends Plugin {
           }
         }
 
-        this.emit('action_retry_attempt', {
+        this.emit('plg:state-machine:action-retry-attempt', {
           machineId,
           entityId,
           action: actionName,
@@ -774,7 +774,7 @@ export class StateMachinePlugin extends Plugin {
       await this._executeAction(initialStateConfig.entry, context, 'INIT', machineId, entityId);
     }
 
-    this.emit('entity_initialized', { machineId, entityId, initialState });
+    this.emit('plg:state-machine:entity-initialized', { machineId, entityId, initialState });
 
     return initialState;
   }
@@ -1018,7 +1018,7 @@ export class StateMachinePlugin extends Plugin {
               });
             }
 
-            this.emit('trigger_executed', {
+            this.emit('plg:state-machine:trigger-executed', {
               machineId,
               entityId: entity.entityId,
               state: stateName,
@@ -1089,7 +1089,7 @@ export class StateMachinePlugin extends Plugin {
               });
             }
 
-            this.emit('trigger_executed', {
+            this.emit('plg:state-machine:trigger-executed', {
               machineId,
               entityId: entity.entityId,
               state: stateName,
@@ -1146,7 +1146,7 @@ export class StateMachinePlugin extends Plugin {
               });
             }
 
-            this.emit('trigger_executed', {
+            this.emit('plg:state-machine:trigger-executed', {
               machineId,
               entityId: entity.entityId,
               state: stateName,
@@ -1215,7 +1215,7 @@ export class StateMachinePlugin extends Plugin {
             });
           }
 
-          this.emit('trigger_executed', {
+          this.emit('plg:state-machine:trigger-executed', {
             machineId,
             entityId: entity.entityId,
             state: stateName,

@@ -350,7 +350,7 @@ export class RelationPlugin extends Plugin {
       console.log(`[RelationPlugin] Installed with ${Object.keys(this.relations).length} resources`);
     }
 
-    this.emit('installed', {
+    this.emit('db:plugin:installed', {
       plugin: 'RelationPlugin',
       resources: Object.keys(this.relations)
     });

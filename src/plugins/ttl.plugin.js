@@ -200,7 +200,7 @@ export class TTLPlugin extends Plugin {
       console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
     }
 
-    this.emit('installed', {
+    this.emit('db:plugin:installed', {
       plugin: 'TTLPlugin',
       resources: Object.keys(this.resources)
     });
@@ -512,7 +512,7 @@ export class TTLPlugin extends Plugin {
       this.stats.lastScanAt = new Date().toISOString();
       this.stats.lastScanDuration = Date.now() - startTime;
 
-      this.emit('scanCompleted', {
+      this.emit('plg:ttl:scan-completed', {
         granularity,
         duration: this.stats.lastScanDuration,
         cohorts
@@ -520,7 +520,7 @@ export class TTLPlugin extends Plugin {
     } catch (error) {
       console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
       this.stats.totalErrors++;
-      this.emit('cleanupError', { granularity, error });
+      this.emit('plg:ttl:cleanup-error', { granularity, error });
     }
   }
 
@@ -585,7 +585,7 @@ export class TTLPlugin extends Plugin {
       await this.expirationIndex.delete(entry.id);
 
       this.stats.totalExpired++;
-      this.emit('recordExpired', { resource: entry.resourceName, record });
+      this.emit('plg:ttl:record-expired', { resource: entry.resourceName, record });
     } catch (error) {
       console.error(`[TTLPlugin] Error processing expired entry:`, error);
       this.stats.totalErrors++;
