@@ -975,7 +975,7 @@ Intercept and transform method calls:
 
 ```javascript
 // Authentication middleware
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   if (!ctx.args[0].userId) {
     throw new Error('Authentication required');
   }
@@ -983,7 +983,7 @@ users.useMiddleware('insert', async (ctx, next) => {
 });
 
 // Logging middleware
-users.useMiddleware('update', async (ctx, next) => {
+users.useMiddleware('updated', async (ctx, next) => {
   const start = Date.now();
   const result = await next();
   console.log(`Update took ${Date.now() - start}ms`);
@@ -991,14 +991,14 @@ users.useMiddleware('update', async (ctx, next) => {
 });
 
 // Validation middleware
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   ctx.args[0].name = ctx.args[0].name.toUpperCase();
   return await next();
 });
 ```
 
 **Supported methods:**
-`get`, `list`, `insert`, `update`, `delete`, `deleteMany`, `exists`, `getMany`, `count`, `page`, `listIds`, `getAll`
+`fetched`, `list`, `inserted`, `updated`, `deleted`, `deleteMany`, `exists`, `getMany`, `count`, `page`, `listIds`, `getAll`
 
 ### Events (Real-time Notifications)
 
@@ -1031,13 +1031,13 @@ const users = await db.createResource({
 });
 
 // Programmatic listeners
-users.on('insert', (event) => {
+users.on('inserted', (event) => {
   sendWelcomeEmail(event.email);
 });
 ```
 
 **Available events:**
-`insert`, `update`, `delete`, `insertMany`, `deleteMany`, `list`, `count`, `get`, `getMany`
+`inserted`, `updated`, `deleted`, `insertMany`, `deleteMany`, `list`, `count`, `fetched`, `getMany`
 
 ### Streaming API
 
@@ -1221,13 +1221,13 @@ const orders = await db.createResource({
 });
 
 // Add middlewares for cross-cutting concerns
-orders.useMiddleware('insert', async (ctx, next) => {
+orders.useMiddleware('inserted', async (ctx, next) => {
   // Rate limiting
   await checkRateLimit(ctx.args[0].userId);
   return await next();
 });
 
-orders.useMiddleware('update', async (ctx, next) => {
+orders.useMiddleware('updated', async (ctx, next) => {
   // Audit logging
   const start = Date.now();
   const result = await next();
@@ -1327,7 +1327,7 @@ export class MyPlugin extends Plugin {
     console.log('Plugin initialized!');
 
     // Wrap methods
-    this.wrapMethod('Resource', 'insert', async (original, resource, args) => {
+    this.wrapMethod('Resource', 'inserted', async (original, resource, args) => {
       console.log(`Inserting into ${resource.name}`);
       const result = await original(...args);
       console.log(`Inserted: ${result.id}`);

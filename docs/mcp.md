@@ -1967,7 +1967,7 @@ You know your setup is working when:
 2. **Monitor costs**: Use `dbGetStats` regularly to track S3 expenses
 3. **Optimize partitions**: Design partitions based on query patterns
 4. **Cache wisely**: Filesystem cache survives restarts, memory cache is faster
-5. **Use batch operations**: `insertMany` is much faster than multiple `insert` calls
+5. **Use batch operations**: `insertMany` is much faster than multiple `inserted` calls
 
 ---
 

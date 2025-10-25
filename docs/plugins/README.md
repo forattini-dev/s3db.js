@@ -60,7 +60,7 @@ const db = new S3db({
     new CachePlugin({ driver: 'memory', config: { maxSize: 1000 } }),
 
     // Monitoring
-    new AuditPlugin({ trackOperations: ['insert', 'update', 'delete'] }),
+    new AuditPlugin({ trackOperations: ['inserted', 'updated', 'deleted'] }),
     new MetricsPlugin({ trackLatency: true }),
 
     // Cost tracking (no config needed)
@@ -1126,11 +1126,11 @@ this.database.addHook('afterCreateResource', async ({ resource }) => {
 Plugins can listen to resource-level events:
 
 ```javascript
-resource.on('insert', async (data) => {
+resource.on('inserted', async (data) => {
   // React to insert operations
 });
 
-resource.on('update', async (id, changes) => {
+resource.on('updated', async (id, changes) => {
   // React to updates
 });
 ```
@@ -2094,7 +2094,7 @@ const productionPlugins = [
   // Monitoring and compliance
   new AuditPlugin({ 
     includeData: true,
-    trackOperations: ['insert', 'update', 'delete']
+    trackOperations: ['inserted', 'updated', 'deleted']
   }),
   new MetricsPlugin({ 
     collectPerformance: true,
@@ -2219,7 +2219,7 @@ const ecommercePlugins = [
   
   // Audit and compliance
   new AuditPlugin({
-    trackOperations: ['insert', 'update', 'delete'],
+    trackOperations: ['inserted', 'updated', 'deleted'],
     includeData: true
   }),
   

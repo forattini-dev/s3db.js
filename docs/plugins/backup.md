@@ -916,15 +916,15 @@ const backupPlugin = new BackupPlugin({
 });
 
 // Event listeners
-backupPlugin.on('backup_start', ({ id, type }) => {
+backupPlugin.on('plg:backup:start', ({ id, type }) => {
   updateDashboard(`Backup ${id} started`);
 });
 
-backupPlugin.on('backup_complete', ({ id, type, size, duration }) => {
+backupPlugin.on('plg:backup:complete', ({ id, type, size, duration }) => {
   metrics.record('backup.completed', { type, size, duration });
 });
 
-backupPlugin.on('restore_complete', ({ id, restored }) => {
+backupPlugin.on('plg:backup:restore-complete', ({ id, restored }) => {
   console.log(`Restored ${restored.length} resources from ${id}`);
 });
 ```
@@ -1412,7 +1412,7 @@ try {
 | `backup` | Disk space, permissions, network | Check storage space, verify credentials |
 | `restore` | Missing backup, corruption | Verify backup exists and is valid |
 | `list` | Storage access denied | Check S3/filesystem permissions |
-| `delete` | Backup in use, permissions | Ensure backup is not being accessed |
+| `deleted` | Backup in use, permissions | Ensure backup is not being accessed |
 | `cleanup` | Retention policy error | Verify retention configuration |
 
 For complete error details, see [Error Classes Reference](../errors.md#backuperror).

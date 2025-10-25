@@ -309,11 +309,11 @@ const emailQueue = new S3QueuePlugin({
 await db.usePlugin(emailQueue);
 
 // Listen to events
-emailQueue.on('message.completed', (event) => {
+emailQueue.on('plg:s3-queue:message-completed', (event) => {
   console.log(`✅ Completed in ${event.duration}ms`);
 });
 
-emailQueue.on('message.dead', (event) => {
+emailQueue.on('plg:s3-queue:message-dead', (event) => {
   console.log(`💀 Message failed after ${event.attempts} attempts`);
   // Alert admins
 });
@@ -1415,49 +1415,49 @@ onMessage: async (record, context) => {
 const queue = new S3QueuePlugin({ ... });
 
 // Message enqueued
-queue.on('message.enqueued', (event) => {
+queue.on('plg:s3-queue:message-enqueued', (event) => {
   console.log(`📨 Enqueued: ${event.id}`);
   // { id, queueId }
 });
 
 // Message claimed by worker
-queue.on('message.claimed', (event) => {
+queue.on('plg:s3-queue:message-claimed', (event) => {
   console.log(`🔒 Claimed: ${event.queueId}`);
   // { queueId, workerId, attempts }
 });
 
 // Processing started
-queue.on('message.processing', (event) => {
+queue.on('plg:s3-queue:message-processing', (event) => {
   console.log(`⚙️ Processing: ${event.queueId}`);
   // { queueId, workerId }
 });
 
 // Message completed
-queue.on('message.completed', (event) => {
+queue.on('plg:s3-queue:message-completed', (event) => {
   console.log(`✅ Completed in ${event.duration}ms`);
   // { queueId, duration, attempts, result }
 });
 
 // Retry scheduled
-queue.on('message.retry', (event) => {
+queue.on('plg:s3-queue:message-retry', (event) => {
   console.log(`🔄 Retry ${event.attempts}/${event.maxAttempts}`);
   // { queueId, error, attempts, maxAttempts, nextVisibleAt }
 });
 
 // Moved to dead letter queue
-queue.on('message.dead', (event) => {
+queue.on('plg:s3-queue:message-dead', (event) => {
   console.log(`💀 Dead letter: ${event.queueId}`);
   // { queueId, originalId, error, attempts }
 });
 
 // Workers started
-queue.on('workers.started', (event) => {
+queue.on('plg:s3-queue:workers-started', (event) => {
   console.log(`🚀 Started ${event.concurrency} workers`);
   // { concurrency, workerId }
 });
 
 // Workers stopped
-queue.on('workers.stopped', (event) => {
+queue.on('plg:s3-queue:workers-stopped', (event) => {
   console.log(`🛑 Workers stopped`);
   // { workerId }
 });
@@ -1474,18 +1474,18 @@ const metrics = {
   totalDuration: 0
 };
 
-queue.on('message.enqueued', () => {
+queue.on('plg:s3-queue:message-enqueued', () => {
   metrics.enqueued++;
   updateDashboard();
 });
 
-queue.on('message.completed', (event) => {
+queue.on('plg:s3-queue:message-completed', (event) => {
   metrics.completed++;
   metrics.totalDuration += event.duration;
   updateDashboard();
 });
 
-queue.on('message.dead', () => {
+queue.on('plg:s3-queue:message-dead', () => {
   metrics.failed++;
   updateDashboard();
   alertAdmins();
@@ -2108,12 +2108,12 @@ const queue = new S3QueuePlugin({
 });
 
 // Monitor all events
-queue.on('message.enqueued', e => console.log('📨 Enqueued:', e));
-queue.on('message.claimed', e => console.log('🔒 Claimed:', e));
-queue.on('message.processing', e => console.log('⚙️ Processing:', e));
-queue.on('message.completed', e => console.log('✅ Completed:', e));
-queue.on('message.retry', e => console.log('🔄 Retry:', e));
-queue.on('message.dead', e => console.log('💀 Dead:', e));
+queue.on('plg:s3-queue:message-enqueued', e => console.log('📨 Enqueued:', e));
+queue.on('plg:s3-queue:message-claimed', e => console.log('🔒 Claimed:', e));
+queue.on('plg:s3-queue:message-processing', e => console.log('⚙️ Processing:', e));
+queue.on('plg:s3-queue:message-completed', e => console.log('✅ Completed:', e));
+queue.on('plg:s3-queue:message-retry', e => console.log('🔄 Retry:', e));
+queue.on('plg:s3-queue:message-dead', e => console.log('💀 Dead:', e));
 ```
 
 ---

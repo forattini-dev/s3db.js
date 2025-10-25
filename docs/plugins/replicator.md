@@ -311,9 +311,9 @@ await users.delete('user-2');
 // → Delete replicated in ~2s
 
 // Step 5: Monitor replication status
-replicatorPlugin.on('replicated', (event) => {
+replicatorPlugin.on('plg:replicator:replicated', (event) => {
   console.log('Replicated:', event);
-  // { operation: 'insert', resource: 'users', recordId: 'user-1', duration: 156 }
+  // { operation: 'inserted', resource: 'users', recordId: 'user-1', duration: 156 }
 });
 
 replicatorPlugin.on('replicationError', (error) => {
@@ -417,7 +417,7 @@ new ReplicatorPlugin({
           // password: OMITTED
           created_at: new Date().toISOString()
         }),
-        actions: ['insert', 'update']  // Don't replicate deletes
+        actions: ['inserted', 'updated']  // Don't replicate deletes
       }
     },
     config: { connectionString: 's3://...' }
@@ -475,7 +475,7 @@ new ReplicatorPlugin({
       driver: 'webhook',
       resources: {
         users: {
-          actions: ['insert'],  // Only new users
+          actions: ['inserted'],  // Only new users
           transform: (data) => ({
             user_id: data.id,
             email: data.email,
@@ -543,7 +543,7 @@ new ReplicatorPlugin({
       orders: {
         // Only replicate completed orders
         shouldReplicate: (data, action) => {
-          if (action === 'delete') return false;  // Never replicate deletes
+          if (action === 'deleted') return false;  // Never replicate deletes
           if (data.status !== 'completed') return false;  // Only completed
           if (data.total < 100) return false;  // Only orders > $100
           return true;
@@ -756,7 +756,7 @@ Replicate to another S3DB instance with **advanced resource mapping and transfor
         original_source: 'production',
         migrated_at: new Date().toISOString()
       }),
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     }
   }
 }
@@ -795,7 +795,7 @@ resources: {
       migrated_at: new Date().toISOString(),
       source_system: 'production'
     }),
-    actions: ['insert', 'update', 'delete']  // Optional: which operations to replicate
+    actions: ['inserted', 'updated', 'deleted']  // Optional: which operations to replicate
   }
 }
 ```
@@ -1283,14 +1283,14 @@ BigQuery has a **90-minute streaming buffer window** where recently inserted dat
     transactions: {
       table: 'transactions_audit',
       mutability: 'immutable',
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     },
 
     // Override to mutable for traditional behavior
     cache: {
       table: 'cache_table',
       mutability: 'mutable',
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     }
   }
 }
@@ -1398,13 +1398,13 @@ pnpm add mysql2
     // Multiple actions
     products: [{
       table: 'products',
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     }],
 
     // Multiple tables for same resource
     orders: [
-      { table: 'orders_current', actions: ['insert', 'update'] },
-      { table: 'orders_archive', actions: ['insert'] }
+      { table: 'orders_current', actions: ['inserted', 'updated'] },
+      { table: 'orders_archive', actions: ['inserted'] }
     ]
   }
 }
@@ -1471,7 +1471,7 @@ pnpm add @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
     products: {
       table: 'ProductsTable',
       primaryKey: 'productId',
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     },
 
     // Composite key (partition key + sort key)
@@ -1479,13 +1479,13 @@ pnpm add @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
       table: 'OrdersTable',
       primaryKey: 'customerId',  // Partition key
       sortKey: 'orderId',        // Sort key
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     },
 
     // Multiple tables
     analytics: [
-      { table: 'Analytics_Current', primaryKey: 'eventId', actions: ['insert'] },
-      { table: 'Analytics_Archive', primaryKey: 'eventId', actions: ['insert'] }
+      { table: 'Analytics_Current', primaryKey: 'eventId', actions: ['inserted'] },
+      { table: 'Analytics_Archive', primaryKey: 'eventId', actions: ['inserted'] }
     ]
   }
 }
@@ -1604,13 +1604,13 @@ pnpm add mongodb
     // Multiple actions
     products: {
       collection: 'products',
-      actions: ['insert', 'update', 'delete']
+      actions: ['inserted', 'updated', 'deleted']
     },
 
     // Multiple collections
     orders: [
-      { collection: 'orders_active', actions: ['insert', 'update'] },
-      { collection: 'orders_archive', actions: ['insert'] }
+      { collection: 'orders_active', actions: ['inserted', 'updated'] },
+      { collection: 'orders_archive', actions: ['inserted'] }
     ]
   }
 }
@@ -1778,12 +1778,12 @@ const transformationExamples = {
 const replicatorPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicatorPlugin');
 
 // Success events
-replicatorPlugin.on('replicated', (data) => {
+replicatorPlugin.on('plg:replicator:replicated', (data) => {
   console.log(`✅ Replicated: ${data.operation} on ${data.resourceName} to ${data.replicator}`);
 });
 
 // Error events
-replicatorPlugin.on('replicator_error', (data) => {
+replicatorPlugin.on('plg:replicator:error', (data) => {
   console.error(`❌ Replication failed: ${data.error} (${data.resourceName})`);
 });
 
@@ -1907,7 +1907,7 @@ transform: (data) => {
   resources: {
     users: {
       resource: 'user_backup',
-      actions: ['insert', 'update'], // Skip deletes
+      actions: ['inserted', 'updated'], // Skip deletes
       transform: (data) => ({ ...data, backup_timestamp: Date.now() })
     }
   }
@@ -1925,11 +1925,11 @@ const replicationMetrics = {
   startTime: Date.now()
 };
 
-replicatorPlugin.on('replicated', () => {
+replicatorPlugin.on('plg:replicator:replicated', () => {
   replicationMetrics.successful++;
 });
 
-replicatorPlugin.on('replicator_error', (data) => {
+replicatorPlugin.on('plg:replicator:error', (data) => {
   replicationMetrics.failed++;
   
   // Alert on high error rates
@@ -2109,7 +2109,7 @@ resources: {
 }
 
 // Monitor transform failures
-replicatorPlugin.on('replicator_error', (data) => {
+replicatorPlugin.on('plg:replicator:error', (data) => {
   if (data.error.includes('Transform function failed')) {
     console.error(`Transform failed for ${data.resourceName}:`, data.error);
     // Log to external monitoring
@@ -2124,7 +2124,7 @@ replicatorPlugin.on('replicator_error', (data) => {
 **Recovery**:
 ```javascript
 // Monitor connection errors
-replicatorPlugin.on('replicator_error', async (data) => {
+replicatorPlugin.on('plg:replicator:error', async (data) => {
   if (data.error.includes('Connection failed')) {
     console.error(`Replicator ${data.replicator} connection failed`);
 
@@ -2164,7 +2164,7 @@ async function safeReplicateBatch(replicator, resourceName, records) {
       const results = [];
       for (const record of records) {
         try {
-          await replicator.replicate(resourceName, 'insert', record, record.id);
+          await replicator.replicate(resourceName, 'inserted', record, record.id);
           results.push({ success: true, id: record.id });
         } catch (err) {
           results.push({ success: false, id: record.id, error: err.message });
@@ -2197,7 +2197,7 @@ await database.createResource({
 });
 
 // Monitor replication errors
-replicatorPlugin.on('replicator_error', async (data) => {
+replicatorPlugin.on('plg:replicator:error', async (data) => {
   const attempts = (errorAttempts.get(data.recordId) || 0) + 1;
   errorAttempts.set(data.recordId, attempts);
 
@@ -2362,11 +2362,11 @@ R: A replicação é automática e em tempo real via eventos. Para sincronizaç�
 **P: Como obter estatísticas de replicação?**
 R: Monitore eventos:
 ```javascript
-replicatorPlugin.on('replicated', (data) => {
+replicatorPlugin.on('plg:replicator:replicated', (data) => {
   console.log(`Replicated: ${data.operation} on ${data.resourceName}`);
 });
 
-replicatorPlugin.on('replicator_error', (data) => {
+replicatorPlugin.on('plg:replicator:error', (data) => {
   console.error(`Failed: ${data.error}`);
 });
 ```
@@ -2377,7 +2377,7 @@ R: Use a opção `actions`:
 resources: {
   users: {
     resource: 'users_backup',
-    actions: ['insert', 'update']  // Skip deletes
+    actions: ['inserted', 'updated']  // Skip deletes
   }
 }
 ```
