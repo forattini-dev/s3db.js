@@ -865,7 +865,7 @@ A: Depende do seu caso de uso:
 - `s3`: Multi-server/distributed (compartilhado entre instâncias)
 
 **Q: O cache funciona automaticamente?**
-A: Sim! Após instalar o plugin, todas as operações de leitura (`get`, `list`, `count`, `query`) são automaticamente cacheadas.
+A: Sim! Após instalar o plugin, todas as operações de leitura (`fetched`, `list`, `count`, `query`) são automaticamente cacheadas.
 
 **Q: Como pular o cache em uma operação específica?**
 A: Passe `skipCache: true` como opção:

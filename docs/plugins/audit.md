@@ -34,7 +34,7 @@ await users.delete('user-123'); // Who deleted? When? What data was lost?
 // ✅ With audit: Complete history
 await users.delete('user-123'); // Auto-logged with who/when/what
 // Query: "Who deleted user-123?"
-const log = await audits.query({ recordId: 'user-123', operation: 'delete' });
+const log = await audits.query({ recordId: 'user-123', operation: 'deleted' });
 // Answer: "admin@company.com at 2024-01-15 10:30:42, data: {...}"
 // - Pass SOC2/HIPAA audits
 // - Full forensic trail
@@ -132,10 +132,10 @@ new AuditPlugin({
 
 // Now logs include userId
 await users.delete('user-123');
-// Logged: { userId: 'admin@company.com', operation: 'delete', ... }
+// Logged: { userId: 'admin@company.com', operation: 'deleted', ... }
 
 // Find who deleted records
-const deletions = await audits.query({ operation: 'delete', userId: 'admin@company.com' });
+const deletions = await audits.query({ operation: 'deleted', userId: 'admin@company.com' });
 ```
 
 **What you get:** Know exactly WHO did WHAT.
@@ -213,7 +213,7 @@ new AuditPlugin({
   resources: ['users', 'payments', 'personal_data'],
 
   // Or only log specific operations
-  operations: ['delete', 'update'],  // Skip inserts
+  operations: ['deleted', 'updated'],  // Skip inserts
 
   // Or custom filter
   shouldAudit: ({ resourceName, operation, data }) => {
@@ -221,10 +221,10 @@ new AuditPlugin({
     if (resourceName.startsWith('plg_')) return false;
 
     // Always log deletes
-    if (operation === 'delete') return true;
+    if (operation === 'deleted') return true;
 
     // Log updates to sensitive fields
-    if (operation === 'update' && ('email' in data || 'password' in data)) {
+    if (operation === 'updated' && ('email' in data || 'password' in data)) {
       return true;
     }
 
@@ -263,7 +263,7 @@ new AuditPlugin({
   resources: ['patients', 'medical_records', 'prescriptions'],
 
   // Log all operations for compliance
-  operations: ['insert', 'update', 'delete', 'deleteMany']
+  operations: ['inserted', 'updated', 'deleted', 'deleteMany']
 })
 
 // Setup retention policy
@@ -436,7 +436,7 @@ console.log(`User user-123 history:`, userHistory.map(h => ({
 
 // Get recent deletions
 const deletions = await audits.list({
-  filter: log => log.operation === 'delete' &&
+  filter: log => log.operation === 'deleted' &&
     new Date(log.timestamp) > new Date(Date.now() - 24*60*60*1000)
 });
 
@@ -460,7 +460,7 @@ const plugin = s3db.plugins.find(p => p instanceof AuditPlugin);
 
 const logs = await plugin.getAuditLogs({
   resourceName: 'users',
-  operation: 'delete',
+  operation: 'deleted',
   recordId: 'user-123',
   startDate: new Date('2024-01-01'),
   endDate: new Date('2024-01-31'),
@@ -572,7 +572,7 @@ console.log(`Cleaned up ${oldLogs.length} old audit logs`);
 ### Básico
 
 **Q: O que é auditado automaticamente?**
-A: Todas as operações: `insert`, `update`, `delete` e `deleteMany`.
+A: Todas as operações: `inserted`, `updated`, `deleted` e `deleteMany`.
 
 **Q: Onde os logs são armazenados?**
 A: Em um recurso chamado `plg_audits` (por padrão), com particionamento por data e por recurso.
@@ -646,7 +646,7 @@ A: Consulte o audit log e use o campo `oldData`:
 ```javascript
 const logs = await auditPlugin.getAuditLogs({
   resourceName: 'users',
-  operation: 'delete',
+  operation: 'deleted',
   recordId: 'user-123'
 });
 const deletedData = JSON.parse(logs[0].oldData);

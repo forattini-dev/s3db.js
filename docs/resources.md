@@ -67,7 +67,7 @@ graph TD
 3. **beforeX Hooks** - All before hooks execute (e.g., beforeInsert)
 4. **Core Operation** - Database operation executes (e.g., INSERT)
 5. **afterX Hooks** - All after hooks execute (e.g., afterInsert)
-6. **Events** - Event listeners fire (e.g., 'insert' event)
+6. **Events** - Event listeners fire (e.g., 'inserted' event)
 7. **Middlewares (after)** - All middlewares unwind in reverse order
 8. **Return to Client** - Final result
 
@@ -537,7 +537,7 @@ await users.insert({
 **Event payload:**
 ```javascript
 {
-  operation: 'insert' | 'update' | 'upsert',
+  operation: 'inserted' | 'updated' | 'upsert',
   id: 'user-123',  // (for update/upsert)
   totalSize: 2548,
   limit: 2048,
@@ -741,7 +741,7 @@ console.log(user.createdAt);  // Auto-timestamp (if enabled)
 
 **Triggers:**
 - Hooks: `beforeInsert`, `afterInsert`
-- Events: `insert`
+- Events: `inserted`
 
 #### insertMany(docs)
 
@@ -761,7 +761,7 @@ console.log(`Inserted ${users.length} users`);
 
 **Triggers:**
 - Hooks: `beforeInsert`, `afterInsert` (for each item)
-- Events: `insertMany` (bulk), `insert` (per item)
+- Events: `insertMany` (bulk), `inserted` (per item)
 
 #### get(id)
 
@@ -781,7 +781,7 @@ if (user) {
 
 **Triggers:**
 - Hooks: `beforeGet`, `afterGet`
-- Events: `get`
+- Events: `fetched`
 
 #### getMany(ids)
 
@@ -799,7 +799,7 @@ console.log(`Retrieved ${users.length} users`);
 
 **Triggers:**
 - Hooks: `beforeGet`, `afterGet` (for each item)
-- Events: `getMany` (bulk), `get` (per item)
+- Events: `getMany` (bulk), `fetched` (per item)
 
 #### update(id, data)
 
@@ -823,7 +823,7 @@ console.log(updated);  // Complete updated document
 
 **Triggers:**
 - Hooks: `beforeUpdate`, `afterUpdate`
-- Events: `update`
+- Events: `updated`
 
 #### patch(id, data)
 
@@ -847,7 +847,7 @@ const updated = await users.patch('user-123', {
 
 **Triggers:**
 - Hooks: `beforeUpdate`, `afterUpdate`
-- Events: `update`
+- Events: `updated`
 
 #### replace(id, data)
 
@@ -872,7 +872,7 @@ const replaced = await users.replace('user-123', {
 
 **Triggers:**
 - Hooks: `beforeUpdate`, `afterUpdate`
-- Events: `update`
+- Events: `updated`
 
 #### Update Method Comparison
 
@@ -899,7 +899,7 @@ console.log(user);  // Created if didn't exist, updated if existed
 
 **Triggers:**
 - Hooks: `beforeInsert`/`beforeUpdate`, `afterInsert`/`afterUpdate`
-- Events: `insert` or `update`
+- Events: `inserted` or `updated`
 
 #### delete(id)
 
@@ -915,7 +915,7 @@ console.log(deleted);  // Deleted document data
 
 **Triggers:**
 - Hooks: `beforeDelete`, `afterDelete`
-- Events: `delete`
+- Events: `deleted`
 
 #### deleteMany(ids)
 
@@ -931,7 +931,7 @@ console.log(`Deleted ${count} users`);
 
 **Triggers:**
 - Hooks: `beforeDelete`, `afterDelete` (for each item)
-- Events: `deleteMany` (bulk), `delete` (per item)
+- Events: `deleteMany` (bulk), `deleted` (per item)
 
 ### Query Operations
 
@@ -1564,7 +1564,7 @@ sequenceDiagram
     PostHooks->>PostHooks: Hook N
 
     PostHooks->>Events: Emit events
-    Note over Events: 'insert' event
+    Note over Events: 'inserted' event
     Events->>Events: Listener 1
     Events->>Events: Listener 2
     Events->>Events: Listener N
@@ -1912,7 +1912,7 @@ sequenceDiagram
 4. **beforeX hooks** - Pre-operation hooks (e.g., beforeInsert)
 5. **Operation** - Core database operation (insert, update, etc.)
 6. **afterX hooks** - Post-operation hooks (e.g., afterInsert)
-7. **Events** - Event listeners fire (e.g., 'insert' event)
+7. **Events** - Event listeners fire (e.g., 'inserted' event)
 8. **Middleware N** (after) - Unwind in reverse order
 9. **Middleware 2** (after)
 10. **Middleware 1** (after)
@@ -1924,7 +1924,7 @@ sequenceDiagram
 async function middleware(ctx, next) {
   // ctx.resource: Resource instance
   // ctx.args: arguments array (for the method)
-  // ctx.method: method name (e.g., 'insert')
+  // ctx.method: method name (e.g., 'inserted')
   // next(): calls the next middleware or the original method
 }
 ```
@@ -1932,10 +1932,10 @@ async function middleware(ctx, next) {
 ### Supported Methods
 
 Middlewares can be added to these methods:
-- `get`, `getMany`, `getAll`
+- `fetched`, `getMany`, `getAll`
 - `list`, `listIds`, `page`
 - `count`, `exists`
-- `insert`, `update`, `delete`, `deleteMany`
+- `inserted`, `updated`, `deleted`, `deleteMany`
 
 ### Simple Middleware
 
@@ -1946,7 +1946,7 @@ const users = await db.createResource({
 });
 
 // Logging middleware
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   console.log('Before insert:', ctx.args[0]);
 
   const result = await next();
@@ -1961,7 +1961,7 @@ users.useMiddleware('insert', async (ctx, next) => {
 
 ```javascript
 // Uppercase name before insert
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   ctx.args[0].name = ctx.args[0].name.toUpperCase();
 
   return await next();
@@ -1975,7 +1975,7 @@ await users.insert({ name: 'john doe', email: 'john@example.com' });
 
 ```javascript
 // Authentication middleware
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   const user = ctx.args[0];
 
   if (!user.userId) {
@@ -1986,7 +1986,7 @@ users.useMiddleware('insert', async (ctx, next) => {
 });
 
 // Permission middleware
-users.useMiddleware('delete', async (ctx, next) => {
+users.useMiddleware('deleted', async (ctx, next) => {
   const userId = ctx.args[0];
   const currentUser = ctx.currentUser;  // Passed in context
 
@@ -2002,7 +2002,7 @@ users.useMiddleware('delete', async (ctx, next) => {
 
 ```javascript
 // Timing middleware
-users.useMiddleware('update', async (ctx, next) => {
+users.useMiddleware('updated', async (ctx, next) => {
   const start = Date.now();
 
   const result = await next();
@@ -2021,7 +2021,7 @@ users.useMiddleware('update', async (ctx, next) => {
 
 ```javascript
 // Email validation
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   const data = ctx.args[0];
 
   if (!data.email || !data.email.includes('@')) {
@@ -2032,7 +2032,7 @@ users.useMiddleware('insert', async (ctx, next) => {
 });
 
 // Complex validation
-users.useMiddleware('update', async (ctx, next) => {
+users.useMiddleware('updated', async (ctx, next) => {
   const id = ctx.args[0];
   const data = ctx.args[1];
 
@@ -2049,7 +2049,7 @@ users.useMiddleware('update', async (ctx, next) => {
 
 ```javascript
 // Cache middleware (short-circuit if cached)
-users.useMiddleware('get', async (ctx, next) => {
+users.useMiddleware('fetched', async (ctx, next) => {
   const id = ctx.args[0];
 
   // Check cache
@@ -2073,7 +2073,7 @@ users.useMiddleware('get', async (ctx, next) => {
 
 ```javascript
 // Middleware 1: Authentication
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   if (!ctx.user) {
     throw new Error('Not authenticated');
   }
@@ -2082,7 +2082,7 @@ users.useMiddleware('insert', async (ctx, next) => {
 });
 
 // Middleware 2: Authorization
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   if (!ctx.authenticated) {
     throw new Error('Not authenticated');
   }
@@ -2093,13 +2093,13 @@ users.useMiddleware('insert', async (ctx, next) => {
 });
 
 // Middleware 3: Logging
-users.useMiddleware('insert', async (ctx, next) => {
+users.useMiddleware('inserted', async (ctx, next) => {
   const start = Date.now();
   const result = await next();
   const duration = Date.now() - start;
 
   await auditLog.write({
-    action: 'insert',
+    action: 'inserted',
     user: ctx.user.id,
     duration,
     timestamp: new Date()
@@ -2129,7 +2129,7 @@ const orders = await db.createResource({
 });
 
 // Authentication middleware
-['insert', 'update', 'delete'].forEach(method => {
+['inserted', 'updated', 'deleted'].forEach(method => {
   orders.useMiddleware(method, async (ctx, next) => {
     const user = ctx.user;
 
@@ -2144,7 +2144,7 @@ const orders = await db.createResource({
 });
 
 // Audit logging middleware
-['insert', 'update', 'delete'].forEach(method => {
+['inserted', 'updated', 'deleted'].forEach(method => {
   orders.useMiddleware(method, async (ctx, next) => {
     const start = Date.now();
     const user = ctx.authenticatedUser;
@@ -2183,7 +2183,7 @@ const orders = await db.createResource({
 });
 
 // Permission middleware
-orders.useMiddleware('delete', async (ctx, next) => {
+orders.useMiddleware('deleted', async (ctx, next) => {
   const user = ctx.authenticatedUser;
 
   if (user.role !== 'admin') {
@@ -2216,7 +2216,7 @@ Resources extend Node.js **EventEmitter**, providing real-time notifications for
 | Data mutation | Can modify data | Read-only observation |
 | Use case | Business logic | Monitoring, logging, analytics |
 
-**Note:** Don't confuse hooks (`beforeInsert`, `afterUpdate`) with events (`insert`, `update`). Hooks are lifecycle functions, events are EventEmitter notifications.
+**Note:** Don't confuse hooks (`beforeInsert`, `afterUpdate`) with events (`inserted`, `updated`). Hooks are lifecycle functions, events are EventEmitter notifications.
 
 ### Event Lifecycle
 
@@ -2246,14 +2246,14 @@ sequenceDiagram
 
 | Event | Trigger | Data | Use Case |
 |-------|---------|------|----------|
-| `insert` | Single insert | Complete document | Logging, notifications |
-| `update` | Single update | Document with `$before`, `$after` | Change tracking |
-| `delete` | Single delete | Deleted document | Cleanup, notifications |
+| `inserted` | Single insert | Complete document | Logging, notifications |
+| `updated` | Single update | Document with `$before`, `$after` | Change tracking |
+| `deleted` | Single delete | Deleted document | Cleanup, notifications |
 | `insertMany` | Bulk insert | Count of inserted | Monitoring |
 | `deleteMany` | Bulk delete | Count of deleted | Monitoring |
 | `list` | List operation | Result object | Performance tracking |
 | `count` | Count operation | Total count | Analytics |
-| `get` | Single get | Complete document | Logging |
+| `fetched` | Single get | Complete document | Logging |
 | `getMany` | Bulk get | Count of documents | Monitoring |
 
 ### Behavior-Specific Events
@@ -2311,24 +2311,24 @@ const users = await db.createResource({
 });
 
 // Add listener
-users.on('insert', (event) => {
+users.on('inserted', (event) => {
   console.log('User created:', event.id);
   sendWelcomeEmail(event.email);
 });
 
 // Multiple listeners
-users.on('update', (event) => {
+users.on('updated', (event) => {
   console.log('User updated:', event.id);
 });
 
-users.on('update', (event) => {
+users.on('updated', (event) => {
   if (event.$before.email !== event.$after.email) {
     console.log('Email changed!');
   }
 });
 
 // One-time listener
-users.once('insert', (event) => {
+users.once('inserted', (event) => {
   console.log('First user created!');
 });
 
@@ -2336,8 +2336,8 @@ users.once('insert', (event) => {
 const listener = (event) => {
   console.log('User deleted:', event.id);
 };
-users.on('delete', listener);
-users.off('delete', listener);  // Remove
+users.on('deleted', listener);
+users.off('deleted', listener);  // Remove
 ```
 
 ### Event Data Structures
@@ -2345,7 +2345,7 @@ users.off('delete', listener);  // Remove
 #### insert Event
 
 ```javascript
-users.on('insert', (event) => {
+users.on('inserted', (event) => {
   console.log(event);
 });
 
@@ -2363,7 +2363,7 @@ users.on('insert', (event) => {
 #### update Event
 
 ```javascript
-users.on('update', (event) => {
+users.on('updated', (event) => {
   console.log(event);
 });
 
@@ -2395,7 +2395,7 @@ users.on('update', (event) => {
 #### delete Event
 
 ```javascript
-users.on('delete', (event) => {
+users.on('deleted', (event) => {
   console.log(event);
 });
 
@@ -2438,7 +2438,7 @@ const users = await db.createResource({
   asyncEvents: true  // Default
 });
 
-users.on('insert', async (event) => {
+users.on('inserted', async (event) => {
   // This runs asynchronously
   await sendWelcomeEmail(event.email);
   console.log('Email sent');
@@ -2468,7 +2468,7 @@ const users = await db.createResource({
   asyncEvents: false  // Sync mode
 });
 
-users.on('insert', async (event) => {
+users.on('inserted', async (event) => {
   // This blocks the insert operation
   await sendWelcomeEmail(event.email);
   console.log('Email sent');
@@ -2635,7 +2635,7 @@ const orders = await db.createResource({
 
 3. **Handle errors in listeners** - Don't let listeners crash
    ```javascript
-   users.on('insert', async (event) => {
+   users.on('inserted', async (event) => {
      try {
        await sendEmail(event.email);
      } catch (error) {
@@ -2653,8 +2653,8 @@ const orders = await db.createResource({
 
 5. **Use programmatic events for dynamic listeners**
    ```javascript
-   users.on('insert', listener);
-   users.off('insert', listener);
+   users.on('inserted', listener);
+   users.off('inserted', listener);
    ```
 
 ---

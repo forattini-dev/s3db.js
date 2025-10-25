@@ -592,7 +592,7 @@ const userMetrics = await s3db.plugins.metrics.getResourceMetrics('users');
 Get metrics for a specific operation type.
 
 ```javascript
-const insertMetrics = await s3db.plugins.metrics.getOperationMetrics('insert');
+const insertMetrics = await s3db.plugins.metrics.getOperationMetrics('inserted');
 ```
 
 ---
@@ -944,7 +944,7 @@ async function optimizeBasedOnMetrics() {
       console.log(`💡 Consider adding pagination to ${op.resource} list operations`);
     }
 
-    if (op.operation === 'get' && op.avgTime > 200) {
+    if (op.operation === 'fetched' && op.avgTime > 200) {
       console.log(`💡 Consider adding caching for ${op.resource} get operations`);
     }
   }
@@ -1047,7 +1047,7 @@ R: Use `getMetrics`:
 ```javascript
 const metrics = await metricsPlugin.getMetrics({
   resourceName: 'users',
-  operation: 'get',
+  operation: 'fetched',
   startDate: '2025-01-01',
   limit: 100
 });
@@ -1065,7 +1065,7 @@ R: Use `getErrorLogs`:
 ```javascript
 const errors = await metricsPlugin.getErrorLogs({
   resourceName: 'orders',
-  operation: 'insert',
+  operation: 'inserted',
   limit: 50
 });
 ```

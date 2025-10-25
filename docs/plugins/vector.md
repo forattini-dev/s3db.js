@@ -1748,46 +1748,46 @@ Already emitted by base Plugin class:
 
 | Event | When | Payload |
 |-------|------|---------|
-| `installed` | Plugin installed | `{ plugin: 'VectorPlugin' }` |
-| `started` | Plugin started | `{ plugin: 'VectorPlugin' }` |
-| `stopped` | Plugin stopped | `{ plugin: 'VectorPlugin' }` |
+| `db:plugin:installed` | Plugin installed | `{ plugin: 'VectorPlugin' }` |
+| `db:plugin:started` | Plugin started | `{ plugin: 'VectorPlugin' }` |
+| `db:plugin:stopped` | Plugin stopped | `{ plugin: 'VectorPlugin' }` |
 | `uninstalled` | Plugin uninstalled | `{ plugin: 'VectorPlugin' }` |
 
 #### 🔍 Search Events
 
 | Event | When | Payload |
 |-------|------|---------|
-| `vector:search-start` | Search initiated | `{ resource, vectorField, limit, distanceMetric, partition, threshold, queryDimensions, timestamp }` |
-| `vector:search-progress` | Search progress (throttled, verbose mode only) | `{ resource, processed, total, progress, timestamp }` |
-| `vector:search-complete` | Search completed | `{ resource, vectorField, resultsCount, totalRecords, processedRecords, dimensionMismatches, duration, throughput, timestamp }` |
-| `vector:search-error` | Search error | `{ resource, error, stack, timestamp }` |
+| `plg:vector:search-start` | Search initiated | `{ resource, vectorField, limit, distanceMetric, partition, threshold, queryDimensions, timestamp }` |
+| `plg:vector:search-progress` | Search progress (throttled, verbose mode only) | `{ resource, processed, total, progress, timestamp }` |
+| `plg:vector:search-complete` | Search completed | `{ resource, vectorField, resultsCount, totalRecords, processedRecords, dimensionMismatches, duration, throughput, timestamp }` |
+| `plg:vector:search-error` | Search error | `{ resource, error, stack, timestamp }` |
 
 #### 🎯 Clustering Events
 
 | Event | When | Payload |
 |-------|------|---------|
-| `vector:cluster-start` | Clustering initiated | `{ resource, vectorField, k, distanceMetric, partition, maxIterations, timestamp }` |
-| `vector:cluster-iteration` | Each k-means iteration (throttled, verbose mode only) | `{ resource, k, iteration, inertia, converged, timestamp }` |
-| `vector:cluster-converged` | Clustering converged | `{ resource, k, iterations, inertia, timestamp }` |
-| `vector:cluster-complete` | Clustering completed | `{ resource, vectorField, k, vectorCount, iterations, converged, inertia, clusterSizes, duration, timestamp }` |
-| `vector:cluster-error` | Clustering error | `{ resource, error, stack, timestamp }` |
+| `plg:vector:cluster-start` | Clustering initiated | `{ resource, vectorField, k, distanceMetric, partition, maxIterations, timestamp }` |
+| `plg:vector:cluster-iteration` | Each k-means iteration (throttled, verbose mode only) | `{ resource, k, iteration, inertia, converged, timestamp }` |
+| `plg:vector:cluster-converged` | Clustering converged | `{ resource, k, iterations, inertia, timestamp }` |
+| `plg:vector:cluster-complete` | Clustering completed | `{ resource, vectorField, k, vectorCount, iterations, converged, inertia, clusterSizes, duration, timestamp }` |
+| `plg:vector:cluster-error` | Clustering error | `{ resource, error, stack, timestamp }` |
 
 #### ⚙️ Configuration & Validation Events
 
 | Event | When | Payload |
 |-------|------|---------|
-| `vector:field-detected` | Auto-detected embedding field | `{ resource, vectorField, timestamp }` |
-| `vector:storage-warning` | Large vectors without proper behavior | `{ resource, vectorFields, totalEstimatedBytes, metadataLimit, currentBehavior, recommendation }` |
-| `vector:behavior-fixed` | Auto-fixed behavior | `{ resource, newBehavior }` |
-| `vector:dimension-mismatch` | Dimension mismatch detected (verbose mode only) | `{ resource, recordIndex, expected, got, timestamp }` |
-| `vector:empty-dataset` | No vectors found | `{ resource, vectorField, totalRecords, timestamp }` |
-| `vector:partition-filter` | Partition filter applied | `{ resource, partition, timestamp }` |
+| `plg:vector:field-detected` | Auto-detected embedding field | `{ resource, vectorField, timestamp }` |
+| `plg:vector:storage-warning` | Large vectors without proper behavior | `{ resource, vectorFields, totalEstimatedBytes, metadataLimit, currentBehavior, recommendation }` |
+| `plg:vector:behavior-fixed` | Auto-fixed behavior | `{ resource, newBehavior }` |
+| `plg:vector:dimension-mismatch` | Dimension mismatch detected (verbose mode only) | `{ resource, recordIndex, expected, got, timestamp }` |
+| `plg:vector:empty-dataset` | No vectors found | `{ resource, vectorField, totalRecords, timestamp }` |
+| `plg:vector:partition-filter` | Partition filter applied | `{ resource, partition, timestamp }` |
 
 #### 📊 Performance Events
 
 | Event | When | Payload |
 |-------|------|---------|
-| `vector:performance` | After operations (verbose mode only) | `{ operation, resource, duration, throughput, recordsPerSecond, timestamp }` |
+| `plg:vector:performance` | After operations (verbose mode only) | `{ operation, resource, duration, throughput, recordsPerSecond, timestamp }` |
 
 ### Usage Examples
 
@@ -1795,14 +1795,14 @@ Already emitted by base Plugin class:
 
 ```javascript
 // Monitor all search operations
-vectorPlugin.on('vector:search-start', (data) => {
+vectorPlugin.on('plg:vector:search-start', (data) => {
   console.log(`🔍 Starting search on ${data.resource}...`);
   console.log(`   Query dimensions: ${data.queryDimensions}`);
   console.log(`   Distance metric: ${data.distanceMetric}`);
   console.log(`   Limit: ${data.limit}`);
 });
 
-vectorPlugin.on('vector:search-complete', (data) => {
+vectorPlugin.on('plg:vector:search-complete', (data) => {
   console.log(`✅ Search completed in ${data.duration}ms`);
   console.log(`   Found: ${data.resultsCount} results`);
   console.log(`   Throughput: ${data.throughput} records/s`);
@@ -1811,7 +1811,7 @@ vectorPlugin.on('vector:search-complete', (data) => {
   }
 });
 
-vectorPlugin.on('vector:search-error', (data) => {
+vectorPlugin.on('plg:vector:search-error', (data) => {
   console.error(`❌ Search error on ${data.resource}:`, data.error);
 });
 ```
@@ -1827,7 +1827,7 @@ const vectorPlugin = new VectorPlugin({
 
 let lastIteration = 0;
 
-vectorPlugin.on('vector:cluster-start', (data) => {
+vectorPlugin.on('plg:vector:cluster-start', (data) => {
   console.log(`\n🎯 Clustering ${data.vectorCount} vectors with k=${data.k}`);
   console.log(`   Resource: ${data.resource}`);
   console.log(`   Distance metric: ${data.distanceMetric}`);
@@ -1835,7 +1835,7 @@ vectorPlugin.on('vector:cluster-start', (data) => {
   lastIteration = 0;
 });
 
-vectorPlugin.on('vector:cluster-iteration', (data) => {
+vectorPlugin.on('plg:vector:cluster-iteration', (data) => {
   if (data.iteration > lastIteration) {
     const bar = '█'.repeat(Math.floor(data.iteration / data.maxIterations * 20));
     console.log(`   Iteration ${data.iteration}: ${bar} Inertia: ${data.inertia.toFixed(2)}`);
@@ -1843,12 +1843,12 @@ vectorPlugin.on('vector:cluster-iteration', (data) => {
   }
 });
 
-vectorPlugin.on('vector:cluster-converged', (data) => {
+vectorPlugin.on('plg:vector:cluster-converged', (data) => {
   console.log(`\n✅ Converged after ${data.iterations} iterations!`);
   console.log(`   Final inertia: ${data.inertia.toFixed(2)}`);
 });
 
-vectorPlugin.on('vector:cluster-complete', (data) => {
+vectorPlugin.on('plg:vector:cluster-complete', (data) => {
   console.log(`\n📊 Clustering Results:`);
   console.log(`   Duration: ${data.duration}ms`);
   console.log(`   Cluster sizes:`, data.clusterSizes);
@@ -1910,7 +1910,7 @@ const dimensionMismatches = new prometheus.Counter({
 });
 
 // Hook up events
-vectorPlugin.on('vector:search-complete', (data) => {
+vectorPlugin.on('plg:vector:search-complete', (data) => {
   searchDuration.labels(data.resource, data.distanceMetric).observe(data.duration);
   searchResults.labels(data.resource).observe(data.resultsCount);
 
@@ -1919,12 +1919,12 @@ vectorPlugin.on('vector:search-complete', (data) => {
   }
 });
 
-vectorPlugin.on('vector:cluster-complete', (data) => {
+vectorPlugin.on('plg:vector:cluster-complete', (data) => {
   clusteringDuration.labels(data.resource, data.k.toString()).observe(data.duration);
 });
 
 // Alert on errors
-vectorPlugin.on('vector:search-error', (data) => {
+vectorPlugin.on('plg:vector:search-error', (data) => {
   logger.error('Vector search error', {
     resource: data.resource,
     error: data.error,
@@ -1934,7 +1934,7 @@ vectorPlugin.on('vector:search-error', (data) => {
   alerting.notify('VectorPlugin Search Error', data);
 });
 
-vectorPlugin.on('vector:cluster-error', (data) => {
+vectorPlugin.on('plg:vector:cluster-error', (data) => {
   logger.error('Vector clustering error', {
     resource: data.resource,
     error: data.error,
@@ -1949,7 +1949,7 @@ vectorPlugin.on('vector:cluster-error', (data) => {
 
 ```javascript
 // Get notified when vector fields are auto-detected
-vectorPlugin.on('vector:field-detected', (data) => {
+vectorPlugin.on('plg:vector:field-detected', (data) => {
   console.log(`✨ Auto-detected vector field: ${data.vectorField}`);
   console.log(`   Resource: ${data.resource}`);
 
@@ -1973,19 +1973,19 @@ if (process.env.NODE_ENV === 'development') {
   });
 
   // Log everything
-  vectorPlugin.on('vector:search-progress', (data) => {
+  vectorPlugin.on('plg:vector:search-progress', (data) => {
     console.log(`[PROGRESS] Processed ${data.processed}/${data.total} (${data.progress.toFixed(1)}%)`);
   });
 
-  vectorPlugin.on('vector:dimension-mismatch', (data) => {
+  vectorPlugin.on('plg:vector:dimension-mismatch', (data) => {
     console.warn(`[MISMATCH] Record ${data.recordIndex}: expected ${data.expected} dims, got ${data.got}`);
   });
 
-  vectorPlugin.on('vector:performance', (data) => {
+  vectorPlugin.on('plg:vector:performance', (data) => {
     console.log(`[PERF] ${data.operation} on ${data.resource}: ${data.duration}ms (${data.throughput} records/s)`);
   });
 
-  vectorPlugin.on('vector:partition-filter', (data) => {
+  vectorPlugin.on('plg:vector:partition-filter', (data) => {
     console.log(`[PARTITION] Filtering by partition: ${JSON.stringify(data.partition)}`);
   });
 }
@@ -2003,7 +2003,7 @@ const analytics = {
   totalVectorsProcessed: 0
 };
 
-vectorPlugin.on('vector:search-complete', (data) => {
+vectorPlugin.on('plg:vector:search-complete', (data) => {
   analytics.searches++;
   analytics.avgSearchDuration =
     (analytics.avgSearchDuration * (analytics.searches - 1) + data.duration) / analytics.searches;
@@ -2018,7 +2018,7 @@ vectorPlugin.on('vector:search-complete', (data) => {
   });
 });
 
-vectorPlugin.on('vector:cluster-complete', (data) => {
+vectorPlugin.on('plg:vector:cluster-complete', (data) => {
   analytics.clusterings++;
   analytics.avgClusteringDuration =
     (analytics.avgClusteringDuration * (analytics.clusterings - 1) + data.duration) / analytics.clusterings;
@@ -2056,7 +2056,7 @@ const qualityThresholds = {
 
 let recentSearches = [];
 
-vectorPlugin.on('vector:search-complete', (data) => {
+vectorPlugin.on('plg:vector:search-complete', (data) => {
   // Track recent searches (last 100)
   recentSearches.push(data);
   if (recentSearches.length > 100) {
@@ -2136,7 +2136,7 @@ const vectorPlugin = new VectorPlugin({
 
 ### Event Throttling
 
-Progress events (`vector:search-progress`, `vector:cluster-iteration`) are automatically throttled to prevent event spam:
+Progress events (`plg:vector:search-progress`, `plg:vector:cluster-iteration`) are automatically throttled to prevent event spam:
 
 ```javascript
 // Default: 100ms throttle
@@ -2554,14 +2554,14 @@ Most embedding providers normalize vectors, so **cosine** is the recommended def
 
 **Q: What events does this plugin emit?**
 **A:**
-- `vector:search:start` - Search started
-- `vector:search:complete` - Search completed with results
-- `vector:cluster:start` - Clustering started
-- `vector:cluster:progress` - Clustering iteration progress
-- `vector:cluster:complete` - Clustering completed
-- `vector:optimalK:start` - Optimal K search started
-- `vector:optimalK:progress` - K evaluation progress
-- `vector:optimalK:complete` - Optimal K found
+- `plg:vector:search:start` - Search started
+- `plg:vector:search:complete` - Search completed with results
+- `plg:vector:cluster:start` - Clustering started
+- `plg:vector:cluster:progress` - Clustering iteration progress
+- `plg:vector:cluster:complete` - Clustering completed
+- `plg:vector:optimalK:start` - Optimal K search started
+- `plg:vector:optimalK:progress` - K evaluation progress
+- `plg:vector:optimalK:complete` - Optimal K found
 
 Enable `verboseEvents: true` for detailed progress tracking.
 
@@ -2573,7 +2573,7 @@ const vectorPlugin = new VectorPlugin({
   eventThrottle: 0  // No throttling for debugging
 });
 
-db.on('vector:*', (data) => {
+db.on('plg:vector:*', (data) => {
   console.log('Vector event:', data);
 });
 ```

@@ -102,7 +102,7 @@ const relationPlugin = new RelationPlugin({
         resource: 'posts',
         foreignKey: 'userId',
         partitionHint: 'byAuthor',  // Use this partition (auto-detected if omitted)
-        cascade: ['delete']          // Delete posts when user deleted
+        cascade: ['deleted']          // Delete posts when user deleted
       },
 
       // 1:1 - one user has one profile
@@ -111,7 +111,7 @@ const relationPlugin = new RelationPlugin({
         resource: 'profiles',
         foreignKey: 'userId',
         partitionHint: 'byUserId',
-        cascade: ['delete']
+        cascade: ['deleted']
       }
     },
 
@@ -315,7 +315,7 @@ Each relation is defined with:
 | `partitionHint` | string | ❌ | Explicit partition name |
 | `junctionPartitionHint` | string | **m:n only** | Junction table partition |
 | `eager` | boolean | ❌ | Auto-load (default: `false`) |
-| `cascade` | array | ❌ | `['delete', 'update']` |
+| `cascade` | array | ❌ | `['deleted', 'updated']` |
 
 ---
 
@@ -336,7 +336,7 @@ relations: {
       foreignKey: 'userId',      // Field in profiles table
       localKey: 'id',            // Field in users table (default)
       partitionHint: 'byUserId', // Optional: explicit partition
-      cascade: ['delete']        // Delete profile when user deleted
+      cascade: ['deleted']        // Delete profile when user deleted
     }
   }
 }
@@ -384,7 +384,7 @@ relations: {
       resource: 'posts',
       foreignKey: 'userId',      // Field in posts table
       partitionHint: 'byAuthor', // Optional
-      cascade: ['delete']        // Delete posts when user deleted
+      cascade: ['deleted']        // Delete posts when user deleted
     }
   }
 }
@@ -579,7 +579,7 @@ relations: {
       type: 'hasMany',
       resource: 'posts',
       foreignKey: 'userId',
-      cascade: ['delete']  // ← Enable cascade
+      cascade: ['deleted']  // ← Enable cascade
     }
   }
 }
@@ -790,7 +790,7 @@ relations: {
       resource: 'posts',
       foreignKey: 'authorId',      // Descriptive
       partitionHint: 'byAuthor',   // Explicit
-      cascade: ['delete']          // Cleanup
+      cascade: ['deleted']          // Cleanup
     }
   }
 }
@@ -860,7 +860,7 @@ relations: {
       type: 'hasMany',
       resource: 'posts',
       foreignKey: 'userId',
-      cascade: ['delete']  // ← Must specify
+      cascade: ['deleted']  // ← Must specify
     }
   }
 }
@@ -881,13 +881,13 @@ const plugin = new RelationPlugin({
         resource: 'posts',
         foreignKey: 'authorId',
         partitionHint: 'byAuthor',
-        cascade: ['delete']
+        cascade: ['deleted']
       },
       profile: {
         type: 'hasOne',
         resource: 'profiles',
         foreignKey: 'userId',
-        cascade: ['delete']
+        cascade: ['deleted']
       }
     },
     posts: {
@@ -901,7 +901,7 @@ const plugin = new RelationPlugin({
         resource: 'comments',
         foreignKey: 'postId',
         partitionHint: 'byPost',
-        cascade: ['delete']
+        cascade: ['deleted']
       },
       tags: {
         type: 'belongsToMany',
@@ -948,7 +948,7 @@ const plugin = new RelationPlugin({
         resource: 'order_items',
         foreignKey: 'orderId',
         partitionHint: 'byOrder',
-        cascade: ['delete']
+        cascade: ['deleted']
       }
     }
   }
