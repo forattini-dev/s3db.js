@@ -374,7 +374,7 @@ class TursoReplicator extends BaseReplicator {
 
     const success = errors.length === 0;
 
-    this.emit('replicated', {
+    this.emit('plg:replicator:replicated', {
       replicator: this.name,
       resourceName,
       operation,

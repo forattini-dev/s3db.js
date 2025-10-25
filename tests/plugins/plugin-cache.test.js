@@ -61,7 +61,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       
       cache.on('set', (data) => events.push({ type: 'set', data }));
       cache.on('fetched', (data) => events.push({ type: 'get', data }));
-      cache.on('deleted', (data) => events.push({ type: 'delete', data }));
+      cache.on('rs:deleted', (data) => events.push({ type: 'delete', data }));
       
       await cache.set('test-key', 'test-value');
       await cache.get('test-key');

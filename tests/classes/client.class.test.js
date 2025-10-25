@@ -139,9 +139,9 @@ describe('Client Class - Coverage', () => {
 
   test('should emit events for putObject/getObject/deleteObject', async () => {
     const events = [];
-    client.on('putObject', (res, opts) => events.push('putObject'));
-    client.on('getObject', (res, opts) => events.push('getObject'));
-    client.on('deleteObject', (res, opts) => events.push('deleteObject'));
+    client.on('cl:PutObject', (res, opts) => events.push('putObject'));
+    client.on('cl:GetObject', (res, opts) => events.push('getObject'));
+    client.on('cl:DeleteObject', (res, opts) => events.push('deleteObject'));
     client.sendCommand = jest.fn().mockResolvedValue({});
     await client.putObject({ key: 'k' });
     await client.getObject('k');

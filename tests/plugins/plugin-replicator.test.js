@@ -392,7 +392,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     // Register error listener to prevent unhandled error
     let errorEvent = null;
-    plugin.on('error', (event) => {
+    plugin.on('plg:replicator:error', (event) => {
       errorEvent = event;
     });
 
@@ -426,7 +426,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     // Register error listener to prevent unhandled error
     let errorEvent = null;
-    plugin.on('error', (event) => {
+    plugin.on('plg:replicator:error', (event) => {
       errorEvent = event;
     });
 
@@ -460,7 +460,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     // Register error listener to prevent unhandled error
     let errorEvent = null;
-    plugin.on('error', (event) => {
+    plugin.on('plg:replicator:error', (event) => {
       errorEvent = event;
     });
 

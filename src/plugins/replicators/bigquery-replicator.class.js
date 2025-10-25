@@ -598,7 +598,7 @@ class BigqueryReplicator extends BaseReplicator {
         console.warn(`[BigqueryReplicator] Replication completed with errors for ${resourceName}:`, errors);
       }
 
-      this.emit('replicated', {
+      this.emit('plg:replicator:replicated', {
         replicator: this.name,
         resourceName,
         operation,
@@ -622,7 +622,7 @@ class BigqueryReplicator extends BaseReplicator {
     if (this.config.verbose) {
       console.warn(`[BigqueryReplicator] Replication failed for ${resourceName}: ${err.message}`);
     }
-    this.emit('replicator_error', {
+    this.emit('plg:replicator:error', {
       replicator: this.name,
       resourceName,
       operation,

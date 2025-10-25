@@ -392,15 +392,15 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const emittedEvents = [];
 
     // Listen to resource events
-    resource.on('inserted', (data) => {
+    resource.on('rs:inserted', (data) => {
       emittedEvents.push({ event: 'insert', data });
     });
 
-    resource.on('updated', (data) => {
+    resource.on('rs:updated', (data) => {
       emittedEvents.push({ event: 'update', ...data });
     });
 
-    resource.on('deleted', (data) => {
+    resource.on('rs:deleted', (data) => {
       emittedEvents.push({ event: 'delete', ...data });
     });
 
