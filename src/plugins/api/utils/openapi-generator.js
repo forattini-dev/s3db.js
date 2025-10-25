@@ -98,7 +98,17 @@ function generateResourceSchema(resource) {
   const properties = {};
   const required = [];
 
-  const attributes = resource.config?.attributes || resource.attributes || {};
+  const allAttributes = resource.config?.attributes || resource.attributes || {};
+
+  // Filter out plugin attributes - they are internal implementation details
+  // and should not be exposed in public API documentation
+  const pluginAttrNames = resource.schema?._pluginAttributes
+    ? Object.values(resource.schema._pluginAttributes).flat()
+    : [];
+
+  const attributes = Object.fromEntries(
+    Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+  );
 
   // Extract resource description (supports both string and object format)
   const resourceDescription = resource.config?.description;
@@ -254,7 +264,16 @@ function generateResourcePaths(resource, version, config = {}) {
     }
 
     // Create query parameters only for partition fields
-    const attributes = resource.config?.attributes || resource.attributes || {};
+    const allAttributes = resource.config?.attributes || resource.attributes || {};
+
+    // Filter out plugin attributes
+    const pluginAttrNames = resource.schema?._pluginAttributes
+      ? Object.values(resource.schema._pluginAttributes).flat()
+      : [];
+
+    const attributes = Object.fromEntries(
+      Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+    );
 
     for (const fieldName of partitionFieldsSet) {
       const fieldDef = attributes[fieldName];

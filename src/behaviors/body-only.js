@@ -59,10 +59,15 @@ export async function handleInsert({ resource, data, mappedData }) {
     '_v': mappedData._v || String(resource.version)
   };
   metadataOnly._map = JSON.stringify(resource.schema.map);
-  
+
+  // Store pluginMap for backwards compatibility when plugins are added/removed
+  if (resource.schema.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+    metadataOnly._pluginMap = JSON.stringify(resource.schema.pluginMap);
+  }
+
   // Use the original object for the body
   const body = JSON.stringify(mappedData);
-  
+
   return { mappedData: metadataOnly, body };
 }
 
@@ -70,16 +75,21 @@ export async function handleUpdate({ resource, id, data, mappedData }) {
   // For updates, we need to merge with existing data
   // Since we can't easily read the existing body during update,
   // we'll put the update data in the body and let the resource handle merging
-  
+
   // Keep only the version field in metadata
   const metadataOnly = {
     '_v': mappedData._v || String(resource.version)
   };
   metadataOnly._map = JSON.stringify(resource.schema.map);
-  
+
+  // Store pluginMap for backwards compatibility when plugins are added/removed
+  if (resource.schema.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+    metadataOnly._pluginMap = JSON.stringify(resource.schema.pluginMap);
+  }
+
   // Use the original object for the body
   const body = JSON.stringify(mappedData);
-  
+
   return { mappedData: metadataOnly, body };
 }
 
