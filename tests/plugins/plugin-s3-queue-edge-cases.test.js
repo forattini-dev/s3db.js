@@ -358,7 +358,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       await plugin.install(database);
 
       const eventPromise = new Promise((resolve) => {
-        plugin.once('workers.started', resolve);
+        plugin.once('plg:s3-queue:workers-started', resolve);
       });
 
       await plugin.startProcessing();
@@ -390,7 +390,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       await plugin.startProcessing();
 
       const eventPromise = new Promise((resolve) => {
-        plugin.once('workers.stopped', resolve);
+        plugin.once('plg:s3-queue:workers-stopped', resolve);
       });
 
       await plugin.stopProcessing();
