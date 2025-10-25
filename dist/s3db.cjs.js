@@ -15747,11 +15747,11 @@ class ConnectionString {
   }
 }
 
-class Client extends EventEmitter {
+class S3Client extends EventEmitter {
   constructor({
     verbose = false,
     id = null,
-    AwsS3Client,
+    AwsS3Client: AwsS3Client2,
     connectionString,
     parallelism = 10,
     httpClientOptions = {}
@@ -15774,7 +15774,7 @@ class Client extends EventEmitter {
       // 60 second timeout
       ...httpClientOptions
     };
-    this.client = AwsS3Client || this.createClient();
+    this.client = AwsS3Client2 || this.createClient();
   }
   createClient() {
     const httpAgent = new http.Agent(this.httpClientOptions);
@@ -21388,7 +21388,7 @@ class Database extends EventEmitter {
         connectionString = `s3://${encodeURIComponent(accessKeyId)}:${encodeURIComponent(secretAccessKey)}@${bucket || "s3db"}?${params.toString()}`;
       }
     }
-    this.client = options.client || new Client({
+    this.client = options.client || new S3Client({
       verbose: this.verbose,
       parallelism: this.parallelism,
       connectionString
@@ -26294,7 +26294,7 @@ class S3TfStateDriver extends TfStateDriver {
    */
   async initialize() {
     const { bucket, credentials, region } = this.connectionConfig;
-    this.client = new Client({
+    this.client = new S3Client({
       bucketName: bucket,
       credentials,
       region
@@ -37920,6 +37920,779 @@ class VectorPlugin extends Plugin {
   }
 }
 
+class MemoryStorage {
+  constructor(config = {}) {
+    this.objects = /* @__PURE__ */ new Map();
+    this.bucket = config.bucket || "s3db";
+    this.enforceLimits = config.enforceLimits || false;
+    this.metadataLimit = config.metadataLimit || 2048;
+    this.maxObjectSize = config.maxObjectSize || 5 * 1024 * 1024 * 1024;
+    this.persistPath = config.persistPath;
+    this.autoPersist = config.autoPersist || false;
+    this.verbose = config.verbose || false;
+  }
+  /**
+   * Generate ETag (MD5 hash) for object body
+   */
+  _generateETag(body) {
+    const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || "");
+    return crypto$1.createHash("md5").update(buffer).digest("hex");
+  }
+  /**
+   * Calculate metadata size in bytes
+   */
+  _calculateMetadataSize(metadata) {
+    if (!metadata) return 0;
+    let size = 0;
+    for (const [key, value] of Object.entries(metadata)) {
+      size += Buffer.byteLength(key, "utf8");
+      size += Buffer.byteLength(String(value), "utf8");
+    }
+    return size;
+  }
+  /**
+   * Validate limits if enforceLimits is enabled
+   */
+  _validateLimits(body, metadata) {
+    if (!this.enforceLimits) return;
+    const metadataSize = this._calculateMetadataSize(metadata);
+    if (metadataSize > this.metadataLimit) {
+      throw new Error(
+        `Metadata size (${metadataSize} bytes) exceeds limit of ${this.metadataLimit} bytes`
+      );
+    }
+    const bodySize = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body || "", "utf8");
+    if (bodySize > this.maxObjectSize) {
+      throw new Error(
+        `Object size (${bodySize} bytes) exceeds limit of ${this.maxObjectSize} bytes`
+      );
+    }
+  }
+  /**
+   * Store an object
+   */
+  async put(key, { body, metadata, contentType, contentEncoding, contentLength, ifMatch }) {
+    this._validateLimits(body, metadata);
+    if (ifMatch !== void 0) {
+      const existing = this.objects.get(key);
+      if (existing && existing.etag !== ifMatch) {
+        throw new Error(`Precondition failed: ETag mismatch for key "${key}"`);
+      }
+    }
+    const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || "");
+    const etag = this._generateETag(buffer);
+    const lastModified = (/* @__PURE__ */ new Date()).toISOString();
+    const size = buffer.length;
+    const objectData = {
+      body: buffer,
+      metadata: metadata || {},
+      contentType: contentType || "application/octet-stream",
+      etag,
+      lastModified,
+      size,
+      contentEncoding,
+      contentLength: contentLength || size
+    };
+    this.objects.set(key, objectData);
+    if (this.verbose) {
+      console.log(`[MemoryStorage] PUT ${key} (${size} bytes, etag: ${etag})`);
+    }
+    if (this.autoPersist && this.persistPath) {
+      await this.saveToDisk();
+    }
+    return {
+      ETag: etag,
+      VersionId: null,
+      // Memory storage doesn't support versioning
+      ServerSideEncryption: null,
+      Location: `/${this.bucket}/${key}`
+    };
+  }
+  /**
+   * Retrieve an object
+   */
+  async get(key) {
+    const obj = this.objects.get(key);
+    if (!obj) {
+      const error = new Error(`Object not found: ${key}`);
+      error.name = "NoSuchKey";
+      error.$metadata = {
+        httpStatusCode: 404,
+        requestId: "memory-" + Date.now(),
+        attempts: 1,
+        totalRetryDelay: 0
+      };
+      throw error;
+    }
+    if (this.verbose) {
+      console.log(`[MemoryStorage] GET ${key} (${obj.size} bytes)`);
+    }
+    const bodyStream = stream$1.Readable.from(obj.body);
+    return {
+      Body: bodyStream,
+      Metadata: { ...obj.metadata },
+      ContentType: obj.contentType,
+      ContentLength: obj.size,
+      ETag: obj.etag,
+      LastModified: new Date(obj.lastModified),
+      ContentEncoding: obj.contentEncoding
+    };
+  }
+  /**
+   * Get object metadata only (like S3 HeadObject)
+   */
+  async head(key) {
+    const obj = this.objects.get(key);
+    if (!obj) {
+      const error = new Error(`Object not found: ${key}`);
+      error.name = "NoSuchKey";
+      error.$metadata = {
+        httpStatusCode: 404,
+        requestId: "memory-" + Date.now(),
+        attempts: 1,
+        totalRetryDelay: 0
+      };
+      throw error;
+    }
+    if (this.verbose) {
+      console.log(`[MemoryStorage] HEAD ${key}`);
+    }
+    return {
+      Metadata: { ...obj.metadata },
+      ContentType: obj.contentType,
+      ContentLength: obj.size,
+      ETag: obj.etag,
+      LastModified: new Date(obj.lastModified),
+      ContentEncoding: obj.contentEncoding
+    };
+  }
+  /**
+   * Copy an object
+   */
+  async copy(from, to, { metadata, metadataDirective, contentType }) {
+    const source = this.objects.get(from);
+    if (!source) {
+      const error = new Error(`Source object not found: ${from}`);
+      error.name = "NoSuchKey";
+      throw error;
+    }
+    let finalMetadata = { ...source.metadata };
+    if (metadataDirective === "REPLACE" && metadata) {
+      finalMetadata = metadata;
+    } else if (metadata) {
+      finalMetadata = { ...finalMetadata, ...metadata };
+    }
+    const result = await this.put(to, {
+      body: source.body,
+      metadata: finalMetadata,
+      contentType: contentType || source.contentType,
+      contentEncoding: source.contentEncoding
+    });
+    if (this.verbose) {
+      console.log(`[MemoryStorage] COPY ${from} \u2192 ${to}`);
+    }
+    return result;
+  }
+  /**
+   * Check if object exists
+   */
+  exists(key) {
+    return this.objects.has(key);
+  }
+  /**
+   * Delete an object
+   */
+  async delete(key) {
+    const existed = this.objects.has(key);
+    this.objects.delete(key);
+    if (this.verbose) {
+      console.log(`[MemoryStorage] DELETE ${key} (existed: ${existed})`);
+    }
+    if (this.autoPersist && this.persistPath) {
+      await this.saveToDisk();
+    }
+    return {
+      DeleteMarker: false,
+      VersionId: null
+    };
+  }
+  /**
+   * Delete multiple objects (batch)
+   */
+  async deleteMultiple(keys) {
+    const deleted = [];
+    const errors = [];
+    for (const key of keys) {
+      try {
+        await this.delete(key);
+        deleted.push({ Key: key });
+      } catch (error) {
+        errors.push({
+          Key: key,
+          Code: error.name || "InternalError",
+          Message: error.message
+        });
+      }
+    }
+    if (this.verbose) {
+      console.log(`[MemoryStorage] DELETE BATCH (${deleted.length} deleted, ${errors.length} errors)`);
+    }
+    return { Deleted: deleted, Errors: errors };
+  }
+  /**
+   * List objects with prefix/delimiter support
+   */
+  async list({ prefix = "", delimiter = null, maxKeys = 1e3, continuationToken = null }) {
+    const allKeys = Array.from(this.objects.keys());
+    let filteredKeys = prefix ? allKeys.filter((key) => key.startsWith(prefix)) : allKeys;
+    filteredKeys.sort();
+    let startIndex = 0;
+    if (continuationToken) {
+      startIndex = parseInt(continuationToken) || 0;
+    }
+    const paginatedKeys = filteredKeys.slice(startIndex, startIndex + maxKeys);
+    const isTruncated = startIndex + maxKeys < filteredKeys.length;
+    const nextContinuationToken = isTruncated ? String(startIndex + maxKeys) : null;
+    const commonPrefixes = /* @__PURE__ */ new Set();
+    const contents = [];
+    for (const key of paginatedKeys) {
+      if (delimiter && prefix) {
+        const suffix = key.substring(prefix.length);
+        const delimiterIndex = suffix.indexOf(delimiter);
+        if (delimiterIndex !== -1) {
+          const commonPrefix = prefix + suffix.substring(0, delimiterIndex + 1);
+          commonPrefixes.add(commonPrefix);
+          continue;
+        }
+      }
+      const obj = this.objects.get(key);
+      contents.push({
+        Key: key,
+        Size: obj.size,
+        LastModified: new Date(obj.lastModified),
+        ETag: obj.etag,
+        StorageClass: "STANDARD"
+      });
+    }
+    if (this.verbose) {
+      console.log(`[MemoryStorage] LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes)`);
+    }
+    return {
+      Contents: contents,
+      CommonPrefixes: Array.from(commonPrefixes).map((prefix2) => ({ Prefix: prefix2 })),
+      IsTruncated: isTruncated,
+      NextContinuationToken: nextContinuationToken,
+      KeyCount: contents.length + commonPrefixes.size,
+      MaxKeys: maxKeys,
+      Prefix: prefix,
+      Delimiter: delimiter
+    };
+  }
+  /**
+   * Create a snapshot of current state
+   */
+  snapshot() {
+    const snapshot = {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      bucket: this.bucket,
+      objectCount: this.objects.size,
+      objects: {}
+    };
+    for (const [key, obj] of this.objects.entries()) {
+      snapshot.objects[key] = {
+        body: obj.body.toString("base64"),
+        metadata: obj.metadata,
+        contentType: obj.contentType,
+        etag: obj.etag,
+        lastModified: obj.lastModified,
+        size: obj.size,
+        contentEncoding: obj.contentEncoding,
+        contentLength: obj.contentLength
+      };
+    }
+    return snapshot;
+  }
+  /**
+   * Restore from a snapshot
+   */
+  restore(snapshot) {
+    if (!snapshot || !snapshot.objects) {
+      throw new Error("Invalid snapshot format");
+    }
+    this.objects.clear();
+    for (const [key, obj] of Object.entries(snapshot.objects)) {
+      this.objects.set(key, {
+        body: Buffer.from(obj.body, "base64"),
+        metadata: obj.metadata,
+        contentType: obj.contentType,
+        etag: obj.etag,
+        lastModified: obj.lastModified,
+        size: obj.size,
+        contentEncoding: obj.contentEncoding,
+        contentLength: obj.contentLength
+      });
+    }
+    if (this.verbose) {
+      console.log(`[MemoryStorage] Restored snapshot with ${this.objects.size} objects`);
+    }
+  }
+  /**
+   * Save current state to disk
+   */
+  async saveToDisk(customPath) {
+    const path = customPath || this.persistPath;
+    if (!path) {
+      throw new Error("No persist path configured");
+    }
+    const snapshot = this.snapshot();
+    const json = JSON.stringify(snapshot, null, 2);
+    const [ok, err] = await tryFn(() => promises.writeFile(path, json, "utf-8"));
+    if (!ok) {
+      throw new Error(`Failed to save to disk: ${err.message}`);
+    }
+    if (this.verbose) {
+      console.log(`[MemoryStorage] Saved ${this.objects.size} objects to ${path}`);
+    }
+    return path;
+  }
+  /**
+   * Load state from disk
+   */
+  async loadFromDisk(customPath) {
+    const path = customPath || this.persistPath;
+    if (!path) {
+      throw new Error("No persist path configured");
+    }
+    const [ok, err, json] = await tryFn(() => promises.readFile(path, "utf-8"));
+    if (!ok) {
+      throw new Error(`Failed to load from disk: ${err.message}`);
+    }
+    const snapshot = JSON.parse(json);
+    this.restore(snapshot);
+    if (this.verbose) {
+      console.log(`[MemoryStorage] Loaded ${this.objects.size} objects from ${path}`);
+    }
+    return snapshot;
+  }
+  /**
+   * Get storage statistics
+   */
+  getStats() {
+    let totalSize = 0;
+    const keys = [];
+    for (const [key, obj] of this.objects.entries()) {
+      totalSize += obj.size;
+      keys.push(key);
+    }
+    return {
+      objectCount: this.objects.size,
+      totalSize,
+      totalSizeFormatted: this._formatBytes(totalSize),
+      keys: keys.sort(),
+      bucket: this.bucket
+    };
+  }
+  /**
+   * Format bytes for human reading
+   */
+  _formatBytes(bytes) {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+  }
+  /**
+   * Clear all objects
+   */
+  clear() {
+    this.objects.clear();
+    if (this.verbose) {
+      console.log(`[MemoryStorage] Cleared all objects`);
+    }
+  }
+}
+
+class MemoryClient extends EventEmitter {
+  constructor(config = {}) {
+    super();
+    this.id = config.id || idGenerator(77);
+    this.verbose = config.verbose || false;
+    this.parallelism = config.parallelism || 10;
+    this.bucket = config.bucket || "s3db";
+    this.keyPrefix = config.keyPrefix || "";
+    this.region = config.region || "us-east-1";
+    this.storage = new MemoryStorage({
+      bucket: this.bucket,
+      enforceLimits: config.enforceLimits || false,
+      metadataLimit: config.metadataLimit || 2048,
+      maxObjectSize: config.maxObjectSize || 5 * 1024 * 1024 * 1024,
+      persistPath: config.persistPath,
+      autoPersist: config.autoPersist || false,
+      verbose: this.verbose
+    });
+    this.config = {
+      bucket: this.bucket,
+      keyPrefix: this.keyPrefix,
+      region: this.region,
+      endpoint: "memory://localhost",
+      forcePathStyle: true
+    };
+    if (this.verbose) {
+      console.log(`[MemoryClient] Initialized (id: ${this.id}, bucket: ${this.bucket})`);
+    }
+  }
+  /**
+   * Simulate sendCommand from AWS SDK
+   * Used by Database/Resource to send AWS SDK commands
+   */
+  async sendCommand(command) {
+    const commandName = command.constructor.name;
+    const input = command.input || {};
+    this.emit("command.request", commandName, input);
+    let response;
+    try {
+      switch (commandName) {
+        case "PutObjectCommand":
+          response = await this._handlePutObject(input);
+          break;
+        case "GetObjectCommand":
+          response = await this._handleGetObject(input);
+          break;
+        case "HeadObjectCommand":
+          response = await this._handleHeadObject(input);
+          break;
+        case "CopyObjectCommand":
+          response = await this._handleCopyObject(input);
+          break;
+        case "DeleteObjectCommand":
+          response = await this._handleDeleteObject(input);
+          break;
+        case "DeleteObjectsCommand":
+          response = await this._handleDeleteObjects(input);
+          break;
+        case "ListObjectsV2Command":
+          response = await this._handleListObjects(input);
+          break;
+        default:
+          throw new Error(`Unsupported command: ${commandName}`);
+      }
+      this.emit("command.response", commandName, response, input);
+      return response;
+    } catch (error) {
+      const mappedError = mapAwsError(error, {
+        bucket: this.bucket,
+        key: input.Key,
+        commandName,
+        commandInput: input
+      });
+      throw mappedError;
+    }
+  }
+  /**
+   * PutObjectCommand handler
+   */
+  async _handlePutObject(input) {
+    const key = input.Key;
+    const metadata = input.Metadata || {};
+    const contentType = input.ContentType;
+    const body = input.Body;
+    const contentEncoding = input.ContentEncoding;
+    const contentLength = input.ContentLength;
+    const ifMatch = input.IfMatch;
+    return await this.storage.put(key, {
+      body,
+      metadata,
+      contentType,
+      contentEncoding,
+      contentLength,
+      ifMatch
+    });
+  }
+  /**
+   * GetObjectCommand handler
+   */
+  async _handleGetObject(input) {
+    const key = input.Key;
+    return await this.storage.get(key);
+  }
+  /**
+   * HeadObjectCommand handler
+   */
+  async _handleHeadObject(input) {
+    const key = input.Key;
+    return await this.storage.head(key);
+  }
+  /**
+   * CopyObjectCommand handler
+   */
+  async _handleCopyObject(input) {
+    const copySource = input.CopySource;
+    const parts = copySource.split("/");
+    const sourceKey = parts.slice(1).join("/");
+    const destinationKey = input.Key;
+    const metadata = input.Metadata;
+    const metadataDirective = input.MetadataDirective;
+    const contentType = input.ContentType;
+    return await this.storage.copy(sourceKey, destinationKey, {
+      metadata,
+      metadataDirective,
+      contentType
+    });
+  }
+  /**
+   * DeleteObjectCommand handler
+   */
+  async _handleDeleteObject(input) {
+    const key = input.Key;
+    return await this.storage.delete(key);
+  }
+  /**
+   * DeleteObjectsCommand handler
+   */
+  async _handleDeleteObjects(input) {
+    const objects = input.Delete?.Objects || [];
+    const keys = objects.map((obj) => obj.Key);
+    return await this.storage.deleteMultiple(keys);
+  }
+  /**
+   * ListObjectsV2Command handler
+   */
+  async _handleListObjects(input) {
+    const fullPrefix = this.keyPrefix && input.Prefix ? path$1.join(this.keyPrefix, input.Prefix) : this.keyPrefix || input.Prefix || "";
+    return await this.storage.list({
+      prefix: fullPrefix,
+      delimiter: input.Delimiter,
+      maxKeys: input.MaxKeys,
+      continuationToken: input.ContinuationToken
+    });
+  }
+  /**
+   * Put an object (Client interface method)
+   */
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
+    const fullKey = this.keyPrefix ? path$1.join(this.keyPrefix, key) : key;
+    const stringMetadata = {};
+    if (metadata) {
+      for (const [k, v] of Object.entries(metadata)) {
+        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
+        const { encoded } = metadataEncode(v);
+        stringMetadata[validKey] = encoded;
+      }
+    }
+    const response = await this.storage.put(fullKey, {
+      body,
+      metadata: stringMetadata,
+      contentType,
+      contentEncoding,
+      contentLength,
+      ifMatch
+    });
+    this.emit("putObject", null, { key, metadata, contentType, body, contentEncoding, contentLength });
+    return response;
+  }
+  /**
+   * Get an object (Client interface method)
+   */
+  async getObject(key) {
+    const fullKey = this.keyPrefix ? path$1.join(this.keyPrefix, key) : key;
+    const response = await this.storage.get(fullKey);
+    const decodedMetadata = {};
+    if (response.Metadata) {
+      for (const [k, v] of Object.entries(response.Metadata)) {
+        decodedMetadata[k] = metadataDecode(v);
+      }
+    }
+    this.emit("getObject", null, { key });
+    return {
+      ...response,
+      Metadata: decodedMetadata
+    };
+  }
+  /**
+   * Head object (get metadata only)
+   */
+  async headObject(key) {
+    const fullKey = this.keyPrefix ? path$1.join(this.keyPrefix, key) : key;
+    const response = await this.storage.head(fullKey);
+    const decodedMetadata = {};
+    if (response.Metadata) {
+      for (const [k, v] of Object.entries(response.Metadata)) {
+        decodedMetadata[k] = metadataDecode(v);
+      }
+    }
+    this.emit("headObject", null, { key });
+    return {
+      ...response,
+      Metadata: decodedMetadata
+    };
+  }
+  /**
+   * Copy an object
+   */
+  async copyObject({ from, to, metadata, metadataDirective, contentType }) {
+    const fullFrom = this.keyPrefix ? path$1.join(this.keyPrefix, from) : from;
+    const fullTo = this.keyPrefix ? path$1.join(this.keyPrefix, to) : to;
+    const encodedMetadata = {};
+    if (metadata) {
+      for (const [k, v] of Object.entries(metadata)) {
+        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
+        const { encoded } = metadataEncode(v);
+        encodedMetadata[validKey] = encoded;
+      }
+    }
+    const response = await this.storage.copy(fullFrom, fullTo, {
+      metadata: encodedMetadata,
+      metadataDirective,
+      contentType
+    });
+    this.emit("copyObject", null, { from, to, metadata, metadataDirective });
+    return response;
+  }
+  /**
+   * Check if object exists
+   */
+  async exists(key) {
+    const fullKey = this.keyPrefix ? path$1.join(this.keyPrefix, key) : key;
+    return this.storage.exists(fullKey);
+  }
+  /**
+   * Delete an object
+   */
+  async deleteObject(key) {
+    const fullKey = this.keyPrefix ? path$1.join(this.keyPrefix, key) : key;
+    const response = await this.storage.delete(fullKey);
+    this.emit("deleteObject", null, { key });
+    return response;
+  }
+  /**
+   * Delete multiple objects (batch)
+   */
+  async deleteObjects(keys) {
+    const fullKeys = keys.map(
+      (key) => this.keyPrefix ? path$1.join(this.keyPrefix, key) : key
+    );
+    const batches = lodashEs.chunk(fullKeys, this.parallelism);
+    const allResults = { Deleted: [], Errors: [] };
+    const { results } = await promisePool.PromisePool.withConcurrency(this.parallelism).for(batches).process(async (batch) => {
+      return await this.storage.deleteMultiple(batch);
+    });
+    for (const result of results) {
+      allResults.Deleted.push(...result.Deleted);
+      allResults.Errors.push(...result.Errors);
+    }
+    this.emit("deleteObjects", null, { keys, count: allResults.Deleted.length });
+    return allResults;
+  }
+  /**
+   * List objects with pagination support
+   */
+  async listObjects({ prefix = "", delimiter = null, maxKeys = 1e3, continuationToken = null }) {
+    const fullPrefix = this.keyPrefix ? path$1.join(this.keyPrefix, prefix) : prefix;
+    const response = await this.storage.list({
+      prefix: fullPrefix,
+      delimiter,
+      maxKeys,
+      continuationToken
+    });
+    this.emit("listObjects", null, { prefix, count: response.Contents.length });
+    return response;
+  }
+  /**
+   * Get a page of keys with offset/limit pagination
+   */
+  async getKeysPage(params = {}) {
+    const { prefix = "", offset = 0, amount = 100 } = params;
+    let keys = [];
+    let truncated = true;
+    let continuationToken;
+    if (offset > 0) {
+      const fullPrefix = this.keyPrefix ? path$1.join(this.keyPrefix, prefix) : prefix;
+      const response = await this.storage.list({
+        prefix: fullPrefix,
+        maxKeys: offset + amount
+      });
+      keys = response.Contents.map((x) => x.Key).slice(offset, offset + amount);
+    } else {
+      while (truncated) {
+        const options = {
+          prefix,
+          continuationToken,
+          maxKeys: amount - keys.length
+        };
+        const res = await this.listObjects(options);
+        if (res.Contents) {
+          keys = keys.concat(res.Contents.map((x) => x.Key));
+        }
+        truncated = res.IsTruncated || false;
+        continuationToken = res.NextContinuationToken;
+        if (keys.length >= amount) {
+          keys = keys.slice(0, amount);
+          break;
+        }
+      }
+    }
+    if (this.keyPrefix) {
+      keys = keys.map((x) => x.replace(this.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace("/", "") : x);
+    }
+    this.emit("getKeysPage", keys, params);
+    return keys;
+  }
+  /**
+   * Get all keys with a given prefix
+   */
+  async getAllKeys({ prefix = "" }) {
+    const fullPrefix = this.keyPrefix ? path$1.join(this.keyPrefix, prefix) : prefix;
+    const response = await this.storage.list({
+      prefix: fullPrefix,
+      maxKeys: 1e5
+      // Large number to get all
+    });
+    let keys = response.Contents.map((x) => x.Key);
+    if (this.keyPrefix) {
+      keys = keys.map((x) => x.replace(this.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace("/", "") : x);
+    }
+    this.emit("getAllKeys", keys, { prefix });
+    return keys;
+  }
+  /**
+   * Create a snapshot of current storage state
+   */
+  snapshot() {
+    return this.storage.snapshot();
+  }
+  /**
+   * Restore from a snapshot
+   */
+  restore(snapshot) {
+    return this.storage.restore(snapshot);
+  }
+  /**
+   * Save current state to disk (persistence)
+   */
+  async saveToDisk(path2) {
+    return await this.storage.saveToDisk(path2);
+  }
+  /**
+   * Load state from disk
+   */
+  async loadFromDisk(path2) {
+    return await this.storage.loadFromDisk(path2);
+  }
+  /**
+   * Get storage statistics
+   */
+  getStats() {
+    return this.storage.getStats();
+  }
+  /**
+   * Clear all objects
+   */
+  clear() {
+    this.storage.clear();
+  }
+}
+
 function mapFieldTypeToTypeScript(fieldType) {
   const baseType = fieldType.split("|")[0].trim();
   const typeMap = {
@@ -38840,7 +39613,7 @@ exports.BigqueryReplicator = BigqueryReplicator;
 exports.CONSUMER_DRIVERS = CONSUMER_DRIVERS;
 exports.Cache = Cache;
 exports.CachePlugin = CachePlugin;
-exports.Client = Client;
+exports.Client = S3Client;
 exports.ConnectionString = ConnectionString;
 exports.ConnectionStringError = ConnectionStringError;
 exports.CostsPlugin = CostsPlugin;
@@ -38859,6 +39632,8 @@ exports.FullTextPlugin = FullTextPlugin;
 exports.GeoPlugin = GeoPlugin;
 exports.InvalidResourceItem = InvalidResourceItem;
 exports.MemoryCache = MemoryCache;
+exports.MemoryClient = MemoryClient;
+exports.MemoryStorage = MemoryStorage;
 exports.MetadataLimitError = MetadataLimitError;
 exports.MetricsPlugin = MetricsPlugin;
 exports.MissingMetadata = MissingMetadata;
@@ -38892,6 +39667,7 @@ exports.ResourceReader = ResourceReader;
 exports.ResourceWriter = ResourceWriter;
 exports.S3BackupDriver = S3BackupDriver;
 exports.S3Cache = S3Cache;
+exports.S3Client = S3Client;
 exports.S3QueuePlugin = S3QueuePlugin;
 exports.S3db = Database;
 exports.S3dbError = S3dbError;
