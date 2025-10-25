@@ -54,15 +54,155 @@ const { prediction } = await mlPlugin.predict('pricePredictor', { cost: 150, dem
 
 ---
 
-## Table of Contents
+## 🚀 Quick Start
 
+Here's a complete example that trains a price prediction model:
+
+```javascript
+import { Database, MLPlugin } from 's3db.js';
+
+// 1. Create database
+const db = new Database({
+  connectionString: 'http://minioadmin:minioadmin@localhost:9000/mybucket'
+});
+
+// 2. Create resource
+const products = await db.createResource({
+  name: 'products',
+  attributes: {
+    cost: 'number|required',
+    demand: 'number|required',
+    price: 'number|required'
+  }
+});
+
+// 3. Insert training data
+await products.insert({ cost: 100, demand: 500, price: 150 });
+await products.insert({ cost: 200, demand: 300, price: 280 });
+// ... insert more data
+
+// 4. Install ML Plugin
+const mlPlugin = new MLPlugin({
+  models: {
+    pricePredictor: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'demand'],
+      target: 'price',
+      autoTrain: true,
+      trainInterval: 3600000 // 1 hour
+    }
+  }
+});
+
+await db.install(mlPlugin);
+await db.start();
+
+// 5. Train model
+await mlPlugin.train('pricePredictor');
+
+// 6. Make predictions
+const { prediction, confidence } = await mlPlugin.predict('pricePredictor', {
+  cost: 150,
+  demand: 400
+});
+
+console.log(`Predicted price: $${prediction.toFixed(2)}`);
+console.log(`Confidence: ${(confidence * 100).toFixed(1)}%`);
+```
+
+**Output:**
+```
+Predicted price: $215.50
+Confidence: 92.3%
+```
+
+---
+
+## 🆚 MLPlugin vs Traditional ML Workflows
+
+**MLPlugin** provides **integrated ML directly on your S3 data**:
+- ✅ Train models on data already in S3 (no ETL needed)
+- ✅ Auto-persistence with versioning (50%+ storage savings)
+- ✅ Built-in data preprocessing (`filter()`, `map()`)
+- ✅ Automatic retraining on schedule or data changes
+- ✅ Production-ready with TensorFlow.js
+- ✅ Zero infrastructure (no separate ML servers)
+
+**Traditional ML Workflows** require complex pipelines:
+- ❌ Export data from database → CSV/Parquet
+- ❌ Upload to separate ML platform (SageMaker, Vertex AI, etc.)
+- ❌ Write training scripts with Pandas/sklearn/TensorFlow
+- ❌ Manage model versioning separately
+- ❌ Deploy models to separate inference servers
+- ❌ Build API layer for predictions
+- ❌ Sync data between database and ML platform
+
+| Aspect | MLPlugin | Traditional Workflow |
+|--------|----------|---------------------|
+| **Setup Time** | 5 minutes | 2-4 hours |
+| **Data Movement** | None (trains on S3) | ETL pipelines needed |
+| **Infrastructure** | Zero (uses existing S3) | ML servers + API servers |
+| **Model Persistence** | Auto-saved to S3 | Manual versioning |
+| **Retraining** | Automatic on schedule | Manual or complex orchestration |
+| **Cost** | S3 storage only (~$0.023/GB) | Compute + storage + API ($100-1000/month) |
+| **Maintenance** | ~0 hours/week | 4-8 hours/week |
+
+**When to use MLPlugin:**
+- 📊 You have data in S3DB and want quick ML predictions
+- 🚀 You need fast time-to-value (MVP in minutes, not days)
+- 💰 You want to minimize infrastructure costs
+- 🔄 You need automatic retraining on fresh data
+- 🎯 Your models are small-to-medium (regression, classification, basic neural nets)
+
+**When to use Traditional ML:**
+- 🧠 You need very large models (billions of parameters)
+- 🔬 You're doing cutting-edge research requiring custom hardware
+- 📈 You have dedicated ML team and infrastructure budget
+- 🌐 You need distributed training across GPU clusters
+
+**Example Comparison:**
+
+```javascript
+// ❌ Traditional: 2 hours to deploy price predictor
+// 1. Export data: python export_to_csv.py (15 min)
+// 2. Upload to ML platform (10 min)
+// 3. Write training script (45 min)
+// 4. Train model (20 min)
+// 5. Deploy inference API (30 min)
+// Total: ~2 hours + ongoing maintenance
+
+// ✅ MLPlugin: 5 minutes to deploy price predictor
+const mlPlugin = new MLPlugin({
+  models: {
+    pricePredictor: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'demand'],
+      target: 'price',
+      autoTrain: true
+    }
+  }
+});
+await db.install(mlPlugin);
+await mlPlugin.train('pricePredictor');
+// Total: 5 minutes + zero maintenance
+```
+
+📚 For real-time CDC replication to external ML platforms (BigQuery ML, Vertex AI, etc.), see [ReplicatorPlugin docs](./replicator.md).
+
+---
+
+## 📋 Table of Contents
+
+- [🚀 Quick Start](#-quick-start)
+- [🆚 MLPlugin vs Traditional ML Workflows](#-mlplugin-vs-traditional-ml-workflows)
 - [Overview](#overview)
 - [Storage Architecture](#storage-architecture)
   - [S3 Key Hierarchy](#s3-key-hierarchy)
   - [Incremental Training Data](#incremental-training-data)
   - [Storage Behaviors](#storage-behaviors)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
 - [Model Types](#model-types)
   - [Regression](#regression)
@@ -342,71 +482,6 @@ import { Database, MLPlugin } from 's3db.js';
 ```
 
 That's it! The plugin is ready to use.
-
----
-
-## Quick Start
-
-Here's a complete example that trains a price prediction model:
-
-```javascript
-import { Database, MLPlugin } from 's3db.js';
-
-// 1. Create database
-const db = new Database({
-  connectionString: 'http://minioadmin:minioadmin@localhost:9000/mybucket'
-});
-
-// 2. Create resource
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    cost: 'number|required',
-    demand: 'number|required',
-    price: 'number|required'
-  }
-});
-
-// 3. Insert training data
-await products.insert({ cost: 100, demand: 500, price: 150 });
-await products.insert({ cost: 200, demand: 300, price: 280 });
-// ... insert more data
-
-// 4. Install ML Plugin
-const mlPlugin = new MLPlugin({
-  models: {
-    pricePredictor: {
-      type: 'regression',
-      resource: 'products',
-      features: ['cost', 'demand'],
-      target: 'price',
-      autoTrain: true,
-      trainInterval: 3600000 // 1 hour
-    }
-  }
-});
-
-await db.install(mlPlugin);
-await db.start();
-
-// 5. Train model
-await mlPlugin.train('pricePredictor');
-
-// 6. Make predictions
-const { prediction, confidence } = await mlPlugin.predict('pricePredictor', {
-  cost: 150,
-  demand: 400
-});
-
-console.log(`Predicted price: $${prediction.toFixed(2)}`);
-console.log(`Confidence: ${(confidence * 100).toFixed(1)}%`);
-```
-
-**Output:**
-```
-Predicted price: $215.50
-Confidence: 92.3%
-```
 
 ---
 

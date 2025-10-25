@@ -23718,6 +23718,28 @@ ${errorDetails}`,
     return Buffer.byteLength(String(body), "utf8");
   }
   /**
+   * Emit events with backward compatibility support
+   * Emits both new standardized events and old deprecated events
+   *
+   * @private
+   * @param {string} oldEvent - Old event name (deprecated)
+   * @param {string} newEvent - New standardized event name
+   * @param {Object} payload - Event payload
+   * @param {string} [id] - Optional ID for ID-specific events
+   */
+  _emitWithDeprecation(oldEvent, newEvent, payload, id = null) {
+    this.emit(newEvent, payload);
+    if (id) {
+      this.emit(`${newEvent}:${id}`, payload);
+    }
+    if (this.listenerCount(oldEvent) > 0) {
+      console.warn(
+        `[s3db.js] Event "${oldEvent}" is deprecated and will be removed in v14.0.0. Use "${newEvent}" instead.` + (id ? ` ID-specific events are also available: "${newEvent}:${id}"` : "")
+      );
+      this.emit(oldEvent, payload);
+    }
+  }
+  /**
    * Insert a new resource object
    * @param {Object} attributes - Resource attributes
    * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
@@ -23857,11 +23879,11 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this.emit("insert", finalResult);
+      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult.id);
       return finalResult;
     } else {
       const finalResult = await this.executeHooks("afterInsert", insertedObject);
-      this.emit("insert", finalResult);
+      this._emitWithDeprecation("insert", "inserted", finalResult, finalResult.id);
       return finalResult;
     }
   }
@@ -23925,7 +23947,7 @@ ${errorDetails}`,
       data = await this.applyVersionMapping(data, objectVersion, this.version);
     }
     data = await this.executeHooks("afterGet", data);
-    this.emit("get", data);
+    this._emitWithDeprecation("get", "fetched", data, data.id);
     const value = data;
     return value;
   }
@@ -24176,19 +24198,19 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this.emit("update", {
+      this._emitWithDeprecation("update", "updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
       return finalResult;
     } else {
       const finalResult = await this.executeHooks("afterUpdate", updatedData);
-      this.emit("update", {
+      this._emitWithDeprecation("update", "updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
       return finalResult;
     }
   }
@@ -24587,11 +24609,11 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         finalResult = await hook(finalResult);
       }
-      this.emit("update", {
+      this._emitWithDeprecation("update", "updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
       return {
         success: true,
         data: finalResult,
@@ -24600,11 +24622,11 @@ ${errorDetails}`,
     } else {
       await this.handlePartitionReferenceUpdates(oldData, newData);
       const finalResult = await this.executeHooks("afterUpdate", updatedData);
-      this.emit("update", {
+      this._emitWithDeprecation("update", "updated", {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
-      });
+      }, updatedData.id);
       return {
         success: true,
         data: finalResult,
@@ -24635,11 +24657,11 @@ ${errorDetails}`,
     await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
     const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
-    this.emit("delete", {
+    this._emitWithDeprecation("delete", "deleted", {
       ...objectData,
       $before: { ...objectData },
       $after: null
-    });
+    }, id);
     if (deleteError) {
       throw mapAwsError(deleteError, {
         bucket: this.client.config.bucket,
