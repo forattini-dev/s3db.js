@@ -25914,109 +25914,106 @@ ${errorDetails}`,
   // STATE MACHINE METHODS
   // ============================================================================
   /**
-   * Send an event to trigger a state transition
-   * @param {string} id - Entity ID
-   * @param {string} event - Event name
-   * @param {Object} [eventData] - Event data
-   * @returns {Promise<Object>} Transition result
-   * @throws {Error} If no state machine is configured for this resource
+   * State machine accessor object
+   * Provides namespaced access to state machine operations
+   * @type {Object}
+   * @property {Function} move - Trigger state transition
+   * @property {Function} get - Get current state
+   * @property {Function} canTransition - Check if transition is valid
+   * @property {Function} getValidEvents - Get valid events for current state
+   * @property {Function} initialize - Initialize entity with initial state
+   * @property {Function} history - Get transition history
    * @example
-   * await orders.state('order-123', 'CONFIRM', { confirmedBy: 'user-456' });
+   * await orders.state.move('order-123', 'CONFIRM');
+   * const state = await orders.state.get('order-123');
+   * const canShip = await orders.state.canTransition('order-123', 'SHIP');
    */
-  async state(id, event, eventData) {
-    if (!this._stateMachine) {
-      throw new Error(
-        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-      );
-    }
-    return this._stateMachine.send(id, event, eventData);
-  }
-  /**
-   * Get current state of an entity
-   * @param {string} id - Entity ID
-   * @returns {Promise<string>} Current state
-   * @throws {Error} If no state machine is configured for this resource
-   * @example
-   * const currentState = await orders.getState('order-123');
-   */
-  async getState(id) {
-    if (!this._stateMachine) {
-      throw new Error(
-        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-      );
-    }
-    return this._stateMachine.getState(id);
-  }
-  /**
-   * Check if a transition is valid
-   * @param {string} id - Entity ID
-   * @param {string} event - Event name
-   * @returns {Promise<boolean>} True if transition is valid
-   * @throws {Error} If no state machine is configured for this resource
-   * @example
-   * const canConfirm = await orders.canTransition('order-123', 'CONFIRM');
-   */
-  async canTransition(id, event) {
-    if (!this._stateMachine) {
-      throw new Error(
-        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-      );
-    }
-    return this._stateMachine.canTransition(id, event);
-  }
-  /**
-   * Get all valid events for the current state
-   * @param {string} id - Entity ID
-   * @returns {Promise<Array<string>>} Array of valid event names
-   * @throws {Error} If no state machine is configured for this resource
-   * @example
-   * const events = await orders.getValidEvents('order-123');
-   * // Returns: ['SHIP', 'CANCEL']
-   */
-  async getValidEvents(id) {
-    if (!this._stateMachine) {
-      throw new Error(
-        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-      );
-    }
-    return this._stateMachine.getValidEvents(id);
-  }
-  /**
-   * Initialize entity with initial state
-   * @param {string} id - Entity ID
-   * @param {Object} [context] - Initial context data
-   * @returns {Promise<void>}
-   * @throws {Error} If no state machine is configured for this resource
-   * @example
-   * await orders.initializeState('order-456', { customerId: 'user-123' });
-   */
-  async initializeState(id, context) {
-    if (!this._stateMachine) {
-      throw new Error(
-        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-      );
-    }
-    return this._stateMachine.initializeEntity(id, context);
-  }
-  /**
-   * Get transition history for an entity
-   * @param {string} id - Entity ID
-   * @param {Object} [options] - Query options
-   * @param {number} [options.limit=100] - Maximum number of transitions
-   * @param {Date} [options.fromDate] - Filter from date
-   * @param {Date} [options.toDate] - Filter to date
-   * @returns {Promise<Array<Object>>} Transition history
-   * @throws {Error} If no state machine is configured for this resource
-   * @example
-   * const history = await orders.getStateHistory('order-123', { limit: 50 });
-   */
-  async getStateHistory(id, options) {
-    if (!this._stateMachine) {
-      throw new Error(
-        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-      );
-    }
-    return this._stateMachine.getTransitionHistory(id, options);
+  get state() {
+    const resource = this;
+    const throwIfNoStateMachine = () => {
+      if (!resource._stateMachine) {
+        throw new Error(
+          `No state machine configured for resource '${resource.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+        );
+      }
+    };
+    return {
+      /**
+       * Trigger a state transition
+       * @param {string} id - Entity ID
+       * @param {string} event - Event name
+       * @param {Object} [eventData] - Event data
+       * @returns {Promise<Object>} Transition result
+       * @example
+       * await orders.state.move('order-123', 'CONFIRM', { confirmedBy: 'user-456' });
+       */
+      move: async (id, event, eventData) => {
+        throwIfNoStateMachine();
+        return resource._stateMachine.send(id, event, eventData);
+      },
+      /**
+       * Get current state of an entity
+       * @param {string} id - Entity ID
+       * @returns {Promise<string>} Current state
+       * @example
+       * const currentState = await orders.state.get('order-123');
+       */
+      get: async (id) => {
+        throwIfNoStateMachine();
+        return resource._stateMachine.getState(id);
+      },
+      /**
+       * Check if a transition is valid
+       * @param {string} id - Entity ID
+       * @param {string} event - Event name
+       * @returns {Promise<boolean>} True if transition is valid
+       * @example
+       * const canConfirm = await orders.state.canTransition('order-123', 'CONFIRM');
+       */
+      canTransition: async (id, event) => {
+        throwIfNoStateMachine();
+        return resource._stateMachine.canTransition(id, event);
+      },
+      /**
+       * Get all valid events for the current state
+       * @param {string} id - Entity ID
+       * @returns {Promise<Array<string>>} Array of valid event names
+       * @example
+       * const events = await orders.state.getValidEvents('order-123');
+       * // Returns: ['SHIP', 'CANCEL']
+       */
+      getValidEvents: async (id) => {
+        throwIfNoStateMachine();
+        return resource._stateMachine.getValidEvents(id);
+      },
+      /**
+       * Initialize entity with initial state
+       * @param {string} id - Entity ID
+       * @param {Object} [context] - Initial context data
+       * @returns {Promise<void>}
+       * @example
+       * await orders.state.initialize('order-456', { customerId: 'user-123' });
+       */
+      initialize: async (id, context) => {
+        throwIfNoStateMachine();
+        return resource._stateMachine.initializeEntity(id, context);
+      },
+      /**
+       * Get transition history for an entity
+       * @param {string} id - Entity ID
+       * @param {Object} [options] - Query options
+       * @param {number} [options.limit=100] - Maximum number of transitions
+       * @param {Date} [options.fromDate] - Filter from date
+       * @param {Date} [options.toDate] - Filter to date
+       * @returns {Promise<Array<Object>>} Transition history
+       * @example
+       * const history = await orders.state.history('order-123', { limit: 50 });
+       */
+      history: async (id, options) => {
+        throwIfNoStateMachine();
+        return resource._stateMachine.getTransitionHistory(id, options);
+      }
+    };
   }
   /**
    * Internal method to attach state machine instance
