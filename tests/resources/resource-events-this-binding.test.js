@@ -35,7 +35,7 @@ describe('Resource Events - this.database Binding', () => {
       },
       events: {
         // Test with regular function (should have this.database)
-        insert: [
+        inserted: [
           async function(data) {
             eventCalls.push({ type: 'insert', hasDatabase: !!this.database });
 
@@ -49,7 +49,7 @@ describe('Resource Events - this.database Binding', () => {
           }
         ],
         // Test with regular function (both regular and arrow functions work after bind fix)
-        update: [
+        updated: [
           async function(data) {
             // Regular function has access to this.database after bind
             eventCalls.push({ type: 'update', hasDatabase: !!this.database });
