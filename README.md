@@ -344,7 +344,9 @@ s3db.js supports multiple connection string formats for different S3 providers:
 "http://test:test@localhost:4566/mybucket/databases/myapp"
 
 // MemoryClient (ultra-fast in-memory testing - no S3 required!)
-// See MemoryClient section below for details
+// Note: MemoryClient doesn't use a connection string, instantiate directly:
+//   const db = new S3db({ client: new MemoryClient({ bucket: 'test-bucket' }) });
+// See MemoryClient section below for full documentation
 
 // Backblaze B2
 "https://KEY_ID:APPLICATION_KEY@s3.us-west-002.backblazeb2.com/BUCKET/databases/myapp"
