@@ -3722,14 +3722,14 @@ export class Resource extends AsyncEventEmitter {
    * State machine accessor object
    * Provides namespaced access to state machine operations
    * @type {Object}
-   * @property {Function} move - Trigger state transition
+   * @property {Function} send - Trigger state transition
    * @property {Function} get - Get current state
    * @property {Function} canTransition - Check if transition is valid
    * @property {Function} getValidEvents - Get valid events for current state
    * @property {Function} initialize - Initialize entity with initial state
    * @property {Function} history - Get transition history
    * @example
-   * await orders.state.move('order-123', 'CONFIRM');
+   * await orders.state.send('order-123', 'CONFIRM');
    * const state = await orders.state.get('order-123');
    * const canShip = await orders.state.canTransition('order-123', 'SHIP');
    */
@@ -3753,9 +3753,9 @@ export class Resource extends AsyncEventEmitter {
        * @param {Object} [eventData] - Event data
        * @returns {Promise<Object>} Transition result
        * @example
-       * await orders.state.move('order-123', 'CONFIRM', { confirmedBy: 'user-456' });
+       * await orders.state.send('order-123', 'CONFIRM', { confirmedBy: 'user-456' });
        */
-      move: async (id, event, eventData) => {
+      send: async (id, event, eventData) => {
         throwIfNoStateMachine();
         return resource._stateMachine.send(id, event, eventData);
       },
