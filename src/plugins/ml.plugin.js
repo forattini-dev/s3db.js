@@ -67,7 +67,8 @@ export class MLPlugin extends Plugin {
       verbose: options.verbose || false,
       minTrainingSamples: options.minTrainingSamples || 10,
       saveModel: options.saveModel !== false, // Default true
-      saveTrainingData: options.saveTrainingData || false
+      saveTrainingData: options.saveTrainingData || false,
+      enableVersioning: options.enableVersioning !== false // Default true
     };
 
     // Validate TensorFlow.js dependency
@@ -78,6 +79,9 @@ export class MLPlugin extends Plugin {
 
     // Model instances
     this.models = {};
+
+    // Model versioning
+    this.modelVersions = new Map(); // Track versions per model: { currentVersion, latestVersion }
 
     // Training state
     this.training = new Map(); // Track ongoing training
@@ -136,6 +140,13 @@ export class MLPlugin extends Plugin {
    * Start the plugin
    */
   async onStart() {
+    // Initialize versioning for each model
+    if (this.config.enableVersioning) {
+      for (const modelName of Object.keys(this.models)) {
+        await this._initializeVersioning(modelName);
+      }
+    }
+
     // Try to load previously trained models
     for (const modelName of Object.keys(this.models)) {
       await this._loadModel(modelName);
@@ -625,6 +636,81 @@ export class MLPlugin extends Plugin {
   }
 
   /**
+   * Initialize versioning for a model
+   * @private
+   */
+  async _initializeVersioning(modelName) {
+    try {
+      const storage = this.getStorage();
+      const [ok, err, versionInfo] = await tryFn(() => storage.get(`version_${modelName}`));
+
+      if (ok && versionInfo) {
+        // Load existing version info
+        this.modelVersions.set(modelName, {
+          currentVersion: versionInfo.currentVersion || 1,
+          latestVersion: versionInfo.latestVersion || 1
+        });
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Loaded version info for "${modelName}": v${versionInfo.currentVersion}`);
+        }
+      } else {
+        // Initialize new versioning
+        this.modelVersions.set(modelName, {
+          currentVersion: 1,
+          latestVersion: 0  // No versions yet
+        });
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Initialized versioning for "${modelName}"`);
+        }
+      }
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to initialize versioning for "${modelName}":`, error.message);
+      // Fallback to v1
+      this.modelVersions.set(modelName, { currentVersion: 1, latestVersion: 0 });
+    }
+  }
+
+  /**
+   * Get next version number for a model
+   * @private
+   */
+  _getNextVersion(modelName) {
+    const versionInfo = this.modelVersions.get(modelName) || { latestVersion: 0 };
+    return versionInfo.latestVersion + 1;
+  }
+
+  /**
+   * Update version info in storage
+   * @private
+   */
+  async _updateVersionInfo(modelName, version) {
+    try {
+      const storage = this.getStorage();
+      const versionInfo = this.modelVersions.get(modelName) || { currentVersion: 1, latestVersion: 0 };
+
+      versionInfo.latestVersion = Math.max(versionInfo.latestVersion, version);
+      versionInfo.currentVersion = version; // Set new version as current
+
+      this.modelVersions.set(modelName, versionInfo);
+
+      await storage.patch(`version_${modelName}`, {
+        modelName,
+        currentVersion: versionInfo.currentVersion,
+        latestVersion: versionInfo.latestVersion,
+        updatedAt: new Date().toISOString()
+      });
+
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Updated version info for "${modelName}": current=v${versionInfo.currentVersion}, latest=v${versionInfo.latestVersion}`);
+      }
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to update version info for "${modelName}":`, error.message);
+    }
+  }
+
+  /**
    * Save model to plugin storage
    * @private
    */
@@ -640,16 +726,53 @@ export class MLPlugin extends Plugin {
         return;
       }
 
-      // Use patch() for faster metadata-only updates (enforce-limits behavior)
-      await storage.patch(`model_${modelName}`, {
-        modelName,
-        type: 'model',
-        data: JSON.stringify(exportedModel),
-        savedAt: new Date().toISOString()
-      });
+      const enableVersioning = this.config.enableVersioning;
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Saved model "${modelName}" to plugin storage (S3)`);
+      if (enableVersioning) {
+        // Save with version
+        const version = this._getNextVersion(modelName);
+        const modelStats = this.models[modelName].getStats();
+
+        // Save versioned model
+        await storage.patch(`model_${modelName}_v${version}`, {
+          modelName,
+          version,
+          type: 'model',
+          data: JSON.stringify(exportedModel),
+          metrics: JSON.stringify({
+            loss: modelStats.loss,
+            accuracy: modelStats.accuracy,
+            samples: modelStats.samples
+          }),
+          savedAt: new Date().toISOString()
+        });
+
+        // Update version info
+        await this._updateVersionInfo(modelName, version);
+
+        // Save active reference (points to current version)
+        await storage.patch(`model_${modelName}_active`, {
+          modelName,
+          version,
+          type: 'reference',
+          updatedAt: new Date().toISOString()
+        });
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Saved model "${modelName}" v${version} to plugin storage (S3)`);
+        }
+      } else {
+        // Save without versioning (legacy behavior)
+        await storage.patch(`model_${modelName}`, {
+          modelName,
+          type: 'model',
+          data: JSON.stringify(exportedModel),
+          savedAt: new Date().toISOString()
+        });
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Saved model "${modelName}" to plugin storage (S3)`);
+        }
       }
     } catch (error) {
       console.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
@@ -657,7 +780,7 @@ export class MLPlugin extends Plugin {
   }
 
   /**
-   * Save intermediate training data to plugin storage
+   * Save intermediate training data to plugin storage (incremental)
    * @private
    */
   async _saveTrainingData(modelName, rawData) {
@@ -665,9 +788,12 @@ export class MLPlugin extends Plugin {
       const storage = this.getStorage();
       const model = this.models[modelName];
       const modelConfig = this.config.models[modelName];
+      const modelStats = model.getStats();
+      const enableVersioning = this.config.enableVersioning;
 
       // Extract features and target from raw data
-      const trainingData = {
+      const trainingEntry = {
+        version: enableVersioning ? this.modelVersions.get(modelName)?.latestVersion || 1 : undefined,
         samples: rawData.length,
         features: modelConfig.features,
         target: modelConfig.target,
@@ -681,22 +807,58 @@ export class MLPlugin extends Plugin {
             target: item[modelConfig.target]
           };
         }),
-        savedAt: new Date().toISOString()
+        metrics: {
+          loss: modelStats.loss,
+          accuracy: modelStats.accuracy,
+          r2: modelStats.r2
+        },
+        trainedAt: new Date().toISOString()
       };
 
-      // Save to plugin storage
-      await storage.patch(`training_data_${modelName}`, {
-        modelName,
-        type: 'training_data',
-        samples: trainingData.samples,
-        features: JSON.stringify(trainingData.features),
-        target: trainingData.target,
-        data: JSON.stringify(trainingData.data),
-        savedAt: trainingData.savedAt
-      });
+      if (enableVersioning) {
+        // Incremental: Load existing history and append
+        const [ok, err, existing] = await tryFn(() => storage.get(`training_history_${modelName}`));
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Saved training data for "${modelName}" (${trainingData.samples} samples) to plugin storage (S3)`);
+        let history = [];
+        if (ok && existing && existing.history) {
+          try {
+            history = JSON.parse(existing.history);
+          } catch (e) {
+            history = [];
+          }
+        }
+
+        // Append new entry
+        history.push(trainingEntry);
+
+        // Save updated history
+        await storage.patch(`training_history_${modelName}`, {
+          modelName,
+          type: 'training_history',
+          totalTrainings: history.length,
+          latestVersion: trainingEntry.version,
+          history: JSON.stringify(history),
+          updatedAt: new Date().toISOString()
+        });
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Appended training data for "${modelName}" v${trainingEntry.version} (${trainingEntry.samples} samples, total: ${history.length} trainings)`);
+        }
+      } else {
+        // Legacy: Replace training data (non-incremental)
+        await storage.patch(`training_data_${modelName}`, {
+          modelName,
+          type: 'training_data',
+          samples: trainingEntry.samples,
+          features: JSON.stringify(trainingEntry.features),
+          target: trainingEntry.target,
+          data: JSON.stringify(trainingEntry.data),
+          savedAt: trainingEntry.trainedAt
+        });
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Saved training data for "${modelName}" (${trainingEntry.samples} samples) to plugin storage (S3)`);
+        }
       }
     } catch (error) {
       console.error(`[MLPlugin] Failed to save training data for "${modelName}":`, error.message);
@@ -710,20 +872,65 @@ export class MLPlugin extends Plugin {
   async _loadModel(modelName) {
     try {
       const storage = this.getStorage();
-      const [ok, err, record] = await tryFn(() => storage.get(`model_${modelName}`));
+      const enableVersioning = this.config.enableVersioning;
 
-      if (!ok || !record) {
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] No saved model found for "${modelName}"`);
+      if (enableVersioning) {
+        // Load active version
+        const [okRef, errRef, activeRef] = await tryFn(() => storage.get(`model_${modelName}_active`));
+
+        if (okRef && activeRef && activeRef.version) {
+          // Load the active version
+          const version = activeRef.version;
+          const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${version}`));
+
+          if (ok && versionData) {
+            const modelData = JSON.parse(versionData.data);
+            await this.models[modelName].import(modelData);
+
+            if (this.config.verbose) {
+              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (active) from plugin storage (S3)`);
+            }
+            return;
+          }
         }
-        return;
-      }
 
-      const modelData = JSON.parse(record.data);
-      await this.models[modelName].import(modelData);
+        // No active reference, try to load latest version
+        const versionInfo = this.modelVersions.get(modelName);
+        if (versionInfo && versionInfo.latestVersion > 0) {
+          const version = versionInfo.latestVersion;
+          const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${version}`));
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Loaded model "${modelName}" from plugin storage (S3)`);
+          if (ok && versionData) {
+            const modelData = JSON.parse(versionData.data);
+            await this.models[modelName].import(modelData);
+
+            if (this.config.verbose) {
+              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (latest) from plugin storage (S3)`);
+            }
+            return;
+          }
+        }
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] No saved model versions found for "${modelName}"`);
+        }
+      } else {
+        // Legacy: Load non-versioned model
+        const [ok, err, record] = await tryFn(() => storage.get(`model_${modelName}`));
+
+        if (!ok || !record) {
+          if (this.config.verbose) {
+            console.log(`[MLPlugin] No saved model found for "${modelName}"`);
+          }
+          return;
+        }
+
+        const modelData = JSON.parse(record.data);
+        await this.models[modelName].import(modelData);
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Loaded model "${modelName}" from plugin storage (S3)`);
+        }
       }
     } catch (error) {
       console.error(`[MLPlugin] Failed to load model "${modelName}":`, error.message);
@@ -799,5 +1006,247 @@ export class MLPlugin extends Plugin {
         console.log(`[MLPlugin] Could not delete training data "${modelName}": ${error.message}`);
       }
     }
+  }
+
+  /**
+   * List all versions of a model
+   * @param {string} modelName - Model name
+   * @returns {Array} List of version info
+   */
+  async listModelVersions(modelName) {
+    if (!this.config.enableVersioning) {
+      throw new MLError('Versioning is not enabled', { modelName });
+    }
+
+    try {
+      const storage = this.getStorage();
+      const versionInfo = this.modelVersions.get(modelName) || { latestVersion: 0 };
+      const versions = [];
+
+      // Load each version
+      for (let v = 1; v <= versionInfo.latestVersion; v++) {
+        const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${v}`));
+
+        if (ok && versionData) {
+          const metrics = versionData.metrics ? JSON.parse(versionData.metrics) : {};
+          versions.push({
+            version: v,
+            savedAt: versionData.savedAt,
+            isCurrent: v === versionInfo.currentVersion,
+            metrics
+          });
+        }
+      }
+
+      return versions;
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to list versions for "${modelName}":`, error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Load a specific version of a model
+   * @param {string} modelName - Model name
+   * @param {number} version - Version number
+   */
+  async loadModelVersion(modelName, version) {
+    if (!this.config.enableVersioning) {
+      throw new MLError('Versioning is not enabled', { modelName });
+    }
+
+    if (!this.models[modelName]) {
+      throw new ModelNotFoundError(`Model "${modelName}" not found`, { modelName });
+    }
+
+    try {
+      const storage = this.getStorage();
+      const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${version}`));
+
+      if (!ok || !versionData) {
+        throw new MLError(`Version ${version} not found for model "${modelName}"`, { modelName, version });
+      }
+
+      const modelData = JSON.parse(versionData.data);
+      await this.models[modelName].import(modelData);
+
+      // Update current version in memory (don't save to storage yet)
+      const versionInfo = this.modelVersions.get(modelName);
+      if (versionInfo) {
+        versionInfo.currentVersion = version;
+        this.modelVersions.set(modelName, versionInfo);
+      }
+
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Loaded model "${modelName}" v${version}`);
+      }
+
+      return {
+        version,
+        metrics: versionData.metrics ? JSON.parse(versionData.metrics) : {},
+        savedAt: versionData.savedAt
+      };
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to load version ${version} for "${modelName}":`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Set active version for a model (used for predictions)
+   * @param {string} modelName - Model name
+   * @param {number} version - Version number
+   */
+  async setActiveVersion(modelName, version) {
+    if (!this.config.enableVersioning) {
+      throw new MLError('Versioning is not enabled', { modelName });
+    }
+
+    // Load the version into the model
+    await this.loadModelVersion(modelName, version);
+
+    // Update version info in storage
+    await this._updateVersionInfo(modelName, version);
+
+    // Update active reference
+    const storage = this.getStorage();
+    await storage.patch(`model_${modelName}_active`, {
+      modelName,
+      version,
+      type: 'reference',
+      updatedAt: new Date().toISOString()
+    });
+
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Set model "${modelName}" active version to v${version}`);
+    }
+
+    return { modelName, version };
+  }
+
+  /**
+   * Get training history for a model
+   * @param {string} modelName - Model name
+   * @returns {Array} Training history
+   */
+  async getTrainingHistory(modelName) {
+    if (!this.config.enableVersioning) {
+      // Fallback to legacy getTrainingData
+      return await this.getTrainingData(modelName);
+    }
+
+    try {
+      const storage = this.getStorage();
+      const [ok, err, historyData] = await tryFn(() => storage.get(`training_history_${modelName}`));
+
+      if (!ok || !historyData) {
+        return null;
+      }
+
+      return {
+        modelName: historyData.modelName,
+        totalTrainings: historyData.totalTrainings,
+        latestVersion: historyData.latestVersion,
+        history: JSON.parse(historyData.history),
+        updatedAt: historyData.updatedAt
+      };
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to load training history for "${modelName}":`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Compare metrics between two versions
+   * @param {string} modelName - Model name
+   * @param {number} version1 - First version
+   * @param {number} version2 - Second version
+   * @returns {Object} Comparison results
+   */
+  async compareVersions(modelName, version1, version2) {
+    if (!this.config.enableVersioning) {
+      throw new MLError('Versioning is not enabled', { modelName });
+    }
+
+    try {
+      const storage = this.getStorage();
+
+      const [ok1, err1, v1Data] = await tryFn(() => storage.get(`model_${modelName}_v${version1}`));
+      const [ok2, err2, v2Data] = await tryFn(() => storage.get(`model_${modelName}_v${version2}`));
+
+      if (!ok1 || !v1Data) {
+        throw new MLError(`Version ${version1} not found`, { modelName, version: version1 });
+      }
+
+      if (!ok2 || !v2Data) {
+        throw new MLError(`Version ${version2} not found`, { modelName, version: version2 });
+      }
+
+      const metrics1 = v1Data.metrics ? JSON.parse(v1Data.metrics) : {};
+      const metrics2 = v2Data.metrics ? JSON.parse(v2Data.metrics) : {};
+
+      return {
+        modelName,
+        version1: {
+          version: version1,
+          savedAt: v1Data.savedAt,
+          metrics: metrics1
+        },
+        version2: {
+          version: version2,
+          savedAt: v2Data.savedAt,
+          metrics: metrics2
+        },
+        improvement: {
+          loss: metrics1.loss && metrics2.loss ? ((metrics1.loss - metrics2.loss) / metrics1.loss * 100).toFixed(2) + '%' : 'N/A',
+          accuracy: metrics1.accuracy && metrics2.accuracy ? ((metrics2.accuracy - metrics1.accuracy) / metrics1.accuracy * 100).toFixed(2) + '%' : 'N/A'
+        }
+      };
+    } catch (error) {
+      console.error(`[MLPlugin] Failed to compare versions for "${modelName}":`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Rollback to a previous version
+   * @param {string} modelName - Model name
+   * @param {number} version - Version to rollback to (defaults to previous version)
+   * @returns {Object} Rollback info
+   */
+  async rollbackVersion(modelName, version = null) {
+    if (!this.config.enableVersioning) {
+      throw new MLError('Versioning is not enabled', { modelName });
+    }
+
+    const versionInfo = this.modelVersions.get(modelName);
+    if (!versionInfo) {
+      throw new MLError(`No version info found for model "${modelName}"`, { modelName });
+    }
+
+    // If no version specified, rollback to previous
+    const targetVersion = version !== null ? version : Math.max(1, versionInfo.currentVersion - 1);
+
+    if (targetVersion === versionInfo.currentVersion) {
+      throw new MLError('Cannot rollback to the same version', { modelName, version: targetVersion });
+    }
+
+    if (targetVersion < 1 || targetVersion > versionInfo.latestVersion) {
+      throw new MLError(`Invalid version ${targetVersion}`, { modelName, version: targetVersion, latestVersion: versionInfo.latestVersion });
+    }
+
+    // Load and set as active
+    const result = await this.setActiveVersion(modelName, targetVersion);
+
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Rolled back model "${modelName}" from v${versionInfo.currentVersion} to v${targetVersion}`);
+    }
+
+    return {
+      modelName,
+      previousVersion: versionInfo.currentVersion,
+      currentVersion: targetVersion,
+      ...result
+    };
   }
 }

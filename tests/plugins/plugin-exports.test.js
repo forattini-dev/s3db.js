@@ -72,36 +72,26 @@ describe('Plugin Exports', () => {
     }
   });
 
-  it('should allow default import of individual plugins', async () => {
-    // Test a few plugins with default imports
-    const AuditPlugin = (await import('../../src/plugins/audit.plugin.js')).default;
-    const BackupPlugin = (await import('../../src/plugins/backup.plugin.js')).default;
-    const CachePlugin = (await import('../../src/plugins/cache.plugin.js')).default;
-    const QueueConsumerPlugin = (await import('../../src/plugins/queue-consumer.plugin.js')).default;
-    const ReplicatorPlugin = (await import('../../src/plugins/replicator.plugin.js')).default;
-
-    expect(AuditPlugin).toBeDefined();
-    expect(BackupPlugin).toBeDefined();
-    expect(CachePlugin).toBeDefined();
-    expect(QueueConsumerPlugin).toBeDefined();
-    expect(ReplicatorPlugin).toBeDefined();
-  });
-
-  it('should have matching named and default exports', async () => {
-    // Verify that named export and default export are the same
+  it('should only export named exports (no default exports)', async () => {
+    // Verify plugins use named exports only
     const auditModule = await import('../../src/plugins/audit.plugin.js');
-    expect(auditModule.AuditPlugin).toBe(auditModule.default);
+    expect(auditModule.AuditPlugin).toBeDefined();
+    expect(auditModule.default).toBeUndefined();
 
     const backupModule = await import('../../src/plugins/backup.plugin.js');
-    expect(backupModule.BackupPlugin).toBe(backupModule.default);
+    expect(backupModule.BackupPlugin).toBeDefined();
+    expect(backupModule.default).toBeUndefined();
 
     const cacheModule = await import('../../src/plugins/cache.plugin.js');
-    expect(cacheModule.CachePlugin).toBe(cacheModule.default);
+    expect(cacheModule.CachePlugin).toBeDefined();
+    expect(cacheModule.default).toBeUndefined();
 
     const queueModule = await import('../../src/plugins/queue-consumer.plugin.js');
-    expect(queueModule.QueueConsumerPlugin).toBe(queueModule.default);
+    expect(queueModule.QueueConsumerPlugin).toBeDefined();
+    expect(queueModule.default).toBeUndefined();
 
     const replicatorModule = await import('../../src/plugins/replicator.plugin.js');
-    expect(replicatorModule.ReplicatorPlugin).toBe(replicatorModule.default);
+    expect(replicatorModule.ReplicatorPlugin).toBeDefined();
+    expect(replicatorModule.default).toBeUndefined();
   });
 });
