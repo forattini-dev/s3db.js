@@ -110,8 +110,9 @@ export class CostsPlugin extends Plugin {
 
   async onStart() {
     if (this.client) {
+      // Listen to cl:response only (fires for all operations, success or error)
+      // This prevents double-counting (cl:request + cl:response would count twice)
       this.client.on("cl:response", (name, response, input) => this.addRequest(name, this.map[name], response, input));
-      this.client.on("cl:request", (name, input) => this.addRequest(name, this.map[name], {}, input));
     }
   }
 
