@@ -109,7 +109,7 @@ export class GeoPlugin extends Plugin {
       console.log(`[GeoPlugin] Installed with ${Object.keys(this.resources).length} resources`);
     }
 
-    this.emit('installed', {
+    this.emit('db:plugin:installed', {
       plugin: 'GeoPlugin',
       resources: Object.keys(this.resources)
     });
@@ -861,7 +861,7 @@ export class GeoPlugin extends Plugin {
       console.log('[GeoPlugin] Uninstalled');
     }
 
-    this.emit('uninstalled', {
+    this.emit('db:plugin:uninstalled', {
       plugin: 'GeoPlugin'
     });
 

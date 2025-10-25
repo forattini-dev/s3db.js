@@ -30,7 +30,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'test', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -70,7 +70,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'updated', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('update', resolve));
+      const eventPromise = new Promise(resolve => resource.once('updated', resolve));
       await resource.update('test-update', updatedData);
       const eventData = await eventPromise;
 
@@ -102,7 +102,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
 
       await resource.insert(testData);
 
-      const eventPromise = new Promise(resolve => resource.once('delete', resolve));
+      const eventPromise = new Promise(resolve => resource.once('deleted', resolve));
       await resource.delete('test-delete');
       const eventData = await eventPromise;
 
@@ -136,7 +136,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'test', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -185,7 +185,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'updated', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('update', resolve));
+      const eventPromise = new Promise(resolve => resource.once('updated', resolve));
       await resource.update('test-overflow-update', updatedData);
       const eventData = await eventPromise;
 
@@ -219,7 +219,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'test', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -259,7 +259,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'updated', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('update', resolve));
+      const eventPromise = new Promise(resolve => resource.once('updated', resolve));
       await resource.update('test-body-only-update', updatedData);
       const eventData = await eventPromise;
 
@@ -293,7 +293,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'test', priority: 'high' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -330,7 +330,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         content: 'Updated content within limits' // Within 50 char limit
       };
 
-      const eventPromise = new Promise(resolve => resource.once('update', resolve));
+      const eventPromise = new Promise(resolve => resource.once('updated', resolve));
       await resource.update('test-truncate-update', updatedData);
       const eventData = await eventPromise;
 
@@ -363,7 +363,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         meta: { category: 'test' }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -394,7 +394,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       };
 
       const eventEmitted = jest.fn();
-      resource.once('insert', eventEmitted);
+      resource.once('inserted', eventEmitted);
 
       try {
         await resource.insert(largeData);
@@ -448,7 +448,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -482,7 +482,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         }
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -523,7 +523,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         arrayField: ['1', '2', '3']
       };
 
-      const eventPromise = new Promise(resolve => resource.once('insert', resolve));
+      const eventPromise = new Promise(resolve => resource.once('inserted', resolve));
       await resource.insert(testData);
       const eventData = await eventPromise;
 
@@ -879,7 +879,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       });
 
       // Add manual listener after resource creation
-      resource.on('insert', manualListener);
+      resource.on('inserted', manualListener);
 
       await resource.insert({
         id: 'test-manual',

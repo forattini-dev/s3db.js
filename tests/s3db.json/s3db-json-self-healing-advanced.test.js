@@ -397,7 +397,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
   describe('Events and Logging', () => {
     test('should emit metadataHealed event when healing occurs', async () => {
       const healingPromise = new Promise((resolve) => {
-        database.once('metadataHealed', (data) => {
+        database.once('db:metadata-healed', (data) => {
           resolve(data);
         });
       });
@@ -466,7 +466,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       });
 
       let healingEventFired = false;
-      database.once('metadataHealed', () => {
+      database.once('db:metadata-healed', () => {
         healingEventFired = true;
       });
 

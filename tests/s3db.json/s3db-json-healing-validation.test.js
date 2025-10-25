@@ -326,7 +326,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
 
     test('emits metadataHealed event for healed files', async () => {
       const healingPromise = new Promise((resolve) => {
-        database.once('metadataHealed', resolve);
+        database.once('db:metadata-healed', resolve);
       });
 
       const corruptedJson = '{ "version": "1", "resources": { "test": "invalid" }';

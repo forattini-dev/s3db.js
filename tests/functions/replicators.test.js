@@ -39,7 +39,7 @@ describe('Replicators Coverage Tests', () => {
       const replicator = new BaseReplicator({ enabled: true });
       
       const events = [];
-      replicator.on('initialized', (data) => events.push(data));
+      replicator.on('db:plugin:initialized', (data) => events.push(data));
       
       await replicator.initialize(database);
       
@@ -107,7 +107,7 @@ describe('Replicators Coverage Tests', () => {
       const replicator = new S3dbReplicator({}, ['users'], database.client);
       
       const events = [];
-      replicator.on('initialized', (data) => events.push(data));
+      replicator.on('db:plugin:initialized', (data) => events.push(data));
       
       await replicator.initialize(database);
       
@@ -162,7 +162,7 @@ describe('Replicators Coverage Tests', () => {
       const replicator = new SqsReplicator(config);
       
       const events = [];
-      replicator.on('initialized', (data) => events.push(data));
+      replicator.on('db:plugin:initialized', (data) => events.push(data));
       
       await replicator.initialize(database);
       
@@ -278,7 +278,7 @@ describe('Replicators Coverage Tests', () => {
       const replicator = new S3dbReplicator({}, ['users'], database.client);
       const events = [];
       
-      replicator.on('initialized', (data) => events.push({ type: 'initialized', data }));
+      replicator.on('db:plugin:initialized', (data) => events.push({ type: 'initialized', data }));
       
       await replicator.initialize(database);
       

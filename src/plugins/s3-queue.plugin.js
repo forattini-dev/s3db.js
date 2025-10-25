@@ -262,7 +262,7 @@ export class S3QueuePlugin extends Plugin {
       console.log(`[S3QueuePlugin] Started ${concurrency} workers`);
     }
 
-    this.emit('workers.started', { concurrency, workerId: this.workerId });
+    this.emit('plg:s3-queue:workers-started', { concurrency, workerId: this.workerId });
   }
 
   async stopProcessing() {
@@ -289,7 +289,7 @@ export class S3QueuePlugin extends Plugin {
       console.log('[S3QueuePlugin] Stopped all workers');
     }
 
-    this.emit('workers.stopped', { workerId: this.workerId });
+    this.emit('plg:s3-queue:workers-stopped', { workerId: this.workerId });
   }
 
   createWorker(handler, workerIndex) {
@@ -518,7 +518,7 @@ export class S3QueuePlugin extends Plugin {
 
       const duration = Date.now() - startTime;
 
-      this.emit('message.completed', {
+      this.emit('plg:s3-queue:message-completed', {
         queueId: message.queueId,
         originalId: message.record.id,
         duration,
@@ -537,7 +537,7 @@ export class S3QueuePlugin extends Plugin {
         // Retry with backoff
         await this.retryMessage(message.queueId, message.attempts, error.message);
 
-        this.emit('message.retry', {
+        this.emit('plg:s3-queue:message-retry', {
           queueId: message.queueId,
           originalId: message.record.id,
           attempts: message.attempts,
@@ -547,7 +547,7 @@ export class S3QueuePlugin extends Plugin {
         // Max attempts reached - move to dead letter queue
         await this.moveToDeadLetter(message.queueId, message.record, error.message);
 
-        this.emit('message.dead', {
+        this.emit('plg:s3-queue:message-dead', {
           queueId: message.queueId,
           originalId: message.record.id,
           error: error.message

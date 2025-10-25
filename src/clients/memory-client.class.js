@@ -73,7 +73,7 @@ export class MemoryClient extends EventEmitter {
     const commandName = command.constructor.name;
     const input = command.input || {};
 
-    this.emit('command.request', commandName, input);
+    this.emit('cl:request', commandName, input);
 
     let response;
 
@@ -105,7 +105,7 @@ export class MemoryClient extends EventEmitter {
           throw new Error(`Unsupported command: ${commandName}`);
       }
 
-      this.emit('command.response', commandName, response, input);
+      this.emit('cl:response', commandName, response, input);
       return response;
 
     } catch (error) {
@@ -237,7 +237,7 @@ export class MemoryClient extends EventEmitter {
       ifMatch
     });
 
-    this.emit('putObject', null, { key, metadata, contentType, body, contentEncoding, contentLength });
+    this.emit('cl:PutObject', null, { key, metadata, contentType, body, contentEncoding, contentLength });
 
     return response;
   }
@@ -257,7 +257,7 @@ export class MemoryClient extends EventEmitter {
       }
     }
 
-    this.emit('getObject', null, { key });
+    this.emit('cl:GetObject', null, { key });
 
     return {
       ...response,
@@ -280,7 +280,7 @@ export class MemoryClient extends EventEmitter {
       }
     }
 
-    this.emit('headObject', null, { key });
+    this.emit('cl:HeadObject', null, { key });
 
     return {
       ...response,
@@ -311,7 +311,7 @@ export class MemoryClient extends EventEmitter {
       contentType
     });
 
-    this.emit('copyObject', null, { from, to, metadata, metadataDirective });
+    this.emit('cl:CopyObject', null, { from, to, metadata, metadataDirective });
 
     return response;
   }
@@ -331,7 +331,7 @@ export class MemoryClient extends EventEmitter {
     const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
     const response = await this.storage.delete(fullKey);
 
-    this.emit('deleteObject', null, { key });
+    this.emit('cl:DeleteObject', null, { key });
 
     return response;
   }
@@ -380,7 +380,7 @@ export class MemoryClient extends EventEmitter {
       continuationToken
     });
 
-    this.emit('listObjects', null, { prefix, count: response.Contents.length });
+    this.emit('cl:ListObjects', null, { prefix, count: response.Contents.length });
 
     return response;
   }
@@ -431,7 +431,7 @@ export class MemoryClient extends EventEmitter {
         .map(x => (x.startsWith('/') ? x.replace('/', '') : x));
     }
 
-    this.emit('getKeysPage', keys, params);
+    this.emit('cl:GetKeysPage', keys, params);
     return keys;
   }
 
@@ -454,7 +454,7 @@ export class MemoryClient extends EventEmitter {
         .map(x => (x.startsWith('/') ? x.replace('/', '') : x));
     }
 
-    this.emit('getAllKeys', keys, { prefix });
+    this.emit('cl:GetAllKeys', keys, { prefix });
     return keys;
   }
 
@@ -464,7 +464,7 @@ export class MemoryClient extends EventEmitter {
   async count({ prefix = '' } = {}) {
     const keys = await this.getAllKeys({ prefix });
     const count = keys.length;
-    this.emit('count', count, { prefix });
+    this.emit('cl:Count', count, { prefix });
     return count;
   }
 
@@ -479,14 +479,14 @@ export class MemoryClient extends EventEmitter {
       const result = await this.deleteObjects(keys);
       totalDeleted = result.Deleted.length;
 
-      this.emit('deleteAll', {
+      this.emit('cl:DeleteAll', {
         prefix,
         batch: totalDeleted,
         total: totalDeleted
       });
     }
 
-    this.emit('deleteAllComplete', {
+    this.emit('cl:DeleteAllComplete', {
       prefix,
       totalDeleted
     });
@@ -504,13 +504,13 @@ export class MemoryClient extends EventEmitter {
 
     // If offset is beyond available keys, return null
     if (offset >= keys.length) {
-      this.emit('getContinuationTokenAfterOffset', null, { prefix, offset });
+      this.emit('cl:GetContinuationTokenAfterOffset', null, { prefix, offset });
       return null;
     }
 
     // Return the key at offset position as continuation token
     const token = keys[offset];
-    this.emit('getContinuationTokenAfterOffset', token, { prefix, offset });
+    this.emit('cl:GetContinuationTokenAfterOffset', token, { prefix, offset });
     return token;
   }
 
@@ -544,7 +544,7 @@ export class MemoryClient extends EventEmitter {
       }
     }
 
-    this.emit('moveAllObjects', { results, errors }, { prefixFrom, prefixTo });
+    this.emit('cl:MoveAllObjects', { results, errors }, { prefixFrom, prefixTo });
 
     if (errors.length > 0) {
       const error = new Error('Some objects could not be moved');
