@@ -428,7 +428,7 @@ class WebhookReplicator extends BaseReplicator {
       const response = await this._makeRequest(payload);
 
       if (response.success) {
-        this.emit('replicated', {
+        this.emit('plg:replicator:replicated', {
           replicator: this.name,
           resource,
           operation,
@@ -450,7 +450,7 @@ class WebhookReplicator extends BaseReplicator {
       console.warn(`[WebhookReplicator] Replication failed for ${resource}: ${err.message}`);
     }
 
-    this.emit('replicator_error', {
+    this.emit('plg:replicator:error', {
       replicator: this.name,
       resource,
       operation,

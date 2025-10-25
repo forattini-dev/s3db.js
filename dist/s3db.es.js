@@ -18579,7 +18579,7 @@ class BigqueryReplicator extends BaseReplicator {
       if (errors.length > 0) {
         console.warn(`[BigqueryReplicator] Replication completed with errors for ${resourceName}:`, errors);
       }
-      this.emit("replicated", {
+      this.emit("plg:replicator:replicated", {
         replicator: this.name,
         resourceName,
         operation,
@@ -18600,7 +18600,7 @@ class BigqueryReplicator extends BaseReplicator {
     if (this.config.verbose) {
       console.warn(`[BigqueryReplicator] Replication failed for ${resourceName}: ${err.message}`);
     }
-    this.emit("replicator_error", {
+    this.emit("plg:replicator:error", {
       replicator: this.name,
       resourceName,
       operation,
@@ -19875,7 +19875,7 @@ ${createSQL}`);
       }
     }
     const success = errors.length === 0;
-    this.emit("replicated", {
+    this.emit("plg:replicator:replicated", {
       replicator: this.name,
       resourceName,
       operation,
@@ -20226,7 +20226,7 @@ ${createSQL}`);
       if (errors.length > 0) {
         console.warn(`[PostgresReplicator] Replication completed with errors for ${resourceName}:`, errors);
       }
-      this.emit("replicated", {
+      this.emit("plg:replicator:replicated", {
         replicator: this.name,
         resourceName,
         operation,
@@ -20247,7 +20247,7 @@ ${createSQL}`);
     if (this.config.verbose) {
       console.warn(`[PostgresReplicator] Replication failed for ${resourceName}: ${err.message}`);
     }
-    this.emit("replicator_error", {
+    this.emit("plg:replicator:error", {
       replicator: this.name,
       resourceName,
       operation,
@@ -27908,7 +27908,7 @@ class SqsReplicator extends BaseReplicator {
         });
         const result2 = await this.sqsClient.send(command);
         results.push({ queueUrl, messageId: result2.MessageId });
-        this.emit("replicated", {
+        this.emit("plg:replicator:replicated", {
           replicator: this.name,
           resource,
           operation,
@@ -27924,7 +27924,7 @@ class SqsReplicator extends BaseReplicator {
     if (this.config.verbose) {
       console.warn(`[SqsReplicator] Replication failed for ${resource}: ${err.message}`);
     }
-    this.emit("replicator_error", {
+    this.emit("plg:replicator:error", {
       replicator: this.name,
       resource,
       operation,
@@ -28321,7 +28321,7 @@ ${createSQL}`);
       }
     }
     const success = errors.length === 0;
-    this.emit("replicated", {
+    this.emit("plg:replicator:replicated", {
       replicator: this.name,
       resourceName,
       operation,
@@ -28627,7 +28627,7 @@ class WebhookReplicator extends BaseReplicator {
       const payload = this.createPayload(resource, operation, transformedData, id, beforeData);
       const response = await this._makeRequest(payload);
       if (response.success) {
-        this.emit("replicated", {
+        this.emit("plg:replicator:replicated", {
           replicator: this.name,
           resource,
           operation,
@@ -28644,7 +28644,7 @@ class WebhookReplicator extends BaseReplicator {
     if (this.config.verbose) {
       console.warn(`[WebhookReplicator] Replication failed for ${resource}: ${err.message}`);
     }
-    this.emit("replicator_error", {
+    this.emit("plg:replicator:error", {
       replicator: this.name,
       resource,
       operation,
