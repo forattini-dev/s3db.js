@@ -29450,7 +29450,7 @@ class S3QueuePlugin extends Plugin {
         createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
       };
       await plugin.queueResource.insert(queueEntry);
-      plugin.emit("message.enqueued", { id: record.id, queueId: queueEntry.id });
+      plugin.emit("plg:s3-queue:message-enqueued", { id: record.id, queueId: queueEntry.id });
       return record;
     };
     resource.queueStats = async function() {
