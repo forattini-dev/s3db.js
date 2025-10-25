@@ -593,6 +593,279 @@ export class MemoryClient extends EventEmitter {
   }
 
   /**
+   * Export to BackupPlugin-compatible format (s3db.json + JSONL files)
+   * Compatible with BackupPlugin for easy migration
+   *
+   * @param {string} outputDir - Output directory path
+   * @param {Object} options - Export options
+   * @param {Array<string>} options.resources - Resource names to export (default: all)
+   * @param {boolean} options.compress - Use gzip compression (default: true)
+   * @param {Object} options.database - Database instance for schema metadata
+   * @returns {Promise<Object>} Export manifest with file paths and stats
+   */
+  async exportBackup(outputDir, options = {}) {
+    const { mkdir, writeFile } = await import('fs/promises');
+    const zlib = await import('zlib');
+    const { promisify } = await import('util');
+    const gzip = promisify(zlib.gzip);
+
+    await mkdir(outputDir, { recursive: true });
+
+    const compress = options.compress !== false;
+    const database = options.database;
+    const resourceFilter = options.resources;
+
+    // Get all keys grouped by resource
+    const allKeys = await this.getAllKeys({});
+    const resourceMap = new Map();
+
+    // Group keys by resource name
+    for (const key of allKeys) {
+      const match = key.match(/^resource=([^/]+)\//);
+      if (match) {
+        const resourceName = match[1];
+        if (!resourceFilter || resourceFilter.includes(resourceName)) {
+          if (!resourceMap.has(resourceName)) {
+            resourceMap.set(resourceName, []);
+          }
+          resourceMap.get(resourceName).push(key);
+        }
+      }
+    }
+
+    const exportedFiles = {};
+    const resourceStats = {};
+
+    // Export each resource to JSONL format
+    for (const [resourceName, keys] of resourceMap.entries()) {
+      const records = [];
+
+      for (const key of keys) {
+        const obj = await this.getObject(key);
+
+        // Extract id from key (e.g., resource=products/id=pr1 -> pr1)
+        const idMatch = key.match(/\/id=([^/]+)/);
+        const recordId = idMatch ? idMatch[1] : null;
+
+        // Reconstruct record from metadata and body
+        const record = { ...obj.Metadata };
+
+        // Include id in record if extracted from key
+        if (recordId && !record.id) {
+          record.id = recordId;
+        }
+
+        // If body exists, parse it
+        if (obj.Body) {
+          const chunks = [];
+          for await (const chunk of obj.Body) {
+            chunks.push(chunk);
+          }
+          const bodyBuffer = Buffer.concat(chunks);
+
+          // Try to parse as JSON if it looks like JSON
+          const bodyStr = bodyBuffer.toString('utf-8');
+          if (bodyStr.startsWith('{') || bodyStr.startsWith('[')) {
+            try {
+              const bodyData = JSON.parse(bodyStr);
+              Object.assign(record, bodyData);
+            } catch {
+              // If not JSON, store as _body field
+              record._body = bodyStr;
+            }
+          } else if (bodyStr) {
+            record._body = bodyStr;
+          }
+        }
+
+        records.push(record);
+      }
+
+      // Convert to JSONL (newline-delimited JSON)
+      const jsonl = records.map(r => JSON.stringify(r)).join('\n');
+      const filename = compress ? `${resourceName}.jsonl.gz` : `${resourceName}.jsonl`;
+      const filePath = `${outputDir}/${filename}`;
+
+      // Write file (compressed or not)
+      if (compress) {
+        const compressed = await gzip(jsonl);
+        await writeFile(filePath, compressed);
+      } else {
+        await writeFile(filePath, jsonl, 'utf-8');
+      }
+
+      exportedFiles[resourceName] = filePath;
+      resourceStats[resourceName] = {
+        recordCount: records.length,
+        fileSize: compress ? (await gzip(jsonl)).length : Buffer.byteLength(jsonl)
+      };
+    }
+
+    // Create s3db.json metadata file
+    const s3dbMetadata = {
+      version: '1.0',
+      timestamp: new Date().toISOString(),
+      bucket: this.bucket,
+      keyPrefix: this.keyPrefix || '',
+      compressed: compress,
+      resources: {},
+      totalRecords: 0,
+      totalSize: 0
+    };
+
+    // Add database schemas if available
+    if (database && database.resources) {
+      for (const [resourceName, resource] of Object.entries(database.resources)) {
+        if (resourceMap.has(resourceName)) {
+          s3dbMetadata.resources[resourceName] = {
+            schema: resource.schema ? {
+              attributes: resource.schema.attributes,
+              partitions: resource.schema.partitions,
+              behavior: resource.schema.behavior,
+              timestamps: resource.schema.timestamps
+            } : null,
+            stats: resourceStats[resourceName]
+          };
+        }
+      }
+    } else {
+      // No database instance, just add stats
+      for (const [resourceName, stats] of Object.entries(resourceStats)) {
+        s3dbMetadata.resources[resourceName] = { stats };
+      }
+    }
+
+    // Calculate totals
+    for (const stats of Object.values(resourceStats)) {
+      s3dbMetadata.totalRecords += stats.recordCount;
+      s3dbMetadata.totalSize += stats.fileSize;
+    }
+
+    // Write s3db.json
+    const s3dbPath = `${outputDir}/s3db.json`;
+    await writeFile(s3dbPath, JSON.stringify(s3dbMetadata, null, 2), 'utf-8');
+
+    return {
+      manifest: s3dbPath,
+      files: exportedFiles,
+      stats: s3dbMetadata,
+      resourceCount: resourceMap.size,
+      totalRecords: s3dbMetadata.totalRecords,
+      totalSize: s3dbMetadata.totalSize
+    };
+  }
+
+  /**
+   * Import from BackupPlugin-compatible format
+   * Loads data from s3db.json + JSONL files created by BackupPlugin or exportBackup()
+   *
+   * @param {string} backupDir - Backup directory path containing s3db.json
+   * @param {Object} options - Import options
+   * @param {Array<string>} options.resources - Resource names to import (default: all)
+   * @param {boolean} options.clear - Clear existing data first (default: false)
+   * @param {Object} options.database - Database instance to recreate schemas
+   * @returns {Promise<Object>} Import stats
+   */
+  async importBackup(backupDir, options = {}) {
+    const { readFile, readdir } = await import('fs/promises');
+    const zlib = await import('zlib');
+    const { promisify } = await import('util');
+    const gunzip = promisify(zlib.gunzip);
+
+    // Clear existing data if requested
+    if (options.clear) {
+      this.clear();
+    }
+
+    // Read s3db.json metadata
+    const s3dbPath = `${backupDir}/s3db.json`;
+    const s3dbContent = await readFile(s3dbPath, 'utf-8');
+    const metadata = JSON.parse(s3dbContent);
+
+    const database = options.database;
+    const resourceFilter = options.resources;
+    const importStats = {
+      resourcesImported: 0,
+      recordsImported: 0,
+      errors: []
+    };
+
+    // Recreate resources if database instance provided
+    if (database && metadata.resources) {
+      for (const [resourceName, resourceMeta] of Object.entries(metadata.resources)) {
+        if (resourceFilter && !resourceFilter.includes(resourceName)) continue;
+
+        if (resourceMeta.schema) {
+          try {
+            await database.createResource({
+              name: resourceName,
+              ...resourceMeta.schema
+            });
+          } catch (error) {
+            // Resource might already exist, that's ok
+          }
+        }
+      }
+    }
+
+    // Read all files in backup directory
+    const files = await readdir(backupDir);
+
+    // Process each JSONL file
+    for (const file of files) {
+      if (!file.endsWith('.jsonl') && !file.endsWith('.jsonl.gz')) continue;
+
+      const resourceName = file.replace(/\.jsonl(\.gz)?$/, '');
+      if (resourceFilter && !resourceFilter.includes(resourceName)) continue;
+
+      const filePath = `${backupDir}/${file}`;
+      let content = await readFile(filePath);
+
+      // Decompress if .gz
+      if (file.endsWith('.gz')) {
+        content = await gunzip(content);
+      }
+
+      // Parse JSONL (one JSON per line)
+      const jsonl = content.toString('utf-8');
+      const lines = jsonl.split('\n').filter(line => line.trim());
+
+      for (const line of lines) {
+        try {
+          const record = JSON.parse(line);
+
+          // Extract id or use generated one
+          const id = record.id || record._id || `imported_${Date.now()}_${Math.random()}`;
+
+          // Separate _body from other fields
+          const { _body, id: _, _id: __, ...metadata } = record;
+
+          // Store in MemoryClient
+          // If _body exists, it's non-JSON body data
+          // Otherwise, metadata contains all the data
+          await this.putObject({
+            key: `resource=${resourceName}/id=${id}`,
+            metadata,
+            body: _body ? Buffer.from(_body) : undefined
+          });
+
+          importStats.recordsImported++;
+        } catch (error) {
+          importStats.errors.push({
+            resource: resourceName,
+            error: error.message,
+            line
+          });
+        }
+      }
+
+      importStats.resourcesImported++;
+    }
+
+    return importStats;
+  }
+
+  /**
    * Get storage statistics
    */
   getStats() {

@@ -9,6 +9,7 @@ Pure in-memory S3-compatible client for blazing-fast tests and development. **10
 ✅ **Full Compatibility** - Drop-in replacement for real S3 Client
 ✅ **Snapshot/Restore** - Perfect for test isolation
 ✅ **Optional Persistence** - Save/load state to disk
+✅ **BackupPlugin Compatible** - Export/import JSONL format
 ✅ **Configurable Limits** - Simulate S3 limits (2KB metadata, etc)
 ✅ **Complete AWS SDK Support** - All commands implemented
 
@@ -133,6 +134,86 @@ await client.saveToDisk('/tmp/my-snapshot.json');
 await client.loadFromDisk('/tmp/my-snapshot.json');
 ```
 
+### BackupPlugin Compatibility
+
+Export and import data in BackupPlugin format (JSONL + s3db.json):
+
+```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
+const client = new MemoryClient();
+const db = new S3db({ client });
+await db.connect();
+
+// Create some data
+const users = await db.createResource({
+  name: 'users',
+  attributes: { id: 'string', name: 'string', email: 'string' }
+});
+
+await users.insert({ id: 'u1', name: 'Alice', email: 'alice@test.com' });
+await users.insert({ id: 'u2', name: 'Bob', email: 'bob@test.com' });
+
+// Export to BackupPlugin format
+await client.exportBackup('/tmp/backup', {
+  compress: true,        // Use gzip compression (.jsonl.gz)
+  database: db,          // Include resource schemas in s3db.json
+  resources: ['users']   // Optional: filter specific resources
+});
+
+// Result:
+// /tmp/backup/
+//   ├── s3db.json        - Metadata with schemas and stats
+//   └── users.jsonl.gz   - Compressed data (one JSON per line)
+
+// Import from BackupPlugin format
+const importStats = await client.importBackup('/tmp/backup', {
+  clear: true,           // Clear existing data first
+  database: db,          // Recreate resources from schemas
+  resources: ['users']   // Optional: import specific resources only
+});
+
+console.log(importStats);
+// {
+//   resourcesImported: 1,
+//   recordsImported: 2,
+//   errors: []
+// }
+```
+
+**BackupPlugin Format Details:**
+
+The export creates a directory structure compatible with BackupPlugin:
+
+```
+/backup-directory/
+  ├── s3db.json           # Metadata file
+  │   {
+  │     "version": "1.0",
+  │     "timestamp": "2025-10-25T...",
+  │     "bucket": "my-bucket",
+  │     "keyPrefix": "",
+  │     "compressed": true,
+  │     "resources": {
+  │       "users": {
+  │         "schema": { ... },
+  │         "stats": { recordCount: 2, fileSize: 1024 }
+  │       }
+  │     }
+  │   }
+  │
+  └── users.jsonl.gz      # Compressed JSON Lines
+      {"id":"u1","name":"Alice","email":"alice@test.com"}
+      {"id":"u2","name":"Bob","email":"bob@test.com"}
+```
+
+**Use Cases:**
+- Migrate data between MemoryClient and real S3
+- Share test fixtures between projects
+- Debug production data locally
+- Create portable database snapshots
+- Analyze data with BigQuery/Athena/Spark
+
 ### Enforce S3 Limits
 
 Validate that your code respects S3 limits:
@@ -211,6 +292,8 @@ new MemoryClient({
 #### Persistence
 - `saveToDisk(path?)` - Save to disk
 - `loadFromDisk(path?)` - Load from disk
+- `exportBackup(outputDir, options?)` - Export to BackupPlugin format
+- `importBackup(backupDir, options?)` - Import from BackupPlugin format
 
 #### Utilities
 - `getStats()` - Get storage statistics
