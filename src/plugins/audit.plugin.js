@@ -65,7 +65,7 @@ export class AuditPlugin extends Plugin {
 
   setupResourceAuditing(resource) {
     // Insert
-    resource.on('insert', async (data) => {
+    resource.on('inserted', async (data) => {
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       await this.logAudit({
         resourceName: resource.name,
@@ -79,7 +79,7 @@ export class AuditPlugin extends Plugin {
     });
 
     // Update
-    resource.on('update', async (data) => {
+    resource.on('updated', async (data) => {
       let oldData = data.$before;
       if (this.config.includeData && !oldData) {
         const [ok, err, fetched] = await tryFn(() => resource.get(data.id));
@@ -99,7 +99,7 @@ export class AuditPlugin extends Plugin {
     });
 
     // Delete
-    resource.on('delete', async (data) => {
+    resource.on('deleted', async (data) => {
       let oldData = data;
       if (this.config.includeData && !oldData) {
         const [ok, err, fetched] = await tryFn(() => resource.get(data.id));
