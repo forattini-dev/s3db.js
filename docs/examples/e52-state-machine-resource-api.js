@@ -99,9 +99,9 @@ console.log(`Order created: ${order.id}`);
 // Initialize state (OLD vs NEW)
 console.log('\n--- Initialize State ---');
 console.log('OLD API: await db.stateMachine("orderWorkflow").initializeEntity(id, context)');
-console.log('NEW API: await ordersResource.initializeState(id, context)');
+console.log('NEW API: await ordersResource.state.initialize(id, context)');
 
-await ordersResource.initializeState(order.id, {
+await ordersResource.state.initialize(order.id, {
   customerId: order.customerId,
   totalAmount: order.totalAmount
 });
@@ -109,49 +109,49 @@ await ordersResource.initializeState(order.id, {
 // Get current state (OLD vs NEW)
 console.log('\n--- Get Current State ---');
 console.log('OLD API: await db.stateMachine("orderWorkflow").getState(id)');
-console.log('NEW API: await ordersResource.getState(id)');
+console.log('NEW API: await ordersResource.state.get(id)');
 
-let currentState = await ordersResource.getState(order.id);
+let currentState = await ordersResource.state.get(order.id);
 console.log(`Current state: ${currentState}`);
 
 // Check valid events (OLD vs NEW)
 console.log('\n--- Get Valid Events ---');
 console.log('OLD API: await db.stateMachine("orderWorkflow").getValidEvents(id)');
-console.log('NEW API: await ordersResource.getValidEvents(id)');
+console.log('NEW API: await ordersResource.state.getValidEvents(id)');
 
-let validEvents = await ordersResource.getValidEvents(order.id);
+let validEvents = await ordersResource.state.getValidEvents(order.id);
 console.log(`Valid events: ${validEvents.join(', ')}`);
 
 // Transition to new state (OLD vs NEW)
 console.log('\n--- Trigger Transition ---');
 console.log('OLD API: await db.stateMachine("orderWorkflow").send(id, "CONFIRM")');
-console.log('NEW API: await ordersResource.state(id, "CONFIRM")');
+console.log('NEW API: await ordersResource.state.move(id, "CONFIRM")');
 
-await ordersResource.state(order.id, 'CONFIRM');
+await ordersResource.state.move(order.id, 'CONFIRM');
 
-currentState = await ordersResource.getState(order.id);
+currentState = await ordersResource.state.get(order.id);
 console.log(`New state: ${currentState}`);
 
 // Ship the order
 console.log('\n--- Ship Order ---');
-await ordersResource.state(order.id, 'SHIP');
+await ordersResource.state.move(order.id, 'SHIP');
 
-currentState = await ordersResource.getState(order.id);
+currentState = await ordersResource.state.get(order.id);
 console.log(`State after shipping: ${currentState}`);
 
 // Deliver the order
 console.log('\n--- Deliver Order ---');
-await ordersResource.state(order.id, 'DELIVER');
+await ordersResource.state.move(order.id, 'DELIVER');
 
-currentState = await ordersResource.getState(order.id);
+currentState = await ordersResource.state.get(order.id);
 console.log(`Final state: ${currentState}`);
 
 // Get transition history (OLD vs NEW)
 console.log('\n--- Get Transition History ---');
 console.log('OLD API: await db.stateMachine("orderWorkflow").getTransitionHistory(id)');
-console.log('NEW API: await ordersResource.getStateHistory(id)');
+console.log('NEW API: await ordersResource.state.history(id)');
 
-const history = await ordersResource.getStateHistory(order.id);
+const history = await ordersResource.state.history(order.id);
 console.log(`\nTransition history (${history.length} transitions):`);
 for (const transition of history) {
   console.log(`  ${transition.fromState || 'INIT'} → ${transition.toState} (event: ${transition.event})`);
@@ -170,24 +170,26 @@ OLD API (verbose):
 -----------------------------------------
 const machine = db.stateMachine('orderWorkflow');
 await machine.initializeEntity(id, context);
-await machine.send(id, 'confirm');
+await machine.send(id, 'CONFIRM');
 const state = await machine.getState(id);
 const events = await machine.getValidEvents(id);
 const history = await machine.getTransitionHistory(id);
 
-NEW API (intuitive):
+NEW API (intuitive + namespaced):
 -----------------------------------------
-await ordersResource.initializeState(id, context);
-await ordersResource.state(id, 'confirm');
-const state = await ordersResource.getState(id);
-const events = await ordersResource.getValidEvents(id);
-const history = await ordersResource.getStateHistory(id);
+await ordersResource.state.initialize(id, context);
+await ordersResource.state.move(id, 'CONFIRM');
+const state = await ordersResource.state.get(id);
+const events = await ordersResource.state.getValidEvents(id);
+const history = await ordersResource.state.history(id);
 
 KEY BENEFITS:
 ✅ More intuitive - operations on the resource itself
 ✅ Less verbose - no machine name needed
+✅ Namespaced - clean organization under .state
 ✅ Consistent - same pattern as insert/update/delete
 ✅ Better DX - easier to discover and use
+✅ Semantic - move() is clearer than send()
 `);
 
 // ============================================================================
@@ -207,7 +209,7 @@ const usersResource = await database.createResource({
 });
 
 try {
-  await usersResource.state('user-123', 'ACTIVATE');
+  await usersResource.state.move('user-123', 'ACTIVATE');
 } catch (error) {
   console.log('\n✅ Expected error:', error.message);
 }
@@ -223,30 +225,37 @@ console.log(`
 KEY TAKEAWAYS:
 ==============
 
-1. Resource-Based API:
-   - State machine methods are now on the resource: resource.state(id, event)
-   - No need to reference machine name: it's automatic
-   - More intuitive and consistent with other resource operations
+1. Namespaced API:
+   - State machine methods under resource.state.*
+   - Clean organization and better discoverability
+   - Semantic method names (move, get, initialize, history)
 
 2. Available Methods:
-   - resource.state(id, event, eventData) - Trigger transition
-   - resource.getState(id) - Get current state
-   - resource.canTransition(id, event) - Check if valid
-   - resource.getValidEvents(id) - Get available events
-   - resource.initializeState(id, context) - Initialize entity
-   - resource.getStateHistory(id, options) - Get history
+   - resource.state.move(id, event, eventData) - Trigger transition
+   - resource.state.get(id) - Get current state
+   - resource.state.canTransition(id, event) - Check if valid
+   - resource.state.getValidEvents(id) - Get available events
+   - resource.state.initialize(id, context) - Initialize entity
+   - resource.state.history(id, options) - Get history
 
 3. Configuration:
    - Link machine to resource: { resource: ordersResource }
    - Or by name: { resource: 'orders' }
-   - Plugin automatically attaches methods to the resource
+   - Plugin automatically attaches state object to the resource
 
 4. Backward Compatibility:
    - This is a BREAKING CHANGE (v14.0.0)
    - Old API (db.stateMachine().send()) has been removed
-   - All code must be updated to use resource methods
+   - All code must be updated to use resource.state.* methods
 
-5. Error Handling:
+5. Benefits:
+   - ✅ Namespaced - organized under .state
+   - ✅ Semantic - move() instead of send()
+   - ✅ Intuitive - operations on resource itself
+   - ✅ Discoverable - easy to find with autocomplete
+   - ✅ Consistent - same pattern as other operations
+
+6. Error Handling:
    - Methods throw error if resource has no state machine
    - Clear error messages guide users to fix configuration
 `);
