@@ -4,7 +4,7 @@
  * Reads Terraform/OpenTofu state files from S3 buckets
  */
 import { TfStateDriver } from './base-driver.js';
-import { Client } from '../../client.class.js';
+import { S3Client } from '../../clients/s3-client.class.js';
 import tryFn from '../../concerns/try-fn.js';
 
 export class S3TfStateDriver extends TfStateDriver {
@@ -71,8 +71,8 @@ export class S3TfStateDriver extends TfStateDriver {
   async initialize() {
     const { bucket, credentials, region } = this.connectionConfig;
 
-    // Create S3 client using s3db's Client class
-    this.client = new Client({
+    // Create S3 client using s3db's S3Client class
+    this.client = new S3Client({
       bucketName: bucket,
       credentials,
       region

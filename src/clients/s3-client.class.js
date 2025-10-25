@@ -7,7 +7,7 @@ import { PromisePool } from "@supercharge/promise-pool";
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 
 import {
-  S3Client,
+  S3Client as AwsS3Client,
   PutObjectCommand,
   GetObjectCommand,
   CopyObjectCommand,
@@ -17,14 +17,14 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import tryFn from "./concerns/try-fn.js";
-import { md5 } from "./concerns/crypto.js";
-import { idGenerator } from "./concerns/id.js";
-import { metadataEncode, metadataDecode } from "./concerns/metadata-encoding.js";
-import { ConnectionString } from "./connection-string.class.js";
-import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "./errors.js";
+import tryFn from "../concerns/try-fn.js";
+import { md5 } from "../concerns/crypto.js";
+import { idGenerator } from "../concerns/id.js";
+import { metadataEncode, metadataDecode } from "../concerns/metadata-encoding.js";
+import { ConnectionString } from "../connection-string.class.js";
+import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "../errors.js";
 
-export class Client extends EventEmitter {
+export class S3Client extends EventEmitter {
   constructor({
     verbose = false,
     id = null,
@@ -75,7 +75,7 @@ export class Client extends EventEmitter {
       }
     }
 
-    const client = new S3Client(options);
+    const client = new AwsS3Client(options);
 
     // Adiciona middleware para Content-MD5 em DeleteObjectsCommand
     client.middlewareStack.add(
@@ -590,4 +590,5 @@ export class Client extends EventEmitter {
   }
 }
 
-export default Client;
+// Default export for backward compatibility
+export default S3Client;

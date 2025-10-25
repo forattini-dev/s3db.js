@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { isEmpty, isFunction } from "lodash-es";
 import jsonStableStringify from "json-stable-stringify";
 
-import Client from "./client.class.js";
+import { S3Client } from "./clients/s3-client.class.js";
 import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
 import { ResourceNotFound, DatabaseError } from "./errors.js";
@@ -98,7 +98,7 @@ export class Database extends EventEmitter {
       }
     }
 
-    this.client = options.client || new Client({
+    this.client = options.client || new S3Client({
       verbose: this.verbose,
       parallelism: this.parallelism,
       connectionString: connectionString,

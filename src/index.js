@@ -1,12 +1,13 @@
 // directories (keep wildcard exports for these)
 export * from './concerns/index.js'
 export * from './plugins/index.js'
+export * from './clients/index.js'
 export * from './errors.js'
 
 // main classes (explicit named exports for better tree-shaking)
 export { Database as S3db } from './database.class.js'
 export { Database } from './database.class.js'
-export { Client } from './client.class.js'
+export { S3Client as Client } from './clients/s3-client.class.js' // backward compatibility
 export { Resource } from './resource.class.js'
 export { Schema } from './schema.class.js'
 export { Validator } from './validator.class.js'
