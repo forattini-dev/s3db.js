@@ -1122,6 +1122,181 @@ describe('MemoryClient - Direct API Tests', () => {
     });
   });
 
+  describe('BackupPlugin Compatibility', () => {
+    it('should export to BackupPlugin-compatible format', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-export-${Date.now()}`);
+
+      // Create some test data
+      await client.putObject({
+        key: 'resource=users/id=u1',
+        metadata: { name: 'Alice', email: 'alice@test.com' },
+        body: Buffer.from(JSON.stringify({ age: 30, city: 'NYC' }))
+      });
+      await client.putObject({
+        key: 'resource=users/id=u2',
+        metadata: { name: 'Bob', email: 'bob@test.com' },
+        body: Buffer.from(JSON.stringify({ age: 25, city: 'LA' }))
+      });
+
+      // Export backup
+      const result = await client.exportBackup(tmpDir, { compress: false });
+
+      expect(result.manifest).toContain('s3db.json');
+      expect(result.files.users).toContain('users.jsonl');
+      expect(result.resourceCount).toBe(1);
+      expect(result.totalRecords).toBe(2);
+
+      // Verify s3db.json exists and has correct structure
+      const s3dbContent = await fs.readFile(`${tmpDir}/s3db.json`, 'utf-8');
+      const s3dbData = JSON.parse(s3dbContent);
+
+      expect(s3dbData.version).toBe('1.0');
+      expect(s3dbData.bucket).toBe('test-direct-api');
+      expect(s3dbData.compressed).toBe(false);
+      expect(s3dbData.resources.users).toBeDefined();
+      expect(s3dbData.totalRecords).toBe(2);
+
+      // Verify JSONL file exists and has correct format
+      const jsonlContent = await fs.readFile(`${tmpDir}/users.jsonl`, 'utf-8');
+      const lines = jsonlContent.split('\n').filter(l => l.trim());
+
+      expect(lines).toHaveLength(2);
+
+      const record1 = JSON.parse(lines[0]);
+      expect(record1.name).toBe('Alice');
+      expect(record1.email).toBe('alice@test.com');
+      expect(record1.age).toBe(30);
+
+      // Cleanup
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should export with gzip compression', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-compressed-${Date.now()}`);
+
+      await client.putObject({
+        key: 'resource=posts/id=p1',
+        metadata: { title: 'Post 1' },
+        body: Buffer.from(JSON.stringify({ content: 'Hello world' }))
+      });
+
+      // Export with compression (default)
+      const result = await client.exportBackup(tmpDir);
+
+      expect(result.files.posts).toContain('.jsonl.gz');
+      expect(result.stats.compressed).toBe(true);
+
+      // Verify compressed file exists
+      const fileExists = await fs.access(`${tmpDir}/posts.jsonl.gz`)
+        .then(() => true)
+        .catch(() => false);
+
+      expect(fileExists).toBe(true);
+
+      // Cleanup
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should import from BackupPlugin-compatible format', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-import-${Date.now()}`);
+
+      // Create test data and export
+      await client.putObject({
+        key: 'resource=products/id=pr1',
+        metadata: { name: 'Product 1', price: '99.99' },
+        body: Buffer.from(JSON.stringify({ stock: 10 }))
+      });
+
+      await client.exportBackup(tmpDir, { compress: false });
+
+      // Clear client and import
+      client.clear();
+      expect(client.getStats().objectCount).toBe(0);
+
+      const importStats = await client.importBackup(tmpDir);
+
+      expect(importStats.resourcesImported).toBe(1);
+      expect(importStats.recordsImported).toBe(1);
+      expect(importStats.errors).toHaveLength(0);
+
+      // Verify data was imported
+      expect(client.getStats().objectCount).toBe(1);
+
+      const obj = await client.getObject('resource=products/id=pr1');
+      expect(obj.Metadata.name).toBe('Product 1');
+      expect(obj.Metadata.price).toBe('99.99');
+
+      // Cleanup
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should import compressed backup files', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-import-gz-${Date.now()}`);
+
+      // Create and export with compression
+      await client.putObject({
+        key: 'resource=orders/id=o1',
+        metadata: { orderId: 'ORDER-001', total: '150.00' },
+        body: Buffer.from(JSON.stringify({ items: 3 }))
+      });
+
+      await client.exportBackup(tmpDir, { compress: true });
+
+      // Import from compressed backup
+      const newClient = new MemoryClient({ bucket: 'import-test' });
+      const stats = await newClient.importBackup(tmpDir);
+
+      expect(stats.resourcesImported).toBe(1);
+      expect(stats.recordsImported).toBe(1);
+
+      // Cleanup
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should filter resources during export', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-filter-${Date.now()}`);
+
+      // Create multiple resources
+      await client.putObject({ key: 'resource=users/id=u1', metadata: { name: 'Alice' } });
+      await client.putObject({ key: 'resource=posts/id=p1', metadata: { title: 'Post 1' } });
+      await client.putObject({ key: 'resource=comments/id=c1', metadata: { text: 'Comment' } });
+
+      // Export only users
+      const result = await client.exportBackup(tmpDir, {
+        resources: ['users'],
+        compress: false
+      });
+
+      expect(result.resourceCount).toBe(1);
+      expect(result.files.users).toBeDefined();
+      expect(result.files.posts).toBeUndefined();
+      expect(result.files.comments).toBeUndefined();
+
+      // Cleanup
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+  });
+
   describe('Persistence', () => {
     it('should save and load from disk', async () => {
       const fs = await import('fs/promises');
