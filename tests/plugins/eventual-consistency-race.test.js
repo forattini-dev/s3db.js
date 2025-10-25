@@ -57,6 +57,9 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
       await Promise.all(operations);
 
+      // Wait for async consolidation to complete (locks + transactions)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Check final balance is correct (1000 + 10*10 = 1100)
       const wallet = await walletsResource.get('wallet-lock-test');
       expect(wallet.balance).toBe(1100);

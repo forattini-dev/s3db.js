@@ -404,7 +404,7 @@ describe('Audit Plugin', () => {
       await users.insert(userData);
 
       // Wait for async audit logging
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       const auditLogs = await auditPlugin.getAuditLogs({
         resourceName: 'users',
@@ -635,6 +635,9 @@ describe('Audit Plugin', () => {
     });
 
     test('should query audit logs by partition', async () => {
+      // Wait for audit logs to be created
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       const auditLogs = await auditPlugin.getAuditLogs({
         partition: 'byDepartment'
       });
@@ -766,7 +769,7 @@ describe('Audit Plugin', () => {
       await users.insert(userData);
 
       // Wait for async audit logging
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       const history = await auditPlugin.getPartitionHistory('users', 'byDepartment', { department: 'IT' });
 
