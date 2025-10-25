@@ -1129,7 +1129,7 @@ console.log(database.client.costs);
 **P: Preciso configurar algo?**
 R: Não, basta instalar o plugin:
 ```javascript
-database.use(CostsPlugin);
+await database.usePlugin(new CostsPlugin());
 ```
 
 **P: Como personalizar os preços por região?**
