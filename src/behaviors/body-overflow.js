@@ -90,6 +90,15 @@ export async function handleInsert({ resource, data, mappedData, originalData })
     currentSize += attributeSizes._v;
   }
 
+  // Always include plugin map for backwards compatibility when plugins are added/removed
+  // Note: _pluginMap is not in mappedData, it's added separately by behaviors
+  if (resource.schema?.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+    const pluginMapStr = JSON.stringify(resource.schema.pluginMap);
+    const pluginMapSize = calculateUTF8Bytes('_pluginMap') + calculateUTF8Bytes(pluginMapStr);
+    metadataFields._pluginMap = pluginMapStr;
+    currentSize += pluginMapSize;
+  }
+
   // Reserve space for $overflow if overflow is possible
   let reservedLimit = effectiveLimit;
   for (const [fieldName, size] of sortedFields) {

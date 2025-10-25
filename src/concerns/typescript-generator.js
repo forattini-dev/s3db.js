@@ -190,10 +190,20 @@ export async function generateTypes(database, options = {}) {
   const resourceInterfaces = [];
 
   for (const [name, resource] of Object.entries(database.resources)) {
-    const attributes = resource.config?.attributes || resource.attributes || {};
+    const allAttributes = resource.config?.attributes || resource.attributes || {};
     const timestamps = resource.config?.timestamps || false;
 
-    const interfaceDef = generateResourceInterface(name, attributes, timestamps);
+    // Filter out plugin attributes - they are internal implementation details
+    // and should not be exposed in public TypeScript interfaces
+    const pluginAttrNames = resource.schema?._pluginAttributes
+      ? Object.values(resource.schema._pluginAttributes).flat()
+      : [];
+
+    const userAttributes = Object.fromEntries(
+      Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+    );
+
+    const interfaceDef = generateResourceInterface(name, userAttributes, timestamps);
     lines.push(interfaceDef);
 
     resourceInterfaces.push({

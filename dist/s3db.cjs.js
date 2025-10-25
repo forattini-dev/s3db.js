@@ -13693,7 +13693,11 @@ class BigqueryReplicator extends BaseReplicator {
         }
         continue;
       }
-      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+      const attributes = Object.fromEntries(
+        Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+      );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const [okSync, errSync] = await tryFn(async () => {
@@ -14711,7 +14715,11 @@ class MySQLReplicator extends BaseReplicator {
         }
         continue;
       }
-      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+      const attributes = Object.fromEntries(
+        Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+      );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const [okSync, errSync] = await tryFn(async () => {
@@ -15090,7 +15098,11 @@ class PlanetScaleReplicator extends BaseReplicator {
         }
         continue;
       }
-      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+      const attributes = Object.fromEntries(
+        Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+      );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const [okSync, errSync] = await tryFn(async () => {
@@ -15411,7 +15423,11 @@ class PostgresReplicator extends BaseReplicator {
         }
         continue;
       }
-      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+      const attributes = Object.fromEntries(
+        Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+      );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const [okSync, errSync] = await tryFn(async () => {
@@ -16535,8 +16551,11 @@ function generateBase62Mapping(keys) {
 }
 function generatePluginAttributeHash(pluginName, attributeName) {
   const input = `${pluginName}:${attributeName}`;
-  const hash = crypto$1.createHash("sha256").update(input).digest("hex");
-  return "p_" + hash.substring(0, 6);
+  const hash = crypto$1.createHash("sha256").update(input).digest();
+  const num = hash.readUInt32BE(0);
+  const base62Hash = encode(num);
+  const paddedHash = base62Hash.padStart(3, "0").substring(0, 3);
+  return "p" + paddedHash.toLowerCase();
 }
 function generatePluginMapping(attributes) {
   const mapping = {};
@@ -16547,7 +16566,7 @@ function generatePluginMapping(attributes) {
     let counter = 1;
     let finalHash = hash;
     while (usedHashes.has(finalHash)) {
-      finalHash = `${hash}_${counter}`;
+      finalHash = `${hash}${counter}`;
       counter++;
     }
     usedHashes.add(finalHash);
@@ -16951,7 +16970,9 @@ class Schema {
       attributes,
       passphrase,
       version = 1,
-      options = {}
+      options = {},
+      _pluginAttributeMetadata,
+      _pluginAttributes
     } = args;
     this.name = name;
     this.version = version;
@@ -16959,7 +16980,8 @@ class Schema {
     this.passphrase = passphrase ?? "secret";
     this.options = lodashEs.merge({}, this.defaultOptions(), options);
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
-    this._pluginAttributeMetadata = {};
+    this._pluginAttributeMetadata = _pluginAttributeMetadata || {};
+    this._pluginAttributes = _pluginAttributes || {};
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(lodashEs.merge(
       { $$async: true, $$strict: false },
@@ -16993,6 +17015,13 @@ class Schema {
       const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginAttributes);
       this.pluginMap = pMapping;
       this.reversedPluginMap = pReversedMapping;
+      this._pluginAttributes = {};
+      for (const { key, pluginName } of pluginAttributes) {
+        if (!this._pluginAttributes[pluginName]) {
+          this._pluginAttributes[pluginName] = [];
+        }
+        this._pluginAttributes[pluginName].push(key);
+      }
     }
     if (!lodashEs.isEmpty(pluginMap)) {
       this.pluginMap = pluginMap;
@@ -17001,6 +17030,9 @@ class Schema {
     if (!this.pluginMap) {
       this.pluginMap = {};
       this.reversedPluginMap = {};
+    }
+    if (!this._pluginAttributes) {
+      this._pluginAttributes = {};
     }
   }
   defaultOptions() {
@@ -17289,7 +17321,8 @@ class Schema {
       attributes: this._exportAttributes(this.attributes),
       map: this.map,
       pluginMap: this.pluginMap || {},
-      _pluginAttributeMetadata: this._pluginAttributeMetadata || {}
+      _pluginAttributeMetadata: this._pluginAttributeMetadata || {},
+      _pluginAttributes: this._pluginAttributes || {}
     };
     return data;
   }
@@ -17363,14 +17396,15 @@ class Schema {
     await this.applyHooksActions(rest, "afterMap");
     return rest;
   }
-  async unmapper(mappedResourceItem, mapOverride) {
+  async unmapper(mappedResourceItem, mapOverride, pluginMapOverride) {
     let obj = lodashEs.cloneDeep(mappedResourceItem);
     delete obj._v;
     obj = await this.applyHooksActions(obj, "beforeUnmap");
     const reversedMap = mapOverride ? lodashEs.invert(mapOverride) : this.reversedMap;
+    const reversedPluginMap = pluginMapOverride ? lodashEs.invert(pluginMapOverride) : this.reversedPluginMap;
     const rest = {};
     for (const [key, value] of Object.entries(obj)) {
-      let originalKey = this.reversedPluginMap[key] || reversedMap[key] || key;
+      let originalKey = reversedPluginMap[key] || reversedMap[key] || key;
       if (!originalKey) {
         originalKey = key;
       }
@@ -17463,6 +17497,13 @@ class Schema {
     const { mapping, reversedMapping } = generatePluginMapping(pluginAttributes);
     this.pluginMap = mapping;
     this.reversedPluginMap = reversedMapping;
+    this._pluginAttributes = {};
+    for (const { key, pluginName } of pluginAttributes) {
+      if (!this._pluginAttributes[pluginName]) {
+        this._pluginAttributes[pluginName] = [];
+      }
+      this._pluginAttributes[pluginName].push(key);
+    }
   }
   /**
    * Preprocess attributes to convert nested objects into validator-compatible format
@@ -17533,37 +17574,38 @@ class Schema {
       } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
         const hasValidatorType = value.type !== void 0 && key !== "$$type";
         if (hasValidatorType) {
-          if (value.type === "ip4") {
-            processed[key] = { ...value, type: "string" };
-          } else if (value.type === "ip6") {
-            processed[key] = { ...value, type: "string" };
-          } else if (value.type === "money" || value.type === "crypto") {
-            processed[key] = { ...value, type: "number", min: value.min !== void 0 ? value.min : 0 };
-          } else if (value.type === "decimal") {
-            processed[key] = { ...value, type: "number" };
-          } else if (value.type === "geo:lat" || value.type === "geo-lat") {
+          const { __plugin__, __pluginCreated__, ...cleanValue } = value;
+          if (cleanValue.type === "ip4") {
+            processed[key] = { ...cleanValue, type: "string" };
+          } else if (cleanValue.type === "ip6") {
+            processed[key] = { ...cleanValue, type: "string" };
+          } else if (cleanValue.type === "money" || cleanValue.type === "crypto") {
+            processed[key] = { ...cleanValue, type: "number", min: cleanValue.min !== void 0 ? cleanValue.min : 0 };
+          } else if (cleanValue.type === "decimal") {
+            processed[key] = { ...cleanValue, type: "number" };
+          } else if (cleanValue.type === "geo:lat" || cleanValue.type === "geo-lat") {
             processed[key] = {
-              ...value,
+              ...cleanValue,
               type: "number",
-              min: value.min !== void 0 ? value.min : -90,
-              max: value.max !== void 0 ? value.max : 90
+              min: cleanValue.min !== void 0 ? cleanValue.min : -90,
+              max: cleanValue.max !== void 0 ? cleanValue.max : 90
             };
-          } else if (value.type === "geo:lon" || value.type === "geo-lon") {
+          } else if (cleanValue.type === "geo:lon" || cleanValue.type === "geo-lon") {
             processed[key] = {
-              ...value,
+              ...cleanValue,
               type: "number",
-              min: value.min !== void 0 ? value.min : -180,
-              max: value.max !== void 0 ? value.max : 180
+              min: cleanValue.min !== void 0 ? cleanValue.min : -180,
+              max: cleanValue.max !== void 0 ? cleanValue.max : 180
             };
-          } else if (value.type === "geo:point" || value.type === "geo-point") {
-            processed[key] = { ...value, type: "any" };
-          } else if (value.type === "object" && value.properties) {
+          } else if (cleanValue.type === "geo:point" || cleanValue.type === "geo-point") {
+            processed[key] = { ...cleanValue, type: "any" };
+          } else if (cleanValue.type === "object" && cleanValue.properties) {
             processed[key] = {
-              ...value,
-              properties: this.preprocessAttributesForValidation(value.properties)
+              ...cleanValue,
+              properties: this.preprocessAttributesForValidation(cleanValue.properties)
             };
           } else {
-            processed[key] = value;
+            processed[key] = cleanValue;
           }
         } else {
           const isExplicitRequired = value.$$type && value.$$type.includes("required");
@@ -17881,7 +17923,11 @@ async function handleInsert$3({ resource, data, mappedData, originalData }) {
       excess: totalSize - 2047,
       data: originalData || data
     });
-    return { mappedData: { _v: mappedData._v }, body: JSON.stringify(mappedData) };
+    const metadataOnly = { _v: mappedData._v };
+    if (resource.schema?.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+      metadataOnly._pluginMap = JSON.stringify(resource.schema.pluginMap);
+    }
+    return { mappedData: metadataOnly, body: JSON.stringify(mappedData) };
   }
   return { mappedData, body: "" };
 }
@@ -18084,6 +18130,12 @@ async function handleInsert$1({ resource, data, mappedData, originalData }) {
     metadataFields._v = mappedData._v;
     currentSize += attributeSizes._v;
   }
+  if (resource.schema?.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+    const pluginMapStr = JSON.stringify(resource.schema.pluginMap);
+    const pluginMapSize = calculateUTF8Bytes("_pluginMap") + calculateUTF8Bytes(pluginMapStr);
+    metadataFields._pluginMap = pluginMapStr;
+    currentSize += pluginMapSize;
+  }
   let reservedLimit = effectiveLimit;
   for (const [fieldName, size] of sortedFields) {
     if (fieldName === "_v") continue;
@@ -18143,6 +18195,9 @@ async function handleInsert({ resource, data, mappedData }) {
     "_v": mappedData._v || String(resource.version)
   };
   metadataOnly._map = JSON.stringify(resource.schema.map);
+  if (resource.schema.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+    metadataOnly._pluginMap = JSON.stringify(resource.schema.pluginMap);
+  }
   const body = JSON.stringify(mappedData);
   return { mappedData: metadataOnly, body };
 }
@@ -18151,6 +18206,9 @@ async function handleUpdate({ resource, id, data, mappedData }) {
     "_v": mappedData._v || String(resource.version)
   };
   metadataOnly._map = JSON.stringify(resource.schema.map);
+  if (resource.schema.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+    metadataOnly._pluginMap = JSON.stringify(resource.schema.pluginMap);
+  }
   const body = JSON.stringify(mappedData);
   return { mappedData: metadataOnly, body };
 }
@@ -20944,8 +21002,9 @@ ${errorDetails}`,
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
       const filtered2 = {};
+      const pluginAttrNames = this.schema._pluginAttributes ? Object.values(this.schema._pluginAttributes).flat() : [];
       for (const [key, value] of Object.entries(obj)) {
-        if (!key.startsWith("_") || key === "_geohash" || key.startsWith("_geohash_zoom")) {
+        if (!key.startsWith("_") || key === "_geohash" || key.startsWith("_geohash_zoom") || pluginAttrNames.includes(key)) {
           filtered2[key] = value;
         }
       }
@@ -20971,7 +21030,16 @@ ${errorDetails}`,
       if (hasOverflow && body) {
         const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
         if (okBody) {
-          const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+          let pluginMapFromMeta = null;
+          if (metadata && metadata._pluginmap) {
+            const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(
+              () => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap)
+            );
+            pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
+          }
+          const [okUnmap, errUnmap, unmappedBody] = await tryFn(
+            () => this.schema.unmapper(parsedBody, void 0, pluginMapFromMeta)
+          );
           bodyData = okUnmap ? unmappedBody : {};
         }
       }
@@ -20988,11 +21056,16 @@ ${errorDetails}`,
     if (behavior === "body-only") {
       const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
       let mapFromMeta = this.schema.map;
+      let pluginMapFromMeta = null;
       if (metadata && metadata._map) {
         const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
         mapFromMeta = okMap ? parsedMap : this.schema.map;
       }
-      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
+      if (metadata && metadata._pluginmap) {
+        const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(() => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap));
+        pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
+      }
+      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta, pluginMapFromMeta));
       const result2 = okUnmap ? { ...unmappedBody, id } : { id };
       Object.keys(result2).forEach((k) => {
         result2[k] = fixValue(result2[k]);
@@ -21002,7 +21075,16 @@ ${errorDetails}`,
     if (behavior === "user-managed" && body && body.trim() !== "") {
       const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
       if (okBody) {
-        const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+        let pluginMapFromMeta = null;
+        if (metadata && metadata._pluginmap) {
+          const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(
+            () => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap)
+          );
+          pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
+        }
+        const [okUnmap, errUnmap, unmappedBody] = await tryFn(
+          () => this.schema.unmapper(parsedBody, void 0, pluginMapFromMeta)
+        );
         const bodyData = okUnmap ? unmappedBody : {};
         const merged = { ...bodyData, ...unmappedMetadata, id };
         Object.keys(merged).forEach((k) => {
@@ -23240,7 +23322,11 @@ class TursoReplicator extends BaseReplicator {
         }
         continue;
       }
-      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+      const attributes = Object.fromEntries(
+        Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+      );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const [okSync, errSync] = await tryFn(async () => {
@@ -37939,9 +38025,13 @@ async function generateTypes(database, options = {}) {
   }
   const resourceInterfaces = [];
   for (const [name, resource] of Object.entries(database.resources)) {
-    const attributes = resource.config?.attributes || resource.attributes || {};
+    const allAttributes = resource.config?.attributes || resource.attributes || {};
     const timestamps = resource.config?.timestamps || false;
-    const interfaceDef = generateResourceInterface(name, attributes, timestamps);
+    const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+    const userAttributes = Object.fromEntries(
+      Object.entries(allAttributes).filter(([name2]) => !pluginAttrNames.includes(name2))
+    );
+    const interfaceDef = generateResourceInterface(name, userAttributes, timestamps);
     lines.push(interfaceDef);
     resourceInterfaces.push({
       name,
