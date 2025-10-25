@@ -113,6 +113,7 @@
     "@google-cloud/bigquery": "^7.0.0",
     "@hono/node-server": "^1.0.0",
     "@hono/swagger-ui": "^0.5.0",
+    "@tensorflow/tfjs-node": "^4.0.0",
     "amqplib": "^0.10.8",
     "hono": "^4.0.0",
     "node-cron": "^4.0.0",
@@ -129,6 +130,9 @@
       "optional": true
     },
     "@hono/swagger-ui": {
+      "optional": true
+    },
+    "@tensorflow/tfjs-node": {
       "optional": true
     },
     "pg": {

@@ -437,15 +437,18 @@ export class ApiPlugin extends Plugin {
     return async (c, next) => {
       await next();
 
-      // Note: Actual compression would require proper streaming support
-      // For now, this is a placeholder
-      const acceptEncoding = c.req.header('accept-encoding') || '';
-
-      if (acceptEncoding.includes('gzip')) {
-        c.header('Content-Encoding', 'gzip');
-      } else if (acceptEncoding.includes('deflate')) {
-        c.header('Content-Encoding', 'deflate');
-      }
+      // TODO: Implement actual compression using zlib
+      // For now, this is a no-op placeholder to avoid ERR_CONTENT_DECODING_FAILED errors
+      //
+      // WARNING: Do NOT set Content-Encoding headers without actually compressing!
+      // Setting these headers without compression causes browsers to fail with:
+      // net::ERR_CONTENT_DECODING_FAILED 200 (OK)
+      //
+      // Real implementation would require:
+      // 1. Check Accept-Encoding header
+      // 2. Compress response body with zlib.gzip() or zlib.deflate()
+      // 3. Set Content-Encoding header
+      // 4. Update Content-Length header
     };
   }
 
