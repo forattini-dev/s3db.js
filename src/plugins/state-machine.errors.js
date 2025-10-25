@@ -14,7 +14,7 @@ import { S3dbError } from '../errors.js';
  */
 export class StateMachineError extends S3dbError {
   constructor(message, details = {}) {
-    const { currentState, targetState, resourceName, operation = 'unknown', ...rest } = details;
+    const { currentState, targetState, resourceName, operation = 'unknown', retriable, ...rest } = details;
 
     let description = details.description;
     if (!description) {
@@ -41,6 +41,14 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/state-mach
     }
 
     super(message, { ...rest, currentState, targetState, resourceName, operation, description });
+
+    // Support retriable property for error classification
+    // retriable: true = will be retried
+    // retriable: false = will not be retried
+    // retriable: undefined = classified by ErrorClassifier
+    if (retriable !== undefined) {
+      this.retriable = retriable;
+    }
   }
 }
 

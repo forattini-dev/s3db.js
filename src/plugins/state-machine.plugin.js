@@ -1,6 +1,7 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { StateMachineError } from "./state-machine.errors.js";
+import { ErrorClassifier } from "../concerns/error-classifier.js";
 
 /**
  * StateMachinePlugin - Finite State Machine Management
@@ -114,11 +115,24 @@ export class StateMachinePlugin extends Plugin {
       // Distributed lock configuration (prevents concurrent transitions)
       workerId: options.workerId || 'default',
       lockTimeout: options.lockTimeout || 1000, // Wait up to 1s for lock
-      lockTTL: options.lockTTL || 5 // Lock expires after 5s (prevent deadlock)
+      lockTTL: options.lockTTL || 5, // Lock expires after 5s (prevent deadlock)
+
+      // Global retry configuration for action execution
+      retryConfig: options.retryConfig || null,
+
+      // Trigger system configuration
+      enableScheduler: options.enableScheduler || false,
+      schedulerConfig: options.schedulerConfig || {},
+      enableDateTriggers: options.enableDateTriggers !== false,
+      enableFunctionTriggers: options.enableFunctionTriggers !== false,
+      enableEventTriggers: options.enableEventTriggers !== false,
+      triggerCheckInterval: options.triggerCheckInterval || 60000 // Check triggers every 60s by default
     };
 
     this.database = null;
     this.machines = new Map();
+    this.triggerIntervals = [];
+    this.schedulerPlugin = null;
 
     this._validateConfiguration();
   }
@@ -163,12 +177,12 @@ export class StateMachinePlugin extends Plugin {
   }
 
   async onInstall() {
-    
+
     // Create state storage resource if persistence is enabled
     if (this.config.persistTransitions) {
       await this._createStateResources();
     }
-    
+
     // Initialize state machines
     for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
       this.machines.set(machineName, {
@@ -176,7 +190,10 @@ export class StateMachinePlugin extends Plugin {
         currentStates: new Map() // entityId -> currentState
       });
     }
-    
+
+    // Setup trigger system if enabled
+    await this._setupTriggers();
+
     this.emit('initialized', { machines: Array.from(this.machines.keys()) });
   }
 
@@ -212,6 +229,7 @@ export class StateMachinePlugin extends Plugin {
         currentState: 'string|required',
         context: 'json|default:{}',
         lastTransition: 'string|default:null',
+        triggerCounts: 'json|default:{}',  // Track trigger execution counts
         updatedAt: 'string|required'
       },
       behavior: 'body-overflow'
@@ -321,16 +339,132 @@ export class StateMachinePlugin extends Plugin {
       }
       return;
     }
-    
-    const [ok, error] = await tryFn(() => 
-      action(context, event, { database: this.database, machineId, entityId })
-    );
-    
-    if (!ok) {
-      if (this.config.verbose) {
-        console.error(`[StateMachinePlugin] Action '${actionName}' failed:`, error.message);
+
+    // Get retry configuration (state-specific overrides global)
+    const machine = this.machines.get(machineId);
+    const currentState = await this.getState(machineId, entityId);
+    const stateConfig = machine?.config?.states?.[currentState];
+
+    // Merge retry configs: global < machine < state
+    const retryConfig = {
+      ...(this.config.retryConfig || {}),
+      ...(machine?.config?.retryConfig || {}),
+      ...(stateConfig?.retryConfig || {})
+    };
+
+    const maxAttempts = retryConfig.maxAttempts ?? 0;
+    const retryEnabled = maxAttempts > 0;
+    let attempt = 0;
+    let lastError = null;
+
+    while (attempt <= maxAttempts) {
+      try {
+        const result = await action(context, event, { database: this.database, machineId, entityId });
+
+        // Success - log retry statistics if retried
+        if (attempt > 0) {
+          this.emit('action_retry_success', {
+            machineId,
+            entityId,
+            action: actionName,
+            attempts: attempt + 1,
+            state: currentState
+          });
+
+          if (this.config.verbose) {
+            console.log(`[StateMachinePlugin] Action '${actionName}' succeeded after ${attempt + 1} attempts`);
+          }
+        }
+
+        return result;
+
+      } catch (error) {
+        lastError = error;
+
+        // If retries are disabled, use old behavior (emit error but don't throw)
+        if (!retryEnabled) {
+          if (this.config.verbose) {
+            console.error(`[StateMachinePlugin] Action '${actionName}' failed:`, error.message);
+          }
+          this.emit('action_error', { actionName, error: error.message, machineId, entityId });
+          return; // Don't throw, continue execution
+        }
+
+        // Classify error
+        const classification = ErrorClassifier.classify(error, {
+          retryableErrors: retryConfig.retryableErrors,
+          nonRetriableErrors: retryConfig.nonRetriableErrors
+        });
+
+        // Non-retriable error - fail immediately
+        if (classification === 'NON_RETRIABLE') {
+          this.emit('action_error_non_retriable', {
+            machineId,
+            entityId,
+            action: actionName,
+            error: error.message,
+            state: currentState
+          });
+
+          if (this.config.verbose) {
+            console.error(`[StateMachinePlugin] Action '${actionName}' failed with non-retriable error:`, error.message);
+          }
+
+          throw error;
+        }
+
+        // Max attempts reached
+        if (attempt >= maxAttempts) {
+          this.emit('action_retry_exhausted', {
+            machineId,
+            entityId,
+            action: actionName,
+            attempts: attempt + 1,
+            error: error.message,
+            state: currentState
+          });
+
+          if (this.config.verbose) {
+            console.error(`[StateMachinePlugin] Action '${actionName}' failed after ${attempt + 1} attempts:`, error.message);
+          }
+
+          throw error;
+        }
+
+        // Retriable error - retry
+        attempt++;
+
+        // Calculate backoff delay
+        const delay = this._calculateBackoff(attempt, retryConfig);
+
+        // Call retry hook if configured
+        if (retryConfig.onRetry) {
+          try {
+            await retryConfig.onRetry(attempt, error, context);
+          } catch (hookError) {
+            if (this.config.verbose) {
+              console.warn(`[StateMachinePlugin] onRetry hook failed:`, hookError.message);
+            }
+          }
+        }
+
+        this.emit('action_retry_attempt', {
+          machineId,
+          entityId,
+          action: actionName,
+          attempt,
+          delay,
+          error: error.message,
+          state: currentState
+        });
+
+        if (this.config.verbose) {
+          console.warn(`[StateMachinePlugin] Action '${actionName}' failed (attempt ${attempt + 1}/${maxAttempts + 1}), retrying in ${delay}ms:`, error.message);
+        }
+
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-      this.emit('action_error', { actionName, error: error.message, machineId, entityId });
     }
   }
 
@@ -451,6 +585,35 @@ export class StateMachinePlugin extends Plugin {
     if (!ok && this.config.verbose) {
       console.warn(`[StateMachinePlugin] Failed to release lock '${lockName}':`, err.message);
     }
+  }
+
+  /**
+   * Calculate backoff delay for retry attempts
+   * @private
+   */
+  _calculateBackoff(attempt, retryConfig) {
+    const {
+      backoffStrategy = 'exponential',
+      baseDelay = 1000,
+      maxDelay = 30000
+    } = retryConfig || {};
+
+    let delay;
+
+    if (backoffStrategy === 'exponential') {
+      // Exponential backoff: baseDelay * 2^(attempt-1)
+      delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+    } else if (backoffStrategy === 'linear') {
+      // Linear backoff: baseDelay * attempt
+      delay = Math.min(baseDelay * attempt, maxDelay);
+    } else {
+      // Fixed backoff: always use baseDelay
+      delay = baseDelay;
+    }
+
+    // Add jitter (±20%) to prevent thundering herd
+    const jitter = delay * 0.2 * (Math.random() - 0.5);
+    return Math.round(delay + jitter);
   }
 
   /**
@@ -674,6 +837,418 @@ export class StateMachinePlugin extends Plugin {
     return dot;
   }
 
+  /**
+   * Get all entities currently in a specific state
+   * @private
+   */
+  async _getEntitiesInState(machineId, stateName) {
+    if (!this.config.persistTransitions) {
+      // Memory-only - check in-memory map
+      const machine = this.machines.get(machineId);
+      if (!machine) return [];
+
+      const entities = [];
+      for (const [entityId, currentState] of machine.currentStates) {
+        if (currentState === stateName) {
+          entities.push({ entityId, currentState, context: {}, triggerCounts: {} });
+        }
+      }
+      return entities;
+    }
+
+    // Query state resource for entities in this state
+    const [ok, err, records] = await tryFn(() =>
+      this.database.resources[this.config.stateResource].query({
+        machineId,
+        currentState: stateName
+      })
+    );
+
+    if (!ok) {
+      if (this.config.verbose) {
+        console.warn(`[StateMachinePlugin] Failed to query entities in state '${stateName}':`, err.message);
+      }
+      return [];
+    }
+
+    return records || [];
+  }
+
+  /**
+   * Increment trigger execution count for an entity
+   * @private
+   */
+  async _incrementTriggerCount(machineId, entityId, triggerName) {
+    if (!this.config.persistTransitions) {
+      // No persistence - skip tracking
+      return;
+    }
+
+    const stateId = `${machineId}_${entityId}`;
+
+    const [ok, err, stateRecord] = await tryFn(() =>
+      this.database.resources[this.config.stateResource].get(stateId)
+    );
+
+    if (ok && stateRecord) {
+      const triggerCounts = stateRecord.triggerCounts || {};
+      triggerCounts[triggerName] = (triggerCounts[triggerName] || 0) + 1;
+
+      await tryFn(() =>
+        this.database.resources[this.config.stateResource].patch(stateId, { triggerCounts })
+      );
+    }
+  }
+
+  /**
+   * Setup trigger system for all state machines
+   * @private
+   */
+  async _setupTriggers() {
+    if (!this.config.enableScheduler && !this.config.enableDateTriggers && !this.config.enableFunctionTriggers && !this.config.enableEventTriggers) {
+      // All triggers disabled
+      return;
+    }
+
+    const cronJobs = {};
+
+    for (const [machineId, machineData] of this.machines) {
+      const machineConfig = machineData.config;
+
+      for (const [stateName, stateConfig] of Object.entries(machineConfig.states)) {
+        const triggers = stateConfig.triggers || [];
+
+        for (let i = 0; i < triggers.length; i++) {
+          const trigger = triggers[i];
+          const triggerName = `${trigger.action}_${i}`;
+
+          if (trigger.type === 'cron' && this.config.enableScheduler) {
+            // Collect cron triggers for SchedulerPlugin
+            const jobName = `${machineId}_${stateName}_${triggerName}`;
+            cronJobs[jobName] = await this._createCronJob(machineId, stateName, trigger, triggerName);
+          } else if (trigger.type === 'date' && this.config.enableDateTriggers) {
+            // Setup date-based trigger
+            await this._setupDateTrigger(machineId, stateName, trigger, triggerName);
+          } else if (trigger.type === 'function' && this.config.enableFunctionTriggers) {
+            // Setup function-based trigger
+            await this._setupFunctionTrigger(machineId, stateName, trigger, triggerName);
+          } else if (trigger.type === 'event' && this.config.enableEventTriggers) {
+            // Setup event-based trigger
+            await this._setupEventTrigger(machineId, stateName, trigger, triggerName);
+          }
+        }
+      }
+    }
+
+    // Install SchedulerPlugin if there are cron jobs
+    if (Object.keys(cronJobs).length > 0 && this.config.enableScheduler) {
+      const { SchedulerPlugin } = await import('./scheduler.plugin.js');
+      this.schedulerPlugin = new SchedulerPlugin({
+        jobs: cronJobs,
+        persistJobs: false, // Don't persist trigger jobs
+        verbose: this.config.verbose,
+        ...this.config.schedulerConfig
+      });
+
+      await this.database.usePlugin(this.schedulerPlugin);
+
+      if (this.config.verbose) {
+        console.log(`[StateMachinePlugin] Installed SchedulerPlugin with ${Object.keys(cronJobs).length} cron triggers`);
+      }
+    }
+  }
+
+  /**
+   * Create a SchedulerPlugin job for a cron trigger
+   * @private
+   */
+  async _createCronJob(machineId, stateName, trigger, triggerName) {
+    return {
+      schedule: trigger.schedule,
+      description: `Trigger '${triggerName}' for ${machineId}.${stateName}`,
+      action: async (database, context) => {
+        // Find all entities in this state
+        const entities = await this._getEntitiesInState(machineId, stateName);
+
+        let executedCount = 0;
+
+        for (const entity of entities) {
+          try {
+            // Check condition if provided
+            if (trigger.condition) {
+              const shouldTrigger = await trigger.condition(entity.context, entity.entityId);
+              if (!shouldTrigger) continue;
+            }
+
+            // Check max triggers
+            if (trigger.maxTriggers !== undefined) {
+              const triggerCount = entity.triggerCounts?.[triggerName] || 0;
+              if (triggerCount >= trigger.maxTriggers) {
+                // Send max triggers event if configured
+                if (trigger.onMaxTriggersReached) {
+                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+                }
+                continue;
+              }
+            }
+
+            // Execute trigger action
+            const result = await this._executeAction(
+              trigger.action,
+              entity.context,
+              'TRIGGER',
+              machineId,
+              entity.entityId
+            );
+
+            // Increment trigger count
+            await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+            executedCount++;
+
+            // Send success event if configured
+            if (trigger.eventOnSuccess) {
+              await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                ...entity.context,
+                triggerResult: result
+              });
+            } else if (trigger.event) {
+              await this.send(machineId, entity.entityId, trigger.event, {
+                ...entity.context,
+                triggerResult: result
+              });
+            }
+
+            this.emit('trigger_executed', {
+              machineId,
+              entityId: entity.entityId,
+              state: stateName,
+              trigger: triggerName,
+              type: 'cron'
+            });
+
+          } catch (error) {
+            // Send failure event if configured
+            if (trigger.event) {
+              await tryFn(() => this.send(machineId, entity.entityId, trigger.event, {
+                ...entity.context,
+                triggerError: error.message
+              }));
+            }
+
+            if (this.config.verbose) {
+              console.error(`[StateMachinePlugin] Trigger '${triggerName}' failed for entity ${entity.entityId}:`, error.message);
+            }
+          }
+        }
+
+        return { processed: entities.length, executed: executedCount };
+      }
+    };
+  }
+
+  /**
+   * Setup a date-based trigger
+   * @private
+   */
+  async _setupDateTrigger(machineId, stateName, trigger, triggerName) {
+    // Poll for entities approaching trigger date
+    const checkInterval = setInterval(async () => {
+      const entities = await this._getEntitiesInState(machineId, stateName);
+
+      for (const entity of entities) {
+        try {
+          // Get trigger date from context field
+          const triggerDateValue = entity.context?.[trigger.field];
+          if (!triggerDateValue) continue;
+
+          const triggerDate = new Date(triggerDateValue);
+          const now = new Date();
+
+          // Check if trigger date reached
+          if (now >= triggerDate) {
+            // Check max triggers
+            if (trigger.maxTriggers !== undefined) {
+              const triggerCount = entity.triggerCounts?.[triggerName] || 0;
+              if (triggerCount >= trigger.maxTriggers) {
+                if (trigger.onMaxTriggersReached) {
+                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+                }
+                continue;
+              }
+            }
+
+            // Execute action
+            const result = await this._executeAction(trigger.action, entity.context, 'TRIGGER', machineId, entity.entityId);
+            await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+
+            // Send event
+            if (trigger.event) {
+              await this.send(machineId, entity.entityId, trigger.event, {
+                ...entity.context,
+                triggerResult: result
+              });
+            }
+
+            this.emit('trigger_executed', {
+              machineId,
+              entityId: entity.entityId,
+              state: stateName,
+              trigger: triggerName,
+              type: 'date'
+            });
+          }
+        } catch (error) {
+          if (this.config.verbose) {
+            console.error(`[StateMachinePlugin] Date trigger '${triggerName}' failed:`, error.message);
+          }
+        }
+      }
+    }, this.config.triggerCheckInterval);
+
+    this.triggerIntervals.push(checkInterval);
+  }
+
+  /**
+   * Setup a function-based trigger
+   * @private
+   */
+  async _setupFunctionTrigger(machineId, stateName, trigger, triggerName) {
+    const interval = trigger.interval || this.config.triggerCheckInterval;
+
+    const checkInterval = setInterval(async () => {
+      const entities = await this._getEntitiesInState(machineId, stateName);
+
+      for (const entity of entities) {
+        try {
+          // Check max triggers
+          if (trigger.maxTriggers !== undefined) {
+            const triggerCount = entity.triggerCounts?.[triggerName] || 0;
+            if (triggerCount >= trigger.maxTriggers) {
+              if (trigger.onMaxTriggersReached) {
+                await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+              }
+              continue;
+            }
+          }
+
+          // Evaluate condition
+          const shouldTrigger = await trigger.condition(entity.context, entity.entityId);
+
+          if (shouldTrigger) {
+            const result = await this._executeAction(trigger.action, entity.context, 'TRIGGER', machineId, entity.entityId);
+            await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+
+            // Send event if configured
+            if (trigger.event) {
+              await this.send(machineId, entity.entityId, trigger.event, {
+                ...entity.context,
+                triggerResult: result
+              });
+            }
+
+            this.emit('trigger_executed', {
+              machineId,
+              entityId: entity.entityId,
+              state: stateName,
+              trigger: triggerName,
+              type: 'function'
+            });
+          }
+        } catch (error) {
+          if (this.config.verbose) {
+            console.error(`[StateMachinePlugin] Function trigger '${triggerName}' failed:`, error.message);
+          }
+        }
+      }
+    }, interval);
+
+    this.triggerIntervals.push(checkInterval);
+  }
+
+  /**
+   * Setup an event-based trigger
+   * @private
+   */
+  async _setupEventTrigger(machineId, stateName, trigger, triggerName) {
+    const eventName = trigger.event;
+
+    // Create event listener
+    const eventHandler = async (eventData) => {
+      const entities = await this._getEntitiesInState(machineId, stateName);
+
+      for (const entity of entities) {
+        try {
+          // Check condition if provided
+          if (trigger.condition) {
+            const shouldTrigger = await trigger.condition(entity.context, entity.entityId, eventData);
+            if (!shouldTrigger) continue;
+          }
+
+          // Check max triggers
+          if (trigger.maxTriggers !== undefined) {
+            const triggerCount = entity.triggerCounts?.[triggerName] || 0;
+            if (triggerCount >= trigger.maxTriggers) {
+              if (trigger.onMaxTriggersReached) {
+                await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+              }
+              continue;
+            }
+          }
+
+          // Execute trigger action with event data in context
+          const result = await this._executeAction(
+            trigger.action,
+            { ...entity.context, eventData },
+            'TRIGGER',
+            machineId,
+            entity.entityId
+          );
+
+          await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+
+          // Send success event if configured
+          if (trigger.sendEvent) {
+            await this.send(machineId, entity.entityId, trigger.sendEvent, {
+              ...entity.context,
+              triggerResult: result,
+              eventData
+            });
+          }
+
+          this.emit('trigger_executed', {
+            machineId,
+            entityId: entity.entityId,
+            state: stateName,
+            trigger: triggerName,
+            type: 'event',
+            eventName
+          });
+        } catch (error) {
+          if (this.config.verbose) {
+            console.error(`[StateMachinePlugin] Event trigger '${triggerName}' failed:`, error.message);
+          }
+        }
+      }
+    };
+
+    // Listen to database events if eventName starts with 'db:'
+    if (eventName.startsWith('db:')) {
+      const dbEventName = eventName.substring(3); // Remove 'db:' prefix
+      this.database.on(dbEventName, eventHandler);
+
+      if (this.config.verbose) {
+        console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
+      }
+    } else {
+      // Listen to plugin events
+      this.on(eventName, eventHandler);
+
+      if (this.config.verbose) {
+        console.log(`[StateMachinePlugin] Listening to plugin event '${eventName}' for trigger '${triggerName}'`);
+      }
+    }
+  }
+
   async start() {
     if (this.config.verbose) {
       console.log(`[StateMachinePlugin] Started with ${this.machines.size} state machines`);
@@ -681,6 +1256,18 @@ export class StateMachinePlugin extends Plugin {
   }
 
   async stop() {
+    // Clear trigger intervals
+    for (const interval of this.triggerIntervals) {
+      clearInterval(interval);
+    }
+    this.triggerIntervals = [];
+
+    // Stop scheduler plugin if installed
+    if (this.schedulerPlugin) {
+      await this.schedulerPlugin.stop();
+      this.schedulerPlugin = null;
+    }
+
     this.machines.clear();
     this.removeAllListeners();
   }
