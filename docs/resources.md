@@ -183,8 +183,8 @@ const orders = await db.createResource({
 
   // Event listeners
   events: {
-    insert: (event) => console.log('INSERT:', event.id),
-    update: (event) => console.log('UPDATE:', event.id)
+    inserted: (event) => console.log('INSERT:', event.id),
+    updated: (event) => console.log('UPDATE:', event.id)
   },
 
   // Async events (default: true)
@@ -2275,12 +2275,12 @@ const users = await db.createResource({
 
   events: {
     // Single listener
-    insert: (event) => {
+    inserted: (event) => {
       console.log('User created:', event.id, event.name);
     },
 
     // Multiple listeners (array)
-    update: [
+    updated: [
       (event) => {
         console.log('Update detected:', event.id);
       },
@@ -2595,7 +2595,7 @@ const orders = await db.createResource({
 
   // Events for monitoring
   events: {
-    insert: (event) => {
+    inserted: (event) => {
       // Log to analytics
       analytics.track('order.created', {
         orderId: event.orderId,
@@ -2607,7 +2607,7 @@ const orders = await db.createResource({
       metrics.histogram('orders.total', event.total);
     },
 
-    update: (event) => {
+    updated: (event) => {
       // Track status changes
       if (event.$before.status !== event.$after.status) {
         analytics.track('order.status_changed', {
@@ -2647,7 +2647,7 @@ const orders = await db.createResource({
 4. **Use declarative events for core functionality**
    ```javascript
    events: {
-     insert: (event) => { /* ... */ }
+     inserted: (event) => { /* ... */ }
    }
    ```
 
