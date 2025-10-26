@@ -20,7 +20,7 @@ export class BaseReplicator extends EventEmitter {
    */
   async initialize(database) {
     this.database = database;
-    this.emit('initialized', { replicator: this.name });
+    this.emit('db:plugin:initialized', { replicator: this.name });
   }
 
   /**
