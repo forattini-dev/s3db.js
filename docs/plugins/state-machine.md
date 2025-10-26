@@ -2338,21 +2338,21 @@ async function sendEventWithRetry(machineId, entityId, event, eventData, maxRetr
 - [Queue Consumer Plugin](./queue-consumer.md) - Trigger state changes from external events
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**P: O que o StateMachinePlugin faz?**
-R: Implementa máquinas de estado finitas (FSM) com transições controladas, guards e ações de entrada/saída.
+**Q: What does StateMachinePlugin do?**
+A: Implements finite state machines (FSM) with controlled transitions, guards, and entry/exit actions.
 
-**P: Para que serve?**
-R: Gerenciar workflows complexos (ex: pedidos, aprovações, processos), garantindo transições válidas e auditando mudanças de estado.
+**Q: What is it for?**
+A: Manage complex workflows (e.g., orders, approvals, processes), ensuring valid transitions and auditing state changes.
 
 **Q: How does it work?**
-R: Define estados, eventos que causam transições, guards (validações) e actions (efeitos colaterais).
+A: Define states, events that cause transitions, guards (validations), and actions (side effects).
 
-### Configuração
+### Configuration
 
-**P: Como definir uma máquina de estados?**
-R:
+**Q: How to define a state machine?**
+A:
 ```javascript
 new StateMachinePlugin({
   stateMachines: {
@@ -2364,9 +2364,9 @@ new StateMachinePlugin({
         },
         confirmed: {
           on: { SHIP: 'shipped' },
-          entry: 'onConfirmed',     // Executa ao entrar
-          exit: 'onLeftConfirmed',  // Executa ao sair
-          guards: { SHIP: 'canShip' }  // Validação
+          entry: 'onConfirmed',     // Executes on enter
+          exit: 'onLeftConfirmed',  // Executes on exit
+          guards: { SHIP: 'canShip' }  // Validation
         },
         shipped: { on: { DELIVER: 'delivered' } },
         delivered: { type: 'final' },
@@ -2376,7 +2376,7 @@ new StateMachinePlugin({
   },
   actions: {
     onConfirmed: async (context, event, machine) => {
-      // Decrementa estoque, envia email, etc.
+      // Decrement inventory, send email, etc.
     }
   },
   guards: {
@@ -2387,10 +2387,10 @@ new StateMachinePlugin({
 })
 ```
 
-### Operações
+### Operations
 
-**P: Como enviar um evento (trigger transition)?**
-R: Use `send`:
+**Q: How to send an event (trigger transition)?**
+A: Use `send`:
 ```javascript
 const result = await stateMachinePlugin.send(
   'order_processing',  // machineId
@@ -2398,60 +2398,60 @@ const result = await stateMachinePlugin.send(
   'CONFIRM',           // event
   { paymentId: 'pay_123' }  // context
 );
-// Retorna: { from: 'pending', to: 'confirmed', event: 'CONFIRM', timestamp }
+// Returns: { from: 'pending', to: 'confirmed', event: 'CONFIRM', timestamp }
 ```
 
-**P: Como obter o estado atual de uma entidade?**
-R: Use `getState`:
+**Q: How to get the current state of an entity?**
+A: Use `getState`:
 ```javascript
 const state = await stateMachinePlugin.getState('order_processing', 'order-123');
-// Retorna: 'confirmed'
+// Returns: 'confirmed'
 ```
 
-**P: Como obter eventos válidos para o estado atual?**
-R: Use `getValidEvents`:
+**Q: How to get valid events for the current state?**
+A: Use `getValidEvents`:
 ```javascript
 const events = await stateMachinePlugin.getValidEvents('order_processing', 'confirmed');
-// Retorna: ['SHIP']
+// Returns: ['SHIP']
 ```
 
-**P: Como consultar histórico de transições?**
-R: Use `getTransitionHistory`:
+**Q: How to query transition history?**
+A: Use `getTransitionHistory`:
 ```javascript
 const history = await stateMachinePlugin.getTransitionHistory(
   'order_processing',
   'order-123',
   { limit: 50 }
 );
-// Retorna array: [{ from, to, event, context, timestamp }, ...]
+// Returns array: [{ from, to, event, context, timestamp }, ...]
 ```
 
-### Inicialização
+### Initialization
 
-**P: Como inicializar o estado de uma nova entidade?**
-R: Use `initializeEntity`:
+**Q: How to initialize the state of a new entity?**
+A: Use `initializeEntity`:
 ```javascript
 await stateMachinePlugin.initializeEntity(
   'order_processing',
   'order-456',
   { customerId: 'user-123' }
 );
-// Estado inicial: 'pending'
+// Initial state: 'pending'
 ```
 
-### Visualização
+### Visualization
 
-**P: Como visualizar a máquina de estados?**
-R: Use `visualize` para obter DOT format (GraphViz):
+**Q: How to visualize the state machine?**
+A: Use `visualize` to get DOT format (GraphViz):
 ```javascript
 const dot = stateMachinePlugin.visualize('order_processing');
-// Salve em arquivo .dot e converta para imagem
+// Save to file .dot and convert to image
 ```
 
-### Monitoramento
+### Monitoring
 
-**P: Como obter estatísticas de transições?**
-R: Use event listeners para rastrear:
+**Q: How to get transition statistics?**
+A: Use event listeners to track:
 ```javascript
 let stats = { total: 0, success: 0, failed: 0 };
 
@@ -2470,8 +2470,8 @@ stateMachinePlugin.on('transition_failed', (data) => {
 console.log(`Success rate: ${(stats.success / stats.total * 100).toFixed(2)}%`);
 ```
 
-**P: Como monitorar guards que falham frequentemente?**
-R: Log guard failures para análise:
+**Q: How to monitor guards that fail frequently?**
+A: Log guard failures for analysis:
 ```javascript
 guards: {
   canShip: async (context, event, machine) => {
@@ -2493,8 +2493,8 @@ guards: {
 }
 ```
 
-**P: Como obter métricas de performance?**
-R: Track execution time:
+**Q: How to get performance metrics?**
+A: Track execution time:
 ```javascript
 actions: {
   onStateChange: async (context, event, machine) => {
@@ -2535,8 +2535,8 @@ actions: {
 }
 ```
 
-**P: Como evitar race conditions em transições concorrentes?**
-R: Use optimistic locking:
+**Q: How to avoid race conditions in concurrent transitions?**
+A: Use optimistic locking:
 ```javascript
 actions: {
   safeTransition: async (context, event, machine) => {
@@ -2559,8 +2559,8 @@ actions: {
 }
 ```
 
-**P: Como garantir atomicidade em transições com múltiplas operações?**
-R: Use try-catch com rollback:
+**Q: How to ensure atomicity in transitions with multiple operations?**
+A: Use try-catch with rollback:
 ```javascript
 actions: {
   processOrder: async (context, event, machine) => {
