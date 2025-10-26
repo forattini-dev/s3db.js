@@ -2,6 +2,8 @@
 
 > The magic behind S3DB's type system - where AWS S3 meets schema validation zen 🧘
 
+**s3db uses [fastest-validator](https://github.com/icebob/fastest-validator)** - a blazing-fast validation library with comprehensive type support. All schema definitions follow fastest-validator's powerful syntax and conventions.
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
@@ -42,7 +44,8 @@ const users = await database.createResource({
     password: 'secret|required',           // Auto-encrypted ✨
     age: 'number|optional|min:18',
     embedding: 'embedding:1536',           // Vector magic 🎯
-    profile: {                             // Nested objects work!
+    profile: {                             // Nested objects using $$type!
+      $$type: 'object',
       name: 'string',
       bio: 'string|max:500'
     }
@@ -936,15 +939,34 @@ Full support for all fastest-validator types:
 
 ## Nested Objects
 
-S3DB fully supports nested object structures.
+S3DB fully supports nested object structures using **[fastest-validator](https://github.com/icebob/fastest-validator)'s object syntax**.
 
-### Simple Nesting
+> **✨ Magic Auto-Detection!**
+>
+> **s3db automatically detects nested objects** - no need for `$$type` or `type/props` in most cases!
+>
+> Just write your object structure naturally:
+> ```javascript
+> profile: {
+>   bio: 'string',
+>   avatar: 'url'
+> }
+> ```
+>
+> **When to use explicit formats:**
+> - Use `$$type` when you need validation control (required/optional)
+> - Use `type/props` for advanced control (strict mode, etc.)
+
+### Simple Nesting - Magic Format (Recommended! ✨)
+
+**No `$$type` or `type/props` needed - s3db detects it automatically!**
 
 ```javascript
 const users = await database.createResource({
   name: 'users',
   attributes: {
     email: 'string|required',
+    // Just write your object - it's automatically detected!
     profile: {
       name: 'string',
       bio: 'string|max:500',
@@ -963,9 +985,42 @@ await users.insert({
 });
 ```
 
-### Deep Nesting
+**How it works:** s3db automatically converts it to:
+```javascript
+profile: {
+  type: 'object',
+  optional: true,  // Auto-marked as optional
+  strict: false,
+  properties: { ... }
+}
+```
+
+### With Validation Control - $$type Format
+
+**Use when you need to mark as required or optional explicitly:**
 
 ```javascript
+const users = await database.createResource({
+  name: 'users',
+  attributes: {
+    email: 'string|required',
+    // Use $$type when you need required/optional control
+    profile: {
+      $$type: 'object|required',  // ← Explicit validation
+      name: 'string',
+      bio: 'string|max:500',
+      avatar: 'string|url'
+    }
+  }
+});
+```
+
+### Deep Nesting - Magic Format (Recommended! ✨)
+
+**Even deeply nested objects are auto-detected!**
+
+```javascript
+// Just write it naturally - no $$type needed anywhere!
 {
   user: {
     profile: {
@@ -982,6 +1037,57 @@ await users.insert({
       notifications: {
         email: 'boolean|default:true',
         sms: 'boolean|default:false'
+      }
+    }
+  }
+}
+```
+
+### Deep Nesting with $$type (when needed)
+
+**Use $$type only when you need validation control:**
+
+```javascript
+{
+  user: {
+    $$type: 'object|required',  // ← Only add when you need control
+    profile: {
+      personal: {               // ← No $$type needed here
+        name: 'string',
+        age: 'number'
+      },
+      social: {
+        $$type: 'object|optional',  // ← Control this level
+        twitter: 'string|optional',
+        github: 'string|optional'
+      }
+    }
+  }
+}
+```
+
+### Advanced - Explicit Format (Rare Cases)
+
+**Use `type/props` for full control (strict mode, custom validation, etc.):**
+
+```javascript
+{
+  user: {
+    type: 'object',
+    optional: false,
+    strict: true,  // ← Enable strict validation
+    props: {
+      profile: {
+        type: 'object',
+        props: {
+          personal: {
+            type: 'object',
+            props: {
+              name: 'string',
+              age: 'number'
+            }
+          }
+        }
       }
     }
   }
