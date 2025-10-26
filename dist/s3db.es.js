@@ -7297,13 +7297,13 @@ class Cache extends EventEmitter {
   async get(key) {
     this.validateKey(key);
     const data = await this._get(key);
-    this.emit("get", data);
+    this.emit("fetched", data);
     return data;
   }
   async del(key) {
     this.validateKey(key);
     const data = await this._del(key);
-    this.emit("delete", data);
+    this.emit("deleted", data);
     return data;
   }
   async delete(key) {
@@ -24625,26 +24625,6 @@ ${errorDetails}`,
     await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
     const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
-    this._emitStandardized("deleted", {
-      ...objectData,
-      $before: { ...objectData },
-      $after: null
-    }, id);
-    if (deleteError) {
-      throw mapAwsError(deleteError, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: "delete",
-        id
-      });
-    }
-    if (!ok2) throw mapAwsError(err2, {
-      key,
-      resourceName: this.name,
-      operation: "delete",
-      id
-    });
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
       if (this.config.strictPartitions) {
         await this.deletePartitionReferences(objectData);
@@ -24677,11 +24657,30 @@ ${errorDetails}`,
       for (const hook of nonPartitionHooks) {
         afterDeleteData = await hook(afterDeleteData);
       }
-      return response;
     } else {
       await this.executeHooks("afterDelete", objectData);
-      return response;
     }
+    this._emitStandardized("deleted", {
+      ...objectData,
+      $before: { ...objectData },
+      $after: null
+    }, id);
+    if (deleteError) {
+      throw mapAwsError(deleteError, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: "delete",
+        id
+      });
+    }
+    if (!ok2) throw mapAwsError(err2, {
+      key,
+      resourceName: this.name,
+      operation: "delete",
+      id
+    });
+    return response;
   }
   /**
    * Insert or update a resource object (upsert operation)
@@ -43869,6 +43868,7 @@ class MemoryClient extends EventEmitter {
     const commandName = command.constructor.name;
     const input = command.input || {};
     this.emit("cl:request", commandName, input);
+    this.emit("command.request", commandName, input);
     let response;
     try {
       switch (commandName) {
@@ -43897,6 +43897,7 @@ class MemoryClient extends EventEmitter {
           throw new Error(`Unsupported command: ${commandName}`);
       }
       this.emit("cl:response", commandName, response, input);
+      this.emit("command.response", commandName, response, input);
       return response;
     } catch (error) {
       const mappedError = mapAwsError(error, {
@@ -44192,13 +44193,13 @@ class MemoryClient extends EventEmitter {
     if (keys.length > 0) {
       const result = await this.deleteObjects(keys);
       totalDeleted = result.Deleted.length;
-      this.emit("cl:DeleteAll", {
+      this.emit("deleteAll", {
         prefix,
         batch: totalDeleted,
         total: totalDeleted
       });
     }
-    this.emit("cl:DeleteAllComplete", {
+    this.emit("deleteAllComplete", {
       prefix,
       totalDeleted
     });
@@ -44245,7 +44246,7 @@ class MemoryClient extends EventEmitter {
         });
       }
     }
-    this.emit("cl:MoveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+    this.emit("moveAllObjects", { results, errors });
     if (errors.length > 0) {
       const error = new Error("Some objects could not be moved");
       error.context = {

@@ -35,14 +35,14 @@ export class Cache extends EventEmitter {
   async get(key) {
     this.validateKey(key);
     const data = await this._get(key);
-    this.emit("get", data);
+    this.emit("fetched", data);
     return data;
   }
 
   async del(key) {
     this.validateKey(key);
     const data = await this._del(key);
-    this.emit("delete", data);
+    this.emit("deleted", data);
     return data;
   }
 
