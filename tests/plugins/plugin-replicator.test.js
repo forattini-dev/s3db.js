@@ -148,9 +148,9 @@ describe('ReplicatorPlugin - listener installation', () => {
     plugin.database = resource.database;
     plugin.installEventListeners(resource);
     
-    expect(resource.on).toHaveBeenCalledWith('insert', expect.any(Function));
-    expect(resource.on).toHaveBeenCalledWith('update', expect.any(Function));
-    expect(resource.on).toHaveBeenCalledWith('delete', expect.any(Function));
+    expect(resource.on).toHaveBeenCalledWith('inserted', expect.any(Function));
+    expect(resource.on).toHaveBeenCalledWith('updated', expect.any(Function));
+    expect(resource.on).toHaveBeenCalledWith('deleted', expect.any(Function));
   });
 
   test('does not install listeners for replicator log resource', () => {
@@ -405,7 +405,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     plugin.database = resource.database;
     plugin.installEventListeners(resource, plugin.database, plugin);
 
-    const insertHandler = resource.on.mock.calls.find(call => call[0] === 'insert')[1];
+    const insertHandler = resource.on.mock.calls.find(call => call[0] === 'inserted')[1];
 
     await insertHandler({ id: '1', name: 'Test' });
 
@@ -440,7 +440,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     plugin.database = resource.database;
     plugin.installEventListeners(resource, plugin.database, plugin);
 
-    const updateHandler = resource.on.mock.calls.find(call => call[0] === 'update')[1];
+    const updateHandler = resource.on.mock.calls.find(call => call[0] === 'updated')[1];
 
     await updateHandler({ id: '1', name: 'Updated' }, { id: '1', name: 'Old' });
 
@@ -473,7 +473,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     plugin.database = resource.database;
     plugin.installEventListeners(resource, plugin.database, plugin);
 
-    const deleteHandler = resource.on.mock.calls.find(call => call[0] === 'delete')[1];
+    const deleteHandler = resource.on.mock.calls.find(call => call[0] === 'deleted')[1];
 
     await deleteHandler({ id: '1' });
 
@@ -1120,9 +1120,9 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     // Verify listeners were removed
     expect(mockResource.off).toHaveBeenCalledTimes(3);
-    expect(mockResource.off).toHaveBeenCalledWith('insert', expect.any(Function));
-    expect(mockResource.off).toHaveBeenCalledWith('update', expect.any(Function));
-    expect(mockResource.off).toHaveBeenCalledWith('delete', expect.any(Function));
+    expect(mockResource.off).toHaveBeenCalledWith('inserted', expect.any(Function));
+    expect(mockResource.off).toHaveBeenCalledWith('updated', expect.any(Function));
+    expect(mockResource.off).toHaveBeenCalledWith('deleted', expect.any(Function));
     expect(plugin.eventListenersInstalled.size).toBe(0);
     expect(plugin.eventHandlers.size).toBe(0);
   });

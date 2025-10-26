@@ -252,15 +252,15 @@ export class ReplicatorPlugin extends Plugin {
 
     // Save handler references
     this.eventHandlers.set(resource.name, {
-      insert: insertHandler,
-      update: updateHandler,
-      delete: deleteHandler
+      inserted: insertHandler,
+      updated: updateHandler,
+      deleted: deleteHandler
     });
 
-    // Attach listeners
-    resource.on('insert', insertHandler);
-    resource.on('update', updateHandler);
-    resource.on('delete', deleteHandler);
+    // Attach listeners (use standardized past tense event names)
+    resource.on('inserted', insertHandler);
+    resource.on('updated', updateHandler);
+    resource.on('deleted', deleteHandler);
 
     this.eventListenersInstalled.add(resource.name);
   }
@@ -753,9 +753,9 @@ export class ReplicatorPlugin extends Plugin {
           const handlers = this.eventHandlers.get(resourceName);
 
           if (resource && handlers) {
-            resource.off('insert', handlers.insert);
-            resource.off('update', handlers.update);
-            resource.off('delete', handlers.delete);
+            resource.off('inserted', handlers.inserted);
+            resource.off('updated', handlers.updated);
+            resource.off('deleted', handlers.deleted);
           }
         }
       }
