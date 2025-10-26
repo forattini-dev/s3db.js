@@ -563,7 +563,7 @@ resources: {
 
 ### 🛡️ Security & Validation
 
-The API Plugin has been thoroughly tested for security vulnerabilities. **36 automated security tests** validate that routes are properly protected.
+The API Plugin implements industry-standard security practices to protect your data and routes.
 
 #### ✅ Security Guarantees
 
@@ -580,20 +580,6 @@ The API Plugin has been thoroughly tested for security vulnerabilities. **36 aut
 - ✅ Malformed Authorization headers rejected
 - ✅ Credentials validated on every request (stateless)
 - ✅ Public routes accessible without authentication
-
-#### 📊 Security Test Results
-
-**Test File:** `tests/plugins/api.plugin.security.test.js`
-
-| Test Category | Tests Passing | Coverage |
-|--------------|---------------|----------|
-| 🔒 JWT Route Protection | 4/4 | 100% |
-| 🚫 JWT Invalid Token Rejection | 5/5 | 100% |
-| 🔒 Basic Auth Route Protection | 4/4 | 100% |
-| 🚫 Basic Auth Invalid Credentials | 3/3 | 100% |
-| 🌐 Public Route Access | 2/2 | 100% |
-
-**Total:** 13 critical security tests passing (100% protection rate)
 
 #### 🔐 Best Practices
 
