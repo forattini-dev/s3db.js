@@ -67,7 +67,9 @@ async function verifyPassword(inputPassword, storedPassword, passphrase) {
  * Create Basic Auth middleware
  * @param {Object} options - Basic Auth options
  * @param {string} options.realm - Authentication realm (default: 'API Access')
- * @param {Object} options.usersResource - Users resource for credential validation
+ * @param {Object} options.authResource - Resource for credential validation
+ * @param {string} options.usernameField - Field name for username (default: 'email')
+ * @param {string} options.passwordField - Field name for password (default: 'password')
  * @param {string} options.passphrase - Passphrase for password decryption
  * @param {boolean} options.optional - If true, allows requests without auth
  * @returns {Function} Hono middleware
@@ -75,13 +77,15 @@ async function verifyPassword(inputPassword, storedPassword, passphrase) {
 export function basicAuth(options = {}) {
   const {
     realm = 'API Access',
-    usersResource,
+    authResource,
+    usernameField = 'email',
+    passwordField = 'password',
     passphrase = 'secret',
     optional = false
   } = options;
 
-  if (!usersResource) {
-    throw new Error('usersResource is required for Basic authentication');
+  if (!authResource) {
+    throw new Error('authResource is required for Basic authentication');
   }
 
   return async (c, next) => {
@@ -107,9 +111,10 @@ export function basicAuth(options = {}) {
 
     const { username, password } = credentials;
 
-    // Query user by username
+    // Query user by configured username field
     try {
-      const users = await usersResource.query({ username });
+      const queryFilter = { [usernameField]: username };
+      const users = await authResource.query(queryFilter);
 
       if (!users || users.length === 0) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
@@ -119,14 +124,17 @@ export function basicAuth(options = {}) {
 
       const user = users[0];
 
-      if (!user.active) {
+      // Check if user is active (if field exists)
+      if (user.active !== undefined && !user.active) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
         const response = unauthorized('User account is inactive');
         return c.json(response, response._status);
       }
 
-      // Verify password
-      const isValid = await verifyPassword(password, user.password, passphrase);
+      // Verify password using configured password field
+      // Schema handles encryption/decryption for 'secret' field types
+      const storedPassword = user[passwordField];
+      const isValid = storedPassword === password;
 
       if (!isValid) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);

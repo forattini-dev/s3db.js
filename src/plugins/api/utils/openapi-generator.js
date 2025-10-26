@@ -185,7 +185,20 @@ function generateResourceSchema(resource) {
  */
 function generateResourcePaths(resource, version, config = {}) {
   const resourceName = resource.name;
-  const basePath = `/${version}/${resourceName}`;
+
+  // Determine version prefix (same logic as server.js)
+  let versionPrefixConfig = config.versionPrefix !== undefined ? config.versionPrefix : false;
+
+  let prefix = '';
+  if (versionPrefixConfig === true) {
+    prefix = version;
+  } else if (versionPrefixConfig === false) {
+    prefix = '';
+  } else if (typeof versionPrefixConfig === 'string') {
+    prefix = versionPrefixConfig;
+  }
+
+  const basePath = prefix ? `/${prefix}/${resourceName}` : `/${resourceName}`;
   const schema = generateResourceSchema(resource);
   const methods = config.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
   const authMethods = config.auth || [];
@@ -820,11 +833,14 @@ The response includes pagination metadata in the \`pagination\` object with tota
  * @param {Object} relationConfig - Relation configuration
  * @param {string} version - Resource version
  * @param {Object} relatedSchema - OpenAPI schema for related resource
+ * @param {string} versionPrefix - Version prefix to use (empty string for no prefix)
  * @returns {Object} OpenAPI paths for relation
  */
-function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema) {
+function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema, versionPrefix = '') {
   const resourceName = resource.name;
-  const basePath = `/${version}/${resourceName}/{id}/${relationName}`;
+  const basePath = versionPrefix
+    ? `/${versionPrefix}/${resourceName}/{id}/${relationName}`
+    : `/${resourceName}/{id}/${relationName}`;
   const relatedResourceName = relationConfig.resource;
   const isToMany = relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany';
 
@@ -950,7 +966,24 @@ export function generateOpenAPISpec(database, config = {}) {
       ? resourceDescription.resource
       : resourceDescription || 'No description';
 
-    resourcesTableRows.push(`| ${name} | ${descText} | \`/${version}/${name}\` |`);
+    // Check version prefix for this resource (same logic as server.js)
+    const config = resourceConfigs[name] || {};
+    let versionPrefixConfig = config.versionPrefix !== undefined
+      ? config.versionPrefix
+      : false; // Default to false (no prefix)
+
+    let prefix = '';
+    if (versionPrefixConfig === true) {
+      prefix = version;
+    } else if (versionPrefixConfig === false) {
+      prefix = '';
+    } else if (typeof versionPrefixConfig === 'string') {
+      prefix = versionPrefixConfig;
+    }
+
+    const basePath = prefix ? `/${prefix}/${name}` : `/${name}`;
+
+    resourcesTableRows.push(`| ${name} | ${descText} | \`${basePath}\` |`);
   }
 
   // Build enhanced description with resources table
@@ -1084,6 +1117,18 @@ For detailed information about each endpoint, see the sections below.`;
     // Determine version
     const version = resource.config?.currentVersion || resource.version || 'v1';
 
+    // Determine version prefix (same logic as server.js)
+    let versionPrefixConfig = config.versionPrefix !== undefined ? config.versionPrefix : false;
+
+    let prefix = '';
+    if (versionPrefixConfig === true) {
+      prefix = version;
+    } else if (versionPrefixConfig === false) {
+      prefix = '';
+    } else if (typeof versionPrefixConfig === 'string') {
+      prefix = versionPrefixConfig;
+    }
+
     // Generate paths
     const paths = generateResourcePaths(resource, version, config);
 
@@ -1128,13 +1173,14 @@ For detailed information about each endpoint, see the sections below.`;
 
         const relatedSchema = generateResourceSchema(relatedResource);
 
-        // Generate relational paths
+        // Generate relational paths (using the same prefix calculated above)
         const relationalPaths = generateRelationalPaths(
           resource,
           relationName,
           relationConfig,
           version,
-          relatedSchema
+          relatedSchema,
+          prefix
         );
 
         // Merge relational paths
