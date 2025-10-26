@@ -569,51 +569,51 @@ console.log(`Cleaned up ${oldLogs.length} old audit logs`);
 
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**Q: O que é auditado automaticamente?**
-A: Todas as operações: `inserted`, `updated`, `deleted` e `deleteMany`.
+**Q: What is automatically audited?**
+A: All operations: `inserted`, `updated`, `deleted` and `deleteMany`.
 
-**Q: Onde os logs são armazenados?**
-A: Em um recurso chamado `plg_audits` (por padrão), com particionamento por data e por recurso.
+**Q: Where are logs stored?**
+A: In a resource called `plg_audits` (by default), with partitioning by date and by resource.
 
-**Q: Qual o impacto de performance?**
-A: Mínimo. O plugin usa eventos assíncronos e não bloqueia operações principais.
+**Q: What is the performance impact?**
+A: Minimal. The plugin uses asynchronous events and doesn't block main operations.
 
-### Configuração
+### Configuration
 
-**Q: Como desabilitar a captura de dados completos?**
+**Q: How to disable full data capture?**
 A: Configure `includeData: false`:
 ```javascript
 new AuditPlugin({
-  includeData: false  // Apenas metadata, sem oldData/newData
+  includeData: false  // Only metadata, no oldData/newData
 })
 ```
 
-**Q: Como limitar o tamanho dos dados capturados?**
+**Q: How to limit captured data size?**
 A: Use `maxDataSize`:
 ```javascript
 new AuditPlugin({
-  maxDataSize: 5000  // Trunca após 5KB
+  maxDataSize: 5000  // Truncate after 5KB
 })
 ```
 
-**Q: Como rastrear o usuário que fez a operação?**
+**Q: How to track the user who performed the operation?**
 A: Configure `getCurrentUserId`:
 ```javascript
 const auditPlugin = new AuditPlugin();
 auditPlugin.getCurrentUserId = () => currentUser.id;
 ```
 
-### Operações
+### Operations
 
-**Q: Como consultar o histórico de um registro?**
+**Q: How to query a record's history?**
 A: Use `getRecordHistory`:
 ```javascript
 const history = await auditPlugin.getRecordHistory('users', 'user-123');
 ```
 
-**Q: Como obter logs de uma partição específica?**
+**Q: How to get logs from a specific partition?**
 A: Use `getPartitionHistory`:
 ```javascript
 const history = await auditPlugin.getPartitionHistory(
@@ -623,7 +623,7 @@ const history = await auditPlugin.getPartitionHistory(
 );
 ```
 
-**Q: Como gerar estatísticas de auditoria?**
+**Q: How to generate audit statistics?**
 A: Use `getAuditStats`:
 ```javascript
 const stats = await auditPlugin.getAuditStats({
@@ -633,16 +633,16 @@ const stats = await auditPlugin.getAuditStats({
 });
 ```
 
-### Manutenção
+### Maintenance
 
-**Q: Como fazer cleanup de logs antigos?**
+**Q: How to cleanup old logs?**
 A: Use `cleanupOldAudits`:
 ```javascript
-const deleted = await auditPlugin.cleanupOldAudits(90); // Remove logs com mais de 90 dias
+const deleted = await auditPlugin.cleanupOldAudits(90); // Remove logs older than 90 days
 ```
 
-**Q: Como recuperar dados deletados?**
-A: Consulte o audit log e use o campo `oldData`:
+**Q: How to recover deleted data?**
+A: Query the audit log and use the `oldData` field:
 ```javascript
 const logs = await auditPlugin.getAuditLogs({
   resourceName: 'users',
@@ -654,6 +654,6 @@ const deletedData = JSON.parse(logs[0].oldData);
 
 ### Troubleshooting
 
-**Q: Logs não estão sendo criados?**
-A: Verifique se o recurso `plg_audits` foi criado corretamente e se há erros no console (ative `verbose: true`).
+**Q: Logs are not being created?**
+A: Check if the `plg_audits` resource was created correctly and if there are errors in the console (enable `verbose: true`).
 

@@ -1102,21 +1102,21 @@ async function compareApproaches(s3db) {
 
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**P: O plugin afeta a performance das operações?**
-R: O impacto é mínimo. O rastreamento de custos adiciona aproximadamente < 0.1ms por operação (overhead negligenciável).
+**Q: Does the plugin affect operation performance?**
+A: The impact is minimal. Cost tracking adds approximately < 0.1ms per operation (negligible overhead).
 
-**P: Posso usar em ambiente local (MinIO/LocalStack)?**
-R: Sim! O plugin funciona com qualquer backend S3-compatível. Os custos serão $0 para LocalStack mas as métricas de requests serão rastreadas.
+**Q: Can I use it in local environments (MinIO/LocalStack)?**
+A: Yes! The plugin works with any S3-compatible backend. Costs will be $0 for LocalStack but request metrics will be tracked.
 
-**P: Preciso configurar credenciais AWS?**
-R: Não. O plugin usa os mesmos credentials já configurados no S3DB e não faz chamadas adicionais à AWS.
+**Q: Do I need to configure AWS credentials?**
+A: No. The plugin uses the same credentials already configured in S3DB and doesn't make additional AWS calls.
 
-### Configuração
+### Configuration
 
-**P: Como acessar os custos?**
-R: Via `client.costs`:
+**Q: How to access costs?**
+A: Via `client.costs`:
 ```javascript
 console.log(database.client.costs);
 // {
@@ -1126,48 +1126,48 @@ console.log(database.client.costs);
 // }
 ```
 
-**P: Preciso configurar algo?**
-R: Não, basta instalar o plugin:
+**Q: Do I need to configure anything?**
+A: No, just install the plugin:
 ```javascript
 await database.usePlugin(new CostsPlugin());
 ```
 
-**P: Como personalizar os preços por região?**
-R: Modifique `CostsPlugin.costs.prices` após instalação:
+**Q: How to customize pricing by region?**
+A: Modify `CostsPlugin.costs.prices` after installation:
 ```javascript
-CostsPlugin.costs.requests.prices.get = 0.0005 / 1000;  // Ajuste regional
+CostsPlugin.costs.requests.prices.get = 0.0005 / 1000;  // Regional adjustment
 CostsPlugin.costs.requests.prices.put = 0.006 / 1000;
 ```
 
-### Operações
+### Operations
 
-**P: Como visualizo os custos acumulados?**
-R: Acesse o objeto `costs`:
+**Q: How to view accumulated costs?**
+A: Access the `costs` object:
 ```javascript
 const costs = database.client.costs;
 console.log(`Total: $${costs.total.toFixed(6)}`);
 console.log(`Requests: ${costs.requests.total}`);
 ```
 
-**P: Como reseto os contadores?**
-R: Não há método público para reset. Reinicie a aplicação ou recrie a instância do database.
+**Q: How to reset counters?**
+A: There's no public method for reset. Restart the application or recreate the database instance.
 
-**P: Como exportar relatórios de custo?**
-R: Serialize o objeto `client.costs`:
+**Q: How to export cost reports?**
+A: Serialize the `client.costs` object:
 ```javascript
 const report = JSON.stringify(database.client.costs, null, 2);
 await fs.writeFile('costs-report.json', report);
 ```
 
-**P: Quais são os preços por operação?**
-R:
-- PUT/POST/COPY/LIST: $0.005 por 1,000 requests
-- GET/SELECT/HEAD/DELETE: $0.0004 por 1,000 requests
+**Q: What are the prices per operation?**
+A:
+- PUT/POST/COPY/LIST: $0.005 per 1,000 requests
+- GET/SELECT/HEAD/DELETE: $0.0004 per 1,000 requests
 
 ### Performance
 
-**P: Como usar custos para otimizar operações?**
-R: Analise quais operações são mais caras:
+**Q: How to use costs to optimize operations?**
+A: Analyze which operations are most expensive:
 ```javascript
 const costs = database.client.costs;
 const operationCosts = Object.entries(costs.requests.counts)
@@ -1182,8 +1182,8 @@ const operationCosts = Object.entries(costs.requests.counts)
 console.log('Most expensive operations:', operationCosts);
 ```
 
-**P: Como monitorar custos em tempo real?**
-R: Configure verificações periódicas:
+**Q: How to monitor costs in real-time?**
+A: Configure periodic checks:
 ```javascript
 setInterval(() => {
   const costs = database.client.costs;
@@ -1193,10 +1193,10 @@ setInterval(() => {
 }, 60000); // Every minute
 ```
 
-### Storage & Data Transfer (Novos Recursos)
+### Storage & Data Transfer (New Features)
 
 **Q: How does storage tracking work?**
-R: O plugin rastreia automaticamente o tamanho dos objetos durante PUT/POST/COPY operations:
+A: The plugin automatically tracks object sizes during PUT/POST/COPY operations:
 ```javascript
 const costs = db.client.costs;
 console.log(`Storage: ${costs.storage.totalGB.toFixed(2)} GB`);
@@ -1204,34 +1204,34 @@ console.log(`Monthly cost: $${costs.storage.subtotal.toFixed(2)}`);
 console.log(`Current tier: ${costs.storage.currentTier + 1}`);
 ```
 
-**P: O que é data transfer e como é calculado?**
-R: Data transfer rastreia uploads (IN) e downloads (OUT):
-- **IN (Upload):** Sempre grátis, rastreado mas custo = $0
-- **OUT (Download):** Cobrado por tier, rastreado em GET operations
+**Q: What is data transfer and how is it calculated?**
+A: Data transfer tracks uploads (IN) and downloads (OUT):
+- **IN (Upload):** Always free, tracked but cost = $0
+- **OUT (Download):** Charged per tier, tracked in GET operations
 ```javascript
 console.log(`Upload: ${costs.dataTransfer.inGB.toFixed(2)} GB (FREE)`);
 console.log(`Download: ${costs.dataTransfer.outGB.toFixed(2)} GB`);
 console.log(`Transfer cost: $${costs.dataTransfer.subtotal.toFixed(2)}`);
 ```
 
-**P: Como ativar o free tier da AWS?**
-R: Use `considerFreeTier: true` no setup:
+**Q: How to enable AWS free tier?**
+A: Use `considerFreeTier: true` in setup:
 ```javascript
 await CostsPlugin.setup(db, {
-  considerFreeTier: true  // 100GB/month OUT grátis
+  considerFreeTier: true  // 100GB/month OUT free
 });
 
-// Verifica quanto do free tier foi usado
-console.log(`Free tier usado: ${costs.dataTransfer.freeTierUsed} GB de 100 GB`);
+// Check how much of free tier was used
+console.log(`Free tier used: ${costs.dataTransfer.freeTierUsed} GB of 100 GB`);
 ```
 
-**P: Vale a pena ativar o free tier?**
-R: **SIM!** Se você transfere até 100GB/mês:
-- Sem free tier: 80GB × $0.09 = **$7.20/mês**
-- Com free tier: 80GB = **$0.00/mês** (economiza $7.20)
+**Q: Is it worth enabling the free tier?**
+A: **YES!** If you transfer up to 100GB/month:
+- Without free tier: 80GB × $0.09 = **$7.20/month**
+- With free tier: 80GB = **$0.00/month** (saves $7.20)
 
-**P: Como saber em qual tier de pricing estou?**
-R: Check `currentTier` para storage e data transfer:
+**Q: How to know which pricing tier I'm in?**
+A: Check `currentTier` for storage and data transfer:
 ```javascript
 const storageTier = costs.storage.tiers[costs.storage.currentTier];
 console.log(`Storage tier: $${storageTier.pricePerGB}/GB`);
@@ -1241,16 +1241,16 @@ console.log(`Transfer OUT tier: $${transferTier.pricePerGB}/GB`);
 ```
 
 **Q: Why is storage.subtotal "monthly" but requests.subtotal is session total?**
-R: Storage é cobrado mensalmente pela AWS ($/GB/mês), então mostramos o custo mensal baseado no storage atual. Requests são cobrados por operação, então mostramos o total acumulado da sessão.
+A: Storage is charged monthly by AWS ($/GB/month), so we show monthly cost based on current storage. Requests are charged per operation, so we show accumulated session total.
 
-**P: Como estimar meu custo mensal total?**
-R: Combine storage mensal + projeção de requests/transfer:
+**Q: How to estimate my total monthly cost?**
+A: Combine monthly storage + projected requests/transfer:
 ```javascript
 function estimateMonthly(costs, hoursRunning) {
   const monthHours = 30 * 24;
   const requestsMonthly = (costs.requests.subtotal / hoursRunning) * monthHours;
   const transferMonthly = (costs.dataTransfer.subtotal / hoursRunning) * monthHours;
-  const storageMonthly = costs.storage.subtotal; // Já é mensal
+  const storageMonthly = costs.storage.subtotal; // Already monthly
 
   return {
     requests: requestsMonthly,
@@ -1260,22 +1260,22 @@ function estimateMonthly(costs, hoursRunning) {
   };
 }
 
-const estimate = estimateMonthly(db.client.costs, 24); // 24h rodando
+const estimate = estimateMonthly(db.client.costs, 24); // 24h running
 console.log(`Estimated monthly: $${estimate.total.toFixed(2)}`);
 ```
 
-### Casos de Uso Práticos
+### Practical Use Cases
 
-**P: Como comparar custos entre diferentes estratégias?**
-R: Crie snapshots e compare:
+**Q: How to compare costs between different strategies?**
+A: Create snapshots and compare:
 ```javascript
-// Snapshot inicial
+// Initial snapshot
 const before = { ...db.client.costs };
 
-// Execute operação
+// Execute operation
 await myOperation();
 
-// Snapshot final
+// Final snapshot
 const after = { ...db.client.costs };
 
 // Compare
@@ -1286,8 +1286,8 @@ console.log('Cost impact:', {
 });
 ```
 
-**P: Como evitar surpresas na conta da AWS?**
-R: Configure alertas automáticos:
+**Q: How to avoid surprises in AWS bill?**
+A: Configure automatic alerts:
 ```javascript
 const MAX_DAILY = 1.00; // $1/day
 
@@ -1295,35 +1295,35 @@ setInterval(() => {
   const projection = (costs.total / hoursRunning) * 24;
 
   if (projection > MAX_DAILY) {
-    // Ação imediata!
+    // Immediate action!
     console.error('🚨 BUDGET EXCEEDED!');
-    // Pausar operações não-críticas
-    // Enviar alerta
+    // Pause non-critical operations
+    // Send alert
   } else if (projection > MAX_DAILY * 0.8) {
     console.warn('⚠️ Approaching budget (80%)');
   }
-}, 300000); // Check a cada 5 min
+}, 300000); // Check every 5 min
 ```
 
-**P: Qual é o custo típico de operações comuns?**
+**Q: What are typical costs for common operations?**
 A: Practical examples:
 
-| Operação | Quantidade | Custo Aproximado |
+| Operation | Quantity | Approximate Cost |
 |----------|-----------|------------------|
 | Insert 1000 users | 1000 × PUT | $0.005 |
 | List all users | 1 × LIST | $0.000005 |
 | Get 1000 users | 1000 × GET | $0.0004 |
-| Store 100GB | 100GB/mês | $2.30/mês |
-| Download 50GB | 50GB/mês | $0.00 (free tier) |
-| Download 150GB | 150GB/mês | $4.50/mês |
+| Store 100GB | 100GB/month | $2.30/month |
+| Download 50GB | 50GB/month | $0.00 (free tier) |
+| Download 150GB | 150GB/month | $4.50/month |
 
-**P: Como otimizar para custo mínimo?**
-R: Siga as prioridades:
-1. ✅ Enable free tier (`considerFreeTier: true`) - **Grátis, $9/mês savings**
-2. ✅ Use batch operations - **90% menos requests**
-3. ✅ Add caching - **90%+ menos GET requests**
-4. ✅ Use partitions - **60-90% menos data transfer**
-5. ✅ Compress large data - **80% menos storage**
+**Q: How to optimize for minimum cost?**
+A: Follow the priorities:
+1. ✅ Enable free tier (`considerFreeTier: true`) - **Free, $9/month savings**
+2. ✅ Use batch operations - **90% fewer requests**
+3. ✅ Add caching - **90%+ fewer GET requests**
+4. ✅ Use partitions - **60-90% less data transfer**
+5. ✅ Compress large data - **80% less storage**
 
 ---
 
