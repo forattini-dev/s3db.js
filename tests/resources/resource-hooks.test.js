@@ -415,6 +415,11 @@ describe('Resource Hooks - Real Integration Tests', () => {
       return data;
     });
 
+    resource.addHook('afterDelete', (data) => {
+      resource.emit('customDelete', { customData: data });
+      return data;
+    });
+
     // Listen to custom events
     resource.on('customInsert', (data) => {
       emittedEvents.push({ event: 'customInsert', data });
@@ -422,6 +427,10 @@ describe('Resource Hooks - Real Integration Tests', () => {
 
     resource.on('customUpdate', (data) => {
       emittedEvents.push({ event: 'customUpdate', data });
+    });
+
+    resource.on('customDelete', (data) => {
+      emittedEvents.push({ event: 'customDelete', data });
     });
 
     // Test event emission with real operations
@@ -441,25 +450,28 @@ describe('Resource Hooks - Real Integration Tests', () => {
     await new Promise(resolve => setImmediate(resolve));
 
     // Verify events were emitted
-    expect(emittedEvents).toHaveLength(5);
-    
+    expect(emittedEvents).toHaveLength(6);
+
     // Custom events are emitted during hook execution (before main events)
     expect(emittedEvents[0].event).toBe('customInsert');
     expect(emittedEvents[0].data.customData.title).toBe('Test Event');
-    
+
     // Main events are emitted after hook execution
     expect(emittedEvents[1].event).toBe('insert');
     expect(emittedEvents[1].data.title).toBe('Test Event');
-    
+
     expect(emittedEvents[2].event).toBe('customUpdate');
     expect(emittedEvents[2].data.customData.title).toBe('Updated Test Event');
-    
+
     expect(emittedEvents[3].event).toBe('update');
     expect(emittedEvents[3].$after.title).toBe('Updated Test Event');
-    
-    expect(emittedEvents[4].event).toBe('delete');
+
+    expect(emittedEvents[4].event).toBe('customDelete');
+    expect(emittedEvents[4].data.customData.id).toBe('event1');
+
+    expect(emittedEvents[5].event).toBe('delete');
     // Verify id in emitted object
-    expect(emittedEvents[4].id).toBe('event1');
+    expect(emittedEvents[5].id).toBe('event1');
   });
 
   test('Hook Performance and Memory', async () => {
