@@ -160,7 +160,7 @@ describe('Resource Events - this.database Binding', () => {
         ]
       },
       events: {
-        insert: [
+        inserted: [
           async function(data) {
             // Event should ALSO have this.database
             expect(this.database).toBeDefined();
