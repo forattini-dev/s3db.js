@@ -137,6 +137,8 @@ console.log("🎉 Connected to S3 database!");
 
 ### 3. Create your first resource
 
+Schema validation powered by **[fastest-validator](https://github.com/icebob/fastest-validator)** ⚡
+
 ```javascript
 const users = await s3db.createResource({
   name: "users",
@@ -718,7 +720,7 @@ await users.insert({ email: 'john@example.com', password: 'secret123', age: 25 }
 
 ### Schema & Field Types
 
-Define your data structure with powerful validation:
+Define your data structure with powerful validation using **[fastest-validator](https://github.com/icebob/fastest-validator)** - a blazing-fast validation library with comprehensive type support:
 
 #### Basic Types
 
@@ -749,6 +751,9 @@ Define your data structure with powerful validation:
 
 #### Schema Examples
 
+> **📖 Validation powered by [fastest-validator](https://github.com/icebob/fastest-validator)**
+> All schemas use fastest-validator's syntax with full support for shorthand notation.
+
 ```javascript
 // Simple schema
 {
@@ -757,21 +762,40 @@ Define your data structure with powerful validation:
   age: 'number|integer|min:0|max:150'
 }
 
-// Nested objects
+// Nested objects - MAGIC AUTO-DETECT! ✨ (recommended)
+// Just write your object structure - s3db detects it automatically!
+{
+  name: 'string|required',
+  profile: {               // ← No $$type needed! Auto-detected as optional object
+    bio: 'string|max:500',
+    avatar: 'url|optional',
+    social: {              // ← Deeply nested also works!
+      twitter: 'string|optional',
+      github: 'string|optional'
+    }
+  }
+}
+
+// Need validation control? Use $$type (when you need required/optional)
+{
+  name: 'string|required',
+  profile: {
+    $$type: 'object|required',  // ← Add required validation
+    bio: 'string|max:500',
+    avatar: 'url|optional'
+  }
+}
+
+// Advanced: Full control (rare cases - strict mode, etc)
 {
   name: 'string|required',
   profile: {
     type: 'object',
+    optional: false,
+    strict: true,        // ← Enable strict validation
     props: {
       bio: 'string|max:500',
-      avatar: 'url|optional',
-      social: {
-        type: 'object',
-        props: {
-          twitter: 'string|optional',
-          github: 'string|optional'
-        }
-      }
+      avatar: 'url|optional'
     }
   }
 }

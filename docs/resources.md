@@ -198,7 +198,7 @@ const orders = await db.createResource({
 |-----------|------|---------|-------------|
 | `name` | `string` | **required** | Resource name (unique within database) |
 | `version` | `string` | `'v1'` | Resource version |
-| `attributes` | `object` | `{}` | Schema definition with validation rules |
+| `attributes` | `object` | `{}` | Schema definition with validation rules ([fastest-validator](https://github.com/icebob/fastest-validator) syntax) |
 | `behavior` | `string` | `'user-managed'` | Behavior strategy (see [Behaviors](#behaviors)) |
 | `timestamps` | `boolean` | `false` | Auto-add createdAt/updatedAt fields |
 | `versioningEnabled` | `boolean` | `false` | Enable resource versioning |
@@ -218,6 +218,11 @@ const orders = await db.createResource({
 ---
 
 ## Schema System
+
+> **⚡ Powered by [fastest-validator](https://github.com/icebob/fastest-validator)**
+>
+> All schema definitions use fastest-validator's powerful and performant validation engine.
+> Supports both **explicit format** (`{ type: 'object', props: {...} }`) and **shorthand format** (`{ $$type: 'object', ...fields }`).
 
 ### Field Types
 
@@ -295,34 +300,58 @@ const orders = await db.createResource({
 
 #### Nested Objects
 
+> **💡 Just Write It - s3db Auto-Detects!**
+>
+> In 99% of cases, simply write your object structure and s3db will detect it automatically.
+> No need for `$$type` or `type/props` unless you need validation control!
+
 ```javascript
+// MAGIC FORMAT ✨ (recommended - 99% of cases)
+// Just write your object naturally!
 {
   name: 'string|required',
 
-  // Simple nested object
+  // Simple nested object - auto-detected!
   profile: {
-    type: 'object',
-    props: {
-      bio: 'string|max:500',
-      avatar: 'url|optional',
-      location: 'string|optional'
-    }
+    bio: 'string|max:500',
+    avatar: 'url|optional',
+    location: 'string|optional'
   },
 
-  // Deeply nested objects
+  // Deeply nested - also auto-detected!
   address: {
+    street: 'string|required',
+    city: 'string|required',
+    country: 'string|required|length:2',
+    coordinates: {
+      lat: 'number|min:-90|max:90',
+      lng: 'number|min:-180|max:180'
+    }
+  }
+}
+```
+
+**Advanced Options** (use only when needed):
+
+```javascript
+// WITH $$type - when you need validation control
+{
+  profile: {
+    $$type: 'object|required',  // ← Explicit required/optional
+    bio: 'string|max:500',
+    avatar: 'url|optional'
+  }
+}
+
+// EXPLICIT FORMAT - full control (strict mode, etc.)
+{
+  profile: {
     type: 'object',
+    optional: false,
+    strict: true,      // ← Enable strict validation
     props: {
-      street: 'string|required',
-      city: 'string|required',
-      country: 'string|required|length:2',
-      coordinates: {
-        type: 'object',
-        props: {
-          lat: 'number|min:-90|max:90',
-          lng: 'number|min:-180|max:180'
-        }
-      }
+      bio: 'string|max:500',
+      avatar: 'url|optional'
     }
   }
 }
