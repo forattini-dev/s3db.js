@@ -551,7 +551,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false, // Use sync events for testing
         events: {
-          insert: insertListener
+          inserted: insertListener
         }
       });
 
@@ -584,7 +584,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false,
         events: {
-          update: [listener1, listener2, listener3]
+          updated: [listener1, listener2, listener3]
         }
       });
 
@@ -627,9 +627,9 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false,
         events: {
-          insert: insertListener,
-          update: updateListener,
-          delete: deleteListener,
+          inserted: insertListener,
+          updated: updateListener,
+          deleted: deleteListener,
           list: listListener,
           count: countListener
         }
@@ -674,7 +674,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false,
         events: {
-          update: updateListener
+          updated: updateListener
         }
       });
 
@@ -721,8 +721,8 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false,
         events: {
-          insertMany: insertManyListener,
-          deleteMany: deleteManyListener
+          'inserted-many': insertManyListener,
+          'deleted-many': deleteManyListener
         }
       });
 
@@ -756,7 +756,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'body-overflow',
         asyncEvents: false,
         events: {
-          insert: insertListener
+          inserted: insertListener
         }
       });
 
@@ -788,7 +788,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
          behavior: 'user-managed',
          asyncEvents: false,
          events: {
-           insert: [workingListener1, workingListener2]
+           inserted: [workingListener1, workingListener2]
          }
        });
 
@@ -821,7 +821,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false,
         events: {
-          insert: contextListener
+          inserted: contextListener
         }
       });
 
@@ -844,7 +844,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         events: {
-          insert: 'not a function' // Invalid: should be function
+          inserted: 'not a function' // Invalid: should be function
         }
       })).rejects.toThrow();
 
@@ -856,7 +856,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         events: {
-          update: ['not a function', 'also not a function'] // Invalid: should be functions
+          updated: ['not a function', 'also not a function'] // Invalid: should be functions
         }
       })).rejects.toThrow();
     });
@@ -874,7 +874,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         behavior: 'user-managed',
         asyncEvents: false,
         events: {
-          insert: configListener
+          inserted: configListener
         }
       });
 
