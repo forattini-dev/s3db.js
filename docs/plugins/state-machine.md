@@ -2595,41 +2595,41 @@ actions: {
 
 ### Troubleshooting
 
-**P: Transição está sendo rejeitada?**
-R: Verifique:
-1. Evento válido para o estado atual
-2. Guard não está retornando false
-3. Estado atual correto (use `getState`)
+**Q: Transition is being rejected?**
+A: Check:
+1. Valid event for the current state
+2. Guard is not returning false
+3. Current state is correct (use `getState`)
 
-**P: Actions não estão executando?**
-R: Verifique se o nome da action está correto e registrado em `actions: {}`.
+**Q: Actions are not executing?**
+A: Verify that the action name is correct and registered in `actions: {}`.
 
-**P: Como debugar guards?**
-R: Ative `verbose: true` e veja logs de erros de guards.
+**Q: How to debug guards?**
+A: Enable `verbose: true` and see guard error logs.
 
-### Concorrência e Locks
+### Concurrency and Locks
 
-**P: Como o plugin previne race conditions?**
-R: O plugin usa **distributed locks** (via PluginStorage) automaticamente antes de cada transição. Um lock é adquirido para `{machineId}-{entityId}`, prevenindo transições concorrentes para a mesma entidade.
+**Q: How does the plugin prevent race conditions?**
+A: The plugin uses **distributed locks** (via PluginStorage) automatically before each transition. A lock is acquired for `{machineId}-{entityId}`, preventing concurrent transitions for the same entity.
 
-**P: O que acontece se duas transições concorrentes tentarem executar?**
-R: Uma delas adquire o lock e executa a transição. A outra espera até `lockTimeout` (default 1s) e então falha com erro `Could not acquire transition lock`.
+**Q: What happens if two concurrent transitions try to execute?**
+A: One of them acquires the lock and executes the transition. The other waits until `lockTimeout` (default 1s) and then fails with error `Could not acquire transition lock`.
 
-**P: Como configurar o timeout de lock?**
-R:
+**Q: How to configure lock timeout?**
+A:
 ```javascript
 new StateMachinePlugin({
   stateMachines: { /* ... */ },
-  lockTimeout: 2000,  // Espera até 2s pelo lock
-  lockTTL: 10         // Lock expira após 10s (previne deadlock)
+  lockTimeout: 2000,  // Wait up to 2s for lock
+  lockTTL: 10         // Lock expires after 10s (prevents deadlock)
 });
 ```
 
-**P: O que acontece se um worker travar enquanto tem um lock?**
-R: O lock expira automaticamente após `lockTTL` segundos (default 5s). Isso previne deadlocks se um worker falhar durante uma transição.
+**Q: What happens if a worker crashes while holding a lock?**
+A: The lock expires automatically after `lockTTL` seconds (default 5s). This prevents deadlocks if a worker fails during a transition.
 
-**P: Posso identificar qual worker adquiriu o lock?**
-R: Sim, use `workerId`:
+**Q: Can I identify which worker acquired the lock?**
+A: Yes, use `workerId`:
 ```javascript
 new StateMachinePlugin({
   stateMachines: { /* ... */ },
@@ -2637,10 +2637,10 @@ new StateMachinePlugin({
 });
 ```
 
-**P: Locks afetam performance?**
-R: Minimamente. PluginStorage usa direct S3 operations e TTL automático. O overhead é ~10-20ms por transição.
+**Q: Do locks affect performance?**
+A: Minimally. PluginStorage uses direct S3 operations and automatic TTL. The overhead is ~10-20ms per transition.
 
-**P: Posso desativar locks?**
-R: Não diretamente, pois locks são essenciais para prevenir inconsistência. Mas você pode reduzir `lockTimeout: 0` para falhar imediatamente se lock não estiver disponível.
+**Q: Can I disable locks?**
+A: Not directly, as locks are essential to prevent inconsistency. But you can reduce `lockTimeout: 0` to fail immediately if lock is not available.
 
 ---
