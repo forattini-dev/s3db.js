@@ -2,6 +2,19 @@
 
 AI guidance for working with s3db.js codebase.
 
+## Validation Engine
+
+**s3db uses [fastest-validator](https://github.com/icebob/fastest-validator)** for all schema validation - a blazing-fast, comprehensive validation library.
+
+**Key Points:**
+- All `attributes` schemas follow fastest-validator syntax
+- **Magic auto-detect**: Nested objects are automatically detected - no `$$type` needed! ✨
+- Three formats (in order of preference):
+  1. **Magic** (99% of cases): `profile: { bio: 'string', avatar: 'url' }` - Auto-detected!
+  2. **$$type** (validation control): `{ $$type: 'object|required', ...fields }` - When you need required/optional
+  3. **Explicit** (advanced): `{ type: 'object', props: {...} }` - Full control (strict mode, etc.)
+- Full docs: `/home/cyber/Work/tetis/s3db.js/docs/fastest-validator.md`
+
 ## Core Reference
 
 ### Classes & Methods
@@ -39,7 +52,7 @@ AI guidance for working with s3db.js codebase.
 | `ip4` | `ip: 'ip4'` | 47% compression |
 | `ip6` | `ip: 'ip6'` | 44% compression |
 | `array` | `tags: 'array\|items:string'` | Arrays |
-| `object` | `profile: { type: 'object', props: {...} }` | Nested |
+| `object` | `profile: { bio: 'string', avatar: 'url' }` (auto-detect! ✨) | Nested objects - just write them naturally! |
 
 ### Partitioning
 
