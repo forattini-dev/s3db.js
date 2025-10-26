@@ -433,6 +433,367 @@ describe('StateMachinePlugin - Event Triggers (New API)', () => {
     });
   });
 
+  describe('maxTriggers and onMaxTriggersReached', () => {
+    it('should limit trigger executions with maxTriggers', async () => {
+      const actionCalls = [];
+
+      stateMachinePlugin = new StateMachinePlugin({
+        enableEventTriggers: true,
+        persistTransitions: true,  // Need to persist to track triggerCounts
+        actions: {
+          incrementCounter: async (context) => {
+            actionCalls.push(context);
+          }
+        },
+        stateMachines: {
+          order: {
+            resource: 'orders',
+            stateField: 'status',
+            initialState: 'pending',
+            states: {
+              pending: {
+                triggers: [{
+                  type: 'event',
+                  eventName: 'updated',
+                  eventSource: orders,
+                  action: 'incrementCounter',
+                  maxTriggers: 2  // Only execute twice
+                }]
+              }
+            }
+          }
+        }
+      });
+
+      await database.usePlugin(stateMachinePlugin);
+
+      await orders.insert({
+        id: 'order-max',
+        customerId: 'customer-1',
+        total: 100,
+        status: 'pending'
+      });
+
+      await stateMachinePlugin.initializeEntity('order', 'order-max', { id: 'order-max' });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // First update - should execute (1/2)
+      await orders.update('order-max', { total: 101 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Second update - should execute (2/2)
+      await orders.update('order-max', { total: 102 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Third update - should NOT execute (max reached)
+      await orders.update('order-max', { total: 103 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Fourth update - should NOT execute (max reached)
+      await orders.update('order-max', { total: 104 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      expect(actionCalls.length).toBe(2); // Only executed twice
+    });
+
+    it('should send event when onMaxTriggersReached', async () => {
+      const transitions = [];
+      const events = [];
+
+      stateMachinePlugin = new StateMachinePlugin({
+        enableEventTriggers: true,
+        persistTransitions: true,  // Need to persist to track triggerCounts
+        actions: {
+          processPayment: async () => ({ processed: true })
+        },
+        stateMachines: {
+          order: {
+            resource: 'orders',
+            stateField: 'status',
+            initialState: 'pending',
+            states: {
+              pending: {
+                triggers: [{
+                  type: 'event',
+                  eventName: 'updated',
+                  eventSource: orders,
+                  // Action without targetState - stays in same state
+                  action: 'processPayment',
+                  maxTriggers: 2,  // Allow 2 executions
+                  onMaxTriggersReached: 'MAX_RETRIES'  // Event to send when limit reached
+                }],
+                on: {
+                  MAX_RETRIES: 'failed',
+                  PROCESS: 'processing'
+                }
+              },
+              processing: {
+                type: 'final'
+              },
+              failed: {
+                type: 'final'
+              }
+            }
+          }
+        }
+      });
+
+      await database.usePlugin(stateMachinePlugin);
+
+      stateMachinePlugin.on('plg:state-machine:transition', (data) => {
+        transitions.push(data);
+      });
+
+      stateMachinePlugin.on('plg:state-machine:trigger-executed', (data) => {
+        events.push(data);
+      });
+
+      await orders.insert({
+        id: 'order-max-event',
+        customerId: 'customer-2',
+        total: 100,
+        status: 'pending'
+      });
+
+      await stateMachinePlugin.initializeEntity('order', 'order-max-event', { id: 'order-max-event' });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // First update - trigger executes (1/2), stays in pending
+      await orders.update('order-max-event', { total: 101 });
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const order1 = await orders.get('order-max-event');
+      expect(order1.status).toBe('pending');
+
+      // Second update - trigger executes (2/2), stays in pending
+      await orders.update('order-max-event', { total: 102 });
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const order2 = await orders.get('order-max-event');
+      expect(order2.status).toBe('pending');
+
+      // Third update - max reached (2), should send MAX_RETRIES event → failed state
+      await orders.update('order-max-event', { total: 103 });
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const order3 = await orders.get('order-max-event');
+      expect(order3.status).toBe('failed');
+
+      // Verify transition to failed happened
+      expect(transitions.some(t => t.to === 'failed' && t.event === 'MAX_RETRIES')).toBe(true);
+
+      // Verify trigger-executed events (should have 2, not 3)
+      if (events.length !== 2) {
+        console.log('DEBUG: Expected 2 events, got:', events.length);
+        console.log('DEBUG: Events:', JSON.stringify(events, null, 2));
+        console.log('DEBUG: Transitions:', JSON.stringify(transitions, null, 2));
+        console.log('DEBUG: Final order:', JSON.stringify(order3, null, 2));
+      }
+      expect(events.length).toBe(2);
+    });
+  });
+
+  describe('action without targetState', () => {
+    it('should execute custom action when trigger fires', async () => {
+      let actionResult = null;
+      let actionContext = null;
+
+      stateMachinePlugin = new StateMachinePlugin({
+        enableEventTriggers: true,
+        persistTransitions: true,  // Need to persist context
+        actions: {
+          processPayment: async (context, event, machine) => {
+            actionContext = context;
+            actionResult = { processed: true, amount: context.totalAmount };
+            return actionResult;
+          }
+        },
+        stateMachines: {
+          order: {
+            resource: 'orders',
+            stateField: 'status',
+            initialState: 'pending',
+            states: {
+              pending: {
+                triggers: [{
+                  type: 'event',
+                  eventName: 'updated',
+                  eventSource: orders,
+                  condition: (context, entityId, eventData) => {
+                    return eventData.paymentStatus === 'ready';
+                  },
+                  action: 'processPayment'  // Execute action, no automatic transition
+                }]
+              }
+            }
+          }
+        }
+      });
+
+      await database.usePlugin(stateMachinePlugin);
+
+      await orders.insert({
+        id: 'order-action',
+        customerId: 'customer-3',
+        total: 150,
+        totalAmount: 150,
+        status: 'pending',
+        paymentStatus: 'pending'
+      });
+
+      await stateMachinePlugin.initializeEntity('order', 'order-action', { id: 'order-action', totalAmount: 150 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Trigger the action
+      await orders.update('order-action', { paymentStatus: 'ready' });
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Action should have been executed
+      expect(actionResult).not.toBeNull();
+      expect(actionResult.processed).toBe(true);
+      expect(actionResult.amount).toBe(150);
+      expect(actionContext).not.toBeNull();
+
+      // State should remain 'pending' (no automatic transition)
+      const order = await orders.get('order-action');
+      expect(order.status).toBe('pending');
+    });
+  });
+
+  describe('sendEvent with action', () => {
+    it('should send event after executing action', async () => {
+      const transitions = [];
+
+      stateMachinePlugin = new StateMachinePlugin({
+        enableEventTriggers: true,
+        persistTransitions: true,  // Need to persist context
+        actions: {
+          validateOrder: async (context) => {
+            return { valid: true };
+          }
+        },
+        stateMachines: {
+          order: {
+            resource: 'orders',
+            stateField: 'status',
+            initialState: 'pending',
+            states: {
+              pending: {
+                triggers: [{
+                  type: 'event',
+                  eventName: 'updated',
+                  eventSource: orders,
+                  condition: (context, entityId, eventData) => {
+                    return eventData.validated === true;
+                  },
+                  action: 'validateOrder',
+                  sendEvent: 'VALIDATED'  // Send this event after action succeeds
+                }],
+                on: {
+                  VALIDATED: 'validated'
+                }
+              },
+              validated: {
+                type: 'final'
+              }
+            }
+          }
+        }
+      });
+
+      await database.usePlugin(stateMachinePlugin);
+
+      stateMachinePlugin.on('plg:state-machine:transition', (data) => {
+        transitions.push(data);
+      });
+
+      await orders.insert({
+        id: 'order-send-event',
+        customerId: 'customer-4',
+        total: 200,
+        status: 'pending',
+        validated: false
+      });
+
+      await stateMachinePlugin.initializeEntity('order', 'order-send-event', { id: 'order-send-event' });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Trigger action + sendEvent
+      await orders.update('order-send-event', { validated: true });
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Should have transitioned via VALIDATED event
+      const order = await orders.get('order-send-event');
+      expect(order.status).toBe('validated');
+
+      // Verify transition occurred
+      expect(transitions.some(t => t.to === 'validated' && t.event === 'VALIDATED')).toBe(true);
+    });
+  });
+
+  describe('trigger-executed event validation', () => {
+    it('should emit detailed trigger-executed event', async () => {
+      const executedEvents = [];
+
+      stateMachinePlugin = new StateMachinePlugin({
+        enableEventTriggers: true,
+        persistTransitions: true,  // Need to persist context
+        stateMachines: {
+          order: {
+            resource: 'orders',
+            stateField: 'status',
+            initialState: 'pending',
+            states: {
+              pending: {
+                triggers: [{
+                  type: 'event',
+                  eventName: (context) => `updated:${context.id}`,
+                  eventSource: orders,
+                  targetState: 'completed'
+                }]
+              },
+              completed: {
+                type: 'final'
+              }
+            }
+          }
+        }
+      });
+
+      await database.usePlugin(stateMachinePlugin);
+
+      stateMachinePlugin.on('plg:state-machine:trigger-executed', (data) => {
+        executedEvents.push(data);
+      });
+
+      await orders.insert({
+        id: 'order-event-detail',
+        customerId: 'customer-5',
+        total: 250,
+        status: 'pending'
+      });
+
+      await stateMachinePlugin.initializeEntity('order', 'order-event-detail', { id: 'order-event-detail' });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Trigger
+      await orders.update('order-event-detail', { total: 251 });
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Verify trigger-executed event
+      expect(executedEvents.length).toBeGreaterThan(0);
+
+      const event = executedEvents[0];
+      expect(event.machineId).toBe('order');
+      expect(event.entityId).toBe('order-event-detail');
+      expect(event.state).toBe('pending');
+      expect(event.type).toBe('event');
+      expect(event.eventName).toBe('updated:order-event-detail');
+      expect(event.targetState).toBe('completed');
+      expect(event.trigger).toBeDefined();
+    });
+  });
+
   describe('Error handling', () => {
     it('should throw error if neither event nor eventName is provided', async () => {
       expect(() => {
