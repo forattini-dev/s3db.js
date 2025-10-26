@@ -91,7 +91,7 @@
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
     "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts",
     "test:mcp": "node mcp/entrypoint.js --help",
-    "install:peers": "pnpm add -D @aws-sdk/client-sqs @google-cloud/bigquery amqplib node-cron pg",
+    "install:peers": "pnpm add -D @aws-sdk/client-sqs @google-cloud/bigquery @hono/node-server @hono/swagger-ui @libsql/client @planetscale/database @tensorflow/tfjs-node amqplib hono node-cron pg",
     "install:peers:script": "./scripts/install-peer-deps.sh"
   },
   "dependencies": {
@@ -113,6 +113,8 @@
     "@google-cloud/bigquery": "^7.0.0",
     "@hono/node-server": "^1.0.0",
     "@hono/swagger-ui": "^0.5.0",
+    "@libsql/client": "^0.14.0",
+    "@planetscale/database": "^1.0.0",
     "@tensorflow/tfjs-node": "^4.0.0",
     "amqplib": "^0.10.8",
     "hono": "^4.0.0",
@@ -130,6 +132,12 @@
       "optional": true
     },
     "@hono/swagger-ui": {
+      "optional": true
+    },
+    "@libsql/client": {
+      "optional": true
+    },
+    "@planetscale/database": {
       "optional": true
     },
     "@tensorflow/tfjs-node": {
@@ -153,6 +161,10 @@
     "@babel/core": "^7.28.4",
     "@babel/preset-env": "^7.28.3",
     "@google-cloud/bigquery": "^7.9.4",
+    "@hono/node-server": "^1.13.7",
+    "@hono/swagger-ui": "^0.5.3",
+    "@libsql/client": "^0.14.0",
+    "@planetscale/database": "^1.19.0",
     "@rollup/plugin-commonjs": "^28.0.8",
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
@@ -168,6 +180,7 @@
     "cli-table3": "^0.6.5",
     "commander": "^14.0.1",
     "esbuild": "^0.25.11",
+    "hono": "^4.7.11",
     "inquirer": "^12.10.0",
     "jest": "^30.2.0",
     "node-cron": "^4.2.1",
