@@ -182,19 +182,29 @@ describe('RSA Keys - Unit Tests', () => {
     });
 
     test('rejects expired token', async () => {
-      const expiredToken = createRS256Token(
-        { sub: 'user-123' },
-        keyPair.privateKey,
-        keyPair.kid,
-        '1s'
-      );
+      // Create token that expired in the past
+      const now = Math.floor(Date.now() / 1000);
+      const header = { alg: 'RS256', typ: 'JWT', kid: keyPair.kid };
+      const payload = {
+        sub: 'user-123',
+        iat: now - 1000, // Issued 1000 seconds ago
+        exp: now - 500   // Expired 500 seconds ago
+      };
 
-      // Wait for token to expire
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+      const { createSign } = await import('crypto');
+      const sign = createSign('RSA-SHA256');
+      sign.update(`${encodedHeader}.${encodedPayload}`);
+      sign.end();
+      const signature = sign.sign(keyPair.privateKey, 'base64url');
+
+      const expiredToken = `${encodedHeader}.${encodedPayload}.${signature}`;
 
       const result = verifyRS256Token(expiredToken, keyPair.publicKey);
       expect(result).toBeNull();
-    }, 3000);
+    });
 
     test('rejects malformed token', () => {
       expect(verifyRS256Token('invalid', keyPair.publicKey)).toBeNull();
