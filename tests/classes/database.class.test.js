@@ -445,8 +445,8 @@ describe('Database Resource Updates and Versioning', () => {
 
   test('should emit resource events', async () => {
     const events = [];
-    database.on('s3db.resourceCreated', (name) => events.push({ type: 'created', name }));
-    database.on('s3db.resourceUpdated', (name) => events.push({ type: 'updated', name }));
+    database.on('db:resource-created', (name) => events.push({ type: 'created', name }));
+    database.on('db:resource-updated', (name) => events.push({ type: 'updated', name }));
 
     // Create resource
     await database.createResource({

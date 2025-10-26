@@ -1,5 +1,29 @@
 # 🤖 State Machine Plugin
 
+## ⚡ IMPORTANT FIX (v13.4.0)
+
+**Fixed race condition with resource events:**
+The plugin now tracks pending event handlers and provides `waitForPendingEvents()` method to ensure all state transitions complete before continuing.
+
+**Works with BOTH async and sync events:**
+
+```javascript
+// Option 1: Async events (default) - use waitForPendingEvents()
+const orders = await db.createResource({ name: 'orders', asyncEvents: true });
+await orders.update('order-123', { paymentStatus: 'confirmed' });
+await stateMachine.waitForPendingEvents(); // Wait for handlers
+// State transition completed ✅
+
+// Option 2: Sync events - immediate, no waiting needed
+const orders = await db.createResource({ name: 'orders', asyncEvents: false });
+await orders.update('order-123', { paymentStatus: 'confirmed' });
+// State transition completed IMMEDIATELY ✅
+```
+
+See [example e76](../examples/e76-state-machine-sync-events.js) for complete demo.
+
+---
+
 ## ⚡ TLDR
 
 **Finite state machine** for complex workflows with controlled transitions and business rule validation.

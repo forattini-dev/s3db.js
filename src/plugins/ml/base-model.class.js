@@ -51,22 +51,36 @@ export class BaseModel {
       errors: 0
     };
 
-    // Validate TensorFlow.js
-    this._validateTensorFlow();
+    // TensorFlow will be loaded lazily on first use
+    this.tf = null;
+    this._tfValidated = false;
   }
 
   /**
-   * Validate TensorFlow.js is installed
+   * Validate and load TensorFlow.js (lazy loading)
    * @private
    */
-  _validateTensorFlow() {
+  async _validateTensorFlow() {
+    if (this._tfValidated) {
+      return; // Already validated and loaded
+    }
+
     try {
+      // Try CommonJS require first (works in most environments)
       this.tf = require('@tensorflow/tfjs-node');
-    } catch (error) {
-      throw new TensorFlowDependencyError(
-        'TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node',
-        { originalError: error.message }
-      );
+      this._tfValidated = true;
+    } catch (requireError) {
+      // If require fails (e.g., Jest VM modules), try dynamic import
+      try {
+        const tfModule = await import('@tensorflow/tfjs-node');
+        this.tf = tfModule.default || tfModule;
+        this._tfValidated = true;
+      } catch (importError) {
+        throw new TensorFlowDependencyError(
+          'TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node',
+          { originalError: importError.message }
+        );
+      }
     }
   }
 
@@ -85,6 +99,11 @@ export class BaseModel {
    * @returns {Object} Training results
    */
   async train(data) {
+    // Validate TensorFlow on first use (lazy loading)
+    if (!this._tfValidated) {
+      await this._validateTensorFlow();
+    }
+
     try {
       if (!data || data.length === 0) {
         throw new InsufficientDataError('No training data provided', {
@@ -171,6 +190,11 @@ export class BaseModel {
    * @returns {Object} Prediction result
    */
   async predict(input) {
+    // Validate TensorFlow on first use (lazy loading)
+    if (!this._tfValidated) {
+      await this._validateTensorFlow();
+    }
+
     if (!this.isTrained) {
       throw new ModelNotTrainedError(`Model "${this.config.name}" is not trained yet`, {
         model: this.config.name
