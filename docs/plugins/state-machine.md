@@ -466,7 +466,7 @@ new StateMachinePlugin({
             type: 'event',
 
             // Listen for updates to this specific order
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             // Condition to check before transitioning
@@ -489,7 +489,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
             condition: (context, event) => {
               return context.shipmentId && context.trackingNumber;
@@ -503,7 +503,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
             condition: (context, event) => {
               return context.deliveredAt && context.signature;
@@ -603,7 +603,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: usersResource,
 
             // ✅ Only transition when profileCompleted flag changes to true
@@ -624,7 +624,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: usersResource,
 
             // ✅ Only transition when emailVerified changes to true
@@ -737,7 +737,7 @@ const stateMachine = new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             // ✅ Transition only when managerApproved changes to true
@@ -763,7 +763,7 @@ const stateMachine = new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             // ✅ Transition only when financeApproved changes to true
@@ -781,7 +781,7 @@ const stateMachine = new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             // ✅ Transition when shipping is ready AND tracking number is added
@@ -855,7 +855,7 @@ states: {
     triggers: [{
       type: 'event',
       // Use patched for lightweight metadata-only updates
-      eventName: `patched:${context => context.id}`,
+      eventName: (context) => `patched:${context.id}`,
       eventSource: sensorsResource,
 
       condition: (context, event) => {
@@ -1041,7 +1041,7 @@ states: {
     // Automatic transition via event trigger
     triggers: [{
       type: 'event',
-      eventName: `updated:${context => context.id}`,
+      eventName: (context) => `updated:${context.id}`,
       eventSource: ordersResource,
       condition: (context) => context.paymentStatus === 'confirmed',
       targetState: 'processing'
