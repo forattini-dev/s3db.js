@@ -14,13 +14,16 @@ import tryFn from '../../../concerns/try-fn.js';
 
 /**
  * Create authentication routes
- * @param {Object} usersResource - s3db.js users resource
+ * @param {Object} authResource - s3db.js resource that manages authentication
  * @param {Object} config - Auth configuration
  * @returns {Hono} Hono app with auth routes
  */
-export function createAuthRoutes(usersResource, config = {}) {
+export function createAuthRoutes(authResource, config = {}) {
   const app = new Hono();
   const {
+    driver,                          // 'jwt' or 'basic'
+    usernameField = 'email',         // Field name for username (default: 'email')
+    passwordField = 'password',      // Field name for password (default: 'password')
     jwtSecret,
     jwtExpiresIn = '7d',
     passphrase = 'secret',
@@ -31,134 +34,152 @@ export function createAuthRoutes(usersResource, config = {}) {
   if (allowRegistration) {
     app.post('/register', asyncHandler(async (c) => {
       const data = await c.req.json();
-      const { username, password, email, role = 'user' } = data;
+      const username = data[usernameField];
+      const password = data[passwordField];
+      const role = data.role || 'user';
 
       // Validate input
       if (!username || !password) {
         const response = formatter.validationError([
-          { field: 'username', message: 'Username is required' },
-          { field: 'password', message: 'Password is required' }
+          { field: usernameField, message: `${usernameField} is required` },
+          { field: passwordField, message: `${passwordField} is required` }
         ]);
         return c.json(response, response._status);
       }
 
       if (password.length < 8) {
         const response = formatter.validationError([
-          { field: 'password', message: 'Password must be at least 8 characters' }
+          { field: passwordField, message: 'Password must be at least 8 characters' }
         ]);
         return c.json(response, response._status);
       }
 
       // Check if username already exists
-      const existing = await usersResource.query({ username });
+      const queryFilter = { [usernameField]: username };
+      const existing = await authResource.query(queryFilter);
       if (existing && existing.length > 0) {
-        const response = formatter.error('Username already exists', {
+        const response = formatter.error(`${usernameField} already exists`, {
           status: 409,
           code: 'CONFLICT'
         });
         return c.json(response, response._status);
       }
 
-      // Create user
-      const user = await usersResource.insert({
-        username,
-        password, // Will be auto-encrypted by schema (secret field)
-        email,
-        role,
-        active: true,
-        apiKey: generateApiKey(),
-        createdAt: new Date().toISOString()
-      });
+      // Create user with dynamic fields
+      // Only include fields from request + required auth fields
+      const userData = {
+        ...data, // Include all fields from request first
+        [usernameField]: username, // Override to ensure correct value
+        [passwordField]: password // Will be auto-encrypted by schema (secret field)
+      };
 
-      // Generate JWT token
+      // Add optional fields only if not provided
+      if (!userData.role) {
+        userData.role = role;
+      }
+      if (userData.active === undefined) {
+        userData.active = true;
+      }
+
+      const user = await authResource.insert(userData);
+
+      // Generate JWT token (only for JWT driver)
       let token = null;
-      if (jwtSecret) {
+      if (driver === 'jwt' && jwtSecret) {
         token = createToken(
-          { userId: user.id, username: user.username, role: user.role },
+          {
+            userId: user.id,
+            [usernameField]: user[usernameField],
+            role: user.role
+          },
           jwtSecret,
           jwtExpiresIn
         );
       }
 
       // Remove sensitive data from response
-      const { password: _, ...userWithoutPassword } = user;
+      const { [passwordField]: _, ...userWithoutPassword } = user;
 
       const response = formatter.created({
         user: userWithoutPassword,
-        token
+        ...(token && { token }) // Only include token if JWT driver
       }, `/auth/users/${user.id}`);
 
       return c.json(response, response._status);
     }));
   }
 
-  // POST /auth/login - Login with username/password
-  app.post('/login', asyncHandler(async (c) => {
-    const data = await c.req.json();
-    const { username, password } = data;
+  // POST /auth/login - Login with username/password (JWT driver only)
+  if (driver === 'jwt') {
+    app.post('/login', asyncHandler(async (c) => {
+      const data = await c.req.json();
+      const username = data[usernameField];
+      const password = data[passwordField];
 
-    // Validate input
-    if (!username || !password) {
-      const response = formatter.unauthorized('Username and password are required');
+      // Validate input
+      if (!username || !password) {
+        const response = formatter.unauthorized(`${usernameField} and ${passwordField} are required`);
+        return c.json(response, response._status);
+      }
+
+      // Find user by username field
+      const queryFilter = { [usernameField]: username };
+      const users = await authResource.query(queryFilter);
+      if (!users || users.length === 0) {
+        const response = formatter.unauthorized('Invalid credentials');
+        return c.json(response, response._status);
+      }
+
+      const user = users[0];
+
+      // Check if user is active
+      if (user.active !== undefined && !user.active) {
+        const response = formatter.unauthorized('User account is inactive');
+        return c.json(response, response._status);
+      }
+
+      // Verify password (compare with password field)
+      // Schema handles encryption/decryption for 'secret' field types
+      const isValid = user[passwordField] === password;
+
+      if (!isValid) {
+        const response = formatter.unauthorized('Invalid credentials');
+        return c.json(response, response._status);
+      }
+
+      // Update last login if field exists
+      if (user.lastLoginAt !== undefined) {
+        await authResource.update(user.id, {
+          lastLoginAt: new Date().toISOString()
+        });
+      }
+
+      // Generate JWT token
+      let token = null;
+      if (jwtSecret) {
+        token = createToken(
+          {
+            userId: user.id,
+            [usernameField]: user[usernameField],
+            role: user.role
+          },
+          jwtSecret,
+          jwtExpiresIn
+        );
+      }
+
+      // Remove sensitive data from response
+      const { [passwordField]: _, ...userWithoutPassword } = user;
+
+      const response = formatter.success({
+        user: userWithoutPassword,
+        token,
+        expiresIn: jwtExpiresIn
+      });
+
       return c.json(response, response._status);
-    }
-
-    // Find user
-    const users = await usersResource.query({ username });
-    if (!users || users.length === 0) {
-      const response = formatter.unauthorized('Invalid credentials');
-      return c.json(response, response._status);
-    }
-
-    const user = users[0];
-
-    if (!user.active) {
-      const response = formatter.unauthorized('User account is inactive');
-      return c.json(response, response._status);
-    }
-
-    // Verify password (decrypt and compare)
-    // Note: In production, use proper password hashing (bcrypt, argon2)
-    const [ok, err, decrypted] = await tryFn(() =>
-      user.password // Password is already decrypted by autoDecrypt
-    );
-
-    // For secret fields, we need to manually decrypt if autoDecrypt is off
-    // But by default autoDecrypt is true, so user.password should be plain text here
-    // Let's just compare directly since schema handles encryption/decryption
-    const isValid = user.password === password;
-
-    if (!isValid) {
-      const response = formatter.unauthorized('Invalid credentials');
-      return c.json(response, response._status);
-    }
-
-    // Update last login
-    await usersResource.update(user.id, {
-      lastLoginAt: new Date().toISOString()
-    });
-
-    // Generate JWT token
-    let token = null;
-    if (jwtSecret) {
-      token = createToken(
-        { userId: user.id, username: user.username, role: user.role },
-        jwtSecret,
-        jwtExpiresIn
-      );
-    }
-
-    // Remove sensitive data from response
-    const { password: _, ...userWithoutPassword } = user;
-
-    const response = formatter.success({
-      user: userWithoutPassword,
-      token,
-      expiresIn: jwtExpiresIn
-    });
-
-    return c.json(response, response._status);
-  }));
+    }));
+  }
 
   // POST /auth/token/refresh - Refresh JWT token
   if (jwtSecret) {
