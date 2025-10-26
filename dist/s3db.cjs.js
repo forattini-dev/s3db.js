@@ -31511,14 +31511,36 @@ class StateMachinePlugin extends Plugin {
   }
   /**
    * Setup an event-based trigger
+   * Supports both old API (trigger.event) and new API (trigger.eventName + eventSource)
    * @private
    */
   async _setupEventTrigger(machineId, stateName, trigger, triggerName) {
-    const eventName = trigger.event;
+    const baseEventName = trigger.eventName || trigger.event;
+    const eventSource = trigger.eventSource;
+    if (!baseEventName) {
+      throw new StateMachineError(`Event trigger '${triggerName}' must have either 'event' or 'eventName' property`, {
+        operation: "_setupEventTrigger",
+        machineId,
+        stateName,
+        triggerName
+      });
+    }
     const eventHandler = async (eventData) => {
       const entities = await this._getEntitiesInState(machineId, stateName);
       for (const entity of entities) {
         try {
+          let resolvedEventName;
+          if (typeof baseEventName === "function") {
+            resolvedEventName = baseEventName(entity.context);
+          } else {
+            resolvedEventName = baseEventName;
+          }
+          if (eventSource && typeof baseEventName === "function") {
+            const eventIdMatch = eventData?.id || eventData?.entityId;
+            if (eventIdMatch && entity.entityId !== eventIdMatch) {
+              continue;
+            }
+          }
           if (trigger.condition) {
             const shouldTrigger = await trigger.condition(entity.context, entity.entityId, eventData);
             if (!shouldTrigger) continue;
@@ -31532,28 +31554,76 @@ class StateMachinePlugin extends Plugin {
               continue;
             }
           }
-          const result = await this._executeAction(
-            trigger.action,
-            { ...entity.context, eventData },
-            "TRIGGER",
-            machineId,
-            entity.entityId
-          );
-          await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
-          if (trigger.sendEvent) {
-            await this.send(machineId, entity.entityId, trigger.sendEvent, {
-              ...entity.context,
-              triggerResult: result,
-              eventData
+          if (trigger.targetState) {
+            await this._transition(
+              machineId,
+              entity.entityId,
+              stateName,
+              trigger.targetState,
+              "TRIGGER",
+              { ...entity.context, eventData, triggerName }
+            );
+            const machine = this.machines.get(machineId);
+            const resourceConfig = machine.config;
+            if (resourceConfig.resource && resourceConfig.stateField) {
+              let resource;
+              if (typeof resourceConfig.resource === "string") {
+                resource = await this.database.getResource(resourceConfig.resource);
+              } else {
+                resource = resourceConfig.resource;
+              }
+              if (resource) {
+                const [ok] = await tryFn(
+                  () => resource.patch(entity.entityId, { [resourceConfig.stateField]: trigger.targetState })
+                );
+                if (!ok && this.config.verbose) {
+                  console.warn(`[StateMachinePlugin] Failed to update resource stateField for entity ${entity.entityId}`);
+                }
+              }
+            }
+            const targetStateConfig = machine.config.states[trigger.targetState];
+            if (targetStateConfig?.entry) {
+              await this._executeAction(
+                targetStateConfig.entry,
+                { ...entity.context, eventData },
+                "TRIGGER",
+                machineId,
+                entity.entityId
+              );
+            }
+            this.emit("plg:state-machine:transition", {
+              machineId,
+              entityId: entity.entityId,
+              from: stateName,
+              to: trigger.targetState,
+              event: "TRIGGER",
+              context: { ...entity.context, eventData, triggerName }
             });
+          } else if (trigger.action) {
+            const result = await this._executeAction(
+              trigger.action,
+              { ...entity.context, eventData },
+              "TRIGGER",
+              machineId,
+              entity.entityId
+            );
+            if (trigger.sendEvent) {
+              await this.send(machineId, entity.entityId, trigger.sendEvent, {
+                ...entity.context,
+                triggerResult: result,
+                eventData
+              });
+            }
           }
+          await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
           this.emit("plg:state-machine:trigger-executed", {
             machineId,
             entityId: entity.entityId,
             state: stateName,
             trigger: triggerName,
             type: "event",
-            eventName
+            eventName: resolvedEventName,
+            targetState: trigger.targetState
           });
         } catch (error) {
           if (this.config.verbose) {
@@ -31562,16 +31632,25 @@ class StateMachinePlugin extends Plugin {
         }
       }
     };
-    if (eventName.startsWith("db:")) {
-      const dbEventName = eventName.substring(3);
-      this.database.on(dbEventName, eventHandler);
+    if (eventSource) {
+      const baseEvent = typeof baseEventName === "function" ? "updated" : baseEventName;
+      eventSource.on(baseEvent, eventHandler);
       if (this.config.verbose) {
-        console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
+        console.log(`[StateMachinePlugin] Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}'`);
       }
     } else {
-      this.on(eventName, eventHandler);
-      if (this.config.verbose) {
-        console.log(`[StateMachinePlugin] Listening to plugin event '${eventName}' for trigger '${triggerName}'`);
+      const staticEventName = typeof baseEventName === "function" ? "updated" : baseEventName;
+      if (staticEventName.startsWith("db:")) {
+        const dbEventName = staticEventName.substring(3);
+        this.database.on(dbEventName, eventHandler);
+        if (this.config.verbose) {
+          console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
+        }
+      } else {
+        this.on(staticEventName, eventHandler);
+        if (this.config.verbose) {
+          console.log(`[StateMachinePlugin] Listening to plugin event '${staticEventName}' for trigger '${triggerName}'`);
+        }
       }
     }
   }
