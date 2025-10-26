@@ -5,9 +5,13 @@
  */
 
 import { createResourceRoutes, createRelationalRoutes } from './routes/resource-routes.js';
+import { createAuthRoutes } from './routes/auth-routes.js';
+import { mountCustomRoutes } from './utils/custom-routes.js';
 import { errorHandler } from './utils/error-handler.js';
 import * as formatter from './utils/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
+import { jwtAuth } from './auth/jwt-auth.js';
+import { basicAuth } from './auth/basic-auth.js';
 
 /**
  * API Server class
@@ -29,6 +33,7 @@ export class ApiServer {
       host: options.host || '0.0.0.0',
       database: options.database,
       resources: options.resources || {},
+      routes: options.routes || {}, // Plugin-level custom routes
       middlewares: options.middlewares || [],
       verbose: options.verbose || false,
       auth: options.auth || {},
@@ -36,6 +41,7 @@ export class ApiServer {
       docsUI: options.docsUI || 'redoc', // 'swagger' or 'redoc'
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024, // 10MB default
       rootHandler: options.rootHandler, // Custom handler for root path, if not provided redirects to /docs
+      versionPrefix: options.versionPrefix, // Global version prefix config
       apiInfo: {
         title: options.apiTitle || 's3db.js API',
         version: options.apiVersion || '1.0.0',
@@ -198,10 +204,18 @@ export class ApiServer {
     // Setup resource routes
     this._setupResourceRoutes();
 
+    // Setup authentication routes if driver is configured
+    if (this.options.auth.driver) {
+      this._setupAuthRoutes();
+    }
+
     // Setup relational routes if RelationPlugin is active
     if (this.relationsPlugin) {
       this._setupRelationalRoutes();
     }
+
+    // Setup plugin-level custom routes
+    this._setupPluginRoutes();
 
     // Global error handler
     this.app.onError((err, c) => {
@@ -247,20 +261,152 @@ export class ApiServer {
       // Determine version
       const version = resource.config?.currentVersion || resource.version || 'v1';
 
+      // Determine version prefix (resource-level overrides global)
+      // Priority: resource.versionPrefix > global versionPrefix > false (default - no prefix)
+      let versionPrefixConfig = config.versionPrefix !== undefined
+        ? config.versionPrefix
+        : this.options.versionPrefix !== undefined
+          ? this.options.versionPrefix
+          : false;
+
+      // Calculate the actual prefix to use
+      let prefix = '';
+      if (versionPrefixConfig === true) {
+        // true: use resource version
+        prefix = version;
+      } else if (versionPrefixConfig === false) {
+        // false: no prefix
+        prefix = '';
+      } else if (typeof versionPrefixConfig === 'string') {
+        // string: custom prefix
+        prefix = versionPrefixConfig;
+      }
+
+      // Prepare custom middleware
+      const middlewares = [...(config.customMiddleware || [])];
+
+      // Add authentication middleware if required
+      if (config.auth && this.options.auth.driver) {
+        const authMiddleware = this._createAuthMiddleware();
+        if (authMiddleware) {
+          middlewares.unshift(authMiddleware); // Add at beginning
+        }
+      }
+
       // Create resource routes
       const resourceApp = createResourceRoutes(resource, version, {
         methods: config.methods,
-        customMiddleware: config.customMiddleware || [],
-        enableValidation: config.validation !== false
+        customMiddleware: middlewares,
+        enableValidation: config.validation !== false,
+        versionPrefix: prefix
       }, this.Hono);
 
-      // Mount resource routes
-      this.app.route(`/${version}/${name}`, resourceApp);
+      // Mount resource routes (with or without prefix)
+      const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
+      this.app.route(mountPath, resourceApp);
 
       if (this.options.verbose) {
-        console.log(`[API Plugin] Mounted routes for resource '${name}' at /${version}/${name}`);
+        console.log(`[API Plugin] Mounted routes for resource '${name}' at ${mountPath}`);
+      }
+
+      // Mount custom routes for this resource (if defined)
+      if (config.routes) {
+        const routeContext = {
+          resource,
+          database,
+          resourceName: name,
+          version
+        };
+
+        // Mount on the resourceApp (nested under resource path)
+        mountCustomRoutes(resourceApp, config.routes, routeContext, this.options.verbose);
       }
     }
+  }
+
+  /**
+   * Setup authentication routes (when auth driver is configured)
+   * @private
+   */
+  _setupAuthRoutes() {
+    const { database, auth } = this.options;
+    const { driver, resource: resourceName, usernameField, passwordField, config } = auth;
+
+    // Get auth resource from database
+    const authResource = database.resources[resourceName];
+    if (!authResource) {
+      console.error(`[API Plugin] Auth resource '${resourceName}' not found. Skipping auth routes.`);
+      return;
+    }
+
+    // Prepare auth config for routes
+    const authConfig = {
+      driver,
+      usernameField,
+      passwordField,
+      jwtSecret: config.jwtSecret || config.secret,
+      jwtExpiresIn: config.jwtExpiresIn || config.expiresIn || '7d',
+      passphrase: config.passphrase || 'secret',
+      allowRegistration: config.allowRegistration !== false
+    };
+
+    // Create auth routes
+    const authApp = createAuthRoutes(authResource, authConfig);
+
+    // Mount auth routes at /auth
+    this.app.route('/auth', authApp);
+
+    if (this.options.verbose) {
+      console.log(`[API Plugin] Mounted auth routes (driver: ${driver}) at /auth`);
+    }
+  }
+
+  /**
+   * Create authentication middleware based on driver
+   * @private
+   * @returns {Function|null} Auth middleware function
+   */
+  _createAuthMiddleware() {
+    const { database, auth } = this.options;
+    const { driver, resource: resourceName, usernameField, passwordField, config } = auth;
+
+    if (!driver) {
+      return null;
+    }
+
+    const authResource = database.resources[resourceName];
+    if (!authResource) {
+      console.error(`[API Plugin] Auth resource '${resourceName}' not found for middleware`);
+      return null;
+    }
+
+    if (driver === 'jwt') {
+      const jwtSecret = config.jwtSecret || config.secret;
+      if (!jwtSecret) {
+        console.error('[API Plugin] JWT driver requires jwtSecret in config');
+        return null;
+      }
+
+      return jwtAuth({
+        secret: jwtSecret,
+        authResource,
+        usernameField,
+        passwordField
+      });
+    }
+
+    if (driver === 'basic') {
+      return basicAuth({
+        realm: config.realm || 'API Access',
+        authResource,
+        usernameField,
+        passwordField,
+        passphrase: config.passphrase || 'secret'
+      });
+    }
+
+    console.error(`[API Plugin] Unknown auth driver: ${driver}`);
+    return null;
   }
 
   /**
@@ -329,6 +475,31 @@ export class ApiServer {
           );
         }
       }
+    }
+  }
+
+  /**
+   * Setup plugin-level custom routes
+   * @private
+   */
+  _setupPluginRoutes() {
+    const { routes, database } = this.options;
+
+    if (!routes || Object.keys(routes).length === 0) {
+      return;
+    }
+
+    // Plugin-level routes context
+    const context = {
+      database,
+      plugins: database?.plugins || {}
+    };
+
+    // Mount plugin routes directly on main app (not nested)
+    mountCustomRoutes(this.app, routes, context, this.options.verbose);
+
+    if (this.options.verbose) {
+      console.log(`[API Plugin] Mounted ${Object.keys(routes).length} plugin-level custom routes`);
     }
   }
 

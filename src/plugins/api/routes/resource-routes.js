@@ -58,11 +58,12 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
   const {
     methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
     customMiddleware = [],
-    enableValidation = true
+    enableValidation = true,
+    versionPrefix = '' // Empty string by default (calculated in server.js)
   } = config;
 
   const resourceName = resource.name;
-  const basePath = `/${version}/${resourceName}`;
+  const basePath = versionPrefix ? `/${versionPrefix}/${resourceName}` : `/${resourceName}`;
 
   // Apply custom middleware
   customMiddleware.forEach(middleware => {

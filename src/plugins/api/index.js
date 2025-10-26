@@ -56,6 +56,10 @@ export class ApiPlugin extends Plugin {
       host: options.host || '0.0.0.0',
       verbose: options.verbose || false,
 
+      // Version prefix configuration (global default)
+      // Can be: true (use resource version), false (no prefix - DEFAULT), or string (custom prefix like 'api/v1')
+      versionPrefix: options.versionPrefix !== undefined ? options.versionPrefix : false,
+
       docs: {
         enabled: options.docs?.enabled !== false && options.docsEnabled !== false, // Enable by default
         ui: options.docs?.ui || 'redoc', // 'swagger' or 'redoc' (redoc is prettier!)
@@ -64,25 +68,26 @@ export class ApiPlugin extends Plugin {
         description: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources'
       },
 
-      // Authentication configuration
-      auth: {
-        jwt: {
-          enabled: options.auth?.jwt?.enabled || false,
-          secret: options.auth?.jwt?.secret || null,
-          expiresIn: options.auth?.jwt?.expiresIn || '7d'
-        },
-        apiKey: {
-          enabled: options.auth?.apiKey?.enabled || false,
-          headerName: options.auth?.apiKey?.headerName || 'X-API-Key'
-        },
-        basic: {
-          enabled: options.auth?.basic?.enabled || false,
-          realm: options.auth?.basic?.realm || 'API Access'
-        }
+      // Authentication configuration (driver-based)
+      auth: options.auth ? {
+        driver: options.auth.driver || null,             // 'jwt' or 'basic'
+        resource: options.auth.resource || 'users',      // Resource that manages auth
+        usernameField: options.auth.usernameField || 'email',   // Default: email
+        passwordField: options.auth.passwordField || 'password', // Default: password
+        config: options.auth.config || {}                // Driver-specific config
+      } : {
+        driver: null,
+        resource: 'users',
+        usernameField: 'email',
+        passwordField: 'password',
+        config: {}
       },
 
       // Resource configuration
       resources: options.resources || {},
+
+      // Custom routes (plugin-level)
+      routes: options.routes || {},
 
       // CORS configuration
       cors: {
@@ -176,10 +181,8 @@ export class ApiPlugin extends Plugin {
       throw err;
     }
 
-    // Create users resource if authentication is enabled
-    const authEnabled = this.config.auth.jwt.enabled ||
-                       this.config.auth.apiKey.enabled ||
-                       this.config.auth.basic.enabled;
+    // Create users resource if authentication driver is configured
+    const authEnabled = this.config.auth.driver !== null;
 
     if (authEnabled) {
       await this._createUsersResource();
@@ -467,6 +470,7 @@ export class ApiPlugin extends Plugin {
       host: this.config.host,
       database: this.database,
       resources: this.config.resources,
+      routes: this.config.routes,
       middlewares: this.compiledMiddlewares,
       verbose: this.config.verbose,
       auth: this.config.auth,

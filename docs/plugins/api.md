@@ -14,28 +14,56 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));  // Instant REST API!
 - ✅ **Swagger UI documentation**: Interactive API docs at `/docs`
 - ✅ **Kubernetes health probes**: `/health/live`, `/health/ready`, `/health`
 - ✅ **4 auth methods**: JWT, API Key, Basic Auth, Public
-- ✅ **Auto-versioning**: `/v0/cars`, `/v1/cars` based on resource version
+- ✅ **Clean URLs by default**: `/cars` (optional versioning: `/v1/cars`)
 - ✅ **Production ready**: CORS, Rate Limiting, Logging, Compression
 - ✅ **Schema validation**: Automatic validation using resource schemas
 - ✅ **Custom middlewares**: Add your own middleware functions
 
 **Generated endpoints:**
 ```
-GET     /v0/cars           → resource.list() or resource.query() with filters
-GET     /v0/cars/:id       → resource.get(id)
-POST    /v0/cars           → resource.insert(data)
-PUT     /v0/cars/:id       → resource.update(id, data)
-PATCH   /v0/cars/:id       → resource.update(id, partial)
-DELETE  /v0/cars/:id       → resource.delete(id)
-HEAD    /v0/cars           → resource.count() + statistics in headers
-OPTIONS /v0/cars           → resource metadata (schema, methods, endpoints)
+GET     /cars           → resource.list() or resource.query() with filters
+GET     /cars/:id       → resource.get(id)
+POST    /cars           → resource.insert(data)
+PUT     /cars/:id       → resource.update(id, data)
+PATCH   /cars/:id       → resource.update(id, partial)
+DELETE  /cars/:id       → resource.delete(id)
+HEAD    /cars           → resource.count() + statistics in headers
+OPTIONS /cars           → resource metadata (schema, methods, endpoints)
 ```
 
 **Filtering via query strings:**
 ```
-GET /v0/cars?status=active&year=2024&inStock=true
-GET /v0/cars?limit=50&offset=100&brand=Toyota
+GET /cars?status=active&year=2024&inStock=true
+GET /cars?limit=50&offset=100&brand=Toyota
 ```
+
+---
+
+## 📑 Table of Contents
+
+- [Quick Start](#-quick-start)
+- [Interactive API Documentation](#-interactive-api-documentation)
+- [Configuration Options](#-configuration-options)
+- [Schema Validation](#-schema-validation)
+- [URL Versioning Configuration](#-url-versioning-configuration)
+- [Authentication](#-authentication)
+- [API Endpoints](#-api-endpoints)
+- [Custom Middlewares](#-custom-middlewares)
+- [Custom Routes](#️-custom-routes)
+- [Rate Limiting](#-rate-limiting)
+- [Request Logging](#-request-logging)
+- [Response Compression](#-response-compression)
+- [CORS Configuration](#-cors-configuration)
+- [Production Deployment](#-production-deployment)
+  - [Docker Setup](#docker-setup)
+  - [Kubernetes Deployment](#kubernetes-deployment)
+  - [Prometheus Monitoring](#prometheus-monitoring)
+- [Best Practices](#-best-practices)
+- [Advanced Usage](#-advanced-usage)
+- [FAQ](#-faq)
+- [Examples](#-examples)
+- [Plugin Methods](#-plugin-methods)
+- [HTTP Status Codes](#-http-status-codes---complete-reference)
 
 ---
 
@@ -76,7 +104,7 @@ await db.usePlugin(new ApiPlugin({
 }));
 
 // Server running at http://localhost:3000
-// GET http://localhost:3000/v0/cars
+// GET http://localhost:3000/cars (clean URLs by default!)
 // View docs at http://localhost:3000/docs
 ```
 
@@ -241,151 +269,295 @@ new ApiPlugin({
 
 ---
 
+## ✅ Schema Validation
+
+The API Plugin automatically validates requests using resource schemas:
+
+```javascript
+const cars = await db.createResource({
+  name: 'cars',
+  attributes: {
+    brand: 'string|required|minlength:2',
+    model: 'string|required',
+    year: 'number|required|min:1900|max:2025',
+    price: 'number|required|min:0'
+  }
+});
+```
+
+**Invalid Request:**
+```bash
+curl -X POST http://localhost:3000/cars \
+  -H "Content-Type: application/json" \
+  -d '{"brand":"X","year":1800}'
+```
+
+**Response:**
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Validation failed",
+    "code": "VALIDATION_ERROR",
+    "details": {
+      "errors": [
+        {
+          "field": "brand",
+          "message": "String length must be at least 2 characters",
+          "expected": "minlength:2",
+          "actual": "X"
+        },
+        {
+          "field": "model",
+          "message": "Field is required",
+          "expected": "required"
+        },
+        {
+          "field": "year",
+          "message": "Number must be at least 1900",
+          "expected": "min:1900",
+          "actual": 1800
+        },
+        {
+          "field": "price",
+          "message": "Field is required",
+          "expected": "required"
+        }
+      ]
+    }
+  }
+}
+```
+
+Validation is automatic for:
+- POST (insert) - Full validation
+- PUT (update) - Full validation
+- PATCH (partial update) - Partial validation
+
+Disable validation per resource:
+```javascript
+resources: {
+  cars: {
+    validation: false  // Disable validation
+  }
+}
+```
+
+---
+
 ## 🔐 Authentication
 
 ### Overview
 
-The API Plugin supports 4 authentication methods that can be combined:
+The API Plugin uses a **driver-based authentication system** where you choose ONE authentication driver for your API. This approach ensures consistency and simplicity across your entire API.
 
-1. **JWT Bearer Token** - Stateless, token in `Authorization: Bearer <token>`
-2. **API Key** - Static key in custom header (default: `X-API-Key`)
-3. **Basic Auth** - Username:password in `Authorization: Basic <base64>`
-4. **Public** - No authentication (configurable per resource)
+**Available drivers:**
+- **JWT** - Token-based authentication with `/auth/login` endpoint
+- **Basic** - HTTP Basic Auth with Base64-encoded credentials in headers
+
+**Key features:**
+- ✅ Resource-based auth configuration (which resource manages users)
+- ✅ Configurable username/password fields (default: `email`/`password`)
+- ✅ Automatic `/auth` routes (registration, login for JWT)
+- ✅ Per-resource auth requirements
 
 ### JWT Authentication
 
+JWT (JSON Web Token) provides stateless authentication where users receive a token after login that must be included in subsequent requests.
+
 **Setup:**
 ```javascript
-new ApiPlugin({
+// Create users resource FIRST (can be named anything)
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    email: 'string|required|email',
+    password: 'secret|required',  // Automatically encrypted
+    role: 'string|optional',
+    active: 'boolean|default:true'
+  }
+});
+
+// Configure API with JWT driver
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
   auth: {
-    jwt: {
-      enabled: true,
-      secret: 'your-256-bit-secret',
-      expiresIn: '7d'
+    driver: 'jwt',                        // Choose JWT driver
+    resource: 'users',                    // Resource that manages auth
+    usernameField: 'email',               // Field for username (default: 'email')
+    passwordField: 'password',            // Field for password (default: 'password')
+    config: {
+      jwtSecret: 'your-256-bit-secret',  // Required for JWT
+      jwtExpiresIn: '7d',                // Token expiration (default: 7d)
+      allowRegistration: true             // Enable /auth/register (default: true)
     }
   },
   resources: {
     cars: {
-      auth: ['jwt']  // Require JWT
+      auth: true  // Require authentication for this resource
     }
   }
-})
+}));
 ```
 
-**Usage:**
+**Generated routes:**
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login and get JWT token
+- `POST /auth/token/refresh` - Refresh JWT token
+- `GET /auth/me` - Get current user info
+- `POST /auth/api-key/regenerate` - Regenerate API key
+
+**Usage flow:**
 ```bash
-# 1. Register user
+# 1. Register new user
 curl -X POST http://localhost:3000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"john","password":"secret123","email":"john@example.com"}'
+  -d '{
+    "email": "john@example.com",
+    "password": "secret123",
+    "role": "user"
+  }'
 
-# 2. Login
+# Response:
+# {
+#   "success": true,
+#   "data": {
+#     "user": { "id": "abc123", "email": "john@example.com", "role": "user" },
+#     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+#   }
+# }
+
+# 2. Login (if already registered)
 curl -X POST http://localhost:3000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"john","password":"secret123"}'
-# Response: { "token": "eyJhbGc..." }
+  -d '{
+    "email": "john@example.com",
+    "password": "secret123"
+  }'
 
-# 3. Use token
-curl http://localhost:3000/v0/cars \
-  -H "Authorization: Bearer eyJhbGc..."
-```
+# Response:
+# {
+#   "success": true,
+#   "data": {
+#     "user": { "id": "abc123", "email": "john@example.com" },
+#     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+#     "expiresIn": "7d"
+#   }
+# }
 
-### API Key Authentication
-
-**Setup:**
-```javascript
-new ApiPlugin({
-  auth: {
-    apiKey: {
-      enabled: true,
-      headerName: 'X-API-Key'
-    }
-  },
-  resources: {
-    cars: {
-      auth: ['apiKey']
-    }
-  }
-})
-```
-
-**Usage:**
-```bash
-# 1. Register to get API key
-curl -X POST http://localhost:3000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"john","password":"secret123"}'
-# Response includes: { "user": { "apiKey": "abc123..." } }
-
-# 2. Use API key
-curl http://localhost:3000/v0/cars \
-  -H "X-API-Key: abc123..."
+# 3. Use token to access protected resources
+curl http://localhost:3000/cars \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
 ### Basic Authentication
 
+HTTP Basic Auth validates credentials on EVERY request by checking username:password against your auth resource.
+
 **Setup:**
 ```javascript
-new ApiPlugin({
+// Create users resource FIRST
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    email: 'string|required|email',
+    password: 'secret|required',  // Automatically encrypted
+    active: 'boolean|default:true'
+  }
+});
+
+// Configure API with Basic Auth driver
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
   auth: {
-    basic: {
-      enabled: true,
-      realm: 'API Access'
+    driver: 'basic',                      // Choose Basic Auth driver
+    resource: 'users',                    // Resource that manages auth
+    usernameField: 'email',               // Field for username (default: 'email')
+    passwordField: 'password',            // Field for password (default: 'password')
+    config: {
+      realm: 'API Access',                // WWW-Authenticate realm (default: 'API Access')
+      allowRegistration: true             // Enable /auth/register (default: true)
     }
   },
   resources: {
     cars: {
-      auth: ['basic']
+      auth: true  // Require authentication
     }
   }
-})
+}));
 ```
 
 **Usage:**
 ```bash
-# Use username:password
-curl http://localhost:3000/v0/cars \
-  -u john:secret123
+# 1. Register user (if registration enabled)
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john@example.com",
+    "password": "secret123"
+  }'
+
+# 2. Access resources with Basic Auth
+curl http://localhost:3000/cars \
+  -u john@example.com:secret123
 
 # Or with Authorization header
-curl http://localhost:3000/v0/cars \
-  -H "Authorization: Basic $(echo -n 'john:secret123' | base64)"
+curl http://localhost:3000/cars \
+  -H "Authorization: Basic $(echo -n 'john@example.com:secret123' | base64)"
 ```
 
-### Multiple Authentication Methods
+**Note:** Basic Auth validates credentials on every request, so it's simpler but requires sending credentials each time. JWT is more efficient for frequent requests after initial login.
 
-Allow multiple auth methods per resource:
+### Custom Username/Password Fields
+
+You can use any field names for username and password:
+
+```javascript
+// Example: Using 'username' instead of 'email'
+const accounts = await db.createResource({
+  name: 'accounts',
+  attributes: {
+    id: 'string|required',
+    username: 'string|required',        // Custom username field
+    secretKey: 'secret|required',       // Custom password field
+    isActive: 'boolean|default:true'
+  }
+});
+
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    driver: 'jwt',
+    resource: 'accounts',              // Different resource name
+    usernameField: 'username',         // Use 'username' field
+    passwordField: 'secretKey',        // Use 'secretKey' field
+    config: {
+      jwtSecret: 'your-secret',
+      jwtExpiresIn: '30d'
+    }
+  }
+}));
+```
+
+### Public vs Protected Resources
+
+Control authentication per resource:
 
 ```javascript
 resources: {
-  cars: {
-    auth: ['jwt', 'apiKey', 'basic']  // Any method works
+  // Public resource - no auth required
+  products: {
+    auth: false,
+    methods: ['GET']  // Read-only public access
+  },
+
+  // Protected resource - auth required
+  orders: {
+    auth: true,       // Requires authentication
+    methods: ['GET', 'POST', 'PUT', 'DELETE']
   }
 }
-```
-
-### Public Access
-
-Disable authentication for specific resources:
-
-```javascript
-resources: {
-  cars: {
-    auth: false  // Public access
-  }
-}
-```
-
-### Authentication Endpoints
-
-The plugin automatically creates these auth endpoints:
-
-```
-POST /auth/register          - Register new user
-POST /auth/login             - Login with username/password
-POST /auth/token/refresh     - Refresh JWT token
-GET  /auth/me                - Get current user info
-POST /auth/api-key/regenerate - Regenerate API key
 ```
 
 ---
@@ -398,7 +570,7 @@ For each resource, the following endpoints are automatically created:
 
 #### List Resources (with Filtering)
 ```http
-GET /{version}/{resource}?limit=100&offset=0&status=active&year=2024
+GET /{resource}?limit=100&offset=0&status=active&year=2024
 
 Query Parameters:
 - limit (number): Max items to return (default: 100, max: 1000)
@@ -408,9 +580,9 @@ Query Parameters:
 - [any field]: Any resource field for filtering (e.g., status=active, year=2024)
 
 Examples:
-  GET /v0/cars?inStock=true
-  GET /v0/cars?brand=Toyota&year=2024
-  GET /v0/cars?price={"$gte":20000,"$lte":30000}  (JSON filter)
+  GET /cars?inStock=true
+  GET /cars?brand=Toyota&year=2024
+  GET /cars?price={"$gte":20000,"$lte":30000}  (JSON filter)
 
 Response:
 {
@@ -435,7 +607,7 @@ resource.list() for efficient filtering.
 
 #### Get Single Resource
 ```http
-GET /{version}/{resource}/:id
+GET /{resource}/:id
 
 Response:
 {
@@ -446,7 +618,7 @@ Response:
 
 #### Create Resource
 ```http
-POST /{version}/{resource}
+POST /{resource}
 
 Body:
 {
@@ -461,7 +633,7 @@ Response:
   "success": true,
   "data": { "id": "abc123", ... },
   "meta": {
-    "location": "/v0/cars/abc123"
+    "location": "/cars/abc123"
   }
 }
 
@@ -471,7 +643,7 @@ Headers:
 
 #### Update Resource (Full)
 ```http
-PUT /{version}/{resource}/:id
+PUT /{resource}/:id
 
 Body: Complete resource object
 
@@ -484,7 +656,7 @@ Response:
 
 #### Update Resource (Partial)
 ```http
-PATCH /{version}/{resource}/:id
+PATCH /{resource}/:id
 
 Body: Partial resource object
 {
@@ -500,7 +672,7 @@ Response:
 
 #### Delete Resource
 ```http
-DELETE /{version}/{resource}/:id
+DELETE /{resource}/:id
 
 Response:
 {
@@ -511,7 +683,7 @@ Response:
 
 #### Get Resource Statistics
 ```http
-HEAD /{version}/{resource}
+HEAD /{resource}
 
 Response: Empty body (200 OK)
 
@@ -521,7 +693,7 @@ Headers:
 - X-Schema-Fields: 8 (number of fields in schema)
 
 Example:
-  curl -I http://localhost:3000/v0/cars
+  curl -I http://localhost:3000/cars
 
   HTTP/1.1 200 OK
   X-Total-Count: 150
@@ -531,7 +703,7 @@ Example:
 
 #### Check if Resource Exists
 ```http
-HEAD /{version}/{resource}/:id
+HEAD /{resource}/:id
 
 Response: Empty body (200 OK or 404 Not Found)
 
@@ -539,7 +711,7 @@ Headers (if exists):
 - Last-Modified: Tue, 15 Nov 2024 12:30:00 GMT
 
 Example:
-  curl -I http://localhost:3000/v0/cars/car-1
+  curl -I http://localhost:3000/cars/car-1
 
   HTTP/1.1 200 OK
   Last-Modified: Tue, 15 Nov 2024 12:30:00 GMT
@@ -547,7 +719,7 @@ Example:
 
 #### Get Resource Metadata
 ```http
-OPTIONS /{version}/{resource}
+OPTIONS /{resource}
 
 Response:
 {
@@ -568,11 +740,11 @@ Response:
     }
   ],
   "endpoints": {
-    "list": "/v0/cars",
-    "get": "/v0/cars/:id",
-    "create": "/v0/cars",
-    "update": "/v0/cars/:id",
-    "delete": "/v0/cars/:id"
+    "list": "/cars",
+    "get": "/cars/:id",
+    "create": "/cars",
+    "update": "/cars/:id",
+    "delete": "/cars/:id"
   },
   "queryParameters": {
     "limit": "number (1-1000, default: 100)",
@@ -697,11 +869,11 @@ GET /openapi.json
         "name": "cars",
         "version": "v0",
         "endpoints": {
-          "list": "/v0/cars",
-          "get": "/v0/cars/:id",
-          "create": "/v0/cars",
-          "update": "/v0/cars/:id",
-          "delete": "/v0/cars/:id"
+          "list": "/cars",
+          "get": "/cars/:id",
+          "create": "/cars",
+          "update": "/cars/:id",
+          "delete": "/cars/:id"
         }
       }
     ],
@@ -1564,21 +1736,120 @@ For detailed MetricsPlugin configuration and features, see [MetricsPlugin docume
 
 ---
 
-## 🔄 Automatic Versioning
+## 🔄 URL Versioning Configuration
 
-The API Plugin automatically versions endpoints based on the resource version:
+**By default, the API Plugin generates clean URLs without version prefixes** (e.g., `/cars`, `/users`). This provides intuitive, simple endpoints that are easy to use and remember.
+
+### Default Behavior (Clean URLs)
 
 ```javascript
-// Resource with version v0
 const cars = await db.createResource({
   name: 'cars',
-  // version defaults to 'v0'
+  attributes: {
+    brand: 'string|required',
+    model: 'string|required',
+    year: 'number|required'
+  }
 });
 
-// Endpoints created:
-// GET /v0/cars
-// POST /v0/cars
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+
+// Endpoints created with clean URLs:
+// GET /cars
+// POST /cars
+// GET /cars/:id
 // etc.
+```
+
+### Enabling Version Prefixes
+
+You can enable version prefixes globally or per-resource using the `versionPrefix` option:
+
+#### Global Configuration
+
+```javascript
+// Enable version prefixes for ALL resources
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  versionPrefix: true  // Use resource version as prefix
+}));
+
+// All resources now have version prefix:
+// GET /v0/cars
+// GET /v0/users
+// GET /v0/products
+```
+
+#### Per-Resource Configuration
+
+```javascript
+// Mix clean URLs with versioned endpoints
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+
+  // Global default: no prefix
+  versionPrefix: false,  // or omit (false is default)
+
+  resources: {
+    // cars: uses global default (no prefix)
+    cars: {
+      auth: false
+    },
+
+    // users: override with version prefix
+    users: {
+      auth: ['jwt'],
+      versionPrefix: true  // Use /v1/users
+    },
+
+    // orders: override with custom prefix
+    orders: {
+      auth: ['jwt', 'apiKey'],
+      versionPrefix: 'api/v2'  // Use /api/v2/orders
+    }
+  }
+}));
+
+// Resulting endpoints:
+// GET /cars              (global default - no prefix)
+// GET /v1/users          (resource override - version prefix)
+// GET /api/v2/orders     (resource override - custom prefix)
+```
+
+### Version Prefix Options
+
+The `versionPrefix` option accepts three types of values:
+
+| Value | Behavior | Example URL |
+|-------|----------|-------------|
+| `false` | No prefix (DEFAULT) | `/cars` |
+| `true` | Use resource version | `/v0/cars`, `/v1/cars` |
+| `string` | Custom prefix | `/api/v1/cars`, `/v2/cars` |
+
+### Resource Schema Versioning
+
+s3db.js automatically versions resource schemas when you update attributes. Combined with `versionPrefix: true`, this enables API versioning:
+
+```javascript
+// Create initial resource (v0)
+const cars = await db.createResource({
+  name: 'cars',
+  attributes: {
+    brand: 'string|required',
+    model: 'string|required',
+    year: 'number|required'
+  }
+});
+
+// Enable version prefix
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  resources: {
+    cars: { versionPrefix: true }
+  }
+}));
+
+// Initial endpoint: GET /v0/cars
 
 // Update schema (creates v1)
 await database.updateResourceAttributes('cars', {
@@ -1593,86 +1864,32 @@ await database.updateResourceAttributes('cars', {
 // GET /v1/cars  (new schema)
 ```
 
-This allows clients to:
-- Continue using old API version
-- Migrate gradually to new version
+**Benefits of versioned APIs:**
+- Clients can continue using old API version during migration
+- Gradual rollout of new features
 - Test new version before switching
+- Backward compatibility
 
----
+**When to use versioned URLs:**
+- Public APIs with external consumers
+- Long-lived applications requiring backward compatibility
+- APIs with multiple client versions in production
+- Microservices with complex dependencies
 
-## ✅ Schema Validation
+**When to use clean URLs (default):**
+- Internal APIs
+- Rapid development and prototyping
+- Single-page applications with synchronized deployments
+- Simple CRUD operations
+- When you control all API consumers
 
-The API Plugin automatically validates requests using resource schemas:
+### Complete Example
 
-```javascript
-const cars = await db.createResource({
-  name: 'cars',
-  attributes: {
-    brand: 'string|required|minlength:2',
-    model: 'string|required',
-    year: 'number|required|min:1900|max:2025',
-    price: 'number|required|min:0'
-  }
-});
-```
-
-**Invalid Request:**
-```bash
-curl -X POST http://localhost:3000/v0/cars \
-  -H "Content-Type: application/json" \
-  -d '{"brand":"X","year":1800}'
-```
-
-**Response:**
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Validation failed",
-    "code": "VALIDATION_ERROR",
-    "details": {
-      "errors": [
-        {
-          "field": "brand",
-          "message": "String length must be at least 2 characters",
-          "expected": "minlength:2",
-          "actual": "X"
-        },
-        {
-          "field": "model",
-          "message": "Field is required",
-          "expected": "required"
-        },
-        {
-          "field": "year",
-          "message": "Number must be at least 1900",
-          "expected": "min:1900",
-          "actual": 1800
-        },
-        {
-          "field": "price",
-          "message": "Field is required",
-          "expected": "required"
-        }
-      ]
-    }
-  }
-}
-```
-
-Validation is automatic for:
-- POST (insert) - Full validation
-- PUT (update) - Full validation
-- PATCH (partial update) - Partial validation
-
-Disable validation per resource:
-```javascript
-resources: {
-  cars: {
-    validation: false  // Disable validation
-  }
-}
-```
+See [e77-api-version-prefix.js](../examples/e77-api-version-prefix.js) for a complete working example demonstrating:
+- Global `versionPrefix` configuration
+- Per-resource overrides
+- Custom prefix strings
+- Mix of clean and versioned URLs
 
 ---
 
@@ -1737,6 +1954,211 @@ resources: {
     ]
   }
 }
+```
+
+---
+
+## 🛤️ Custom Routes
+
+Define custom routes at both plugin and resource level using a moleculer-js inspired syntax.
+
+### Plugin-Level Custom Routes
+
+Add global custom routes to your API:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+
+  // Plugin-level custom routes (mounted at root)
+  routes: {
+    'GET /health': async (c) => {
+      return c.json({
+        status: 'healthy',
+        uptime: process.uptime(),
+        timestamp: Date.now()
+      });
+    },
+
+    'POST /webhook': async (c) => {
+      const payload = await c.req.json();
+      // Access database via context
+      const context = c.get('customRouteContext');
+      const { database } = context;
+
+      // Process webhook
+      await database.resources.webhooks.insert(payload);
+
+      return c.json({ success: true });
+    },
+
+    'GET /stats': async (c) => {
+      const context = c.get('customRouteContext');
+      const { database } = context;
+
+      const stats = {
+        users: await database.resources.users.count(),
+        orders: await database.resources.orders.count()
+      };
+
+      return c.json(stats);
+    }
+  }
+}));
+```
+
+**Generated routes:**
+- `GET /health`
+- `POST /webhook`
+- `GET /stats`
+
+### Resource-Level Custom Routes
+
+Add custom routes nested under resource paths:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  resources: {
+    users: {
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+
+      // Custom routes for users resource (mounted under /users)
+      routes: {
+        'POST /:id/activate': async (c) => {
+          const userId = c.req.param('id');
+          const context = c.get('customRouteContext');
+          const { resource } = context;
+
+          // Activate user
+          await resource.update(userId, { active: true, activatedAt: new Date().toISOString() });
+
+          return c.json({
+            success: true,
+            message: `User ${userId} activated`
+          });
+        },
+
+        'POST /:id/reset-password': async (c) => {
+          const userId = c.req.param('id');
+          const { newPassword } = await c.req.json();
+          const context = c.get('customRouteContext');
+          const { resource } = context;
+
+          await resource.update(userId, { password: newPassword });
+
+          return c.json({ success: true });
+        },
+
+        'GET /:id/statistics': async (c) => {
+          const userId = c.req.param('id');
+          const context = c.get('customRouteContext');
+          const { database } = context;
+
+          // Query related data
+          const orders = await database.resources.orders.query({ userId });
+          const stats = {
+            totalOrders: orders.length,
+            totalSpent: orders.reduce((sum, o) => sum + o.total, 0)
+          };
+
+          return c.json(stats);
+        }
+      }
+    }
+  }
+}));
+```
+
+**Generated routes:**
+- `POST /users/:id/activate`
+- `POST /users/:id/reset-password`
+- `GET /users/:id/statistics`
+
+### Route Key Format
+
+Routes must follow the format: `"METHOD /path"`
+
+**Valid methods:** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+
+**Path examples:**
+- `"/health"` - Simple path
+- `"/:id"` - Path parameter
+- `"/:id/action"` - Nested path with parameter
+- `"/users/:userId/orders/:orderId"` - Multiple parameters
+
+### Context Access
+
+Custom route handlers receive context via `c.get('customRouteContext')`:
+
+**Plugin-level routes:**
+```javascript
+{
+  database,      // Database instance
+  plugins        // All plugins
+}
+```
+
+**Resource-level routes:**
+```javascript
+{
+  resource,      // Current resource instance
+  database,      // Database instance
+  resourceName,  // Resource name string
+  version        // Resource version (e.g., 'v1')
+}
+```
+
+### Complete Example
+
+```javascript
+const db = new Database({ connectionString: '...' });
+await db.connect();
+
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    email: 'string|required|email',
+    password: 'secret|required',
+    active: 'boolean|default:false'
+  }
+});
+
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+
+  // Global custom routes
+  routes: {
+    'GET /api/info': async (c) => {
+      return c.json({
+        name: 'My API',
+        version: '1.0.0',
+        environment: process.env.NODE_ENV
+      });
+    }
+  },
+
+  resources: {
+    users: {
+      // Resource-specific custom routes
+      routes: {
+        'POST /:id/activate': async (c) => {
+          const userId = c.req.param('id');
+          const context = c.get('customRouteContext');
+          await context.resource.update(userId, { active: true });
+          return c.json({ success: true });
+        }
+      }
+    }
+  }
+}));
+
+// Routes available:
+// GET  /api/info
+// POST /users/:id/activate
+// GET  /users (standard CRUD)
+// POST /users (standard CRUD)
+// etc.
 ```
 
 ---
@@ -1968,7 +2390,7 @@ function getPaginatedUrl(baseUrl, page, pageSize) {
 }
 
 // Fetch page 2 with 50 items per page
-const url = getPaginatedUrl('/v0/cars', 2, 50);
+const url = getPaginatedUrl('/cars', 2, 50);
 const response = await fetch(url);
 ```
 
@@ -1976,10 +2398,10 @@ const response = await fetch(url);
 
 ```javascript
 // Query specific partition
-const response = await fetch('/v0/cars?partition=byRegion&partitionValues={"region":"US"}');
+const response = await fetch('/cars?partition=byRegion&partitionValues={"region":"US"}');
 
 // Get from specific partition
-const response = await fetch('/v0/cars/car-1?partition=byRegion&partitionValues={"region":"US"}');
+const response = await fetch('/cars/car-1?partition=byRegion&partitionValues={"region":"US"}');
 ```
 
 ---
@@ -2058,10 +2480,10 @@ A: Use query filters with comparison operators:
 
 ```javascript
 // Get first page (limit 50)
-GET /v0/cars?limit=50
+GET /cars?limit=50
 
 // Get next page using last ID as cursor
-GET /v0/cars?id={"$gt":"last-id-from-previous-page"}&limit=50
+GET /cars?id={"$gt":"last-id-from-previous-page"}&limit=50
 ```
 
 For custom cursor pagination, add middleware:
@@ -2176,7 +2598,7 @@ A: Core parameters:
 A: Defaults:
 - Server starts on port 3000, listens on 0.0.0.0
 - All resources automatically get REST endpoints (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
-- Endpoints versioned based on resource version (`/v0/cars`, `/v1/cars`)
+- **Clean URLs without version prefix** (`/cars`, `/users`) - Optional versioning available with `versionPrefix: true`
 - Schema validation enabled by default
 - Authentication disabled by default (public access)
 - CORS disabled by default
@@ -2243,7 +2665,7 @@ curl http://localhost:3000/health/ready
 curl http://localhost:3000/openapi.json | jq
 
 // 6. Test with verbose curl
-curl -v http://localhost:3000/v0/cars
+curl -v http://localhost:3000/cars
 ```
 
 **Q: What HTTP methods are supported per endpoint?**
@@ -2252,8 +2674,8 @@ A: Default methods per endpoint:
 
 | Endpoint | Methods | Purpose |
 |----------|---------|---------|
-| `/{version}/{resource}` | GET, POST, HEAD, OPTIONS | List/create resources, get stats, get metadata |
-| `/{version}/{resource}/:id` | GET, PUT, PATCH, DELETE, HEAD | Get/update/delete single resource, check existence |
+| `/{resource}` | GET, POST, HEAD, OPTIONS | List/create resources, get stats, get metadata |
+| `/{resource}/:id` | GET, PUT, PATCH, DELETE, HEAD | Get/update/delete single resource, check existence |
 | `/auth/register` | POST | User registration |
 | `/auth/login` | POST | User login |
 | `/auth/token/refresh` | POST | Refresh JWT token |
@@ -2266,19 +2688,49 @@ A: Default methods per endpoint:
 | `/openapi.json` | GET | OpenAPI 3.0 spec |
 | `/` | GET | API info |
 
-**Q: How does automatic versioning work?**
+**Q: How does URL versioning work?**
 
-A: Versioning is based on resource schema versions:
+A: **By default, the API uses clean URLs without version prefixes** (e.g., `/cars`). Versioning is **optional** and can be enabled via `versionPrefix` option:
 
+**Default behavior (clean URLs):**
+```javascript
+// Default: No version prefix
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+
+// Endpoints created:
+GET /cars
+POST /cars
+GET /users
+```
+
+**Enable versioning:**
+```javascript
+// Enable version prefix globally
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  versionPrefix: true  // Use resource version in URL
+}));
+
+// Endpoints now include version:
+GET /v0/cars
+POST /v0/users
+```
+
+**How it works when enabled:**
 1. Each resource has a `currentVersion` (e.g., `v0`, `v1`, `v2`)
-2. API creates endpoints for the current version: `/v0/cars`, `/v1/cars`
+2. When `versionPrefix: true`, API creates endpoints with version: `/v0/cars`, `/v1/cars`
 3. When you update a resource schema with `updateResourceAttributes()`, a new version is created
 4. Both old and new versions remain accessible for backward compatibility
-5. Clients can specify which version to use in the URL path
-6. Each version serves data according to its schema definition
+5. Each version serves data according to its schema definition
 
-Example flow:
-```
+**Example flow with versioning enabled:**
+```javascript
+// Enable versioning
+await db.usePlugin(new ApiPlugin({
+  versionPrefix: true,
+  resources: { cars: {} }
+}));
+
 // Initial: v0 endpoints created
 POST /v0/cars
 
@@ -2287,6 +2739,8 @@ POST /v0/cars
 GET /v0/cars  (old schema)
 GET /v1/cars  (new schema)
 ```
+
+For more details, see the [URL Versioning Configuration](#-url-versioning-configuration) section.
 
 **Q: Can I use this with serverless platforms (AWS Lambda, Vercel, Cloudflare Workers)?**
 
@@ -2417,7 +2871,7 @@ The API Plugin implements **ALL standard HTTP status codes** with consistent, de
 
 ```bash
 # Request
-GET /v0/cars/car-123
+GET /cars/car-123
 
 # Response
 HTTP/1.1 200 OK
@@ -2445,7 +2899,7 @@ Content-Type: application/json
 
 ```bash
 # Request
-POST /v0/cars
+POST /cars
 Content-Type: application/json
 {
   "brand": "Honda",
@@ -2457,7 +2911,7 @@ Content-Type: application/json
 # Response
 HTTP/1.1 201 Created
 Content-Type: application/json
-Location: /v0/cars/car-456
+Location: /cars/car-456
 ```
 ```json
 {
@@ -2472,7 +2926,7 @@ Location: /v0/cars/car-456
   },
   "meta": {
     "timestamp": "2024-11-15T12:30:00.000Z",
-    "location": "/v0/cars/car-456"
+    "location": "/cars/car-456"
   }
 }
 ```
@@ -2483,7 +2937,7 @@ Location: /v0/cars/car-456
 
 ```bash
 # Request
-DELETE /v0/cars/car-123
+DELETE /cars/car-123
 
 # Response
 HTTP/1.1 204 No Content
@@ -2508,7 +2962,7 @@ HTTP/1.1 204 No Content
 
 ```bash
 # Request
-POST /v0/cars
+POST /cars
 Content-Type: application/json
 {
   "brand": "X",
@@ -2564,7 +3018,7 @@ Content-Type: application/json
 
 ```bash
 # Request
-GET /v0/cars
+GET /cars
 
 # Response
 HTTP/1.1 401 Unauthorized
@@ -2593,7 +3047,7 @@ WWW-Authenticate: Bearer realm="API Access"
 
 ```bash
 # Request
-DELETE /v0/users/user-123
+DELETE /users/user-123
 Authorization: Bearer <valid-token-but-not-admin>
 
 # Response
@@ -2623,7 +3077,7 @@ Content-Type: application/json
 
 ```bash
 # Request
-GET /v0/cars/nonexistent-id
+GET /cars/nonexistent-id
 
 # Response
 HTTP/1.1 404 Not Found
@@ -2652,7 +3106,7 @@ Content-Type: application/json
 
 ```bash
 # Request
-POST /v0/cars
+POST /cars
 Content-Type: application/json
 Content-Length: 15728640
 { ... very large payload ... }
@@ -2694,7 +3148,7 @@ new ApiPlugin({
 
 ```bash
 # Request (101st request in 1 minute)
-GET /v0/cars
+GET /cars
 
 # Response
 HTTP/1.1 429 Too Many Requests
@@ -2743,7 +3197,7 @@ new ApiPlugin({
 
 ```bash
 # Request
-GET /v0/cars/car-123
+GET /cars/car-123
 
 # Response
 HTTP/1.1 500 Internal Server Error
