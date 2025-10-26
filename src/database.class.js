@@ -1091,7 +1091,7 @@ export class Database extends EventEmitter {
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
       }
-      this.emit("db:resource:updated", name);
+      this.emit("s3db.resourceUpdated", name);
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -1131,7 +1131,7 @@ export class Database extends EventEmitter {
     }
 
     await this.uploadMetadataFile();
-    this.emit("db:resource:created", name);
+    this.emit("s3db.resourceCreated", name);
     return resource;
   }
 
@@ -1239,6 +1239,9 @@ export class Database extends EventEmitter {
   }
 
   async disconnect() {
+    // Emit disconnected event BEFORE removing listeners (Fix #2)
+    await this.emit('disconnected', new Date());
+
     // Silently ignore all errors during disconnect
     await tryFn(async () => {
       // 1. Remove all listeners from all plugins
@@ -1427,7 +1430,7 @@ export class Database extends EventEmitter {
       const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
       if (!ok) {
         // Emit error event
-        this.emit('db:hook-error', { event, error, context });
+        this.emit('hookError', { event, error, context });
 
         // In strict mode, throw on first error instead of continuing
         if (this.strictHooks) {

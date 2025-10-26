@@ -180,7 +180,7 @@ class PostgresReplicator extends BaseReplicator {
       await this.syncSchemas(database);
     }
 
-    this.emit('initialized', {
+    this.emit('db:plugin:initialized', {
       replicator: this.name,
       database: this.database || 'postgres',
       resources: Object.keys(this.resources)

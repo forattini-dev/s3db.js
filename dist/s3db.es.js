@@ -17700,7 +17700,7 @@ class BaseReplicator extends EventEmitter {
    */
   async initialize(database) {
     this.database = database;
-    this.emit("initialized", { replicator: this.name });
+    this.emit("db:plugin:initialized", { replicator: this.name });
   }
   /**
    * Replicate data to the target
@@ -18271,7 +18271,7 @@ class BigqueryReplicator extends BaseReplicator {
     if (this.schemaSync.enabled) {
       await this.syncSchemas(database);
     }
-    this.emit("initialized", {
+    this.emit("db:plugin:initialized", {
       replicator: this.name,
       projectId: this.projectId,
       datasetId: this.datasetId,
@@ -20019,7 +20019,7 @@ class PostgresReplicator extends BaseReplicator {
     if (this.schemaSync.enabled) {
       await this.syncSchemas(database);
     }
-    this.emit("initialized", {
+    this.emit("db:plugin:initialized", {
       replicator: this.name,
       database: this.database || "postgres",
       resources: Object.keys(this.resources)
@@ -27005,7 +27005,7 @@ class Database extends EventEmitter {
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
       }
-      this.emit("db:resource:updated", name);
+      this.emit("s3db.resourceUpdated", name);
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -27042,7 +27042,7 @@ class Database extends EventEmitter {
       this._applyMiddlewares(resource, middlewares);
     }
     await this.uploadMetadataFile();
-    this.emit("db:resource:created", name);
+    this.emit("s3db.resourceCreated", name);
     return resource;
   }
   /**
@@ -27168,6 +27168,7 @@ class Database extends EventEmitter {
     return !!this.savedMetadata;
   }
   async disconnect() {
+    await this.emit("disconnected", /* @__PURE__ */ new Date());
     await tryFn(async () => {
       if (this.pluginList && this.pluginList.length > 0) {
         for (const plugin of this.pluginList) {
@@ -27318,7 +27319,7 @@ class Database extends EventEmitter {
     for (const hook of hooks) {
       const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
       if (!ok) {
-        this.emit("db:hook-error", { event, error, context });
+        this.emit("hookError", { event, error, context });
         if (this.strictHooks) {
           throw new DatabaseError(`Hook execution failed for event '${event}': ${error.message}`, {
             event,
@@ -27877,7 +27878,7 @@ class SqsReplicator extends BaseReplicator {
         region: this.region,
         credentials: this.config.credentials
       });
-      this.emit("initialized", {
+      this.emit("db:plugin:initialized", {
         replicator: this.name,
         queueUrl: this.queueUrl,
         queues: this.queues,
@@ -28606,7 +28607,7 @@ class WebhookReplicator extends BaseReplicator {
       });
       throw error;
     }
-    this.emit("initialized", {
+    this.emit("db:plugin:initialized", {
       replicator: this.name,
       url: this.url,
       method: this.method,
