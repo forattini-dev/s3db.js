@@ -856,63 +856,63 @@ async function cacheSetWithRetry(cache, key, value, retries = 3) {
 
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**Q: Qual driver de cache devo usar?**
-A: Depende do seu caso de uso:
-- `memory`: Desenvolvimento e cache temporário (mais rápido)
-- `filesystem`: Produção single-server (persiste entre restarts)
-- `s3`: Multi-server/distributed (compartilhado entre instâncias)
+**Q: Which cache driver should I use?**
+A: Depends on your use case:
+- `memory`: Development and temporary cache (fastest)
+- `filesystem`: Production single-server (persists between restarts)
+- `s3`: Multi-server/distributed (shared between instances)
 
-**Q: O cache funciona automaticamente?**
-A: Sim! Após instalar o plugin, todas as operações de leitura (`fetched`, `list`, `count`, `query`) são automaticamente cacheadas.
+**Q: Does cache work automatically?**
+A: Yes! After installing the plugin, all read operations (`fetched`, `list`, `count`, `query`) are automatically cached.
 
-**Q: Como pular o cache em uma operação específica?**
-A: Passe `skipCache: true` como opção:
+**Q: How to skip cache for a specific operation?**
+A: Pass `skipCache: true` as an option:
 ```javascript
 const user = await users.get('id123', { skipCache: true });
 ```
 
-### Configuração
+### Configuration
 
-**Q: Como configurar TTL (time-to-live)?**
-A: Use a opção `ttl` em milissegundos:
+**Q: How to configure TTL (time-to-live)?**
+A: Use the `ttl` option in milliseconds:
 ```javascript
 new CachePlugin({
   driver: 'memory',
-  ttl: 60000  // 60 segundos
+  ttl: 60000  // 60 seconds
 })
 ```
 
-**Q: Posso cachear apenas recursos específicos?**
-A: Sim! Use `include` ou `exclude`:
+**Q: Can I cache only specific resources?**
+A: Yes! Use `include` or `exclude`:
 ```javascript
 new CachePlugin({
-  include: ['users', 'products'],  // Apenas estes recursos
-  exclude: ['logs']                // Todos exceto logs
+  include: ['users', 'products'],  // Only these resources
+  exclude: ['logs']                // All except logs
 })
 ```
 
-**Q: Como evitar cachear recursos criados por plugins?**
-A: Por padrão, recursos com `createdBy !== 'user'` já não são cacheados. Para incluí-los explicitamente, adicione ao array `include`.
+**Q: How to avoid caching plugin-created resources?**
+A: By default, resources with `createdBy !== 'user'` are not cached. To explicitly include them, add to the `include` array.
 
-### Operações
+### Operations
 
-**Q: Como limpar o cache manualmente?**
-A: Use os métodos do plugin:
+**Q: How to manually clear cache?**
+A: Use the plugin methods:
 ```javascript
-// Limpar cache de um recurso
+// Clear cache for a resource
 await users.cache.clear();
 
-// Limpar todo o cache
+// Clear all cache
 await database.plugins.cache.clearAllCache();
 
-// Partition-aware: limpar partição específica
+// Partition-aware: clear specific partition
 await resource.clearPartitionCache('byRegion', { region: 'US' });
 ```
 
-**Q: Como preaquecer o cache?**
-A: Use o método `warmCache`:
+**Q: How to warm up the cache?**
+A: Use the `warmCache` method:
 ```javascript
 await database.plugins.cache.warmCache('users', {
   includePartitions: true,
@@ -922,31 +922,31 @@ await database.plugins.cache.warmCache('users', {
 
 ### Performance
 
-**Q: Qual driver é mais rápido?**
-A: `memory` é o mais rápido (~2ms vs 180ms do S3). `filesystem` é intermediário. `s3` tem maior latência mas permite compartilhamento entre instâncias.
+**Q: Which driver is fastest?**
+A: `memory` is fastest (~2ms vs 180ms from S3). `filesystem` is intermediate. `s3` has higher latency but allows sharing between instances.
 
-**Q: Como analisar o uso do cache?**
-A: Use `analyzeCacheUsage()` com partition-aware cache:
+**Q: How to analyze cache usage?**
+A: Use `analyzeCacheUsage()` with partition-aware cache:
 ```javascript
 const analysis = await database.plugins.cache.analyzeCacheUsage();
-// Retorna: most used partitions, least used, recomendações
+// Returns: most used partitions, least used, recommendations
 ```
 
-**Q: Como configurar o tamanho máximo?**
-A: Você tem 3 opções (escolha apenas UMA):
+**Q: How to configure maximum size?**
+A: You have 3 options (choose only ONE):
 
-1. **Por número de itens** (simples):
+1. **By item count** (simple):
 ```javascript
 new CachePlugin({
   driver: 'memory',
-  maxSize: 1000,  // Máximo 1000 itens
+  maxSize: 1000,  // Maximum 1000 items
   config: {
     evictionPolicy: 'lru'
   }
 })
 ```
 
-2. **Por bytes absolutos** (ambientes fixos):
+2. **By absolute bytes** (fixed environments):
 ```javascript
 new CachePlugin({
   driver: 'memory',
@@ -957,21 +957,21 @@ new CachePlugin({
 })
 ```
 
-3. **Por porcentagem** (containers/cloud - RECOMENDADO):
+3. **By percentage** (containers/cloud - RECOMMENDED):
 ```javascript
 new CachePlugin({
   driver: 'memory',
   config: {
-    maxMemoryPercent: 0.1,  // 10% da memória do sistema
+    maxMemoryPercent: 0.1,  // 10% of system memory
     enableCompression: true
   }
 })
 ```
 
-⚠️ **IMPORTANTE**: Não use `maxMemoryBytes` e `maxMemoryPercent` juntos - o sistema lançará um erro!
+⚠️ **IMPORTANT**: Don't use `maxMemoryBytes` and `maxMemoryPercent` together - the system will throw an error!
 
-**Q: Como monitorar o uso de memória do cache?**
-A: Use o método `getMemoryStats()` do driver:
+**Q: How to monitor cache memory usage?**
+A: Use the driver's `getMemoryStats()` method:
 ```javascript
 const cache = database.plugins.cache.driver;
 const stats = cache.getMemoryStats();
@@ -985,48 +985,48 @@ console.log('Memory Stats:', {
   evicted: stats.evictedDueToMemory
 });
 
-// Alerta se uso alto
+// Alert if usage is high
 if (stats.memoryUsagePercent > 90) {
   console.warn('⚠️ Cache memory usage above 90%!');
 }
 ```
 
-**Q: O que acontece quando o limite de memória é atingido?**
-A: O cache automaticamente remove os itens mais antigos (eviction) até ter espaço suficiente. Você pode monitorar quantos itens foram removidos com `stats.evictedDueToMemory`.
+**Q: What happens when memory limit is reached?**
+A: Cache automatically removes oldest items (eviction) until there's enough space. You can monitor how many items were removed with `stats.evictedDueToMemory`.
 
 ### Troubleshooting
 
-**Q: O cache não está sendo invalidado após updates?**
-A: Verifique se o plugin foi instalado ANTES de criar os recursos. O plugin instala middlewares nos recursos durante `onInstall()`.
+**Q: Cache is not being invalidated after updates?**
+A: Check if the plugin was installed BEFORE creating the resources. The plugin installs middlewares on resources during `onInstall()`.
 
-**Q: Estou vendo dados desatualizados?**
-A: Reduza o TTL ou use `skipCache: true` para operações que precisam dados em tempo real.
+**Q: I'm seeing stale data?**
+A: Reduce TTL or use `skipCache: true` for operations that need real-time data.
 
 **Q: Memory usage too high / OOM errors?**
-A: Configure `maxMemoryBytes` ou `maxMemoryPercent`:
+A: Configure `maxMemoryBytes` or `maxMemoryPercent`:
 ```javascript
 new CachePlugin({
   driver: 'memory',
   config: {
-    maxMemoryPercent: 0.1,  // Limite a 10% da memória
-    enableCompression: true  // Reduz uso de memória
+    maxMemoryPercent: 0.1,  // Limit to 10% of memory
+    enableCompression: true  // Reduces memory usage
   }
 })
 ```
 
-**Q: Como debugar problemas de cache?**
-A: Ative o modo verbose e monitore estatísticas:
+**Q: How to debug cache issues?**
+A: Enable verbose mode and monitor statistics:
 ```javascript
 new CachePlugin({
   verbose: true,
   config: { enableStats: true }
 })
 
-// Verifique estatísticas
+// Check statistics
 const stats = resource.cache.stats();
 console.log(`Hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
 
-// Verifique memória
+// Check memory
 const memStats = resource.cache.getMemoryStats();
 console.log(`Memory: ${memStats.memoryUsagePercent.toFixed(1)}%`);
 ```

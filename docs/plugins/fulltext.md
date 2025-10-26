@@ -1034,121 +1034,121 @@ setInterval(maintainIndexes, 7 * 24 * 60 * 60 * 1000);
 
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**P: O que o FullTextPlugin faz?**
-R: Adiciona busca full-text em campos de texto usando índices invertidos armazenados no S3, similar a Elasticsearch mas usando S3DB.
+**Q: What does the FullTextPlugin do?**
+A: Adds full-text search on text fields using inverted indexes stored in S3, similar to Elasticsearch but using S3DB.
 
 **Q: How does indexing work?**
-R: Tokeniza o texto, cria índices invertidos (palavra → IDs dos registros) e armazena no recurso `plg_fulltext_indexes`.
+A: Tokenizes text, creates inverted indexes (word → record IDs) and stores them in the `plg_fulltext_indexes` resource.
 
-**P: Suporta acentuação e caracteres especiais?**
-R: Sim, preserva caracteres acentuados (UTF-8 completo) e normaliza automaticamente durante a tokenização.
+**Q: Does it support accents and special characters?**
+A: Yes, preserves accented characters (full UTF-8) and automatically normalizes during tokenization.
 
-### Configuração
+### Configuration
 
-**P: Como configurar quais campos indexar?**
-R: Use a opção `fields`:
+**Q: How to configure which fields to index?**
+A: Use the `fields` option:
 ```javascript
 new FullTextPlugin({
   fields: ['title', 'description', 'tags']
 })
 ```
 
-**P: Como configurar tamanho mínimo de palavra?**
-R: Use `minWordLength`:
+**Q: How to configure minimum word length?**
+A: Use `minWordLength`:
 ```javascript
 new FullTextPlugin({
-  minWordLength: 2  // Indexa palavras com 2+ caracteres (padrão: 3)
+  minWordLength: 2  // Index words with 2+ characters (default: 3)
 })
 ```
 
-**P: Como configurar número máximo de resultados?**
-R: Use `maxResults`:
+**Q: How to configure maximum number of results?**
+A: Use `maxResults`:
 ```javascript
 new FullTextPlugin({
-  maxResults: 50  // Padrão: 100
+  maxResults: 50  // Default: 100
 })
 ```
 
-### Operações
+### Operations
 
-**P: Como fazer uma busca?**
-R: Use os métodos de busca:
+**Q: How to perform a search?**
+A: Use the search methods:
 ```javascript
-// Busca e retorna apenas IDs com score
+// Search and return only IDs with score
 const results = await fulltextPlugin.search('articles', 'javascript async', {
   limit: 20,
   exactMatch: false
 });
 
-// Busca e retorna registros completos com _searchScore
+// Search and return full records with _searchScore
 const articles = await fulltextPlugin.searchRecords('articles', 'javascript async', {
   limit: 20,
-  fields: ['title', 'content']  // Busca apenas nestes campos
+  fields: ['title', 'content']  // Search only these fields
 });
 ```
 
-**P: Qual a diferença entre exact match e partial match?**
-R:
-- `exactMatch: true` busca palavras exatas
-- `exactMatch: false` (padrão) busca palavras que começam com o termo (ex: "java" encontra "javascript")
+**Q: What's the difference between exact match and partial match?**
+A:
+- `exactMatch: true` searches for exact words
+- `exactMatch: false` (default) searches for words that start with the term (e.g., "java" finds "javascript")
 
-**P: Como rebuild os índices?**
-R: Use `rebuildIndex`:
+**Q: How to rebuild indexes?**
+A: Use `rebuildIndex`:
 ```javascript
-// Rebuild de um recurso
+// Rebuild a single resource
 await fulltextPlugin.rebuildIndex('articles');
 
-// Rebuild de todos os recursos
+// Rebuild all resources
 await fulltextPlugin.rebuildAllIndexes();
 ```
 
-### Manutenção
+### Maintenance
 
-**P: Como obter estatísticas dos índices?**
-R: Use `getIndexStats`:
+**Q: How to get index statistics?**
+A: Use `getIndexStats`:
 ```javascript
 const stats = await fulltextPlugin.getIndexStats();
-// Retorna: totalIndexes, resources, totalWords, avgWordsPerResource, etc.
+// Returns: totalIndexes, resources, totalWords, avgWordsPerResource, etc.
 ```
 
-**P: Como limpar índices?**
-R: Use `clearIndex` ou `clearAllIndexes`:
+**Q: How to clear indexes?**
+A: Use `clearIndex` or `clearAllIndexes`:
 ```javascript
 await fulltextPlugin.clearIndex('articles');
 await fulltextPlugin.clearAllIndexes();
 ```
 
-**P: Os índices são atualizados automaticamente?**
-R: Sim, o plugin monitora insert/update/delete e atualiza os índices em tempo real automaticamente.
+**Q: Are indexes updated automatically?**
+A: Yes, the plugin monitors insert/update/delete and automatically updates indexes in real-time.
 
 ### Performance
 
-**P: Qual o impacto de performance da indexação?**
-R: Mínimo em operações de leitura. Inserts/updates são ~10-30% mais lentos devido à tokenização e atualização de índices.
+**Q: What is the performance impact of indexing?**
+A: Minimal on read operations. Inserts/updates are ~10-30% slower due to tokenization and index updates.
 
-**P: Como otimizar a busca?**
-R:
-1. Use `fields` específicos ao invés de buscar todos os campos
-2. Use `limit` baixo para retornar apenas resultados relevantes
-3. Use `exactMatch: true` quando possível
-4. Considere pagination com `offset`
+**Q: How to optimize search?**
+A:
+1. Use specific `fields` instead of searching all fields
+2. Use low `limit` to return only relevant results
+3. Use `exactMatch: true` when possible
+4. Consider pagination with `offset`
 
-**P: Posso usar em produção?**
-R: Sim, mas para volumes muito grandes (milhões de registros), considere uma solução dedicada como Elasticsearch ou Typesense.
+**Q: Can I use it in production?**
+A: Yes, but for very large volumes (millions of records), consider a dedicated solution like Elasticsearch or Typesense.
 
 ### Troubleshooting
 
-**P: Busca não retorna resultados esperados?**
-R: Verifique:
-1. Palavras têm tamanho >= `minWordLength`
-2. Campos estão incluídos em `fields`
-3. Índices foram criados (use `getIndexStats`)
-4. Use `exactMatch: false` para busca parcial
+**Q: Search is not returning expected results?**
+A: Check:
+1. Words have length >= `minWordLength`
+2. Fields are included in `fields`
+3. Indexes were created (use `getIndexStats`)
+4. Use `exactMatch: false` for partial search
 
-**P: Como debugar índices?**
-R: Consulte diretamente o recurso de índices:
+**Q: How to debug indexes?**
+A: Query the index resource directly:
 ```javascript
 const indexes = await database.resources.plg_fulltext_indexes.list();
 console.log(indexes);
