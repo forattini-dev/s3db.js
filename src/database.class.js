@@ -1091,7 +1091,7 @@ export class Database extends EventEmitter {
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
       }
-      this.emit("s3db.resourceUpdated", name);
+      this.emit("db:resource-updated", name);
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -1131,7 +1131,7 @@ export class Database extends EventEmitter {
     }
 
     await this.uploadMetadataFile();
-    this.emit("s3db.resourceCreated", name);
+    this.emit("db:resource-created", name);
     return resource;
   }
 

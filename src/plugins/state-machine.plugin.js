@@ -133,8 +133,44 @@ export class StateMachinePlugin extends Plugin {
     this.machines = new Map();
     this.triggerIntervals = [];
     this.schedulerPlugin = null;
+    this._pendingEventHandlers = new Set();
 
     this._validateConfiguration();
+  }
+
+  /**
+   * Wait for all pending event handlers to complete
+   * Useful when working with async events (asyncEvents: true)
+   * @param {number} timeout - Maximum time to wait in milliseconds (default: 5000)
+   * @returns {Promise<void>}
+   */
+  async waitForPendingEvents(timeout = 5000) {
+    if (this._pendingEventHandlers.size === 0) {
+      return; // No pending events
+    }
+
+    const startTime = Date.now();
+
+    while (this._pendingEventHandlers.size > 0) {
+      if (Date.now() - startTime > timeout) {
+        throw new StateMachineError(
+          `Timeout waiting for ${this._pendingEventHandlers.size} pending event handlers`,
+          {
+            operation: 'waitForPendingEvents',
+            pendingCount: this._pendingEventHandlers.size,
+            timeout
+          }
+        );
+      }
+
+      // Wait for at least one handler to complete
+      if (this._pendingEventHandlers.size > 0) {
+        await Promise.race(Array.from(this._pendingEventHandlers));
+      }
+
+      // Small delay before checking again
+      await new Promise(resolve => setImmediate(resolve));
+    }
   }
 
   _validateConfiguration() {
@@ -1331,10 +1367,29 @@ export class StateMachinePlugin extends Plugin {
       // Resource events are typically: inserted, updated, deleted
       const baseEvent = typeof baseEventName === 'function' ? 'updated' : baseEventName;
 
-      eventSource.on(baseEvent, eventHandler);
+      // IMPORTANT: For resources with async events, we need to ensure the event handler
+      // completes before returning control. We wrap the handler to track pending operations.
+      const wrappedHandler = async (...args) => {
+        // Track this as a pending operation
+        const handlerPromise = eventHandler(...args);
+
+        // Store promise if state machine has event tracking
+        if (!this._pendingEventHandlers) {
+          this._pendingEventHandlers = new Set();
+        }
+        this._pendingEventHandlers.add(handlerPromise);
+
+        try {
+          await handlerPromise;
+        } finally {
+          this._pendingEventHandlers.delete(handlerPromise);
+        }
+      };
+
+      eventSource.on(baseEvent, wrappedHandler);
 
       if (this.config.verbose) {
-        console.log(`[StateMachinePlugin] Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}'`);
+        console.log(`[StateMachinePlugin] Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}' (async-safe)`);
       }
     } else {
       // Original behavior: listen to database or plugin events

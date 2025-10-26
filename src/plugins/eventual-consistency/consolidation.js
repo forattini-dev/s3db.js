@@ -140,7 +140,7 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     }
 
     if (emitFn) {
-      emitFn('eventual-consistency.consolidated', {
+      emitFn('plg:eventual-consistency:consolidated', {
         resource: config.resource,
         field: config.field,
         recordCount: uniqueIds.length,
@@ -157,7 +157,7 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
       error
     );
     if (emitFn) {
-      emitFn('eventual-consistency.consolidation-error', error);
+      emitFn('plg:eventual-consistency:consolidation-error', error);
     }
   }
 }

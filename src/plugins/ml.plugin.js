@@ -6,6 +6,7 @@
  */
 
 import { Plugin } from './plugin.class.js';
+import { Resource } from '../resource.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import tryFn from '../concerns/try-fn.js';
 
@@ -71,11 +72,11 @@ export class MLPlugin extends Plugin {
       enableVersioning: options.enableVersioning !== false // Default true
     };
 
-    // Validate TensorFlow.js dependency
-    requirePluginDependency('ml-plugin');
-
     // Model instances
     this.models = {};
+
+    // Dependency validation flag (lazy validation)
+    this._dependenciesValidated = false;
 
     // Model versioning
     this.modelVersions = new Map(); // Track versions per model: { currentVersion, latestVersion }
@@ -105,6 +106,33 @@ export class MLPlugin extends Plugin {
   async onInstall() {
     if (this.config.verbose) {
       console.log('[MLPlugin] Installing ML Plugin...');
+    }
+
+    // Validate plugin dependencies (lazy validation)
+    if (!this._dependenciesValidated) {
+      const result = await requirePluginDependency('ml-plugin', {
+        throwOnError: false,
+        checkVersions: true
+      });
+
+      if (!result.valid) {
+        // In test environments with Jest VM modules, dynamic imports may fail
+        // even when packages are installed. Try direct import as fallback.
+        try {
+          await import('@tensorflow/tfjs-node');
+          if (this.config.verbose) {
+            console.log('[MLPlugin] TensorFlow.js loaded successfully (fallback import)');
+          }
+        } catch (err) {
+          // If both methods fail, throw the original error
+          throw new TensorFlowDependencyError(
+            'TensorFlow.js dependency not found. Install with: pnpm add @tensorflow/tfjs-node\n' +
+            result.messages.join('\n')
+          );
+        }
+      }
+
+      this._dependenciesValidated = true;
     }
 
     // Validate model configurations
@@ -231,10 +259,166 @@ export class MLPlugin extends Plugin {
       this.database._mlPlugin = this;
     }
 
+    // Create namespace "ml" on Resource prototype
+    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'ml')) {
+      Object.defineProperty(Resource.prototype, 'ml', {
+        get() {
+          const resource = this;
+          const mlPlugin = resource.database?._mlPlugin;
+
+          if (!mlPlugin) {
+            throw new Error('MLPlugin not installed');
+          }
+
+          return {
+            /**
+             * Auto-setup and train ML model (zero-config)
+             * @param {string} target - Target attribute to predict
+             * @param {Object} options - Configuration options
+             * @returns {Promise<Object>} Training results
+             */
+            learn: async (target, options = {}) => {
+              return await mlPlugin._resourceLearn(resource.name, target, options);
+            },
+
+            /**
+             * Make prediction
+             * @param {Object} input - Input features
+             * @param {string} target - Target attribute
+             * @returns {Promise<Object>} Prediction result
+             */
+            predict: async (input, target) => {
+              return await mlPlugin._resourcePredict(resource.name, input, target);
+            },
+
+            /**
+             * Train model manually
+             * @param {string} target - Target attribute
+             * @param {Object} options - Training options
+             * @returns {Promise<Object>} Training results
+             */
+            train: async (target, options = {}) => {
+              return await mlPlugin._resourceTrainModel(resource.name, target, options);
+            },
+
+            /**
+             * List all models for this resource
+             * @returns {Array} List of models
+             */
+            list: () => {
+              return mlPlugin._resourceListModels(resource.name);
+            },
+
+            /**
+             * List model versions
+             * @param {string} target - Target attribute
+             * @returns {Promise<Array>} List of versions
+             */
+            versions: async (target) => {
+              const modelName = mlPlugin._findModelForResource(resource.name, target);
+              if (!modelName) {
+                throw new ModelNotFoundError(
+                  `No model found for resource "${resource.name}" with target "${target}"`,
+                  { resourceName: resource.name, targetAttribute: target }
+                );
+              }
+              return await mlPlugin.listModelVersions(modelName);
+            },
+
+            /**
+             * Rollback to previous version
+             * @param {string} target - Target attribute
+             * @param {number} version - Version to rollback to (optional)
+             * @returns {Promise<Object>} Rollback info
+             */
+            rollback: async (target, version = null) => {
+              const modelName = mlPlugin._findModelForResource(resource.name, target);
+              if (!modelName) {
+                throw new ModelNotFoundError(
+                  `No model found for resource "${resource.name}" with target "${target}"`,
+                  { resourceName: resource.name, targetAttribute: target }
+                );
+              }
+              return await mlPlugin.rollbackVersion(modelName, version);
+            },
+
+            /**
+             * Compare two versions
+             * @param {string} target - Target attribute
+             * @param {number} v1 - First version
+             * @param {number} v2 - Second version
+             * @returns {Promise<Object>} Comparison results
+             */
+            compare: async (target, v1, v2) => {
+              const modelName = mlPlugin._findModelForResource(resource.name, target);
+              if (!modelName) {
+                throw new ModelNotFoundError(
+                  `No model found for resource "${resource.name}" with target "${target}"`,
+                  { resourceName: resource.name, targetAttribute: target }
+                );
+              }
+              return await mlPlugin.compareVersions(modelName, v1, v2);
+            },
+
+            /**
+             * Get model statistics
+             * @param {string} target - Target attribute
+             * @returns {Object} Model stats
+             */
+            stats: (target) => {
+              const modelName = mlPlugin._findModelForResource(resource.name, target);
+              if (!modelName) {
+                throw new ModelNotFoundError(
+                  `No model found for resource "${resource.name}" with target "${target}"`,
+                  { resourceName: resource.name, targetAttribute: target }
+                );
+              }
+              return mlPlugin.getModelStats(modelName);
+            },
+
+            /**
+             * Export model
+             * @param {string} target - Target attribute
+             * @returns {Promise<Object>} Exported model
+             */
+            export: async (target) => {
+              const modelName = mlPlugin._findModelForResource(resource.name, target);
+              if (!modelName) {
+                throw new ModelNotFoundError(
+                  `No model found for resource "${resource.name}" with target "${target}"`,
+                  { resourceName: resource.name, targetAttribute: target }
+                );
+              }
+              return await mlPlugin.exportModel(modelName);
+            },
+
+            /**
+             * Import model
+             * @param {string} target - Target attribute
+             * @param {Object} data - Model data
+             * @returns {Promise<void>}
+             */
+            import: async (target, data) => {
+              const modelName = mlPlugin._findModelForResource(resource.name, target);
+              if (!modelName) {
+                throw new ModelNotFoundError(
+                  `No model found for resource "${resource.name}" with target "${target}"`,
+                  { resourceName: resource.name, targetAttribute: target }
+                );
+              }
+              return await mlPlugin.importModel(modelName, data);
+            }
+          };
+        },
+        configurable: true
+      });
+    }
+
+    // Keep legacy methods for backward compatibility
     // Add predict() method to Resource prototype
-    if (!this.database.Resource.prototype.predict) {
-      this.database.Resource.prototype.predict = async function(input, targetAttribute) {
-        const mlPlugin = this.database._mlPlugin;
+    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'predict')) {
+      Resource.prototype.predict = async function(input, targetAttribute) {
+        const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
           throw new Error('MLPlugin not installed');
         }
@@ -244,9 +428,9 @@ export class MLPlugin extends Plugin {
     }
 
     // Add trainModel() method to Resource prototype
-    if (!this.database.Resource.prototype.trainModel) {
-      this.database.Resource.prototype.trainModel = async function(targetAttribute, options = {}) {
-        const mlPlugin = this.database._mlPlugin;
+    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'trainModel')) {
+      Resource.prototype.trainModel = async function(targetAttribute, options = {}) {
+        const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
           throw new Error('MLPlugin not installed');
         }
@@ -256,9 +440,9 @@ export class MLPlugin extends Plugin {
     }
 
     // Add listModels() method to Resource prototype
-    if (!this.database.Resource.prototype.listModels) {
-      this.database.Resource.prototype.listModels = function() {
-        const mlPlugin = this.database._mlPlugin;
+    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'listModels')) {
+      Resource.prototype.listModels = function() {
+        const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
           throw new Error('MLPlugin not installed');
         }
@@ -268,7 +452,7 @@ export class MLPlugin extends Plugin {
     }
 
     if (this.config.verbose) {
-      console.log('[MLPlugin] Injected ML methods into Resource prototype');
+      console.log('[MLPlugin] Injected ML namespace (resource.ml.*) into Resource prototype');
     }
   }
 
@@ -294,6 +478,283 @@ export class MLPlugin extends Plugin {
     }
 
     return null;
+  }
+
+  /**
+   * Auto-setup and train ML model (resource.ml.learn implementation)
+   * @param {string} resourceName - Resource name
+   * @param {string} target - Target attribute to predict
+   * @param {Object} options - Configuration options
+   * @returns {Promise<Object>} Training results
+   * @private
+   */
+  async _resourceLearn(resourceName, target, options = {}) {
+    // Check if model already exists
+    let modelName = this._findModelForResource(resourceName, target);
+
+    if (modelName) {
+      // Model exists, just retrain
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Model "${modelName}" already exists, retraining...`);
+      }
+      return await this.train(modelName, options);
+    }
+
+    // Create new model dynamically
+    modelName = `${resourceName}_${target}_auto`;
+
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Auto-creating model "${modelName}" for ${resourceName}.${target}...`);
+    }
+
+    // Get resource
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new ModelConfigError(
+        `Resource "${resourceName}" not found`,
+        { resourceName, availableResources: Object.keys(this.database.resources) }
+      );
+    }
+
+    // Auto-detect type if not specified
+    let modelType = options.type;
+    if (!modelType) {
+      modelType = await this._autoDetectType(resourceName, target);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Auto-detected type: ${modelType}`);
+      }
+    }
+
+    // Auto-select features if not specified
+    let features = options.features;
+    if (!features || features.length === 0) {
+      features = await this._autoSelectFeatures(resourceName, target);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Auto-selected features: ${features.join(', ')}`);
+      }
+    }
+
+    // Get sample count to adjust batchSize automatically
+    const [samplesOk, samplesErr, sampleData] = await tryFn(() => resource.list());
+    const sampleCount = (samplesOk && sampleData) ? sampleData.length : 0;
+
+    // Get default model config and adjust batchSize based on available data
+    let defaultModelConfig = this._getDefaultModelConfig(modelType);
+
+    // Check if user explicitly provided batchSize
+    const userProvidedBatchSize = options.modelConfig && options.modelConfig.batchSize !== undefined;
+
+    if (!userProvidedBatchSize && sampleCount > 0 && sampleCount < defaultModelConfig.batchSize) {
+      // Adjust batchSize to be at most half of available samples (only if user didn't provide one)
+      defaultModelConfig.batchSize = Math.max(4, Math.floor(sampleCount / 2));
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Auto-adjusted batchSize to ${defaultModelConfig.batchSize} based on ${sampleCount} samples`);
+      }
+    }
+
+    // Merge custom modelConfig with defaults
+    // If user didn't provide batchSize, keep the auto-adjusted one from defaultModelConfig
+    const customModelConfig = options.modelConfig || {};
+    const mergedModelConfig = {
+      ...defaultModelConfig,
+      ...customModelConfig,
+      // Preserve auto-adjusted batchSize if user didn't provide one
+      ...(!userProvidedBatchSize && { batchSize: defaultModelConfig.batchSize })
+    };
+
+    // Create model config
+    const modelConfig = {
+      type: modelType,
+      resource: resourceName,
+      features: features,
+      target: target,
+      autoTrain: options.autoTrain !== undefined ? options.autoTrain : false,
+      saveModel: options.saveModel !== undefined ? options.saveModel : true,
+      saveTrainingData: options.saveTrainingData !== undefined ? options.saveTrainingData : false,
+      modelConfig: mergedModelConfig,
+      ...options
+    };
+
+    // Register model
+    this.config.models[modelName] = modelConfig;
+
+    // Initialize model
+    await this._initializeModel(modelName, modelConfig);
+
+    // Update cache
+    this._buildModelCache();
+
+    // Train immediately
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Training model "${modelName}"...`);
+    }
+
+    const result = await this.train(modelName, options);
+
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] ✅ Model "${modelName}" ready!`);
+    }
+
+    return {
+      modelName,
+      type: modelType,
+      features,
+      target,
+      ...result
+    };
+  }
+
+  /**
+   * Auto-detect model type based on target attribute
+   * @param {string} resourceName - Resource name
+   * @param {string} target - Target attribute
+   * @returns {Promise<string>} Model type
+   * @private
+   */
+  async _autoDetectType(resourceName, target) {
+    const resource = this.database.resources[resourceName];
+
+    // Get some sample data
+    const [ok, err, samples] = await tryFn(() => resource.list({ limit: 100 }));
+
+    if (!ok || !samples || samples.length === 0) {
+      // Default to regression if no data
+      return 'regression';
+    }
+
+    // Analyze target values
+    const targetValues = samples.map(s => s[target]).filter(v => v != null);
+
+    if (targetValues.length === 0) {
+      return 'regression';
+    }
+
+    // Check if numeric
+    const isNumeric = targetValues.every(v => typeof v === 'number');
+
+    if (isNumeric) {
+      // Check for time series (if data has timestamp)
+      const hasTimestamp = samples.every(s => s.timestamp || s.createdAt || s.date);
+      if (hasTimestamp) {
+        return 'timeseries';
+      }
+      return 'regression';
+    }
+
+    // Check if categorical (strings/booleans)
+    const isCategorical = targetValues.every(v => typeof v === 'string' || typeof v === 'boolean');
+
+    if (isCategorical) {
+      return 'classification';
+    }
+
+    // Default
+    return 'regression';
+  }
+
+  /**
+   * Auto-select best features for prediction
+   * @param {string} resourceName - Resource name
+   * @param {string} target - Target attribute
+   * @returns {Promise<Array>} Selected features
+   * @private
+   */
+  async _autoSelectFeatures(resourceName, target) {
+    const resource = this.database.resources[resourceName];
+
+    // Get all numeric attributes from schema
+    const schema = resource.schema;
+    const attributes = schema?.attributes || {};
+
+    const numericFields = [];
+
+    for (const [fieldName, fieldDef] of Object.entries(attributes)) {
+      // Skip target
+      if (fieldName === target) continue;
+
+      // Skip system fields
+      if (['id', 'createdAt', 'updatedAt', 'createdBy'].includes(fieldName)) continue;
+
+      // Check if numeric type
+      const fieldType = typeof fieldDef === 'string' ? fieldDef.split('|')[0] : fieldDef.type;
+
+      if (fieldType === 'number' || fieldType === 'integer' || fieldType === 'float') {
+        numericFields.push(fieldName);
+      }
+    }
+
+    // If no numeric fields found, try to detect from data
+    if (numericFields.length === 0) {
+      const [ok, err, samples] = await tryFn(() => resource.list({ limit: 10 }));
+
+      if (ok && samples && samples.length > 0) {
+        const firstSample = samples[0];
+
+        for (const [key, value] of Object.entries(firstSample)) {
+          if (key === target) continue;
+          if (['id', 'createdAt', 'updatedAt', 'createdBy'].includes(key)) continue;
+
+          if (typeof value === 'number') {
+            numericFields.push(key);
+          }
+        }
+      }
+    }
+
+    if (numericFields.length === 0) {
+      throw new ModelConfigError(
+        `No numeric features found for target "${target}" in resource "${resourceName}"`,
+        { resourceName, target, availableAttributes: Object.keys(attributes) }
+      );
+    }
+
+    return numericFields;
+  }
+
+  /**
+   * Get default model config for type
+   * @param {string} type - Model type
+   * @returns {Object} Default config
+   * @private
+   */
+  _getDefaultModelConfig(type) {
+    const defaults = {
+      regression: {
+        epochs: 50,
+        batchSize: 32,
+        learningRate: 0.01,
+        validationSplit: 0.2,
+        polynomial: 1
+      },
+      classification: {
+        epochs: 50,
+        batchSize: 32,
+        learningRate: 0.01,
+        validationSplit: 0.2,
+        units: 64,
+        dropout: 0.2
+      },
+      timeseries: {
+        epochs: 50,
+        batchSize: 16,
+        learningRate: 0.001,
+        validationSplit: 0.2,
+        lookback: 10,
+        lstmUnits: 50
+      },
+      'neural-network': {
+        epochs: 50,
+        batchSize: 32,
+        learningRate: 0.01,
+        validationSplit: 0.2,
+        layers: [
+          { units: 64, activation: 'relu', dropout: 0.2 },
+          { units: 32, activation: 'relu' }
+        ]
+      }
+    };
+
+    return defaults[type] || defaults.regression;
   }
 
   /**

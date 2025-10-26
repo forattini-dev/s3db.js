@@ -170,7 +170,7 @@ async function tryLoadPackage(packageName) {
     let version = null;
     try {
       const pkgJson = await import(`${packageName}/package.json`, {
-        assert: { type: 'json' }
+        with: { type: 'json' }
       });
       version = pkgJson.default?.version || pkgJson.version || null;
     } catch (e) {
