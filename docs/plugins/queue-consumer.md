@@ -912,16 +912,16 @@ const getQueueConfig = () => {
 - [Metrics Plugin](./metrics.md) - Monitor queue processing performance
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**P: O que o QueueConsumerPlugin faz?**
-R: Consome mensagens de filas externas (SQS, RabbitMQ) e executa operações no S3DB automaticamente (insert, update, delete).
+**Q: What does the QueueConsumerPlugin do?**
+A: Consumes messages from external queues (SQS, RabbitMQ) and executes operations on S3DB automatically (insert, update, delete).
 
-**P: Quais drivers estão disponíveis?**
-R: `sqs` (AWS SQS) e `rabbitmq` (RabbitMQ/AMQP).
+**Q: Which drivers are available?**
+A: `sqs` (AWS SQS) and `rabbitmq` (RabbitMQ/AMQP).
 
-**P: Qual o formato das mensagens?**
-R: JSON com `resource`, `action` e `data`:
+**Q: What is the message format?**
+A: JSON with `resource`, `action` and `data`:
 ```json
 {
   "resource": "users",
@@ -930,10 +930,10 @@ R: JSON com `resource`, `action` e `data`:
 }
 ```
 
-### Configuração
+### Configuration
 
-**P: Como configurar múltiplas filas?**
-R: Use o formato de array:
+**Q: How to configure multiple queues?**
+A: Use the array format:
 ```javascript
 new QueueConsumerPlugin({
   consumers: [
@@ -949,8 +949,8 @@ new QueueConsumerPlugin({
 })
 ```
 
-**P: Como configurar RabbitMQ?**
-R: Use o driver `rabbitmq`:
+**Q: How to configure RabbitMQ?**
+A: Use the `rabbitmq` driver:
 ```javascript
 new QueueConsumerPlugin({
   consumers: [{
@@ -967,8 +967,8 @@ new QueueConsumerPlugin({
 })
 ```
 
-**P: Como configurar concurrency?**
-R: Use a opção `concurrency`:
+**Q: How to configure concurrency?**
+A: Use the `concurrency` option:
 ```javascript
 new QueueConsumerPlugin({
   consumers: [{
@@ -981,16 +981,16 @@ new QueueConsumerPlugin({
 })
 ```
 
-### Operações
+### Operations
 
-**P: Quais actions são suportadas?**
-R: `inserted`, `updated`, `deleted`, `upsert` (dependendo do driver).
+**Q: Which actions are supported?**
+A: `inserted`, `updated`, `deleted`, `upsert` (depending on the driver).
 
-**P: Como transformar mensagens antes de processar?**
-R: Use middleware ou Lambda/function antes da fila. O plugin processa mensagens diretamente no formato esperado.
+**Q: How to transform messages before processing?**
+A: Use middleware or Lambda/function before the queue. The plugin processes messages directly in the expected format.
 
-**P: Como lidar com erros?**
-R: Configure callbacks globais:
+**Q: How to handle errors?**
+A: Configure global callbacks:
 ```javascript
 new QueueConsumerPlugin({
   consumers: [...],
@@ -999,15 +999,15 @@ new QueueConsumerPlugin({
   },
   onError: (error, rawMessage) => {
     console.error('Queue error:', error);
-    // Enviar para DLQ, notificar, etc.
+    // Send to DLQ, notify, etc.
   }
 })
 ```
 
 ### Performance
 
-**P: Como aumentar throughput?**
-R: Aumente `concurrency` e `prefetch` (RabbitMQ):
+**Q: How to increase throughput?**
+A: Increase `concurrency` and `prefetch` (RabbitMQ):
 ```javascript
 config: {
   prefetch: 20  // RabbitMQ: fetch 20 messages at a time
@@ -1019,8 +1019,8 @@ consumers: [{
 }]
 ```
 
-**P: Como reduzir latência?**
-R: Use `pollInterval` menor (SQS):
+**Q: How to reduce latency?**
+A: Use smaller `pollInterval` (SQS):
 ```javascript
 config: {
   pollInterval: 1000  // Poll every 1 second
@@ -1029,15 +1029,15 @@ config: {
 
 ### Troubleshooting
 
-**P: Mensagens não estão sendo processadas?**
-R: Verifique:
-1. Formato da mensagem (resource/action/data)
-2. Recurso existe no database
-3. Credenciais e região corretas
-4. Fila tem mensagens disponíveis
+**Q: Messages are not being processed?**
+A: Check:
+1. Message format (resource/action/data)
+2. Resource exists in database
+3. Correct credentials and region
+4. Queue has available messages
 
-**P: Como debugar o consumidor?**
-R: Ative logs detalhados:
+**Q: How to debug the consumer?**
+A: Enable detailed logs:
 ```javascript
 new QueueConsumerPlugin({
   verbose: true,
@@ -1045,8 +1045,8 @@ new QueueConsumerPlugin({
 })
 ```
 
-**P: Mensagens estão falhando silenciosamente?**
-R: Configure `onError` e verifique logs:
+**Q: Messages are failing silently?**
+A: Configure `onError` and check logs:
 ```javascript
 onError: (error, message) => {
   console.error('Processing failed:', error);

@@ -1516,25 +1516,25 @@ For a detailed comparison, see [BackupPlugin vs ReplicatorPlugin](./BACKUP_VS_RE
 - [Scheduler Plugin](./scheduler.md) - Automate backup scheduling
 ## ❓ FAQ
 
-### Básico
+### Basics
 
-**P: O que o BackupPlugin faz?**
-R: Cria backups automatizados do banco de dados inteiro ou de recursos específicos, com suporte a compressão, encriptação e múltiplos destinos.
+**Q: What does the BackupPlugin do?**
+A: Creates automated backups of the entire database or specific resources, with support for compression, encryption, and multiple destinations.
 
-**P: Quais drivers estão disponíveis?**
-R: `filesystem` (disco local), `s3` (S3 remoto), `multi` (múltiplos destinos simultâneos).
+**Q: Which drivers are available?**
+A: `filesystem` (local disk), `s3` (remote S3), `multi` (simultaneous multiple destinations).
 
-**P: Suporta backups incrementais?**
-R: Sim, use `type: 'incremental'` para backup apenas de mudanças desde o último backup completo.
+**Q: Does it support incremental backups?**
+A: Yes, use `type: 'incremental'` to backup only changes since the last full backup.
 
-**P: Qual o formato dos backups?**
-R: JSONL (JSON Lines) comprimido com gzip (.jsonl.gz) + arquivo s3db.json com metadados. Compatível com BigQuery, Athena, e outras ferramentas de analytics.
+**Q: What is the backup format?**
+A: JSONL (JSON Lines) compressed with gzip (.jsonl.gz) + s3db.json file with metadata. Compatible with BigQuery, Athena, and other analytics tools.
 
 **Q: How does streaming work?**
-R: O BackupPlugin escreve os records um por um sem carregar o dataset inteiro na memória, usando apenas ~10KB de RAM constante independente do tamanho do banco.
+A: The BackupPlugin writes records one by one without loading the entire dataset into memory, using only ~10KB of constant RAM regardless of database size.
 
-**P: Como restaurar um backup?**
-R: Use o **ImporterPlugin** para restaurar backups JSONL.gz:
+**Q: How to restore a backup?**
+A: Use the **ImporterPlugin** to restore JSONL.gz backups:
 ```javascript
 const importer = new ImporterPlugin({
   resource: 'users',
@@ -1546,12 +1546,12 @@ const importer = new ImporterPlugin({
 await db.usePlugin(importer);
 await importer.import();  // ✅ Backup restored in ~12 seconds for 1M records
 ```
-📚 Veja [ImporterPlugin docs](./importer.md) para mais detalhes sobre import/restore.
+📚 See [ImporterPlugin docs](./importer.md) for more details about import/restore.
 
-### Configuração
+### Configuration
 
-**P: Como configurar backup para filesystem?**
-R:
+**Q: How to configure filesystem backup?**
+A:
 ```javascript
 new BackupPlugin({
   driver: 'filesystem',
@@ -1567,8 +1567,8 @@ new BackupPlugin({
 })
 ```
 
-**P: Como configurar backup para S3?**
-R:
+**Q: How to configure S3 backup?**
+A:
 ```javascript
 new BackupPlugin({
   driver: 's3',
@@ -1580,8 +1580,8 @@ new BackupPlugin({
 })
 ```
 
-**P: Como configurar múltiplos destinos?**
-R:
+**Q: How to configure multiple destinations?**
+A:
 ```javascript
 new BackupPlugin({
   driver: 'multi',
@@ -1595,58 +1595,58 @@ new BackupPlugin({
 })
 ```
 
-### Operações
+### Operations
 
-**P: Como criar um backup manual?**
-R: Use `backup`:
+**Q: How to create a manual backup?**
+A: Use `backup`:
 ```javascript
 const result = await backupPlugin.backup('full');
-// Retorna: { id, type, size, duration, checksum, driverInfo }
+// Returns: { id, type, size, duration, checksum, driverInfo }
 ```
 
-**P: Como restaurar um backup?**
-R: Use `restore`:
+**Q: How to restore a backup?**
+A: Use `restore`:
 ```javascript
 const result = await backupPlugin.restore('full-2025-01-15-abc123', {
-  resources: ['users', 'orders'],  // null = todos
+  resources: ['users', 'orders'],  // null = all
   overwrite: true
 });
 ```
 
-**P: Como listar backups disponíveis?**
-R: Use `listBackups`:
+**Q: How to list available backups?**
+A: Use `listBackups`:
 ```javascript
 const backups = await backupPlugin.listBackups({ limit: 20 });
-// Retorna array de backups com metadata
+// Returns array of backups with metadata
 ```
 
-**P: Como obter status de um backup?**
-R: Use `getBackupStatus`:
+**Q: How to get backup status?**
+A: Use `getBackupStatus`:
 ```javascript
 const status = await backupPlugin.getBackupStatus('full-2025-01-15-abc123');
-// Retorna: { id, type, status, size, checksum, error, ... }
+// Returns: { id, type, status, size, checksum, error, ... }
 ```
 
-### Retenção
+### Retention
 
 **Q: How does the GFS retention policy work?**
-R: Grandfather-Father-Son:
-- Daily: mantém X backups diários
-- Weekly: mantém X backups semanais
-- Monthly: mantém X backups mensais
-- Yearly: mantém X backups anuais
+A: Grandfather-Father-Son:
+- Daily: keeps X daily backups
+- Weekly: keeps X weekly backups
+- Monthly: keeps X monthly backups
+- Yearly: keeps X yearly backups
 
-**P: Como fazer cleanup de backups antigos?**
-R: Use `cleanupBackups`:
+**Q: How to cleanup old backups?**
+A: Use `cleanupBackups`:
 ```javascript
 const cleaned = await backupPlugin.cleanupBackups();
 console.log(`Cleaned up ${cleaned.count} old backups`);
 ```
 
-### Segurança
+### Security
 
-**P: Como encriptar backups?**
-R:
+**Q: How to encrypt backups?**
+A:
 ```javascript
 new BackupPlugin({
   encryption: {
@@ -1656,22 +1656,22 @@ new BackupPlugin({
 })
 ```
 
-**P: Como verificar integridade?**
-R: A verificação por checksum é automática se `verification: true` (padrão).
+**Q: How to verify integrity?**
+A: Checksum verification is automatic if `verification: true` (default).
 
 ### Troubleshooting
 
-**P: Backup está falhando?**
-R: Verifique:
-1. Permissões de escrita no destino
-2. Espaço em disco suficiente
-3. Credenciais corretas (S3)
-4. Use `verbose: true` para logs
+**Q: Backup is failing?**
+A: Check:
+1. Write permissions on destination
+2. Sufficient disk space
+3. Correct credentials (S3)
+4. Use `verbose: true` for logs
 
-**P: Restore está falhando?**
-R: Verifique:
-1. Backup existe e está completo
-2. Checksum válido
-3. Recursos existem no database de destino
+**Q: Restore is failing?**
+A: Check:
+1. Backup exists and is complete
+2. Valid checksum
+3. Resources exist in destination database
 
 ---
