@@ -1322,7 +1322,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterGet hooks
     data = await this.executeHooks('afterGet', data);
 
-    this._emitStandardized("get", "fetched", data, data.id);
+    this._emitStandardized("fetched", data, data.id);
     const value = data;
     return value;
   }
@@ -2202,7 +2202,7 @@ export class Resource extends AsyncEventEmitter {
     const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
 
     // Always emit delete event for audit purposes, even if delete fails
-    this._emitStandardized("delete", "deleted", {
+    this._emitStandardized("deleted", {
       ...objectData,
       $before: { ...objectData },
       $after: null
@@ -2357,7 +2357,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterCount hooks
     await this.executeHooks('afterCount', { count, partition, partitionValues });
 
-    this._emitStandardized("count", "counted", count);
+    this._emitStandardized("count", count);
     return count;
   }
 
@@ -2385,7 +2385,7 @@ export class Resource extends AsyncEventEmitter {
         return result;
       });
 
-    this._emitStandardized("insertMany", "inserted-many", objects.length);
+    this._emitStandardized("inserted-many", objects.length);
     return results;
   }
 
@@ -2435,7 +2435,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterDeleteMany hooks
     await this.executeHooks('afterDeleteMany', { ids, results });
 
-    this._emitStandardized("deleteMany", "deleted-many", ids.length);
+    this._emitStandardized("deleted-many", ids.length);
     return results;
   }
 
@@ -2449,7 +2449,7 @@ export class Resource extends AsyncEventEmitter {
     const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
 
-    this._emitStandardized("deleteAll", "deleted-all", {
+    this._emitStandardized("deleted-all", {
       version: this.version,
       prefix,
       deletedCount
@@ -2472,7 +2472,7 @@ export class Resource extends AsyncEventEmitter {
     const prefix = `resource=${this.name}`;
     const deletedCount = await this.client.deleteAll({ prefix });
 
-    this._emitStandardized("deleteAllData", "deleted-all-data", {
+    this._emitStandardized("deleted-all-data", {
       resource: this.name,
       prefix,
       deletedCount
@@ -2550,7 +2550,7 @@ export class Resource extends AsyncEventEmitter {
       const idPart = parts.find(part => part.startsWith('id='));
       return idPart ? idPart.replace('id=', '') : null;
     }).filter(Boolean);
-    this._emitStandardized("listIds", "listed-ids", ids.length);
+    this._emitStandardized("listed-ids", ids.length);
     return ids;
   }
 
@@ -2598,13 +2598,13 @@ export class Resource extends AsyncEventEmitter {
     const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
     if (!ok) throw err;
     const results = await this.processListResults(ids, 'main');
-    this._emitStandardized("list", "listed", { count: results.length, errors: 0 });
+    this._emitStandardized("list", { count: results.length, errors: 0 });
     return results;
   }
 
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
     if (!this.config.partitions?.[partition]) {
-      this._emitStandardized("list", "listed", { partition, partitionValues, count: 0, errors: 0 });
+      this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
     const partitionDef = this.config.partitions[partition];
@@ -2614,7 +2614,7 @@ export class Resource extends AsyncEventEmitter {
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-    this._emitStandardized("list", "listed", { partition, partitionValues, count: results.length, errors: 0 });
+    this._emitStandardized("list", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
   }
 
@@ -2670,7 +2670,7 @@ export class Resource extends AsyncEventEmitter {
         }
         return this.handleResourceError(err, id, context);
       });
-    this._emitStandardized("list", "listed", { count: results.length, errors: 0 });
+    this._emitStandardized("list", { count: results.length, errors: 0 });
     return results;
   }
 
@@ -2743,11 +2743,11 @@ export class Resource extends AsyncEventEmitter {
    */
   handleListError(error, { partition, partitionValues }) {
     if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      this._emitStandardized("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
+      this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
 
-    this._emitStandardized("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
+    this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 1 });
     return [];
   }
 
@@ -2789,7 +2789,7 @@ export class Resource extends AsyncEventEmitter {
     // Execute afterGetMany hooks
     const finalResults = await this.executeHooks('afterGetMany', results);
 
-    this._emitStandardized("getMany", "fetched-many", ids.length);
+    this._emitStandardized("fetched-many", ids.length);
     return finalResults;
   }
 
@@ -2880,7 +2880,7 @@ export class Resource extends AsyncEventEmitter {
           hasTotalItems: totalItems !== null
         }
       };
-      this._emitStandardized("page", "paginated", result);
+      this._emitStandardized("paginated", result);
       return result;
     });
     if (ok) return result;
@@ -2954,7 +2954,7 @@ export class Resource extends AsyncEventEmitter {
       contentType
     }));
     if (!ok2) throw err2;
-    this._emitStandardized("setContent", "content-set", { id, contentType, contentLength: buffer.length }, id);
+    this._emitStandardized("content-set", { id, contentType, contentLength: buffer.length }, id);
     return updatedData;
   }
 
@@ -2984,7 +2984,7 @@ export class Resource extends AsyncEventEmitter {
     }
     const buffer = Buffer.from(await response.Body.transformToByteArray());
     const contentType = response.ContentType || null;
-    this._emitStandardized("content", "content-fetched", { id, contentLength: buffer.length, contentType }, id);
+    this._emitStandardized("content-fetched", { id, contentLength: buffer.length, contentType }, id);
     return {
       buffer,
       contentType
@@ -3018,7 +3018,7 @@ export class Resource extends AsyncEventEmitter {
       metadata: existingMetadata,
     }));
     if (!ok2) throw err2;
-    this._emitStandardized("deleteContent", "content-deleted", id, id);
+    this._emitStandardized("content-deleted", id, id);
     return response;
   }
 
@@ -3428,7 +3428,7 @@ export class Resource extends AsyncEventEmitter {
     data._partition = partitionName;
     data._partitionValues = partitionValues;
 
-    this._emitStandardized("getFromPartition", "partition-fetched", data, data.id);
+    this._emitStandardized("partition-fetched", data, data.id);
     return data;
   }
 
