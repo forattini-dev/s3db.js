@@ -74,6 +74,7 @@ export class MemoryClient extends EventEmitter {
     const input = command.input || {};
 
     this.emit('cl:request', commandName, input);
+    this.emit('command.request', commandName, input);
 
     let response;
 
@@ -106,6 +107,7 @@ export class MemoryClient extends EventEmitter {
       }
 
       this.emit('cl:response', commandName, response, input);
+      this.emit('command.response', commandName, response, input);
       return response;
 
     } catch (error) {
@@ -479,14 +481,14 @@ export class MemoryClient extends EventEmitter {
       const result = await this.deleteObjects(keys);
       totalDeleted = result.Deleted.length;
 
-      this.emit('cl:DeleteAll', {
+      this.emit('deleteAll', {
         prefix,
         batch: totalDeleted,
         total: totalDeleted
       });
     }
 
-    this.emit('cl:DeleteAllComplete', {
+    this.emit('deleteAllComplete', {
       prefix,
       totalDeleted
     });
@@ -544,7 +546,7 @@ export class MemoryClient extends EventEmitter {
       }
     }
 
-    this.emit('cl:MoveAllObjects', { results, errors }, { prefixFrom, prefixTo });
+    this.emit('moveAllObjects', { results, errors });
 
     if (errors.length > 0) {
       const error = new Error('Some objects could not be moved');
