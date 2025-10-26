@@ -399,7 +399,7 @@ class WebhookReplicator extends BaseReplicator {
       throw error;
     }
 
-    this.emit('initialized', {
+    this.emit('db:plugin:initialized', {
       replicator: this.name,
       url: this.url,
       method: this.method,

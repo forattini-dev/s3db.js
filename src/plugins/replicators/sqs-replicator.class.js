@@ -182,7 +182,7 @@ class SqsReplicator extends BaseReplicator {
         region: this.region,
         credentials: this.config.credentials
       });
-      this.emit('initialized', { 
+      this.emit('db:plugin:initialized', { 
         replicator: this.name, 
         queueUrl: this.queueUrl,
         queues: this.queues,

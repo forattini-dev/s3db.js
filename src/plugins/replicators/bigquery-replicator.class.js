@@ -189,7 +189,7 @@ class BigqueryReplicator extends BaseReplicator {
       await this.syncSchemas(database);
     }
 
-    this.emit('initialized', {
+    this.emit('db:plugin:initialized', {
       replicator: this.name,
       projectId: this.projectId,
       datasetId: this.datasetId,
