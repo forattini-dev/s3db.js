@@ -103,7 +103,7 @@ export async function runGarbageCollection(transactionResource, storage, config,
     }
 
     if (emitFn) {
-      emitFn('eventual-consistency.gc-completed', {
+      emitFn('plg:eventual-consistency:gc-completed', {
         resource: config.resource,
         field: config.field,
         deletedCount: results.length,
@@ -115,7 +115,7 @@ export async function runGarbageCollection(transactionResource, storage, config,
       console.warn(`[EventualConsistency] GC error:`, error.message);
     }
     if (emitFn) {
-      emitFn('eventual-consistency.gc-error', error);
+      emitFn('plg:eventual-consistency:gc-error', error);
     }
   } finally {
     // Always release GC lock

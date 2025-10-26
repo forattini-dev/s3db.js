@@ -255,7 +255,7 @@ export async function onStart(fieldHandlers, config, runConsolidationFn, runGCFn
         }
 
         if (emitFn) {
-          emitFn('eventual-consistency.started', {
+          emitFn('plg:eventual-consistency:started', {
             resource: resourceName,
             field: fieldName,
             cohort: config.cohort
@@ -295,7 +295,7 @@ export async function onStop(fieldHandlers, emitFn) {
       }
 
       if (emitFn) {
-        emitFn('eventual-consistency.stopped', {
+        emitFn('plg:eventual-consistency:stopped', {
           resource: resourceName,
           field: fieldName
         });

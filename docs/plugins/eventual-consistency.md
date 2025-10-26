@@ -35,6 +35,7 @@ await wallets.add('w1', 'balance', 100);  // Creates transaction and consolidate
 - [Examples](#examples)
 - [Analytics API](#analytics-api)
 - [Sync vs Async Mode](#sync-vs-async-mode)
+- [Events](#events)
 - [FAQ](#-faq)
 
 ---
@@ -1336,6 +1337,103 @@ await db.createResource({
   }
 });
 ```
+
+---
+
+## Events
+
+The EventualConsistencyPlugin emits the following events that you can listen to:
+
+### `plg:eventual-consistency:started`
+
+Emitted when consolidation or garbage collection starts for a resource/field.
+
+```javascript
+plugin.on('plg:eventual-consistency:started', (data) => {
+  console.log(`Started for ${data.resource}.${data.field}`);
+  console.log(`Cohort config:`, data.cohort);
+});
+```
+
+**Payload:**
+- `resource` (string): Resource name
+- `field` (string): Field name
+- `cohort` (object): Cohort configuration
+
+### `plg:eventual-consistency:stopped`
+
+Emitted when consolidation/garbage collection stops for a resource/field.
+
+```javascript
+plugin.on('plg:eventual-consistency:stopped', (data) => {
+  console.log(`Stopped for ${data.resource}.${data.field}`);
+});
+```
+
+**Payload:**
+- `resource` (string): Resource name
+- `field` (string): Field name
+
+### `plg:eventual-consistency:consolidated`
+
+Emitted after each successful consolidation run.
+
+```javascript
+plugin.on('plg:eventual-consistency:consolidated', (data) => {
+  console.log(`Consolidated ${data.recordCount} records in ${data.duration}ms`);
+  console.log(`Success: ${data.successCount}, Errors: ${data.errorCount}`);
+});
+```
+
+**Payload:**
+- `resource` (string): Resource name
+- `field` (string): Field name
+- `recordCount` (number): Total records processed
+- `successCount` (number): Successfully consolidated records
+- `errorCount` (number): Failed records
+- `duration` (number): Duration in milliseconds
+
+### `plg:eventual-consistency:consolidation-error`
+
+Emitted when consolidation encounters an error.
+
+```javascript
+plugin.on('plg:eventual-consistency:consolidation-error', (error) => {
+  console.error('Consolidation error:', error);
+});
+```
+
+**Payload:**
+- `error` (Error): The error object
+
+### `plg:eventual-consistency:gc-completed`
+
+Emitted after garbage collection completes.
+
+```javascript
+plugin.on('plg:eventual-consistency:gc-completed', (data) => {
+  console.log(`GC deleted ${data.deletedCount} old transactions`);
+});
+```
+
+**Payload:**
+- `resource` (string): Resource name
+- `field` (string): Field name
+- `deletedCount` (number): Number of transactions deleted
+- `errorCount` (number): Number of errors during deletion
+
+### `plg:eventual-consistency:gc-error`
+
+Emitted when garbage collection encounters an error.
+
+```javascript
+plugin.on('plg:eventual-consistency:gc-error', (error) => {
+  console.error('GC error:', error);
+});
+```
+
+**Payload:**
+- `error` (Error): The error object
 
 ---
 
