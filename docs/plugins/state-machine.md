@@ -577,6 +577,353 @@ Use standard s3db.js resource events:
 
 **Best Practice**: Use ID-specific events (`updated:${context => context.id}`) to avoid triggering on unrelated records.
 
+### 🔍 Detecting Which Fields Changed
+
+When using event triggers with `updated` or `patched` events, you often need to check **which specific fields changed** before deciding whether to transition. The State Machine Plugin provides access to both old and new values through the event context.
+
+#### Accessing Changed Fields
+
+The `context` parameter in condition functions contains:
+- `context.{field}` - Current field values (after the update)
+- `context.$before.{field}` - Previous field values (before the update, if available)
+
+**Example: Transition only when specific fields change**
+
+```javascript
+new StateMachinePlugin({
+  machines: {
+    userOnboarding: {
+      initialState: 'incomplete',
+      stateField: 'onboardingStatus',
+      resource: usersResource,
+
+      states: {
+        incomplete: {
+          description: 'User profile is incomplete',
+
+          triggers: [{
+            type: 'event',
+            eventName: `updated:${context => context.id}`,
+            eventSource: usersResource,
+
+            // ✅ Only transition when profileCompleted flag changes to true
+            condition: (context, event) => {
+              const wasIncomplete = context.$before?.profileCompleted === false;
+              const isNowComplete = context.profileCompleted === true;
+
+              // Transition only if the field actually changed
+              return wasIncomplete && isNowComplete;
+            },
+
+            targetState: 'pending_verification'
+          }]
+        },
+
+        pending_verification: {
+          description: 'Profile complete, waiting for email verification',
+
+          triggers: [{
+            type: 'event',
+            eventName: `updated:${context => context.id}`,
+            eventSource: usersResource,
+
+            // ✅ Only transition when emailVerified changes to true
+            condition: (context, event) => {
+              return context.emailVerified === true &&
+                     context.$before?.emailVerified !== true;
+            },
+
+            targetState: 'active'
+          }]
+        },
+
+        active: {
+          description: 'User fully onboarded and active',
+          type: 'final'
+        }
+      }
+    }
+  }
+});
+```
+
+#### Field-Level Validation Patterns
+
+**Pattern 1: Check if a specific field changed**
+
+```javascript
+condition: (context, event) => {
+  // Did the 'status' field change?
+  const statusChanged = context.status !== context.$before?.status;
+  const isApproved = context.status === 'approved';
+
+  return statusChanged && isApproved;
+}
+```
+
+**Pattern 2: Detect numeric threshold changes**
+
+```javascript
+condition: (context, event) => {
+  // Did score cross 70% threshold?
+  const previousScore = context.$before?.score || 0;
+  const currentScore = context.score || 0;
+
+  return previousScore < 70 && currentScore >= 70;
+}
+```
+
+**Pattern 3: Multiple field validation**
+
+```javascript
+condition: (context, event) => {
+  // All required fields must be filled
+  const allFieldsFilled =
+    context.name &&
+    context.email &&
+    context.phone &&
+    context.address;
+
+  // At least one field was previously empty
+  const wasIncomplete =
+    !context.$before?.name ||
+    !context.$before?.email ||
+    !context.$before?.phone ||
+    !context.$before?.address;
+
+  return allFieldsFilled && wasIncomplete;
+}
+```
+
+**Pattern 4: Detecting specific value changes**
+
+```javascript
+condition: (context, event) => {
+  // Transition only when payment method changes from null to 'credit_card'
+  const paymentMethodAdded =
+    !context.$before?.paymentMethod &&
+    context.paymentMethod === 'credit_card';
+
+  return paymentMethodAdded;
+}
+```
+
+#### Complete Example: Order Approval Workflow
+
+```javascript
+const ordersResource = await database.createResource({
+  name: 'orders',
+  attributes: {
+    customerId: 'string|required',
+    totalAmount: 'number|required',
+    managerApproved: 'boolean|optional',
+    financeApproved: 'boolean|optional',
+    shippingReady: 'boolean|optional',
+    trackingNumber: 'string|optional',
+    status: 'string|optional'
+  }
+});
+
+const stateMachine = new StateMachinePlugin({
+  machines: {
+    orderApproval: {
+      initialState: 'pending_manager',
+      stateField: 'status',
+      resource: ordersResource,
+
+      states: {
+        pending_manager: {
+          description: 'Waiting for manager approval',
+
+          triggers: [{
+            type: 'event',
+            eventName: `updated:${context => context.id}`,
+            eventSource: ordersResource,
+
+            // ✅ Transition only when managerApproved changes to true
+            condition: (context, event) => {
+              const wasNotApproved = context.$before?.managerApproved !== true;
+              const isNowApproved = context.managerApproved === true;
+
+              console.log(`Manager approval check:`, {
+                before: context.$before?.managerApproved,
+                after: context.managerApproved,
+                willTransition: wasNotApproved && isNowApproved
+              });
+
+              return wasNotApproved && isNowApproved;
+            },
+
+            targetState: 'pending_finance'
+          }]
+        },
+
+        pending_finance: {
+          description: 'Waiting for finance approval',
+
+          triggers: [{
+            type: 'event',
+            eventName: `updated:${context => context.id}`,
+            eventSource: ordersResource,
+
+            // ✅ Transition only when financeApproved changes to true
+            condition: (context, event) => {
+              return context.financeApproved === true &&
+                     context.$before?.financeApproved !== true;
+            },
+
+            targetState: 'approved'
+          }]
+        },
+
+        approved: {
+          description: 'Fully approved, preparing for shipment',
+
+          triggers: [{
+            type: 'event',
+            eventName: `updated:${context => context.id}`,
+            eventSource: ordersResource,
+
+            // ✅ Transition when shipping is ready AND tracking number is added
+            condition: (context, event) => {
+              const shippingJustReady =
+                context.shippingReady === true &&
+                context.$before?.shippingReady !== true;
+
+              const hasTracking = !!context.trackingNumber;
+
+              return shippingJustReady && hasTracking;
+            },
+
+            targetState: 'shipped'
+          }]
+        },
+
+        shipped: {
+          description: 'Order shipped to customer',
+          type: 'final'
+        }
+      }
+    }
+  }
+});
+
+await database.usePlugin(stateMachine);
+
+// Usage example:
+const order = await ordersResource.insert({
+  customerId: 'cust-123',
+  totalAmount: 1500,
+  managerApproved: false,
+  financeApproved: false,
+  shippingReady: false
+});
+
+await stateMachine.initializeEntity('orderApproval', order.id);
+console.log('Order created, status:', (await ordersResource.get(order.id)).status);
+// Output: pending_manager
+
+// Manager approves (triggers transition to pending_finance)
+await ordersResource.update(order.id, { managerApproved: true });
+await new Promise(r => setTimeout(r, 100));
+console.log('After manager approval:', (await ordersResource.get(order.id)).status);
+// Output: pending_finance
+
+// Finance approves (triggers transition to approved)
+await ordersResource.update(order.id, { financeApproved: true });
+await new Promise(r => setTimeout(r, 100));
+console.log('After finance approval:', (await ordersResource.get(order.id)).status);
+// Output: approved
+
+// Shipping ready with tracking (triggers transition to shipped)
+await ordersResource.update(order.id, {
+  shippingReady: true,
+  trackingNumber: 'TRK123456'
+});
+await new Promise(r => setTimeout(r, 100));
+console.log('After shipping ready:', (await ordersResource.get(order.id)).status);
+// Output: shipped
+```
+
+#### Using `patched` Event (Performance Optimization)
+
+For metadata-only updates, use the `patched` event instead of `updated` for better performance:
+
+```javascript
+states: {
+  monitoring: {
+    triggers: [{
+      type: 'event',
+      // Use patched for lightweight metadata-only updates
+      eventName: `patched:${context => context.id}`,
+      eventSource: sensorsResource,
+
+      condition: (context, event) => {
+        // Check if temperature threshold exceeded
+        const temp = parseFloat(context.temperature);
+        const prevTemp = parseFloat(context.$before?.temperature || 0);
+
+        const crossedThreshold = prevTemp < 80 && temp >= 80;
+        return crossedThreshold;
+      },
+
+      targetState: 'alert'
+    }]
+  }
+}
+```
+
+**When to use `patched` vs `updated`:**
+
+| Event | Use When | Performance |
+|-------|----------|-------------|
+| `updated` | Full record updates, body changes | Standard (GET + PUT) |
+| `patched` | Metadata-only updates | 40-60% faster (HEAD + COPY) |
+
+**Note:** Both `updated` and `patched` events provide `$before` values for comparison.
+
+#### Best Practices
+
+1. **Always check `$before` exists**: Use optional chaining (`?.`) to handle first updates
+   ```javascript
+   context.$before?.fieldName !== context.fieldName
+   ```
+
+2. **Validate the change, not just the value**: Ensure the field actually changed
+   ```javascript
+   // ✅ Good - checks if changed
+   context.approved === true && context.$before?.approved !== true
+
+   // ❌ Bad - might trigger on every update
+   context.approved === true
+   ```
+
+3. **Use specific conditions**: Be precise about what triggers a transition
+   ```javascript
+   // ✅ Good - specific threshold
+   context.score >= 70 && context.$before?.score < 70
+
+   // ❌ Bad - too broad
+   context.score > 0
+   ```
+
+4. **Log for debugging**: Add console.log in conditions to understand trigger behavior
+   ```javascript
+   condition: (context, event) => {
+     console.log('Checking approval:', {
+       before: context.$before?.approved,
+       after: context.approved
+     });
+     return context.approved === true;
+   }
+   ```
+
+5. **Handle undefined `$before`**: First update won't have previous values
+   ```javascript
+   const prevValue = context.$before?.status || 'unknown';
+   const changedToActive = prevValue !== 'active' && context.status === 'active';
+   ```
+
 ### Cron Triggers (Scheduled)
 
 Periodically check conditions and transition:
