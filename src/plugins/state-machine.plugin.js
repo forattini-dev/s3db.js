@@ -1170,10 +1170,22 @@ export class StateMachinePlugin extends Plugin {
 
   /**
    * Setup an event-based trigger
+   * Supports both old API (trigger.event) and new API (trigger.eventName + eventSource)
    * @private
    */
   async _setupEventTrigger(machineId, stateName, trigger, triggerName) {
-    const eventName = trigger.event;
+    // Support both old API (event) and new API (eventName)
+    const baseEventName = trigger.eventName || trigger.event;
+    const eventSource = trigger.eventSource;
+
+    if (!baseEventName) {
+      throw new StateMachineError(`Event trigger '${triggerName}' must have either 'event' or 'eventName' property`, {
+        operation: '_setupEventTrigger',
+        machineId,
+        stateName,
+        triggerName
+      });
+    }
 
     // Create event listener
     const eventHandler = async (eventData) => {
@@ -1181,6 +1193,26 @@ export class StateMachinePlugin extends Plugin {
 
       for (const entity of entities) {
         try {
+          // Resolve dynamic event name if it's a function
+          let resolvedEventName;
+          if (typeof baseEventName === 'function') {
+            resolvedEventName = baseEventName(entity.context);
+          } else {
+            resolvedEventName = baseEventName;
+          }
+
+          // Skip if event name doesn't match (for dynamic event names)
+          // This allows filtering events by entity context
+          if (eventSource && typeof baseEventName === 'function') {
+            // For resource-specific events with dynamic names, we need to check
+            // if this specific event matches this entity
+            // The eventData will contain the ID that was part of the event name
+            const eventIdMatch = eventData?.id || eventData?.entityId;
+            if (eventIdMatch && entity.entityId !== eventIdMatch) {
+              continue; // Not for this entity
+            }
+          }
+
           // Check condition if provided
           if (trigger.condition) {
             const shouldTrigger = await trigger.condition(entity.context, entity.entityId, eventData);
@@ -1198,25 +1230,83 @@ export class StateMachinePlugin extends Plugin {
             }
           }
 
-          // Execute trigger action with event data in context
-          const result = await this._executeAction(
-            trigger.action,
-            { ...entity.context, eventData },
-            'TRIGGER',
-            machineId,
-            entity.entityId
-          );
+          // NEW: Support targetState for automatic transitions
+          if (trigger.targetState) {
+            // Automatic transition to target state
+            await this._transition(
+              machineId,
+              entity.entityId,
+              stateName,
+              trigger.targetState,
+              'TRIGGER',
+              { ...entity.context, eventData, triggerName }
+            );
+
+            // Update resource's stateField if configured
+            const machine = this.machines.get(machineId);
+            const resourceConfig = machine.config;
+            if (resourceConfig.resource && resourceConfig.stateField) {
+              // Get the resource instance
+              let resource;
+              if (typeof resourceConfig.resource === 'string') {
+                resource = await this.database.getResource(resourceConfig.resource);
+              } else {
+                resource = resourceConfig.resource;
+              }
+
+              // Update the state field in the resource
+              if (resource) {
+                const [ok] = await tryFn(() =>
+                  resource.patch(entity.entityId, { [resourceConfig.stateField]: trigger.targetState })
+                );
+                if (!ok && this.config.verbose) {
+                  console.warn(`[StateMachinePlugin] Failed to update resource stateField for entity ${entity.entityId}`);
+                }
+              }
+            }
+
+            // Execute entry action of target state if exists
+            const targetStateConfig = machine.config.states[trigger.targetState];
+            if (targetStateConfig?.entry) {
+              await this._executeAction(
+                targetStateConfig.entry,
+                { ...entity.context, eventData },
+                'TRIGGER',
+                machineId,
+                entity.entityId
+              );
+            }
+
+            // Emit transition event
+            this.emit('plg:state-machine:transition', {
+              machineId,
+              entityId: entity.entityId,
+              from: stateName,
+              to: trigger.targetState,
+              event: 'TRIGGER',
+              context: { ...entity.context, eventData, triggerName }
+            });
+          } else if (trigger.action) {
+            // Execute trigger action with event data in context
+            const result = await this._executeAction(
+              trigger.action,
+              { ...entity.context, eventData },
+              'TRIGGER',
+              machineId,
+              entity.entityId
+            );
+
+            // Send success event if configured
+            if (trigger.sendEvent) {
+              await this.send(machineId, entity.entityId, trigger.sendEvent, {
+                ...entity.context,
+                triggerResult: result,
+                eventData
+              });
+            }
+          }
 
           await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
-
-          // Send success event if configured
-          if (trigger.sendEvent) {
-            await this.send(machineId, entity.entityId, trigger.sendEvent, {
-              ...entity.context,
-              triggerResult: result,
-              eventData
-            });
-          }
 
           this.emit('plg:state-machine:trigger-executed', {
             machineId,
@@ -1224,7 +1314,8 @@ export class StateMachinePlugin extends Plugin {
             state: stateName,
             trigger: triggerName,
             type: 'event',
-            eventName
+            eventName: resolvedEventName,
+            targetState: trigger.targetState
           });
         } catch (error) {
           if (this.config.verbose) {
@@ -1234,20 +1325,35 @@ export class StateMachinePlugin extends Plugin {
       }
     };
 
-    // Listen to database events if eventName starts with 'db:'
-    if (eventName.startsWith('db:')) {
-      const dbEventName = eventName.substring(3); // Remove 'db:' prefix
-      this.database.on(dbEventName, eventHandler);
+    // NEW: Support eventSource for resource-specific events
+    if (eventSource) {
+      // Listen to events from a specific resource
+      // Resource events are typically: inserted, updated, deleted
+      const baseEvent = typeof baseEventName === 'function' ? 'updated' : baseEventName;
+
+      eventSource.on(baseEvent, eventHandler);
 
       if (this.config.verbose) {
-        console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
+        console.log(`[StateMachinePlugin] Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}'`);
       }
     } else {
-      // Listen to plugin events
-      this.on(eventName, eventHandler);
+      // Original behavior: listen to database or plugin events
+      const staticEventName = typeof baseEventName === 'function' ? 'updated' : baseEventName;
 
-      if (this.config.verbose) {
-        console.log(`[StateMachinePlugin] Listening to plugin event '${eventName}' for trigger '${triggerName}'`);
+      if (staticEventName.startsWith('db:')) {
+        const dbEventName = staticEventName.substring(3); // Remove 'db:' prefix
+        this.database.on(dbEventName, eventHandler);
+
+        if (this.config.verbose) {
+          console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
+        }
+      } else {
+        // Listen to plugin events
+        this.on(staticEventName, eventHandler);
+
+        if (this.config.verbose) {
+          console.log(`[StateMachinePlugin] Listening to plugin event '${staticEventName}' for trigger '${triggerName}'`);
+        }
       }
     }
   }
