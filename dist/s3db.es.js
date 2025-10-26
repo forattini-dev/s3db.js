@@ -26159,7 +26159,7 @@ class Database extends EventEmitter {
     })();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "13.3.0" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "13.3.1" : "latest");
       return ok ? version : "latest";
     })();
     this._resourcesMap = {};
