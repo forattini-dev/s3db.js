@@ -78,7 +78,7 @@ const stateMachine = new StateMachinePlugin({
           triggers: [{
             type: 'event',
             // Listen for the updated:{id} event from the orders resource
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             // Condition to check before transitioning
@@ -111,7 +111,7 @@ const stateMachine = new StateMachinePlugin({
           // Event-based trigger: Listen for shipment creation
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             condition: (context, event) => {
@@ -139,7 +139,7 @@ const stateMachine = new StateMachinePlugin({
           // Event-based trigger: Listen for delivery confirmation
           triggers: [{
             type: 'event',
-            eventName: `updated:${context => context.id}`,
+            eventName: (context) => `updated:${context.id}`,
             eventSource: ordersResource,
 
             condition: (context, event) => {
@@ -392,7 +392,7 @@ KEY TAKEAWAYS:
 3. Trigger Configuration:
    triggers: [{
      type: 'event',
-     eventName: 'updated:\${context => context.id}',
+     eventName: (context) => `updated:${context.id}`,  // ✅ Function that returns dynamic event name
      eventSource: ordersResource,
      condition: (context, event) => context.paymentStatus === 'confirmed',
      targetState: 'processing'
