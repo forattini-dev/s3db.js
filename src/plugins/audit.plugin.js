@@ -1,3 +1,430 @@
+/**
+ * # AuditPlugin - Comprehensive Audit Trail for s3db.js
+ *
+ * ## Overview
+ *
+ * The AuditPlugin automatically tracks all changes (insert, update, delete) to your resources,
+ * creating a complete audit trail for compliance, debugging, and historical analysis.
+ *
+ * ## Features
+ *
+ * 1. **Automatic Change Tracking** - Captures all insert/update/delete operations
+ * 2. **Partition-Aware** - Efficient queries using date and resource partitions
+ * 3. **Configurable Data Inclusion** - Control whether to store full data or just metadata
+ * 4. **Data Truncation** - Automatically truncates large records to prevent storage issues
+ * 5. **Flexible Querying** - Filter by resource, operation, record ID, partition, or date range
+ * 6. **Statistics & Analytics** - Built-in aggregation methods for audit analysis
+ * 7. **Retention Management** - Automatic cleanup of old audit logs
+ *
+ * ## Configuration
+ *
+ * ```javascript
+ * import { Database } from 's3db.js';
+ * import { AuditPlugin } from 's3db.js/plugins/audit';
+ *
+ * // Basic configuration
+ * const db = new Database({
+ *   connectionString: 's3://bucket/db'
+ * });
+ *
+ * await db.use(new AuditPlugin({
+ *   includeData: true,        // Store before/after data (default: true)
+ *   includePartitions: true,  // Track partition information (default: true)
+ *   maxDataSize: 10000        // Max bytes for data field (default: 10000)
+ * }));
+ *
+ * // Minimal configuration (metadata only, faster)
+ * await db.use(new AuditPlugin({
+ *   includeData: false,       // Don't store data, only operation metadata
+ *   includePartitions: false  // Don't track partitions
+ * }));
+ * ```
+ *
+ * ## Usage Examples
+ *
+ * ### Basic Audit Trail
+ *
+ * ```javascript
+ * const users = await db.createResource({
+ *   name: 'users',
+ *   attributes: {
+ *     email: 'string|required',
+ *     name: 'string'
+ *   }
+ * });
+ *
+ * // These operations are automatically audited
+ * await users.insert({ id: 'u1', email: 'john@example.com', name: 'John' });
+ * await users.update('u1', { name: 'John Doe' });
+ * await users.delete('u1');
+ *
+ * // Query audit logs
+ * const auditPlugin = db.plugins.AuditPlugin;
+ * const logs = await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',
+ *   recordId: 'u1'
+ * });
+ *
+ * console.log(logs);
+ * // [
+ * //   { operation: 'insert', recordId: 'u1', newData: '{"id":"u1",...}', timestamp: '...' },
+ * //   { operation: 'update', recordId: 'u1', oldData: '...', newData: '...', timestamp: '...' },
+ * //   { operation: 'delete', recordId: 'u1', oldData: '...', timestamp: '...' }
+ * // ]
+ * ```
+ *
+ * ### Querying Audit Logs
+ *
+ * ```javascript
+ * const auditPlugin = db.plugins.AuditPlugin;
+ *
+ * // Get all changes to a specific resource
+ * const userChanges = await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',
+ *   limit: 100
+ * });
+ *
+ * // Get changes by operation type
+ * const deletions = await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',
+ *   operation: 'delete'
+ * });
+ *
+ * // Get changes in a date range
+ * const recentChanges = await auditPlugin.getAuditLogs({
+ *   startDate: '2025-01-01',
+ *   endDate: '2025-01-31'
+ * });
+ *
+ * // Get specific record history
+ * const recordHistory = await auditPlugin.getRecordHistory('users', 'u1');
+ * ```
+ *
+ * ### Audit Statistics
+ *
+ * ```javascript
+ * // Get comprehensive statistics
+ * const stats = await auditPlugin.getAuditStats({
+ *   resourceName: 'users',
+ *   startDate: '2025-01-01'
+ * });
+ *
+ * console.log(stats);
+ * // {
+ * //   total: 1523,
+ * //   byOperation: { insert: 500, update: 1000, delete: 23 },
+ * //   byResource: { users: 1523 },
+ * //   byUser: { system: 1200, 'user@example.com': 323 },
+ * //   timeline: { '2025-01-01': 45, '2025-01-02': 67, ... }
+ * // }
+ * ```
+ *
+ * ### Partition History
+ *
+ * ```javascript
+ * const orders = await db.createResource({
+ *   name: 'orders',
+ *   attributes: { region: 'string', amount: 'number' },
+ *   partitions: {
+ *     byRegion: { fields: { region: 'string' } }
+ *   }
+ * });
+ *
+ * // Get audit trail for a specific partition
+ * const partitionLogs = await auditPlugin.getPartitionHistory(
+ *   'orders',
+ *   'byRegion',
+ *   { region: 'US' }
+ * );
+ * ```
+ *
+ * ### Cleanup Old Audit Logs
+ *
+ * ```javascript
+ * // Delete audit logs older than 90 days (default)
+ * const deletedCount = await auditPlugin.cleanupOldAudits(90);
+ * console.log(`Deleted ${deletedCount} old audit logs`);
+ *
+ * // Custom retention period (30 days)
+ * await auditPlugin.cleanupOldAudits(30);
+ * ```
+ *
+ * ## Best Practices
+ *
+ * ### 1. Configure Data Inclusion Based on Needs
+ *
+ * ```javascript
+ * // For compliance (full audit trail)
+ * new AuditPlugin({
+ *   includeData: true,
+ *   includePartitions: true,
+ *   maxDataSize: 50000  // Large limit for complete data
+ * });
+ *
+ * // For performance monitoring (metadata only)
+ * new AuditPlugin({
+ *   includeData: false,
+ *   includePartitions: false
+ * });
+ * ```
+ *
+ * ### 2. Use Partition-Aware Queries for Performance
+ *
+ * ```javascript
+ * // FAST: Query by resource (uses partition)
+ * await auditPlugin.getAuditLogs({ resourceName: 'users' });
+ *
+ * // FAST: Query by date (uses partition)
+ * await auditPlugin.getAuditLogs({ startDate: '2025-01-15', endDate: '2025-01-16' });
+ *
+ * // SLOWER: Multiple filters (requires list scan)
+ * await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',
+ *   operation: 'update',
+ *   recordId: 'u1'
+ * });
+ * ```
+ *
+ * ### 3. Implement Regular Cleanup
+ *
+ * ```javascript
+ * // Schedule monthly cleanup (using cron or scheduler)
+ * setInterval(async () => {
+ *   const deleted = await auditPlugin.cleanupOldAudits(90);
+ *   console.log(`Audit cleanup: removed ${deleted} records`);
+ * }, 30 * 24 * 60 * 60 * 1000); // 30 days
+ * ```
+ *
+ * ### 4. Track User Context
+ *
+ * ```javascript
+ * // Set current user for audit trails
+ * auditPlugin.getCurrentUserId = () => {
+ *   // Return current user ID from your auth system
+ *   return getCurrentUser()?.email || 'system';
+ * };
+ *
+ * // Now all audit logs will include the user ID
+ * await users.insert({ email: 'jane@example.com' });
+ * // Audit log will show: userId: 'admin@example.com'
+ * ```
+ *
+ * ## Performance Considerations
+ *
+ * ### Storage Overhead
+ *
+ * - **With includeData: true** - Approximately 2-3x storage per operation
+ * - **With includeData: false** - Approximately 200-500 bytes per operation
+ * - Large records are automatically truncated based on `maxDataSize`
+ *
+ * ### Query Performance
+ *
+ * | Query Type | Performance | Notes |
+ * |------------|-------------|-------|
+ * | By resource name | **O(n)** where n = records in resource | Uses `byResource` partition |
+ * | By date range | **O(n)** where n = records in date range | Uses `byDate` partition |
+ * | By operation | **O(n)** of all records | Requires full scan |
+ * | By record ID | **O(n)** of all records | Requires full scan |
+ * | Combined filters | **O(n)** of all records | Fetches up to 10,000 records |
+ *
+ * ### Optimization Tips
+ *
+ * ```javascript
+ * // 1. Use partition-aware queries when possible
+ * const logs = await auditPlugin.getAuditLogs({ resourceName: 'users' });
+ *
+ * // 2. Limit result sets
+ * const recent = await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',
+ *   limit: 50
+ * });
+ *
+ * // 3. Use narrow date ranges
+ * const dailyLogs = await auditPlugin.getAuditLogs({
+ *   startDate: '2025-01-15',
+ *   endDate: '2025-01-15'  // Single day
+ * });
+ *
+ * // 4. Disable data inclusion for high-volume resources
+ * new AuditPlugin({ includeData: false });
+ * ```
+ *
+ * ## Troubleshooting
+ *
+ * ### Audit Logs Not Being Created
+ *
+ * ```javascript
+ * // Check if plugin is installed
+ * console.log(db.plugins.AuditPlugin);  // Should exist
+ *
+ * // Check if audit resource exists
+ * console.log(db.resources.plg_audits);  // Should exist
+ *
+ * // Verify plugin started
+ * await db.start();  // Must call start() to activate plugin
+ * ```
+ *
+ * ### Large Audit Logs Slow Queries
+ *
+ * ```javascript
+ * // Solution 1: Reduce data inclusion
+ * new AuditPlugin({ includeData: false });
+ *
+ * // Solution 2: Implement regular cleanup
+ * await auditPlugin.cleanupOldAudits(30);  // Keep only 30 days
+ *
+ * // Solution 3: Use more specific queries
+ * await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',  // Use partition
+ *   limit: 100              // Limit results
+ * });
+ * ```
+ *
+ * ### Data Truncation Issues
+ *
+ * ```javascript
+ * // Check if records are being truncated
+ * const logs = await auditPlugin.getAuditLogs({ resourceName: 'users' });
+ * const truncated = logs.filter(log => {
+ *   const data = JSON.parse(log.newData || '{}');
+ *   return data._truncated === true;
+ * });
+ *
+ * // Increase max size if needed
+ * new AuditPlugin({ maxDataSize: 50000 });  // Increase from default 10000
+ * ```
+ *
+ * ### Memory Usage with Large History
+ *
+ * ```javascript
+ * // Instead of loading all at once
+ * const all = await auditPlugin.getAuditLogs({ resourceName: 'users' });
+ *
+ * // Use pagination
+ * for (let offset = 0; offset < totalRecords; offset += 100) {
+ *   const batch = await auditPlugin.getAuditLogs({
+ *     resourceName: 'users',
+ *     limit: 100,
+ *     offset
+ *   });
+ *   processBatch(batch);
+ * }
+ * ```
+ *
+ * ## Audit Log Schema
+ *
+ * ```javascript
+ * {
+ *   id: 'audit-1234567890-abc',           // Unique audit log ID
+ *   resourceName: 'users',                 // Resource that was modified
+ *   operation: 'update',                   // 'insert' | 'update' | 'delete' | 'deleteMany'
+ *   recordId: 'u1',                        // ID of the modified record
+ *   userId: 'admin@example.com',           // User who made the change
+ *   timestamp: '2025-01-15T10:30:00Z',     // When the change occurred
+ *   createdAt: '2025-01-15',               // Date for partitioning (YYYY-MM-DD)
+ *   oldData: '{"id":"u1","name":"John"}',  // Data before change (JSON string)
+ *   newData: '{"id":"u1","name":"Jane"}',  // Data after change (JSON string)
+ *   partition: 'byRegion',                 // Partition name (if applicable)
+ *   partitionValues: '{"region":"US"}',    // Partition values (JSON string)
+ *   metadata: '{"source":"audit-plugin"}', // Additional metadata
+ * }
+ * ```
+ *
+ * ## Real-World Use Cases
+ *
+ * ### 1. Compliance & Regulatory Requirements
+ *
+ * ```javascript
+ * // HIPAA, SOC2, GDPR compliance
+ * const auditPlugin = new AuditPlugin({
+ *   includeData: true,      // Full audit trail required
+ *   includePartitions: true,
+ *   maxDataSize: 100000     // Large records
+ * });
+ *
+ * // Generate compliance report
+ * const report = await auditPlugin.getAuditStats({
+ *   startDate: '2025-01-01',
+ *   endDate: '2025-12-31'
+ * });
+ * ```
+ *
+ * ### 2. Debugging & Troubleshooting
+ *
+ * ```javascript
+ * // Find when and who changed a specific record
+ * const history = await auditPlugin.getRecordHistory('orders', 'order-123');
+ * console.log(history.map(log => ({
+ *   timestamp: log.timestamp,
+ *   user: log.userId,
+ *   operation: log.operation,
+ *   before: JSON.parse(log.oldData || '{}'),
+ *   after: JSON.parse(log.newData || '{}')
+ * })));
+ * ```
+ *
+ * ### 3. Activity Monitoring
+ *
+ * ```javascript
+ * // Real-time activity dashboard
+ * setInterval(async () => {
+ *   const recentActivity = await auditPlugin.getAuditLogs({
+ *     startDate: new Date(Date.now() - 60000).toISOString(),  // Last minute
+ *     limit: 100
+ *   });
+ *
+ *   updateDashboard(recentActivity);
+ * }, 10000);  // Update every 10 seconds
+ * ```
+ *
+ * ### 4. Data Recovery
+ *
+ * ```javascript
+ * // Recover accidentally deleted record
+ * const deletedLog = await auditPlugin.getAuditLogs({
+ *   resourceName: 'users',
+ *   operation: 'delete',
+ *   recordId: 'u1'
+ * });
+ *
+ * if (deletedLog.length > 0) {
+ *   const originalData = JSON.parse(deletedLog[0].oldData);
+ *   await users.insert(originalData);  // Restore
+ * }
+ * ```
+ *
+ * ## API Reference
+ *
+ * ### Constructor Options
+ *
+ * - `includeData` (boolean, default: true) - Store before/after data in audit logs
+ * - `includePartitions` (boolean, default: true) - Track partition information
+ * - `maxDataSize` (number, default: 10000) - Maximum bytes for data field
+ *
+ * ### Methods
+ *
+ * - `getAuditLogs(options)` - Query audit logs with filters
+ * - `getRecordHistory(resourceName, recordId)` - Get complete history of a record
+ * - `getPartitionHistory(resourceName, partition, values)` - Get partition-specific history
+ * - `getAuditStats(options)` - Get aggregated statistics
+ * - `cleanupOldAudits(retentionDays)` - Delete old audit logs
+ *
+ * ### Query Options
+ *
+ * ```typescript
+ * interface AuditQueryOptions {
+ *   resourceName?: string;   // Filter by resource
+ *   operation?: string;      // Filter by operation ('insert' | 'update' | 'delete')
+ *   recordId?: string;       // Filter by record ID
+ *   partition?: string;      // Filter by partition name
+ *   startDate?: string;      // Filter by start date (ISO format)
+ *   endDate?: string;        // Filter by end date (ISO format)
+ *   limit?: number;          // Max results (default: 100)
+ *   offset?: number;         // Pagination offset (default: 0)
+ * }
+ * ```
+ */
+
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 

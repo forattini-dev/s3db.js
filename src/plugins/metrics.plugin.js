@@ -1,3 +1,578 @@
+/**
+ * # MetricsPlugin - Performance & Error Monitoring for s3db.js
+ *
+ * ## Overview
+ *
+ * The MetricsPlugin provides comprehensive performance monitoring, error tracking, and
+ * Prometheus integration for s3db.js applications. Track operation counts, durations,
+ * errors, and export metrics to Prometheus for visualization.
+ *
+ * ## Features
+ *
+ * 1. **Operation Tracking** - Monitor insert, update, delete, get, list, count operations
+ * 2. **Performance Metrics** - Track operation duration and throughput
+ * 3. **Error Logging** - Capture and store error details
+ * 4. **Resource-Level Metrics** - Per-resource and global metrics
+ * 5. **Prometheus Integration** - Export metrics in Prometheus format
+ * 6. **Flexible Modes** - Standalone, integrated (with API Plugin), or auto mode
+ * 7. **Automatic Cleanup** - Retention-based cleanup of old metrics
+ * 8. **Periodic Flushing** - Configurable flush interval for metric persistence
+ *
+ * ## Configuration
+ *
+ * ```javascript
+ * import { Database } from 's3db.js';
+ * import { MetricsPlugin } from 's3db.js/plugins/metrics';
+ *
+ * // Basic configuration
+ * const db = new Database({
+ *   connectionString: 's3://bucket/db'
+ * });
+ *
+ * await db.use(new MetricsPlugin({
+ *   collectPerformance: true,   // Track performance data (default: true)
+ *   collectErrors: true,         // Track errors (default: true)
+ *   collectUsage: true,          // Track usage metrics (default: true)
+ *   retentionDays: 30,           // Keep metrics for 30 days (default: 30)
+ *   flushInterval: 60000         // Flush every 60 seconds (default: 60000)
+ * }));
+ *
+ * // With Prometheus integration
+ * await db.use(new MetricsPlugin({
+ *   prometheus: {
+ *     enabled: true,             // Enable Prometheus export (default: true)
+ *     mode: 'auto',              // auto | integrated | standalone (default: 'auto')
+ *     port: 9090,                // Standalone server port (default: 9090)
+ *     path: '/metrics',          // Metrics endpoint path (default: '/metrics')
+ *     includeResourceLabels: true // Include resource names in labels (default: true)
+ *   }
+ * }));
+ * ```
+ *
+ * ## Usage Examples
+ *
+ * ### Basic Metrics Collection
+ *
+ * ```javascript
+ * const db = new Database({ connectionString: 's3://bucket/db' });
+ * await db.use(new MetricsPlugin());
+ * await db.start();
+ *
+ * const users = await db.createResource({
+ *   name: 'users',
+ *   attributes: { name: 'string', email: 'string' }
+ * });
+ *
+ * // Perform operations (automatically tracked)
+ * await users.insert({ id: 'u1', name: 'John', email: 'john@example.com' });
+ * await users.get('u1');
+ * await users.update('u1', { name: 'Jane' });
+ *
+ * // Get metrics
+ * const metricsPlugin = db.plugins.MetricsPlugin;
+ * const stats = await metricsPlugin.getStats();
+ *
+ * console.log(stats);
+ * // {
+ * //   period: '24h',
+ * //   totalOperations: 3,
+ * //   totalErrors: 0,
+ * //   avgResponseTime: 45.2,
+ * //   operationsByType: {
+ * //     insert: { count: 1, errors: 0, avgTime: 52 },
+ * //     get: { count: 1, errors: 0, avgTime: 38 },
+ * //     update: { count: 1, errors: 0, avgTime: 46 }
+ * //   },
+ * //   uptime: { startTime: '2025-01-15T...', duration: 3600000 }
+ * // }
+ * ```
+ *
+ * ### Query Metrics
+ *
+ * ```javascript
+ * const metricsPlugin = db.plugins.MetricsPlugin;
+ *
+ * // Get all metrics for last 24 hours
+ * const allMetrics = await metricsPlugin.getMetrics({
+ *   startDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+ * });
+ *
+ * // Get metrics for specific resource
+ * const userMetrics = await metricsPlugin.getMetrics({
+ *   resourceName: 'users',
+ *   limit: 100
+ * });
+ *
+ * // Get metrics for specific operation
+ * const insertMetrics = await metricsPlugin.getMetrics({
+ *   operation: 'insert',
+ *   startDate: '2025-01-15',
+ *   endDate: '2025-01-16'
+ * });
+ * ```
+ *
+ * ### Error Tracking
+ *
+ * ```javascript
+ * const metricsPlugin = db.plugins.MetricsPlugin;
+ *
+ * // Get recent errors
+ * const errors = await metricsPlugin.getErrorLogs({
+ *   limit: 50
+ * });
+ *
+ * console.log(errors);
+ * // [
+ * //   {
+ * //     id: 'error-123...',
+ * //     resourceName: 'users',
+ * //     operation: 'insert',
+ * //     error: 'Validation failed: email is required',
+ * //     timestamp: '2025-01-15T10:30:00Z',
+ * //     createdAt: '2025-01-15'
+ * //   }
+ * // ]
+ *
+ * // Get errors for specific resource
+ * const userErrors = await metricsPlugin.getErrorLogs({
+ *   resourceName: 'users',
+ *   operation: 'insert',
+ *   startDate: '2025-01-15'
+ * });
+ * ```
+ *
+ * ### Performance Monitoring
+ *
+ * ```javascript
+ * const metricsPlugin = db.plugins.MetricsPlugin;
+ *
+ * // Get performance logs
+ * const perfLogs = await metricsPlugin.getPerformanceLogs({
+ *   resourceName: 'users',
+ *   operation: 'insert',
+ *   limit: 100
+ * });
+ *
+ * console.log(perfLogs);
+ * // [
+ * //   {
+ * //     id: 'perf-123...',
+ * //     resourceName: 'users',
+ * //     operation: 'insert',
+ * //     duration: 52,
+ * //     timestamp: '2025-01-15T10:30:00Z'
+ * //   }
+ * // ]
+ *
+ * // Identify slow operations
+ * const slowOps = perfLogs.filter(log => log.duration > 100);
+ * console.log(`Found ${slowOps.length} slow operations`);
+ * ```
+ *
+ * ### Prometheus Integration
+ *
+ * ```javascript
+ * // AUTO mode: detects API Plugin and chooses mode automatically
+ * await db.use(new MetricsPlugin({
+ *   prometheus: { mode: 'auto' }
+ * }));
+ *
+ * // INTEGRATED mode: uses API Plugin's server
+ * await db.use(new MetricsPlugin({
+ *   prometheus: {
+ *     mode: 'integrated',
+ *     path: '/metrics'
+ *   }
+ * }));
+ * // Metrics available at http://localhost:3000/metrics (API Plugin's port)
+ *
+ * // STANDALONE mode: separate HTTP server
+ * await db.use(new MetricsPlugin({
+ *   prometheus: {
+ *     mode: 'standalone',
+ *     port: 9090,
+ *     path: '/metrics'
+ *   }
+ * }));
+ * // Metrics available at http://localhost:9090/metrics
+ *
+ * // Get Prometheus metrics manually
+ * const prometheusMetrics = await metricsPlugin.getPrometheusMetrics();
+ * console.log(prometheusMetrics);
+ * // # HELP s3db_operations_total Total number of operations
+ * // # TYPE s3db_operations_total counter
+ * // s3db_operations_total{operation="insert",resource="users"} 15
+ * // s3db_operations_total{operation="get",resource="users"} 42
+ * // ...
+ * ```
+ *
+ * ### Cleanup Old Metrics
+ *
+ * ```javascript
+ * const metricsPlugin = db.plugins.MetricsPlugin;
+ *
+ * // Clean up metrics older than retention period
+ * await metricsPlugin.cleanupOldData();
+ *
+ * // Schedule regular cleanup (e.g., daily)
+ * setInterval(async () => {
+ *   await metricsPlugin.cleanupOldData();
+ *   console.log('Metrics cleanup completed');
+ * }, 24 * 60 * 60 * 1000);
+ * ```
+ *
+ * ## Best Practices
+ *
+ * ### 1. Configure Appropriate Retention
+ *
+ * ```javascript
+ * // For production: 30-90 days
+ * await db.use(new MetricsPlugin({
+ *   retentionDays: 90
+ * }));
+ *
+ * // For development: 7 days
+ * await db.use(new MetricsPlugin({
+ *   retentionDays: 7
+ * }));
+ *
+ * // For high-volume: shorter retention
+ * await db.use(new MetricsPlugin({
+ *   retentionDays: 14,
+ *   flushInterval: 300000  // Flush every 5 minutes
+ * }));
+ * ```
+ *
+ * ### 2. Use Prometheus for Visualization
+ *
+ * ```javascript
+ * // Enable Prometheus export
+ * await db.use(new MetricsPlugin({
+ *   prometheus: { enabled: true, mode: 'standalone', port: 9090 }
+ * }));
+ *
+ * // Configure Prometheus to scrape metrics
+ * // In prometheus.yml:
+ * // scrape_configs:
+ * //   - job_name: 's3db'
+ * //     static_configs:
+ * //       - targets: ['localhost:9090']
+ *
+ * // Use Grafana for dashboards
+ * // - Import Prometheus as data source
+ * // - Create dashboards with PromQL queries
+ * ```
+ *
+ * ### 3. Monitor Error Rates
+ *
+ * ```javascript
+ * // Set up alerts for high error rates
+ * setInterval(async () => {
+ *   const stats = await metricsPlugin.getStats();
+ *   const errorRate = stats.totalErrors / stats.totalOperations;
+ *
+ *   if (errorRate > 0.05) {  // 5% error rate
+ *     console.error(`High error rate detected: ${(errorRate * 100).toFixed(2)}%`);
+ *     sendAlert({
+ *       message: 'S3DB error rate exceeded threshold',
+ *       errorRate,
+ *       totalErrors: stats.totalErrors,
+ *       totalOperations: stats.totalOperations
+ *     });
+ *   }
+ * }, 60000);  // Check every minute
+ * ```
+ *
+ * ### 4. Track Performance Baselines
+ *
+ * ```javascript
+ * // Establish performance baselines
+ * const baseline = {
+ *   insert: 50,  // ms
+ *   update: 60,
+ *   get: 30,
+ *   list: 100
+ * };
+ *
+ * // Alert on performance degradation
+ * setInterval(async () => {
+ *   const stats = await metricsPlugin.getStats();
+ *
+ *   for (const [op, opStats] of Object.entries(stats.operationsByType)) {
+ *     if (opStats.avgTime > baseline[op] * 1.5) {  // 50% slower
+ *       console.warn(`Performance degradation: ${op} is ${opStats.avgTime}ms (baseline: ${baseline[op]}ms)`);
+ *     }
+ *   }
+ * }, 300000);  // Check every 5 minutes
+ * ```
+ *
+ * ## Performance Considerations
+ *
+ * ### Overhead
+ *
+ * - **CPU**: 1-3% overhead (timing + metric recording)
+ * - **Memory**: ~5-10KB per 1000 operations (in-memory buffer)
+ * - **Storage**: ~300-500 bytes per operation metric
+ * - **Latency**: <1ms per operation
+ *
+ * ### Optimization Tips
+ *
+ * ```javascript
+ * // 1. Disable unnecessary collection
+ * await db.use(new MetricsPlugin({
+ *   collectPerformance: false,  // Disable if not needed
+ *   collectErrors: true          // Keep error tracking
+ * }));
+ *
+ * // 2. Increase flush interval
+ * await db.use(new MetricsPlugin({
+ *   flushInterval: 300000  // Flush every 5 minutes (less frequent writes)
+ * }));
+ *
+ * // 3. Shorter retention period
+ * await db.use(new MetricsPlugin({
+ *   retentionDays: 14  // Less storage, faster cleanup
+ * }));
+ *
+ * // 4. Manual flush control
+ * await db.use(new MetricsPlugin({
+ *   flushInterval: 0  // Disable auto-flush, flush manually
+ * }));
+ * await metricsPlugin.flushMetrics();  // Flush when needed
+ * ```
+ *
+ * ## Troubleshooting
+ *
+ * ### Metrics Not Being Collected
+ *
+ * ```javascript
+ * // Check if plugin is installed and started
+ * console.log(db.plugins.MetricsPlugin);  // Should exist
+ * await db.start();  // Must call start() to activate plugin
+ *
+ * // Check if metrics resources exist
+ * console.log(db.resources.plg_metrics);  // Should exist
+ * console.log(db.resources.plg_error_logs);
+ * console.log(db.resources.plg_performance_logs);
+ * ```
+ *
+ * ### Prometheus Endpoint Not Available
+ *
+ * ```javascript
+ * // Check Prometheus configuration
+ * const plugin = db.plugins.MetricsPlugin;
+ * console.log(plugin.config.prometheus);
+ *
+ * // Ensure plugin is started
+ * await db.start();
+ *
+ * // For integrated mode, ensure API Plugin is active
+ * console.log(db.plugins.api);  // Should exist for integrated mode
+ *
+ * // For standalone mode, check if port is available
+ * // Try accessing: http://localhost:9090/metrics
+ * ```
+ *
+ * ### High Storage Usage
+ *
+ * ```javascript
+ * // Check metrics count
+ * const allMetrics = await metricsPlugin.getMetrics();
+ * console.log(`Total metrics: ${allMetrics.length}`);
+ *
+ * // Solution 1: Reduce retention
+ * await db.use(new MetricsPlugin({
+ *   retentionDays: 14  // Down from 30
+ * }));
+ *
+ * // Solution 2: Manual cleanup
+ * await metricsPlugin.cleanupOldData();
+ *
+ * // Solution 3: Disable performance logging
+ * await db.use(new MetricsPlugin({
+ *   collectPerformance: false
+ * }));
+ * ```
+ *
+ * ### Metrics Causing Performance Issues
+ *
+ * ```javascript
+ * // Solution 1: Increase flush interval
+ * await db.use(new MetricsPlugin({
+ *   flushInterval: 600000  // Flush every 10 minutes
+ * }));
+ *
+ * // Solution 2: Disable in tests
+ * const shouldEnableMetrics = process.env.NODE_ENV !== 'test';
+ * if (shouldEnableMetrics) {
+ *   await db.use(new MetricsPlugin());
+ * }
+ *
+ * // Solution 3: Selective collection
+ * await db.use(new MetricsPlugin({
+ *   collectPerformance: false,  // Disable performance logging
+ *   collectErrors: true          // Keep error tracking
+ * }));
+ * ```
+ *
+ * ## Real-World Use Cases
+ *
+ * ### 1. Production Monitoring Dashboard
+ *
+ * ```javascript
+ * // Set up comprehensive monitoring
+ * await db.use(new MetricsPlugin({
+ *   retentionDays: 90,
+ *   prometheus: {
+ *     enabled: true,
+ *     mode: 'standalone',
+ *     port: 9090
+ *   }
+ * }));
+ *
+ * // Generate daily reports
+ * setInterval(async () => {
+ *   const stats = await metricsPlugin.getStats();
+ *   const errors = await metricsPlugin.getErrorLogs({ limit: 10 });
+ *
+ *   const report = {
+ *     date: new Date().toISOString(),
+ *     totalOps: stats.totalOperations,
+ *     avgResponseTime: stats.avgResponseTime,
+ *     errorCount: stats.totalErrors,
+ *     topErrors: errors.slice(0, 5),
+ *     operationBreakdown: stats.operationsByType
+ *   };
+ *
+ *   sendDailyReport(report);
+ * }, 24 * 60 * 60 * 1000);
+ * ```
+ *
+ * ### 2. Performance Regression Detection
+ *
+ * ```javascript
+ * // Track performance over time
+ * const performanceBaseline = {};
+ *
+ * setInterval(async () => {
+ *   const stats = await metricsPlugin.getStats();
+ *
+ *   for (const [op, opStats] of Object.entries(stats.operationsByType)) {
+ *     if (!performanceBaseline[op]) {
+ *       performanceBaseline[op] = opStats.avgTime;
+ *     }
+ *
+ *     const degradation = ((opStats.avgTime / performanceBaseline[op]) - 1) * 100;
+ *
+ *     if (degradation > 50) {  // 50% slower
+ *       console.error(`Performance regression: ${op} is ${degradation.toFixed(1)}% slower`);
+ *       createIncident({
+ *         title: `S3DB Performance Regression: ${op}`,
+ *         description: `${op} operation is ${degradation.toFixed(1)}% slower than baseline`,
+ *         baseline: performanceBaseline[op],
+ *         current: opStats.avgTime
+ *       });
+ *     }
+ *   }
+ * }, 300000);  // Check every 5 minutes
+ * ```
+ *
+ * ### 3. SLA Monitoring
+ *
+ * ```javascript
+ * // Monitor SLA compliance (99.9% uptime, <100ms avg response time)
+ * setInterval(async () => {
+ *   const stats = await metricsPlugin.getStats();
+ *
+ *   const errorRate = stats.totalErrors / stats.totalOperations;
+ *   const slaCompliance = {
+ *     uptime: (1 - errorRate) * 100,
+ *     avgResponseTime: stats.avgResponseTime,
+ *     meetsUptime: errorRate < 0.001,  // 99.9%
+ *     meetsPerformance: stats.avgResponseTime < 100
+ *   };
+ *
+ *   if (!slaCompliance.meetsUptime || !slaCompliance.meetsPerformance) {
+ *     sendSLAAlert(slaCompliance);
+ *   }
+ *
+ *   logSLACompliance(slaCompliance);
+ * }, 60000);  // Check every minute
+ * ```
+ *
+ * ### 4. Cost Optimization Analysis
+ *
+ * ```javascript
+ * // Analyze operation patterns to optimize costs
+ * setInterval(async () => {
+ *   const stats = await metricsPlugin.getStats();
+ *
+ *   const report = {
+ *     totalOps: stats.totalOperations,
+ *     breakdown: {
+ *       expensive: stats.operationsByType.insert?.count || 0 +
+ *                  stats.operationsByType.update?.count || 0,
+ *       cheap: stats.operationsByType.get?.count || 0
+ *     }
+ *   };
+ *
+ *   // Suggest optimizations
+ *   if (report.breakdown.expensive > report.breakdown.cheap * 2) {
+ *     console.warn('High write-to-read ratio detected. Consider caching to reduce costs.');
+ *   }
+ * }, 24 * 60 * 60 * 1000);  // Daily analysis
+ * ```
+ *
+ * ## API Reference
+ *
+ * ### Constructor Options
+ *
+ * - `collectPerformance` (boolean, default: true) - Track performance metrics
+ * - `collectErrors` (boolean, default: true) - Track errors
+ * - `collectUsage` (boolean, default: true) - Track usage metrics
+ * - `retentionDays` (number, default: 30) - Retention period for metrics
+ * - `flushInterval` (number, default: 60000) - Flush interval in milliseconds
+ * - `prometheus` (object) - Prometheus configuration
+ *   - `enabled` (boolean, default: true) - Enable Prometheus export
+ *   - `mode` (string, default: 'auto') - 'auto' | 'integrated' | 'standalone'
+ *   - `port` (number, default: 9090) - Standalone server port
+ *   - `path` (string, default: '/metrics') - Metrics endpoint path
+ *   - `includeResourceLabels` (boolean, default: true) - Include resource names
+ *
+ * ### Methods
+ *
+ * - `getMetrics(options)` - Query metrics with filters
+ * - `getErrorLogs(options)` - Get error logs
+ * - `getPerformanceLogs(options)` - Get performance logs
+ * - `getStats()` - Get aggregated statistics (last 24h)
+ * - `getPrometheusMetrics()` - Get Prometheus-formatted metrics
+ * - `cleanupOldData()` - Delete old metrics based on retention period
+ * - `flushMetrics()` - Manually flush metrics to storage
+ *
+ * ### Query Options
+ *
+ * ```typescript
+ * interface MetricsQueryOptions {
+ *   type?: string;           // 'operation' | 'error' | 'performance'
+ *   resourceName?: string;   // Filter by resource
+ *   operation?: string;      // Filter by operation
+ *   startDate?: string;      // Filter by start date (ISO format)
+ *   endDate?: string;        // Filter by end date (ISO format)
+ *   limit?: number;          // Max results (default: 100)
+ *   offset?: number;         // Pagination offset (default: 0)
+ * }
+ * ```
+ *
+ * ## Notes
+ *
+ * - Plugin creates 3 resources: plg_metrics, plg_error_logs, plg_performance_logs
+ * - All resources use date partitioning for efficient queries
+ * - Metrics flush automatically on plugin stop
+ * - Flush timer is disabled during tests (NODE_ENV=test)
+ * - Prometheus mode 'auto' detects API Plugin and chooses best mode
+ * - Standalone Prometheus server listens on 0.0.0.0 (all interfaces)
+ */
+
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 
