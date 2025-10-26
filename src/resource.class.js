@@ -2201,31 +2201,6 @@ export class Resource extends AsyncEventEmitter {
     const key = this.getResourceKey(id);
     const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
 
-    // Always emit delete event for audit purposes, even if delete fails
-    this._emitStandardized("deleted", {
-      ...objectData,
-      $before: { ...objectData },
-      $after: null
-    }, id);
-    
-    // If we had an error getting the object, throw it now (after emitting the event)
-    if (deleteError) {
-      throw mapAwsError(deleteError, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: 'delete',
-        id
-      });
-    }
-    
-    if (!ok2) throw mapAwsError(err2, {
-      key,
-      resourceName: this.name,
-      operation: 'delete',
-      id
-    });
-    
     // Handle partition cleanup based on strictPartitions and asyncPartitions config
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
       if (this.config.strictPartitions) {
@@ -2257,19 +2232,44 @@ export class Resource extends AsyncEventEmitter {
       }
 
       // Execute other afterDelete hooks synchronously (excluding partition hook)
-      const nonPartitionHooks = this.hooks.afterDelete.filter(hook => 
+      const nonPartitionHooks = this.hooks.afterDelete.filter(hook =>
         !hook.toString().includes('deletePartitionReferences')
       );
       let afterDeleteData = objectData;
       for (const hook of nonPartitionHooks) {
         afterDeleteData = await hook(afterDeleteData);
       }
-      return response;
     } else {
       // Sync mode: execute all hooks including partition deletion
       const afterDeleteData = await this.executeHooks('afterDelete', objectData);
-      return response;
     }
+
+    // Always emit delete event after hooks execute, for audit purposes (even if delete fails)
+    this._emitStandardized("deleted", {
+      ...objectData,
+      $before: { ...objectData },
+      $after: null
+    }, id);
+
+    // If we had an error getting the object, throw it now (after emitting event and hooks)
+    if (deleteError) {
+      throw mapAwsError(deleteError, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: 'delete',
+        id
+      });
+    }
+
+    if (!ok2) throw mapAwsError(err2, {
+      key,
+      resourceName: this.name,
+      operation: 'delete',
+      id
+    });
+
+    return response;
   }
 
   /**
