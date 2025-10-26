@@ -395,4 +395,80 @@ Os testes automatizados garantem que:
 
 ---
 
+## 🌐 Exemplos de Integração com Identity Providers
+
+Além dos testes automatizados, fornecemos exemplos completos de integração com identity providers externos:
+
+### Azure AD (Microsoft Entra ID)
+
+**Arquivo:** `docs/examples/e62-azure-ad-integration.js`
+
+**Características:**
+- ✅ API completamente passiva (apenas valida tokens)
+- ✅ Azure AD gerencia todos os usuários
+- ✅ Suporte a App Roles e Scopes
+- ✅ Claims do Azure AD (oid, upn, email, roles, scp)
+- ✅ Multi-tenant support
+
+**Setup:**
+```javascript
+const azureOIDC = new OIDCClient({
+  issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+  audience: 'api://YOUR_API_CLIENT_ID',
+  discoveryUri: `https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration`
+});
+```
+
+**Inclui:**
+- Configuração completa do Azure Portal
+- 3 métodos para obter tokens (client credentials, authorization code, Azure CLI)
+- Exemplos de rotas protegidas com role/scope checks
+- Guia de setup passo-a-passo
+
+---
+
+### Keycloak (Open Source)
+
+**Arquivo:** `docs/examples/e63-keycloak-integration.js`
+
+**Características:**
+- ✅ Open-source (grátis, você gerencia)
+- ✅ API completamente passiva (apenas valida tokens)
+- ✅ Multi-realm support
+- ✅ Realm roles + Client roles
+- ✅ Custom scopes
+- ✅ Claims do Keycloak (sub, preferred_username, realm_access, resource_access)
+
+**Setup:**
+```javascript
+const keycloakOIDC = new OIDCClient({
+  issuer: `http://localhost:8080/realms/production`,
+  audience: 'orders-api',
+  discoveryUri: `http://localhost:8080/realms/production/.well-known/openid-configuration`
+});
+```
+
+**Inclui:**
+- Docker setup para rodar Keycloak localmente
+- Configuração de Realm, Client, Roles e Scopes
+- 3 métodos para obter tokens (password grant, client credentials, authorization code)
+- Exemplos de rotas protegidas com role/scope checks
+- Comparação completa: Keycloak vs Azure AD
+
+---
+
+### Comparação: Azure AD vs Keycloak
+
+| Feature | Keycloak | Azure AD |
+|---------|----------|----------|
+| **Custo** | ✅ Open-source (grátis) | 💰 Pago (pricing por usuário) |
+| **Deploy** | 🐳 Docker/K8s (você gerencia) | ☁️ Microsoft gerencia |
+| **Customização** | ✅ Total (código aberto) | ⚠️ Limitada (SaaS) |
+| **Integração** | ✅ OIDC/SAML/LDAP | ✅ OIDC/SAML/Office 365 |
+| **Setup** | 🔧 Manual (Admin Console) | 🔧 Manual (Azure Portal) |
+
+**Ambos funcionam perfeitamente com s3db.js!** A API apenas valida tokens usando OIDCClient - o identity provider gerencia os usuários.
+
+---
+
 **🎉 100+ testes automatizados garantem que OAuth2/OIDC funciona perfeitamente!**
