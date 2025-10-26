@@ -13,7 +13,7 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));  // Instant REST API!
 - ✅ **Automatic REST endpoints** for all resources
 - ✅ **Swagger UI documentation**: Interactive API docs at `/docs`
 - ✅ **Kubernetes health probes**: `/health/live`, `/health/ready`, `/health`
-- ✅ **4 auth methods**: JWT, API Key, Basic Auth, Public
+- ✅ **Auth drivers**: JWT, Basic Auth, OAuth2/OIDC (microservices SSO)
 - ✅ **Clean URLs by default**: `/cars` (optional versioning: `/v1/cars`)
 - ✅ **Production ready**: CORS, Rate Limiting, Logging, Compression
 - ✅ **Schema validation**: Automatic validation using resource schemas
@@ -355,6 +355,7 @@ The API Plugin uses a **driver-based authentication system** where you choose ON
 **Available drivers:**
 - **JWT** - Token-based authentication with `/auth/login` endpoint
 - **Basic** - HTTP Basic Auth with Base64-encoded credentials in headers
+- **OAuth2/OIDC** - Microservices SSO with RS256 asymmetric keys ([docs](../oauth2-oidc.md))
 
 **Key features:**
 - ✅ Resource-based auth configuration (which resource manages users)
@@ -510,6 +511,851 @@ curl http://localhost:3000/cars \
 ```
 
 **Note:** Basic Auth validates credentials on every request, so it's simpler but requires sending credentials each time. JWT is more efficient for frequent requests after initial login.
+
+### OAuth2 + OpenID Connect (Microservices SSO)
+
+For **microservices architecture** where multiple services need to authenticate against a central SSO (Single Sign-On) service, use OAuth2 + OIDC with RS256 asymmetric keys.
+
+#### Architecture Overview
+
+```mermaid
+graph TB
+    Client[Client Application]
+    SSO[SSO Server<br/>Port 3000<br/>Authorization Server]
+    Orders[Orders API<br/>Port 3001<br/>Resource Server]
+    Products[Products API<br/>Port 3002<br/>Resource Server]
+    Payments[Payments API<br/>Port 3003<br/>Resource Server]
+
+    Client -->|1. POST /auth/token<br/>client_id + client_secret| SSO
+    SSO -->|2. Access Token<br/>RS256 signed JWT| Client
+
+    Client -->|3. GET /orders<br/>Bearer token| Orders
+    Client -->|3. GET /products<br/>SAME token| Products
+    Client -->|3. POST /payments<br/>SAME token| Payments
+
+    SSO -.->|JWKS<br/>Public Keys| Orders
+    SSO -.->|JWKS<br/>Public Keys| Products
+    SSO -.->|JWKS<br/>Public Keys| Payments
+
+    style SSO fill:#e1f5ff,stroke:#01579b,stroke-width:3px
+    style Orders fill:#f3e5f5,stroke:#4a148c
+    style Products fill:#f3e5f5,stroke:#4a148c
+    style Payments fill:#f3e5f5,stroke:#4a148c
+    style Client fill:#fff3e0,stroke:#e65100
+```
+
+**Key Benefits:**
+- ✅ **Centralized authentication**: Single SSO service manages all users
+- ✅ **Distributed authorization**: Each API validates tokens independently (no SSO calls)
+- ✅ **No shared secrets**: APIs only need public keys from JWKS
+- ✅ **Standard protocols**: OAuth2/OIDC compliance
+- ✅ **RS256 signing**: Asymmetric keys (private key only on SSO)
+- ✅ **One token, multiple services**: Same token works across all APIs
+
+#### Complete SSO Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant SSO as SSO Server<br/>(Port 3000)
+    participant Orders as Orders API<br/>(Port 3001)
+    participant Products as Products API<br/>(Port 3002)
+
+    Note over SSO: Initialization
+    SSO->>SSO: Generate RSA key pair<br/>(private + public)
+    SSO->>SSO: Store in oauth_keys resource<br/>(private key encrypted)
+
+    Note over Orders,Products: Resource Servers Init
+    Orders->>SSO: GET /.well-known/jwks.json
+    SSO-->>Orders: Public keys (JWKS)
+    Orders->>Orders: Cache JWKS (1 hour)
+
+    Products->>SSO: GET /.well-known/jwks.json
+    SSO-->>Products: Public keys (JWKS)
+    Products->>Products: Cache JWKS (1 hour)
+
+    Note over Client,SSO: Step 1: Get Token
+    Client->>SSO: POST /auth/token<br/>grant_type=client_credentials<br/>client_id + client_secret<br/>scope=orders:read products:write
+    SSO->>SSO: Validate client credentials
+    SSO->>SSO: Create JWT payload<br/>{iss, sub, aud, scope, exp}
+    SSO->>SSO: Sign with PRIVATE key (RS256)
+    SSO-->>Client: access_token: eyJhbGci...
+
+    Note over Client,Orders: Step 2: Access Orders API
+    Client->>Orders: GET /orders<br/>Authorization: Bearer eyJhbGci...
+    Orders->>Orders: Extract token from header
+    Orders->>Orders: Decode JWT header<br/>Extract kid (key ID)
+    Orders->>Orders: Get public key from JWKS cache
+    Orders->>Orders: Verify signature with PUBLIC key
+    Orders->>Orders: Validate claims<br/>(iss, aud, exp)
+    Orders->>Orders: Check scope: orders:read ✓
+    Orders->>Orders: Extract userId from sub claim
+    Orders->>Orders: Query orders WHERE userId
+    Orders-->>Client: { orders: [...], user: {...} }
+
+    Note over Client,Products: Step 3: Access Products API (SAME TOKEN!)
+    Client->>Products: POST /products<br/>Authorization: Bearer eyJhbGci...
+    Products->>Products: Extract token
+    Products->>Products: Get public key from cache
+    Products->>Products: Verify signature locally
+    Products->>Products: Validate claims
+    Products->>Products: Check scope: products:write ✓
+    Products->>Products: Create product
+    Products-->>Client: { product: {...} }
+
+    Note over Orders,Products: ✅ NO communication with SSO!<br/>✅ Validation is 100% local!
+```
+
+#### Token Validation Flow
+
+```mermaid
+sequenceDiagram
+    participant API as Resource Server<br/>(Orders/Products/Payments)
+    participant Cache as JWKS Cache<br/>(In-memory)
+    participant Request as Incoming Request
+
+    Request->>API: Authorization: Bearer eyJhbGci...
+
+    API->>API: 1. Extract token from header
+
+    API->>API: 2. Decode JWT header<br/>{alg: "RS256", kid: "abc123"}
+
+    API->>Cache: 3. Get public key for kid: abc123
+
+    alt Key found in cache
+        Cache-->>API: Public key (PEM format)
+    else Key not in cache
+        Cache-->>API: null
+        API->>API: Fetch JWKS from SSO
+        API->>Cache: Store keys in cache
+    end
+
+    API->>API: 4. Verify RS256 signature<br/>using public key
+
+    alt Signature valid
+        API->>API: 5. Validate claims:<br/>• iss = http://sso ✓<br/>• aud = http://api ✓<br/>• exp > now ✓
+
+        alt Claims valid
+            API->>API: 6. Extract payload:<br/>• sub (userId)<br/>• scope (permissions)
+            API->>API: 7. Check required scopes
+
+            alt Has required scopes
+                API-->>Request: ✅ 200 OK + Data
+            else Missing scopes
+                API-->>Request: ❌ 403 Forbidden
+            end
+        else Claims invalid
+            API-->>Request: ❌ 401 Unauthorized<br/>(Invalid claims)
+        end
+    else Signature invalid
+        API-->>Request: ❌ 401 Unauthorized<br/>(Invalid signature)
+    end
+```
+
+#### Component Architecture
+
+```mermaid
+graph TB
+    subgraph "SSO Server (Authorization Server)"
+        SSO_API[API Endpoints]
+        SSO_Users[users Resource<br/>email, password, scopes]
+        SSO_Keys[oauth_keys Resource<br/>kid, publicKey, privateKey]
+        SSO_Clients[oauth_clients Resource<br/>clientId, clientSecret]
+        OAuth2[OAuth2Server Class]
+        KeyMgr[KeyManager<br/>RS256 Signing]
+
+        SSO_API --> OAuth2
+        OAuth2 --> KeyMgr
+        OAuth2 --> SSO_Users
+        OAuth2 --> SSO_Keys
+        OAuth2 --> SSO_Clients
+
+        SSO_API -->|GET /.well-known/jwks.json| Public[Public Keys JWKS]
+        SSO_API -->|POST /auth/token| Tokens[Issue Tokens]
+        SSO_API -->|GET /auth/userinfo| UserInfo[User Claims]
+    end
+
+    subgraph "Orders API (Resource Server)"
+        Orders_API[API Endpoints]
+        Orders_Data[orders Resource<br/>userId, productId, total]
+        OIDC_Orders[OIDCClient]
+        JWKS_Cache_Orders[JWKS Cache<br/>TTL: 1 hour]
+
+        Orders_API --> OIDC_Orders
+        OIDC_Orders --> JWKS_Cache_Orders
+        OIDC_Orders --> Orders_Data
+    end
+
+    subgraph "Products API (Resource Server)"
+        Products_API[API Endpoints]
+        Products_Data[products Resource<br/>name, price, sku]
+        OIDC_Products[OIDCClient]
+        JWKS_Cache_Products[JWKS Cache<br/>TTL: 1 hour]
+
+        Products_API --> OIDC_Products
+        OIDC_Products --> JWKS_Cache_Products
+        OIDC_Products --> Products_Data
+    end
+
+    Public -.->|One-time fetch<br/>Cache 1 hour| JWKS_Cache_Orders
+    Public -.->|One-time fetch<br/>Cache 1 hour| JWKS_Cache_Products
+
+    style SSO_Users fill:#bbdefb
+    style SSO_Keys fill:#ffccbc
+    style SSO_Clients fill:#c8e6c9
+    style Orders_Data fill:#f0f4c3
+    style Products_Data fill:#f0f4c3
+```
+
+#### RS256 vs HS256 Security Model
+
+```mermaid
+graph LR
+    subgraph "❌ HS256 (Symmetric) - DON'T USE for Microservices"
+        SSO_H[SSO Server<br/>shared secret]
+        Orders_H[Orders API<br/>shared secret]
+        Products_H[Products API<br/>shared secret]
+        Payments_H[Payments API<br/>shared secret]
+
+        SSO_H -.->|Same secret<br/>everywhere| Orders_H
+        SSO_H -.->|Same secret<br/>everywhere| Products_H
+        SSO_H -.->|Same secret<br/>everywhere| Payments_H
+
+        style SSO_H fill:#ffcdd2,stroke:#c62828
+        style Orders_H fill:#ffcdd2,stroke:#c62828
+        style Products_H fill:#ffcdd2,stroke:#c62828
+        style Payments_H fill:#ffcdd2,stroke:#c62828
+    end
+
+    subgraph "✅ RS256 (Asymmetric) - CORRECT for Microservices"
+        SSO_R[SSO Server<br/>🔒 PRIVATE key<br/>signs tokens]
+        Orders_R[Orders API<br/>🔓 PUBLIC key<br/>validates only]
+        Products_R[Products API<br/>🔓 PUBLIC key<br/>validates only]
+        Payments_R[Payments API<br/>🔓 PUBLIC key<br/>validates only]
+
+        SSO_R -->|JWKS<br/>public keys only| Orders_R
+        SSO_R -->|JWKS<br/>public keys only| Products_R
+        SSO_R -->|JWKS<br/>public keys only| Payments_R
+
+        style SSO_R fill:#c8e6c9,stroke:#2e7d32
+        style Orders_R fill:#e1f5fe,stroke:#01579b
+        style Products_R fill:#e1f5fe,stroke:#01579b
+        style Payments_R fill:#e1f5fe,stroke:#01579b
+    end
+```
+
+**Why RS256 is superior for microservices:**
+
+| Aspect | HS256 (Symmetric) | RS256 (Asymmetric) |
+|--------|-------------------|-------------------|
+| **Secret Distribution** | ❌ Shared secret on ALL services | ✅ Private key ONLY on SSO |
+| **Security Risk** | ❌ One leak compromises EVERYTHING | ✅ Public key leak is safe |
+| **Token Creation** | ❌ Any service can create fake tokens | ✅ Only SSO can create tokens |
+| **Key Rotation** | ❌ Update ALL services | ✅ Update SSO, APIs auto-fetch JWKS |
+| **Validation** | ✅ Fast (symmetric) | ✅ Fast (cached public key) |
+| **Use Case** | Single service | Microservices, SSO |
+
+#### Quick Start: SSO Server Setup
+
+```javascript
+import Database from 's3db.js';
+import { APIPlugin } from 's3db.js/plugins/api';
+import { OAuth2Server } from 's3db.js/plugins/api/auth/oauth2-server';
+
+// 1. Create SSO database
+const ssoDb = new Database({
+  connectionString: 's3://minioadmin:minioadmin@localhost:9000/sso',
+  encryptionKey: 'your-encryption-key'
+});
+await ssoDb.connect();
+
+// 2. Create users resource
+const usersResource = await ssoDb.createResource({
+  name: 'users',
+  attributes: {
+    email: 'string|required|email',
+    password: 'secret|required',
+    name: 'string',
+    scopes: 'array|items:string',  // ['orders:read', 'products:write', ...]
+    active: 'boolean|default:true'
+  }
+});
+
+// 3. Create OAuth keys resource
+const keysResource = await ssoDb.createResource({
+  name: 'oauth_keys',
+  attributes: {
+    kid: 'string|required',
+    publicKey: 'string|required',
+    privateKey: 'secret|required',  // AES-256-GCM encrypted
+    algorithm: 'string|default:RS256',
+    active: 'boolean|default:true'
+  }
+});
+
+// 4. Create OAuth clients resource (optional)
+const clientsResource = await ssoDb.createResource({
+  name: 'oauth_clients',
+  attributes: {
+    clientId: 'string|required',
+    clientSecret: 'secret|required',
+    name: 'string',
+    redirectUris: 'array|items:string',
+    grantTypes: 'array|items:string',
+    scopes: 'array|items:string'
+  }
+});
+
+// 5. Initialize OAuth2 server
+const oauth2 = new OAuth2Server({
+  issuer: 'http://localhost:3000',
+  keyResource: keysResource,
+  userResource: usersResource,
+  clientResource: clientsResource,
+
+  // Token expiry
+  accessTokenExpiry: '15m',
+  idTokenExpiry: '15m',
+  refreshTokenExpiry: '7d',
+
+  // Supported features
+  supportedScopes: [
+    'openid',           // OIDC identity
+    'profile',          // User profile
+    'email',            // User email
+    'offline_access',   // Refresh tokens
+    'orders:read',      // Custom scopes
+    'orders:write',
+    'products:read',
+    'products:write'
+  ],
+  supportedGrantTypes: [
+    'client_credentials',
+    'authorization_code',
+    'refresh_token'
+  ]
+});
+
+await oauth2.initialize();  // Generates RSA key pair if needed
+
+// 6. Create API with OAuth2 endpoints
+const api = new APIPlugin({ port: 3000 });
+
+// OIDC Discovery endpoint
+api.addRoute({
+  path: '/.well-known/openid-configuration',
+  method: 'GET',
+  handler: oauth2.discoveryHandler.bind(oauth2),
+  auth: false
+});
+
+// JWKS endpoint (public keys)
+api.addRoute({
+  path: '/.well-known/jwks.json',
+  method: 'GET',
+  handler: oauth2.jwksHandler.bind(oauth2),
+  auth: false
+});
+
+// Token endpoint (all grant types)
+api.addRoute({
+  path: '/auth/token',
+  method: 'POST',
+  handler: oauth2.tokenHandler.bind(oauth2),
+  auth: false
+});
+
+// UserInfo endpoint
+api.addRoute({
+  path: '/auth/userinfo',
+  method: 'GET',
+  handler: oauth2.userinfoHandler.bind(oauth2),
+  auth: false  // Validates token internally
+});
+
+// Token introspection endpoint
+api.addRoute({
+  path: '/auth/introspect',
+  method: 'POST',
+  handler: oauth2.introspectHandler.bind(oauth2),
+  auth: false
+});
+
+await ssoDb.use(api);
+
+console.log('✅ SSO Server running on http://localhost:3000');
+console.log('📖 JWKS: http://localhost:3000/.well-known/jwks.json');
+console.log('🔐 Token: POST http://localhost:3000/auth/token');
+```
+
+#### Quick Start: Resource Server Setup
+
+```javascript
+import Database from 's3db.js';
+import { APIPlugin } from 's3db.js/plugins/api';
+import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+
+// 1. Create Orders API database
+const ordersDb = new Database({
+  connectionString: 's3://minioadmin:minioadmin@localhost:9000/orders'
+});
+await ordersDb.connect();
+
+// 2. Create orders resource (NO users resource!)
+const ordersResource = await ordersDb.createResource({
+  name: 'orders',
+  attributes: {
+    userId: 'string|required',  // From token sub claim
+    productId: 'string|required',
+    quantity: 'number|required',
+    total: 'number|required',
+    status: 'string|default:pending'
+  }
+});
+
+// 3. Initialize OIDC client
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:3000',        // SSO server URL
+  audience: 'http://localhost:3001',      // This API's URL
+  jwksCacheTTL: 3600000,                  // Cache JWKS for 1 hour
+  clockTolerance: 60,                     // 60 seconds clock skew tolerance
+  autoRefreshJWKS: true                   // Auto-refresh JWKS periodically
+});
+
+await oidcClient.initialize();  // Fetches JWKS from SSO
+
+// 4. Create API
+const api = new APIPlugin({ port: 3001 });
+
+// 5. Add OIDC auth driver
+api.addAuthDriver('oidc', oidcClient.middleware.bind(oidcClient));
+
+// 6. Protected routes
+api.addRoute({
+  path: '/orders',
+  method: 'GET',
+  handler: async (req, res) => {
+    // req.user contains validated token payload
+    const userId = req.user.sub;
+    const scopes = req.user.scope.split(' ');
+
+    // Check required scope
+    if (!scopes.includes('orders:read')) {
+      return res.status(403).json({ error: 'Insufficient scopes' });
+    }
+
+    // Query orders for this user
+    const orders = await ordersResource.query({ userId });
+    res.json({ orders, user: req.user });
+  },
+  auth: 'oidc'  // Requires valid OIDC token
+});
+
+api.addRoute({
+  path: '/orders',
+  method: 'POST',
+  handler: async (req, res) => {
+    const userId = req.user.sub;
+    const scopes = req.user.scope.split(' ');
+
+    if (!scopes.includes('orders:write')) {
+      return res.status(403).json({ error: 'Insufficient scopes' });
+    }
+
+    const order = await ordersResource.insert({
+      userId,
+      productId: req.body.productId,
+      quantity: req.body.quantity,
+      total: req.body.total
+    });
+
+    res.status(201).json({ order });
+  },
+  auth: 'oidc'
+});
+
+// Public route (no auth)
+api.addRoute({
+  path: '/health',
+  method: 'GET',
+  handler: (req, res) => {
+    res.json({ status: 'healthy' });
+  },
+  auth: false
+});
+
+await ordersDb.use(api);
+
+console.log('✅ Orders API running on http://localhost:3001');
+```
+
+#### Grant Types
+
+##### 1. Client Credentials (Service-to-Service)
+
+**Use case**: Backend services communicating with each other (no user involved)
+
+```bash
+# Request token
+curl -X POST http://localhost:3000/auth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=service-a" \
+  -d "client_secret=secret" \
+  -d "scope=orders:read orders:write products:read"
+
+# Response
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIs...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "scope": "orders:read orders:write products:read"
+}
+
+# Use token
+curl http://localhost:3001/orders \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+##### 2. Authorization Code (Web Applications)
+
+**Use case**: Web apps with user login (user consents to access)
+
+```bash
+# Step 1: Redirect user to SSO for login
+GET http://localhost:3000/auth/authorize?
+  response_type=code&
+  client_id=webapp&
+  redirect_uri=https://app.com/callback&
+  scope=openid profile email orders:read&
+  state=random-state-value
+
+# Step 2: User logs in, SSO redirects back with code
+https://app.com/callback?code=AUTH_CODE&state=random-state-value
+
+# Step 3: Exchange code for tokens
+curl -X POST http://localhost:3000/auth/token \
+  -d "grant_type=authorization_code" \
+  -d "code=AUTH_CODE" \
+  -d "redirect_uri=https://app.com/callback" \
+  -d "client_id=webapp" \
+  -d "client_secret=secret"
+
+# Response
+{
+  "access_token": "eyJhbGci...",
+  "id_token": "eyJhbGci...",         # User identity (OIDC)
+  "refresh_token": "refresh...",     # If offline_access scope
+  "token_type": "Bearer",
+  "expires_in": 900
+}
+```
+
+##### 3. Refresh Token (Long-lived Sessions)
+
+**Use case**: Get new access token without re-authentication
+
+```bash
+curl -X POST http://localhost:3000/auth/token \
+  -d "grant_type=refresh_token" \
+  -d "refresh_token=refresh..." \
+  -d "client_id=webapp" \
+  -d "client_secret=secret" \
+  -d "scope=orders:read"  # Optional, must be subset
+
+# Response
+{
+  "access_token": "eyJhbGci...",
+  "id_token": "eyJhbGci...",
+  "token_type": "Bearer",
+  "expires_in": 900
+}
+```
+
+#### Token Structure
+
+**Access Token (JWT Payload)**:
+```json
+{
+  "iss": "http://localhost:3000",           // Issuer (SSO server)
+  "sub": "user-abc123",                     // Subject (user ID)
+  "aud": "http://localhost:3001",           // Audience (target API)
+  "scope": "orders:read orders:write",      // Permissions
+  "exp": 1234567890,                        // Expiration (Unix timestamp)
+  "iat": 1234567000,                        // Issued at
+  "client_id": "mobile-app"                 // OAuth client
+}
+```
+
+**ID Token (OIDC - User Identity)**:
+```json
+{
+  "iss": "http://localhost:3000",
+  "sub": "user-abc123",
+  "aud": "webapp",
+  "exp": 1234567890,
+  "iat": 1234567000,
+  "name": "John Doe",
+  "email": "john@example.com",
+  "email_verified": true,
+  "picture": "https://example.com/avatar.jpg"
+}
+```
+
+#### Scopes and Permissions
+
+```javascript
+// SSO Server - Define supported scopes
+const oauth2 = new OAuth2Server({
+  supportedScopes: [
+    // OIDC standard scopes
+    'openid',          // Required for OIDC
+    'profile',         // User profile (name, picture)
+    'email',           // User email
+    'offline_access',  // Refresh tokens
+
+    // Custom resource scopes
+    'orders:read',
+    'orders:write',
+    'orders:delete',
+    'products:read',
+    'products:write',
+    'payments:process',
+    'admin:all'        // Full admin access
+  ]
+});
+
+// Resource Server - Check scopes
+api.addRoute({
+  path: '/orders/:id',
+  method: 'DELETE',
+  handler: async (req, res) => {
+    const scopes = req.user.scope.split(' ');
+
+    // Require specific scope
+    if (!scopes.includes('orders:delete')) {
+      return res.status(403).json({
+        error: 'insufficient_scope',
+        error_description: 'Requires scope: orders:delete'
+      });
+    }
+
+    // Check admin scope
+    if (scopes.includes('admin:all')) {
+      // Admin can delete any order
+    } else {
+      // Regular user can only delete own orders
+      const order = await ordersResource.get(req.params.id);
+      if (order.userId !== req.user.sub) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
+    await ordersResource.delete(req.params.id);
+    res.status(204).send();
+  },
+  auth: 'oidc'
+});
+```
+
+#### Key Rotation
+
+```javascript
+// Rotate RSA key pair (recommended every 90 days)
+await oauth2.rotateKeys();
+
+// What happens:
+// 1. Generates new RSA key pair
+// 2. Marks old key inactive (but keeps it)
+// 3. New tokens signed with new key
+// 4. Old tokens still valid until expiry
+// 5. Resource servers auto-fetch new JWKS
+```
+
+**Best practices:**
+- ✅ Rotate keys every 90 days
+- ✅ Keep old keys for token validity period (e.g., 24 hours)
+- ✅ Use automated rotation (cron job)
+- ✅ Monitor key usage metrics
+- ✅ Delete old keys after all tokens expire
+
+#### Zero Dependencies
+
+s3db.js OAuth2/OIDC uses **ZERO external dependencies** - built entirely on Node.js native crypto APIs:
+
+```javascript
+// Native Node.js modules only
+import {
+  generateKeyPairSync,  // RSA key generation
+  createSign,           // JWT signing
+  createVerify,         // JWT verification
+  createHash,           // SHA-256 hashing
+  randomBytes,          // Secure random generation
+  randomUUID            // UUID generation
+} from 'crypto';
+
+// Node.js 18+ native fetch
+const jwks = await fetch('http://sso/.well-known/jwks.json');
+```
+
+**Benefits**:
+- ✅ No supply chain vulnerabilities
+- ✅ Smaller bundle size (~38 KB vs ~5 MB)
+- ✅ Faster performance (native crypto)
+- ✅ No dependency updates needed
+- ✅ Works wherever Node.js works (Docker, Lambda, Edge)
+
+#### Troubleshooting
+
+**Token validation fails**:
+
+```javascript
+// Debug token validation
+const verification = await oidcClient.verifyToken(token);
+
+if (!verification.valid) {
+  console.error('Token invalid:', verification.error);
+  console.log('Header:', verification.header);
+  console.log('Payload:', verification.payload);
+}
+
+// Common issues:
+// ❌ Issuer mismatch: iss claim doesn't match OIDC issuer
+// ❌ Audience mismatch: aud claim doesn't match resource server
+// ❌ Expired token: exp claim < current time
+// ❌ Clock skew: Increase clockTolerance option
+// ❌ Invalid signature: JWKS not cached or wrong key
+```
+
+**JWKS not found**:
+
+```javascript
+// Force refresh JWKS
+await oidcClient.fetchJWKS(true);
+
+// Check JWKS endpoint is accessible
+console.log('JWKS URI:', oidcClient.jwksUri);
+const jwks = await fetch(oidcClient.jwksUri);
+console.log('JWKS:', await jwks.json());
+```
+
+**Clock skew issues**:
+
+```javascript
+// Increase tolerance for time validation
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:3000',
+  clockTolerance: 300  // 5 minutes tolerance
+});
+```
+
+#### Complete Working Example
+
+See [`docs/examples/e60-oauth2-microservices.js`](../examples/e60-oauth2-microservices.js) for a complete working example with:
+- SSO server (port 3000)
+- Orders API (port 3001)
+- Products API (port 3002)
+- Test client that requests tokens and makes API calls
+
+Run it:
+```bash
+# Start MinIO
+docker run -d -p 9000:9000 -p 9001:9001 \
+  minio/minio server /data --console-address ":9001"
+
+# Run example
+node docs/examples/e60-oauth2-microservices.js
+```
+
+#### Docker Compose Example
+
+```yaml
+version: '3.8'
+
+services:
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  sso:
+    build: ./sso-service
+    ports:
+      - "3000:3000"
+    environment:
+      S3DB_CONNECTION: http://minioadmin:minioadmin@minio:9000/sso
+      S3DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      OAUTH2_ISSUER: http://sso:3000
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  orders-api:
+    build: ./orders-service
+    ports:
+      - "3001:3001"
+    environment:
+      S3DB_CONNECTION: http://minioadmin:minioadmin@minio:9000/orders
+      OAUTH2_ISSUER: http://sso:3000
+    depends_on:
+      - sso
+
+  products-api:
+    build: ./products-service
+    ports:
+      - "3002:3002"
+    environment:
+      S3DB_CONNECTION: http://minioadmin:minioadmin@minio:9000/products
+      OAUTH2_ISSUER: http://sso:3000
+    depends_on:
+      - sso
+```
+
+#### When to Use OAuth2/OIDC
+
+**✅ Use OAuth2/OIDC when:**
+- You have multiple services (microservices)
+- You need Single Sign-On (SSO)
+- Services are deployed independently
+- You want centralized user management
+- You need standard protocol compliance
+- You want to avoid shared secrets
+
+**❌ Don't use OAuth2/OIDC when:**
+- You have a single monolithic API
+- You don't need SSO
+- Complexity isn't worth it
+- JWT driver is sufficient
+
+**Comparison**:
+
+| Feature | OAuth2/OIDC | JWT Driver | Basic Auth |
+|---------|-------------|-----------|------------|
+| **Best For** | Microservices | Single API | Scripts/Tools |
+| **Setup Complexity** | High | Medium | Low |
+| **Security** | High (RS256) | Medium (HS256) | Low |
+| **SSO Support** | ✅ Yes | ❌ No | ❌ No |
+| **Token Sharing** | ✅ Yes | ❌ No | ❌ No |
+| **Key Management** | Asymmetric | Symmetric | N/A |
+| **Standards** | OAuth2/OIDC | JWT | HTTP Basic |
+
+#### Additional Resources
+
+- **OAuth 2.0 Spec**: [RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)
+- **OpenID Connect Core**: [Spec](https://openid.net/specs/openid-connect-core-1_0.html)
+- **JWT Best Practices**: [RFC 8725](https://datatracker.ietf.org/doc/html/rfc8725)
+- **PKCE**: [RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)
+- **Token Introspection**: [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
 
 ### Custom Username/Password Fields
 
