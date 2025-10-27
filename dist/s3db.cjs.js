@@ -5,10 +5,12 @@ Object.defineProperty(exports, '__esModule', { value: true });
 var crypto$1 = require('crypto');
 var EventEmitter = require('events');
 var hono = require('hono');
-var promises = require('fs/promises');
-var fs = require('fs');
-var promises$1 = require('stream/promises');
+var fs = require('fs/promises');
 var path$1 = require('path');
+var fs$1 = require('fs');
+var clientS3 = require('@aws-sdk/client-s3');
+require('@aws-sdk/s3-request-presigner');
+var promises = require('stream/promises');
 var stream$1 = require('stream');
 var zlib = require('node:zlib');
 var os = require('os');
@@ -23,11 +25,10 @@ var web = require('node:stream/web');
 var http = require('http');
 var https = require('https');
 var nodeHttpHandler = require('@smithy/node-http-handler');
-var clientS3 = require('@aws-sdk/client-s3');
 var node_url = require('node:url');
 var node_path = require('node:path');
 var actualFS = require('node:fs');
-var promises$2 = require('node:fs/promises');
+var promises$1 = require('node:fs/promises');
 var node_events = require('node:events');
 var Stream = require('node:stream');
 var node_string_decoder = require('node:string_decoder');
@@ -7510,6 +7511,8 @@ class ApiServer {
       middlewares: options.middlewares || [],
       verbose: options.verbose || false,
       auth: options.auth || {},
+      static: options.static || [],
+      // Static file serving config
       docsEnabled: options.docsEnabled !== false,
       // Enable /docs by default
       docsUI: options.docsUI || "redoc",
@@ -7606,6 +7609,7 @@ class ApiServer {
       }
       return c.redirect("/docs", 302);
     });
+    this._setupStaticRoutes();
     if (this.options.docsEnabled) {
       this.app.get("/openapi.json", (c) => {
         if (!this.openAPISpec) {
@@ -10953,7 +10957,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     const targetPath = path$1.join(targetDir, `${backupId}.backup`);
     const manifestPath = path$1.join(targetDir, `${backupId}.manifest.json`);
     const [createDirOk, createDirErr] = await tryFn(
-      () => promises.mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
+      () => fs.mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
     );
     if (!createDirOk) {
       throw new BackupError("Failed to create backup directory", {
@@ -10965,7 +10969,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check directory permissions and disk space"
       });
     }
-    const [copyOk, copyErr] = await tryFn(() => promises.copyFile(filePath, targetPath));
+    const [copyOk, copyErr] = await tryFn(() => fs.copyFile(filePath, targetPath));
     if (!copyOk) {
       throw new BackupError("Failed to copy backup file", {
         operation: "upload",
@@ -10985,7 +10989,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       ))
     );
     if (!manifestOk) {
-      await tryFn(() => promises.unlink(targetPath));
+      await tryFn(() => fs.unlink(targetPath));
       throw new BackupError("Failed to write manifest file", {
         operation: "upload",
         driver: "filesystem",
@@ -10995,7 +10999,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check directory permissions and disk space"
       });
     }
-    const [statOk, , stats] = await tryFn(() => promises.stat(targetPath));
+    const [statOk, , stats] = await tryFn(() => fs.stat(targetPath));
     const size = statOk ? stats.size : 0;
     this.log(`Uploaded backup ${backupId} to ${targetPath} (${size} bytes)`);
     return {
@@ -11010,7 +11014,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
-    const [existsOk] = await tryFn(() => promises.access(sourcePath));
+    const [existsOk] = await tryFn(() => fs.access(sourcePath));
     if (!existsOk) {
       throw new BackupError("Backup file not found", {
         operation: "download",
@@ -11021,8 +11025,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       });
     }
     const targetDir = path$1.dirname(targetPath);
-    await tryFn(() => promises.mkdir(targetDir, { recursive: true }));
-    const [copyOk, copyErr] = await tryFn(() => promises.copyFile(sourcePath, targetPath));
+    await tryFn(() => fs.mkdir(targetDir, { recursive: true }));
+    const [copyOk, copyErr] = await tryFn(() => fs.copyFile(sourcePath, targetPath));
     if (!copyOk) {
       throw new BackupError("Failed to download backup", {
         operation: "download",
@@ -11046,8 +11050,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.manifest.json`
     );
-    const [deleteBackupOk] = await tryFn(() => promises.unlink(backupPath));
-    const [deleteManifestOk] = await tryFn(() => promises.unlink(manifestPath));
+    const [deleteBackupOk] = await tryFn(() => fs.unlink(backupPath));
+    const [deleteManifestOk] = await tryFn(() => fs.unlink(manifestPath));
     if (!deleteBackupOk && !deleteManifestOk) {
       throw new BackupError("Failed to delete backup files", {
         operation: "delete",
@@ -11075,12 +11079,12 @@ class FilesystemBackupDriver extends BaseBackupDriver {
   }
   async _scanDirectory(dirPath, prefix, results, limit) {
     if (results.length >= limit) return;
-    const [readDirOk, , files] = await tryFn(() => promises.readdir(dirPath));
+    const [readDirOk, , files] = await tryFn(() => fs.readdir(dirPath));
     if (!readDirOk) return;
     for (const file of files) {
       if (results.length >= limit) break;
       const fullPath = path$1.join(dirPath, file);
-      const [statOk, , stats] = await tryFn(() => promises.stat(fullPath));
+      const [statOk, , stats] = await tryFn(() => fs.stat(fullPath));
       if (!statOk) continue;
       if (stats.isDirectory()) {
         await this._scanDirectory(fullPath, prefix, results, limit);
@@ -11116,8 +11120,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     );
     const [readOk, readErr] = await tryFn(async () => {
       const hash = crypto$1.createHash("sha256");
-      const stream = fs.createReadStream(backupPath);
-      await promises$1.pipeline(stream, hash);
+      const stream = fs$1.createReadStream(backupPath);
+      await promises.pipeline(stream, hash);
       const actualChecksum = hash.digest("hex");
       return actualChecksum === expectedChecksum;
     });
@@ -11195,10 +11199,10 @@ class S3BackupDriver extends BaseBackupDriver {
   async upload(filePath, backupId, manifest) {
     const backupKey = this.resolveKey(backupId, manifest);
     const manifestKey = this.resolveManifestKey(backupId, manifest);
-    const [statOk, , stats] = await tryFn(() => promises.stat(filePath));
+    const [statOk, , stats] = await tryFn(() => fs.stat(filePath));
     const fileSize = statOk ? stats.size : 0;
     const [uploadOk, uploadErr] = await tryFn(async () => {
-      const fileStream = fs.createReadStream(filePath);
+      const fileStream = fs$1.createReadStream(filePath);
       return await this.config.client.uploadObject({
         bucket: this.config.bucket,
         key: backupKey,
@@ -11787,7 +11791,7 @@ class StreamingExporter {
   async exportResource(resource, outputPath, type = "full", sinceTimestamp = null) {
     let recordCount = 0;
     let bytesWritten = 0;
-    const writeStream = fs.createWriteStream(outputPath);
+    const writeStream = fs$1.createWriteStream(outputPath);
     let outputStream = writeStream;
     if (this.compress) {
       const gzipStream = zlib.createGzip();
@@ -11906,7 +11910,7 @@ class BackupPlugin extends Plugin {
   async onInstall() {
     this.driver = createBackupDriver(this.config.driver, this.config.driverConfig);
     await this.driver.setup(this.database);
-    await promises.mkdir(this.config.tempDir, { recursive: true });
+    await fs.mkdir(this.config.tempDir, { recursive: true });
     await this._createBackupMetadataResource();
     if (this.config.verbose) {
       const storageInfo = this.driver.getStorageInfo();
@@ -11963,7 +11967,7 @@ class BackupPlugin extends Plugin {
       this.emit("plg:backup:start", { id: backupId, type });
       const metadata = await this._createBackupMetadata(backupId, type);
       const tempBackupDir = path$1.join(this.config.tempDir, backupId);
-      await promises.mkdir(tempBackupDir, { recursive: true });
+      await fs.mkdir(tempBackupDir, { recursive: true });
       try {
         const manifest = await this._createBackupManifest(type, options);
         const exportedFiles = await this._exportResources(manifest.resources, tempBackupDir, type);
@@ -12169,7 +12173,7 @@ class BackupPlugin extends Plugin {
       };
     }
     const metadataPath = path$1.join(tempDir, "s3db.json");
-    await promises.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
     if (this.config.verbose) {
       console.log(`[BackupPlugin] Generated s3db.json metadata`);
     }
@@ -12182,7 +12186,7 @@ class BackupPlugin extends Plugin {
     };
     let totalSize = 0;
     for (const filePath of files) {
-      const [readOk, readErr, content] = await tryFn(() => promises.readFile(filePath, "utf8"));
+      const [readOk, readErr, content] = await tryFn(() => fs.readFile(filePath, "utf8"));
       if (!readOk) {
         if (this.config.verbose) {
           console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
@@ -12199,11 +12203,11 @@ class BackupPlugin extends Plugin {
     }
     const archiveJson = JSON.stringify(archive);
     if (compressionType === "none") {
-      await promises.writeFile(targetPath, archiveJson, "utf8");
+      await fs.writeFile(targetPath, archiveJson, "utf8");
     } else {
-      const output = fs.createWriteStream(targetPath);
+      const output = fs$1.createWriteStream(targetPath);
       const gzip = zlib.createGzip({ level: 6 });
-      await promises$1.pipeline(
+      await promises.pipeline(
         async function* () {
           yield Buffer.from(archiveJson, "utf8");
         },
@@ -12211,14 +12215,14 @@ class BackupPlugin extends Plugin {
         output
       );
     }
-    const [statOk, , stats] = await tryFn(() => promises.stat(targetPath));
+    const [statOk, , stats] = await tryFn(() => fs.stat(targetPath));
     return statOk ? stats.size : totalSize;
   }
   async _generateChecksum(filePath) {
     const [ok, err, result] = await tryFn(async () => {
       const hash = crypto$1.createHash("sha256");
-      const stream = fs.createReadStream(filePath);
-      await promises$1.pipeline(stream, hash);
+      const stream = fs$1.createReadStream(filePath);
+      await promises.pipeline(stream, hash);
       return hash.digest("hex");
     });
     if (!ok) {
@@ -12251,7 +12255,7 @@ class BackupPlugin extends Plugin {
         throw new Error(`Backup '${backupId}' is not in completed status`);
       }
       const tempRestoreDir = path$1.join(this.config.tempDir, `restore-${backupId}`);
-      await promises.mkdir(tempRestoreDir, { recursive: true });
+      await fs.mkdir(tempRestoreDir, { recursive: true });
       try {
         const downloadPath = path$1.join(tempRestoreDir, `${backupId}.backup`);
         await this.driver.download(backupId, downloadPath, backup.driverInfo);
@@ -12289,7 +12293,7 @@ class BackupPlugin extends Plugin {
     try {
       let archiveData = "";
       if (this.config.compression !== "none") {
-        const input = fs.createReadStream(backupPath);
+        const input = fs$1.createReadStream(backupPath);
         const gunzip = zlib.createGunzip();
         const chunks = [];
         await new Promise((resolve, reject) => {
@@ -12297,7 +12301,7 @@ class BackupPlugin extends Plugin {
         });
         archiveData = Buffer.concat(chunks).toString("utf8");
       } else {
-        archiveData = await promises.readFile(backupPath, "utf8");
+        archiveData = await fs.readFile(backupPath, "utf8");
       }
       let archive;
       try {
@@ -13032,7 +13036,7 @@ class FilesystemCache extends Cache {
   }
   async _ensureDirectory(dir) {
     const [ok, err] = await tryFn(async () => {
-      await promises.mkdir(dir, { recursive: true });
+      await fs.mkdir(dir, { recursive: true });
     });
     if (!ok && err.code !== "EEXIST") {
       throw new Error(`Failed to create cache directory: ${err.message}`);
@@ -13069,7 +13073,7 @@ class FilesystemCache extends Cache {
         await this._acquireLock(filePath);
       }
       try {
-        await promises.writeFile(filePath, finalData, {
+        await fs.writeFile(filePath, finalData, {
           encoding: compressed ? "utf8" : this.encoding,
           mode: this.fileMode
         });
@@ -13083,7 +13087,7 @@ class FilesystemCache extends Cache {
             compressedSize: compressed ? Buffer.byteLength(finalData, "utf8") : originalSize,
             compressionRatio: compressed ? (Buffer.byteLength(finalData, "utf8") / originalSize).toFixed(2) : 1
           };
-          await promises.writeFile(this._getMetadataPath(filePath), JSON.stringify(metadata), {
+          await fs.writeFile(this._getMetadataPath(filePath), JSON.stringify(metadata), {
             encoding: this.encoding,
             mode: this.fileMode
           });
@@ -13121,7 +13125,7 @@ class FilesystemCache extends Cache {
         const metadataPath = this._getMetadataPath(filePath);
         if (await this._fileExists(metadataPath)) {
           const [ok, err, metadata] = await tryFn(async () => {
-            const metaContent = await promises.readFile(metadataPath, this.encoding);
+            const metaContent = await fs.readFile(metadataPath, this.encoding);
             return JSON.parse(metaContent);
           });
           if (ok && metadata.ttl > 0) {
@@ -13130,7 +13134,7 @@ class FilesystemCache extends Cache {
           }
         }
       } else if (this.ttl > 0) {
-        const stats = await promises.stat(filePath);
+        const stats = await fs.stat(filePath);
         const age = Date.now() - stats.mtime.getTime();
         isExpired = age > this.ttl;
       }
@@ -13145,13 +13149,13 @@ class FilesystemCache extends Cache {
         await this._acquireLock(filePath);
       }
       try {
-        const content = await promises.readFile(filePath, this.encoding);
+        const content = await fs.readFile(filePath, this.encoding);
         let isCompressed = false;
         if (this.enableMetadata) {
           const metadataPath = this._getMetadataPath(filePath);
           if (await this._fileExists(metadataPath)) {
             const [ok, err, metadata] = await tryFn(async () => {
-              const metaContent = await promises.readFile(metadataPath, this.encoding);
+              const metaContent = await fs.readFile(metadataPath, this.encoding);
               return JSON.parse(metaContent);
             });
             if (ok) {
@@ -13190,18 +13194,18 @@ class FilesystemCache extends Cache {
     const filePath = this._getFilePath(key);
     try {
       if (await this._fileExists(filePath)) {
-        await promises.unlink(filePath);
+        await fs.unlink(filePath);
       }
       if (this.enableMetadata) {
         const metadataPath = this._getMetadataPath(filePath);
         if (await this._fileExists(metadataPath)) {
-          await promises.unlink(metadataPath);
+          await fs.unlink(metadataPath);
         }
       }
       if (this.enableBackup) {
         const backupPath = filePath + this.backupSuffix;
         if (await this._fileExists(backupPath)) {
-          await promises.unlink(backupPath);
+          await fs.unlink(backupPath);
         }
       }
       if (this.enableStats) {
@@ -13226,7 +13230,7 @@ class FilesystemCache extends Cache {
         }
         return true;
       }
-      const files = await promises.readdir(this.directory);
+      const files = await fs.readdir(this.directory);
       const cacheFiles = files.filter((file) => {
         if (!file.startsWith(this.prefix)) return false;
         if (!file.endsWith(this.fileExtension)) return false;
@@ -13240,7 +13244,7 @@ class FilesystemCache extends Cache {
         const filePath = path$1.join(this.directory, file);
         try {
           if (await this._fileExists(filePath)) {
-            await promises.unlink(filePath);
+            await fs.unlink(filePath);
           }
         } catch (error) {
           if (error.code !== "ENOENT") {
@@ -13251,7 +13255,7 @@ class FilesystemCache extends Cache {
           try {
             const metadataPath = this._getMetadataPath(filePath);
             if (await this._fileExists(metadataPath)) {
-              await promises.unlink(metadataPath);
+              await fs.unlink(metadataPath);
             }
           } catch (error) {
             if (error.code !== "ENOENT") {
@@ -13263,7 +13267,7 @@ class FilesystemCache extends Cache {
           try {
             const backupPath = filePath + this.backupSuffix;
             if (await this._fileExists(backupPath)) {
-              await promises.unlink(backupPath);
+              await fs.unlink(backupPath);
             }
           } catch (error) {
             if (error.code !== "ENOENT") {
@@ -13298,7 +13302,7 @@ class FilesystemCache extends Cache {
   }
   async keys() {
     try {
-      const files = await promises.readdir(this.directory);
+      const files = await fs.readdir(this.directory);
       const cacheFiles = files.filter(
         (file) => file.startsWith(this.prefix) && file.endsWith(this.fileExtension)
       );
@@ -13315,14 +13319,14 @@ class FilesystemCache extends Cache {
   // Helper methods
   async _fileExists(filePath) {
     const [ok] = await tryFn(async () => {
-      await promises.stat(filePath);
+      await fs.stat(filePath);
     });
     return ok;
   }
   async _copyFile(src, dest) {
     const [ok, err] = await tryFn(async () => {
-      const content = await promises.readFile(src);
-      await promises.writeFile(dest, content);
+      const content = await fs.readFile(src);
+      await fs.writeFile(dest, content);
     });
     if (!ok) {
       console.warn("FilesystemCache: Failed to create backup:", err.message);
@@ -13331,7 +13335,7 @@ class FilesystemCache extends Cache {
   async _cleanup() {
     if (!this.ttl || this.ttl <= 0) return;
     try {
-      const files = await promises.readdir(this.directory);
+      const files = await fs.readdir(this.directory);
       const now = Date.now();
       for (const file of files) {
         if (!file.startsWith(this.prefix) || !file.endsWith(this.fileExtension)) {
@@ -13343,7 +13347,7 @@ class FilesystemCache extends Cache {
           const metadataPath = this._getMetadataPath(filePath);
           if (await this._fileExists(metadataPath)) {
             const [ok, err, metadata] = await tryFn(async () => {
-              const metaContent = await promises.readFile(metadataPath, this.encoding);
+              const metaContent = await fs.readFile(metadataPath, this.encoding);
               return JSON.parse(metaContent);
             });
             if (ok && metadata.ttl > 0) {
@@ -13353,7 +13357,7 @@ class FilesystemCache extends Cache {
           }
         } else {
           const [ok, err, stats] = await tryFn(async () => {
-            return await promises.stat(filePath);
+            return await fs.stat(filePath);
           });
           if (ok) {
             const age = now - stats.mtime.getTime();
@@ -13395,7 +13399,7 @@ class FilesystemCache extends Cache {
     };
     const [ok, err] = await tryFn(async () => {
       const line = JSON.stringify(entry) + "\n";
-      await fs.promises.appendFile(this.journalFile, line, this.encoding);
+      await fs$1.promises.appendFile(this.journalFile, line, this.encoding);
     });
     if (!ok) {
       console.warn("FilesystemCache journal error:", err.message);
@@ -13564,7 +13568,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
     const [ok, err] = await tryFn(async () => {
       if (await this._fileExists(partitionDir)) {
-        await promises.rm(partitionDir, { recursive: true });
+        await fs.rm(partitionDir, { recursive: true });
       }
     });
     if (!ok) {
@@ -13582,7 +13586,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const resourceDir = path$1.join(this.directory, `resource=${resource}`);
     const [ok, err] = await tryFn(async () => {
       if (await this._fileExists(resourceDir)) {
-        await promises.rm(resourceDir, { recursive: true });
+        await fs.rm(resourceDir, { recursive: true });
       }
     });
     for (const [key] of this.partitionUsage.entries()) {
@@ -13714,11 +13718,11 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     return filename.replace(/[<>:"/\\|?*]/g, "_");
   }
   async _calculateDirectoryStats(dir, stats) {
-    const [ok, err, files] = await tryFn(() => promises.readdir(dir));
+    const [ok, err, files] = await tryFn(() => fs.readdir(dir));
     if (!ok) return;
     for (const file of files) {
       const filePath = path$1.join(dir, file);
-      const [statOk, statErr, fileStat] = await tryFn(() => promises.stat(filePath));
+      const [statOk, statErr, fileStat] = await tryFn(() => fs.stat(filePath));
       if (statOk) {
         if (fileStat.isDirectory()) {
           await this._calculateDirectoryStats(filePath, stats);
@@ -13731,7 +13735,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
   async loadUsageStats() {
     const [ok, err, content] = await tryFn(async () => {
-      const data = await promises.readFile(this.usageStatsFile, "utf8");
+      const data = await fs.readFile(this.usageStatsFile, "utf8");
       return JSON.parse(data);
     });
     if (ok && content) {
@@ -13741,7 +13745,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   async _saveUsageStats() {
     const statsObject = Object.fromEntries(this.partitionUsage);
     await tryFn(async () => {
-      await promises.writeFile(
+      await fs.writeFile(
         this.usageStatsFile,
         JSON.stringify(statsObject, null, 2),
         "utf8"
@@ -13751,7 +13755,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   async _writeFileWithMetadata(filePath, data) {
     const content = JSON.stringify(data);
     const [ok, err] = await tryFn(async () => {
-      await promises.writeFile(filePath, content, {
+      await fs.writeFile(filePath, content, {
         encoding: this.encoding,
         mode: this.fileMode
       });
@@ -13763,7 +13767,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
   async _readFileWithMetadata(filePath) {
     const [ok, err, content] = await tryFn(async () => {
-      return await promises.readFile(filePath, this.encoding);
+      return await fs.readFile(filePath, this.encoding);
     });
     if (!ok || !content) return null;
     try {
@@ -42374,18 +42378,18 @@ class Minipass extends node_events.EventEmitter {
     }
 }
 
-const realpathSync = fs.realpathSync.native;
+const realpathSync = fs$1.realpathSync.native;
 const defaultFS = {
-    lstatSync: fs.lstatSync,
-    readdir: fs.readdir,
-    readdirSync: fs.readdirSync,
-    readlinkSync: fs.readlinkSync,
+    lstatSync: fs$1.lstatSync,
+    readdir: fs$1.readdir,
+    readdirSync: fs$1.readdirSync,
+    readlinkSync: fs$1.readlinkSync,
     realpathSync,
     promises: {
-        lstat: promises$2.lstat,
-        readdir: promises$2.readdir,
-        readlink: promises$2.readlink,
-        realpath: promises$2.realpath,
+        lstat: promises$1.lstat,
+        readdir: promises$1.readdir,
+        readlink: promises$1.readlink,
+        realpath: promises$1.realpath,
     },
 };
 // if they just gave us require('fs') then use our default
@@ -45662,7 +45666,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
    */
   async initialize() {
     try {
-      const stats = await promises.stat(this.basePath);
+      const stats = await fs.stat(this.basePath);
       if (!stats.isDirectory()) {
         throw new Error(`Base path is not a directory: ${this.basePath}`);
       }
@@ -45684,7 +45688,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
       const stateFiles = await Promise.all(
         files.map(async (file) => {
           const fullPath = path$1.join(this.basePath, file);
-          const stats = await promises.stat(fullPath);
+          const stats = await fs.stat(fullPath);
           return {
             path: file,
             fullPath,
@@ -45706,7 +45710,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
   async readStateFile(path) {
     const fullPath = path.startsWith(this.basePath) ? path : path$1.join(this.basePath, path);
     try {
-      const content = await promises.readFile(fullPath, "utf-8");
+      const content = await fs.readFile(fullPath, "utf-8");
       return JSON.parse(content);
     } catch (error) {
       if (error.code === "ENOENT") {
@@ -45721,7 +45725,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
   async getStateFileMetadata(path) {
     const fullPath = path.startsWith(this.basePath) ? path : path$1.join(this.basePath, path);
     try {
-      const stats = await promises.stat(fullPath);
+      const stats = await fs.stat(fullPath);
       return {
         path,
         fullPath,
@@ -46125,7 +46129,7 @@ class TfStatePlugin extends Plugin {
     pattern.slice(baseDir.length);
     const findFiles = async (dir) => {
       try {
-        const entries = await promises.readdir(dir, { withFileTypes: true });
+        const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = path$1.join(dir, entry.name);
           if (entry.isDirectory()) {
@@ -46538,11 +46542,11 @@ class TfStatePlugin extends Plugin {
    * @private
    */
   async _readStateFile(filePath) {
-    if (!fs.existsSync(filePath)) {
+    if (!fs$1.existsSync(filePath)) {
       throw new StateFileNotFoundError(filePath);
     }
     const [ok, err, content] = await tryFn(async () => {
-      return await promises.readFile(filePath, "utf-8");
+      return await fs.readFile(filePath, "utf-8");
     });
     if (!ok) {
       throw new InvalidStateFileError(filePath, `Failed to read file: ${err.message}`);
@@ -47123,7 +47127,7 @@ class TfStatePlugin extends Plugin {
   async _setupFileWatchers() {
     for (const path of this.watchPaths) {
       try {
-        const watcher = promises.watch(path);
+        const watcher = fs.watch(path);
         (async () => {
           for await (const event of watcher) {
             if (event.eventType === "change" && event.filename.endsWith(".tfstate")) {
@@ -49644,7 +49648,7 @@ class MemoryStorage {
     }
     const snapshot = this.snapshot();
     const json = JSON.stringify(snapshot, null, 2);
-    const [ok, err] = await tryFn(() => promises.writeFile(path, json, "utf-8"));
+    const [ok, err] = await tryFn(() => fs.writeFile(path, json, "utf-8"));
     if (!ok) {
       throw new Error(`Failed to save to disk: ${err.message}`);
     }
@@ -49661,7 +49665,7 @@ class MemoryStorage {
     if (!path) {
       throw new Error("No persist path configured");
     }
-    const [ok, err, json] = await tryFn(() => promises.readFile(path, "utf-8"));
+    const [ok, err, json] = await tryFn(() => fs.readFile(path, "utf-8"));
     if (!ok) {
       throw new Error(`Failed to load from disk: ${err.message}`);
     }
@@ -50558,8 +50562,8 @@ async function generateTypes(database, options = {}) {
   }
   const content = lines.join("\n");
   if (outputPath) {
-    await promises.mkdir(path$1.dirname(outputPath), { recursive: true });
-    await promises.writeFile(outputPath, content, "utf-8");
+    await fs.mkdir(path$1.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, content, "utf-8");
   }
   return content;
 }
@@ -52095,6 +52099,8 @@ class IdentityServer {
         console.log("[Identity Server]   POST /admin/users/:id/verify-email (Mark Email Verified)");
         console.log("[Identity Server]   POST /admin/users/:id/reset-password (Send Password Reset)");
         console.log("[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)");
+        console.log("[Identity Server]   GET  /oauth/authorize (OAuth2 Consent Screen - Overrides OAuth2Server)");
+        console.log("[Identity Server]   POST /oauth/consent (Process OAuth2 Consent Decision)");
       }
     } catch (error) {
       console.error("[Identity Server] Failed to setup UI routes:", error);
@@ -52685,7 +52691,7 @@ const cssPath = path$1.join(__dirname$1, "../styles/main.css");
 let cachedCSS = null;
 function getCSS() {
   if (!cachedCSS) {
-    cachedCSS = fs.readFileSync(cssPath, "utf-8");
+    cachedCSS = fs$1.readFileSync(cssPath, "utf-8");
   }
   return cachedCSS;
 }
@@ -54249,6 +54255,239 @@ function AdminUserFormPage(props = {}) {
   });
 }
 
+const SCOPE_DESCRIPTIONS = {
+  openid: {
+    name: "OpenID Connect",
+    description: "Sign in using your identity",
+    icon: "\u{1F510}"
+  },
+  profile: {
+    name: "Profile Information",
+    description: "Access your basic profile information (name, picture)",
+    icon: "\u{1F464}"
+  },
+  email: {
+    name: "Email Address",
+    description: "Access your email address",
+    icon: "\u{1F4E7}"
+  },
+  offline_access: {
+    name: "Offline Access",
+    description: "Maintain access when you are not using the app",
+    icon: "\u{1F504}"
+  },
+  phone: {
+    name: "Phone Number",
+    description: "Access your phone number",
+    icon: "\u{1F4F1}"
+  },
+  address: {
+    name: "Address",
+    description: "Access your address information",
+    icon: "\u{1F3E0}"
+  }
+};
+function ConsentPage(props = {}) {
+  const {
+    client = {},
+    scopes = [],
+    user = {},
+    responseType,
+    redirectUri,
+    state = "",
+    codeChallenge = "",
+    codeChallengeMethod = "plain",
+    error = null,
+    config = {}
+  } = props;
+  const scopeDetails = scopes.map((scope) => ({
+    scope,
+    ...SCOPE_DESCRIPTIONS[scope],
+    unknown: !SCOPE_DESCRIPTIONS[scope]
+  })).filter((s) => !s.unknown);
+  const content = html`
+    <div class="container-sm">
+      ${error ? html`
+        <div class="alert alert-danger mb-4">
+          ${error}
+        </div>
+      ` : ""}
+
+      <div style="text-align: center; margin-bottom: 2rem;">
+        ${config.logoUrl ? html`
+          <img src="${config.logoUrl}" alt="Logo" style="max-width: 80px; margin-bottom: 1rem;" />
+        ` : ""}
+        <h1 style="font-size: 1.75rem; margin-bottom: 0.5rem;">Authorize Application</h1>
+        <p style="color: var(--color-text-muted);">
+          <strong>${client.name || "Application"}</strong> is requesting access to your account
+        </p>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header">
+          Application Information
+        </div>
+        <div class="p-3">
+          <div style="display: grid; gap: 1rem;">
+            <div>
+              <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                Application Name
+              </div>
+              <div style="font-size: 1.125rem; font-weight: 600;">
+                ${client.name || "Unknown Application"}
+              </div>
+            </div>
+
+            ${client.description ? html`
+              <div>
+                <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                  Description
+                </div>
+                <div>${client.description}</div>
+              </div>
+            ` : ""}
+
+            <div>
+              <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                Client ID
+              </div>
+              <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem; word-break: break-all;">
+                ${client.clientId}
+              </code>
+            </div>
+
+            <div>
+              <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                Will Redirect To
+              </div>
+              <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem; word-break: break-all;">
+                ${redirectUri}
+              </code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header">
+          Requested Permissions
+        </div>
+        <div class="p-3">
+          ${scopeDetails.length === 0 ? html`
+            <p style="color: var(--color-text-muted); font-style: italic;">
+              This application is not requesting any specific permissions.
+            </p>
+          ` : html`
+            <div style="display: grid; gap: 1rem;">
+              ${scopeDetails.map((s) => html`
+                <div style="display: flex; gap: 1rem; align-items: flex-start;">
+                  <div style="font-size: 2rem; line-height: 1;">
+                    ${s.icon}
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; margin-bottom: 0.25rem;">
+                      ${s.name}
+                    </div>
+                    <div style="color: var(--color-text-muted); font-size: 0.875rem;">
+                      ${s.description}
+                    </div>
+                  </div>
+                </div>
+              `)}
+            </div>
+          `}
+        </div>
+      </div>
+
+      <div class="card mb-3" style="background-color: var(--color-light);">
+        <div class="p-3">
+          <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+            <div style="font-size: 1.5rem;">ℹ️</div>
+            <div style="flex: 1;">
+              <div style="font-weight: 600; margin-bottom: 0.5rem;">
+                Signed in as ${user.name}
+              </div>
+              <div style="font-size: 0.875rem; color: var(--color-text-muted); margin-bottom: 0.75rem;">
+                By clicking "Allow", you authorize <strong>${client.name}</strong> to access your information as described above.
+              </div>
+              <div style="font-size: 0.875rem; color: var(--color-text-muted);">
+                You can revoke this access at any time from your <a href="/profile" style="color: var(--color-primary);">profile settings</a>.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Authorization Form -->
+      <form method="POST" action="/oauth/consent">
+        <!-- OAuth2 Parameters -->
+        <input type="hidden" name="response_type" value="${responseType}" />
+        <input type="hidden" name="client_id" value="${client.clientId}" />
+        <input type="hidden" name="redirect_uri" value="${redirectUri}" />
+        <input type="hidden" name="scope" value="${scopes.join(" ")}" />
+        ${state ? html`<input type="hidden" name="state" value="${state}" />` : ""}
+        ${codeChallenge ? html`<input type="hidden" name="code_challenge" value="${codeChallenge}" />` : ""}
+        ${codeChallengeMethod ? html`<input type="hidden" name="code_challenge_method" value="${codeChallengeMethod}" />` : ""}
+
+        <!-- Trust Option -->
+        <div class="form-group">
+          <div class="form-check">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              id="trust_application"
+              name="trust_application"
+              value="1"
+            />
+            <label class="form-check-label" for="trust_application">
+              Trust this application (don't ask again)
+            </label>
+          </div>
+          <small class="form-text">
+            You won't be asked for permission next time this application requests access with the same permissions.
+          </small>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <button
+            type="submit"
+            name="decision"
+            value="deny"
+            class="btn btn-secondary"
+            style="order: 1;"
+          >
+            Deny
+          </button>
+          <button
+            type="submit"
+            name="decision"
+            value="allow"
+            class="btn btn-primary"
+            style="order: 2;"
+          >
+            Allow
+          </button>
+        </div>
+      </form>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <a href="/logout" style="color: var(--color-text-muted); font-size: 0.875rem;">
+          Not ${user.name}? Sign out
+        </a>
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: `Authorize ${client.name || "Application"}`,
+    content,
+    config,
+    user,
+    error: null
+    // Error shown in page
+  });
+}
+
 const DEFAULT_PASSWORD_POLICY = {
   minLength: 8,
   maxLength: 128,
@@ -55407,6 +55646,180 @@ function registerUIRoutes(app, plugin) {
     } catch (error) {
       console.error("[Identity Plugin] Toggle admin error:", error);
       return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/oauth/authorize", sessionAuth(sessionManager, { required: false }), async (c) => {
+    const query = c.req.query();
+    const {
+      response_type,
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method = "plain"
+    } = query;
+    try {
+      if (!response_type || !client_id || !redirect_uri) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Request</h1>
+              <p>response_type, client_id, and redirect_uri are required</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      const user = c.get("user");
+      if (!user) {
+        const returnUrl = `/oauth/authorize?${new URLSearchParams(query).toString()}`;
+        return c.redirect(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+      }
+      const [okClient, errClient, clients] = await tryFn(
+        () => plugin.oauth2ClientsResource.query({ clientId: client_id })
+      );
+      if (!okClient || !clients || clients.length === 0) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Client</h1>
+              <p>Client not found</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      const client = clients[0];
+      if (client.active === false) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Client Inactive</h1>
+              <p>This client is not currently active</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      if (!client.redirectUris || !client.redirectUris.includes(redirect_uri)) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Redirect URI</h1>
+              <p>The redirect_uri does not match any registered URIs for this client</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      const requestedScopes = scope ? scope.split(" ") : [];
+      if (requestedScopes.length > 0) {
+        const invalidScopes = requestedScopes.filter(
+          (s) => !client.allowedScopes || !client.allowedScopes.includes(s)
+        );
+        if (invalidScopes.length > 0) {
+          return c.html(`
+            <html>
+              <body>
+                <h1>Invalid Scopes</h1>
+                <p>Invalid scopes: ${invalidScopes.join(", ")}</p>
+              </body>
+            </html>
+          `, 400);
+        }
+      }
+      return c.html(ConsentPage({
+        client,
+        scopes: requestedScopes,
+        user,
+        responseType: response_type,
+        redirectUri: redirect_uri,
+        state,
+        codeChallenge: code_challenge,
+        codeChallengeMethod: code_challenge_method,
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error("[Identity Plugin] OAuth authorize error:", error);
+      return c.html(`
+        <html>
+          <body>
+            <h1>Server Error</h1>
+            <p>An error occurred while processing your request</p>
+          </body>
+        </html>
+      `, 500);
+    }
+  });
+  app.post("/oauth/consent", sessionAuth(sessionManager, { required: true }), async (c) => {
+    const body = await c.req.parseBody();
+    const {
+      decision,
+      trust_application,
+      response_type,
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method = "plain"
+    } = body;
+    const user = c.get("user");
+    try {
+      if (decision === "deny") {
+        const errorParams = new URLSearchParams({
+          error: "access_denied",
+          error_description: "User denied authorization"
+        });
+        if (state) {
+          errorParams.set("state", state);
+        }
+        return c.redirect(`${redirect_uri}?${errorParams.toString()}`);
+      }
+      const authCode = generateAuthCode();
+      const requestedScopes = scope ? scope.split(" ") : [];
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1e3).toISOString();
+      const [okCode, errCode] = await tryFn(
+        () => plugin.oauth2AuthCodesResource.insert({
+          code: authCode,
+          clientId: client_id,
+          userId: user.id,
+          redirectUri: redirect_uri,
+          scope: requestedScopes,
+          codeChallenge: code_challenge || null,
+          codeChallengeMethod: code_challenge_method || "plain",
+          expiresAt,
+          used: false,
+          trusted: trust_application === "1"
+        })
+      );
+      if (!okCode) {
+        console.error("[Identity Plugin] Failed to store auth code:", errCode);
+        return c.html(`
+          <html>
+            <body>
+              <h1>Server Error</h1>
+              <p>Failed to generate authorization code</p>
+            </body>
+          </html>
+        `, 500);
+      }
+      if (trust_application === "1") {
+      }
+      const successParams = new URLSearchParams({
+        code: authCode
+      });
+      if (state) {
+        successParams.set("state", state);
+      }
+      return c.redirect(`${redirect_uri}?${successParams.toString()}`);
+    } catch (error) {
+      console.error("[Identity Plugin] OAuth consent error:", error);
+      return c.html(`
+        <html>
+          <body>
+            <h1>Server Error</h1>
+            <p>An error occurred while processing your consent</p>
+          </body>
+        </html>
+      `, 500);
     }
   });
 }

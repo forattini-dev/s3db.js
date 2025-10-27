@@ -13,8 +13,10 @@ import { AdminClientsPage } from './pages/admin/clients.js';
 import { AdminClientFormPage } from './pages/admin/client-form.js';
 import { AdminUsersPage } from './pages/admin/users.js';
 import { AdminUserFormPage } from './pages/admin/user-form.js';
+import { ConsentPage } from './pages/consent.js';
 import { hashPassword, verifyPassword, validatePassword } from '../concerns/password.js';
 import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
+import { generateAuthCode } from '../oidc-discovery.js';
 import { tryFn } from '../../../concerns/try-fn.js';
 import { sessionAuth, adminOnly } from './middleware.js';
 import { idGenerator } from '../../../concerns/id.js';
@@ -1481,6 +1483,226 @@ export function registerUIRoutes(app, plugin) {
     } catch (error) {
       console.error('[Identity Plugin] Toggle admin error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // ============================================================================
+  // OAuth2 Consent Screen Routes (overrides OAuth2Server routes)
+  // ============================================================================
+
+  // GET /oauth/authorize - Show consent screen (session-based)
+  app.get('/oauth/authorize', sessionAuth(sessionManager, { required: false }), async (c) => {
+    const query = c.req.query();
+    const {
+      response_type,
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method = 'plain'
+    } = query;
+
+    try {
+      // Validate required parameters
+      if (!response_type || !client_id || !redirect_uri) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Request</h1>
+              <p>response_type, client_id, and redirect_uri are required</p>
+            </body>
+          </html>
+        `, 400);
+      }
+
+      // Check if user is logged in
+      const user = c.get('user');
+      if (!user) {
+        // Redirect to login with return URL
+        const returnUrl = `/oauth/authorize?${new URLSearchParams(query).toString()}`;
+        return c.redirect(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+      }
+
+      // Get client information
+      const [okClient, errClient, clients] = await tryFn(() =>
+        plugin.oauth2ClientsResource.query({ clientId: client_id })
+      );
+
+      if (!okClient || !clients || clients.length === 0) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Client</h1>
+              <p>Client not found</p>
+            </body>
+          </html>
+        `, 400);
+      }
+
+      const client = clients[0];
+
+      // Check if client is active
+      if (client.active === false) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Client Inactive</h1>
+              <p>This client is not currently active</p>
+            </body>
+          </html>
+        `, 400);
+      }
+
+      // Validate redirect_uri
+      if (!client.redirectUris || !client.redirectUris.includes(redirect_uri)) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Redirect URI</h1>
+              <p>The redirect_uri does not match any registered URIs for this client</p>
+            </body>
+          </html>
+        `, 400);
+      }
+
+      // Parse and validate scopes
+      const requestedScopes = scope ? scope.split(' ') : [];
+      if (requestedScopes.length > 0) {
+        const invalidScopes = requestedScopes.filter(s =>
+          !client.allowedScopes || !client.allowedScopes.includes(s)
+        );
+
+        if (invalidScopes.length > 0) {
+          return c.html(`
+            <html>
+              <body>
+                <h1>Invalid Scopes</h1>
+                <p>Invalid scopes: ${invalidScopes.join(', ')}</p>
+              </body>
+            </html>
+          `, 400);
+        }
+      }
+
+      // Check if user has previously authorized this client with these scopes
+      // For now, always show consent screen. In FASE 8, we'll implement "trust" feature.
+
+      // Show consent screen
+      return c.html(ConsentPage({
+        client,
+        scopes: requestedScopes,
+        user,
+        responseType: response_type,
+        redirectUri: redirect_uri,
+        state,
+        codeChallenge: code_challenge,
+        codeChallengeMethod: code_challenge_method,
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error('[Identity Plugin] OAuth authorize error:', error);
+      return c.html(`
+        <html>
+          <body>
+            <h1>Server Error</h1>
+            <p>An error occurred while processing your request</p>
+          </body>
+        </html>
+      `, 500);
+    }
+  });
+
+  // POST /oauth/consent - Process user consent decision
+  app.post('/oauth/consent', sessionAuth(sessionManager, { required: true }), async (c) => {
+    const body = await c.req.parseBody();
+    const {
+      decision,
+      trust_application,
+      response_type,
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method = 'plain'
+    } = body;
+
+    const user = c.get('user');
+
+    try {
+      // If user denied, redirect back with error
+      if (decision === 'deny') {
+        const errorParams = new URLSearchParams({
+          error: 'access_denied',
+          error_description: 'User denied authorization'
+        });
+        if (state) {
+          errorParams.set('state', state);
+        }
+        return c.redirect(`${redirect_uri}?${errorParams.toString()}`);
+      }
+
+      // User approved - generate authorization code
+      const authCode = generateAuthCode();
+      const requestedScopes = scope ? scope.split(' ') : [];
+
+      // Calculate expiration (10 minutes from now)
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+      // Store authorization code
+      const [okCode, errCode] = await tryFn(() =>
+        plugin.oauth2AuthCodesResource.insert({
+          code: authCode,
+          clientId: client_id,
+          userId: user.id,
+          redirectUri: redirect_uri,
+          scope: requestedScopes,
+          codeChallenge: code_challenge || null,
+          codeChallengeMethod: code_challenge_method || 'plain',
+          expiresAt,
+          used: false,
+          trusted: trust_application === '1'
+        })
+      );
+
+      if (!okCode) {
+        console.error('[Identity Plugin] Failed to store auth code:', errCode);
+        return c.html(`
+          <html>
+            <body>
+              <h1>Server Error</h1>
+              <p>Failed to generate authorization code</p>
+            </body>
+          </html>
+        `, 500);
+      }
+
+      // If trust_application is enabled, store consent for future use
+      if (trust_application === '1') {
+        // Store consent record (implement in FASE 8 with proper consent tracking)
+        // For now, the "trusted" flag is stored with the auth code
+      }
+
+      // Redirect back to client with authorization code
+      const successParams = new URLSearchParams({
+        code: authCode
+      });
+      if (state) {
+        successParams.set('state', state);
+      }
+
+      return c.redirect(`${redirect_uri}?${successParams.toString()}`);
+    } catch (error) {
+      console.error('[Identity Plugin] OAuth consent error:', error);
+      return c.html(`
+        <html>
+          <body>
+            <h1>Server Error</h1>
+            <p>An error occurred while processing your consent</p>
+          </body>
+        </html>
+      `, 500);
     }
   });
 }
