@@ -5462,11 +5462,6 @@ class ApiPlugin extends Plugin {
       // Custom global middlewares
       middlewares: options.middlewares || []
     };
-    if (this.config.compression.enabled) {
-      throw new Error(
-        "[API Plugin] Compression is not yet implemented. Please set compression.enabled to false. Track progress: https://github.com/forattini-dev/s3db.js/issues"
-      );
-    }
     this.server = null;
     this.usersResource = null;
   }
@@ -5683,12 +5678,79 @@ class ApiPlugin extends Plugin {
     };
   }
   /**
-   * Create compression middleware (placeholder)
+   * Create compression middleware (using Node.js zlib)
    * @private
    */
   async _createCompressionMiddleware() {
+    const { gzip, brotliCompress } = await import('zlib');
+    const { promisify } = await import('util');
+    const gzipAsync = promisify(gzip);
+    const brotliAsync = promisify(brotliCompress);
+    const { threshold, level } = this.config.compression;
+    const skipContentTypes = [
+      "image/",
+      "video/",
+      "audio/",
+      "application/zip",
+      "application/gzip",
+      "application/x-gzip",
+      "application/x-bzip2"
+    ];
     return async (c, next) => {
       await next();
+      if (!c.res || !c.res.body) {
+        return;
+      }
+      if (c.res.headers.has("content-encoding")) {
+        return;
+      }
+      const contentType = c.res.headers.get("content-type") || "";
+      if (skipContentTypes.some((type) => contentType.startsWith(type))) {
+        return;
+      }
+      const acceptEncoding = c.req.header("accept-encoding") || "";
+      const supportsBrotli = acceptEncoding.includes("br");
+      const supportsGzip = acceptEncoding.includes("gzip");
+      if (!supportsBrotli && !supportsGzip) {
+        return;
+      }
+      let body;
+      try {
+        const text = await c.res.text();
+        body = Buffer.from(text, "utf-8");
+      } catch (err) {
+        return;
+      }
+      if (body.length < threshold) {
+        return;
+      }
+      let compressed;
+      let encoding;
+      try {
+        if (supportsBrotli) {
+          compressed = await brotliAsync(body);
+          encoding = "br";
+        } else {
+          compressed = await gzipAsync(body, { level });
+          encoding = "gzip";
+        }
+        if (compressed.length >= body.length) {
+          return;
+        }
+        const headers = new Headers(c.res.headers);
+        headers.set("Content-Encoding", encoding);
+        headers.set("Content-Length", compressed.length.toString());
+        headers.set("Vary", "Accept-Encoding");
+        c.res = new Response(compressed, {
+          status: c.res.status,
+          statusText: c.res.statusText,
+          headers
+        });
+      } catch (err) {
+        if (this.config.verbose) {
+          console.error("[API Plugin] Compression error:", err.message);
+        }
+      }
     };
   }
   /**
