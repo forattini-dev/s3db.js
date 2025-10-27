@@ -191,7 +191,7 @@ type GuardFunction = (
 
 **Hono (Recommended):**
 ```javascript
-import { createHonoContext, applyGuardsToList } from 's3db.js/concerns/guards-helpers';
+import { createHonoContext, applyGuardsToList } from 's3db.js/plugins/api/concerns/guards-helpers';
 import { Hono } from 'hono';
 
 const app = new Hono();
@@ -223,7 +223,7 @@ app.post('/orders', async (c) => {
 
 **Express:**
 ```javascript
-import { createExpressContext, applyGuardsToList } from 's3db.js/concerns/guards-helpers';
+import { createExpressContext, applyGuardsToList } from 's3db.js/plugins/api/concerns/guards-helpers';
 
 app.get('/orders', async (req, res) => {
   const context = createExpressContext(req);
@@ -235,7 +235,7 @@ app.get('/orders', async (req, res) => {
 
 **Fastify:**
 ```javascript
-import { createFastifyContext, applyGuardsToList } from 's3db.js/concerns/guards-helpers';
+import { createFastifyContext, applyGuardsToList } from 's3db.js/plugins/api/concerns/guards-helpers';
 
 fastify.get('/orders', async (request, reply) => {
   const context = createFastifyContext(request);
