@@ -7,8 +7,8 @@
 import { createResourceRoutes, createRelationalRoutes } from './routes/resource-routes.js';
 import { createAuthRoutes } from './routes/auth-routes.js';
 import { mountCustomRoutes } from './utils/custom-routes.js';
-import { errorHandler } from './utils/error-handler.js';
-import * as formatter from './utils/response-formatter.js';
+import { errorHandler } from '../shared/error-handler.js';
+import * as formatter from '../shared/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
 import { createAuthMiddleware } from './auth/index.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
@@ -209,11 +209,6 @@ export class ApiServer {
       this._setupAuthRoutes();
     }
 
-    // Setup OAuth2 Server routes if configured
-    if (this.options.oauth2Server) {
-      this._setupOAuth2Routes();
-    }
-
     // Setup OIDC routes if configured
     const oidcDriver = this.options.auth?.drivers?.find(d => d.driver === 'oidc');
     if (oidcDriver) {
@@ -372,64 +367,6 @@ export class ApiServer {
 
     if (this.options.verbose) {
       console.log('[API Plugin] Mounted auth routes (driver: jwt) at /auth');
-    }
-  }
-
-  /**
-   * Setup OAuth2 Server routes (when oauth2-server driver is configured)
-   * @private
-   */
-  _setupOAuth2Routes() {
-    const { oauth2Server } = this.options;
-
-    if (!oauth2Server) {
-      return;
-    }
-
-    // OIDC Discovery endpoint
-    this.app.get('/.well-known/openid-configuration', async (c) => {
-      return oauth2Server.discoveryHandler(c);
-    });
-
-    // JWKS (JSON Web Key Set) endpoint
-    this.app.get('/.well-known/jwks.json', async (c) => {
-      return oauth2Server.jwksHandler(c);
-    });
-
-    // OAuth2 Token endpoint
-    this.app.post('/oauth/token', async (c) => {
-      return oauth2Server.tokenHandler(c);
-    });
-
-    // OIDC UserInfo endpoint
-    this.app.get('/oauth/userinfo', async (c) => {
-      return oauth2Server.userinfoHandler(c);
-    });
-
-    // Token introspection endpoint
-    this.app.post('/oauth/introspect', async (c) => {
-      return oauth2Server.introspectHandler(c);
-    });
-
-    // Authorization endpoint (GET for user consent UI)
-    this.app.get('/oauth/authorize', async (c) => {
-      return oauth2Server.authorizeHandler(c);
-    });
-
-    // Client registration endpoint (requires authentication)
-    this.app.post('/oauth/register', async (c) => {
-      return oauth2Server.registerClientHandler(c);
-    });
-
-    if (this.options.verbose) {
-      console.log('[API Plugin] Mounted OAuth2 Server routes:');
-      console.log('[API Plugin]   GET  /.well-known/openid-configuration (OIDC Discovery)');
-      console.log('[API Plugin]   GET  /.well-known/jwks.json (JWKS)');
-      console.log('[API Plugin]   GET  /oauth/authorize (Authorization)');
-      console.log('[API Plugin]   POST /oauth/token (Token)');
-      console.log('[API Plugin]   GET  /oauth/userinfo (UserInfo)');
-      console.log('[API Plugin]   POST /oauth/introspect (Introspection)');
-      console.log('[API Plugin]   POST /oauth/register (Client Registration)');
     }
   }
 
