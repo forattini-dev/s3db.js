@@ -225,6 +225,8 @@ export class IdentityPlugin extends Plugin {
           scope: 'string|optional',
           expiresAt: 'string|required',
           used: 'boolean|default:false',
+          codeChallenge: 'string|optional',          // PKCE support
+          codeChallengeMethod: 'string|optional',    // PKCE support
           createdAt: 'string|optional'
         },
         behavior: 'body-overflow',
