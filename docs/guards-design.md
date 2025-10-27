@@ -109,25 +109,26 @@ guard: {
 ```javascript
 guard: {
   // Lista apenas próprios registros via partition (O(1)!)
-  list: (req, user) => {
-    req.partitionName = 'byUser';
-    req.partitionValues = { userId: user.id };
+  list: (ctx) => {
+    // Framework-agnostic! Funciona com Express, Hono, Fastify
+    ctx.setPartition('byUser', { userId: ctx.user.id });
     return true;
   },
 
   // Get/Update/Delete verificam ownership
-  get: async (req, user, resource) => {
+  get: async (ctx, resource) => {
     // resource = record atual (já buscado)
-    return resource.userId === user.id;
+    return resource.userId === ctx.user.id;
   },
 
-  update: async (req, user, resource) => {
-    return resource.userId === user.id;
+  update: async (ctx, resource) => {
+    return resource.userId === ctx.user.id;
   },
 
-  delete: async (req, user, resource) => {
+  delete: async (ctx, resource) => {
     // Só dono OU admin pode deletar
-    return resource.userId === user.id || user.roles.includes('admin');
+    const roles = ctx.user.roles || [];
+    return resource.userId === ctx.user.id || roles.includes('admin');
   }
 }
 ```
@@ -145,21 +146,24 @@ guard: {
 ```javascript
 guard: {
   // TODAS as operações forçam tenantId
-  '*': (req, user) => {
-    const tenantId = user.tenantId || user.tid;
+  '*': (ctx) => {
+    const tenantId = ctx.user.tenantId || ctx.user.tid;
 
     if (!tenantId) {
       throw new Error('Tenant ID missing');
     }
 
-    // Força partition por tenant em TODAS as queries
-    req.tenantId = tenantId;
+    // Força tenant em TODAS as operações
+    ctx.tenantId = tenantId;
+    ctx.userId = ctx.user.id || ctx.user.sub;
 
-    if (!req.partitionValues) {
-      req.partitionValues = {};
-    }
-    req.partitionValues.tenantId = tenantId;
+    // Partition será aplicado automaticamente
+    return true;
+  },
 
+  // List força partition por tenant
+  list: (ctx) => {
+    ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
     return true;
   }
 }
@@ -206,6 +210,96 @@ guard: {
     return resource.userId === user.id || user.roles.includes('admin');
   }
 }
+```
+
+---
+
+## 🌐 Framework Adapters (Express, Hono, Fastify)
+
+Guards são **framework-agnostic**! Basta criar um adapter para cada framework:
+
+### Express Adapter
+
+```javascript
+// Middleware que cria GuardContext do Express req
+function createExpressContext(req) {
+  return {
+    user: req.user,
+    params: req.params || {},
+    body: req.body || {},
+    query: req.query || {},
+    headers: req.headers || {},
+
+    // Helper para set partition
+    setPartition(name, values) {
+      this.partitionName = name;
+      this.partitionValues = values;
+    },
+
+    // Framework raw (para casos avançados)
+    raw: { req }
+  };
+}
+
+// Uso
+const context = createExpressContext(req);
+const allowed = await resource.executeGuard('list', context);
+```
+
+### Hono Adapter
+
+```javascript
+// Middleware que cria GuardContext do Hono Context
+function createHonoContext(c) {
+  return {
+    user: c.get('user'),  // User from middleware
+    params: c.req.param(),
+    body: await c.req.json(),
+    query: c.req.query(),
+    headers: Object.fromEntries(c.req.raw.headers.entries()),
+
+    // Helper para set partition
+    setPartition(name, values) {
+      this.partitionName = name;
+      this.partitionValues = values;
+    },
+
+    // Framework raw
+    raw: { c }
+  };
+}
+
+// Uso
+const context = await createHonoContext(c);
+const allowed = await resource.executeGuard('list', context);
+```
+
+### Fastify Adapter
+
+```javascript
+// Middleware que cria GuardContext do Fastify request
+function createFastifyContext(request) {
+  return {
+    user: request.user,
+    params: request.params || {},
+    body: request.body || {},
+    query: request.query || {},
+    headers: request.headers || {},
+
+    // Helper para set partition
+    setPartition(name, values) {
+      this.partitionName = name;
+      this.partitionValues = values;
+    },
+
+    // Framework raw
+    raw: { request }
+  };
+}
+
+// Uso
+const context = createFastifyContext(request);
+const allowed = await resource.executeGuard('list', context);
 ```
 
 ---
@@ -281,12 +375,32 @@ apiPlugin.addRoute({
 
 ---
 
-## 🚀 Signature da Guard Function
+## 🚀 Signature da Guard Function (Framework-Agnostic!)
 
 ```typescript
+// Guard context - funciona com Express, Hono, Fastify, etc!
+type GuardContext = {
+  user: JWTPayload;                    // Decoded token
+  params: Record<string, string>;      // Route params (:id, etc)
+  body: any;                           // Request body
+  query: Record<string, string>;       // Query string
+  headers: Record<string, string>;     // Request headers
+
+  // Helpers
+  setPartition(name: string, values: object): void;  // Set partition for query
+  tenantId?: string;                   // Populated by guard
+  userId?: string;                     // Populated by guard
+
+  // Framework-specific (optional, for advanced use)
+  raw?: {
+    req?: any;     // Express req
+    c?: any;       // Hono context
+    request?: any; // Fastify request
+  };
+};
+
 type GuardFunction = (
-  req: Request,           // Express request
-  user: JWTPayload,       // Decoded token (req.user)
+  context: GuardContext,  // Framework-agnostic context
   resource?: Resource     // Resource atual (para get/update/delete)
 ) => boolean | Promise<boolean>;
 
