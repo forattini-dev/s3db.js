@@ -49,6 +49,9 @@ export class IdentityServer {
       verbose: options.verbose || false,
       issuer: options.issuer,
       oauth2Server: options.oauth2Server,
+      sessionManager: options.sessionManager || null,
+      usersResource: options.usersResource || null,
+      identityPlugin: options.identityPlugin || null,
       cors: options.cors || {},
       security: options.security || {},
       logging: options.logging || {}
@@ -134,6 +137,9 @@ export class IdentityServer {
 
     // Setup OAuth2/OIDC routes
     this._setupOAuth2Routes();
+
+    // Setup UI routes (login, register, profile, etc.)
+    this._setupUIRoutes();
 
     // Global error handler
     this.app.onError((err, c) => {
@@ -231,6 +237,41 @@ export class IdentityServer {
       console.log('[Identity Server]   POST /oauth/introspect (Introspection)');
       console.log('[Identity Server]   POST /oauth/register (Client Registration)');
       console.log('[Identity Server]   POST /oauth/revoke (Token Revocation)');
+    }
+  }
+
+  /**
+   * Setup UI routes (login, register, profile, etc.)
+   * @private
+   */
+  async _setupUIRoutes() {
+    const { sessionManager, identityPlugin } = this.options;
+
+    if (!sessionManager || !identityPlugin) {
+      if (this.options.verbose) {
+        console.log('[Identity Server] SessionManager or IdentityPlugin not provided, skipping UI routes');
+      }
+      return;
+    }
+
+    try {
+      // Dynamic import of UI routes
+      const { registerUIRoutes } = await import('./ui/routes.js');
+
+      // Register all UI routes (login, register, logout)
+      registerUIRoutes(this.app, identityPlugin);
+
+      if (this.options.verbose) {
+        console.log('[Identity Server] Mounted UI routes:');
+        console.log('[Identity Server]   GET  /login (Login Form)');
+        console.log('[Identity Server]   POST /login (Process Login)');
+        console.log('[Identity Server]   GET  /register (Registration Form)');
+        console.log('[Identity Server]   POST /register (Process Registration)');
+        console.log('[Identity Server]   GET  /logout (Logout)');
+        console.log('[Identity Server]   POST /logout (Logout)');
+      }
+    } catch (error) {
+      console.error('[Identity Server] Failed to setup UI routes:', error);
     }
   }
 
