@@ -8152,18 +8152,18 @@ function createOIDCHandler(config, app, usersResource) {
   };
 }
 
-function patternToRegex(pattern) {
+function patternToRegex$1(pattern) {
   let escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
   escaped = escaped.replace(/\*\*/g, "__DOUBLE_STAR__");
   escaped = escaped.replace(/\*/g, "([^/]+)");
   escaped = escaped.replace(/__DOUBLE_STAR__/g, "(.*)");
   return new RegExp(`^${escaped}$`);
 }
-function matchPath(pattern, path) {
-  const regex = patternToRegex(pattern);
+function matchPath$1(pattern, path) {
+  const regex = patternToRegex$1(pattern);
   return regex.test(path);
 }
-function calculateSpecificity(pattern) {
+function calculateSpecificity$1(pattern) {
   const segments = pattern.split("/").filter((s) => s !== "");
   let score = 0;
   for (const segment of segments) {
@@ -8183,8 +8183,8 @@ function findBestMatch(rules, path) {
   }
   const matches = rules.map((rule) => ({
     rule,
-    specificity: calculateSpecificity(rule.pattern)
-  })).filter(({ rule }) => matchPath(rule.pattern, path)).sort((a, b) => b.specificity - a.specificity);
+    specificity: calculateSpecificity$1(rule.pattern)
+  })).filter(({ rule }) => matchPath$1(rule.pattern, path)).sort((a, b) => b.specificity - a.specificity);
   return matches.length > 0 ? matches[0].rule : null;
 }
 function validatePathAuth(pathAuth) {
@@ -10120,6 +10120,105 @@ function setupTemplateEngine(options = {}) {
   };
 }
 
+function calculateSpecificity(pattern) {
+  let score = 0;
+  if (!pattern.includes("*") && !pattern.includes(":")) {
+    score += 1e4;
+  }
+  const segments = pattern.split("/").filter((s) => s.length > 0);
+  score += segments.length * 100;
+  const singleWildcards = (pattern.match(/(?<!\*)\*(?!\*)/g) || []).length;
+  const doubleWildcards = (pattern.match(/\*\*/g) || []).length;
+  score -= singleWildcards * 10;
+  score -= doubleWildcards * 50;
+  const params = (pattern.match(/:[^/]+/g) || []).length;
+  score -= params * 5;
+  return score;
+}
+function patternToRegex(pattern) {
+  let regexPattern = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+  regexPattern = regexPattern.replace(/:([^/]+)/g, "([^/]+)");
+  regexPattern = regexPattern.replace(/\*\*/g, "___GLOBSTAR___").replace(/\*/g, "[^/]*").replace(/___GLOBSTAR___/g, ".*");
+  regexPattern = "^" + regexPattern + "$";
+  return new RegExp(regexPattern);
+}
+function matchPath(path, pattern) {
+  if (path === pattern) return true;
+  const regex = patternToRegex(pattern);
+  return regex.test(path);
+}
+function findAuthRule(path, rules = []) {
+  if (!rules || rules.length === 0) {
+    return null;
+  }
+  const matches = rules.map((rule) => ({
+    ...rule,
+    specificity: calculateSpecificity(rule.path)
+  })).filter((rule) => matchPath(path, rule.path)).sort((a, b) => b.specificity - a.specificity);
+  return matches.length > 0 ? matches[0] : null;
+}
+function createPathBasedAuthMiddleware(options = {}) {
+  const {
+    rules = [],
+    authMiddlewares = {},
+    unauthorizedHandler = null
+  } = options;
+  return async (c, next) => {
+    const currentPath = c.req.path;
+    const rule = findAuthRule(currentPath, rules);
+    if (!rule) {
+      return await next();
+    }
+    if (!rule.required) {
+      return await next();
+    }
+    if (rule.methods.length === 0 && rule.required) {
+      console.error(`[Path Auth] Invalid rule: path "${rule.path}" requires auth but has no methods`);
+      if (unauthorizedHandler) {
+        return unauthorizedHandler(c, "Configuration error");
+      }
+      return c.json({ error: "Configuration error" }, 500);
+    }
+    const allowedMiddlewares = rule.methods.map((methodName) => ({
+      name: methodName,
+      middleware: authMiddlewares[methodName]
+    })).filter((m) => m.middleware);
+    if (allowedMiddlewares.length === 0) {
+      console.error(`[Path Auth] No middlewares found for methods: ${rule.methods.join(", ")}`);
+      if (unauthorizedHandler) {
+        return unauthorizedHandler(c, "No auth methods available");
+      }
+      return c.json({ error: "No auth methods available" }, 500);
+    }
+    const strategy = rule.strategy || "any";
+    const priorities = rule.priorities || {};
+    if (strategy === "priority" && Object.keys(priorities).length > 0) {
+      allowedMiddlewares.sort((a, b) => {
+        const priorityA = priorities[a.name] || 999;
+        const priorityB = priorities[b.name] || 999;
+        return priorityA - priorityB;
+      });
+    }
+    for (const { name, middleware } of allowedMiddlewares) {
+      let authSuccess = false;
+      const tempNext = async () => {
+        authSuccess = true;
+      };
+      await middleware(c, tempNext);
+      if (authSuccess && c.get("user")) {
+        return await next();
+      }
+    }
+    if (unauthorizedHandler) {
+      return unauthorizedHandler(c, `Authentication required. Allowed methods: ${rule.methods.join(", ")}`);
+    }
+    return c.json({
+      error: "Unauthorized",
+      message: `Authentication required. Allowed methods: ${rule.methods.join(", ")}`
+    }, 401);
+  };
+}
+
 class ApiServer {
   /**
    * Create API server
@@ -10418,7 +10517,7 @@ class ApiServer {
    */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
-    const { drivers, resource: defaultResourceName, pathAuth } = auth;
+    const { drivers, resource: defaultResourceName, pathAuth, pathRules } = auth;
     if (!drivers || drivers.length === 0) {
       return null;
     }
@@ -10426,6 +10525,9 @@ class ApiServer {
     if (!authResource) {
       console.error(`[API Plugin] Auth resource '${defaultResourceName}' not found for middleware`);
       return null;
+    }
+    if (pathRules && pathRules.length > 0) {
+      return this._createPathRulesAuthMiddleware(authResource, drivers, pathRules);
     }
     if (pathAuth) {
       try {
@@ -10561,6 +10663,86 @@ class ApiServer {
       usersResource: authResource,
       optional: true
       // Let guards handle authorization
+    });
+  }
+  /**
+   * Create path-based auth middleware using pathRules
+   * @private
+   * @param {Object} authResource - Users resource for authentication
+   * @param {Array} drivers - Auth driver configurations
+   * @param {Array} pathRules - Path-based auth rules
+   * @returns {Function} Hono middleware
+   */
+  _createPathRulesAuthMiddleware(authResource, drivers, pathRules) {
+    const authMiddlewares = {};
+    for (const driverDef of drivers) {
+      const driverType = driverDef.type || driverDef.driver;
+      const driverConfig = driverDef.config || driverDef;
+      if (driverType === "oauth2-server") {
+        continue;
+      }
+      if (driverType === "oidc") {
+        if (this.oidcMiddleware) {
+          authMiddlewares.oidc = this.oidcMiddleware;
+        }
+        continue;
+      }
+      if (driverType === "jwt") {
+        authMiddlewares.jwt = jwtAuth({
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
+          usersResource: authResource,
+          optional: true
+        });
+      }
+      if (driverType === "apiKey") {
+        authMiddlewares.apiKey = apiKeyAuth({
+          headerName: driverConfig.headerName || "X-API-Key",
+          usersResource: authResource,
+          optional: true
+        });
+      }
+      if (driverType === "basic") {
+        authMiddlewares.basic = basicAuth({
+          authResource,
+          usernameField: driverConfig.usernameField || "email",
+          passwordField: driverConfig.passwordField || "password",
+          passphrase: driverConfig.passphrase || "secret",
+          adminUser: driverConfig.adminUser || null,
+          optional: true
+        });
+      }
+      if (driverType === "oauth2") {
+        const oauth2Handler = createOAuth2Handler(driverConfig, authResource);
+        authMiddlewares.oauth2 = async (c, next) => {
+          const user = await oauth2Handler(c);
+          if (user) {
+            c.set("user", user);
+            return await next();
+          }
+        };
+      }
+    }
+    if (this.options.verbose) {
+      console.log(`[API Server] Path-based auth with ${pathRules.length} rules`);
+      console.log(`[API Server] Available auth methods: ${Object.keys(authMiddlewares).join(", ")}`);
+    }
+    return createPathBasedAuthMiddleware({
+      rules: pathRules,
+      authMiddlewares,
+      unauthorizedHandler: (c, message) => {
+        const acceptHeader = c.req.header("accept") || "";
+        const acceptsHtml = acceptHeader.includes("text/html");
+        if (acceptsHtml) {
+          if (authMiddlewares.oidc) {
+            return c.redirect("/auth/login", 302);
+          }
+        }
+        return c.json({
+          error: "Unauthorized",
+          message
+        }, 401);
+      }
     });
   }
   /**

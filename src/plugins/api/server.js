@@ -16,6 +16,11 @@ import { findBestMatch, validatePathAuth } from './utils/path-matcher.js';
 import { createFilesystemHandler, validateFilesystemConfig } from './utils/static-filesystem.js';
 import { createS3Handler, validateS3Config } from './utils/static-s3.js';
 import { setupTemplateEngine } from './utils/template-engine.js';
+import { createPathBasedAuthMiddleware, findAuthRule } from './auth/path-auth-matcher.js';
+import { jwtAuth } from './auth/jwt-auth.js';
+import { apiKeyAuth } from './auth/api-key-auth.js';
+import { basicAuth } from './auth/basic-auth.js';
+import { createOAuth2Handler } from './auth/oauth2-auth.js';
 
 /**
  * API Server class
@@ -424,7 +429,7 @@ export class ApiServer {
    */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
-    const { drivers, resource: defaultResourceName, pathAuth } = auth;
+    const { drivers, resource: defaultResourceName, pathAuth, pathRules } = auth;
 
     // If no drivers configured, no auth
     if (!drivers || drivers.length === 0) {
@@ -436,6 +441,11 @@ export class ApiServer {
     if (!authResource) {
       console.error(`[API Plugin] Auth resource '${defaultResourceName}' not found for middleware`);
       return null;
+    }
+
+    // NEW: If pathRules configured, use new path-based auth system
+    if (pathRules && pathRules.length > 0) {
+      return this._createPathRulesAuthMiddleware(authResource, drivers, pathRules);
     }
 
     // Validate pathAuth config if provided
@@ -609,6 +619,108 @@ export class ApiServer {
       oidc: this.oidcMiddleware || null,  // OIDC middleware (if configured)
       usersResource: authResource,
       optional: true  // Let guards handle authorization
+    });
+  }
+
+  /**
+   * Create path-based auth middleware using pathRules
+   * @private
+   * @param {Object} authResource - Users resource for authentication
+   * @param {Array} drivers - Auth driver configurations
+   * @param {Array} pathRules - Path-based auth rules
+   * @returns {Function} Hono middleware
+   */
+  _createPathRulesAuthMiddleware(authResource, drivers, pathRules) {
+    // Build auth middlewares map by driver type
+    const authMiddlewares = {};
+
+    for (const driverDef of drivers) {
+      const driverType = driverDef.type || driverDef.driver;
+      const driverConfig = driverDef.config || driverDef;
+
+      // Skip oauth2-server (not a request auth method)
+      if (driverType === 'oauth2-server') {
+        continue;
+      }
+
+      // OIDC middleware (already configured)
+      if (driverType === 'oidc') {
+        if (this.oidcMiddleware) {
+          authMiddlewares.oidc = this.oidcMiddleware;
+        }
+        continue;
+      }
+
+      // JWT
+      if (driverType === 'jwt') {
+        authMiddlewares.jwt = jwtAuth({
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d',
+          usersResource: authResource,
+          optional: true
+        });
+      }
+
+      // API Key
+      if (driverType === 'apiKey') {
+        authMiddlewares.apiKey = apiKeyAuth({
+          headerName: driverConfig.headerName || 'X-API-Key',
+          usersResource: authResource,
+          optional: true
+        });
+      }
+
+      // Basic Auth
+      if (driverType === 'basic') {
+        authMiddlewares.basic = basicAuth({
+          authResource,
+          usernameField: driverConfig.usernameField || 'email',
+          passwordField: driverConfig.passwordField || 'password',
+          passphrase: driverConfig.passphrase || 'secret',
+          adminUser: driverConfig.adminUser || null,
+          optional: true
+        });
+      }
+
+      // OAuth2
+      if (driverType === 'oauth2') {
+        const oauth2Handler = createOAuth2Handler(driverConfig, authResource);
+        authMiddlewares.oauth2 = async (c, next) => {
+          const user = await oauth2Handler(c);
+          if (user) {
+            c.set('user', user);
+            return await next();
+          }
+        };
+      }
+    }
+
+    if (this.options.verbose) {
+      console.log(`[API Server] Path-based auth with ${pathRules.length} rules`);
+      console.log(`[API Server] Available auth methods: ${Object.keys(authMiddlewares).join(', ')}`);
+    }
+
+    // Create and return path-based auth middleware
+    return createPathBasedAuthMiddleware({
+      rules: pathRules,
+      authMiddlewares,
+      unauthorizedHandler: (c, message) => {
+        // Content negotiation
+        const acceptHeader = c.req.header('accept') || '';
+        const acceptsHtml = acceptHeader.includes('text/html');
+
+        if (acceptsHtml) {
+          // Redirect to login if OIDC is available
+          if (authMiddlewares.oidc) {
+            return c.redirect('/auth/login', 302);
+          }
+        }
+
+        return c.json({
+          error: 'Unauthorized',
+          message
+        }, 401);
+      }
     });
   }
 
