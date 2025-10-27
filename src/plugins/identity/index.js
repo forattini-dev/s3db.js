@@ -114,7 +114,35 @@ export class IdentityPlugin extends Plugin {
         title: options.ui?.title || 'S3DB Identity',
         logo: options.ui?.logo || null,
         primaryColor: options.ui?.primaryColor || '#007bff',
-        customCSS: options.ui?.customCSS || null
+        customCSS: options.ui?.customCSS || null,
+        baseUrl: options.ui?.baseUrl || `http://localhost:${options.port || 4000}`
+      },
+
+      // Email Configuration (SMTP)
+      email: {
+        enabled: options.email?.enabled !== false,
+        from: options.email?.from || 'noreply@s3db.identity',
+        replyTo: options.email?.replyTo || null,
+        smtp: {
+          host: options.email?.smtp?.host || 'localhost',
+          port: options.email?.smtp?.port || 587,
+          secure: options.email?.smtp?.secure || false,
+          auth: {
+            user: options.email?.smtp?.auth?.user || '',
+            pass: options.email?.smtp?.auth?.pass || ''
+          },
+          tls: {
+            rejectUnauthorized: options.email?.smtp?.tls?.rejectUnauthorized !== false
+          }
+        },
+        templates: {
+          baseUrl: options.email?.templates?.baseUrl || options.ui?.baseUrl || `http://localhost:${options.port || 4000}`,
+          brandName: options.email?.templates?.brandName || options.ui?.title || 'S3DB Identity',
+          brandLogo: options.email?.templates?.brandLogo || options.ui?.logo || null,
+          brandColor: options.email?.templates?.brandColor || options.ui?.primaryColor || '#007bff',
+          supportEmail: options.email?.templates?.supportEmail || options.email?.replyTo || null,
+          customFooter: options.email?.templates?.customFooter || null
+        }
       },
 
       // Features (MVP - Phase 1)
@@ -158,12 +186,14 @@ export class IdentityPlugin extends Plugin {
     this.server = null;
     this.oauth2Server = null;
     this.sessionManager = null;
+    this.emailService = null;
 
     // Resources
     this.oauth2KeysResource = null;
     this.oauth2ClientsResource = null;
     this.oauth2AuthCodesResource = null;
     this.sessionsResource = null;
+    this.passwordResetTokensResource = null;
     this.usersResource = null;
   }
 
@@ -205,6 +235,9 @@ export class IdentityPlugin extends Plugin {
 
     // Initialize Session Manager
     await this._initializeSessionManager();
+
+    // Initialize Email Service
+    await this._initializeEmailService();
 
     if (this.config.verbose) {
       console.log('[Identity Plugin] Installed successfully');
@@ -350,6 +383,37 @@ export class IdentityPlugin extends Plugin {
     } else {
       throw errSessions;
     }
+
+    // 5. Password Reset Tokens Resource (for password reset flow)
+    const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn(() =>
+      this.database.createResource({
+        name: 'plg_password_reset_tokens',
+        attributes: {
+          userId: 'string|required',
+          token: 'string|required',
+          expiresAt: 'string|required',
+          used: 'boolean|default:false',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'IdentityPlugin'
+      })
+    );
+
+    if (okResetTokens) {
+      this.passwordResetTokensResource = resetTokensResource;
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] Created plg_password_reset_tokens resource');
+      }
+    } else if (this.database.resources.plg_password_reset_tokens) {
+      this.passwordResetTokensResource = this.database.resources.plg_password_reset_tokens;
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] Using existing plg_password_reset_tokens resource');
+      }
+    } else {
+      throw errResetTokens;
+    }
   }
 
   /**
@@ -445,6 +509,32 @@ export class IdentityPlugin extends Plugin {
   }
 
   /**
+   * Initialize email service
+   * @private
+   */
+  async _initializeEmailService() {
+    const { EmailService } = await import('./email-service.js');
+
+    this.emailService = new EmailService({
+      enabled: this.config.email.enabled,
+      from: this.config.email.from,
+      replyTo: this.config.email.replyTo,
+      smtp: this.config.email.smtp,
+      templates: this.config.email.templates,
+      verbose: this.config.verbose
+    });
+
+    if (this.config.verbose) {
+      console.log('[Identity Plugin] Email Service initialized');
+      console.log(`[Identity Plugin] Email enabled: ${this.config.email.enabled}`);
+      if (this.config.email.enabled) {
+        console.log(`[Identity Plugin] SMTP host: ${this.config.email.smtp.host}:${this.config.email.smtp.port}`);
+        console.log(`[Identity Plugin] From address: ${this.config.email.from}`);
+      }
+    }
+  }
+
+  /**
    * Start plugin
    */
   async onStart() {
@@ -496,6 +586,11 @@ export class IdentityPlugin extends Plugin {
     // Stop session cleanup timer
     if (this.sessionManager) {
       this.sessionManager.stopCleanup();
+    }
+
+    // Close email service connection
+    if (this.emailService) {
+      await this.emailService.close();
     }
 
     this.emit('plugin.stopped');
