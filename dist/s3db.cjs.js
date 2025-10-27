@@ -8131,6 +8131,17 @@ function createOIDCHandler(config, app, usersResource) {
       }
     }
     session.last_activity = Date.now();
+    if (session.user.active !== void 0 && !session.user.active) {
+      c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+      const acceptHeader = c.req.header("accept") || "";
+      const acceptsHtml = acceptHeader.includes("text/html");
+      if (acceptsHtml) {
+        return c.redirect(`${loginPath}?error=account_inactive`, 302);
+      } else {
+        const response = unauthorized("User account is inactive");
+        return c.json(response, response._status);
+      }
+    }
     c.set("user", {
       ...session.user,
       authMethod: "oidc",
@@ -10059,6 +10070,80 @@ function validateS3Config(config) {
   }
 }
 
+async function loadEJS() {
+  try {
+    const ejs = await import('ejs');
+    return ejs.default || ejs;
+  } catch (err) {
+    throw new Error(
+      "EJS template engine not installed. Install with: npm install ejs\nEJS is a peer dependency to keep the core package lightweight."
+    );
+  }
+}
+function setupTemplateEngine(options = {}) {
+  const {
+    engine = "jsx",
+    templatesDir = "./views",
+    layout = null,
+    engineOptions = {},
+    customRenderer = null
+  } = options;
+  const templatesPath = path$1.resolve(templatesDir);
+  return async (c, next) => {
+    c.render = async (template, data = {}, renderOptions = {}) => {
+      if (typeof template === "object" && template !== null) {
+        return c.html(template);
+      }
+      if (engine === "ejs") {
+        const ejs = await loadEJS();
+        const templateFile = template.endsWith(".ejs") ? template : `${template}.ejs`;
+        const templatePath = path$1.join(templatesPath, templateFile);
+        if (!require$$0$1.existsSync(templatePath)) {
+          throw new Error(`Template not found: ${templatePath}`);
+        }
+        const templateContent = await fs.readFile(templatePath, "utf-8");
+        const renderData = {
+          ...data,
+          // Add helpers that EJS templates might expect
+          _url: c.req.url,
+          _path: c.req.path,
+          _method: c.req.method
+        };
+        const html = ejs.render(templateContent, renderData, {
+          filename: templatePath,
+          // For includes to work
+          ...engineOptions,
+          ...renderOptions
+        });
+        if (layout || renderOptions.layout) {
+          const layoutName = renderOptions.layout || layout;
+          const layoutFile = layoutName.endsWith(".ejs") ? layoutName : `${layoutName}.ejs`;
+          const layoutPath = path$1.join(templatesPath, layoutFile);
+          if (!require$$0$1.existsSync(layoutPath)) {
+            throw new Error(`Layout not found: ${layoutPath}`);
+          }
+          const layoutContent = await fs.readFile(layoutPath, "utf-8");
+          const wrappedHtml = ejs.render(layoutContent, {
+            ...renderData,
+            body: html
+            // Content goes into <%- body %>
+          }, {
+            filename: layoutPath,
+            ...engineOptions
+          });
+          return c.html(wrappedHtml);
+        }
+        return c.html(html);
+      }
+      if (engine === "custom" && customRenderer) {
+        return customRenderer(c, template, data, renderOptions);
+      }
+      throw new Error(`Unsupported template engine: ${engine}`);
+    };
+    await next();
+  };
+}
+
 class ApiServer {
   /**
    * Create API server
@@ -10077,6 +10162,8 @@ class ApiServer {
       resources: options.resources || {},
       routes: options.routes || {},
       // Plugin-level custom routes
+      templates: options.templates || { enabled: false, engine: "jsx" },
+      // Template engine config
       middlewares: options.middlewares || [],
       verbose: options.verbose || false,
       auth: options.auth || {},
@@ -10113,6 +10200,13 @@ class ApiServer {
     this.options.middlewares.forEach((middleware) => {
       this.app.use("*", middleware);
     });
+    if (this.options.templates?.enabled) {
+      const templateMiddleware = setupTemplateEngine(this.options.templates);
+      this.app.use("*", templateMiddleware);
+      if (this.options.verbose) {
+        console.log(`[API Server] Template engine enabled: ${this.options.templates.engine}`);
+      }
+    }
     this.app.use("*", async (c, next) => {
       const method = c.req.method;
       if (["POST", "PUT", "PATCH"].includes(method)) {
@@ -10770,6 +10864,16 @@ class ApiPlugin extends Plugin {
       },
       // Custom routes (plugin-level)
       routes: options.routes || {},
+      // Template engine configuration
+      templates: {
+        enabled: options.templates?.enabled || false,
+        engine: options.templates?.engine || "jsx",
+        // 'jsx' (default), 'ejs', 'custom'
+        templatesDir: options.templates?.templatesDir || "./views",
+        layout: options.templates?.layout || null,
+        engineOptions: options.templates?.engineOptions || {},
+        customRenderer: options.templates?.customRenderer || null
+      },
       // CORS configuration
       cors: {
         enabled: options.cors?.enabled || false,
@@ -11290,6 +11394,7 @@ class ApiPlugin extends Plugin {
       database: this.database,
       resources: this.config.resources,
       routes: this.config.routes,
+      templates: this.config.templates,
       middlewares: this.compiledMiddlewares,
       verbose: this.config.verbose,
       auth: this.config.auth,

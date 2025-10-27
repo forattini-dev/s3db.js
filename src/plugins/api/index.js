@@ -88,6 +88,16 @@ export class ApiPlugin extends Plugin {
       // Custom routes (plugin-level)
       routes: options.routes || {},
 
+      // Template engine configuration
+      templates: {
+        enabled: options.templates?.enabled || false,
+        engine: options.templates?.engine || 'jsx', // 'jsx' (default), 'ejs', 'custom'
+        templatesDir: options.templates?.templatesDir || './views',
+        layout: options.templates?.layout || null,
+        engineOptions: options.templates?.engineOptions || {},
+        customRenderer: options.templates?.customRenderer || null
+      },
+
       // CORS configuration
       cors: {
         enabled: options.cors?.enabled || false,
@@ -765,6 +775,7 @@ export class ApiPlugin extends Plugin {
       database: this.database,
       resources: this.config.resources,
       routes: this.config.routes,
+      templates: this.config.templates,
       middlewares: this.compiledMiddlewares,
       verbose: this.config.verbose,
       auth: this.config.auth,
@@ -844,3 +855,6 @@ export class ApiPlugin extends Plugin {
 // Export auth utilities (OIDCClient, guards helpers, etc.)
 export { OIDCClient } from './auth/oidc-client.js';
 export * from './concerns/guards-helpers.js';
+
+// Export template engine utilities
+export { setupTemplateEngine, ejsEngine, jsxEngine } from './utils/template-engine.js';
