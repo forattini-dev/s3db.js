@@ -13,6 +13,8 @@ import { generateOpenAPISpec } from './utils/openapi-generator.js';
 import { createAuthMiddleware } from './auth/index.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
 import { findBestMatch, validatePathAuth } from './utils/path-matcher.js';
+import { createFilesystemHandler, validateFilesystemConfig } from './utils/static-filesystem.js';
+import { createS3Handler, validateS3Config } from './utils/static-s3.js';
 
 /**
  * API Server class
@@ -38,6 +40,7 @@ export class ApiServer {
       middlewares: options.middlewares || [],
       verbose: options.verbose || false,
       auth: options.auth || {},
+      static: options.static || [], // Static file serving config
       docsEnabled: options.docsEnabled !== false, // Enable /docs by default
       docsUI: options.docsUI || 'redoc', // 'swagger' or 'redoc'
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024, // 10MB default
@@ -163,6 +166,9 @@ export class ApiServer {
       // Otherwise, redirect to docs
       return c.redirect('/docs', 302);
     });
+
+    // Setup static file serving (before resource routes to give static files priority)
+    this._setupStaticRoutes();
 
     // OpenAPI spec endpoint
     if (this.options.docsEnabled) {
@@ -685,6 +691,104 @@ export class ApiServer {
 
     if (this.options.verbose) {
       console.log(`[API Plugin] Mounted ${Object.keys(routes).length} plugin-level custom routes`);
+    }
+  }
+
+  /**
+   * Setup static file serving routes
+   * @private
+   */
+  _setupStaticRoutes() {
+    const { static: staticConfigs, database } = this.options;
+
+    if (!staticConfigs || staticConfigs.length === 0) {
+      return;
+    }
+
+    if (!Array.isArray(staticConfigs)) {
+      throw new Error('Static config must be an array of mount points');
+    }
+
+    for (const [index, config] of staticConfigs.entries()) {
+      try {
+        // Validate required fields
+        if (!config.driver) {
+          throw new Error(`static[${index}]: "driver" is required (filesystem or s3)`);
+        }
+
+        if (!config.path) {
+          throw new Error(`static[${index}]: "path" is required (mount path)`);
+        }
+
+        if (!config.path.startsWith('/')) {
+          throw new Error(`static[${index}]: "path" must start with / (got: ${config.path})`);
+        }
+
+        const driverConfig = config.config || {};
+
+        // Create handler based on driver
+        let handler;
+
+        if (config.driver === 'filesystem') {
+          // Validate filesystem-specific config
+          validateFilesystemConfig({ ...config, ...driverConfig });
+
+          handler = createFilesystemHandler({
+            root: config.root,
+            index: driverConfig.index,
+            maxAge: driverConfig.maxAge,
+            dotfiles: driverConfig.dotfiles,
+            etag: driverConfig.etag,
+            cors: driverConfig.cors
+          });
+
+        } else if (config.driver === 's3') {
+          // Validate S3-specific config
+          validateS3Config({ ...config, ...driverConfig });
+
+          // Get S3 client from database
+          const s3Client = database?.client?.client; // S3Client instance
+
+          if (!s3Client) {
+            throw new Error(`static[${index}]: S3 driver requires database with S3 client`);
+          }
+
+          handler = createS3Handler({
+            s3Client,
+            bucket: config.bucket,
+            prefix: config.prefix,
+            streaming: driverConfig.streaming,
+            signedUrlExpiry: driverConfig.signedUrlExpiry,
+            maxAge: driverConfig.maxAge,
+            cacheControl: driverConfig.cacheControl,
+            contentDisposition: driverConfig.contentDisposition,
+            etag: driverConfig.etag,
+            cors: driverConfig.cors
+          });
+
+        } else {
+          throw new Error(
+            `static[${index}]: invalid driver "${config.driver}". Valid drivers: filesystem, s3`
+          );
+        }
+
+        // Mount handler at specified path
+        // Use wildcard to match all sub-paths
+        const mountPath = config.path === '/' ? '/*' : `${config.path}/*`;
+        this.app.get(mountPath, handler);
+        this.app.head(mountPath, handler);
+
+        if (this.options.verbose) {
+          console.log(
+            `[API Plugin] Mounted static files (${config.driver}) at ${config.path}` +
+            (config.driver === 'filesystem' ? ` -> ${config.root}` : ` -> s3://${config.bucket}/${config.prefix || ''}`)
+          );
+        }
+
+      } catch (err) {
+        console.error(`[API Plugin] Failed to setup static files for index ${index}:`, err.message);
+        throw err;
+      }
     }
   }
 

@@ -297,6 +297,8 @@ export class IdentityServer {
         console.log('[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)');
         console.log('[Identity Server]   GET  /oauth/authorize (OAuth2 Consent Screen - Overrides OAuth2Server)');
         console.log('[Identity Server]   POST /oauth/consent (Process OAuth2 Consent Decision)');
+        console.log('[Identity Server]   GET  /verify-email (Verify Email with Token)');
+        console.log('[Identity Server]   POST /verify-email/resend (Resend Verification Email)');
       }
     } catch (error) {
       console.error('[Identity Server] Failed to setup UI routes:', error);
