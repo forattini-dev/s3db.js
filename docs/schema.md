@@ -41,7 +41,7 @@ const users = await database.createResource({
   name: 'users',
   attributes: {
     email: 'string|required|email',
-    password: 'secret|required',           // Auto-encrypted ✨
+    password: 'password|required|min:8',   // Auto-hashed with bcrypt ✨
     age: 'number|optional|min:18',
     embedding: 'embedding:1536',           // Vector magic 🎯
     profile: {                             // Nested objects using $$type!
@@ -55,7 +55,7 @@ const users = await database.createResource({
 // Insert with automatic validation
 const user = await users.insert({
   email: 'ada@lovelace.com',
-  password: 'supersecret',
+  password: 'MySecurePass123',
   age: 36,
   embedding: [0.1, 0.2, ...], // 1536 floats
   profile: {
@@ -67,7 +67,7 @@ const user = await users.insert({
 
 **What just happened?**
 - ✅ Email validated as proper email format
-- 🔐 Password encrypted with AES-256-GCM
+- 🔐 Password hashed with bcrypt (one-way, 60→53 bytes compacted)
 - 🎯 Embedding compressed by 77% with fixed-point encoding
 - 📦 Everything stored in S3 metadata (or body if too large)
 - 🚀 Schema versioned and cached for future operations
@@ -78,15 +78,41 @@ const user = await users.insert({
 
 S3DB extends standard types with custom types optimized for S3's 2KB metadata limit. These types provide automatic compression, encryption, and encoding.
 
-### 🔐 `secret` - Auto-Encrypted Fields
+### 🔑 `password` - One-Way Bcrypt Hashing
 
-**Store sensitive data with AES-256-GCM encryption:**
+**Store user passwords securely with bcrypt (RECOMMENDED FOR PASSWORDS):**
 
 ```javascript
 attributes: {
-  password: 'secret|required',           // String, auto-encrypted
-  apiKey: 'secret|min:32',              // With validation
-  pin: 'secretNumber',                  // Number, auto-encrypted
+  userPassword: 'password|required|min:8',     // Auto-hashed with bcrypt
+  adminPassword: 'password|required|min:12',   // With validation
+}
+```
+
+**Key Features:**
+- ✅ **One-way hashing** - Cannot be decrypted (industry standard for passwords)
+- ✅ **Bcrypt algorithm** - Resistant to brute-force attacks
+- ✅ **Space optimized** - Compacted from 60 to 53 bytes (11.6% savings)
+- ✅ **Auto-hashed** - Automatically hashed on insert/update
+- ✅ **Configurable rounds** - Default 10 rounds (configurable 4-31)
+
+**Verification:**
+```javascript
+import { verifyPassword } from 's3db.js';
+
+const user = await users.get(userId);
+const isValid = await verifyPassword(plainPassword, user.password);
+```
+
+### 🔐 `secret` - Reversible AES-256-GCM Encryption
+
+**Store reversible secrets like API keys and tokens (NOT for passwords!):**
+
+```javascript
+attributes: {
+  apiKey: 'secret|required',           // String, auto-encrypted
+  refreshToken: 'secret|min:32',       // With validation
+  pin: 'secretNumber',                 // Number, auto-encrypted
   metadata: 'secretAny'                 // Any type, auto-encrypted
 }
 ```
@@ -193,7 +219,8 @@ console.log(post.metadata.views);  // 100 (auto-parsed)
 
 | Type | Input Example | Stored As | Savings | Use Case |
 |------|---------------|-----------|---------|----------|
-| `secret` | `"password123"` | `"salt:iv:encrypted:tag"` | Encrypted | Passwords, API keys, tokens |
+| `password` | `"MyPass123"` (11 bytes) | `"compacted_hash"` (53 bytes) | One-way | **User passwords** (bcrypt, irreversible) |
+| `secret` | `"sk-abc123"` | `"salt:iv:encrypted:tag"` | Encrypted | API keys, tokens (AES-256, reversible) |
 | `embedding:1536` | `[0.1, 0.2, ...]` (30KB) | `"2kF_nX..."` (7KB) | **77%** | Vector search, RAG, ML |
 | `ip4` | `"192.168.1.1"` (15 bytes) | `"wKgBAQ=="` (8 bytes) | **47%** | IP tracking, analytics |
 | `ip6` | `"2001:db8::1"` (39 bytes) | `"IAENuAAAA..."` (24 bytes) | **44%** | IPv6 networks |
@@ -394,9 +421,9 @@ await users.insert({
 
 This section provides full documentation for each custom type. For a quick overview, see [Custom Types Summary](#-custom-types---space-optimized-for-s3).
 
-### `secret` - Auto-Encrypted Fields
+### `password` - One-Way Bcrypt Hashing
 
-Store sensitive data with automatic AES-256-GCM encryption.
+Store user passwords securely with bcrypt one-way hashing. **Use this for user passwords, NOT the `secret` type!**
 
 #### Usage
 
@@ -405,24 +432,65 @@ const users = await database.createResource({
   name: 'users',
   attributes: {
     email: 'string|required',
-    password: 'secret|required',           // Encrypted string
-    apiKey: 'secret|min:32',              // Encrypted with validation
+    password: 'password|required|min:8',   // Bcrypt hashed
+  }
+});
+
+// Insert - password auto-hashed with bcrypt
+const user = await users.insert({
+  email: 'alan@turing.com',
+  password: 'MySecurePass123',
+});
+
+// Password is stored as compacted bcrypt hash (53 bytes)
+console.log(user.password); // "saltsaltsalt...hash..." (compacted, no $2b$10$ prefix)
+
+// To verify a password, use verifyPassword()
+import { verifyPassword } from 's3db.js';
+const isValid = await verifyPassword('MySecurePass123', user.password);
+console.log(isValid); // true
+```
+
+#### Configuration
+
+Configure bcrypt rounds at database level (default: 10):
+
+```javascript
+const database = new Database({
+  connectionString: '...',
+  bcryptRounds: 12  // Higher = more secure but slower (4-31)
+});
+```
+
+### `secret` - Auto-Encrypted Fields (Reversible)
+
+Store sensitive data with automatic AES-256-GCM encryption. **Use this for API keys and tokens, NOT for user passwords!**
+
+#### Usage
+
+```javascript
+const accounts = await database.createResource({
+  name: 'accounts',
+  attributes: {
+    email: 'string|required',
+    apiKey: 'secret|required',            // Encrypted string
+    refreshToken: 'secret|min:32',        // Encrypted with validation
     pin: 'secretNumber',                  // Encrypted number
     metadata: 'secretAny'                 // Encrypted any type
   }
 });
 
-// Insert - password auto-encrypted
-const user = await users.insert({
+// Insert - secrets auto-encrypted
+const account = await accounts.insert({
   email: 'alan@turing.com',
-  password: 'enigma123',
   apiKey: 'sk_live_abc123xyz...',
+  refreshToken: 'rt_abc123...',
   pin: 1234
 });
 
-// Retrieve - password auto-decrypted
-const found = await users.get(user.id);
-console.log(found.password);  // 'enigma123' (decrypted)
+// Retrieve - secrets auto-decrypted
+const found = await accounts.get(account.id);
+console.log(found.apiKey);  // 'sk_live_abc123xyz...' (decrypted)
 ```
 
 #### Secret Variants

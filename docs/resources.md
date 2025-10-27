@@ -273,9 +273,17 @@ const orders = await db.createResource({
 
 ```javascript
 {
-  // Secret (AES-256-GCM encrypted)
-  password: 'secret|required',
+  // Password (bcrypt one-way hash - USE FOR USER PASSWORDS)
+  // Auto-hashed with bcrypt on insert/update (60→53 bytes compacted)
+  // Use verifyPassword() from 's3db.js' to verify
+  userPassword: 'password|required|min:8',
+  adminPassword: 'password|required|min:12',
+
+  // Secret (AES-256-GCM reversible encryption - USE FOR API KEYS/TOKENS)
+  // Can be decrypted with passphrase - NOT suitable for passwords!
   apiKey: 'secret|required',
+  refreshToken: 'secret|required',
+  encryptedData: 'secret|optional',
 
   // IP Addresses (Binary Base64 - 44-47% savings)
   ipv4: 'ip4',

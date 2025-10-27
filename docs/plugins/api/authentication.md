@@ -49,7 +49,7 @@ const users = await db.createResource({
   attributes: {
     id: 'string|required',
     email: 'string|required|email',
-    password: 'secret|required',  // Automatically encrypted
+    password: 'password|required|min:8',  // Automatically hashed with bcrypt
     role: 'string|optional',
     active: 'boolean|default:true'
   }
@@ -141,7 +141,7 @@ const users = await db.createResource({
   attributes: {
     id: 'string|required',
     email: 'string|required|email',
-    password: 'secret|required',  // Automatically encrypted
+    password: 'password|required|min:8',  // Automatically hashed with bcrypt
     active: 'boolean|default:true'
   }
 });

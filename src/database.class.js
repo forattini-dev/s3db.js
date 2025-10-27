@@ -66,6 +66,7 @@ export class Database extends EventEmitter {
     this.plugins = this.pluginRegistry; // Alias for plugin registry
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
+    this.bcryptRounds = options.bcryptRounds || 10;
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
     this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
@@ -235,6 +236,7 @@ export class Database extends EventEmitter {
           behavior: versionData.behavior || 'user-managed',
           parallelism: this.parallelism,
           passphrase: this.passphrase,
+          bcryptRounds: this.bcryptRounds,
           observers: [this],
           cache: this.cache,
           timestamps: versionData.timestamps !== undefined ? versionData.timestamps : false,
@@ -967,6 +969,7 @@ export class Database extends EventEmitter {
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
+      bcryptRounds: this.bcryptRounds,
       versioningEnabled: this.versioningEnabled
     });
     
@@ -1104,6 +1107,7 @@ export class Database extends EventEmitter {
       behavior,
       parallelism: this.parallelism,
       passphrase: config.passphrase !== undefined ? config.passphrase : this.passphrase,
+      bcryptRounds: config.bcryptRounds !== undefined ? config.bcryptRounds : this.bcryptRounds,
       observers: [this],
       cache: config.cache !== undefined ? config.cache : this.cache,
       timestamps: config.timestamps !== undefined ? config.timestamps : false,

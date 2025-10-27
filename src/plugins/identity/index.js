@@ -488,7 +488,7 @@ export class IdentityPlugin extends Plugin {
         name: resourceName,
         attributes: {
           email: 'string|required|email',
-          password: 'secret|required',
+          password: 'password|required',
           name: 'string|optional',
           scopes: 'array|items:string|optional',
           active: 'boolean|default:true'

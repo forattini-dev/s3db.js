@@ -163,38 +163,100 @@ describe('Validator Class - Enhanced Shorthand & Custom Types', () => {
     expect(arrayError.actual).toBe(0);
   });
 
+  test('validates custom password type with bcrypt hashing', async () => {
+    // Test validator with autoEncrypt enabled
+    const validatorWithBcrypt = new Validator({ bcryptRounds: 10, autoEncrypt: true });
+    const validatorWithoutBcrypt = new Validator({ autoEncrypt: true });
+
+    const schema = {
+      password: 'password',
+      userPassword: 'password|min:8',
+      adminPassword: { type: 'password', min: 12 }
+    };
+
+    // Test with bcryptRounds - should hash successfully
+    const checkWithBcrypt = validatorWithBcrypt.compile(schema);
+    const validData = {
+      password: 'mysecret123',
+      userPassword: 'longenoughpass',
+      adminPassword: 'verylongpassword123'
+    };
+
+    const resultWithBcrypt = await checkWithBcrypt(validData);
+    expect(resultWithBcrypt).toBe(true);
+
+    // Values should be hashed (changed from original, 53 bytes compacted)
+    expect(validData.password).not.toBe('mysecret123');
+    expect(validData.password.length).toBe(53); // Compacted bcrypt hash
+    expect(validData.userPassword).not.toBe('longenoughpass');
+    expect(validData.userPassword.length).toBe(53);
+    expect(validData.adminPassword).not.toBe('verylongpassword123');
+    expect(validData.adminPassword.length).toBe(53);
+
+    // Test without bcryptRounds - should produce specific error
+    const checkWithoutBcrypt = validatorWithoutBcrypt.compile(schema);
+    const resultWithoutBcrypt = await checkWithoutBcrypt({
+      password: 'mysecret123',
+      userPassword: 'longenoughpass',
+      adminPassword: 'validpassword123'
+    });
+
+    expect(Array.isArray(resultWithoutBcrypt)).toBe(true);
+    expect(resultWithoutBcrypt.length).toBe(3); // Should have exactly 3 errors (one per password field)
+
+    // Check specific hashing errors
+    resultWithoutBcrypt.forEach(error => {
+      expect(error.type).toBe('bcryptRoundsMissing');
+      expect(['password', 'userPassword', 'adminPassword']).toContain(error.field);
+      expect(error).toHaveProperty('actual');
+      expect(error.message).toContain('Missing bcrypt rounds configuration');
+    });
+
+    // Test password with string constraints
+    const constraintResult = await checkWithBcrypt({
+      password: 'valid',
+      userPassword: 'short', // too short for min:8
+      adminPassword: 'toolong'.repeat(20) // too long for max:128 (default)
+    });
+
+    expect(Array.isArray(constraintResult)).toBe(true);
+    expect(constraintResult.length).toBeGreaterThanOrEqual(1); // Should have at least 1 constraint error
+
+    expect(constraintResult.find(err => err.field === 'userPassword' && err.type === 'stringMin')).toBeDefined();
+  });
+
   test('validates custom secret type with comprehensive error checking', async () => {
     const validatorWithPassphrase = new Validator({ passphrase: 'test-passphrase' });
     const validatorWithoutPassphrase = new Validator();
 
     const schema = {
-      password: 'secret',
-      apiKey: 'secret|min:10',
-      token: { type: 'secret', max: 100 }
+      apiKey: 'secret',
+      token: 'secret|min:10',
+      refreshToken: { type: 'secret', max: 100 }
     };
 
     // Test with passphrase - should encrypt successfully
     const checkWithPassphrase = validatorWithPassphrase.compile(schema);
     const validData = {
-      password: 'mysecret123',
-      apiKey: 'longenoughkey',
-      token: 'short'
+      apiKey: 'mysecret123',
+      token: 'longenoughkey',
+      refreshToken: 'short'
     };
 
     const resultWithPassphrase = await checkWithPassphrase(validData);
     expect(resultWithPassphrase).toBe(true);
-    
+
     // Values should be encrypted (changed from original)
-    expect(validData.password).not.toBe('mysecret123');
-    expect(validData.apiKey).not.toBe('longenoughkey');
-    expect(validData.token).not.toBe('short');
+    expect(validData.apiKey).not.toBe('mysecret123');
+    expect(validData.token).not.toBe('longenoughkey');
+    expect(validData.refreshToken).not.toBe('short');
 
     // Test without passphrase - should produce specific error
     const checkWithoutPassphrase = validatorWithoutPassphrase.compile(schema);
     const resultWithoutPassphrase = await checkWithoutPassphrase({
-      password: 'mysecret123',
-      apiKey: 'longenoughkey',
-      token: 'validtoken'
+      apiKey: 'mysecret123',
+      token: 'longenoughkey',
+      refreshToken: 'validtoken'
     });
 
     expect(Array.isArray(resultWithoutPassphrase)).toBe(true);
@@ -203,23 +265,23 @@ describe('Validator Class - Enhanced Shorthand & Custom Types', () => {
     // Check specific encryption errors
     resultWithoutPassphrase.forEach(error => {
       expect(error.type).toBe('encryptionKeyMissing');
-      expect(['password', 'apiKey', 'token']).toContain(error.field);
+      expect(['apiKey', 'token', 'refreshToken']).toContain(error.field);
       expect(error).toHaveProperty('actual');
       expect(error.message).toContain('Missing configuration for secrets encryption');
     });
 
     // Test secret with string constraints
     const constraintResult = await checkWithPassphrase({
-      password: 'valid',
-      apiKey: 'short', // too short for min:10
-      token: 'a'.repeat(200) // too long for max:100
+      apiKey: 'valid',
+      token: 'short', // too short for min:10
+      refreshToken: 'a'.repeat(200) // too long for max:100
     });
 
     expect(Array.isArray(constraintResult)).toBe(true);
     expect(constraintResult.length).toBe(2); // Should have exactly 2 constraint errors
 
-    expect(constraintResult.find(err => err.field === 'apiKey' && err.type === 'stringMin')).toBeDefined();
-    expect(constraintResult.find(err => err.field === 'token' && err.type === 'stringMax')).toBeDefined();
+    expect(constraintResult.find(err => err.field === 'token' && err.type === 'stringMin')).toBeDefined();
+    expect(constraintResult.find(err => err.field === 'refreshToken' && err.type === 'stringMax')).toBeDefined();
   });
 
   test('validates secretAny and secretNumber custom types', async () => {

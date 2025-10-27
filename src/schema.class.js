@@ -13,6 +13,7 @@ import {
 } from "lodash-es";
 
 import { encrypt, decrypt } from "./concerns/crypto.js";
+import { hashPassword, compactHash } from "./concerns/password-hashing.js";
 import { ValidatorManager } from "./validator.class.js";
 import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
@@ -119,6 +120,16 @@ export const SchemaActions = {
     if (raw === 'null') return null;
     if (raw === 'undefined') return undefined;
     return raw;
+  },
+
+  hashPassword: async (value, { bcryptRounds = 10 }) => {
+    if (value === null || value === undefined) return value;
+    // Hash with bcrypt
+    const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(value), bcryptRounds));
+    if (!okHash) return value; // Return original on error
+    // Compact hash to save space (60 → 53 bytes)
+    const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
+    return okCompact ? compacted : hash; // Return compacted or fallback to full hash
   },
 
   toString: (value) => value == null ? value : String(value),
@@ -535,6 +546,7 @@ export class Schema {
       name,
       attributes,
       passphrase,
+      bcryptRounds,
       version = 1,
       options = {},
       _pluginAttributeMetadata,
@@ -545,6 +557,7 @@ export class Schema {
     this.version = version;
     this.attributes = attributes || {};
     this.passphrase = passphrase ?? "secret";
+    this.bcryptRounds = bcryptRounds ?? 10;
     this.options = merge({}, this.defaultOptions(), options);
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
 
@@ -555,7 +568,11 @@ export class Schema {
     // Preprocess attributes to handle nested objects for validator compilation
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
 
-    this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
+    this.validator = new ValidatorManager({
+      autoEncrypt: false,
+      passphrase: this.passphrase,
+      bcryptRounds: this.bcryptRounds
+    }).compile(merge(
       { $$async: true, $$strict: false },
       processedAttributes,
     ))
@@ -824,6 +841,16 @@ export class Schema {
         continue;
       }
 
+      // Handle passwords
+      if (defStr.includes("password") || defType === 'password') {
+        if (this.options.autoEncrypt) {
+          this.addHook("beforeMap", name, "hashPassword");
+        }
+        // No afterUnmap hook - passwords are one-way hashed
+        // Skip other processing for passwords
+        continue;
+      }
+
       // Handle ip4 type
       if (defStr.includes("ip4") || defType === 'ip4') {
         this.addHook("beforeMap", name, "encodeIPv4");
@@ -1067,6 +1094,7 @@ export class Schema {
         if (value !== undefined && typeof SchemaActions[actionName] === 'function') {
           set(cloned, attribute, await SchemaActions[actionName](value, {
             passphrase: this.passphrase,
+            bcryptRounds: this.bcryptRounds,
             separator: this.options.arraySeparator,
             ...actionParams  // Merge custom parameters (currency, precision, etc.)
           }))
@@ -1181,6 +1209,7 @@ export class Schema {
           if (typeof SchemaActions[actionName] === 'function') {
             parsedValue = await SchemaActions[actionName](parsedValue, {
               passphrase: this.passphrase,
+              bcryptRounds: this.bcryptRounds,
               separator: this.options.arraySeparator,
               ...actionParams  // Merge custom parameters (currency, precision, etc.)
             });

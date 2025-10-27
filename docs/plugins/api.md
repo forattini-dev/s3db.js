@@ -215,7 +215,7 @@ const users = await db.createResource({
   name: 'users',
   attributes: {
     email: 'string|required|email',
-    password: 'secret|required',  // Automatically encrypted
+    password: 'password|required|min:8',  // Automatically hashed with bcrypt
     role: 'string|default:user'
   }
 });

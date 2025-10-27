@@ -26,7 +26,8 @@ export class Resource extends AsyncEventEmitter {
    * @param {string} [config.version='v1'] - Resource version
    * @param {Object} [config.attributes={}] - Resource attributes schema
    * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
-   * @param {string} [config.passphrase='secret'] - Encryption passphrase
+   * @param {string} [config.passphrase='secret'] - Encryption passphrase (for 'secret' type)
+   * @param {number} [config.bcryptRounds=10] - Bcrypt rounds (for 'password' type)
    * @param {number} [config.parallelism=10] - Parallelism for bulk operations
    * @param {Array} [config.observers=[]] - Observer instances
    * @param {boolean} [config.cache=false] - Enable caching
@@ -123,6 +124,7 @@ export class Resource extends AsyncEventEmitter {
       attributes = {},
       behavior = DEFAULT_BEHAVIOR,
       passphrase = 'secret',
+      bcryptRounds = 10,
       parallelism = 10,
       observers = [],
       cache = false,
@@ -152,6 +154,7 @@ export class Resource extends AsyncEventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
+    this.bcryptRounds = bcryptRounds;
     this.versioningEnabled = versioningEnabled;
     this.strictValidation = strictValidation;
     
@@ -405,6 +408,7 @@ export class Resource extends AsyncEventEmitter {
       name: this.name,
       attributes: this.attributes,
       passphrase: this.passphrase,
+      bcryptRounds: this.bcryptRounds,
       version: this.version,
       options: {
         autoDecrypt: this.config.autoDecrypt,
