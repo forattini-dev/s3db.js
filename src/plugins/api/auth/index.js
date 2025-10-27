@@ -8,6 +8,7 @@ import { jwtAuth } from './jwt-auth.js';
 import { apiKeyAuth } from './api-key-auth.js';
 import { basicAuth } from './basic-auth.js';
 import { createOAuth2Handler } from './oauth2-auth.js';
+import { OIDCClient } from './oidc-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
 
 /**
@@ -132,7 +133,7 @@ export function createAuthMiddleware(options = {}) {
   };
 }
 
-export { OIDCClient } from './oidc-client.js';
+export { OIDCClient };
 
 export default {
   createAuthMiddleware,

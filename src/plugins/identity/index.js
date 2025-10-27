@@ -30,6 +30,13 @@ import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
 import { OAuth2Server } from './oauth2-server.js';
+import {
+  BASE_USER_ATTRIBUTES,
+  BASE_TENANT_ATTRIBUTES,
+  BASE_CLIENT_ATTRIBUTES,
+  validateResourcesConfig,
+  mergeResourceAttributes
+} from './concerns/resource-schemas.js';
 
 /**
  * Identity Provider Plugin class
@@ -43,6 +50,32 @@ export class IdentityPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
+
+    // Validate required resources configuration
+    const resourcesValidation = validateResourcesConfig(options.resources);
+    if (!resourcesValidation.valid) {
+      throw new Error(
+        'IdentityPlugin configuration error:\n' +
+        resourcesValidation.errors.join('\n')
+      );
+    }
+
+    // Validate extra attributes (will throw if invalid)
+    mergeResourceAttributes(
+      BASE_USER_ATTRIBUTES,
+      options.resources.users.attributes || {},
+      'users'
+    );
+    mergeResourceAttributes(
+      BASE_TENANT_ATTRIBUTES,
+      options.resources.tenants.attributes || {},
+      'tenants'
+    );
+    mergeResourceAttributes(
+      BASE_CLIENT_ATTRIBUTES,
+      options.resources.clients.attributes || {},
+      'clients'
+    );
 
     this.config = {
       // Server configuration
@@ -62,8 +95,25 @@ export class IdentityPlugin extends Plugin {
       refreshTokenExpiry: options.refreshTokenExpiry || '7d',
       authCodeExpiry: options.authCodeExpiry || '10m',
 
-      // User resource (for authentication)
-      userResource: options.userResource || 'users',
+      // Resource configuration (REQUIRED)
+      // User must declare: users, tenants, clients with name + optional extra attributes
+      resources: {
+        users: {
+          name: options.resources.users.name,
+          extraAttributes: options.resources.users.attributes || {},
+          mergedAttributes: null  // Will be populated in _createResources()
+        },
+        tenants: {
+          name: options.resources.tenants.name,
+          extraAttributes: options.resources.tenants.attributes || {},
+          mergedAttributes: null
+        },
+        clients: {
+          name: options.resources.clients.name,
+          extraAttributes: options.resources.clients.attributes || {},
+          mergedAttributes: null
+        }
+      },
 
       // CORS configuration
       cors: {
@@ -238,13 +288,16 @@ export class IdentityPlugin extends Plugin {
     this.sessionManager = null;
     this.emailService = null;
 
-    // Resources
+    // Internal plugin resources (prefixed with plg_)
     this.oauth2KeysResource = null;
-    this.oauth2ClientsResource = null;
     this.oauth2AuthCodesResource = null;
     this.sessionsResource = null;
     this.passwordResetTokensResource = null;
+
+    // User-managed resources (user chooses names)
     this.usersResource = null;
+    this.tenantsResource = null;
+    this.clientsResource = null;
   }
 
   /**
@@ -274,11 +327,11 @@ export class IdentityPlugin extends Plugin {
       throw err;
     }
 
-    // Create OAuth2 resources
-    await this._createOAuth2Resources();
+    // Create user-managed resources (users, tenants, clients) with merged attributes
+    await this._createUserManagedResources();
 
-    // Create users resource if not exists
-    await this._ensureUsersResource();
+    // Create OAuth2 internal resources (keys, auth_codes, sessions, etc.)
+    await this._createOAuth2Resources();
 
     // Initialize OAuth2 Server
     await this._initializeOAuth2Server();
@@ -332,41 +385,7 @@ export class IdentityPlugin extends Plugin {
       throw errKeys;
     }
 
-    // 2. OAuth Clients Resource (registered applications)
-    const [okClients, errClients, clientsResource] = await tryFn(() =>
-      this.database.createResource({
-        name: 'plg_oauth_clients',
-        attributes: {
-          clientId: 'string|required',
-          clientSecret: 'secret|required',
-          name: 'string|required',
-          redirectUris: 'array|items:string|required',
-          allowedScopes: 'array|items:string|optional',
-          grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
-          active: 'boolean|default:true',
-          createdAt: 'string|optional'
-        },
-        behavior: 'body-overflow',
-        timestamps: true,
-        createdBy: 'IdentityPlugin'
-      })
-    );
-
-    if (okClients) {
-      this.oauth2ClientsResource = clientsResource;
-      if (this.config.verbose) {
-        console.log('[Identity Plugin] Created plg_oauth_clients resource');
-      }
-    } else if (this.database.resources.plg_oauth_clients) {
-      this.oauth2ClientsResource = this.database.resources.plg_oauth_clients;
-      if (this.config.verbose) {
-        console.log('[Identity Plugin] Using existing plg_oauth_clients resource');
-      }
-    } else {
-      throw errClients;
-    }
-
-    // 3. OAuth Authorization Codes Resource (authorization_code flow)
+    // 2. OAuth Authorization Codes Resource (authorization_code flow)
     const [okCodes, errCodes, codesResource] = await tryFn(() =>
       this.database.createResource({
         name: 'plg_auth_codes',
@@ -402,7 +421,7 @@ export class IdentityPlugin extends Plugin {
       throw errCodes;
     }
 
-    // 4. Sessions Resource (user sessions for UI/admin)
+    // 3. Sessions Resource (user sessions for UI/admin)
     const [okSessions, errSessions, sessionsResource] = await tryFn(() =>
       this.database.createResource({
         name: 'plg_sessions',
@@ -434,7 +453,7 @@ export class IdentityPlugin extends Plugin {
       throw errSessions;
     }
 
-    // 5. Password Reset Tokens Resource (for password reset flow)
+    // 4. Password Reset Tokens Resource (for password reset flow)
     const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn(() =>
       this.database.createResource({
         name: 'plg_password_reset_tokens',
@@ -467,45 +486,108 @@ export class IdentityPlugin extends Plugin {
   }
 
   /**
-   * Ensure users resource exists (for authentication)
+   * Create user-managed resources (users, tenants, clients) with merged attributes
    * @private
    */
-  async _ensureUsersResource() {
-    const resourceName = this.config.userResource;
+  async _createUserManagedResources() {
+    // 1. Create Users Resource
+    const usersConfig = this.config.resources.users;
+    const usersMergedAttrs = mergeResourceAttributes(
+      BASE_USER_ATTRIBUTES,
+      usersConfig.extraAttributes,
+      'users'
+    );
 
-    // Check if resource already exists
-    if (this.database.resources[resourceName]) {
-      this.usersResource = this.database.resources[resourceName];
-      if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${resourceName} resource`);
-      }
-      return;
-    }
+    // Store merged attributes for reference
+    usersConfig.mergedAttributes = usersMergedAttrs;
 
-    // Create minimal users resource if not exists
-    const [ok, err, resource] = await tryFn(() =>
+    const [okUsers, errUsers, usersResource] = await tryFn(() =>
       this.database.createResource({
-        name: resourceName,
-        attributes: {
-          email: 'string|required|email',
-          password: 'password|required',
-          name: 'string|optional',
-          scopes: 'array|items:string|optional',
-          active: 'boolean|default:true'
-        },
+        name: usersConfig.name,
+        attributes: usersMergedAttrs,
         behavior: 'body-overflow',
-        timestamps: true,
-        createdBy: 'IdentityPlugin'
+        timestamps: true
       })
     );
 
-    if (ok) {
-      this.usersResource = resource;
+    if (okUsers) {
+      this.usersResource = usersResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${resourceName} resource`);
+        console.log(`[Identity Plugin] Created ${usersConfig.name} resource with merged attributes`);
+      }
+    } else if (this.database.resources[usersConfig.name]) {
+      this.usersResource = this.database.resources[usersConfig.name];
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Using existing ${usersConfig.name} resource`);
       }
     } else {
-      throw err;
+      throw errUsers;
+    }
+
+    // 2. Create Tenants Resource (multi-tenancy support)
+    const tenantsConfig = this.config.resources.tenants;
+    const tenantsMergedAttrs = mergeResourceAttributes(
+      BASE_TENANT_ATTRIBUTES,
+      tenantsConfig.extraAttributes,
+      'tenants'
+    );
+
+    tenantsConfig.mergedAttributes = tenantsMergedAttrs;
+
+    const [okTenants, errTenants, tenantsResource] = await tryFn(() =>
+      this.database.createResource({
+        name: tenantsConfig.name,
+        attributes: tenantsMergedAttrs,
+        behavior: 'body-overflow',
+        timestamps: true
+      })
+    );
+
+    if (okTenants) {
+      this.tenantsResource = tenantsResource;
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Created ${tenantsConfig.name} resource with merged attributes`);
+      }
+    } else if (this.database.resources[tenantsConfig.name]) {
+      this.tenantsResource = this.database.resources[tenantsConfig.name];
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Using existing ${tenantsConfig.name} resource`);
+      }
+    } else {
+      throw errTenants;
+    }
+
+    // 3. Create OAuth2 Clients Resource
+    const clientsConfig = this.config.resources.clients;
+    const clientsMergedAttrs = mergeResourceAttributes(
+      BASE_CLIENT_ATTRIBUTES,
+      clientsConfig.extraAttributes,
+      'clients'
+    );
+
+    clientsConfig.mergedAttributes = clientsMergedAttrs;
+
+    const [okClients, errClients, clientsResource] = await tryFn(() =>
+      this.database.createResource({
+        name: clientsConfig.name,
+        attributes: clientsMergedAttrs,
+        behavior: 'body-overflow',
+        timestamps: true
+      })
+    );
+
+    if (okClients) {
+      this.clientsResource = clientsResource;
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Created ${clientsConfig.name} resource with merged attributes`);
+      }
+    } else if (this.database.resources[clientsConfig.name]) {
+      this.clientsResource = this.database.resources[clientsConfig.name];
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Using existing ${clientsConfig.name} resource`);
+      }
+    } else {
+      throw errClients;
     }
   }
 
@@ -518,7 +600,7 @@ export class IdentityPlugin extends Plugin {
       issuer: this.config.issuer,
       keyResource: this.oauth2KeysResource,
       userResource: this.usersResource,
-      clientResource: this.oauth2ClientsResource,
+      clientResource: this.clientsResource,
       authCodeResource: this.oauth2AuthCodesResource,
       supportedScopes: this.config.supportedScopes,
       supportedGrantTypes: this.config.supportedGrantTypes,
