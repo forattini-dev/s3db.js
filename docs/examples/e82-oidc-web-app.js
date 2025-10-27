@@ -6,7 +6,7 @@
  * faz login lá, e volta autenticado para esta aplicação.
  *
  * Arquitetura:
- * - Authorization Server (e80) - SSO Server que emite tokens (porta 4000)
+ * - Authorization Server (e80 - IdentityPlugin) - SSO Server que emite tokens (porta 4000)
  * - Web Application (esta app) - Aplicação que usa OIDC para login (porta 3000)
  *
  * Run (após iniciar o e80-sso-oauth2-server.js):
@@ -17,7 +17,7 @@ import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 
 const APP_PORT = 3000;
-const SSO_URL = 'http://localhost:4000'; // SSO Server (e80)
+const SSO_URL = 'http://localhost:4000'; // Identity Provider (e80 - IdentityPlugin)
 const APP_URL = `http://localhost:${APP_PORT}`;
 
 async function setupWebApp() {

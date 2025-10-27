@@ -4,7 +4,7 @@
  * This example demonstrates how to create a complete OAuth2 + OIDC microservices
  * architecture with s3db.js, where:
  *
- * 1. SSO Service (Port 3000) - Authorization Server
+ * 1. SSO Service (Port 3000) - IdentityPlugin (Authorization Server)
  *    - Manages users and authentication
  *    - Issues RS256 JWT tokens
  *    - Provides OIDC discovery and JWKS endpoints

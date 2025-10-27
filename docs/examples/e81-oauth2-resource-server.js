@@ -2,11 +2,11 @@
  * Example 81: OAuth2/OIDC Resource Server (Client Application)
  *
  * Como configurar uma aplicação que CONSOME tokens de um servidor OAuth2/OIDC.
- * Esta aplicação valida tokens emitidos pelo SSO Server (e80).
+ * Esta aplicação valida tokens emitidos pelo Identity Provider (e80).
  *
  * Arquitetura:
- * - Authorization Server (e80) - Emite tokens (porta 4000)
- * - Resource Server (esta app) - Valida tokens (porta 3000)
+ * - Authorization Server (e80 - IdentityPlugin) - Emite tokens JWT (porta 4000)
+ * - Resource Server (esta app - ApiPlugin) - Valida tokens (porta 3000)
  *
  * Run (após iniciar o e80-sso-oauth2-server.js):
  *   node docs/examples/e81-oauth2-resource-server.js
@@ -16,7 +16,7 @@ import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 
 const APP_PORT = 3000;
-const SSO_URL = 'http://localhost:4000'; // URL do SSO Server (e80)
+const SSO_URL = 'http://localhost:4000'; // URL do Identity Provider (e80 - IdentityPlugin)
 
 async function setupResourceServer() {
   // 1. Criar database
@@ -46,22 +46,21 @@ async function setupResourceServer() {
     port: APP_PORT,
     verbose: true,
 
-    // Autenticação OAuth2 - Valida tokens do SSO Server
+    // Autenticação OIDC - Valida tokens do Identity Provider
     auth: {
       drivers: [
         {
-          driver: 'oauth2',  // ← Resource Server (valida tokens)
+          driver: 'oidc',  // ← Resource Server (valida tokens JWT do IdentityPlugin)
           config: {
-            issuer: SSO_URL,  // URL do Authorization Server
-            jwksUri: `${SSO_URL}/.well-known/jwks.json`,  // Public keys
+            issuer: SSO_URL,  // URL do Identity Provider (IdentityPlugin)
+            // jwksUri é descoberto automaticamente via /.well-known/openid-configuration
             audience: 'my-api',  // Opcional: valida audiência do token
-            algorithms: ['RS256'],  // Algoritmo de assinatura
-            cacheTTL: 3600000,  // 1 hora de cache das chaves públicas
-            fetchUserInfo: false  // Não buscar user do DB local (usar claims do token)
+            requiredScopes: ['read:api', 'write:api'],  // Scopes necessários
+            clockTolerance: 60  // Tolerância de 60s para exp/nbf
           }
         }
       ],
-      resource: 'users'  // Não usado quando fetchUserInfo=false
+      resource: 'users'  // Não usado quando não há user lookup local
     },
 
     // CORS para permitir requisições do frontend
@@ -123,33 +122,36 @@ async function printUsage() {
 
 async function demonstrateFlow() {
   console.log('💡 Como usar esta API:\n');
-  console.log('1. Obter token do SSO Server:');
-  console.log('   POST http://localhost:4000/auth/login');
-  console.log('   Body: { "email": "admin@sso.local", "password": "Admin123!" }');
-  console.log('   Response: { "token": "eyJhbGc..." }');
+  console.log('1. Obter token do Identity Provider (Client Credentials Grant):');
+  console.log('   POST http://localhost:4000/oauth/token');
+  console.log('   Headers: Authorization: Basic base64(client_id:client_secret)');
+  console.log('   Body: grant_type=client_credentials&scope=read:api write:api');
+  console.log('   Response: { "access_token": "eyJhbGc...", "expires_in": 900 }');
   console.log('');
-  console.log('2. OU usar OAuth2 Authorization Code Flow:');
+  console.log('2. OU usar OAuth2 Authorization Code Flow (para usuários):');
   console.log('   GET http://localhost:4000/oauth/authorize?...');
-  console.log('   → Login');
-  console.log('   → POST http://localhost:4000/oauth/token');
-  console.log('   Response: { "access_token": "eyJhbGc...", ... }');
+  console.log('   → Login UI (email: admin@sso.local, password: Admin123!)');
+  console.log('   → Callback com code');
+  console.log('   → POST http://localhost:4000/oauth/token (troca code por tokens)');
+  console.log('   Response: { "access_token": "...", "id_token": "...", "refresh_token": "..." }');
   console.log('');
-  console.log('3. Usar o token para acessar esta API:');
+  console.log('3. Usar o access_token para acessar esta API:');
   console.log('   GET http://localhost:3000/cars');
   console.log('   Header: Authorization: Bearer eyJhbGc...');
   console.log('');
-  console.log('4. Exemplo com curl:');
-  console.log('   # Login no SSO');
-  console.log('   TOKEN=$(curl -X POST http://localhost:4000/auth/login \\');
-  console.log('     -H "Content-Type: application/json" \\');
-  console.log('     -d \'{"email":"admin@sso.local","password":"Admin123!"}\' \\');
-  console.log('     | jq -r \'.data.token\')');
+  console.log('4. Exemplo com curl (Client Credentials):');
+  console.log('   # Obter token (usando client criado no e80)');
+  console.log('   TOKEN=$(curl -X POST http://localhost:4000/oauth/token \\');
+  console.log('     -H "Authorization: Basic $(echo -n "app-client-123:super-secret-key-456" | base64)" \\');
+  console.log('     -H "Content-Type: application/x-www-form-urlencoded" \\');
+  console.log('     -d "grant_type=client_credentials&scope=read:api write:api" \\');
+  console.log('     | jq -r \'.access_token\')');
   console.log('');
-  console.log('   # Listar carros (requer scope: read:api)');
+  console.log('   # Listar carros (token com scope: read:api)');
   console.log('   curl http://localhost:3000/cars \\');
   console.log('     -H "Authorization: Bearer $TOKEN"');
   console.log('');
-  console.log('   # Criar carro (requer scope: write:api)');
+  console.log('   # Criar carro (token com scope: write:api)');
   console.log('   curl -X POST http://localhost:3000/cars \\');
   console.log('     -H "Authorization: Bearer $TOKEN" \\');
   console.log('     -H "Content-Type: application/json" \\');
@@ -158,22 +160,23 @@ async function demonstrateFlow() {
 }
 
 async function testConnection() {
-  console.log('🧪 Testando conexão com SSO Server...\n');
+  console.log('🧪 Testando conexão com Identity Provider...\n');
 
   try {
     const response = await fetch(`${SSO_URL}/.well-known/openid-configuration`);
 
     if (!response.ok) {
-      throw new Error(`SSO Server não está rodando (${response.status})`);
+      throw new Error(`Identity Provider não está rodando (${response.status})`);
     }
 
     const discovery = await response.json();
-    console.log('✅ SSO Server detectado:', discovery.issuer);
+    console.log('✅ Identity Provider detectado:', discovery.issuer);
     console.log('   JWKS URI:', discovery.jwks_uri);
     console.log('   Scopes suportados:', discovery.scopes_supported.join(', '));
+    console.log('   Grant types:', discovery.grant_types_supported.join(', '));
   } catch (err) {
-    console.error('❌ Erro ao conectar com SSO Server:', err.message);
-    console.error('   Certifique-se de que o e80-sso-oauth2-server.js está rodando na porta 4000!');
+    console.error('❌ Erro ao conectar com Identity Provider:', err.message);
+    console.error('   Certifique-se de que o e80-sso-oauth2-server.js (IdentityPlugin) está rodando na porta 4000!');
     process.exit(1);
   }
 }
