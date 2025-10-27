@@ -135,7 +135,7 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 
 ```javascript
 import Database from 's3db.js';
-import { ApiPlugin } from 's3db.js/plugins/api';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

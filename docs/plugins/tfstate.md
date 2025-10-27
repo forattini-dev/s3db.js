@@ -5,7 +5,7 @@
 **Import and query** your Terraform/OpenTofu states as s3db resources with **automatic change tracking** and **intelligent partition-based queries**.
 
 ```javascript
-import { TfStatePlugin } from 's3db.js/plugins';
+import { TfStatePlugin } from 's3db.js';
 
 const plugin = new TfStatePlugin({
   filters: {
@@ -207,7 +207,7 @@ diff.changes.added.forEach(r => {
 
 ```javascript
 import { Database } from 's3db.js';
-import { TfStatePlugin } from 's3db.js/plugins';
+import { TfStatePlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION

@@ -1422,8 +1422,8 @@ topk(10, s3db_operation_duration_seconds)
 
 ```javascript
 import { Database } from 's3db.js';
-import { ApiPlugin } from 's3db.js/plugins';
-import { MetricsPlugin } from 's3db.js/plugins';
+import { ApiPlugin } from 's3db.js';
+import { MetricsPlugin } from 's3db.js';
 
 const db = new Database({ useFakeS3: true });
 await db.connect();

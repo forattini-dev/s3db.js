@@ -11,13 +11,13 @@ s3db.js provides **two client implementations** for different use cases:
 
 ## 🚀 MemoryClient - Ultra-Fast Testing
 
-**Pure in-memory client** for blazing-fast tests with zero dependencies.
+**Pure in-memory client** for ultra-fast tests without external services.
 
 **Features:**
 - ⚡ **100-1000x faster** than LocalStack
-- 🎯 **Zero dependencies** - no Docker or S3 needed
+- 🎯 **No external services** - no Docker or S3 needed
 - 💯 **100% API compatible** with S3Client
-- 💾 **Snapshot/restore** - instant test state management
+- 💾 **Snapshot/restore** - rapid test state management
 - 📦 **Optional persistence** - save/load to disk
 - 🔄 **BackupPlugin compatible** - export/import JSONL format
 
@@ -500,7 +500,7 @@ try {
 
 **1. Use tryFn for optional operations:**
 ```javascript
-import { tryFn } from 's3db.js/concerns/try-fn';
+import { tryFn } from 's3db.js';
 
 const [ok, err, data] = await tryFn(() => client.getObject('optional-key'));
 if (ok) {

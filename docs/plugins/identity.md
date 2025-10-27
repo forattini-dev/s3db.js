@@ -10,7 +10,7 @@ The IdentityPlugin transforms s3db.js into a **centralized OAuth2/OIDC Authoriza
 
 ```javascript
 import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js/plugins/identity';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-server',
@@ -43,7 +43,7 @@ await db.usePlugin(identityPlugin);
 ```
 
 **Key Features:**
-- ✅ **Zero dependencies** - Built on Node.js native crypto (only requires hono + @hono/node-server)
+- ✅ **Minimal external dependencies** - Uses Node.js native crypto for JWT signing (requires hono for HTTP server)
 - ✅ **RS256 signing** - Asymmetric RSA keys for JWT tokens
 - ✅ **OIDC Discovery** - Auto-configurable by Resource Servers
 - ✅ **JWKS endpoint** - Public key distribution
@@ -84,7 +84,7 @@ pnpm add hono @hono/node-server
 
 ```javascript
 import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js/plugins/identity';
+import { IdentityPlugin } from 's3db.js';
 
 const SSO_PORT = 4000;
 const SSO_URL = `http://localhost:${SSO_PORT}`;
@@ -448,7 +448,7 @@ const identityPlugin = new IdentityPlugin({
 
 ```javascript
 // Resource Server (not using IdentityPlugin, just validating tokens)
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { OIDCClient } from 's3db.js';
 
 // Azure AD
 const azureOIDC = new OIDCClient({
@@ -575,7 +575,7 @@ A:
 
 A: Use `OIDCClient`:
 ```javascript
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { OIDCClient } from 's3db.js';
 
 const oidcClient = new OIDCClient({
   issuer: 'http://localhost:4000',
@@ -692,7 +692,7 @@ The **IdentityPlugin** transforms s3db.js into a production-ready OAuth2/OIDC Au
 ✅ **9 endpoints** - Discovery, JWKS, Token, Authorize, UserInfo, Introspect, Revoke, Register
 ✅ **4 grant types** - authorization_code, client_credentials, refresh_token, PKCE
 ✅ **RS256 signing** - Asymmetric RSA keys for secure JWT tokens
-✅ **Zero external dependencies** - Built on Node.js native crypto
+✅ **Uses Node.js native crypto** - for JWT signing and key generation
 ✅ **Enterprise features** - Azure AD/Keycloak parity
 ✅ **5-minute setup** - Simple configuration, automatic resource creation
 

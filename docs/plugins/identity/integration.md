@@ -19,8 +19,8 @@ Resource Servers validate JWT tokens issued by the Identity Plugin using the OID
 ### Basic Setup
 
 ```javascript
-import { ApiPlugin } from 's3db.js/plugins/api';
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { ApiPlugin } from 's3db.js';
+import { OIDCClient } from 's3db.js';
 
 // Create OIDC client
 const oidcClient = new OIDCClient({
@@ -208,7 +208,7 @@ app.handleDeepLink('myapp://callback', async (params) => {
 Resource Server validating tokens from Azure AD:
 
 ```javascript
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { OIDCClient } from 's3db.js';
 
 const tenantId = 'your-tenant-id';
 const clientId = 'your-api-client-id';
@@ -244,7 +244,7 @@ await db.usePlugin(new ApiPlugin({
 Resource Server validating tokens from Keycloak:
 
 ```javascript
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { OIDCClient } from 's3db.js';
 
 const keycloakOIDC = new OIDCClient({
   issuer: 'http://localhost:8080/realms/production',

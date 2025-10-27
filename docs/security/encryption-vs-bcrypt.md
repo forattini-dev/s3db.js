@@ -272,7 +272,7 @@ const valid = await bcrypt.compare(loginPassword, users[0].passwordHash);
 ### ✅ Use S3DB Native `secret` Type
 
 - **Any secret data**: passwords, API keys, tokens, secrets
-- **Integrated solution**: zero external dependencies
+- **Integrated solution**: uses Node.js native crypto
 - **Convenience**: auto-encrypt/decrypt
 - **Performance**: fast enough for most use cases (~50ms)
 - **Flexibility**: works for any secret field, not just passwords

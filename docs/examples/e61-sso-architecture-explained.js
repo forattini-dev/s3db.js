@@ -7,9 +7,9 @@
  */
 
 import Database from 's3db.js';
-import { APIPlugin } from 's3db.js/plugins/api';
+import { APIPlugin } from 's3db.js';
 import { OAuth2Server } from 's3db.js/plugins/identity/oauth2-server';
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { OIDCClient } from 's3db.js';
 
 // ============================================================================
 // SERVIDOR SSO - O ÚNICO QUE TEM USUÁRIOS E AUTENTICA

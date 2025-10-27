@@ -205,7 +205,7 @@ The **IdentityPlugin** is a dedicated plugin for creating OAuth2/OIDC Authorizat
 
 **Quick Example:**
 ```javascript
-import { IdentityPlugin } from 's3db.js/plugins/identity';
+import { IdentityPlugin } from 's3db.js';
 
 const identityPlugin = new IdentityPlugin({
   port: 4000,
@@ -224,7 +224,7 @@ await db.usePlugin(identityPlugin);
 The **ApiPlugin** includes OIDC client support for validating tokens issued by external OAuth2/OIDC providers (like IdentityPlugin, Azure AD, Keycloak):
 
 ```javascript
-import { ApiPlugin } from 's3db.js/plugins/api';
+import { ApiPlugin } from 's3db.js';
 
 const apiPlugin = new ApiPlugin({
   port: 3000,
@@ -269,7 +269,7 @@ When using OIDC for **web application login** (Authorization Code Flow), you can
 **Configuration:**
 
 ```javascript
-import { ApiPlugin } from 's3db.js/plugins/api';
+import { ApiPlugin } from 's3db.js';
 
 const apiPlugin = new ApiPlugin({
   port: 3000,

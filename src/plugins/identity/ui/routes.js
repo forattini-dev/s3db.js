@@ -15,7 +15,7 @@ import { AdminUsersPage } from './pages/admin/users.js';
 import { AdminUserFormPage } from './pages/admin/user-form.js';
 import { ConsentPage } from './pages/consent.js';
 import { VerifyEmailPage } from './pages/verify-email.js';
-import { hashPassword, verifyPassword, validatePassword } from '../concerns/password.js';
+import { verifyPassword, validatePassword } from '../concerns/password.js';
 import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
 import { generateAuthCode } from '../oidc-discovery.js';
 import { tryFn } from '../../../concerns/try-fn.js';
@@ -100,9 +100,9 @@ export function registerUIRoutes(app, plugin) {
 
       const user = users[0];
 
-      // Verify password
+      // Verify password (auto-decrypted by S3DB)
       const [okVerify, errVerify, isValid] = await tryFn(() =>
-        verifyPassword(password, user.passwordHash)
+        verifyPassword(password, user.password)
       );
 
       if (!okVerify || !isValid) {
@@ -266,29 +266,17 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/register?error=${encodeURIComponent('An account with this email already exists')}&name=${encodeURIComponent(name)}`);
       }
 
-      // Hash password
-      const [okHash, errHash, passwordHash] = await tryFn(() =>
-        hashPassword(password, config.passwordPolicy.bcryptRounds)
-      );
-
-      if (!okHash) {
-        if (config.verbose) {
-          console.error('[Identity Plugin] Password hashing failed:', errHash);
-        }
-        return c.redirect(`/register?error=${encodeURIComponent('Failed to process password. Please try again.')}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
-      }
-
       // Get request metadata
       const ipAddress = c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
                         c.req.header('x-real-ip') ||
                         'unknown';
 
-      // Create user
+      // Create user (password will be auto-encrypted by S3DB)
       const [okUser, errUser, user] = await tryFn(() =>
         usersResource.insert({
           email: normalizedEmail,
           name: name.trim(),
-          passwordHash,
+          password: password,  // Auto-encrypted with 'secret' type
           status: 'pending_verification', // Requires email verification
           isAdmin: false,
           emailVerified: false,
@@ -561,22 +549,10 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/forgot-password?error=${encodeURIComponent('Reset link has already been used.')}`);
       }
 
-      // Hash new password
-      const [okHash, errHash, passwordHash] = await tryFn(() =>
-        hashPassword(password, config.passwordPolicy.bcryptRounds)
-      );
-
-      if (!okHash) {
-        if (config.verbose) {
-          console.error('[Identity Plugin] Password hashing failed:', errHash);
-        }
-        return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent('Failed to process password. Please try again.')}`);
-      }
-
-      // Update user password
+      // Update user password (auto-encrypted by S3DB)
       const [okUpdate, errUpdate] = await tryFn(() =>
         usersResource.patch(resetToken.userId, {
-          passwordHash
+          password: password  // Auto-encrypted with 'secret' type
         })
       );
 
@@ -763,9 +739,9 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/profile?error=${encodeURIComponent('Failed to load profile')}`);
       }
 
-      // Verify current password
+      // Verify current password (auto-decrypted by S3DB)
       const [okVerify, errVerify, isValid] = await tryFn(() =>
-        verifyPassword(current_password, userData.passwordHash)
+        verifyPassword(current_password, userData.password)
       );
 
       if (!okVerify || !isValid) {
@@ -779,22 +755,10 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/profile?error=${encodeURIComponent(errorMsg)}`);
       }
 
-      // Hash new password
-      const [okHash, errHash, passwordHash] = await tryFn(() =>
-        hashPassword(new_password, config.passwordPolicy.bcryptRounds)
-      );
-
-      if (!okHash) {
-        if (config.verbose) {
-          console.error('[Identity Plugin] Password hashing failed:', errHash);
-        }
-        return c.redirect(`/profile?error=${encodeURIComponent('Failed to process password. Please try again.')}`);
-      }
-
-      // Update password
+      // Update password (auto-encrypted by S3DB)
       const [okUpdate, errUpdate] = await tryFn(() =>
         usersResource.patch(userData.id, {
-          passwordHash
+          password: new_password  // Auto-encrypted with 'secret' type
         })
       );
 
