@@ -1154,6 +1154,335 @@ export function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
+
+  // ============================================================================
+  // User Management Routes
+  // ============================================================================
+
+  // GET /admin/users - List all users
+  app.get('/admin/users', adminOnly(sessionManager), async (c) => {
+    const error = c.req.query('error');
+    const success = c.req.query('success');
+
+    try {
+      const [okUsers, errUsers, allUsers] = await tryFn(() =>
+        usersResource.list({ limit: 1000 })
+      );
+
+      if (!okUsers) {
+        console.error('[Identity Plugin] List users error:', errUsers);
+        return c.html(AdminUsersPage({
+          users: [],
+          user: c.get('user'),
+          error: 'Failed to load users',
+          success: success ? decodeURIComponent(success) : null,
+          config: config.ui
+        }));
+      }
+
+      const users = allUsers || [];
+
+      return c.html(AdminUsersPage({
+        users,
+        user: c.get('user'),
+        error: error ? decodeURIComponent(error) : null,
+        success: success ? decodeURIComponent(success) : null,
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error('[Identity Plugin] List users error:', error);
+      return c.html(AdminUsersPage({
+        users: [],
+        user: c.get('user'),
+        error: 'An error occurred. Please try again.',
+        config: config.ui
+      }));
+    }
+  });
+
+  // GET /admin/users/:id/edit - Edit user form
+  app.get('/admin/users/:id/edit', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+    const error = c.req.query('error');
+
+    try {
+      const [okUser, errUser, editUser] = await tryFn(() =>
+        usersResource.get(userId)
+      );
+
+      if (!okUser || !editUser) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
+      }
+
+      return c.html(AdminUserFormPage({
+        editUser,
+        user: c.get('user'),
+        error: error ? decodeURIComponent(error) : null,
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error('[Identity Plugin] Get user error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/users/:id/update - Update user
+  app.post('/admin/users/:id/update', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+    const body = await c.req.parseBody();
+    const { name, email, status, role, emailVerified } = body;
+    const currentUser = c.get('user');
+
+    try {
+      // Get the user
+      const [okUser, errUser, editUser] = await tryFn(() =>
+        usersResource.get(userId)
+      );
+
+      if (!okUser || !editUser) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
+      }
+
+      // Prevent self-modification of critical fields
+      const isSelfEdit = userId === currentUser.id;
+
+      // Check if email changed and is unique
+      if (email !== editUser.email) {
+        const [okExists, errExists, existingUsers] = await tryFn(() =>
+          usersResource.query({ email: email.toLowerCase().trim() })
+        );
+
+        if (okExists && existingUsers && existingUsers.length > 0) {
+          return c.html(AdminUserFormPage({
+            editUser: { ...editUser, name, email },
+            user: currentUser,
+            error: 'Email already in use',
+            config: config.ui
+          }));
+        }
+      }
+
+      // Build update object
+      const updates = {
+        name: name.trim(),
+        email: email.toLowerCase().trim()
+      };
+
+      // Only allow status/role changes if not self-editing
+      if (!isSelfEdit) {
+        if (status) {
+          updates.status = status;
+        }
+        if (role) {
+          updates.role = role;
+        }
+      }
+
+      // Handle email verification
+      updates.emailVerified = emailVerified === '1';
+
+      // If email changed, mark as unverified
+      if (email !== editUser.email) {
+        updates.emailVerified = false;
+      }
+
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.update(userId, updates)
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Update user error:', errUpdate);
+        return c.html(AdminUserFormPage({
+          editUser: { ...editUser, ...updates },
+          user: currentUser,
+          error: 'Failed to update user',
+          config: config.ui
+        }));
+      }
+
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${name} updated successfully`)}`);
+    } catch (error) {
+      console.error('[Identity Plugin] Update user error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/users/:id/delete - Delete user
+  app.post('/admin/users/:id/delete', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+    const currentUser = c.get('user');
+
+    // Prevent self-deletion
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent('You cannot delete your own account')}`);
+    }
+
+    try {
+      const [okUser, errUser, user] = await tryFn(() =>
+        usersResource.get(userId)
+      );
+
+      if (!okUser || !user) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
+      }
+
+      const userName = user.name;
+
+      const [okDelete, errDelete] = await tryFn(() =>
+        usersResource.delete(userId)
+      );
+
+      if (!okDelete) {
+        console.error('[Identity Plugin] Delete user error:', errDelete);
+        return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to delete user')}`);
+      }
+
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${userName} deleted successfully`)}`);
+    } catch (error) {
+      console.error('[Identity Plugin] Delete user error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/users/:id/change-status - Change user status
+  app.post('/admin/users/:id/change-status', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+    const body = await c.req.parseBody();
+    const { status } = body;
+    const currentUser = c.get('user');
+
+    // Prevent self-status change
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent('You cannot change your own status')}`);
+    }
+
+    try {
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.patch(userId, { status })
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Change status error:', errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to change user status')}`);
+      }
+
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`User status changed to ${status}`)}`);
+    } catch (error) {
+      console.error('[Identity Plugin] Change status error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/users/:id/verify-email - Mark email as verified
+  app.post('/admin/users/:id/verify-email', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+
+    try {
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.patch(userId, { emailVerified: true })
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Verify email error:', errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to verify email')}`);
+      }
+
+      return c.redirect(`/admin/users?success=${encodeURIComponent('Email marked as verified')}`);
+    } catch (error) {
+      console.error('[Identity Plugin] Verify email error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/users/:id/reset-password - Send password reset email
+  app.post('/admin/users/:id/reset-password', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+    const currentUser = c.get('user');
+
+    // Prevent resetting own password this way
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent('Use the profile page to change your own password')}`);
+    }
+
+    try {
+      const [okUser, errUser, user] = await tryFn(() =>
+        usersResource.get(userId)
+      );
+
+      if (!okUser || !user) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
+      }
+
+      // Generate reset token
+      const resetToken = generatePasswordResetToken();
+      const resetExpiry = calculateExpiration(1); // 1 hour
+
+      // Update user with reset token
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.patch(userId, {
+          passwordResetToken: resetToken,
+          passwordResetExpiry: resetExpiry
+        })
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Password reset update error:', errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to generate reset token')}`);
+      }
+
+      // Send email
+      if (plugin.emailService) {
+        const resetUrl = `${config.issuer}/reset-password?token=${resetToken}`;
+        await plugin.emailService.sendPasswordResetEmail(user.email, {
+          name: user.name,
+          resetUrl
+        });
+      }
+
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`Password reset email sent to ${user.email}`)}`);
+    } catch (error) {
+      console.error('[Identity Plugin] Reset password error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/users/:id/toggle-admin - Toggle admin role
+  app.post('/admin/users/:id/toggle-admin', adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param('id');
+    const currentUser = c.get('user');
+
+    // Prevent self-role change
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent('You cannot change your own role')}`);
+    }
+
+    try {
+      const [okUser, errUser, user] = await tryFn(() =>
+        usersResource.get(userId)
+      );
+
+      if (!okUser || !user) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
+      }
+
+      const newRole = user.role === 'admin' ? 'user' : 'admin';
+
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.patch(userId, { role: newRole })
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Toggle admin error:', errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to change user role')}`);
+      }
+
+      const action = newRole === 'admin' ? 'granted admin privileges to' : 'removed admin privileges from';
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`Successfully ${action} ${user.name}`)}`);
+    } catch (error) {
+      console.error('[Identity Plugin] Toggle admin error:', error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
 }
 
 // Helper function to format uptime

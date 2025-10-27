@@ -287,6 +287,14 @@ export class IdentityServer {
         console.log('[Identity Server]   POST /admin/clients/:id/delete (Delete Client)');
         console.log('[Identity Server]   POST /admin/clients/:id/rotate-secret (Rotate Client Secret)');
         console.log('[Identity Server]   POST /admin/clients/:id/toggle-active (Toggle Client Active)');
+        console.log('[Identity Server]   GET  /admin/users (List Users - Protected)');
+        console.log('[Identity Server]   GET  /admin/users/:id/edit (Edit User Form)');
+        console.log('[Identity Server]   POST /admin/users/:id/update (Update User)');
+        console.log('[Identity Server]   POST /admin/users/:id/delete (Delete User)');
+        console.log('[Identity Server]   POST /admin/users/:id/change-status (Change User Status)');
+        console.log('[Identity Server]   POST /admin/users/:id/verify-email (Mark Email Verified)');
+        console.log('[Identity Server]   POST /admin/users/:id/reset-password (Send Password Reset)');
+        console.log('[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)');
       }
     } catch (error) {
       console.error('[Identity Server] Failed to setup UI routes:', error);
