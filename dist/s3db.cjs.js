@@ -52087,6 +52087,14 @@ class IdentityServer {
         console.log("[Identity Server]   POST /admin/clients/:id/delete (Delete Client)");
         console.log("[Identity Server]   POST /admin/clients/:id/rotate-secret (Rotate Client Secret)");
         console.log("[Identity Server]   POST /admin/clients/:id/toggle-active (Toggle Client Active)");
+        console.log("[Identity Server]   GET  /admin/users (List Users - Protected)");
+        console.log("[Identity Server]   GET  /admin/users/:id/edit (Edit User Form)");
+        console.log("[Identity Server]   POST /admin/users/:id/update (Update User)");
+        console.log("[Identity Server]   POST /admin/users/:id/delete (Delete User)");
+        console.log("[Identity Server]   POST /admin/users/:id/change-status (Change User Status)");
+        console.log("[Identity Server]   POST /admin/users/:id/verify-email (Mark Email Verified)");
+        console.log("[Identity Server]   POST /admin/users/:id/reset-password (Send Password Reset)");
+        console.log("[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)");
       }
     } catch (error) {
       console.error("[Identity Server] Failed to setup UI routes:", error);
@@ -53771,6 +53779,476 @@ function AdminClientFormPage(props = {}) {
   });
 }
 
+function AdminUsersPage(props = {}) {
+  const { users = [], user = {}, error = null, success = null, config = {} } = props;
+  const statusColors = {
+    active: "var(--color-success)",
+    suspended: "var(--color-danger)",
+    pending_verification: "var(--color-warning)"
+  };
+  const content = html`
+    <div class="container">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <h1>User Management</h1>
+        <a href="/admin" class="btn btn-secondary">
+          ← Back to Dashboard
+        </a>
+      </div>
+
+      ${users.length === 0 ? html`
+        <div class="card">
+          <div class="p-3 text-center">
+            <p class="text-muted">No users found.</p>
+          </div>
+        </div>
+      ` : html`
+        <div class="card">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--color-border); background-color: var(--color-light);">
+                <th style="text-align: left; padding: 1rem; font-weight: 500;">Name</th>
+                <th style="text-align: left; padding: 1rem; font-weight: 500;">Email</th>
+                <th style="text-align: left; padding: 1rem; font-weight: 500;">Status</th>
+                <th style="text-align: left; padding: 1rem; font-weight: 500;">Role</th>
+                <th style="text-align: left; padding: 1rem; font-weight: 500;">Verified</th>
+                <th style="text-align: left; padding: 1rem; font-weight: 500;">Joined</th>
+                <th style="text-align: right; padding: 1rem; font-weight: 500;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map((u) => {
+    const statusColor = statusColors[u.status] || "var(--color-text-muted)";
+    const isCurrentUser = u.id === user.id;
+    return html`
+                  <tr style="border-bottom: 1px solid var(--color-border);">
+                    <td style="padding: 1rem;">
+                      <strong>${u.name}</strong>
+                      ${isCurrentUser ? html`
+                        <span class="badge" style="background-color: var(--color-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem; margin-left: 0.5rem;">
+                          You
+                        </span>
+                      ` : ""}
+                    </td>
+                    <td style="padding: 1rem;">
+                      <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem;">
+                        ${u.email}
+                      </code>
+                    </td>
+                    <td style="padding: 1rem;">
+                      <span class="badge" style="background-color: ${statusColor}; color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
+                        ${u.status.replace("_", " ")}
+                      </span>
+                    </td>
+                    <td style="padding: 1rem;">
+                      ${u.role === "admin" ? html`
+                        <span class="badge" style="background-color: var(--color-danger); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
+                          Admin
+                        </span>
+                      ` : html`
+                        <span style="color: var(--color-text-muted); font-size: 0.875rem;">User</span>
+                      `}
+                    </td>
+                    <td style="padding: 1rem;">
+                      ${u.emailVerified ? html`
+                        <span style="color: var(--color-success);">✓</span>
+                      ` : html`
+                        <span style="color: var(--color-text-muted);">✗</span>
+                      `}
+                    </td>
+                    <td style="padding: 1rem; color: var(--color-text-muted); font-size: 0.875rem;">
+                      ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "Unknown"}
+                    </td>
+                    <td style="padding: 1rem; text-align: right;">
+                      <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                        <a href="/admin/users/${u.id}/edit" class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.5rem 0.75rem;">
+                          Edit
+                        </a>
+                        ${!isCurrentUser ? html`
+                          <form method="POST" action="/admin/users/${u.id}/delete" style="margin: 0; display: inline;">
+                            <button
+                              type="submit"
+                              class="btn btn-danger"
+                              style="font-size: 0.875rem; padding: 0.5rem 0.75rem;"
+                              onclick="return confirm('Are you sure you want to delete this user? This action cannot be undone.')"
+                            >
+                              Delete
+                            </button>
+                          </form>
+                        ` : ""}
+                      </div>
+                    </td>
+                  </tr>
+
+                  <!-- Expandable Actions Row -->
+                  <tr style="border-bottom: 1px solid var(--color-border); background-color: var(--color-light);">
+                    <td colspan="7" style="padding: 0.75rem 1rem;">
+                      <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                        <!-- Status Management -->
+                        ${!isCurrentUser ? html`
+                          <form method="POST" action="/admin/users/${u.id}/change-status" style="margin: 0;">
+                            <input type="hidden" name="status" value="${u.status === "active" ? "suspended" : "active"}" />
+                            <button type="submit" class="btn ${u.status === "active" ? "btn-danger" : "btn-success"}" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                              ${u.status === "active" ? "\u{1F534} Suspend" : "\u{1F7E2} Activate"}
+                            </button>
+                          </form>
+                        ` : ""}
+
+                        <!-- Mark as Verified -->
+                        ${!u.emailVerified && !isCurrentUser ? html`
+                          <form method="POST" action="/admin/users/${u.id}/verify-email" style="margin: 0;">
+                            <button type="submit" class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                              ✓ Mark Email Verified
+                            </button>
+                          </form>
+                        ` : ""}
+
+                        <!-- Reset Password -->
+                        ${!isCurrentUser ? html`
+                          <form method="POST" action="/admin/users/${u.id}/reset-password" style="margin: 0;">
+                            <button
+                              type="submit"
+                              class="btn btn-secondary"
+                              style="font-size: 0.875rem; padding: 0.5rem 1rem;"
+                              onclick="return confirm('Send password reset email to ${u.email}?')"
+                            >
+                              🔑 Send Password Reset
+                            </button>
+                          </form>
+                        ` : ""}
+
+                        <!-- Toggle Admin -->
+                        ${!isCurrentUser ? html`
+                          <form method="POST" action="/admin/users/${u.id}/toggle-admin" style="margin: 0;">
+                            <button
+                              type="submit"
+                              class="btn ${u.role === "admin" ? "btn-danger" : "btn-primary"}"
+                              style="font-size: 0.875rem; padding: 0.5rem 1rem;"
+                              onclick="return confirm('${u.role === "admin" ? "Remove admin privileges from" : "Grant admin privileges to"} ${u.name}?')"
+                            >
+                              ${u.role === "admin" ? "\u{1F464} Remove Admin" : "\u26A1 Make Admin"}
+                            </button>
+                          </form>
+                        ` : ""}
+                      </div>
+                    </td>
+                  </tr>
+                `;
+  })}
+            </tbody>
+          </table>
+        </div>
+      `}
+
+      <!-- Statistics Summary -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 2rem;">
+        <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+          <div class="p-3 text-center">
+            <div style="font-size: 0.875rem; opacity: 0.9;">Total Users</div>
+            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">${users.length}</div>
+          </div>
+        </div>
+
+        <div class="card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white;">
+          <div class="p-3 text-center">
+            <div style="font-size: 0.875rem; opacity: 0.9;">Active</div>
+            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">
+              ${users.filter((u) => u.status === "active").length}
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white;">
+          <div class="p-3 text-center">
+            <div style="font-size: 0.875rem; opacity: 0.9;">Pending</div>
+            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">
+              ${users.filter((u) => u.status === "pending_verification").length}
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+          <div class="p-3 text-center">
+            <div style="font-size: 0.875rem; opacity: 0.9;">Verified Emails</div>
+            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">
+              ${users.filter((u) => u.emailVerified).length}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: "User Management - Admin",
+    content,
+    config,
+    user,
+    error,
+    success
+  });
+}
+
+function AdminUserFormPage(props = {}) {
+  const { editUser = {}, user = {}, error = null, config = {} } = props;
+  const isCurrentUser = editUser.id === user.id;
+  const content = html`
+    <div class="container-sm">
+      <div style="margin-bottom: 2rem;">
+        <a href="/admin/users" class="btn-link" style="font-size: 0.875rem;">← Back to Users</a>
+        <h1 class="mt-3">Edit User: ${editUser.name}</h1>
+      </div>
+
+      <div class="card">
+        <form method="POST" action="/admin/users/${editUser.id}/update">
+          <div class="p-3">
+            <!-- Name -->
+            <div class="form-group">
+              <label for="name" class="form-label form-label-required">Full Name</label>
+              <input
+                type="text"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="name"
+                name="name"
+                value="${editUser.name}"
+                required
+                autofocus
+                placeholder="John Doe"
+              />
+              <small class="form-text">User's display name</small>
+              ${error ? html`<div class="invalid-feedback">${error}</div>` : ""}
+            </div>
+
+            <!-- Email -->
+            <div class="form-group">
+              <label for="email" class="form-label form-label-required">Email Address</label>
+              <input
+                type="email"
+                class="form-control"
+                id="email"
+                name="email"
+                value="${editUser.email}"
+                required
+                placeholder="user@example.com"
+              />
+              <small class="form-text">Email address for login and notifications</small>
+            </div>
+
+            <!-- Status -->
+            <div class="form-group">
+              <label class="form-label form-label-required">Account Status</label>
+              <div style="display: grid; gap: 0.75rem;">
+                <div class="form-check">
+                  <input
+                    type="radio"
+                    class="form-check-input"
+                    id="status_active"
+                    name="status"
+                    value="active"
+                    ${editUser.status === "active" ? "checked" : ""}
+                    ${isCurrentUser ? "disabled" : ""}
+                  />
+                  <label class="form-check-label" for="status_active">
+                    <strong>Active</strong> - User can log in and access services
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    type="radio"
+                    class="form-check-input"
+                    id="status_suspended"
+                    name="status"
+                    value="suspended"
+                    ${editUser.status === "suspended" ? "checked" : ""}
+                    ${isCurrentUser ? "disabled" : ""}
+                  />
+                  <label class="form-check-label" for="status_suspended">
+                    <strong>Suspended</strong> - User cannot log in
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    type="radio"
+                    class="form-check-input"
+                    id="status_pending"
+                    name="status"
+                    value="pending_verification"
+                    ${editUser.status === "pending_verification" ? "checked" : ""}
+                    ${isCurrentUser ? "disabled" : ""}
+                  />
+                  <label class="form-check-label" for="status_pending">
+                    <strong>Pending Verification</strong> - Awaiting email verification
+                  </label>
+                </div>
+              </div>
+              ${isCurrentUser ? html`
+                <small class="form-text" style="color: var(--color-warning);">You cannot change your own status</small>
+              ` : ""}
+            </div>
+
+            <!-- Role -->
+            <div class="form-group">
+              <label class="form-label form-label-required">Role</label>
+              <div style="display: grid; gap: 0.75rem;">
+                <div class="form-check">
+                  <input
+                    type="radio"
+                    class="form-check-input"
+                    id="role_user"
+                    name="role"
+                    value="user"
+                    ${editUser.role !== "admin" ? "checked" : ""}
+                    ${isCurrentUser ? "disabled" : ""}
+                  />
+                  <label class="form-check-label" for="role_user">
+                    <strong>User</strong> - Standard user access
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    type="radio"
+                    class="form-check-input"
+                    id="role_admin"
+                    name="role"
+                    value="admin"
+                    ${editUser.role === "admin" ? "checked" : ""}
+                    ${isCurrentUser ? "disabled" : ""}
+                  />
+                  <label class="form-check-label" for="role_admin">
+                    <strong>Admin</strong> - Full administrative access
+                  </label>
+                </div>
+              </div>
+              ${isCurrentUser ? html`
+                <small class="form-text" style="color: var(--color-warning);">You cannot change your own role</small>
+              ` : ""}
+            </div>
+
+            <!-- Email Verification -->
+            <div class="form-group">
+              <div class="form-check">
+                <input
+                  type="checkbox"
+                  class="form-check-input"
+                  id="emailVerified"
+                  name="emailVerified"
+                  value="1"
+                  ${editUser.emailVerified ? "checked" : ""}
+                />
+                <label class="form-check-label" for="emailVerified">
+                  <strong>Email Verified</strong> - User has confirmed their email address
+                </label>
+              </div>
+            </div>
+
+            <!-- Submit Buttons -->
+            <div class="form-group mb-0" style="display: flex; gap: 1rem;">
+              <button type="submit" class="btn btn-primary">
+                Update User
+              </button>
+              <a href="/admin/users" class="btn btn-secondary">
+                Cancel
+              </a>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- User Information -->
+      <div class="card mt-4">
+        <div class="card-header">
+          User Information
+        </div>
+        <div class="p-3">
+          <div style="display: grid; gap: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
+              <span style="font-weight: 500;">User ID:</span>
+              <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem;">
+                ${editUser.id}
+              </code>
+            </div>
+            ${editUser.createdAt ? html`
+              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
+                <span style="font-weight: 500;">Joined:</span>
+                <span>${new Date(editUser.createdAt).toLocaleString()}</span>
+              </div>
+            ` : ""}
+            ${editUser.updatedAt ? html`
+              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
+                <span style="font-weight: 500;">Last Updated:</span>
+                <span>${new Date(editUser.updatedAt).toLocaleString()}</span>
+              </div>
+            ` : ""}
+            ${editUser.lastLoginAt ? html`
+              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
+                <span style="font-weight: 500;">Last Login:</span>
+                <span>${new Date(editUser.lastLoginAt).toLocaleString()}</span>
+              </div>
+            ` : html`
+              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
+                <span style="font-weight: 500;">Last Login:</span>
+                <span style="color: var(--color-text-muted);">Never</span>
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
+
+      <!-- Danger Zone -->
+      ${!isCurrentUser ? html`
+        <div class="card mt-4" style="border-color: var(--color-danger);">
+          <div class="card-header" style="background-color: var(--color-danger); color: white;">
+            Danger Zone
+          </div>
+          <div class="p-3">
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <!-- Send Password Reset -->
+              <div>
+                <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Send Password Reset Email</h3>
+                <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.75rem;">
+                  Send a password reset link to ${editUser.email}
+                </p>
+                <form method="POST" action="/admin/users/${editUser.id}/reset-password" style="margin: 0;">
+                  <button
+                    type="submit"
+                    class="btn btn-secondary"
+                    onclick="return confirm('Send password reset email to ${editUser.email}?')"
+                  >
+                    🔑 Send Password Reset
+                  </button>
+                </form>
+              </div>
+
+              <!-- Delete User -->
+              <div style="padding-top: 1rem; border-top: 1px solid var(--color-border);">
+                <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Delete User Account</h3>
+                <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.75rem;">
+                  Permanently delete this user account. This action cannot be undone.
+                </p>
+                <form method="POST" action="/admin/users/${editUser.id}/delete" style="margin: 0;">
+                  <button
+                    type="submit"
+                    class="btn btn-danger"
+                    onclick="return confirm('Are you sure you want to delete ${editUser.name}? This action cannot be undone.')"
+                  >
+                    🗑️ Delete User
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+  return BaseLayout({
+    title: `Edit User: ${editUser.name} - Admin`,
+    content,
+    config,
+    user,
+    error: null
+    // Error shown in form
+  });
+}
+
 const DEFAULT_PASSWORD_POLICY = {
   minLength: 8,
   maxLength: 128,
@@ -54682,6 +55160,253 @@ function registerUIRoutes(app, plugin) {
         console.error("[Identity Plugin] Toggle active error:", error);
       }
       return c.redirect(`/admin/clients?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/admin/users", adminOnly(sessionManager), async (c) => {
+    const error = c.req.query("error");
+    const success = c.req.query("success");
+    try {
+      const [okUsers, errUsers, allUsers] = await tryFn(
+        () => usersResource.list({ limit: 1e3 })
+      );
+      if (!okUsers) {
+        console.error("[Identity Plugin] List users error:", errUsers);
+        return c.html(AdminUsersPage({
+          users: [],
+          user: c.get("user"),
+          error: "Failed to load users",
+          success: success ? decodeURIComponent(success) : null,
+          config: config.ui
+        }));
+      }
+      const users = allUsers || [];
+      return c.html(AdminUsersPage({
+        users,
+        user: c.get("user"),
+        error: error ? decodeURIComponent(error) : null,
+        success: success ? decodeURIComponent(success) : null,
+        config: config.ui
+      }));
+    } catch (error2) {
+      console.error("[Identity Plugin] List users error:", error2);
+      return c.html(AdminUsersPage({
+        users: [],
+        user: c.get("user"),
+        error: "An error occurred. Please try again.",
+        config: config.ui
+      }));
+    }
+  });
+  app.get("/admin/users/:id/edit", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const error = c.req.query("error");
+    try {
+      const [okUser, errUser, editUser] = await tryFn(
+        () => usersResource.get(userId)
+      );
+      if (!okUser || !editUser) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      return c.html(AdminUserFormPage({
+        editUser,
+        user: c.get("user"),
+        error: error ? decodeURIComponent(error) : null,
+        config: config.ui
+      }));
+    } catch (error2) {
+      console.error("[Identity Plugin] Get user error:", error2);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/update", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const body = await c.req.parseBody();
+    const { name, email, status, role, emailVerified } = body;
+    const currentUser = c.get("user");
+    try {
+      const [okUser, errUser, editUser] = await tryFn(
+        () => usersResource.get(userId)
+      );
+      if (!okUser || !editUser) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      const isSelfEdit = userId === currentUser.id;
+      if (email !== editUser.email) {
+        const [okExists, errExists, existingUsers] = await tryFn(
+          () => usersResource.query({ email: email.toLowerCase().trim() })
+        );
+        if (okExists && existingUsers && existingUsers.length > 0) {
+          return c.html(AdminUserFormPage({
+            editUser: { ...editUser, name, email },
+            user: currentUser,
+            error: "Email already in use",
+            config: config.ui
+          }));
+        }
+      }
+      const updates = {
+        name: name.trim(),
+        email: email.toLowerCase().trim()
+      };
+      if (!isSelfEdit) {
+        if (status) {
+          updates.status = status;
+        }
+        if (role) {
+          updates.role = role;
+        }
+      }
+      updates.emailVerified = emailVerified === "1";
+      if (email !== editUser.email) {
+        updates.emailVerified = false;
+      }
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.update(userId, updates)
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Update user error:", errUpdate);
+        return c.html(AdminUserFormPage({
+          editUser: { ...editUser, ...updates },
+          user: currentUser,
+          error: "Failed to update user",
+          config: config.ui
+        }));
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${name} updated successfully`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Update user error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/delete", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const currentUser = c.get("user");
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot delete your own account")}`);
+    }
+    try {
+      const [okUser, errUser, user] = await tryFn(
+        () => usersResource.get(userId)
+      );
+      if (!okUser || !user) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      const userName = user.name;
+      const [okDelete, errDelete] = await tryFn(
+        () => usersResource.delete(userId)
+      );
+      if (!okDelete) {
+        console.error("[Identity Plugin] Delete user error:", errDelete);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("Failed to delete user")}`);
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${userName} deleted successfully`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Delete user error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/change-status", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const body = await c.req.parseBody();
+    const { status } = body;
+    const currentUser = c.get("user");
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot change your own status")}`);
+    }
+    try {
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.patch(userId, { status })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Change status error:", errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("Failed to change user status")}`);
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`User status changed to ${status}`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Change status error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/verify-email", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    try {
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.patch(userId, { emailVerified: true })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Verify email error:", errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("Failed to verify email")}`);
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent("Email marked as verified")}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Verify email error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/reset-password", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const currentUser = c.get("user");
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent("Use the profile page to change your own password")}`);
+    }
+    try {
+      const [okUser, errUser, user] = await tryFn(
+        () => usersResource.get(userId)
+      );
+      if (!okUser || !user) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      const resetToken = generatePasswordResetToken();
+      const resetExpiry = calculateExpiration(1);
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.patch(userId, {
+          passwordResetToken: resetToken,
+          passwordResetExpiry: resetExpiry
+        })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Password reset update error:", errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("Failed to generate reset token")}`);
+      }
+      if (plugin.emailService) {
+        const resetUrl = `${config.issuer}/reset-password?token=${resetToken}`;
+        await plugin.emailService.sendPasswordResetEmail(user.email, {
+          name: user.name,
+          resetUrl
+        });
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`Password reset email sent to ${user.email}`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Reset password error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/toggle-admin", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const currentUser = c.get("user");
+    if (userId === currentUser.id) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot change your own role")}`);
+    }
+    try {
+      const [okUser, errUser, user] = await tryFn(
+        () => usersResource.get(userId)
+      );
+      if (!okUser || !user) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      const newRole = user.role === "admin" ? "user" : "admin";
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.patch(userId, { role: newRole })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Toggle admin error:", errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("Failed to change user role")}`);
+      }
+      const action = newRole === "admin" ? "granted admin privileges to" : "removed admin privileges from";
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`Successfully ${action} ${user.name}`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Toggle admin error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
   });
 }
