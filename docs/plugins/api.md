@@ -3670,6 +3670,123 @@ const response = await fetch('/cars/car-1?partition=byRegion&partitionValues={"r
 
 ## ❓ FAQ
 
+### 🔍 Troubleshooting Flowchart
+
+**Visual decision tree for common errors** - follow the path to find the solution.
+
+```mermaid
+flowchart TD
+    Start{{"API Error Occurred"}}
+    Start --> CheckStatus{What's the<br/>HTTP status?}
+
+    CheckStatus -->|401 Unauthorized| Auth401{Check auth<br/>configuration}
+    CheckStatus -->|403 Forbidden| Auth403{Check guards<br/>or permissions}
+    CheckStatus -->|404 Not Found| NotFound{Resource<br/>exists?}
+    CheckStatus -->|429 Too Many Requests| RateLimit{Rate limiting<br/>enabled?}
+    CheckStatus -->|500 Internal Server Error| ServerError{Check<br/>server logs}
+    CheckStatus -->|503 Service Unavailable| Overload{Server<br/>overloaded?}
+
+    Auth401 --> AuthDriver{Auth driver<br/>configured?}
+    AuthDriver -->|No| FixAuth1["Add auth config:<br/>auth: { driver: 'jwt',<br/>secret: 'your-secret' }"]
+    AuthDriver -->|Yes| TokenValid{Token valid?}
+    TokenValid -->|No| FixAuth2["Get new token:<br/>POST /auth/login"]
+    TokenValid -->|Yes| HeaderCheck{Authorization<br/>header present?}
+    HeaderCheck -->|No| FixAuth3["Add header:<br/>Authorization: Bearer TOKEN"]
+    HeaderCheck -->|Yes| JWTSecret{JWT secret<br/>correct?}
+    JWTSecret -->|No| FixAuth4["Fix JWT secret in<br/>plugin config"]
+    JWTSecret -->|Yes| CheckAuthLogs["Check auth driver logs<br/>for validation errors"]
+
+    Auth403 --> GuardCheck{Guards<br/>defined?}
+    GuardCheck -->|No| Public["Public API?<br/>Add guard: () => true"]
+    GuardCheck -->|Yes| GuardReturns{Guard returns<br/>false?}
+    GuardReturns -->|Yes| FixGuard1["Fix guard logic:<br/>check ctx.user permissions"]
+    GuardReturns -->|No| GuardError{Guard throws<br/>error?}
+    GuardError -->|Yes| FixGuard2["Fix guard implementation:<br/>catch errors, return boolean"]
+    GuardError -->|No| PartitionCheck{Partition<br/>access issue?}
+    PartitionCheck -->|Yes| FixPartition["Fix partition in guard:<br/>ctx.setPartition(name, values)"]
+    PartitionCheck -->|No| RoleCheck["Check user roles/scopes<br/>in JWT payload"]
+
+    NotFound --> EndpointExists{Endpoint in<br/>Swagger docs?}
+    EndpointExists -->|No| FixNotFound1["Check resource name:<br/>GET /api/RESOURCE_NAME"]
+    EndpointExists -->|Yes| RecordExists{Record with<br/>ID exists?}
+    RecordExists -->|No| FixNotFound2["Create record first:<br/>POST /api/resource"]
+    RecordExists -->|Yes| VersionCheck{Correct API<br/>version?}
+    VersionCheck -->|No| FixNotFound3["Use correct version:<br/>GET /v1/resource or /v2/resource"]
+    VersionCheck -->|Yes| CustomRoute["Check custom routes<br/>configuration"]
+
+    RateLimit --> RateLimitConfig{Rate limit<br/>config correct?}
+    RateLimitConfig -->|Too low| FixRate1["Increase rate limit:<br/>maxRequests: 1000"]
+    RateLimitConfig -->|Correct| WaitOrRetry["Wait for window reset<br/>or implement retry logic"]
+
+    ServerError --> ErrorType{Error type?}
+    ErrorType -->|S3 error| S3Check{S3 credentials<br/>valid?}
+    S3Check -->|No| FixS31["Fix S3 credentials:<br/>AWS_ACCESS_KEY_ID,<br/>AWS_SECRET_ACCESS_KEY"]
+    S3Check -->|Yes| S3Bucket{Bucket<br/>exists?}
+    S3Bucket -->|No| FixS32["Create S3 bucket:<br/>aws s3 mb s3://BUCKET"]
+    S3Bucket -->|Yes| S3Permissions{Bucket<br/>permissions?}
+    S3Permissions -->|No| FixS33["Fix IAM policy:<br/>s3:GetObject, s3:PutObject"]
+    S3Permissions -->|Yes| S3Region["Check S3 region matches<br/>connection string"]
+
+    ErrorType -->|Validation error| ValidationFix["Check request body<br/>matches resource schema"]
+    ErrorType -->|Resource not found| ResourceCreate["Create resource:<br/>await db.createResource()"]
+    ErrorType -->|Guard error| GuardFix["Fix guard logic:<br/>return boolean, not throw"]
+    ErrorType -->|Other| LogsCheck["Check detailed logs:<br/>plugin.verbose = true"]
+
+    Overload --> CPUCheck{CPU > 90%?}
+    CPUCheck -->|Yes| ScaleHorizontal["Scale horizontally:<br/>add more instances"]
+    CPUCheck -->|No| MemoryCheck{Memory > 80%?}
+    MemoryCheck -->|Yes| MemoryLeak["Check for memory leaks:<br/>node --inspect"]
+    MemoryCheck -->|No| S3Throttle{S3 SlowDown<br/>errors?}
+    S3Throttle -->|Yes| AddPartitions["Add partitions to<br/>distribute S3 requests"]
+    S3Throttle -->|No| CheckConnections["Check max connections:<br/>reduce keep-alive timeout"]
+
+    style Start fill:#fff3cd,stroke:#856404,stroke-width:3px
+    style FixAuth1 fill:#d4edda,stroke:#155724
+    style FixAuth2 fill:#d4edda,stroke:#155724
+    style FixAuth3 fill:#d4edda,stroke:#155724
+    style FixAuth4 fill:#d4edda,stroke:#155724
+    style FixGuard1 fill:#d4edda,stroke:#155724
+    style FixGuard2 fill:#d4edda,stroke:#155724
+    style FixPartition fill:#d4edda,stroke:#155724
+    style FixNotFound1 fill:#d4edda,stroke:#155724
+    style FixNotFound2 fill:#d4edda,stroke:#155724
+    style FixNotFound3 fill:#d4edda,stroke:#155724
+    style FixRate1 fill:#d4edda,stroke:#155724
+    style FixS31 fill:#d4edda,stroke:#155724
+    style FixS32 fill:#d4edda,stroke:#155724
+    style FixS33 fill:#d4edda,stroke:#155724
+    style ScaleHorizontal fill:#d4edda,stroke:#155724
+    style AddPartitions fill:#d4edda,stroke:#155724
+```
+
+**Common Error Patterns & Quick Fixes:**
+
+| Error | Status | Cause | Solution |
+|-------|--------|-------|----------|
+| `Unauthorized` | 401 | No/invalid token | Add `Authorization: Bearer TOKEN` header |
+| `Forbidden` | 403 | Guard returned false | Check guard logic, user permissions |
+| `Not Found` | 404 | Resource/record missing | Check resource name, create record |
+| `Too Many Requests` | 429 | Rate limit exceeded | Wait or increase `maxRequests` |
+| `S3 Access Denied` | 500 | Missing S3 permissions | Add IAM policy: `s3:GetObject`, `s3:PutObject` |
+| `SlowDown` | 503 | S3 rate limit hit | Add partitions to distribute requests |
+| `Validation Failed` | 400 | Invalid request body | Match resource schema attributes |
+| `Resource not configured` | 500 | Resource not created | Run `await db.createResource()` |
+
+**Debug Mode:**
+```javascript
+// Enable verbose logging for detailed troubleshooting
+new ApiPlugin({
+  port: 3000,
+  verbose: true,  // ✅ Shows all internal logs
+  logging: {
+    enabled: true,
+    format: ':method :path :status :response-time ms'
+  }
+});
+```
+
+---
+
 ### For Developers
 
 **Q: Can I use the API Plugin with existing authentication systems (Auth0, Firebase, etc.)?**
