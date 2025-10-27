@@ -1056,124 +1056,73 @@ curl http://localhost:3000/cars \
 
 **Note:** Basic Auth validates credentials on every request, so it's simpler but requires sending credentials each time. JWT is more efficient for frequent requests after initial login.
 
-### OAuth2 + OpenID Connect (Microservices SSO)
+### OAuth2 + OpenID Connect (SSO Authorization Server)
 
-For **microservices architecture** with centralized Single Sign-On (SSO), s3db.js provides production-ready OAuth2/OIDC support with RS256 asymmetric keys and JWKS.
+For **centralized OAuth2/OIDC Authorization Server** (Single Sign-On server that issues tokens), use the **[IdentityPlugin](./identity.md)**.
 
-**📖 [Complete OAuth2/OIDC Guide](../oauth2-guide.md)** - Full SSO setup, testing, Azure AD/Keycloak integration, troubleshooting (1,500+ lines)
+**📖 [Complete IdentityPlugin Documentation](./identity.md)** - Full OAuth2/OIDC Authorization Server with Azure AD/Keycloak feature parity
 
-#### Quick Overview
+The **IdentityPlugin** is a dedicated plugin for creating OAuth2/OIDC Authorization Servers with:
+- ✅ 9 endpoints (Discovery, JWKS, Token, Authorize, UserInfo, Introspect, Revoke, Register)
+- ✅ 4 grant types (authorization_code, client_credentials, refresh_token, PKCE)
+- ✅ RS256 signing with auto-generated RSA keys
+- ✅ Built-in login UI for authorization_code flow
+- ✅ Enterprise features (token revocation, dynamic client registration)
 
-**Architecture Benefits:**
-- ✅ **Centralized authentication** - Single SSO service manages all users
-- ✅ **Distributed authorization** - Each API validates tokens independently (no SSO calls)
-- ✅ **RS256 signing** - Asymmetric keys (private key only on SSO)
-- ✅ **One token, multiple services** - Same token works across all APIs
-- ✅ **Zero dependencies** - Built on Node.js native crypto (no npm packages)
-- ✅ **External provider support** - Works with Azure AD, Keycloak, any OIDC provider
-
-**Minimal SSO Example:**
-
+**Quick Example:**
 ```javascript
-// SSO Server (Authorization Server)
-import { OAuth2Server } from 's3db.js/plugins/api/auth/oauth2-server';
+import { IdentityPlugin } from 's3db.js/plugins/identity';
 
-const oauth2 = new OAuth2Server({
-  issuer: 'http://localhost:3000',
-  keyResource: keysResource,
-  userResource: usersResource,
-  accessTokenExpiry: '15m',
-  supportedScopes: ['openid', 'profile', 'orders:read', 'orders:write']
+const identityPlugin = new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+  supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
+  supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
+  accessTokenExpiry: '15m'
 });
 
-await oauth2.initialize();  // Generates RSA key pair
-
-// Add OAuth2 endpoints
-api.addRoute({
-  path: '/.well-known/jwks.json',
-  method: 'GET',
-  handler: oauth2.jwksHandler.bind(oauth2),
-  auth: false
-});
-
-api.addRoute({
-  path: '/auth/token',
-  method: 'POST',
-  handler: oauth2.tokenHandler.bind(oauth2),
-  auth: false
-});
+await db.usePlugin(identityPlugin);
+// 🎉 You now have a full OAuth2/OIDC Authorization Server!
 ```
 
+**For Resource Servers (APIs that validate tokens):**
+
+The **ApiPlugin** includes OIDC client support for validating tokens issued by external OAuth2/OIDC providers (like IdentityPlugin, Azure AD, Keycloak):
+
 ```javascript
-// Resource Server (Orders API)
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { ApiPlugin } from 's3db.js/plugins/api';
 
-const oidcClient = new OIDCClient({
-  issuer: 'http://localhost:3000',  // SSO server URL
-  audience: 'http://localhost:3001',  // This API's URL
-  jwksCacheTTL: 3600000  // Cache JWKS for 1 hour
-});
-
-await oidcClient.initialize();  // Fetches JWKS from SSO
-
-api.addAuthDriver('oidc', oidcClient.middleware.bind(oidcClient));
-
-api.addRoute({
-  path: '/orders',
-  method: 'GET',
-  handler: async (req, res) => {
-    const userId = req.user.sub;  // From validated token
-    const scopes = req.user.scope.split(' ');
-
-    if (!scopes.includes('orders:read')) {
-      return res.status(403).json({ error: 'Insufficient scopes' });
+const apiPlugin = new ApiPlugin({
+  port: 3000,
+  auth: {
+    driver: 'oidc',
+    config: {
+      issuer: 'http://localhost:4000',  // SSO server URL (IdentityPlugin)
+      audience: 'http://localhost:3000',
+      jwksCacheTTL: 3600000  // Cache JWKS for 1 hour
     }
-
-    const orders = await ordersResource.query({ userId });
-    res.json({ orders });
   },
-  auth: 'oidc'  // Requires valid OIDC token
+  resources: {
+    orders: { auth: true }  // Protected by OIDC token validation
+  }
 });
+
+await db.usePlugin(apiPlugin);
 ```
 
-**Get Access Token:**
-```bash
-curl -X POST http://localhost:3000/auth/token \
-  -d "grant_type=client_credentials" \
-  -d "client_id=service-a" \
-  -d "client_secret=secret" \
-  -d "scope=orders:read orders:write"
+**When to use:**
+- ✅ **IdentityPlugin** - Create SSO server (Authorization Server that issues tokens)
+- ✅ **ApiPlugin with OIDC driver** - Create Resource Server (API that validates tokens from SSO)
 
-# Response: { "access_token": "eyJhbGci...", "expires_in": 900 }
-```
-
-**Use Token:**
-```bash
-curl http://localhost:3001/orders \
-  -H "Authorization: Bearer eyJhbGci..."
-```
-
-**When to Use:**
-- ✅ Multiple microservices
-- ✅ Single Sign-On (SSO) needed
-- ✅ Centralized user management
-- ✅ Standard protocol compliance
-
-**When NOT to Use:**
-- ❌ Single monolithic API → Use JWT driver
-- ❌ Simple scripts/tools → Use Basic Auth
-
-**See the [OAuth2/OIDC Guide](../oauth2-guide.md) for:**
-- Complete SSO flow diagrams (Mermaid)
-- RSA key rotation best practices
-- Grant types (authorization_code, refresh_token, client_credentials)
-- Azure AD, Keycloak, external provider integration
-- Comprehensive troubleshooting guide
-- Testing strategies
-- Docker Compose examples
-- Complete working examples
+**See also:**
+- **[IdentityPlugin Documentation](./identity.md)** - Authorization Server documentation
+- **[OAuth2/OIDC Guide](../oauth2-guide.md)** - Complete OAuth2 architecture guide
+- **[Example 80](../examples/e80-sso-oauth2-server.js)** - SSO Server with IdentityPlugin
+- **[Example 81](../examples/e81-oauth2-resource-server.js)** - Resource Server with ApiPlugin + OIDC driver
+- **[Example 82](../examples/e82-oidc-web-app.js)** - Web App with Authorization Code Flow
 
 ---
+
 
 ### Custom Username/Password Fields
 
