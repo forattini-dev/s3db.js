@@ -1,5 +1,7 @@
 # Identity Plugin - Admin Panel
 
+[← Back to Identity Plugin](../identity-plugin.md) | [Configuration](./configuration.md) | [Security →](./security.md)
+
 Complete guide to the administrative interface for managing users and OAuth2 clients.
 
 ## Table of Contents
