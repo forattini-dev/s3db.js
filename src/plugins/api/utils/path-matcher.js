@@ -19,11 +19,14 @@ function patternToRegex(pattern) {
   let escaped = pattern
     .replace(/[.+?^${}()|[\]\\]/g, '\\$&');
 
-  // Replace ** with regex that matches any characters including /
-  escaped = escaped.replace(/\*\*/g, '(.*)');
+  // Replace ** with a placeholder first (to avoid conflict with *)
+  escaped = escaped.replace(/\*\*/g, '__DOUBLE_STAR__');
 
   // Replace * with regex that matches any characters except /
-  escaped = escaped.replace(/\*/g, '([^/]*)');
+  escaped = escaped.replace(/\*/g, '([^/]+)');
+
+  // Replace placeholder with regex that matches any characters including /
+  escaped = escaped.replace(/__DOUBLE_STAR__/g, '(.*)');
 
   // Anchor to start and end
   return new RegExp(`^${escaped}$`);

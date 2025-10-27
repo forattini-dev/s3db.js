@@ -11,6 +11,8 @@ import { ProfilePage } from './pages/profile.js';
 import { AdminDashboardPage } from './pages/admin/dashboard.js';
 import { AdminClientsPage } from './pages/admin/clients.js';
 import { AdminClientFormPage } from './pages/admin/client-form.js';
+import { AdminUsersPage } from './pages/admin/users.js';
+import { AdminUserFormPage } from './pages/admin/user-form.js';
 import { hashPassword, verifyPassword, validatePassword } from '../concerns/password.js';
 import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
 import { tryFn } from '../../../concerns/try-fn.js';

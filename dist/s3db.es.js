@@ -7402,8 +7402,9 @@ function createOIDCHandler(config, app, usersResource) {
 
 function patternToRegex(pattern) {
   let escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-  escaped = escaped.replace(/\*\*/g, "(.*)");
-  escaped = escaped.replace(/\*/g, "([^/]*)");
+  escaped = escaped.replace(/\*\*/g, "__DOUBLE_STAR__");
+  escaped = escaped.replace(/\*/g, "([^/]+)");
+  escaped = escaped.replace(/__DOUBLE_STAR__/g, "(.*)");
   return new RegExp(`^${escaped}$`);
 }
 function matchPath(pattern, path) {
