@@ -137,6 +137,18 @@ export const PLUGIN_DEPENDENCIES = {
         description: 'Universal JOSE and JWE implementation (for RSA key generation and JWT signing)',
         installCommand: 'pnpm add jose',
         npmUrl: 'https://www.npmjs.com/package/jose'
+      },
+      'bcrypt': {
+        version: '^5.1.0',
+        description: 'Secure password hashing library',
+        installCommand: 'pnpm add bcrypt',
+        npmUrl: 'https://www.npmjs.com/package/bcrypt'
+      },
+      'nodemailer': {
+        version: '^6.9.0',
+        description: 'Email sending library for password reset and verification',
+        installCommand: 'pnpm add nodemailer',
+        npmUrl: 'https://www.npmjs.com/package/nodemailer'
       }
     }
   },

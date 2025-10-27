@@ -2598,6 +2598,18 @@ const PLUGIN_DEPENDENCIES = {
         description: "Universal JOSE and JWE implementation (for RSA key generation and JWT signing)",
         installCommand: "pnpm add jose",
         npmUrl: "https://www.npmjs.com/package/jose"
+      },
+      "bcrypt": {
+        version: "^5.1.0",
+        description: "Secure password hashing library",
+        installCommand: "pnpm add bcrypt",
+        npmUrl: "https://www.npmjs.com/package/bcrypt"
+      },
+      "nodemailer": {
+        version: "^6.9.0",
+        description: "Email sending library for password reset and verification",
+        installCommand: "pnpm add nodemailer",
+        npmUrl: "https://www.npmjs.com/package/nodemailer"
       }
     }
   },
@@ -9755,6 +9767,29 @@ class IdentityPlugin extends Plugin {
         enabled: options.logging?.enabled || false,
         format: options.logging?.format || ":method :path :status :response-time ms"
       },
+      // Session Management
+      session: {
+        sessionExpiry: options.session?.sessionExpiry || "24h",
+        cookieName: options.session?.cookieName || "s3db_session",
+        cookiePath: options.session?.cookiePath || "/",
+        cookieHttpOnly: options.session?.cookieHttpOnly !== false,
+        cookieSecure: options.session?.cookieSecure || false,
+        // Set true in production with HTTPS
+        cookieSameSite: options.session?.cookieSameSite || "Lax",
+        cleanupInterval: options.session?.cleanupInterval || 36e5,
+        // 1 hour
+        enableCleanup: options.session?.enableCleanup !== false
+      },
+      // Password Policy
+      passwordPolicy: {
+        minLength: options.passwordPolicy?.minLength || 8,
+        maxLength: options.passwordPolicy?.maxLength || 128,
+        requireUppercase: options.passwordPolicy?.requireUppercase !== false,
+        requireLowercase: options.passwordPolicy?.requireLowercase !== false,
+        requireNumbers: options.passwordPolicy?.requireNumbers !== false,
+        requireSymbols: options.passwordPolicy?.requireSymbols || false,
+        bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
+      },
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -9806,9 +9841,11 @@ class IdentityPlugin extends Plugin {
     };
     this.server = null;
     this.oauth2Server = null;
+    this.sessionManager = null;
     this.oauth2KeysResource = null;
     this.oauth2ClientsResource = null;
     this.oauth2AuthCodesResource = null;
+    this.sessionsResource = null;
     this.usersResource = null;
   }
   /**
@@ -9837,6 +9874,7 @@ class IdentityPlugin extends Plugin {
     await this._createOAuth2Resources();
     await this._ensureUsersResource();
     await this._initializeOAuth2Server();
+    await this._initializeSessionManager();
     if (this.config.verbose) {
       console.log("[Identity Plugin] Installed successfully");
     }
@@ -9942,6 +9980,35 @@ class IdentityPlugin extends Plugin {
     } else {
       throw errCodes;
     }
+    const [okSessions, errSessions, sessionsResource] = await tryFn(
+      () => this.database.createResource({
+        name: "plg_sessions",
+        attributes: {
+          userId: "string|required",
+          expiresAt: "string|required",
+          ipAddress: "ip4|optional",
+          userAgent: "string|optional",
+          metadata: "object|optional",
+          createdAt: "string|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        createdBy: "IdentityPlugin"
+      })
+    );
+    if (okSessions) {
+      this.sessionsResource = sessionsResource;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Created plg_sessions resource");
+      }
+    } else if (this.database.resources.plg_sessions) {
+      this.sessionsResource = this.database.resources.plg_sessions;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Using existing plg_sessions resource");
+      }
+    } else {
+      throw errSessions;
+    }
   }
   /**
    * Ensure users resource exists (for authentication)
@@ -10008,6 +10075,22 @@ class IdentityPlugin extends Plugin {
     }
   }
   /**
+   * Initialize Session Manager
+   * @private
+   */
+  async _initializeSessionManager() {
+    const { SessionManager } = await Promise.resolve().then(function () { return sessionManager; });
+    this.sessionManager = new SessionManager({
+      sessionResource: this.sessionsResource,
+      config: this.config.session
+    });
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Session Manager initialized");
+      console.log(`[Identity Plugin] Session expiry: ${this.config.session.sessionExpiry}`);
+      console.log(`[Identity Plugin] Cookie name: ${this.config.session.cookieName}`);
+    }
+  }
+  /**
    * Start plugin
    */
   async onStart() {
@@ -10042,6 +10125,9 @@ class IdentityPlugin extends Plugin {
     if (this.server) {
       await this.server.stop();
       this.server = null;
+    }
+    if (this.sessionManager) {
+      this.sessionManager.stopCleanup();
     }
     this.emit("plugin.stopped");
   }
@@ -50589,6 +50675,413 @@ class Seeder {
     this.log("\u2705 Database reset complete");
   }
 }
+
+function generateSessionId() {
+  return idGenerator();
+}
+function calculateExpiration(duration) {
+  let ms;
+  if (typeof duration === "number") {
+    ms = duration;
+  } else if (typeof duration === "string") {
+    const match = duration.match(/^(\d+)([smhd])$/);
+    if (!match) {
+      throw new Error(`Invalid duration format: ${duration}. Use '15m', '1h', '7d', etc.`);
+    }
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    switch (unit) {
+      case "s":
+        ms = value * 1e3;
+        break;
+      // seconds
+      case "m":
+        ms = value * 60 * 1e3;
+        break;
+      // minutes
+      case "h":
+        ms = value * 60 * 60 * 1e3;
+        break;
+      // hours
+      case "d":
+        ms = value * 24 * 60 * 60 * 1e3;
+        break;
+      // days
+      default:
+        throw new Error(`Invalid duration unit: ${unit}`);
+    }
+  } else {
+    throw new Error("Duration must be a string or number");
+  }
+  return Date.now() + ms;
+}
+function isExpired(expiresAt) {
+  if (!expiresAt) {
+    return true;
+  }
+  const timestamp = typeof expiresAt === "string" ? new Date(expiresAt).getTime() : expiresAt;
+  return Date.now() > timestamp;
+}
+
+const DEFAULT_CONFIG = {
+  sessionExpiry: "24h",
+  // Default: 24 hours
+  cookieName: "s3db_session",
+  // Cookie name
+  cookiePath: "/",
+  // Cookie path
+  cookieHttpOnly: true,
+  // HTTP-only cookie (no JS access)
+  cookieSecure: false,
+  // Secure cookie (HTTPS only) - set to true in production
+  cookieSameSite: "Lax",
+  // SameSite attribute ('Strict', 'Lax', 'None')
+  cleanupInterval: 36e5,
+  // Cleanup interval: 1 hour (in ms)
+  enableCleanup: true
+  // Enable automatic cleanup
+};
+class SessionManager {
+  /**
+   * Create Session Manager
+   * @param {Object} options - Configuration options
+   * @param {Object} options.sessionResource - S3DB sessions resource
+   * @param {Object} [options.config] - Session configuration
+   */
+  constructor(options = {}) {
+    this.sessionResource = options.sessionResource;
+    this.config = { ...DEFAULT_CONFIG, ...options.config };
+    this.cleanupTimer = null;
+    if (!this.sessionResource) {
+      throw new Error("SessionManager requires a sessionResource");
+    }
+    if (this.config.enableCleanup) {
+      this._startCleanup();
+    }
+  }
+  /**
+   * Create a new session
+   * @param {Object} data - Session data
+   * @param {string} data.userId - User ID
+   * @param {Object} [data.metadata] - Additional session metadata
+   * @param {string} [data.ipAddress] - Client IP address
+   * @param {string} [data.userAgent] - Client user agent
+   * @param {string} [duration] - Session duration (overrides default)
+   * @returns {Promise<{sessionId: string, expiresAt: number, session: Object}>}
+   */
+  async createSession(data) {
+    const { userId, metadata = {}, ipAddress, userAgent, duration } = data;
+    if (!userId) {
+      throw new Error("userId is required to create a session");
+    }
+    generateSessionId();
+    const expiresAt = calculateExpiration(duration || this.config.sessionExpiry);
+    const sessionData = {
+      userId,
+      expiresAt: new Date(expiresAt).toISOString(),
+      ipAddress: ipAddress || null,
+      userAgent: userAgent || null,
+      metadata,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const [ok, err, session] = await tryFn(
+      () => this.sessionResource.insert(sessionData)
+    );
+    if (!ok) {
+      throw new Error(`Failed to create session: ${err.message}`);
+    }
+    return {
+      sessionId: session.id,
+      // S3DB auto-generated ID
+      expiresAt,
+      session
+    };
+  }
+  /**
+   * Validate a session
+   * @param {string} sessionId - Session ID to validate
+   * @returns {Promise<{valid: boolean, session: Object|null, reason: string|null}>}
+   */
+  async validateSession(sessionId) {
+    if (!sessionId) {
+      return { valid: false, session: null, reason: "No session ID provided" };
+    }
+    const [ok, err, session] = await tryFn(
+      () => this.sessionResource.get(sessionId)
+    );
+    if (!ok || !session) {
+      return { valid: false, session: null, reason: "Session not found" };
+    }
+    if (isExpired(session.expiresAt)) {
+      await this.destroySession(sessionId);
+      return { valid: false, session: null, reason: "Session expired" };
+    }
+    return { valid: true, session, reason: null };
+  }
+  /**
+   * Get session data without validation
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object|null>} Session object or null
+   */
+  async getSession(sessionId) {
+    if (!sessionId) {
+      return null;
+    }
+    const [ok, , session] = await tryFn(
+      () => this.sessionResource.get(sessionId)
+    );
+    return ok ? session : null;
+  }
+  /**
+   * Update session metadata
+   * @param {string} sessionId - Session ID
+   * @param {Object} metadata - New metadata to merge
+   * @returns {Promise<Object>} Updated session
+   */
+  async updateSession(sessionId, metadata) {
+    if (!sessionId) {
+      throw new Error("sessionId is required");
+    }
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      throw new Error("Session not found");
+    }
+    const updatedMetadata = { ...session.metadata, ...metadata };
+    const [ok, err, updated] = await tryFn(
+      () => this.sessionResource.update(sessionId, {
+        metadata: updatedMetadata
+      })
+    );
+    if (!ok) {
+      throw new Error(`Failed to update session: ${err.message}`);
+    }
+    return updated;
+  }
+  /**
+   * Destroy a session (logout)
+   * @param {string} sessionId - Session ID to destroy
+   * @returns {Promise<boolean>} True if session was destroyed
+   */
+  async destroySession(sessionId) {
+    if (!sessionId) {
+      return false;
+    }
+    const [ok] = await tryFn(
+      () => this.sessionResource.delete(sessionId)
+    );
+    return ok;
+  }
+  /**
+   * Destroy all sessions for a user (logout all devices)
+   * @param {string} userId - User ID
+   * @returns {Promise<number>} Number of sessions destroyed
+   */
+  async destroyUserSessions(userId) {
+    if (!userId) {
+      return 0;
+    }
+    const [ok, , sessions] = await tryFn(
+      () => this.sessionResource.query({ userId })
+    );
+    if (!ok || !sessions || sessions.length === 0) {
+      return 0;
+    }
+    let count = 0;
+    for (const session of sessions) {
+      const destroyed = await this.destroySession(session.id);
+      if (destroyed) count++;
+    }
+    return count;
+  }
+  /**
+   * Get all active sessions for a user
+   * @param {string} userId - User ID
+   * @returns {Promise<Array>} Array of active sessions
+   */
+  async getUserSessions(userId) {
+    if (!userId) {
+      return [];
+    }
+    const [ok, , sessions] = await tryFn(
+      () => this.sessionResource.query({ userId })
+    );
+    if (!ok || !sessions) {
+      return [];
+    }
+    const activeSessions = [];
+    for (const session of sessions) {
+      if (!isExpired(session.expiresAt)) {
+        activeSessions.push(session);
+      } else {
+        await this.destroySession(session.id);
+      }
+    }
+    return activeSessions;
+  }
+  /**
+   * Set session cookie in HTTP response
+   * @param {Object} res - HTTP response object (Express/Hono style)
+   * @param {string} sessionId - Session ID
+   * @param {number} expiresAt - Expiration timestamp (Unix ms)
+   */
+  setSessionCookie(res, sessionId, expiresAt) {
+    const expires = new Date(expiresAt);
+    const cookieOptions = [
+      `${this.config.cookieName}=${sessionId}`,
+      `Path=${this.config.cookiePath}`,
+      `Expires=${expires.toUTCString()}`,
+      `Max-Age=${Math.floor((expiresAt - Date.now()) / 1e3)}`
+    ];
+    if (this.config.cookieHttpOnly) {
+      cookieOptions.push("HttpOnly");
+    }
+    if (this.config.cookieSecure) {
+      cookieOptions.push("Secure");
+    }
+    if (this.config.cookieSameSite) {
+      cookieOptions.push(`SameSite=${this.config.cookieSameSite}`);
+    }
+    const cookieValue = cookieOptions.join("; ");
+    if (typeof res.setHeader === "function") {
+      res.setHeader("Set-Cookie", cookieValue);
+    } else if (typeof res.header === "function") {
+      res.header("Set-Cookie", cookieValue);
+    } else {
+      throw new Error("Unsupported response object");
+    }
+  }
+  /**
+   * Clear session cookie in HTTP response
+   * @param {Object} res - HTTP response object
+   */
+  clearSessionCookie(res) {
+    const cookieOptions = [
+      `${this.config.cookieName}=`,
+      `Path=${this.config.cookiePath}`,
+      "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+      "Max-Age=0"
+    ];
+    if (this.config.cookieHttpOnly) {
+      cookieOptions.push("HttpOnly");
+    }
+    if (this.config.cookieSecure) {
+      cookieOptions.push("Secure");
+    }
+    if (this.config.cookieSameSite) {
+      cookieOptions.push(`SameSite=${this.config.cookieSameSite}`);
+    }
+    const cookieValue = cookieOptions.join("; ");
+    if (typeof res.setHeader === "function") {
+      res.setHeader("Set-Cookie", cookieValue);
+    } else if (typeof res.header === "function") {
+      res.header("Set-Cookie", cookieValue);
+    }
+  }
+  /**
+   * Get session ID from HTTP request cookies
+   * @param {Object} req - HTTP request object
+   * @returns {string|null} Session ID or null
+   */
+  getSessionIdFromRequest(req) {
+    const cookieHeader = req.headers?.cookie || req.header?.("cookie");
+    if (!cookieHeader) {
+      return null;
+    }
+    const cookies = cookieHeader.split(";").reduce((acc, cookie) => {
+      const [key, value] = cookie.trim().split("=");
+      acc[key] = value;
+      return acc;
+    }, {});
+    return cookies[this.config.cookieName] || null;
+  }
+  /**
+   * Cleanup expired sessions
+   * @returns {Promise<number>} Number of sessions cleaned up
+   */
+  async cleanupExpiredSessions() {
+    const [ok, , sessions] = await tryFn(
+      () => this.sessionResource.list({ limit: 1e3 })
+    );
+    if (!ok || !sessions) {
+      return 0;
+    }
+    let count = 0;
+    for (const session of sessions) {
+      if (isExpired(session.expiresAt)) {
+        const destroyed = await this.destroySession(session.id);
+        if (destroyed) count++;
+      }
+    }
+    return count;
+  }
+  /**
+   * Start automatic cleanup of expired sessions
+   * @private
+   */
+  _startCleanup() {
+    if (this.cleanupTimer) {
+      return;
+    }
+    this.cleanupTimer = setInterval(async () => {
+      try {
+        const count = await this.cleanupExpiredSessions();
+        if (count > 0) {
+          console.log(`[SessionManager] Cleaned up ${count} expired sessions`);
+        }
+      } catch (error) {
+        console.error("[SessionManager] Cleanup error:", error.message);
+      }
+    }, this.config.cleanupInterval);
+  }
+  /**
+   * Stop automatic cleanup
+   */
+  stopCleanup() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+  /**
+   * Get session statistics
+   * @returns {Promise<Object>} Session statistics
+   */
+  async getStatistics() {
+    const [ok, , sessions] = await tryFn(
+      () => this.sessionResource.list({ limit: 1e4 })
+    );
+    if (!ok || !sessions) {
+      return {
+        total: 0,
+        active: 0,
+        expired: 0,
+        users: 0
+      };
+    }
+    let active = 0;
+    let expired = 0;
+    const uniqueUsers = /* @__PURE__ */ new Set();
+    for (const session of sessions) {
+      if (isExpired(session.expiresAt)) {
+        expired++;
+      } else {
+        active++;
+        uniqueUsers.add(session.userId);
+      }
+    }
+    return {
+      total: sessions.length,
+      active,
+      expired,
+      users: uniqueUsers.size
+    };
+  }
+}
+
+var sessionManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  SessionManager: SessionManager
+});
 
 function createCorsMiddleware(config = {}) {
   const {
