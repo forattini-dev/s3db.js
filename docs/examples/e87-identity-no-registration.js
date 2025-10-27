@@ -2,13 +2,20 @@
  * Example: Identity Provider with Registration Disabled
  *
  * Demonstrates how to disable public self-registration and restrict
- * account creation to administrators only.
+ * account creation to administrators only. Also shows enterprise-specific
+ * resource configuration with employee IDs, departments, and org structure.
  *
  * Use cases:
  * - Enterprise environments where users are provisioned by IT
  * - Invite-only applications
  * - Closed beta/private applications
  * - B2B SaaS with admin-managed accounts
+ *
+ * Features:
+ * - Custom enterprise resource schemas (employeeId, department, etc.)
+ * - Partitioning for performance (byDepartment, byLocation)
+ * - Lifecycle hooks (data normalization, logging)
+ * - Disabled public registration
  *
  * Usage:
  *   node docs/examples/e87-identity-no-registration.js
@@ -28,6 +35,66 @@ async function main() {
   const identityPlugin = new IdentityPlugin({
     issuer: 'http://localhost:4000',
     database: db,
+
+    // ============================================================================
+    // RESOURCE CONFIGURATION (Enterprise Use Case)
+    // ============================================================================
+    resources: {
+      users: {
+        name: 'enterprise_users',
+        attributes: {
+          // Enterprise-specific fields
+          employeeId: 'string|required',
+          department: 'string|default:general',
+          managerId: 'string|optional',
+          costCenter: 'string|optional',
+          officeLocation: 'string|default:HQ',
+          startDate: 'string|optional'  // ISO date
+        },
+        partitions: {
+          byDepartment: { fields: { department: 'string' } },
+          byLocation: { fields: { officeLocation: 'string' } }
+        },
+        hooks: {
+          beforeInsert: async (data) => {
+            // Enforce uppercase employee IDs
+            if (data.employeeId) {
+              data.employeeId = data.employeeId.toUpperCase();
+            }
+            // Enforce uppercase department codes
+            if (data.department) {
+              data.department = data.department.toUpperCase();
+            }
+            return data;
+          },
+          afterInsert: async (data) => {
+            console.log(`✅ New employee provisioned: ${data.employeeId} (${data.email})`);
+          }
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        asyncPartitions: true  // Faster writes for HR systems
+      },
+      tenants: {
+        name: 'enterprise_divisions',
+        attributes: {
+          // Organizational units
+          divisionCode: 'string|required',
+          budget: 'number|default:0',
+          headcount: 'number|default:0',
+          parentDivisionId: 'string|optional'
+        }
+      },
+      clients: {
+        name: 'enterprise_apps',
+        attributes: {
+          // Internal app metadata
+          appOwner: 'string|email|optional',
+          environment: 'string|default:production',  // production, staging, dev
+          sla: 'string|default:standard'  // standard, critical
+        }
+      }
+    },
 
     // ============================================================================
     // REGISTRATION CONFIGURATION

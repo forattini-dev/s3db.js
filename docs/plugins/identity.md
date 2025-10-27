@@ -52,6 +52,167 @@ await db.usePlugin(identityPlugin);
 - ✅ **Dynamic client registration** - RFC 7591 compliant
 - ✅ **Built-in login UI** - HTML form for authorization_code flow
 - ✅ **Enterprise features** - Azure AD/Keycloak feature parity
+- ✅ **Customizable resource schemas** - Extend users, tenants, and clients with your own fields
+
+---
+
+## 🎨 Resource Configuration & Customization
+
+The Identity Plugin creates three core resources: **users**, **tenants**, and **clients**. Each has **base attributes** required by the plugin, but you can extend them with your own fields using deep merge.
+
+### Base Schemas
+
+The plugin provides **protected base attributes** that cannot be overridden:
+
+**Users** (authentication & authorization):
+```javascript
+{
+  email: 'string|required|email',
+  password: 'password|required',        // Auto-hashed with bcrypt
+  emailVerified: 'boolean|default:false',
+  name: 'string|optional',
+  givenName: 'string|optional',
+  familyName: 'string|optional',
+  nickname: 'string|optional',
+  picture: 'string|optional',
+  locale: 'string|optional',
+  scopes: 'array|items:string|optional',
+  roles: 'array|items:string|optional',
+  tenantId: 'string|optional',
+  active: 'boolean|default:true',
+  metadata: 'object|optional'
+}
+```
+
+**Tenants** (multi-tenancy):
+```javascript
+{
+  name: 'string|required',
+  slug: 'string|required',
+  settings: 'object|optional',
+  active: 'boolean|default:true',
+  metadata: 'object|optional'
+}
+```
+
+**Clients** (OAuth2/OIDC apps):
+```javascript
+{
+  clientId: 'string|required',
+  clientSecret: 'secret|required',
+  name: 'string|required',
+  description: 'string|optional',
+  redirectUris: 'array|items:string|required',
+  allowedScopes: 'array|items:string|optional',
+  grantTypes: 'array|items:string|default:[\"authorization_code\",\"refresh_token\"]',
+  responseTypes: 'array|items:string|optional',
+  tenantId: 'string|optional',
+  tokenEndpointAuthMethod: 'string|default:client_secret_post',
+  requirePkce: 'boolean|default:false',
+  active: 'boolean|default:true',
+  metadata: 'object|optional'
+}
+```
+
+### Extending Resources with Custom Fields
+
+You can add **extra attributes**, **hooks**, **partitions**, and configure **behavior** for each resource:
+
+```javascript
+const identityPlugin = new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+
+  resources: {
+    users: {
+      name: 'app_users',
+      attributes: {
+        // Custom fields (cannot override base attributes!)
+        companyId: 'string|default:default-company',
+        department: 'string|default:engineering',
+        employeeId: 'string|optional'
+      },
+      // Partitions for performance
+      partitions: {
+        byCompany: { fields: { companyId: 'string' } },
+        byDepartment: { fields: { department: 'string' } }
+      },
+      // Lifecycle hooks
+      hooks: {
+        beforeInsert: async (data) => {
+          data.department = data.department?.toUpperCase();
+          return data;
+        },
+        afterUpdate: async (data) => {
+          console.log('User updated:', data.email);
+        }
+      },
+      // Storage behavior
+      behavior: 'body-overflow',  // or 'body-only', 'enforce-limits', etc.
+      timestamps: true
+    },
+
+    tenants: {
+      name: 'organizations',
+      attributes: {
+        plan: 'string|default:free',
+        maxUsers: 'number|default:10',
+        billingEmail: 'string|email|optional'
+      },
+      partitions: {
+        byPlan: { fields: { plan: 'string' } }
+      }
+    },
+
+    clients: {
+      name: 'oauth_apps',
+      attributes: {
+        logoUrl: 'string|default:https://placeholder.com/logo.png',
+        brandColor: 'string|default:#007bff',
+        webhookUrl: 'string|url|optional'
+      }
+    }
+  }
+});
+```
+
+### Validation Rules
+
+**Required**:
+- All three resources (`users`, `tenants`, `clients`) must be configured
+- Each resource must have a `name` property
+- Extra attributes cannot override base attributes
+
+**Optional Fields**:
+- Optional custom fields **must** have a default value:
+  ```javascript
+  ✅ companyId: 'string|default:default-company'
+  ❌ companyId: 'string|optional'  // ERROR: missing default
+  ```
+
+### Full Configuration Control
+
+Beyond attributes, you have full control over resource creation:
+
+```javascript
+resources: {
+  users: {
+    name: 'users_v1',
+    attributes: { /* custom fields */ },
+    partitions: { /* O(1) lookups */ },
+    hooks: {
+      beforeInsert: async (data) => { /* validate */ },
+      afterInsert: async (data) => { /* notify */ },
+      beforeUpdate: async (data) => { /* audit */ }
+    },
+    behavior: 'body-overflow',  // metadata overflow strategy
+    timestamps: true,           // add createdAt/updatedAt
+    asyncPartitions: true       // 70-100% faster writes
+  }
+}
+```
+
+**See also**: [Configuration Reference](./identity/configuration.md) for complete options.
 
 ---
 
