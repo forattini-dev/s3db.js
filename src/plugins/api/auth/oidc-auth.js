@@ -24,7 +24,7 @@
  *     idpLogout: true,
  *     autoCreateUser: true,
  *     // 🎯 Hook: Called after user is authenticated
- *     onUserAuthenticated: async ({ user, created, claims, tokens }) => {
+ *     onUserAuthenticated: async ({ user, created, claims, tokens, context }) => {
  *       if (created) {
  *         // User was just created - create profile, send welcome email, etc.
  *         await db.resources.profiles.insert({
@@ -34,6 +34,14 @@
  *           onboarded: false
  *         });
  *       }
+ *
+ *       // Set cookie with API token
+ *       context.cookie('api_token', user.apiToken, {
+ *         httpOnly: true,
+ *         secure: true,
+ *         sameSite: 'Lax',
+ *         maxAge: 7 * 24 * 60 * 60  // 7 days
+ *       });
  *     }
  *   }
  * }
@@ -419,7 +427,8 @@ export function createOIDCHandler(config, app, usersResource) {
                   access_token: tokens.access_token,
                   id_token: tokens.id_token,
                   refresh_token: tokens.refresh_token
-                }
+                },
+                context: c  // 🔥 Pass Hono context for cookie/header manipulation
               });
             } catch (hookErr) {
               console.error('[OIDC] onUserAuthenticated hook failed:', hookErr);

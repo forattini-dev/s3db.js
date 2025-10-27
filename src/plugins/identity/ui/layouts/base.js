@@ -49,6 +49,7 @@ export function BaseLayout(props) {
     logo: config.logo || null,
     logoUrl: config.logoUrl || null,
     favicon: config.favicon || null,
+    registrationEnabled: config.registrationEnabled !== false,  // Show register link
 
     // Colors
     primaryColor: config.primaryColor || '#007bff',
