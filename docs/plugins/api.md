@@ -1018,6 +1018,62 @@ Check logs for:
 
 ---
 
+**Q: How do I implement dual authentication (OIDC + Basic Auth)?**
+
+A: Use priority-based authentication strategy for sophisticated auth flows:
+```javascript
+auth: {
+  strategy: 'priority',  // NEW: Waterfall authentication
+  priorities: {
+    oidc: 1,    // Try OIDC first (browser/SSO)
+    basic: 2    // Fallback to Basic Auth (API tokens)
+  },
+  drivers: [
+    {
+      type: 'oidc',
+      protectedPaths: ['/app/**', '/dashboard/**'],  // OIDC required
+      beforeCreateUser: async ({ user, claims }) => {
+        // Enrich with external API data
+        const employee = await peopleAPI.getByEmail(claims.email);
+        return {
+          costCenterId: employee.costCenter.id,
+          team: employee.team,
+          apiToken: generateToken()  // Auto-generate API token
+        };
+      },
+      beforeUpdateUser: async ({ user, updates, claims }) => {
+        // Refresh data on every login
+        const employee = await peopleAPI.getByEmail(claims.email);
+        return {
+          costCenterId: employee.costCenter.id,
+          team: employee.team
+        };
+      }
+    },
+    {
+      type: 'basic',
+      resource: 'users',
+      usernameField: 'email',
+      passwordField: 'apiToken'
+    }
+  ]
+}
+```
+
+**Use cases:**
+- **mrt-shortner architecture**: OIDC for `/app` (browser), Basic Auth for `/api` (tokens)
+- **Microservices**: OIDC for user-facing, Basic for service-to-service
+- **Migration**: Keep Basic Auth during OIDC rollout
+
+**How it works:**
+1. Request to `/app` → OIDC middleware checks session → redirect to login if missing
+2. Request to `/api/urls` → OIDC tries first → falls back to Basic Auth
+3. Request to `/health` (not protected) → skips all auth
+
+See `docs/examples/e83-api-oidc-dual-auth.js` for complete example.
+
+---
+
 ### Advanced
 
 **Q: Can I use custom middlewares?**
