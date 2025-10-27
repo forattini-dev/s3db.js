@@ -10852,12 +10852,21 @@ class ApiPlugin extends Plugin {
       auth: options.auth ? {
         // Array of authentication drivers (OR logic - any driver can authenticate)
         drivers: options.auth.drivers || [],
+        // Path-based authentication rules (more specific paths win)
+        pathRules: options.auth.pathRules || [],
+        // Global fallback strategy (used when no pathRules match)
+        strategy: options.auth.strategy || "any",
+        // 'any' or 'priority'
+        priorities: options.auth.priorities || {},
         // Global settings
         resource: options.auth.resource || "users",
         usernameField: options.auth.usernameField || "email",
         passwordField: options.auth.passwordField || "password"
       } : {
         drivers: [],
+        pathRules: [],
+        strategy: "any",
+        priorities: {},
         resource: "users",
         usernameField: "email",
         passwordField: "password"
