@@ -7068,7 +7068,7 @@ async function getOrCreateUser(usersResource, claims, config) {
       updates.name = claims.name;
     }
     user = await usersResource.update(userId, updates);
-    return user;
+    return { user, created: false };
   }
   const newUser = {
     id: userId,
@@ -7098,7 +7098,7 @@ async function getOrCreateUser(usersResource, claims, config) {
     }
   };
   user = await usersResource.insert(newUser);
-  return user;
+  return { user, created: true };
 }
 async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
   const response = await fetch(tokenEndpoint, {
@@ -7258,9 +7258,28 @@ function createOIDCHandler(config, app, usersResource) {
         return c.json({ error: "Failed to decode id_token" }, 500);
       }
       let user = null;
+      let userCreated = false;
       if (autoCreateUser && usersResource) {
         try {
-          user = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+          const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+          user = result.user;
+          userCreated = result.created;
+          if (finalConfig.onUserAuthenticated && typeof finalConfig.onUserAuthenticated === "function") {
+            try {
+              await finalConfig.onUserAuthenticated({
+                user,
+                created: userCreated,
+                claims: idTokenClaims,
+                tokens: {
+                  access_token: tokens.access_token,
+                  id_token: tokens.id_token,
+                  refresh_token: tokens.refresh_token
+                }
+              });
+            } catch (hookErr) {
+              console.error("[OIDC] onUserAuthenticated hook failed:", hookErr);
+            }
+          }
         } catch (err) {
           console.error("[OIDC] Failed to create/update user:", err);
         }

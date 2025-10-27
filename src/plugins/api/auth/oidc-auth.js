@@ -22,7 +22,19 @@
  *     rollingDuration: 86400000,  // 24 hours
  *     absoluteDuration: 604800000, // 7 days
  *     idpLogout: true,
- *     autoCreateUser: true
+ *     autoCreateUser: true,
+ *     // 🎯 Hook: Called after user is authenticated
+ *     onUserAuthenticated: async ({ user, created, claims, tokens }) => {
+ *       if (created) {
+ *         // User was just created - create profile, send welcome email, etc.
+ *         await db.resources.profiles.insert({
+ *           id: `profile-${user.id}`,
+ *           userId: user.id,
+ *           bio: '',
+ *           onboarded: false
+ *         });
+ *       }
+ *     }
  *   }
  * }
  */
@@ -82,7 +94,7 @@ export function validateOidcConfig(config) {
  * @param {Object} usersResource - s3db.js users resource
  * @param {Object} claims - ID token claims
  * @param {Object} config - OIDC config
- * @returns {Promise<Object>} User object
+ * @returns {Promise<{user: Object, created: boolean}>} User object and creation status
  */
 async function getOrCreateUser(usersResource, claims, config) {
   const userId = claims.email || claims.preferred_username || claims.sub;
@@ -93,8 +105,10 @@ async function getOrCreateUser(usersResource, claims, config) {
 
   // Try to get existing user
   let user = null;
+  let userExists = false;
   try {
     user = await usersResource.get(userId);
+    userExists = true;
   } catch (err) {
     // User not found, will create below
   }
@@ -126,7 +140,7 @@ async function getOrCreateUser(usersResource, claims, config) {
     }
 
     user = await usersResource.update(userId, updates);
-    return user;
+    return { user, created: false };
   }
 
   // Create new user
@@ -158,7 +172,7 @@ async function getOrCreateUser(usersResource, claims, config) {
   };
 
   user = await usersResource.insert(newUser);
-  return user;
+  return { user, created: true };
 }
 
 /**
@@ -387,9 +401,31 @@ export function createOIDCHandler(config, app, usersResource) {
 
       // Auto-create/update user
       let user = null;
+      let userCreated = false;
       if (autoCreateUser && usersResource) {
         try {
-          user = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+          const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+          user = result.user;
+          userCreated = result.created;
+
+          // Call onUserAuthenticated hook if configured
+          if (finalConfig.onUserAuthenticated && typeof finalConfig.onUserAuthenticated === 'function') {
+            try {
+              await finalConfig.onUserAuthenticated({
+                user,
+                created: userCreated,
+                claims: idTokenClaims,
+                tokens: {
+                  access_token: tokens.access_token,
+                  id_token: tokens.id_token,
+                  refresh_token: tokens.refresh_token
+                }
+              });
+            } catch (hookErr) {
+              console.error('[OIDC] onUserAuthenticated hook failed:', hookErr);
+              // Don't block authentication if hook fails
+            }
+          }
         } catch (err) {
           console.error('[OIDC] Failed to create/update user:', err);
           // Continue without user (will use token claims only)
