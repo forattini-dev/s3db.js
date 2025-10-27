@@ -38,7 +38,7 @@ Serve files from a local directory.
 **Basic Configuration:**
 
 ```javascript
-import { ApiPlugin } from 's3db.js/plugins/api';
+import { ApiPlugin } from 's3db.js';
 
 await db.usePlugin(new ApiPlugin({
   port: 3000,

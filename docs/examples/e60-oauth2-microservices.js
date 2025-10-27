@@ -26,9 +26,9 @@
  */
 
 import Database from 's3db.js';
-import { APIPlugin } from 's3db.js/plugins/api';
+import { APIPlugin } from 's3db.js';
 import { OAuth2Server } from 's3db.js/plugins/identity/oauth2-server';
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { OIDCClient } from 's3db.js';
 
 // ============================================================================
 // 1. SSO SERVICE (Authorization Server) - Port 3000

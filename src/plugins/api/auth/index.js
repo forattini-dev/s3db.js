@@ -132,6 +132,9 @@ export function createAuthMiddleware(options = {}) {
   };
 }
 
+// Note: OIDCClient not exported due to broken import (oidc-discovery.js missing)
+// export { OIDCClient } from './oidc-client.js';
+
 export default {
   createAuthMiddleware,
   jwtAuth,

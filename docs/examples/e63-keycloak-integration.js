@@ -17,8 +17,8 @@
  */
 
 import Database from 's3db.js';
-import { ApiPlugin } from 's3db.js/plugins/api';
-import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+import { ApiPlugin } from 's3db.js';
+import { OIDCClient } from 's3db.js';
 
 // ============================================================================
 // CONFIGURAÇÃO - Substituir com seus valores do Keycloak

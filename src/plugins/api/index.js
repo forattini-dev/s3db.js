@@ -840,3 +840,8 @@ export class ApiPlugin extends Plugin {
     return this.server ? this.server.getApp() : null;
   }
 }
+
+// Export auth utilities (OIDCClient, guards helpers, etc.)
+// Note: OIDCClient not exported due to broken import (oidc-discovery.js missing)
+// export { OIDCClient } from './auth/oidc-client.js';
+export * from './concerns/guards-helpers.js';
