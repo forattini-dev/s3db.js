@@ -2,8 +2,11 @@
  * Example: Identity Provider with White-Label Theme (S3dbCorp)
  *
  * Demonstrates comprehensive white-label branding configuration
- * for the Identity Provider plugin, including colors, logos, typography,
- * company information, and social links.
+ * for the Identity Provider plugin, including:
+ * - Custom resource schemas with extra attributes
+ * - Partitions and hooks for user/tenant/client resources
+ * - Colors, logos, typography, company information
+ * - Social links and custom CSS
  *
  * Usage:
  *   node docs/examples/e85-identity-whitelabel.js
@@ -23,6 +26,57 @@ async function main() {
   const identityPlugin = new IdentityPlugin({
     issuer: 'http://localhost:4000',
     database: db,
+
+    // 🎨 RESOURCE CONFIGURATION
+    // Define custom attributes and behavior for identity resources
+    resources: {
+      users: {
+        name: 's3dbcorp_users',
+        attributes: {
+          // Custom fields for S3dbCorp users
+          companyName: 'string|default:S3dbCorp',
+          department: 'string|default:engineering',
+          jobTitle: 'string|optional',
+          phoneNumber: 'string|optional'
+        },
+        partitions: {
+          byDepartment: { fields: { department: 'string' } },
+          byCompany: { fields: { companyName: 'string' } }
+        },
+        hooks: {
+          beforeInsert: async (data) => {
+            // Uppercase department for consistency
+            if (data.department) {
+              data.department = data.department.toUpperCase();
+            }
+            return data;
+          }
+        },
+        behavior: 'body-overflow',
+        timestamps: true
+      },
+      tenants: {
+        name: 's3dbcorp_tenants',
+        attributes: {
+          // Subscription/billing fields
+          plan: 'string|default:free',
+          maxUsers: 'number|default:25',
+          billingEmail: 'string|email|optional'
+        },
+        partitions: {
+          byPlan: { fields: { plan: 'string' } }
+        }
+      },
+      clients: {
+        name: 's3dbcorp_oauth_clients',
+        attributes: {
+          // White-label branding per OAuth client
+          logoUrl: 'string|default:https://s3dbcorp.com/logo.png',
+          brandColor: 'string|default:#0066CC',
+          webhookUrl: 'string|url|optional'
+        }
+      }
+    },
 
     // Email Configuration (optional)
     email: {
