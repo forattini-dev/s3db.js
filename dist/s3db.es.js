@@ -12220,7 +12220,7 @@ class IdentityPlugin extends Plugin {
         name: resourceName,
         attributes: {
           email: "string|required|email",
-          password: "secret|required",
+          password: "password|required",
           name: "string|optional",
           scopes: "array|items:string|optional",
           active: "boolean|default:true"
@@ -21809,6 +21809,20 @@ async function hashPassword(password, rounds = 10) {
   }
   return await bcrypt.hash(password, rounds);
 }
+async function verifyPassword$1(plaintext, hash) {
+  if (!plaintext || typeof plaintext !== "string") {
+    return false;
+  }
+  if (!hash || typeof hash !== "string") {
+    return false;
+  }
+  try {
+    const fullHash = hash.startsWith("$") ? hash : expandHash(hash);
+    return await bcrypt.compare(plaintext, fullHash);
+  } catch (error) {
+    return false;
+  }
+}
 function compactHash(bcryptHash) {
   if (!bcryptHash || typeof bcryptHash !== "string") {
     throw new Error("Invalid bcrypt hash");
@@ -21821,6 +21835,16 @@ function compactHash(bcryptHash) {
     throw new Error("Invalid bcrypt hash format");
   }
   return parts[3];
+}
+function expandHash(compactHash2, rounds = 10) {
+  if (!compactHash2 || typeof compactHash2 !== "string") {
+    throw new Error("Invalid compacted hash");
+  }
+  if (compactHash2.startsWith("$")) {
+    return compactHash2;
+  }
+  const roundsStr = rounds.toString().padStart(2, "0");
+  return `$2b$${roundsStr}$${compactHash2}`;
 }
 
 async function secretHandler(actual, errors, schema) {
@@ -22197,6 +22221,13 @@ const SchemaActions = {
     if (raw === "null") return null;
     if (raw === "undefined") return void 0;
     return raw;
+  },
+  hashPassword: async (value, { bcryptRounds = 10 }) => {
+    if (value === null || value === void 0) return value;
+    const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(value), bcryptRounds));
+    if (!okHash) return value;
+    const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
+    return okCompact ? compacted : hash;
   },
   toString: (value) => value == null ? value : String(value),
   fromArray: (value, { separator }) => {
@@ -22577,6 +22608,7 @@ class Schema {
       name,
       attributes,
       passphrase,
+      bcryptRounds,
       version = 1,
       options = {},
       _pluginAttributeMetadata,
@@ -22586,12 +22618,17 @@ class Schema {
     this.version = version;
     this.attributes = attributes || {};
     this.passphrase = passphrase ?? "secret";
+    this.bcryptRounds = bcryptRounds ?? 10;
     this.options = merge({}, this.defaultOptions(), options);
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
     this._pluginAttributeMetadata = _pluginAttributeMetadata || {};
     this._pluginAttributes = _pluginAttributes || {};
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
-    this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
+    this.validator = new ValidatorManager({
+      autoEncrypt: false,
+      passphrase: this.passphrase,
+      bcryptRounds: this.bcryptRounds
+    }).compile(merge(
       { $$async: true, $$strict: false },
       processedAttributes
     ));
@@ -22772,6 +22809,12 @@ class Schema {
         }
         if (this.options.autoDecrypt) {
           this.addHook("afterUnmap", name, "decrypt");
+        }
+        continue;
+      }
+      if (defStr.includes("password") || defType === "password") {
+        if (this.options.autoEncrypt) {
+          this.addHook("beforeMap", name, "hashPassword");
         }
         continue;
       }
@@ -22963,6 +23006,7 @@ class Schema {
         if (value !== void 0 && typeof SchemaActions[actionName] === "function") {
           set(cloned, attribute, await SchemaActions[actionName](value, {
             passphrase: this.passphrase,
+            bcryptRounds: this.bcryptRounds,
             separator: this.options.arraySeparator,
             ...actionParams
             // Merge custom parameters (currency, precision, etc.)
@@ -23054,6 +23098,7 @@ class Schema {
           if (typeof SchemaActions[actionName] === "function") {
             parsedValue = await SchemaActions[actionName](parsedValue, {
               passphrase: this.passphrase,
+              bcryptRounds: this.bcryptRounds,
               separator: this.options.arraySeparator,
               ...actionParams
               // Merge custom parameters (currency, precision, etc.)
@@ -24185,6 +24230,7 @@ ${errorDetails}`,
       name: this.name,
       attributes: this.attributes,
       passphrase: this.passphrase,
+      bcryptRounds: this.bcryptRounds,
       version: this.version,
       options: {
         autoDecrypt: this.config.autoDecrypt,
@@ -34541,6 +34587,7 @@ class Database extends EventEmitter {
     this.plugins = this.pluginRegistry;
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
+    this.bcryptRounds = options.bcryptRounds || 10;
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false;
     this.strictValidation = options.strictValidation !== false;
@@ -34662,6 +34709,7 @@ class Database extends EventEmitter {
           behavior: versionData.behavior || "user-managed",
           parallelism: this.parallelism,
           passphrase: this.passphrase,
+          bcryptRounds: this.bcryptRounds,
           observers: [this],
           cache: this.cache,
           timestamps: versionData.timestamps !== void 0 ? versionData.timestamps : false,
@@ -35257,6 +35305,7 @@ class Database extends EventEmitter {
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
+      bcryptRounds: this.bcryptRounds,
       versioningEnabled: this.versioningEnabled
     });
     const newHash = this.generateDefinitionHash(mockResource.export());
@@ -35368,6 +35417,7 @@ class Database extends EventEmitter {
       behavior,
       parallelism: this.parallelism,
       passphrase: config.passphrase !== void 0 ? config.passphrase : this.passphrase,
+      bcryptRounds: config.bcryptRounds !== void 0 ? config.bcryptRounds : this.bcryptRounds,
       observers: [this],
       cache: config.cache !== void 0 ? config.cache : this.cache,
       timestamps: config.timestamps !== void 0 ? config.timestamps : false,
@@ -71786,14 +71836,8 @@ const DEFAULT_PASSWORD_POLICY = {
   requireNumbers: true,
   requireSymbols: false
 };
-function verifyPassword(plaintext, storedPassword) {
-  if (!plaintext || typeof plaintext !== "string") {
-    return false;
-  }
-  if (!storedPassword || typeof storedPassword !== "string") {
-    return false;
-  }
-  return plaintext === storedPassword;
+async function verifyPassword(plaintext, storedHash) {
+  return await verifyPassword$1(plaintext, storedHash);
 }
 function validatePassword(password, policy = DEFAULT_PASSWORD_POLICY) {
   const errors = [];

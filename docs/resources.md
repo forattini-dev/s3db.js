@@ -1878,12 +1878,6 @@ graph TD
     O3 --> P[Return Result to Client]
     I --> P
 
-    style B fill:#e1f5ff
-    style C fill:#fff4e1
-    style G fill:#f0f0f0
-    style J fill:#fff4e1
-    style N fill:#e8f5e9
-    style O fill:#e1f5ff
 ```
 
 ---
