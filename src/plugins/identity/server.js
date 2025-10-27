@@ -224,6 +224,19 @@ export class IdentityServer {
       }
     });
 
+    // Authorization endpoint (POST for processing login)
+    this.app.post('/oauth/authorize', async (c) => {
+      try {
+        const result = await oauth2Server.authorizePostHandler(c.req, c);
+        return result; // Returns redirect
+      } catch (error) {
+        return c.json({
+          error: 'server_error',
+          error_description: error.message
+        }, 500);
+      }
+    });
+
     // Client registration endpoint
     this.app.post('/oauth/register', async (c) => {
       try {
@@ -237,15 +250,28 @@ export class IdentityServer {
       }
     });
 
+    // Token revocation endpoint
+    this.app.post('/oauth/revoke', async (c) => {
+      try {
+        const result = await oauth2Server.revokeHandler(c.req, c);
+        return result;
+      } catch (error) {
+        // RFC 7009: Always return 200 for security
+        return c.body(null, 200);
+      }
+    });
+
     if (this.options.verbose) {
       console.log('[Identity Server] Mounted OAuth2/OIDC routes:');
       console.log('[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)');
       console.log('[Identity Server]   GET  /.well-known/jwks.json (JWKS)');
-      console.log('[Identity Server]   GET  /oauth/authorize (Authorization)');
+      console.log('[Identity Server]   GET  /oauth/authorize (Authorization UI)');
+      console.log('[Identity Server]   POST /oauth/authorize (Process Login)');
       console.log('[Identity Server]   POST /oauth/token (Token)');
       console.log('[Identity Server]   GET  /oauth/userinfo (UserInfo)');
       console.log('[Identity Server]   POST /oauth/introspect (Introspection)');
       console.log('[Identity Server]   POST /oauth/register (Client Registration)');
+      console.log('[Identity Server]   POST /oauth/revoke (Token Revocation)');
     }
   }
 

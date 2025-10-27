@@ -655,6 +655,374 @@ export class OAuth2Server {
   }
 
   /**
+   * Authorization endpoint handler (GET /oauth/authorize)
+   * Implements OAuth2 authorization code flow
+   *
+   * Query params:
+   * - response_type: 'code' (required)
+   * - client_id: Client identifier (required)
+   * - redirect_uri: Callback URL (required)
+   * - scope: Requested scopes (optional)
+   * - state: CSRF protection (recommended)
+   * - code_challenge: PKCE challenge (optional)
+   * - code_challenge_method: PKCE method (optional, default: plain)
+   */
+  async authorizeHandler(req, res) {
+    try {
+      const {
+        response_type,
+        client_id,
+        redirect_uri,
+        scope,
+        state,
+        code_challenge,
+        code_challenge_method = 'plain'
+      } = req.query || {};
+
+      // Validate required parameters
+      if (!response_type || !client_id || !redirect_uri) {
+        return res.status(400).json({
+          error: 'invalid_request',
+          error_description: 'response_type, client_id, and redirect_uri are required'
+        });
+      }
+
+      // Validate response_type
+      if (!this.supportedResponseTypes.includes(response_type)) {
+        return res.status(400).json({
+          error: 'unsupported_response_type',
+          error_description: `Response type ${response_type} is not supported`
+        });
+      }
+
+      // Validate client
+      if (this.clientResource) {
+        const clients = await this.clientResource.query({ clientId: client_id });
+
+        if (clients.length === 0) {
+          return res.status(400).json({
+            error: 'invalid_client',
+            error_description: 'Client not found'
+          });
+        }
+
+        const client = clients[0];
+
+        // Validate redirect_uri
+        if (!client.redirectUris.includes(redirect_uri)) {
+          return res.status(400).json({
+            error: 'invalid_request',
+            error_description: 'Invalid redirect_uri'
+          });
+        }
+
+        // Validate scopes
+        if (scope) {
+          const requestedScopes = scope.split(' ');
+          const invalidScopes = requestedScopes.filter(s =>
+            !client.allowedScopes.includes(s)
+          );
+
+          if (invalidScopes.length > 0) {
+            return res.status(400).json({
+              error: 'invalid_scope',
+              error_description: `Invalid scopes: ${invalidScopes.join(', ')}`
+            });
+          }
+        }
+      }
+
+      // For now, return a simple HTML form for user authentication
+      // In production, this would be a proper login UI with session management
+      const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Authorization - ${this.issuer}</title>
+  <style>
+    body { font-family: system-ui; max-width: 400px; margin: 100px auto; padding: 20px; }
+    form { background: #f5f5f5; padding: 20px; border-radius: 8px; }
+    input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    .info { background: #e7f3ff; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="info">
+    <strong>Application requesting access:</strong><br>
+    Client ID: ${client_id}<br>
+    Scopes: ${scope || 'none'}<br>
+    Redirect: ${redirect_uri}
+  </div>
+  <form method="POST" action="/oauth/authorize">
+    <input type="hidden" name="response_type" value="${response_type}">
+    <input type="hidden" name="client_id" value="${client_id}">
+    <input type="hidden" name="redirect_uri" value="${redirect_uri}">
+    <input type="hidden" name="scope" value="${scope || ''}">
+    <input type="hidden" name="state" value="${state || ''}">
+    <input type="hidden" name="code_challenge" value="${code_challenge || ''}">
+    <input type="hidden" name="code_challenge_method" value="${code_challenge_method}">
+
+    <input type="email" name="username" placeholder="Email" required>
+    <input type="password" name="password" placeholder="Password" required>
+    <button type="submit">Authorize</button>
+  </form>
+</body>
+</html>`;
+
+      return res.status(200).header('Content-Type', 'text/html').send(html);
+
+    } catch (error) {
+      console.error('[OAuth2Server] Authorization error:', error);
+      return res.status(500).json({
+        error: 'server_error',
+        error_description: error.message
+      });
+    }
+  }
+
+  /**
+   * Authorization endpoint handler (POST /oauth/authorize)
+   * Processes user authentication and generates authorization code
+   */
+  async authorizePostHandler(req, res) {
+    try {
+      const {
+        response_type,
+        client_id,
+        redirect_uri,
+        scope,
+        state,
+        code_challenge,
+        code_challenge_method = 'plain',
+        username,
+        password
+      } = req.body || {};
+
+      // Authenticate user
+      const users = await this.userResource.query({ email: username });
+
+      if (users.length === 0) {
+        return res.status(401).json({
+          error: 'access_denied',
+          error_description: 'Invalid credentials'
+        });
+      }
+
+      const user = users[0];
+
+      // Verify password (assuming password is hashed with bcrypt or similar)
+      // In production, use proper password verification
+      if (user.password !== password) {
+        return res.status(401).json({
+          error: 'access_denied',
+          error_description: 'Invalid credentials'
+        });
+      }
+
+      // Generate authorization code
+      const code = generateAuthCode();
+      const expiresAt = new Date(Date.now() + this.parseExpiryToSeconds(this.authCodeExpiry) * 1000).toISOString();
+
+      // Store authorization code
+      if (this.authCodeResource) {
+        await this.authCodeResource.insert({
+          code,
+          clientId: client_id,
+          userId: user.id,
+          redirectUri: redirect_uri,
+          scope: scope || '',
+          expiresAt,
+          used: false,
+          codeChallenge: code_challenge || null,
+          codeChallengeMethod: code_challenge_method
+        });
+      }
+
+      // Build redirect URL with authorization code
+      const url = new URL(redirect_uri);
+      url.searchParams.set('code', code);
+      if (state) {
+        url.searchParams.set('state', state);
+      }
+
+      // Redirect user back to client application
+      return res.redirect(url.toString());
+
+    } catch (error) {
+      console.error('[OAuth2Server] Authorization POST error:', error);
+      return res.status(500).json({
+        error: 'server_error',
+        error_description: error.message
+      });
+    }
+  }
+
+  /**
+   * Client Registration endpoint handler (POST /oauth/register)
+   * Implements RFC 7591 - OAuth 2.0 Dynamic Client Registration
+   *
+   * Request body:
+   * - redirect_uris: Array of redirect URIs (required)
+   * - token_endpoint_auth_method: 'client_secret_basic' | 'client_secret_post'
+   * - grant_types: Array of grant types (optional)
+   * - response_types: Array of response types (optional)
+   * - client_name: Human-readable name (optional)
+   * - client_uri: URL of client homepage (optional)
+   * - logo_uri: URL of client logo (optional)
+   * - scope: Space-separated scopes (optional)
+   * - contacts: Array of contact emails (optional)
+   * - tos_uri: Terms of service URL (optional)
+   * - policy_uri: Privacy policy URL (optional)
+   */
+  async registerClientHandler(req, res) {
+    try {
+      const {
+        redirect_uris,
+        token_endpoint_auth_method = 'client_secret_basic',
+        grant_types,
+        response_types,
+        client_name,
+        client_uri,
+        logo_uri,
+        scope,
+        contacts,
+        tos_uri,
+        policy_uri
+      } = req.body || {};
+
+      // Validate required fields
+      if (!redirect_uris || !Array.isArray(redirect_uris) || redirect_uris.length === 0) {
+        return res.status(400).json({
+          error: 'invalid_redirect_uri',
+          error_description: 'redirect_uris is required and must be a non-empty array'
+        });
+      }
+
+      // Validate redirect URIs (must be HTTPS in production)
+      for (const uri of redirect_uris) {
+        try {
+          new URL(uri);
+        } catch {
+          return res.status(400).json({
+            error: 'invalid_redirect_uri',
+            error_description: `Invalid redirect URI: ${uri}`
+          });
+        }
+      }
+
+      // Generate client credentials
+      const clientId = generateClientId();
+      const clientSecret = generateClientSecret();
+
+      // Prepare client metadata
+      const clientData = {
+        clientId,
+        clientSecret,
+        name: client_name || `Client ${clientId}`,
+        redirectUris: redirect_uris,
+        allowedScopes: scope ? scope.split(' ') : this.supportedScopes,
+        grantTypes: grant_types || ['authorization_code', 'refresh_token'],
+        responseTypes: response_types || ['code'],
+        tokenEndpointAuthMethod: token_endpoint_auth_method,
+        active: true
+      };
+
+      // Optional fields
+      if (client_uri) clientData.clientUri = client_uri;
+      if (logo_uri) clientData.logoUri = logo_uri;
+      if (contacts) clientData.contacts = contacts;
+      if (tos_uri) clientData.tosUri = tos_uri;
+      if (policy_uri) clientData.policyUri = policy_uri;
+
+      // Store client
+      if (!this.clientResource) {
+        return res.status(500).json({
+          error: 'server_error',
+          error_description: 'Client registration not available'
+        });
+      }
+
+      const client = await this.clientResource.insert(clientData);
+
+      // Return client credentials (RFC 7591 response format)
+      return res.status(201).json({
+        client_id: clientId,
+        client_secret: clientSecret,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        client_secret_expires_at: 0, // 0 = never expires
+        redirect_uris: redirect_uris,
+        token_endpoint_auth_method,
+        grant_types: clientData.grantTypes,
+        response_types: clientData.responseTypes,
+        client_name: clientData.name,
+        client_uri,
+        logo_uri,
+        scope: clientData.allowedScopes.join(' '),
+        contacts,
+        tos_uri,
+        policy_uri
+      });
+
+    } catch (error) {
+      console.error('[OAuth2Server] Client registration error:', error);
+      return res.status(500).json({
+        error: 'server_error',
+        error_description: error.message
+      });
+    }
+  }
+
+  /**
+   * Token Revocation endpoint handler (POST /oauth/revoke)
+   * Implements RFC 7009 - OAuth 2.0 Token Revocation
+   *
+   * Request body:
+   * - token: Token to revoke (required)
+   * - token_type_hint: 'access_token' | 'refresh_token' (optional)
+   */
+  async revokeHandler(req, res) {
+    try {
+      const { token, token_type_hint } = req.body || {};
+
+      if (!token) {
+        return res.status(400).json({
+          error: 'invalid_request',
+          error_description: 'token is required'
+        });
+      }
+
+      // Verify and decode token
+      const { publicKey, privateKey, kid } = await this.keyManager.getCurrentKey();
+      const { verifyRS256Token } = await import('./rsa-keys.js');
+
+      const [valid, payload] = verifyRS256Token(token, publicKey);
+
+      if (!valid) {
+        // RFC 7009: "The authorization server responds with HTTP status code 200"
+        // even if token is invalid (prevents token scanning)
+        return res.status(200).send();
+      }
+
+      // In a production system, you would:
+      // 1. Store revoked tokens in a blacklist (Redis, database, etc.)
+      // 2. Check blacklist during token validation
+      // 3. Set TTL on blacklist entries matching token expiry
+
+      // For now, just return success
+      // TODO: Implement token blacklist storage
+
+      return res.status(200).send();
+
+    } catch (error) {
+      console.error('[OAuth2Server] Token revocation error:', error);
+      // RFC 7009: Return 200 even on error (security best practice)
+      return res.status(200).send();
+    }
+  }
+
+  /**
    * Rotate signing keys
    */
   async rotateKeys() {
