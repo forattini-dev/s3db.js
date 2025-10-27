@@ -1,20 +1,21 @@
 /**
  * Guards Live Example
  *
- * Exemplo funcional de guards com Express (framework-agnostic).
+ * Exemplo funcional de guards com Hono (framework-agnostic).
  * Mostra como usar guards declarativos para autorização automática.
  */
 
-import Database from 's3db.js';
-import express from 'express';
+import Database from '../../src/database.class.js';
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
 import {
-  createExpressContext,
+  createHonoContext,
   applyGuardsToList,
   applyGuardsToGet,
   applyGuardsToInsert,
   applyGuardsToUpdate,
   applyGuardsToDelete
-} from 's3db.js/concerns/guards-helpers';
+} from '../../src/concerns/guards-helpers.js';
 
 // ============================================================================
 // SETUP DATABASE COM GUARDS
@@ -129,32 +130,30 @@ async function setupDatabase() {
 }
 
 // ============================================================================
-// EXPRESS API COM GUARDS
+// HONO API COM GUARDS
 // ============================================================================
 
-async function createExpressAPI(ordersResource) {
-  const app = express();
-
-  app.use(express.json());
+async function createHonoAPI(ordersResource) {
+  const app = new Hono();
 
   // ========================================
   // Fake auth middleware (simula OAuth2/OIDC)
   // ========================================
-  app.use((req, res, next) => {
+  app.use('*', async (c, next) => {
     // Simula user do token JWT
     // Em produção, viria do OIDCClient middleware
-    req.user = {
-      sub: req.headers['x-user-id'] || 'user-123',
-      tenantId: req.headers['x-tenant-id'] || 'tenant-1',
+    c.set('user', {
+      sub: c.req.header('x-user-id') || 'user-123',
+      tenantId: c.req.header('x-tenant-id') || 'tenant-1',
       email: 'john@example.com',
       resource_access: {
         'orders-api': {
-          roles: req.headers['x-user-role'] === 'admin' ? ['admin'] : ['user']
+          roles: c.req.header('x-user-role') === 'admin' ? ['admin'] : ['user']
         }
       }
-    };
+    });
 
-    next();
+    await next();
   });
 
   // ========================================
@@ -162,10 +161,10 @@ async function createExpressAPI(ordersResource) {
   // ========================================
 
   // GET /orders - List with guards
-  app.get('/orders', async (req, res) => {
+  app.get('/orders', async (c) => {
     try {
       // 1. Create framework-agnostic context
-      const context = createExpressContext(req);
+      const context = await createHonoContext(c);
 
       // 2. Apply guards to list (executa guard + aplica partition)
       const options = await applyGuardsToList(ordersResource, context);
@@ -173,7 +172,7 @@ async function createExpressAPI(ordersResource) {
       // 3. List com partition automático do guard (O(1)!)
       const orders = await ordersResource.list(options);
 
-      res.json({
+      return c.json({
         orders,
         count: orders.length,
         partition: options.partition,
@@ -181,113 +180,124 @@ async function createExpressAPI(ordersResource) {
       });
     } catch (err) {
       console.error('List error:', err);
-      res.status(err.message.includes('Forbidden') ? 403 : 500).json({
-        error: err.message
-      });
+      return c.json(
+        { error: err.message },
+        err.message.includes('Forbidden') ? 403 : 500
+      );
     }
   });
 
   // GET /orders/:id - Get with guards
-  app.get('/orders/:id', async (req, res) => {
+  app.get('/orders/:id', async (c) => {
     try {
       // 1. Create context
-      const context = createExpressContext(req);
+      const context = await createHonoContext(c);
 
       // 2. Get record
-      const order = await ordersResource.get(req.params.id);
+      const order = await ordersResource.get(c.req.param('id'));
 
       // 3. Apply guards (ownership check)
       const allowed = await applyGuardsToGet(ordersResource, context, order);
 
       if (!allowed) {
         // 404 ao invés de 403 (não revela existência)
-        return res.status(404).json({ error: 'Order not found' });
+        return c.json({ error: 'Order not found' }, 404);
       }
 
-      res.json(order);
+      return c.json(order);
     } catch (err) {
       console.error('Get error:', err);
-      res.status(500).json({ error: err.message });
+      return c.json({ error: err.message }, 500);
     }
   });
 
   // POST /orders - Insert with guards
-  app.post('/orders', async (req, res) => {
+  app.post('/orders', async (c) => {
     try {
       // 1. Create context
-      const context = createExpressContext(req);
+      const context = await createHonoContext(c);
 
-      // 2. Apply guards (força tenantId/userId)
-      const data = await applyGuardsToInsert(ordersResource, context, req.body);
+      // 2. Get body
+      const body = await c.req.json();
 
-      // 3. Insert com dados modificados pelo guard
+      // 3. Apply guards (força tenantId/userId)
+      const data = await applyGuardsToInsert(ordersResource, context, body);
+
+      // 4. Insert com dados modificados pelo guard
       const order = await ordersResource.insert(data);
 
-      res.status(201).json(order);
+      return c.json(order, 201);
     } catch (err) {
       console.error('Insert error:', err);
-      res.status(err.message.includes('Forbidden') ? 403 : 500).json({
-        error: err.message
-      });
+      return c.json(
+        { error: err.message },
+        err.message.includes('Forbidden') ? 403 : 500
+      );
     }
   });
 
   // PATCH /orders/:id - Update with guards
-  app.patch('/orders/:id', async (req, res) => {
+  app.patch('/orders/:id', async (c) => {
     try {
       // 1. Create context
-      const context = createExpressContext(req);
+      const context = await createHonoContext(c);
 
       // 2. Get current record
-      const order = await ordersResource.get(req.params.id);
+      const order = await ordersResource.get(c.req.param('id'));
 
       // 3. Apply guards (ownership check)
       await applyGuardsToUpdate(ordersResource, context, order);
 
-      // 4. Update
-      const updated = await ordersResource.update(req.params.id, req.body);
+      // 4. Get body and update
+      const body = await c.req.json();
+      const updated = await ordersResource.update(c.req.param('id'), body);
 
-      res.json(updated);
+      return c.json(updated);
     } catch (err) {
       console.error('Update error:', err);
-      res.status(err.message.includes('Forbidden') ? 403 : 500).json({
-        error: err.message
-      });
+      return c.json(
+        { error: err.message },
+        err.message.includes('Forbidden') ? 403 : 500
+      );
     }
   });
 
   // DELETE /orders/:id - Delete with guards
-  app.delete('/orders/:id', async (req, res) => {
+  app.delete('/orders/:id', async (c) => {
     try {
       // 1. Create context
-      const context = createExpressContext(req);
+      const context = await createHonoContext(c);
 
       // 2. Get current record
-      const order = await ordersResource.get(req.params.id);
+      const order = await ordersResource.get(c.req.param('id'));
 
       // 3. Apply guards (ownership OU admin)
       await applyGuardsToDelete(ordersResource, context, order);
 
       // 4. Delete
-      await ordersResource.delete(req.params.id);
+      await ordersResource.delete(c.req.param('id'));
 
-      res.status(204).send();
+      return c.body(null, 204);
     } catch (err) {
       console.error('Delete error:', err);
-      res.status(err.message.includes('Forbidden') ? 403 : 500).json({
-        error: err.message
-      });
+      return c.json(
+        { error: err.message },
+        err.message.includes('Forbidden') ? 403 : 500
+      );
     }
   });
 
   // ========================================
   // Start server
   // ========================================
+  console.log('✅ Hono API rodando em http://localhost:3000\n');
+
   return new Promise((resolve) => {
-    const server = app.listen(3000, () => {
-      console.log('✅ Express API rodando em http://localhost:3000\n');
-      resolve({ app, server });
+    const server = serve({
+      fetch: app.fetch,
+      port: 3000
     });
+    resolve({ app, server });
   });
 }
 
@@ -449,8 +459,8 @@ async function main() {
   // Demo programático
   await demo(ordersResource);
 
-  // Express API
-  const { server } = await createExpressAPI(ordersResource);
+  // Hono API
+  const { server } = await createHonoAPI(ordersResource);
 
   console.log('📖 Teste a API com curl:\n');
   console.log('# List orders (User1)');

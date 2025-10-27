@@ -57,6 +57,10 @@
       "types": "./src/concerns/typescript-generator.d.ts",
       "import": "./src/concerns/typescript-generator.js",
       "require": "./src/concerns/typescript-generator.js"
+    },
+    "./concerns/guards-helpers": {
+      "import": "./src/concerns/guards-helpers.js",
+      "require": "./src/concerns/guards-helpers.js"
     }
   },
   "files": [
