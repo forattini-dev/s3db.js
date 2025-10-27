@@ -1,5 +1,7 @@
 # Identity Plugin - Architecture
 
+[← Back to Identity Plugin](../identity-plugin.md) | [OAuth2/OIDC](./oauth2-oidc.md) | [Troubleshooting](./troubleshooting.md)
+
 Technical architecture and implementation details.
 
 ## Table of Contents

@@ -1,5 +1,7 @@
 # Identity Plugin - OAuth2 & OpenID Connect
 
+[← Back to Identity Plugin](../identity-plugin.md) | [Admin Panel](./admin-panel.md) | [Security →](./security.md)
+
 Complete guide to OAuth2 authorization and OIDC identity features.
 
 ## Table of Contents

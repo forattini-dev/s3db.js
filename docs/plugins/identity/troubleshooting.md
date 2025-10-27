@@ -1,5 +1,7 @@
 # Identity Plugin - Troubleshooting
 
+[← Back to Identity Plugin](../identity-plugin.md) | [Security](./security.md) | [Architecture →](./architecture.md)
+
 Common issues and solutions for the Identity Provider plugin.
 
 ## Table of Contents

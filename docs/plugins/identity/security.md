@@ -1,5 +1,7 @@
 # Identity Plugin - Security Best Practices
 
+[← Back to Identity Plugin](../identity-plugin.md) | [Configuration](./configuration.md) | [Troubleshooting →](./troubleshooting.md)
+
 Security guidelines and best practices for production deployment.
 
 ## Table of Contents
