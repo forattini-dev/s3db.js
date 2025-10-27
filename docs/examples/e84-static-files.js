@@ -183,12 +183,27 @@ async function setupAPI(db, staticDir) {
         root: staticDir,           // Root directory
         config: {
           index: ['index.html'],   // Directory index files
+          fallback: false,         // No fallback for this path
           maxAge: 86400000,        // Cache for 24 hours (milliseconds)
           dotfiles: 'ignore',      // Ignore dotfiles (.env, .git, etc.)
           etag: true,              // Enable ETag (304 responses)
           cors: true               // Enable CORS
         }
       },
+
+      // 🔥 NEW: Example for SPA (React Router, Vue Router, etc.)
+      // Uncomment to serve a React app with client-side routing
+      // {
+      //   driver: 'filesystem',
+      //   path: '/app',            // Mount React app at /app/*
+      //   root: './build',         // React build directory
+      //   config: {
+      //     fallback: 'index.html', // ⭐ Fallback to index.html for SPA routing!
+      //     maxAge: 3600000,       // Cache for 1 hour
+      //     etag: true,
+      //     cors: true
+      //   }
+      // },
 
       // S3 driver - serve from S3 bucket (streaming mode)
       {
@@ -278,6 +293,8 @@ function printUsage() {
   console.log('Filesystem Driver:');
   console.log('  root           - Root directory to serve files from');
   console.log('  index          - Index files for directories (default: ["index.html"])');
+  console.log('  fallback       - Fallback file for SPA routing (e.g., "index.html", true, or false)');
+  console.log('                   ⭐ Use for React Router, Vue Router, etc.');
   console.log('  maxAge         - Cache max-age in milliseconds (default: 0)');
   console.log('  dotfiles       - Handle dotfiles: "ignore", "allow", "deny" (default: "ignore")');
   console.log('  etag           - Enable ETag generation (default: true)');
@@ -306,6 +323,39 @@ function printUsage() {
   console.log('  ✓ Content-Type detection');
   console.log('  ✓ Path traversal prevention');
   console.log('  ✓ S3 streaming or presigned URL redirect\n');
+
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🚀 SPA (REACT ROUTER) SETUP');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  console.log('For React apps with React Router (or any SPA framework):');
+  console.log('');
+  console.log('1. Build your React app:');
+  console.log('   npm run build');
+  console.log('');
+  console.log('2. Configure static serving with fallback:');
+  console.log('   {');
+  console.log('     driver: "filesystem",');
+  console.log('     path: "/app",');
+  console.log('     root: "./build",');
+  console.log('     config: {');
+  console.log('       fallback: "index.html",  // ⭐ Key for SPA routing!');
+  console.log('       maxAge: 3600000,');
+  console.log('       etag: true');
+  console.log('     }');
+  console.log('   }');
+  console.log('');
+  console.log('3. Access your app:');
+  console.log('   GET /app/              → serves index.html');
+  console.log('   GET /app/login         → serves index.html (React Router handles /login)');
+  console.log('   GET /app/dashboard     → serves index.html (React Router handles /dashboard)');
+  console.log('   GET /app/static/css/*  → serves actual CSS files');
+  console.log('');
+  console.log('How it works:');
+  console.log('  - If file exists (like /app/static/js/main.js) → serve it');
+  console.log('  - If file NOT exists (like /app/dashboard) → serve index.html');
+  console.log('  - React Router takes over and renders the correct component');
+  console.log('');
 
   console.log('✅ Server ready!\n');
 }
