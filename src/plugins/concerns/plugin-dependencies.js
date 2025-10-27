@@ -107,6 +107,12 @@ export const PLUGIN_DEPENDENCIES = {
         description: 'Swagger UI integration for Hono',
         installCommand: 'pnpm add @hono/swagger-ui',
         npmUrl: 'https://www.npmjs.com/package/@hono/swagger-ui'
+      },
+      'jose': {
+        version: '^5.0.0',
+        description: 'Universal JOSE and JWE implementation (for OAuth2 token validation)',
+        installCommand: 'pnpm add jose',
+        npmUrl: 'https://www.npmjs.com/package/jose'
       }
     }
   },

@@ -2,6 +2,7 @@ import crypto, { createHash, generateKeyPairSync, createPublicKey, createSign, c
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import EventEmitter from 'events';
 import { Hono } from 'hono';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { mkdir, copyFile, unlink, stat, access, readdir, writeFile, readFile, rm, watch } from 'fs/promises';
 import fs, { createReadStream, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync } from 'fs';
 import { pipeline } from 'stream/promises';
@@ -2543,6 +2544,12 @@ const PLUGIN_DEPENDENCIES = {
         description: "Swagger UI integration for Hono",
         installCommand: "pnpm add @hono/swagger-ui",
         npmUrl: "https://www.npmjs.com/package/@hono/swagger-ui"
+      },
+      "jose": {
+        version: "^5.0.0",
+        description: "Universal JOSE and JWE implementation (for OAuth2 token validation)",
+        installCommand: "pnpm add jose",
+        npmUrl: "https://www.npmjs.com/package/jose"
       }
     }
   },
@@ -4990,12 +4997,113 @@ function basicAuth(options = {}) {
   };
 }
 
+const jwksCache = /* @__PURE__ */ new Map();
+function createOAuth2Handler(config, usersResource) {
+  const {
+    issuer,
+    jwksUri,
+    audience = null,
+    algorithms = ["RS256", "ES256"],
+    cacheTTL = 36e5,
+    // 1 hour
+    clockTolerance = 60,
+    // 60 seconds tolerance for exp/nbf
+    validateScopes = true,
+    fetchUserInfo = true
+  } = config;
+  if (!issuer) {
+    throw new Error("[OAuth2 Auth] Missing required config: issuer");
+  }
+  const finalJwksUri = jwksUri || `${issuer}/.well-known/jwks.json`;
+  const getJWKS = () => {
+    const cacheKey = finalJwksUri;
+    if (jwksCache.has(cacheKey)) {
+      const cached = jwksCache.get(cacheKey);
+      if (Date.now() - cached.timestamp < cacheTTL) {
+        return cached.jwks;
+      }
+    }
+    const jwks = createRemoteJWKSet(new URL(finalJwksUri), {
+      cooldownDuration: 3e4,
+      // 30 seconds cooldown between fetches
+      cacheMaxAge: cacheTTL
+    });
+    jwksCache.set(cacheKey, {
+      jwks,
+      timestamp: Date.now()
+    });
+    return jwks;
+  };
+  return async (c) => {
+    const authHeader = c.req.header("authorization") || c.req.header("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return null;
+    }
+    const token = authHeader.substring(7);
+    try {
+      const jwks = getJWKS();
+      const verifyOptions = {
+        issuer,
+        algorithms,
+        clockTolerance
+      };
+      if (audience) {
+        verifyOptions.audience = audience;
+      }
+      const { payload } = await jwtVerify(token, jwks, verifyOptions);
+      const userId = payload.sub;
+      const email = payload.email || null;
+      const username = payload.preferred_username || payload.username || email;
+      const scopes = payload.scope ? payload.scope.split(" ") : payload.scopes || [];
+      const role = payload.role || "user";
+      let user = null;
+      if (fetchUserInfo && userId && usersResource) {
+        try {
+          user = await usersResource.get(userId).catch(() => null);
+          if (!user && email) {
+            const users = await usersResource.query({ email }, { limit: 1 });
+            user = users[0] || null;
+          }
+        } catch (err) {
+        }
+      }
+      if (user) {
+        return {
+          ...user,
+          scopes: user.scopes || scopes,
+          // Prefer database scopes
+          role: user.role || role,
+          tokenClaims: payload
+          // Include full token claims
+        };
+      }
+      return {
+        id: userId,
+        username: username || userId,
+        email,
+        role,
+        scopes,
+        active: true,
+        tokenClaims: payload,
+        isVirtual: true
+        // Flag to indicate user is not in local database
+      };
+    } catch (err) {
+      if (config.verbose) {
+        console.error("[OAuth2 Auth] Token verification failed:", err.message);
+      }
+      return null;
+    }
+  };
+}
+
 function createAuthMiddleware(options = {}) {
   const {
     methods = [],
     jwt: jwtConfig = {},
     apiKey: apiKeyConfig = {},
     basic: basicConfig = {},
+    oauth2: oauth2Config = {},
     usersResource,
     optional = false
   } = options;
@@ -5034,6 +5142,19 @@ function createAuthMiddleware(options = {}) {
         optional: true
         // Check all methods before rejecting
       })
+    });
+  }
+  if (methods.includes("oauth2") && oauth2Config.issuer) {
+    const oauth2Handler = createOAuth2Handler(oauth2Config, usersResource);
+    middlewares.push({
+      name: "oauth2",
+      middleware: async (c, next) => {
+        const user = await oauth2Handler(c);
+        if (user) {
+          c.set("user", user);
+          return await next();
+        }
+      }
     });
   }
   return async (c, next) => {
@@ -5410,6 +5531,7 @@ class ApiServer {
       jwt: driverConfigs.jwt,
       apiKey: driverConfigs.apiKey,
       basic: driverConfigs.basic,
+      oauth2: driverConfigs.oauth2,
       usersResource: authResource,
       optional: true
       // Let guards handle authorization
