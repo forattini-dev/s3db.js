@@ -202,7 +202,7 @@ The Identity Plugin creates and manages these resources:
   id: 'string',              // User ID
   email: 'string',           // Email (unique)
   name: 'string',            // Display name
-  passwordHash: 'string',    // bcrypt hashed password
+  password: 'password',      // Auto-hashed with bcrypt (one-way, 53 bytes)
   status: 'string',          // active | suspended | pending_verification
   emailVerified: 'boolean',  // Email verification status
   role: 'string',            // user | admin
@@ -214,7 +214,8 @@ The Identity Plugin creates and manages these resources:
 
 **Notes:**
 - Email must be unique
-- Password hashed with bcrypt
+- Password automatically hashed with bcrypt (one-way, irreversible)
+- Use `verifyPassword()` from 's3db.js' to verify passwords
 - Status controls login access
 - Admin role grants access to admin panel
 

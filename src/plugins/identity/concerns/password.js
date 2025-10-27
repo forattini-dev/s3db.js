@@ -1,11 +1,12 @@
 /**
- * Password Management - Hashing and Validation
+ * Password Management - Validation and Generation
  *
- * Uses bcrypt for secure password hashing with configurable rounds.
+ * Uses S3DB native 'password' type for one-way bcrypt hashing.
+ * Passwords are hashed automatically on insert/update using bcrypt.
  * Provides password strength validation according to policy.
  */
 
-import bcrypt from 'bcrypt';
+import { verifyPassword as bcryptVerify } from '../../../concerns/password-hashing.js';
 
 /**
  * Default password policy
@@ -16,50 +17,24 @@ const DEFAULT_PASSWORD_POLICY = {
   requireUppercase: true,
   requireLowercase: true,
   requireNumbers: true,
-  requireSymbols: false,
-  bcryptRounds: 10
+  requireSymbols: false
 };
 
 /**
- * Hash a plaintext password using bcrypt
- * @param {string} password - Plaintext password
- * @param {number} [rounds=10] - Bcrypt cost factor (higher = more secure but slower)
- * @returns {Promise<string>} Hashed password
- */
-export async function hashPassword(password, rounds = 10) {
-  if (!password || typeof password !== 'string') {
-    throw new Error('Password must be a non-empty string');
-  }
-
-  if (password.length > 72) {
-    // Bcrypt has a maximum password length of 72 bytes
-    throw new Error('Password too long (max 72 characters)');
-  }
-
-  return await bcrypt.hash(password, rounds);
-}
-
-/**
- * Verify a plaintext password against a hashed password
+ * Verify a plaintext password against a stored bcrypt hash
+ *
+ * NOTE: With S3DB's `password` type, passwords are auto-hashed on insert/update
+ * using bcrypt with compaction (60 → 53 bytes). This function verifies the
+ * plaintext password against the stored hash using bcrypt.compare().
+ *
  * @param {string} plaintext - Plaintext password to verify
- * @param {string} hash - Hashed password to compare against
+ * @param {string} storedHash - Stored bcrypt hash (compacted, 53 bytes)
  * @returns {Promise<boolean>} True if password matches, false otherwise
  */
-export async function verifyPassword(plaintext, hash) {
-  if (!plaintext || typeof plaintext !== 'string') {
-    return false;
-  }
-
-  if (!hash || typeof hash !== 'string') {
-    return false;
-  }
-
-  try {
-    return await bcrypt.compare(plaintext, hash);
-  } catch (error) {
-    // Invalid hash format
-    return false;
-  }
+export async function verifyPassword(plaintext, storedHash) {
+  // Use bcrypt verification from password-hashing.js
+  // It handles both full (60 bytes) and compacted (53 bytes) hashes
+  return await bcryptVerify(plaintext, storedHash);
 }
 
 /**
@@ -155,27 +130,9 @@ export function generatePassword(policy = DEFAULT_PASSWORD_POLICY) {
   return password.split('').sort(() => Math.random() - 0.5).join('');
 }
 
-/**
- * Check if password needs rehashing (e.g., bcrypt rounds changed)
- * @param {string} hash - Existing password hash
- * @param {number} [targetRounds=10] - Target bcrypt rounds
- * @returns {boolean} True if password should be rehashed
- */
-export function needsRehash(hash, targetRounds = 10) {
-  try {
-    const rounds = bcrypt.getRounds(hash);
-    return rounds < targetRounds;
-  } catch (error) {
-    // Invalid hash format
-    return true;
-  }
-}
-
 export default {
-  hashPassword,
   verifyPassword,
   validatePassword,
   generatePassword,
-  needsRehash,
   DEFAULT_PASSWORD_POLICY
 };

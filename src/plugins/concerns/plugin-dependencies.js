@@ -139,13 +139,13 @@ export const PLUGIN_DEPENDENCIES = {
         npmUrl: 'https://www.npmjs.com/package/jose'
       },
       'bcrypt': {
-        version: '^5.1.0',
+        version: '^5.1.0 || ^6.0.0',
         description: 'Secure password hashing library',
         installCommand: 'pnpm add bcrypt',
         npmUrl: 'https://www.npmjs.com/package/bcrypt'
       },
       'nodemailer': {
-        version: '^6.9.0',
+        version: '^6.9.0 || ^7.0.0',
         description: 'Email sending library for password reset and verification',
         installCommand: 'pnpm add nodemailer',
         npmUrl: 'https://www.npmjs.com/package/nodemailer'

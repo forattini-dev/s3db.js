@@ -2,6 +2,7 @@ import { merge, isString } from "lodash-es";
 import FastestValidator from "fastest-validator";
 
 import { encrypt } from "./concerns/crypto.js";
+import { hashPassword, compactHash } from "./concerns/password-hashing.js";
 import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ValidationError } from "./errors.js";
 
@@ -26,6 +27,43 @@ async function secretHandler (actual, errors, schema) {
   return actual;
 }
 
+async function passwordHandler (actual, errors, schema) {
+  if (!this.bcryptRounds) {
+    errors.push(new ValidationError("Missing bcrypt rounds configuration.", {
+      actual,
+      type: "bcryptRoundsMissing",
+      suggestion: "Provide bcryptRounds in database configuration."
+    }));
+    return actual;
+  }
+
+  // Hash password with bcrypt
+  const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(actual), this.bcryptRounds));
+  if (!okHash) {
+    errors.push(new ValidationError("Problem hashing password.", {
+      actual,
+      type: "passwordHashingProblem",
+      error: errHash,
+      suggestion: "Check the bcryptRounds configuration and password value."
+    }));
+    return actual;
+  }
+
+  // Compact hash to save space (60 bytes → 53 bytes)
+  const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
+  if (!okCompact) {
+    errors.push(new ValidationError("Problem compacting password hash.", {
+      actual,
+      type: "hashCompactionProblem",
+      error: errCompact,
+      suggestion: "Bcrypt hash format may be invalid."
+    }));
+    return hash; // Return uncompacted as fallback
+  }
+
+  return compacted;
+}
+
 async function jsonHandler (actual, errors, schema) {
   if (isString(actual)) return actual;
   const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
@@ -34,13 +72,15 @@ async function jsonHandler (actual, errors, schema) {
 }
 
 export class Validator extends FastestValidator {
-  constructor({ options, passphrase, autoEncrypt = true } = {}) {
+  constructor({ options, passphrase, bcryptRounds = 10, autoEncrypt = true } = {}) {
     super(merge({}, {
       useNewCustomCheckerFunction: true,
 
       messages: {
         encryptionKeyMissing: "Missing configuration for secrets encryption.",
         encryptionProblem: "Problem encrypting secret. Actual: {actual}. Error: {error}",
+        bcryptRoundsMissing: "Missing bcrypt rounds configuration for password hashing.",
+        passwordHashingProblem: "Problem hashing password. Error: {error}",
       },
 
       defaults: {
@@ -57,6 +97,7 @@ export class Validator extends FastestValidator {
     }, options))
 
     this.passphrase = passphrase;
+    this.bcryptRounds = bcryptRounds;
     this.autoEncrypt = autoEncrypt;
 
     this.alias('secret', {
@@ -73,9 +114,18 @@ export class Validator extends FastestValidator {
       custom: this.autoEncrypt ? secretHandler : undefined,
     })
 
-    this.alias('secretNumber', { 
+    this.alias('secretNumber', {
       type: "number",
       custom: this.autoEncrypt ? secretHandler : undefined,
+    })
+
+    this.alias('password', {
+      type: "string",
+      custom: this.autoEncrypt ? passwordHandler : undefined,
+      messages: {
+        string: "The '{field}' field must be a string.",
+        stringMin: "This password '{field}' field length must be at least {expected} long.",
+      },
     })
 
     this.alias('json', {

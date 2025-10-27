@@ -3,22 +3,22 @@ import EventEmitter from 'events';
 import { Hono } from 'hono';
 import fs, { mkdir, copyFile, unlink, stat, access, readdir, writeFile, readFile as readFile$1, rm, watch } from 'fs/promises';
 import path$1, { sep as sep$1, join, dirname } from 'path';
-import fs$1, { createReadStream, promises as promises$1, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync, readFileSync } from 'fs';
+import require$$0$1, { createReadStream, promises as promises$1, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync, readFileSync } from 'fs';
 import { HeadObjectCommand, GetObjectCommand, S3Client as S3Client$1, PutObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Buffer as Buffer$1 } from 'buffer';
-import os, { homedir } from 'os';
+import require$$2, { homedir } from 'os';
 import { pipeline } from 'stream/promises';
-import require$$0$2, { Transform, Writable, Readable } from 'stream';
+import require$$0$3, { Transform, Writable, Readable } from 'stream';
 import zlib from 'node:zlib';
 import jsonStableStringify from 'json-stable-stringify';
-import os$1 from 'node:os';
+import os from 'node:os';
 import { PromisePool } from '@supercharge/promise-pool';
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import { merge, isString, isEmpty, invert, uniq, cloneDeep, get, set, isObject as isObject$1, chunk, isFunction as isFunction$1 } from 'lodash-es';
 import { flatten, unflatten } from 'flat';
 import FastestValidator from 'fastest-validator';
 import { ReadableStream } from 'node:stream/web';
-import require$$0$3, { Agent } from 'http';
+import require$$0$4, { Agent } from 'http';
 import require$$1, { Agent as Agent$1 } from 'https';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { fileURLToPath } from 'node:url';
@@ -30,11 +30,11 @@ import Stream from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import require$$3, { gzip, brotliCompress } from 'zlib';
 import require$$1$1, { promisify } from 'util';
-import require$$0$1, { fileURLToPath as fileURLToPath$1 } from 'url';
+import require$$0$2, { fileURLToPath as fileURLToPath$1 } from 'url';
 import require$$7 from 'net';
 import require$$4 from 'dns';
 import require$$1$2 from 'tls';
-import require$$0$4 from 'child_process';
+import require$$0$5 from 'child_process';
 
 function _mergeNamespaces(n, m) {
   m.forEach(function (e) {
@@ -1095,6 +1095,615 @@ function base64ToArrayBuffer(base64) {
     }
     return bytes;
   }
+}
+
+var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
+
+function getDefaultExportFromCjs (x) {
+	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
+}
+
+var bcrypt$1 = {exports: {}};
+
+function commonjsRequire(path) {
+	throw new Error('Could not dynamically require "' + path + '". Please configure the dynamicRequireTargets or/and ignoreDynamicRequires option of @rollup/plugin-commonjs appropriately for this require call to work.');
+}
+
+var nodeGypBuild$1 = {exports: {}};
+
+var nodeGypBuild;
+var hasRequiredNodeGypBuild$1;
+
+function requireNodeGypBuild$1 () {
+	if (hasRequiredNodeGypBuild$1) return nodeGypBuild;
+	hasRequiredNodeGypBuild$1 = 1;
+	var fs = require$$0$1;
+	var path = path$1;
+	var os = require$$2;
+
+	// Workaround to fix webpack's build warnings: 'the request of a dependency is an expression'
+	var runtimeRequire = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : commonjsRequire; // eslint-disable-line
+
+	var vars = (process.config && process.config.variables) || {};
+	var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
+	var abi = process.versions.modules; // TODO: support old node where this is undef
+	var runtime = isElectron() ? 'electron' : (isNwjs() ? 'node-webkit' : 'node');
+
+	var arch = process.env.npm_config_arch || os.arch();
+	var platform = process.env.npm_config_platform || os.platform();
+	var libc = process.env.LIBC || (isAlpine(platform) ? 'musl' : 'glibc');
+	var armv = process.env.ARM_VERSION || (arch === 'arm64' ? '8' : vars.arm_version) || '';
+	var uv = (process.versions.uv || '').split('.')[0];
+
+	nodeGypBuild = load;
+
+	function load (dir) {
+	  return runtimeRequire(load.resolve(dir))
+	}
+
+	load.resolve = load.path = function (dir) {
+	  dir = path.resolve(dir || '.');
+
+	  try {
+	    var name = runtimeRequire(path.join(dir, 'package.json')).name.toUpperCase().replace(/-/g, '_');
+	    if (process.env[name + '_PREBUILD']) dir = process.env[name + '_PREBUILD'];
+	  } catch (err) {}
+
+	  if (!prebuildsOnly) {
+	    var release = getFirst(path.join(dir, 'build/Release'), matchBuild);
+	    if (release) return release
+
+	    var debug = getFirst(path.join(dir, 'build/Debug'), matchBuild);
+	    if (debug) return debug
+	  }
+
+	  var prebuild = resolve(dir);
+	  if (prebuild) return prebuild
+
+	  var nearby = resolve(path.dirname(process.execPath));
+	  if (nearby) return nearby
+
+	  var target = [
+	    'platform=' + platform,
+	    'arch=' + arch,
+	    'runtime=' + runtime,
+	    'abi=' + abi,
+	    'uv=' + uv,
+	    armv ? 'armv=' + armv : '',
+	    'libc=' + libc,
+	    'node=' + process.versions.node,
+	    process.versions.electron ? 'electron=' + process.versions.electron : '',
+	    typeof __webpack_require__ === 'function' ? 'webpack=true' : '' // eslint-disable-line
+	  ].filter(Boolean).join(' ');
+
+	  throw new Error('No native build was found for ' + target + '\n    loaded from: ' + dir + '\n')
+
+	  function resolve (dir) {
+	    // Find matching "prebuilds/<platform>-<arch>" directory
+	    var tuples = readdirSync(path.join(dir, 'prebuilds')).map(parseTuple);
+	    var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
+	    if (!tuple) return
+
+	    // Find most specific flavor first
+	    var prebuilds = path.join(dir, 'prebuilds', tuple.name);
+	    var parsed = readdirSync(prebuilds).map(parseTags);
+	    var candidates = parsed.filter(matchTags(runtime, abi));
+	    var winner = candidates.sort(compareTags(runtime))[0];
+	    if (winner) return path.join(prebuilds, winner.file)
+	  }
+	};
+
+	function readdirSync (dir) {
+	  try {
+	    return fs.readdirSync(dir)
+	  } catch (err) {
+	    return []
+	  }
+	}
+
+	function getFirst (dir, filter) {
+	  var files = readdirSync(dir).filter(filter);
+	  return files[0] && path.join(dir, files[0])
+	}
+
+	function matchBuild (name) {
+	  return /\.node$/.test(name)
+	}
+
+	function parseTuple (name) {
+	  // Example: darwin-x64+arm64
+	  var arr = name.split('-');
+	  if (arr.length !== 2) return
+
+	  var platform = arr[0];
+	  var architectures = arr[1].split('+');
+
+	  if (!platform) return
+	  if (!architectures.length) return
+	  if (!architectures.every(Boolean)) return
+
+	  return { name, platform, architectures }
+	}
+
+	function matchTuple (platform, arch) {
+	  return function (tuple) {
+	    if (tuple == null) return false
+	    if (tuple.platform !== platform) return false
+	    return tuple.architectures.includes(arch)
+	  }
+	}
+
+	function compareTuples (a, b) {
+	  // Prefer single-arch prebuilds over multi-arch
+	  return a.architectures.length - b.architectures.length
+	}
+
+	function parseTags (file) {
+	  var arr = file.split('.');
+	  var extension = arr.pop();
+	  var tags = { file: file, specificity: 0 };
+
+	  if (extension !== 'node') return
+
+	  for (var i = 0; i < arr.length; i++) {
+	    var tag = arr[i];
+
+	    if (tag === 'node' || tag === 'electron' || tag === 'node-webkit') {
+	      tags.runtime = tag;
+	    } else if (tag === 'napi') {
+	      tags.napi = true;
+	    } else if (tag.slice(0, 3) === 'abi') {
+	      tags.abi = tag.slice(3);
+	    } else if (tag.slice(0, 2) === 'uv') {
+	      tags.uv = tag.slice(2);
+	    } else if (tag.slice(0, 4) === 'armv') {
+	      tags.armv = tag.slice(4);
+	    } else if (tag === 'glibc' || tag === 'musl') {
+	      tags.libc = tag;
+	    } else {
+	      continue
+	    }
+
+	    tags.specificity++;
+	  }
+
+	  return tags
+	}
+
+	function matchTags (runtime, abi) {
+	  return function (tags) {
+	    if (tags == null) return false
+	    if (tags.runtime && tags.runtime !== runtime && !runtimeAgnostic(tags)) return false
+	    if (tags.abi && tags.abi !== abi && !tags.napi) return false
+	    if (tags.uv && tags.uv !== uv) return false
+	    if (tags.armv && tags.armv !== armv) return false
+	    if (tags.libc && tags.libc !== libc) return false
+
+	    return true
+	  }
+	}
+
+	function runtimeAgnostic (tags) {
+	  return tags.runtime === 'node' && tags.napi
+	}
+
+	function compareTags (runtime) {
+	  // Precedence: non-agnostic runtime, abi over napi, then by specificity.
+	  return function (a, b) {
+	    if (a.runtime !== b.runtime) {
+	      return a.runtime === runtime ? -1 : 1
+	    } else if (a.abi !== b.abi) {
+	      return a.abi ? -1 : 1
+	    } else if (a.specificity !== b.specificity) {
+	      return a.specificity > b.specificity ? -1 : 1
+	    } else {
+	      return 0
+	    }
+	  }
+	}
+
+	function isNwjs () {
+	  return !!(process.versions && process.versions.nw)
+	}
+
+	function isElectron () {
+	  if (process.versions && process.versions.electron) return true
+	  if (process.env.ELECTRON_RUN_AS_NODE) return true
+	  return typeof window !== 'undefined' && window.process && window.process.type === 'renderer'
+	}
+
+	function isAlpine (platform) {
+	  return platform === 'linux' && fs.existsSync('/etc/alpine-release')
+	}
+
+	// Exposed for unit tests
+	// TODO: move to lib
+	load.parseTags = parseTags;
+	load.matchTags = matchTags;
+	load.compareTags = compareTags;
+	load.parseTuple = parseTuple;
+	load.matchTuple = matchTuple;
+	load.compareTuples = compareTuples;
+	return nodeGypBuild;
+}
+
+var hasRequiredNodeGypBuild;
+
+function requireNodeGypBuild () {
+	if (hasRequiredNodeGypBuild) return nodeGypBuild$1.exports;
+	hasRequiredNodeGypBuild = 1;
+	const runtimeRequire = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : commonjsRequire; // eslint-disable-line
+	if (typeof runtimeRequire.addon === 'function') { // if the platform supports native resolving prefer that
+	  nodeGypBuild$1.exports = runtimeRequire.addon.bind(runtimeRequire);
+	} else { // else use the runtime version here
+	  nodeGypBuild$1.exports = requireNodeGypBuild$1();
+	}
+	return nodeGypBuild$1.exports;
+}
+
+var promises;
+var hasRequiredPromises;
+
+function requirePromises () {
+	if (hasRequiredPromises) return promises;
+	hasRequiredPromises = 1;
+	let Promise = commonjsGlobal.Promise;
+
+	/// encapsulate a method with a node-style callback in a Promise
+	/// @param {object} 'this' of the encapsulated function
+	/// @param {function} function to be encapsulated
+	/// @param {Array-like} args to be passed to the called function
+	/// @return {Promise} a Promise encapsulating the function
+	function promise(fn, context, args) {
+	    if (!Array.isArray(args)) {
+	        args = Array.prototype.slice.call(args);
+	    }
+
+	    if (typeof fn !== 'function') {
+	        return Promise.reject(new Error('fn must be a function'));
+	    }
+
+	    return new Promise((resolve, reject) => {
+	        args.push((err, data) => {
+	            if (err) {
+	                reject(err);
+	            } else {
+	                resolve(data);
+	            }
+	        });
+
+	        fn.apply(context, args);
+	    });
+	}
+
+	/// @param {err} the error to be thrown
+	function reject(err) {
+	    return Promise.reject(err);
+	}
+
+	/// changes the promise implementation that bcrypt uses
+	/// @param {Promise} the implementation to use
+	function use(promise) {
+	    Promise = promise;
+	}
+
+	promises = {
+	    promise,
+	    reject,
+	    use
+	};
+	return promises;
+}
+
+var hasRequiredBcrypt;
+
+function requireBcrypt () {
+	if (hasRequiredBcrypt) return bcrypt$1.exports;
+	hasRequiredBcrypt = 1;
+	(function (module) {
+		const path = path$1;
+		const bindings = requireNodeGypBuild()(path.resolve(__dirname));
+
+		const crypto = crypto$1;
+
+		const promises = requirePromises();
+
+		/// generate a salt (sync)
+		/// @param {Number} [rounds] number of rounds (default 10)
+		/// @return {String} salt
+		function genSaltSync(rounds, minor) {
+		    // default 10 rounds
+		    if (!rounds) {
+		        rounds = 10;
+		    } else if (typeof rounds !== 'number') {
+		        throw new Error('rounds must be a number');
+		    }
+
+		    if (!minor) {
+		        minor = 'b';
+		    } else if (minor !== 'b' && minor !== 'a') {
+		        throw new Error('minor must be either "a" or "b"');
+		    }
+
+		    return bindings.gen_salt_sync(minor, rounds, crypto.randomBytes(16));
+		}
+
+		/// generate a salt
+		/// @param {Number} [rounds] number of rounds (default 10)
+		/// @param {Function} cb callback(err, salt)
+		function genSalt(rounds, minor, cb) {
+		    let error;
+
+		    // if callback is first argument, then use defaults for others
+		    if (typeof arguments[0] === 'function') {
+		        // have to set callback first otherwise arguments are overridden
+		        cb = arguments[0];
+		        rounds = 10;
+		        minor = 'b';
+		        // callback is second argument
+		    } else if (typeof arguments[1] === 'function') {
+		        // have to set callback first otherwise arguments are overridden
+		        cb = arguments[1];
+		        minor = 'b';
+		    }
+
+		    if (!cb) {
+		        return promises.promise(genSalt, this, [rounds, minor]);
+		    }
+
+		    // default 10 rounds
+		    if (!rounds) {
+		        rounds = 10;
+		    } else if (typeof rounds !== 'number') {
+		        // callback error asynchronously
+		        error = new Error('rounds must be a number');
+		        return process.nextTick(function () {
+		            cb(error);
+		        });
+		    }
+
+		    if (!minor) {
+		        minor = 'b';
+		    } else if (minor !== 'b' && minor !== 'a') {
+		        error = new Error('minor must be either "a" or "b"');
+		        return process.nextTick(function () {
+		            cb(error);
+		        });
+		    }
+
+		    crypto.randomBytes(16, function (error, randomBytes) {
+		        if (error) {
+		            cb(error);
+		            return;
+		        }
+
+		        bindings.gen_salt(minor, rounds, randomBytes, cb);
+		    });
+		}
+
+		/// hash data using a salt
+		/// @param {String|Buffer} data the data to encrypt
+		/// @param {String} salt the salt to use when hashing
+		/// @return {String} hash
+		function hashSync(data, salt) {
+		    if (data == null || salt == null) {
+		        throw new Error('data and salt arguments required');
+		    }
+
+		    if (!(typeof data === 'string' || data instanceof Buffer) || (typeof salt !== 'string' && typeof salt !== 'number')) {
+		        throw new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
+		    }
+
+		    if (typeof salt === 'number') {
+		        salt = module.exports.genSaltSync(salt);
+		    }
+
+		    return bindings.encrypt_sync(data, salt);
+		}
+
+		/// hash data using a salt
+		/// @param {String|Buffer} data the data to encrypt
+		/// @param {String} salt the salt to use when hashing
+		/// @param {Function} cb callback(err, hash)
+		function hash(data, salt, cb) {
+		    let error;
+
+		    if (typeof data === 'function') {
+		        error = new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
+		        return process.nextTick(function () {
+		            data(error);
+		        });
+		    }
+
+		    if (typeof salt === 'function') {
+		        error = new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
+		        return process.nextTick(function () {
+		            salt(error);
+		        });
+		    }
+
+		    // cb exists but is not a function
+		    // return a rejecting promise
+		    if (cb && typeof cb !== 'function') {
+		        return promises.reject(new Error('cb must be a function or null to return a Promise'));
+		    }
+
+		    if (!cb) {
+		        return promises.promise(hash, this, [data, salt]);
+		    }
+
+		    if (data == null || salt == null) {
+		        error = new Error('data and salt arguments required');
+		        return process.nextTick(function () {
+		            cb(error);
+		        });
+		    }
+
+		    if (!(typeof data === 'string' || data instanceof Buffer) || (typeof salt !== 'string' && typeof salt !== 'number')) {
+		        error = new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
+		        return process.nextTick(function () {
+		            cb(error);
+		        });
+		    }
+
+
+		    if (typeof salt === 'number') {
+		        return module.exports.genSalt(salt, function (err, salt) {
+		            return bindings.encrypt(data, salt, cb);
+		        });
+		    }
+
+		    return bindings.encrypt(data, salt, cb);
+		}
+
+		/// compare raw data to hash
+		/// @param {String|Buffer} data the data to hash and compare
+		/// @param {String} hash expected hash
+		/// @return {bool} true if hashed data matches hash
+		function compareSync(data, hash) {
+		    if (data == null || hash == null) {
+		        throw new Error('data and hash arguments required');
+		    }
+
+		    if (!(typeof data === 'string' || data instanceof Buffer) || typeof hash !== 'string') {
+		        throw new Error('data must be a string or Buffer and hash must be a string');
+		    }
+
+		    return bindings.compare_sync(data, hash);
+		}
+
+		/// compare raw data to hash
+		/// @param {String|Buffer} data the data to hash and compare
+		/// @param {String} hash expected hash
+		/// @param {Function} cb callback(err, matched) - matched is true if hashed data matches hash
+		function compare(data, hash, cb) {
+		    let error;
+
+		    if (typeof data === 'function') {
+		        error = new Error('data and hash arguments required');
+		        return process.nextTick(function () {
+		            data(error);
+		        });
+		    }
+
+		    if (typeof hash === 'function') {
+		        error = new Error('data and hash arguments required');
+		        return process.nextTick(function () {
+		            hash(error);
+		        });
+		    }
+
+		    // cb exists but is not a function
+		    // return a rejecting promise
+		    if (cb && typeof cb !== 'function') {
+		        return promises.reject(new Error('cb must be a function or null to return a Promise'));
+		    }
+
+		    if (!cb) {
+		        return promises.promise(compare, this, [data, hash]);
+		    }
+
+		    if (data == null || hash == null) {
+		        error = new Error('data and hash arguments required');
+		        return process.nextTick(function () {
+		            cb(error);
+		        });
+		    }
+
+		    if (!(typeof data === 'string' || data instanceof Buffer) || typeof hash !== 'string') {
+		        error = new Error('data and hash must be strings');
+		        return process.nextTick(function () {
+		            cb(error);
+		        });
+		    }
+
+		    return bindings.compare(data, hash, cb);
+		}
+
+		/// @param {String} hash extract rounds from this hash
+		/// @return {Number} the number of rounds used to encrypt a given hash
+		function getRounds(hash) {
+		    if (hash == null) {
+		        throw new Error('hash argument required');
+		    }
+
+		    if (typeof hash !== 'string') {
+		        throw new Error('hash must be a string');
+		    }
+
+		    return bindings.get_rounds(hash);
+		}
+
+		module.exports = {
+		    genSaltSync,
+		    genSalt,
+		    hashSync,
+		    hash,
+		    compareSync,
+		    compare,
+		    getRounds,
+		}; 
+	} (bcrypt$1));
+	return bcrypt$1.exports;
+}
+
+var bcryptExports = requireBcrypt();
+var bcrypt = /*@__PURE__*/getDefaultExportFromCjs(bcryptExports);
+
+async function hashPassword(password, rounds = 10) {
+  if (!password || typeof password !== "string") {
+    throw new Error("Password must be a non-empty string");
+  }
+  if (rounds < 4 || rounds > 31) {
+    throw new Error("Bcrypt rounds must be between 4 and 31");
+  }
+  return await bcrypt.hash(password, rounds);
+}
+async function verifyPassword$1(plaintext, hash) {
+  if (!plaintext || typeof plaintext !== "string") {
+    return false;
+  }
+  if (!hash || typeof hash !== "string") {
+    return false;
+  }
+  try {
+    const fullHash = hash.startsWith("$") ? hash : expandHash(hash);
+    return await bcrypt.compare(plaintext, fullHash);
+  } catch (error) {
+    return false;
+  }
+}
+function compactHash(bcryptHash) {
+  if (!bcryptHash || typeof bcryptHash !== "string") {
+    throw new Error("Invalid bcrypt hash");
+  }
+  if (!bcryptHash.startsWith("$2")) {
+    throw new Error("Not a valid bcrypt hash");
+  }
+  const parts = bcryptHash.split("$");
+  if (parts.length !== 4) {
+    throw new Error("Invalid bcrypt hash format");
+  }
+  return parts[3];
+}
+function expandHash(compactHash2, rounds = 10) {
+  if (!compactHash2 || typeof compactHash2 !== "string") {
+    throw new Error("Invalid compacted hash");
+  }
+  if (compactHash2.startsWith("$")) {
+    return compactHash2;
+  }
+  const roundsStr = rounds.toString().padStart(2, "0");
+  return `$2b$${roundsStr}$${compactHash2}`;
+}
+function isBcryptHash(str) {
+  if (!str || typeof str !== "string") {
+    return false;
+  }
+  if (str.startsWith("$2")) {
+    return str.length === 60;
+  }
+  return str.length === 53;
 }
 
 const idGenerator = customAlphabet(urlAlphabet, 22);
@@ -2598,13 +3207,13 @@ const PLUGIN_DEPENDENCIES = {
         npmUrl: "https://www.npmjs.com/package/jose"
       },
       "bcrypt": {
-        version: "^5.1.0",
+        version: "^5.1.0 || ^6.0.0",
         description: "Secure password hashing library",
         installCommand: "pnpm add bcrypt",
         npmUrl: "https://www.npmjs.com/package/bcrypt"
       },
       "nodemailer": {
-        version: "^6.9.0",
+        version: "^6.9.0 || ^7.0.0",
         description: "Email sending library for password reset and verification",
         installCommand: "pnpm add nodemailer",
         npmUrl: "https://www.npmjs.com/package/nodemailer"
@@ -13850,7 +14459,7 @@ class BackupPlugin extends Plugin {
       include: options.include || null,
       exclude: options.exclude || [],
       backupMetadataResource: options.backupMetadataResource || "plg_backup_metadata",
-      tempDir: options.tempDir || path$1.join(os.tmpdir(), "s3db", "backups"),
+      tempDir: options.tempDir || path$1.join(require$$2.tmpdir(), "s3db", "backups"),
       verbose: options.verbose || false,
       // Hooks
       onBackupStart: options.onBackupStart || null,
@@ -14708,7 +15317,7 @@ class MemoryCache extends Cache {
           `[MemoryCache] maxMemoryPercent must be between 0 and 1 (e.g., 0.1 for 10%). Received: ${config.maxMemoryPercent}`
         );
       }
-      const totalMemory = os$1.totalmem();
+      const totalMemory = os.totalmem();
       this.maxMemoryBytes = Math.floor(totalMemory * config.maxMemoryPercent);
       this.maxMemoryPercent = config.maxMemoryPercent;
     } else {
@@ -14885,9 +15494,9 @@ class MemoryCache extends Cache {
     const totalItems = Object.keys(this.cache).length;
     const memoryUsagePercent = this.maxMemoryBytes > 0 ? (this.currentMemoryBytes / this.maxMemoryBytes * 100).toFixed(2) : 0;
     const systemMemory = {
-      total: os$1.totalmem(),
-      free: os$1.freemem(),
-      used: os$1.totalmem() - os$1.freemem()
+      total: os.totalmem(),
+      free: os.freemem(),
+      used: os.totalmem() - os.freemem()
     };
     const cachePercentOfTotal = systemMemory.total > 0 ? (this.currentMemoryBytes / systemMemory.total * 100).toFixed(2) : 0;
     return {
@@ -15365,7 +15974,7 @@ class FilesystemCache extends Cache {
     };
     const [ok, err] = await tryFn(async () => {
       const line = JSON.stringify(entry) + "\n";
-      await fs$1.promises.appendFile(this.journalFile, line, this.encoding);
+      await require$$0$1.promises.appendFile(this.journalFile, line, this.encoding);
     });
     if (!ok) {
       console.warn("FilesystemCache journal error:", err.message);
@@ -21245,606 +21854,6 @@ class AsyncEventEmitter extends EventEmitter {
   setAsyncMode(enabled) {
     this._asyncMode = enabled;
   }
-}
-
-var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
-
-function getDefaultExportFromCjs (x) {
-	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
-}
-
-var bcrypt$1 = {exports: {}};
-
-function commonjsRequire(path) {
-	throw new Error('Could not dynamically require "' + path + '". Please configure the dynamicRequireTargets or/and ignoreDynamicRequires option of @rollup/plugin-commonjs appropriately for this require call to work.');
-}
-
-var nodeGypBuild$1 = {exports: {}};
-
-var nodeGypBuild;
-var hasRequiredNodeGypBuild$1;
-
-function requireNodeGypBuild$1 () {
-	if (hasRequiredNodeGypBuild$1) return nodeGypBuild;
-	hasRequiredNodeGypBuild$1 = 1;
-	var fs = fs$1;
-	var path = path$1;
-	var os$1 = os;
-
-	// Workaround to fix webpack's build warnings: 'the request of a dependency is an expression'
-	var runtimeRequire = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : commonjsRequire; // eslint-disable-line
-
-	var vars = (process.config && process.config.variables) || {};
-	var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
-	var abi = process.versions.modules; // TODO: support old node where this is undef
-	var runtime = isElectron() ? 'electron' : (isNwjs() ? 'node-webkit' : 'node');
-
-	var arch = process.env.npm_config_arch || os$1.arch();
-	var platform = process.env.npm_config_platform || os$1.platform();
-	var libc = process.env.LIBC || (isAlpine(platform) ? 'musl' : 'glibc');
-	var armv = process.env.ARM_VERSION || (arch === 'arm64' ? '8' : vars.arm_version) || '';
-	var uv = (process.versions.uv || '').split('.')[0];
-
-	nodeGypBuild = load;
-
-	function load (dir) {
-	  return runtimeRequire(load.resolve(dir))
-	}
-
-	load.resolve = load.path = function (dir) {
-	  dir = path.resolve(dir || '.');
-
-	  try {
-	    var name = runtimeRequire(path.join(dir, 'package.json')).name.toUpperCase().replace(/-/g, '_');
-	    if (process.env[name + '_PREBUILD']) dir = process.env[name + '_PREBUILD'];
-	  } catch (err) {}
-
-	  if (!prebuildsOnly) {
-	    var release = getFirst(path.join(dir, 'build/Release'), matchBuild);
-	    if (release) return release
-
-	    var debug = getFirst(path.join(dir, 'build/Debug'), matchBuild);
-	    if (debug) return debug
-	  }
-
-	  var prebuild = resolve(dir);
-	  if (prebuild) return prebuild
-
-	  var nearby = resolve(path.dirname(process.execPath));
-	  if (nearby) return nearby
-
-	  var target = [
-	    'platform=' + platform,
-	    'arch=' + arch,
-	    'runtime=' + runtime,
-	    'abi=' + abi,
-	    'uv=' + uv,
-	    armv ? 'armv=' + armv : '',
-	    'libc=' + libc,
-	    'node=' + process.versions.node,
-	    process.versions.electron ? 'electron=' + process.versions.electron : '',
-	    typeof __webpack_require__ === 'function' ? 'webpack=true' : '' // eslint-disable-line
-	  ].filter(Boolean).join(' ');
-
-	  throw new Error('No native build was found for ' + target + '\n    loaded from: ' + dir + '\n')
-
-	  function resolve (dir) {
-	    // Find matching "prebuilds/<platform>-<arch>" directory
-	    var tuples = readdirSync(path.join(dir, 'prebuilds')).map(parseTuple);
-	    var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
-	    if (!tuple) return
-
-	    // Find most specific flavor first
-	    var prebuilds = path.join(dir, 'prebuilds', tuple.name);
-	    var parsed = readdirSync(prebuilds).map(parseTags);
-	    var candidates = parsed.filter(matchTags(runtime, abi));
-	    var winner = candidates.sort(compareTags(runtime))[0];
-	    if (winner) return path.join(prebuilds, winner.file)
-	  }
-	};
-
-	function readdirSync (dir) {
-	  try {
-	    return fs.readdirSync(dir)
-	  } catch (err) {
-	    return []
-	  }
-	}
-
-	function getFirst (dir, filter) {
-	  var files = readdirSync(dir).filter(filter);
-	  return files[0] && path.join(dir, files[0])
-	}
-
-	function matchBuild (name) {
-	  return /\.node$/.test(name)
-	}
-
-	function parseTuple (name) {
-	  // Example: darwin-x64+arm64
-	  var arr = name.split('-');
-	  if (arr.length !== 2) return
-
-	  var platform = arr[0];
-	  var architectures = arr[1].split('+');
-
-	  if (!platform) return
-	  if (!architectures.length) return
-	  if (!architectures.every(Boolean)) return
-
-	  return { name, platform, architectures }
-	}
-
-	function matchTuple (platform, arch) {
-	  return function (tuple) {
-	    if (tuple == null) return false
-	    if (tuple.platform !== platform) return false
-	    return tuple.architectures.includes(arch)
-	  }
-	}
-
-	function compareTuples (a, b) {
-	  // Prefer single-arch prebuilds over multi-arch
-	  return a.architectures.length - b.architectures.length
-	}
-
-	function parseTags (file) {
-	  var arr = file.split('.');
-	  var extension = arr.pop();
-	  var tags = { file: file, specificity: 0 };
-
-	  if (extension !== 'node') return
-
-	  for (var i = 0; i < arr.length; i++) {
-	    var tag = arr[i];
-
-	    if (tag === 'node' || tag === 'electron' || tag === 'node-webkit') {
-	      tags.runtime = tag;
-	    } else if (tag === 'napi') {
-	      tags.napi = true;
-	    } else if (tag.slice(0, 3) === 'abi') {
-	      tags.abi = tag.slice(3);
-	    } else if (tag.slice(0, 2) === 'uv') {
-	      tags.uv = tag.slice(2);
-	    } else if (tag.slice(0, 4) === 'armv') {
-	      tags.armv = tag.slice(4);
-	    } else if (tag === 'glibc' || tag === 'musl') {
-	      tags.libc = tag;
-	    } else {
-	      continue
-	    }
-
-	    tags.specificity++;
-	  }
-
-	  return tags
-	}
-
-	function matchTags (runtime, abi) {
-	  return function (tags) {
-	    if (tags == null) return false
-	    if (tags.runtime && tags.runtime !== runtime && !runtimeAgnostic(tags)) return false
-	    if (tags.abi && tags.abi !== abi && !tags.napi) return false
-	    if (tags.uv && tags.uv !== uv) return false
-	    if (tags.armv && tags.armv !== armv) return false
-	    if (tags.libc && tags.libc !== libc) return false
-
-	    return true
-	  }
-	}
-
-	function runtimeAgnostic (tags) {
-	  return tags.runtime === 'node' && tags.napi
-	}
-
-	function compareTags (runtime) {
-	  // Precedence: non-agnostic runtime, abi over napi, then by specificity.
-	  return function (a, b) {
-	    if (a.runtime !== b.runtime) {
-	      return a.runtime === runtime ? -1 : 1
-	    } else if (a.abi !== b.abi) {
-	      return a.abi ? -1 : 1
-	    } else if (a.specificity !== b.specificity) {
-	      return a.specificity > b.specificity ? -1 : 1
-	    } else {
-	      return 0
-	    }
-	  }
-	}
-
-	function isNwjs () {
-	  return !!(process.versions && process.versions.nw)
-	}
-
-	function isElectron () {
-	  if (process.versions && process.versions.electron) return true
-	  if (process.env.ELECTRON_RUN_AS_NODE) return true
-	  return typeof window !== 'undefined' && window.process && window.process.type === 'renderer'
-	}
-
-	function isAlpine (platform) {
-	  return platform === 'linux' && fs.existsSync('/etc/alpine-release')
-	}
-
-	// Exposed for unit tests
-	// TODO: move to lib
-	load.parseTags = parseTags;
-	load.matchTags = matchTags;
-	load.compareTags = compareTags;
-	load.parseTuple = parseTuple;
-	load.matchTuple = matchTuple;
-	load.compareTuples = compareTuples;
-	return nodeGypBuild;
-}
-
-var hasRequiredNodeGypBuild;
-
-function requireNodeGypBuild () {
-	if (hasRequiredNodeGypBuild) return nodeGypBuild$1.exports;
-	hasRequiredNodeGypBuild = 1;
-	const runtimeRequire = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : commonjsRequire; // eslint-disable-line
-	if (typeof runtimeRequire.addon === 'function') { // if the platform supports native resolving prefer that
-	  nodeGypBuild$1.exports = runtimeRequire.addon.bind(runtimeRequire);
-	} else { // else use the runtime version here
-	  nodeGypBuild$1.exports = requireNodeGypBuild$1();
-	}
-	return nodeGypBuild$1.exports;
-}
-
-var promises;
-var hasRequiredPromises;
-
-function requirePromises () {
-	if (hasRequiredPromises) return promises;
-	hasRequiredPromises = 1;
-	let Promise = commonjsGlobal.Promise;
-
-	/// encapsulate a method with a node-style callback in a Promise
-	/// @param {object} 'this' of the encapsulated function
-	/// @param {function} function to be encapsulated
-	/// @param {Array-like} args to be passed to the called function
-	/// @return {Promise} a Promise encapsulating the function
-	function promise(fn, context, args) {
-	    if (!Array.isArray(args)) {
-	        args = Array.prototype.slice.call(args);
-	    }
-
-	    if (typeof fn !== 'function') {
-	        return Promise.reject(new Error('fn must be a function'));
-	    }
-
-	    return new Promise((resolve, reject) => {
-	        args.push((err, data) => {
-	            if (err) {
-	                reject(err);
-	            } else {
-	                resolve(data);
-	            }
-	        });
-
-	        fn.apply(context, args);
-	    });
-	}
-
-	/// @param {err} the error to be thrown
-	function reject(err) {
-	    return Promise.reject(err);
-	}
-
-	/// changes the promise implementation that bcrypt uses
-	/// @param {Promise} the implementation to use
-	function use(promise) {
-	    Promise = promise;
-	}
-
-	promises = {
-	    promise,
-	    reject,
-	    use
-	};
-	return promises;
-}
-
-var hasRequiredBcrypt;
-
-function requireBcrypt () {
-	if (hasRequiredBcrypt) return bcrypt$1.exports;
-	hasRequiredBcrypt = 1;
-	(function (module) {
-		const path = path$1;
-		const bindings = requireNodeGypBuild()(path.resolve(__dirname));
-
-		const crypto = crypto$1;
-
-		const promises = requirePromises();
-
-		/// generate a salt (sync)
-		/// @param {Number} [rounds] number of rounds (default 10)
-		/// @return {String} salt
-		function genSaltSync(rounds, minor) {
-		    // default 10 rounds
-		    if (!rounds) {
-		        rounds = 10;
-		    } else if (typeof rounds !== 'number') {
-		        throw new Error('rounds must be a number');
-		    }
-
-		    if (!minor) {
-		        minor = 'b';
-		    } else if (minor !== 'b' && minor !== 'a') {
-		        throw new Error('minor must be either "a" or "b"');
-		    }
-
-		    return bindings.gen_salt_sync(minor, rounds, crypto.randomBytes(16));
-		}
-
-		/// generate a salt
-		/// @param {Number} [rounds] number of rounds (default 10)
-		/// @param {Function} cb callback(err, salt)
-		function genSalt(rounds, minor, cb) {
-		    let error;
-
-		    // if callback is first argument, then use defaults for others
-		    if (typeof arguments[0] === 'function') {
-		        // have to set callback first otherwise arguments are overridden
-		        cb = arguments[0];
-		        rounds = 10;
-		        minor = 'b';
-		        // callback is second argument
-		    } else if (typeof arguments[1] === 'function') {
-		        // have to set callback first otherwise arguments are overridden
-		        cb = arguments[1];
-		        minor = 'b';
-		    }
-
-		    if (!cb) {
-		        return promises.promise(genSalt, this, [rounds, minor]);
-		    }
-
-		    // default 10 rounds
-		    if (!rounds) {
-		        rounds = 10;
-		    } else if (typeof rounds !== 'number') {
-		        // callback error asynchronously
-		        error = new Error('rounds must be a number');
-		        return process.nextTick(function () {
-		            cb(error);
-		        });
-		    }
-
-		    if (!minor) {
-		        minor = 'b';
-		    } else if (minor !== 'b' && minor !== 'a') {
-		        error = new Error('minor must be either "a" or "b"');
-		        return process.nextTick(function () {
-		            cb(error);
-		        });
-		    }
-
-		    crypto.randomBytes(16, function (error, randomBytes) {
-		        if (error) {
-		            cb(error);
-		            return;
-		        }
-
-		        bindings.gen_salt(minor, rounds, randomBytes, cb);
-		    });
-		}
-
-		/// hash data using a salt
-		/// @param {String|Buffer} data the data to encrypt
-		/// @param {String} salt the salt to use when hashing
-		/// @return {String} hash
-		function hashSync(data, salt) {
-		    if (data == null || salt == null) {
-		        throw new Error('data and salt arguments required');
-		    }
-
-		    if (!(typeof data === 'string' || data instanceof Buffer) || (typeof salt !== 'string' && typeof salt !== 'number')) {
-		        throw new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
-		    }
-
-		    if (typeof salt === 'number') {
-		        salt = module.exports.genSaltSync(salt);
-		    }
-
-		    return bindings.encrypt_sync(data, salt);
-		}
-
-		/// hash data using a salt
-		/// @param {String|Buffer} data the data to encrypt
-		/// @param {String} salt the salt to use when hashing
-		/// @param {Function} cb callback(err, hash)
-		function hash(data, salt, cb) {
-		    let error;
-
-		    if (typeof data === 'function') {
-		        error = new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
-		        return process.nextTick(function () {
-		            data(error);
-		        });
-		    }
-
-		    if (typeof salt === 'function') {
-		        error = new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
-		        return process.nextTick(function () {
-		            salt(error);
-		        });
-		    }
-
-		    // cb exists but is not a function
-		    // return a rejecting promise
-		    if (cb && typeof cb !== 'function') {
-		        return promises.reject(new Error('cb must be a function or null to return a Promise'));
-		    }
-
-		    if (!cb) {
-		        return promises.promise(hash, this, [data, salt]);
-		    }
-
-		    if (data == null || salt == null) {
-		        error = new Error('data and salt arguments required');
-		        return process.nextTick(function () {
-		            cb(error);
-		        });
-		    }
-
-		    if (!(typeof data === 'string' || data instanceof Buffer) || (typeof salt !== 'string' && typeof salt !== 'number')) {
-		        error = new Error('data must be a string or Buffer and salt must either be a salt string or a number of rounds');
-		        return process.nextTick(function () {
-		            cb(error);
-		        });
-		    }
-
-
-		    if (typeof salt === 'number') {
-		        return module.exports.genSalt(salt, function (err, salt) {
-		            return bindings.encrypt(data, salt, cb);
-		        });
-		    }
-
-		    return bindings.encrypt(data, salt, cb);
-		}
-
-		/// compare raw data to hash
-		/// @param {String|Buffer} data the data to hash and compare
-		/// @param {String} hash expected hash
-		/// @return {bool} true if hashed data matches hash
-		function compareSync(data, hash) {
-		    if (data == null || hash == null) {
-		        throw new Error('data and hash arguments required');
-		    }
-
-		    if (!(typeof data === 'string' || data instanceof Buffer) || typeof hash !== 'string') {
-		        throw new Error('data must be a string or Buffer and hash must be a string');
-		    }
-
-		    return bindings.compare_sync(data, hash);
-		}
-
-		/// compare raw data to hash
-		/// @param {String|Buffer} data the data to hash and compare
-		/// @param {String} hash expected hash
-		/// @param {Function} cb callback(err, matched) - matched is true if hashed data matches hash
-		function compare(data, hash, cb) {
-		    let error;
-
-		    if (typeof data === 'function') {
-		        error = new Error('data and hash arguments required');
-		        return process.nextTick(function () {
-		            data(error);
-		        });
-		    }
-
-		    if (typeof hash === 'function') {
-		        error = new Error('data and hash arguments required');
-		        return process.nextTick(function () {
-		            hash(error);
-		        });
-		    }
-
-		    // cb exists but is not a function
-		    // return a rejecting promise
-		    if (cb && typeof cb !== 'function') {
-		        return promises.reject(new Error('cb must be a function or null to return a Promise'));
-		    }
-
-		    if (!cb) {
-		        return promises.promise(compare, this, [data, hash]);
-		    }
-
-		    if (data == null || hash == null) {
-		        error = new Error('data and hash arguments required');
-		        return process.nextTick(function () {
-		            cb(error);
-		        });
-		    }
-
-		    if (!(typeof data === 'string' || data instanceof Buffer) || typeof hash !== 'string') {
-		        error = new Error('data and hash must be strings');
-		        return process.nextTick(function () {
-		            cb(error);
-		        });
-		    }
-
-		    return bindings.compare(data, hash, cb);
-		}
-
-		/// @param {String} hash extract rounds from this hash
-		/// @return {Number} the number of rounds used to encrypt a given hash
-		function getRounds(hash) {
-		    if (hash == null) {
-		        throw new Error('hash argument required');
-		    }
-
-		    if (typeof hash !== 'string') {
-		        throw new Error('hash must be a string');
-		    }
-
-		    return bindings.get_rounds(hash);
-		}
-
-		module.exports = {
-		    genSaltSync,
-		    genSalt,
-		    hashSync,
-		    hash,
-		    compareSync,
-		    compare,
-		    getRounds,
-		}; 
-	} (bcrypt$1));
-	return bcrypt$1.exports;
-}
-
-var bcryptExports = requireBcrypt();
-var bcrypt = /*@__PURE__*/getDefaultExportFromCjs(bcryptExports);
-
-async function hashPassword(password, rounds = 10) {
-  if (!password || typeof password !== "string") {
-    throw new Error("Password must be a non-empty string");
-  }
-  if (rounds < 4 || rounds > 31) {
-    throw new Error("Bcrypt rounds must be between 4 and 31");
-  }
-  return await bcrypt.hash(password, rounds);
-}
-async function verifyPassword$1(plaintext, hash) {
-  if (!plaintext || typeof plaintext !== "string") {
-    return false;
-  }
-  if (!hash || typeof hash !== "string") {
-    return false;
-  }
-  try {
-    const fullHash = hash.startsWith("$") ? hash : expandHash(hash);
-    return await bcrypt.compare(plaintext, fullHash);
-  } catch (error) {
-    return false;
-  }
-}
-function compactHash(bcryptHash) {
-  if (!bcryptHash || typeof bcryptHash !== "string") {
-    throw new Error("Invalid bcrypt hash");
-  }
-  if (!bcryptHash.startsWith("$2")) {
-    throw new Error("Not a valid bcrypt hash");
-  }
-  const parts = bcryptHash.split("$");
-  if (parts.length !== 4) {
-    throw new Error("Invalid bcrypt hash format");
-  }
-  return parts[3];
-}
-function expandHash(compactHash2, rounds = 10) {
-  if (!compactHash2 || typeof compactHash2 !== "string") {
-    throw new Error("Invalid compacted hash");
-  }
-  if (compactHash2.startsWith("$")) {
-    return compactHash2;
-  }
-  const roundsStr = rounds.toString().padStart(2, "0");
-  return `$2b$${roundsStr}$${compactHash2}`;
 }
 
 async function secretHandler(actual, errors, schema) {
@@ -55219,7 +55228,7 @@ function requireCookies () {
 
 	// module to handle cookies
 
-	const urllib = require$$0$1;
+	const urllib = require$$0$2;
 
 	const SESSION_TIMEOUT = 1800; // 30 min
 
@@ -55513,11 +55522,11 @@ function requireFetch () {
 	if (hasRequiredFetch) return fetch$1.exports;
 	hasRequiredFetch = 1;
 
-	const http = require$$0$3;
+	const http = require$$0$4;
 	const https = require$$1;
-	const urllib = require$$0$1;
+	const urllib = require$$0$2;
 	const zlib = require$$3;
-	const PassThrough = require$$0$2.PassThrough;
+	const PassThrough = require$$0$3.PassThrough;
 	const Cookies = requireCookies();
 	const packageData = require$$9;
 	const net = require$$7;
@@ -55803,13 +55812,13 @@ function requireShared () {
 	hasRequiredShared = 1;
 	(function (module) {
 
-		const urllib = require$$0$1;
+		const urllib = require$$0$2;
 		const util = require$$1$1;
-		const fs = fs$1;
+		const fs = require$$0$1;
 		const nmfetch = requireFetch();
 		const dns = require$$4;
 		const net = require$$7;
-		const os$1 = os;
+		const os = require$$2;
 
 		const DNS_TTL = 5 * 60 * 1000;
 		const CACHE_CLEANUP_INTERVAL = 30 * 1000; // Minimum 30 seconds between cleanups
@@ -55823,7 +55832,7 @@ function requireShared () {
 
 		let networkInterfaces;
 		try {
-		    networkInterfaces = os$1.networkInterfaces();
+		    networkInterfaces = os.networkInterfaces();
 		} catch (_err) {
 		    // fails on some systems
 		}
@@ -59152,7 +59161,7 @@ function requireBase64 () {
 	if (hasRequiredBase64) return base64;
 	hasRequiredBase64 = 1;
 
-	const Transform = require$$0$2.Transform;
+	const Transform = require$$0$3.Transform;
 
 	/**
 	 * Encodes a Buffer into a base64 encoded string
@@ -59299,7 +59308,7 @@ function requireQp () {
 	if (hasRequiredQp) return qp;
 	hasRequiredQp = 1;
 
-	const Transform = require$$0$2.Transform;
+	const Transform = require$$0$3.Transform;
 
 	/**
 	 * Encodes a Buffer into a Quoted-Printable encoded string
@@ -60540,7 +60549,7 @@ function requireLastNewline () {
 	if (hasRequiredLastNewline) return lastNewline;
 	hasRequiredLastNewline = 1;
 
-	const Transform = require$$0$2.Transform;
+	const Transform = require$$0$3.Transform;
 
 	class LastNewline extends Transform {
 	    constructor() {
@@ -60581,7 +60590,7 @@ function requireLeWindows () {
 	if (hasRequiredLeWindows) return leWindows;
 	hasRequiredLeWindows = 1;
 
-	const stream = require$$0$2;
+	const stream = require$$0$3;
 	const Transform = stream.Transform;
 
 	/**
@@ -60641,7 +60650,7 @@ function requireLeUnix () {
 	if (hasRequiredLeUnix) return leUnix;
 	hasRequiredLeUnix = 1;
 
-	const stream = require$$0$2;
+	const stream = require$$0$3;
 	const Transform = stream.Transform;
 
 	/**
@@ -60695,9 +60704,9 @@ function requireMimeNode () {
 	hasRequiredMimeNode = 1;
 
 	const crypto = crypto$1;
-	const fs = fs$1;
+	const fs = require$$0$1;
 	const punycode = requirePunycode();
-	const PassThrough = require$$0$2.PassThrough;
+	const PassThrough = require$$0$3.PassThrough;
 	const shared = requireShared();
 
 	const mimeFuncs = requireMimeFuncs();
@@ -62652,7 +62661,7 @@ function requireMessageParser () {
 	if (hasRequiredMessageParser) return messageParser;
 	hasRequiredMessageParser = 1;
 
-	const Transform = require$$0$2.Transform;
+	const Transform = require$$0$3.Transform;
 
 	/**
 	 * MessageParser instance is a transform stream that separates message headers
@@ -62817,7 +62826,7 @@ function requireRelaxedBody () {
 
 	// streams through a message body and calculates relaxed body hash
 
-	const Transform = require$$0$2.Transform;
+	const Transform = require$$0$3.Transform;
 	const crypto = crypto$1;
 
 	class RelaxedBody extends Transform {
@@ -63105,8 +63114,8 @@ function requireDkim () {
 	const MessageParser = requireMessageParser();
 	const RelaxedBody = requireRelaxedBody();
 	const sign = requireSign();
-	const PassThrough = require$$0$2.PassThrough;
-	const fs = fs$1;
+	const PassThrough = require$$0$3.PassThrough;
+	const fs = require$$0$1;
 	const path = path$1;
 	const crypto = crypto$1;
 
@@ -63366,7 +63375,7 @@ function requireHttpProxyClient () {
 
 	const net = require$$7;
 	const tls = require$$1$2;
-	const urllib = require$$0$1;
+	const urllib = require$$0$2;
 
 	/**
 	 * Establishes proxied connection to destinationPort
@@ -63841,7 +63850,7 @@ function requireMailer () {
 	const DKIM = requireDkim();
 	const httpProxyClient = requireHttpProxyClient();
 	const util = require$$1$1;
-	const urllib = require$$0$1;
+	const urllib = require$$0$2;
 	const packageData = require$$9;
 	const MailMessage = requireMailMessage();
 	const net = require$$7;
@@ -64283,7 +64292,7 @@ function requireDataStream () {
 	if (hasRequiredDataStream) return dataStream;
 	hasRequiredDataStream = 1;
 
-	const stream = require$$0$2;
+	const stream = require$$0$3;
 	const Transform = stream.Transform;
 
 	/**
@@ -64403,10 +64412,10 @@ function requireSmtpConnection () {
 	const EventEmitter$1 = EventEmitter.EventEmitter;
 	const net = require$$7;
 	const tls = require$$1$2;
-	const os$1 = os;
+	const os = require$$2;
 	const crypto = crypto$1;
 	const DataStream = requireDataStream();
-	const PassThrough = require$$0$2.PassThrough;
+	const PassThrough = require$$0$3.PassThrough;
 	const shared = requireShared();
 
 	// default timeout values in ms
@@ -66219,7 +66228,7 @@ function requireSmtpConnection () {
 	        // defaul hostname is machine hostname or [IP]
 	        let defaultHostname;
 	        try {
-	            defaultHostname = os$1.hostname() || '';
+	            defaultHostname = os.hostname() || '';
 	        } catch (_err) {
 	            // fails on windows 7
 	            defaultHostname = 'localhost';
@@ -66250,7 +66259,7 @@ function requireXoauth2 () {
 	if (hasRequiredXoauth2) return xoauth2;
 	hasRequiredXoauth2 = 1;
 
-	const Stream = require$$0$2.Stream;
+	const Stream = require$$0$3.Stream;
 	const nmfetch = requireFetch();
 	const crypto = crypto$1;
 	const shared = requireShared();
@@ -68784,7 +68793,7 @@ function requireSendmailTransport () {
 	if (hasRequiredSendmailTransport) return sendmailTransport;
 	hasRequiredSendmailTransport = 1;
 
-	const spawn = require$$0$4.spawn;
+	const spawn = require$$0$5.spawn;
 	const packageData = require$$9;
 	const shared = requireShared();
 
@@ -73323,5 +73332,5 @@ var routes = /*#__PURE__*/Object.freeze({
   registerUIRoutes: registerUIRoutes
 });
 
-export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, ApiPlugin, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, S3Client as Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, DynamoDBReplicator, EncryptionError, ErrorMap, EventualConsistencyPlugin, Factory, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, GeoPlugin, IdentityPlugin, InvalidResourceItem, MLPlugin, MemoryCache, MemoryClient, MemoryStorage, MetadataLimitError, MetricsPlugin, MissingMetadata, MongoDBReplicator, MultiBackupDriver, MySQLReplicator, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, PlanetScaleReplicator, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3Client, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, Seeder, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TTLPlugin, TfStatePlugin, TursoReplicator, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Memory, createBackupDriver, createConsumer, createReplicator, decode$1 as decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode$1 as encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, generateTypes, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, printTypes, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig };
+export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, ApiPlugin, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, S3Client as Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, DynamoDBReplicator, EncryptionError, ErrorMap, EventualConsistencyPlugin, Factory, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, GeoPlugin, IdentityPlugin, InvalidResourceItem, MLPlugin, MemoryCache, MemoryClient, MemoryStorage, MetadataLimitError, MetricsPlugin, MissingMetadata, MongoDBReplicator, MultiBackupDriver, MySQLReplicator, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, PlanetScaleReplicator, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3Client, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, Seeder, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TTLPlugin, TfStatePlugin, TursoReplicator, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Memory, compactHash, createBackupDriver, createConsumer, createReplicator, decode$1 as decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode$1 as encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, expandHash, generateTypes, getBehavior, getSizeBreakdown, hashPassword, idGenerator, isBcryptHash, mapAwsError, md5, passwordGenerator, printTypes, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig, verifyPassword$1 as verifyPassword };
 //# sourceMappingURL=s3db.es.js.map
