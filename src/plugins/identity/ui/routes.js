@@ -5,7 +5,10 @@
 
 import { LoginPage } from './pages/login.js';
 import { RegisterPage } from './pages/register.js';
+import { ForgotPasswordPage } from './pages/forgot-password.js';
+import { ResetPasswordPage } from './pages/reset-password.js';
 import { hashPassword, verifyPassword, validatePassword } from '../concerns/password.js';
+import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
 import { tryFn } from '../../../concerns/try-fn.js';
 
 /**
@@ -294,6 +297,225 @@ export function registerUIRoutes(app, plugin) {
 
     sessionManager.clearSessionCookie(c);
     return c.redirect('/login?success=You have been logged out successfully');
+  });
+
+  // ============================================================================
+  // GET /forgot-password - Show forgot password form
+  // ============================================================================
+  app.get('/forgot-password', async (c) => {
+    const error = c.req.query('error');
+    const success = c.req.query('success');
+    const email = c.req.query('email') || '';
+
+    return c.html(ForgotPasswordPage({
+      error: error ? decodeURIComponent(error) : null,
+      success: success ? decodeURIComponent(success) : null,
+      email,
+      config: config.ui
+    }));
+  });
+
+  // ============================================================================
+  // POST /forgot-password - Handle forgot password request
+  // ============================================================================
+  app.post('/forgot-password', async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const { email } = body;
+
+      if (!email) {
+        return c.redirect(`/forgot-password?error=${encodeURIComponent('Email is required')}`);
+      }
+
+      // Find user by email
+      const normalizedEmail = email.toLowerCase().trim();
+      const [okQuery, errQuery, users] = await tryFn(() =>
+        usersResource.query({ email: normalizedEmail })
+      );
+
+      // Always show success message (security - don't reveal if user exists)
+      const successMessage = 'If an account exists with this email, you will receive password reset instructions.';
+
+      if (!okQuery || users.length === 0) {
+        // User doesn't exist, but show success anyway
+        await new Promise(resolve => setTimeout(resolve, 500)); // Timing attack protection
+        return c.redirect(`/forgot-password?success=${encodeURIComponent(successMessage)}`);
+      }
+
+      const user = users[0];
+
+      // Generate reset token
+      const resetToken = generatePasswordResetToken();
+      const expiresAt = calculateExpiration('1h'); // 1 hour expiration
+
+      // Store reset token
+      const [okToken, errToken] = await tryFn(() =>
+        plugin.passwordResetTokensResource.insert({
+          userId: user.id,
+          token: resetToken,
+          expiresAt,
+          used: false
+        })
+      );
+
+      if (!okToken) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to create reset token:', errToken);
+        }
+        return c.redirect(`/forgot-password?error=${encodeURIComponent('Failed to process request. Please try again.')}&email=${encodeURIComponent(email)}`);
+      }
+
+      // Send password reset email
+      if (plugin.emailService && plugin.emailService.config.enabled) {
+        await plugin.emailService.sendPasswordResetEmail({
+          to: user.email,
+          name: user.name,
+          resetToken,
+          expiresIn: 60 // minutes
+        });
+      } else if (config.verbose) {
+        console.log('[Identity Plugin] Email service disabled. Reset token:', resetToken);
+        console.log('[Identity Plugin] Reset URL:', `${config.ui.baseUrl || 'http://localhost:4000'}/reset-password?token=${resetToken}`);
+      }
+
+      return c.redirect(`/forgot-password?success=${encodeURIComponent(successMessage)}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Forgot password error:', error);
+      }
+      return c.redirect(`/forgot-password?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // ============================================================================
+  // GET /reset-password - Show reset password form
+  // ============================================================================
+  app.get('/reset-password', async (c) => {
+    const token = c.req.query('token');
+    const error = c.req.query('error');
+
+    if (!token) {
+      return c.redirect(`/forgot-password?error=${encodeURIComponent('Invalid or missing reset token')}`);
+    }
+
+    // Validate token exists and not expired
+    const [okQuery, errQuery, tokens] = await tryFn(() =>
+      plugin.passwordResetTokensResource.query({ token })
+    );
+
+    if (!okQuery || tokens.length === 0) {
+      return c.redirect(`/forgot-password?error=${encodeURIComponent('Invalid reset token')}`);
+    }
+
+    const resetToken = tokens[0];
+
+    // Check if token is expired
+    if (isExpired(resetToken.expiresAt)) {
+      return c.redirect(`/forgot-password?error=${encodeURIComponent('Reset link has expired. Please request a new one.')}`);
+    }
+
+    // Check if token was already used
+    if (resetToken.used) {
+      return c.redirect(`/forgot-password?error=${encodeURIComponent('Reset link has already been used. Please request a new one.')}`);
+    }
+
+    return c.html(ResetPasswordPage({
+      error: error ? decodeURIComponent(error) : null,
+      token,
+      passwordPolicy: config.passwordPolicy,
+      config: config.ui
+    }));
+  });
+
+  // ============================================================================
+  // POST /reset-password - Handle password reset
+  // ============================================================================
+  app.post('/reset-password', async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const { token, password, confirm_password } = body;
+
+      if (!token || !password || !confirm_password) {
+        return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent('All fields are required')}`);
+      }
+
+      // Validate password match
+      if (password !== confirm_password) {
+        return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent('Passwords do not match')}`);
+      }
+
+      // Validate password strength
+      const passwordValidation = validatePassword(password, config.passwordPolicy);
+      if (!passwordValidation.valid) {
+        const errorMsg = passwordValidation.errors.join(', ');
+        return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent(errorMsg)}`);
+      }
+
+      // Find reset token
+      const [okQuery, errQuery, tokens] = await tryFn(() =>
+        plugin.passwordResetTokensResource.query({ token })
+      );
+
+      if (!okQuery || tokens.length === 0) {
+        return c.redirect(`/forgot-password?error=${encodeURIComponent('Invalid reset token')}`);
+      }
+
+      const resetToken = tokens[0];
+
+      // Check if token is expired
+      if (isExpired(resetToken.expiresAt)) {
+        return c.redirect(`/forgot-password?error=${encodeURIComponent('Reset link has expired. Please request a new one.')}`);
+      }
+
+      // Check if token was already used
+      if (resetToken.used) {
+        return c.redirect(`/forgot-password?error=${encodeURIComponent('Reset link has already been used.')}`);
+      }
+
+      // Hash new password
+      const [okHash, errHash, passwordHash] = await tryFn(() =>
+        hashPassword(password, config.passwordPolicy.bcryptRounds)
+      );
+
+      if (!okHash) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Password hashing failed:', errHash);
+        }
+        return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent('Failed to process password. Please try again.')}`);
+      }
+
+      // Update user password
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.patch(resetToken.userId, {
+          passwordHash
+        })
+      );
+
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Password update failed:', errUpdate);
+        }
+        return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent('Failed to reset password. Please try again.')}`);
+      }
+
+      // Mark token as used
+      await tryFn(() =>
+        plugin.passwordResetTokensResource.patch(resetToken.id, { used: true })
+      );
+
+      // Destroy all user sessions (force re-login)
+      await sessionManager.destroyUserSessions(resetToken.userId);
+
+      // Redirect to login with success message
+      return c.redirect(`/login?success=${encodeURIComponent('Your password has been reset successfully. Please log in with your new password.')}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Reset password error:', error);
+      }
+      return c.redirect(`/forgot-password?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
   });
 }
 
