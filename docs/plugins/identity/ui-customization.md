@@ -1,5 +1,7 @@
 # Identity Plugin - UI Customization
 
+[← Back to Identity Plugin](../identity-plugin.md) | [Configuration](./configuration.md) | [Examples →](../identity-examples.md)
+
 Complete guide to white-label branding and custom page overrides.
 
 ## Table of Contents
