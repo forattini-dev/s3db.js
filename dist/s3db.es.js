@@ -7040,8 +7040,10 @@ async function getOrCreateUser(usersResource, claims, config) {
     throw new Error("Cannot extract user ID from OIDC claims (no email/preferred_username/sub)");
   }
   let user = null;
+  let userExists = false;
   try {
     user = await usersResource.get(userId);
+    userExists = true;
   } catch (err) {
   }
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -10391,10 +10393,44 @@ class IdentityPlugin extends Plugin {
       },
       // UI Configuration (white-label customization)
       ui: {
+        // Branding
         title: options.ui?.title || "S3DB Identity",
+        companyName: options.ui?.companyName || "S3DB",
+        tagline: options.ui?.tagline || "Secure Identity & Access Management",
+        logoUrl: options.ui?.logoUrl || null,
         logo: options.ui?.logo || null,
+        // Deprecated, use logoUrl
+        favicon: options.ui?.favicon || null,
+        // Colors (11 options)
         primaryColor: options.ui?.primaryColor || "#007bff",
+        secondaryColor: options.ui?.secondaryColor || "#6c757d",
+        successColor: options.ui?.successColor || "#28a745",
+        dangerColor: options.ui?.dangerColor || "#dc3545",
+        warningColor: options.ui?.warningColor || "#ffc107",
+        infoColor: options.ui?.infoColor || "#17a2b8",
+        textColor: options.ui?.textColor || "#212529",
+        textMuted: options.ui?.textMuted || "#6c757d",
+        backgroundColor: options.ui?.backgroundColor || "#ffffff",
+        backgroundLight: options.ui?.backgroundLight || "#f8f9fa",
+        borderColor: options.ui?.borderColor || "#dee2e6",
+        // Typography
+        fontFamily: options.ui?.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: options.ui?.fontSize || "16px",
+        // Layout
+        borderRadius: options.ui?.borderRadius || "0.375rem",
+        boxShadow: options.ui?.boxShadow || "0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)",
+        // Company Info
+        footerText: options.ui?.footerText || null,
+        supportEmail: options.ui?.supportEmail || null,
+        privacyUrl: options.ui?.privacyUrl || "/privacy",
+        termsUrl: options.ui?.termsUrl || "/terms",
+        // Social Links
+        socialLinks: options.ui?.socialLinks || null,
+        // Custom CSS
         customCSS: options.ui?.customCSS || null,
+        // Custom Pages (override default pages)
+        customPages: options.ui?.customPages || {},
+        // Base URL
         baseUrl: options.ui?.baseUrl || `http://localhost:${options.port || 4e3}`
       },
       // Email Configuration (SMTP)
@@ -55303,8 +55339,12 @@ function adminOnly(sessionManager) {
   });
 }
 
+function getPageComponent(customPages, pageName, defaultPage) {
+  return customPages[pageName] || defaultPage;
+}
 function registerUIRoutes(app, plugin) {
   const { sessionManager, usersResource, config } = plugin;
+  const customPages = config.ui.customPages || {};
   app.get("/login", async (c) => {
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
     if (sessionId) {
@@ -55316,7 +55356,8 @@ function registerUIRoutes(app, plugin) {
     const error = c.req.query("error");
     const success = c.req.query("success");
     const email = c.req.query("email") || "";
-    return c.html(LoginPage({
+    const PageComponent = getPageComponent(customPages, "login", LoginPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       success: success ? decodeURIComponent(success) : null,
       email,
@@ -55397,7 +55438,8 @@ function registerUIRoutes(app, plugin) {
     const error = c.req.query("error");
     const email = c.req.query("email") || "";
     const name = c.req.query("name") || "";
-    return c.html(RegisterPage({
+    const PageComponent = getPageComponent(customPages, "register", RegisterPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       email,
       name,
@@ -55515,7 +55557,8 @@ function registerUIRoutes(app, plugin) {
     const error = c.req.query("error");
     const success = c.req.query("success");
     const email = c.req.query("email") || "";
-    return c.html(ForgotPasswordPage({
+    const PageComponent = getPageComponent(customPages, "forgotPassword", ForgotPasswordPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       success: success ? decodeURIComponent(success) : null,
       email,
@@ -55594,7 +55637,8 @@ function registerUIRoutes(app, plugin) {
     if (resetToken.used) {
       return c.redirect(`/forgot-password?error=${encodeURIComponent("Reset link has already been used. Please request a new one.")}`);
     }
-    return c.html(ResetPasswordPage({
+    const PageComponent = getPageComponent(customPages, "resetPassword", ResetPasswordPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       token,
       passwordPolicy: config.passwordPolicy,
@@ -55683,7 +55727,8 @@ function registerUIRoutes(app, plugin) {
       })) : [];
       const error = c.req.query("error");
       const success = c.req.query("success");
-      return c.html(ProfilePage({
+      const PageComponent = getPageComponent(customPages, "profile", ProfilePage);
+      return c.html(PageComponent({
         user: userData,
         sessions,
         error: error ? decodeURIComponent(error) : null,
@@ -56454,7 +56499,8 @@ function registerUIRoutes(app, plugin) {
           `, 400);
         }
       }
-      return c.html(ConsentPage({
+      const PageComponent = getPageComponent(customPages, "consent", ConsentPage);
+      return c.html(PageComponent({
         client,
         scopes: requestedScopes,
         user,
@@ -56553,8 +56599,9 @@ function registerUIRoutes(app, plugin) {
   });
   app.get("/verify-email", async (c) => {
     const token = c.req.query("token");
+    const PageComponent = getPageComponent(customPages, "verifyEmail", VerifyEmailPage);
     if (!token) {
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: "pending",
         config: config.ui
       }));
@@ -56564,7 +56611,7 @@ function registerUIRoutes(app, plugin) {
         () => usersResource.query({ emailVerificationToken: token })
       );
       if (!okUsers || !users || users.length === 0) {
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: "error",
           message: "Invalid verification link. It may have already been used or expired.",
           config: config.ui
@@ -56572,7 +56619,7 @@ function registerUIRoutes(app, plugin) {
       }
       const user = users[0];
       if (user.emailVerified) {
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: "success",
           message: "Your email is already verified! You can sign in now.",
           config: config.ui
@@ -56580,7 +56627,7 @@ function registerUIRoutes(app, plugin) {
       }
       if (user.emailVerificationExpiry) {
         if (isExpired(user.emailVerificationExpiry)) {
-          return c.html(VerifyEmailPage({
+          return c.html(PageComponent({
             status: "expired",
             email: user.email,
             message: "This verification link has expired. Please request a new one.",
@@ -56599,19 +56646,19 @@ function registerUIRoutes(app, plugin) {
       );
       if (!okUpdate) {
         console.error("[Identity Plugin] Email verification update error:", errUpdate);
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: "error",
           message: "Failed to verify email. Please try again later.",
           config: config.ui
         }));
       }
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: "success",
         config: config.ui
       }));
     } catch (error) {
       console.error("[Identity Plugin] Email verification error:", error);
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: "error",
         message: "An error occurred while verifying your email.",
         config: config.ui
@@ -56621,8 +56668,9 @@ function registerUIRoutes(app, plugin) {
   app.post("/verify-email/resend", async (c) => {
     const body = await c.req.parseBody();
     const { email } = body;
+    const PageComponent = getPageComponent(customPages, "verifyEmail", VerifyEmailPage);
     if (!email) {
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: "error",
         message: "Email address is required.",
         config: config.ui
@@ -56633,7 +56681,7 @@ function registerUIRoutes(app, plugin) {
         () => usersResource.query({ email: email.toLowerCase().trim() })
       );
       if (!okUsers || !users || users.length === 0) {
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: "pending",
           message: "If an account exists with this email, a verification link has been sent.",
           config: config.ui
@@ -56641,7 +56689,7 @@ function registerUIRoutes(app, plugin) {
       }
       const user = users[0];
       if (user.emailVerified) {
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: "success",
           message: "Your email is already verified! You can sign in now.",
           config: config.ui
@@ -56657,7 +56705,7 @@ function registerUIRoutes(app, plugin) {
       );
       if (!okUpdate) {
         console.error("[Identity Plugin] Verification token update error:", errUpdate);
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: "error",
           message: "Failed to send verification email. Please try again later.",
           config: config.ui
@@ -56670,7 +56718,7 @@ function registerUIRoutes(app, plugin) {
           verificationToken
         });
       }
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: "pending",
         email: user.email,
         message: "A new verification link has been sent to your email address.",
@@ -56678,7 +56726,7 @@ function registerUIRoutes(app, plugin) {
       }));
     } catch (error) {
       console.error("[Identity Plugin] Resend verification error:", error);
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: "error",
         message: "An error occurred. Please try again later.",
         config: config.ui
