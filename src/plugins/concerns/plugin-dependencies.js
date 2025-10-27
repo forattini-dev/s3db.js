@@ -116,6 +116,24 @@ export const PLUGIN_DEPENDENCIES = {
       }
     }
   },
+  'identity-plugin': {
+    name: 'Identity Provider Plugin',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/identity.md',
+    dependencies: {
+      'hono': {
+        version: '^4.0.0',
+        description: 'Ultra-light HTTP server framework',
+        installCommand: 'pnpm add hono',
+        npmUrl: 'https://www.npmjs.com/package/hono'
+      },
+      '@hono/node-server': {
+        version: '^1.0.0',
+        description: 'Node.js adapter for Hono',
+        installCommand: 'pnpm add @hono/node-server',
+        npmUrl: 'https://www.npmjs.com/package/@hono/node-server'
+      }
+    }
+  },
   'ml-plugin': {
     name: 'ML Plugin',
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/ml-plugin.md',
