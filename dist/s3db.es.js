@@ -2,9 +2,11 @@ import crypto$1, { createHash, createVerify, generateKeyPairSync, createPublicKe
 import EventEmitter from 'events';
 import { Hono } from 'hono';
 import { mkdir, copyFile, unlink, stat, access, readdir, writeFile, readFile, rm, watch } from 'fs/promises';
-import fs, { createReadStream, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync, readFileSync } from 'fs';
-import { pipeline } from 'stream/promises';
 import path$1, { join, dirname } from 'path';
+import fs, { createReadStream, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync, readFileSync } from 'fs';
+import { S3Client as S3Client$1, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import '@aws-sdk/s3-request-presigner';
+import { pipeline } from 'stream/promises';
 import { Transform, Writable, Readable } from 'stream';
 import zlib from 'node:zlib';
 import os from 'os';
@@ -19,7 +21,6 @@ import { ReadableStream } from 'node:stream/web';
 import { Agent } from 'http';
 import { Agent as Agent$1 } from 'https';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
-import { S3Client as S3Client$1, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { fileURLToPath } from 'node:url';
 import { win32, posix } from 'node:path';
 import * as actualFS from 'node:fs';
@@ -7486,6 +7487,8 @@ class ApiServer {
       middlewares: options.middlewares || [],
       verbose: options.verbose || false,
       auth: options.auth || {},
+      static: options.static || [],
+      // Static file serving config
       docsEnabled: options.docsEnabled !== false,
       // Enable /docs by default
       docsUI: options.docsUI || "redoc",
@@ -7582,6 +7585,7 @@ class ApiServer {
       }
       return c.redirect("/docs", 302);
     });
+    this._setupStaticRoutes();
     if (this.options.docsEnabled) {
       this.app.get("/openapi.json", (c) => {
         if (!this.openAPISpec) {
@@ -52071,6 +52075,8 @@ class IdentityServer {
         console.log("[Identity Server]   POST /admin/users/:id/verify-email (Mark Email Verified)");
         console.log("[Identity Server]   POST /admin/users/:id/reset-password (Send Password Reset)");
         console.log("[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)");
+        console.log("[Identity Server]   GET  /oauth/authorize (OAuth2 Consent Screen - Overrides OAuth2Server)");
+        console.log("[Identity Server]   POST /oauth/consent (Process OAuth2 Consent Decision)");
       }
     } catch (error) {
       console.error("[Identity Server] Failed to setup UI routes:", error);
@@ -54225,6 +54231,239 @@ function AdminUserFormPage(props = {}) {
   });
 }
 
+const SCOPE_DESCRIPTIONS = {
+  openid: {
+    name: "OpenID Connect",
+    description: "Sign in using your identity",
+    icon: "\u{1F510}"
+  },
+  profile: {
+    name: "Profile Information",
+    description: "Access your basic profile information (name, picture)",
+    icon: "\u{1F464}"
+  },
+  email: {
+    name: "Email Address",
+    description: "Access your email address",
+    icon: "\u{1F4E7}"
+  },
+  offline_access: {
+    name: "Offline Access",
+    description: "Maintain access when you are not using the app",
+    icon: "\u{1F504}"
+  },
+  phone: {
+    name: "Phone Number",
+    description: "Access your phone number",
+    icon: "\u{1F4F1}"
+  },
+  address: {
+    name: "Address",
+    description: "Access your address information",
+    icon: "\u{1F3E0}"
+  }
+};
+function ConsentPage(props = {}) {
+  const {
+    client = {},
+    scopes = [],
+    user = {},
+    responseType,
+    redirectUri,
+    state = "",
+    codeChallenge = "",
+    codeChallengeMethod = "plain",
+    error = null,
+    config = {}
+  } = props;
+  const scopeDetails = scopes.map((scope) => ({
+    scope,
+    ...SCOPE_DESCRIPTIONS[scope],
+    unknown: !SCOPE_DESCRIPTIONS[scope]
+  })).filter((s) => !s.unknown);
+  const content = html`
+    <div class="container-sm">
+      ${error ? html`
+        <div class="alert alert-danger mb-4">
+          ${error}
+        </div>
+      ` : ""}
+
+      <div style="text-align: center; margin-bottom: 2rem;">
+        ${config.logoUrl ? html`
+          <img src="${config.logoUrl}" alt="Logo" style="max-width: 80px; margin-bottom: 1rem;" />
+        ` : ""}
+        <h1 style="font-size: 1.75rem; margin-bottom: 0.5rem;">Authorize Application</h1>
+        <p style="color: var(--color-text-muted);">
+          <strong>${client.name || "Application"}</strong> is requesting access to your account
+        </p>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header">
+          Application Information
+        </div>
+        <div class="p-3">
+          <div style="display: grid; gap: 1rem;">
+            <div>
+              <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                Application Name
+              </div>
+              <div style="font-size: 1.125rem; font-weight: 600;">
+                ${client.name || "Unknown Application"}
+              </div>
+            </div>
+
+            ${client.description ? html`
+              <div>
+                <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                  Description
+                </div>
+                <div>${client.description}</div>
+              </div>
+            ` : ""}
+
+            <div>
+              <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                Client ID
+              </div>
+              <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem; word-break: break-all;">
+                ${client.clientId}
+              </code>
+            </div>
+
+            <div>
+              <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                Will Redirect To
+              </div>
+              <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem; word-break: break-all;">
+                ${redirectUri}
+              </code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header">
+          Requested Permissions
+        </div>
+        <div class="p-3">
+          ${scopeDetails.length === 0 ? html`
+            <p style="color: var(--color-text-muted); font-style: italic;">
+              This application is not requesting any specific permissions.
+            </p>
+          ` : html`
+            <div style="display: grid; gap: 1rem;">
+              ${scopeDetails.map((s) => html`
+                <div style="display: flex; gap: 1rem; align-items: flex-start;">
+                  <div style="font-size: 2rem; line-height: 1;">
+                    ${s.icon}
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; margin-bottom: 0.25rem;">
+                      ${s.name}
+                    </div>
+                    <div style="color: var(--color-text-muted); font-size: 0.875rem;">
+                      ${s.description}
+                    </div>
+                  </div>
+                </div>
+              `)}
+            </div>
+          `}
+        </div>
+      </div>
+
+      <div class="card mb-3" style="background-color: var(--color-light);">
+        <div class="p-3">
+          <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+            <div style="font-size: 1.5rem;">ℹ️</div>
+            <div style="flex: 1;">
+              <div style="font-weight: 600; margin-bottom: 0.5rem;">
+                Signed in as ${user.name}
+              </div>
+              <div style="font-size: 0.875rem; color: var(--color-text-muted); margin-bottom: 0.75rem;">
+                By clicking "Allow", you authorize <strong>${client.name}</strong> to access your information as described above.
+              </div>
+              <div style="font-size: 0.875rem; color: var(--color-text-muted);">
+                You can revoke this access at any time from your <a href="/profile" style="color: var(--color-primary);">profile settings</a>.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Authorization Form -->
+      <form method="POST" action="/oauth/consent">
+        <!-- OAuth2 Parameters -->
+        <input type="hidden" name="response_type" value="${responseType}" />
+        <input type="hidden" name="client_id" value="${client.clientId}" />
+        <input type="hidden" name="redirect_uri" value="${redirectUri}" />
+        <input type="hidden" name="scope" value="${scopes.join(" ")}" />
+        ${state ? html`<input type="hidden" name="state" value="${state}" />` : ""}
+        ${codeChallenge ? html`<input type="hidden" name="code_challenge" value="${codeChallenge}" />` : ""}
+        ${codeChallengeMethod ? html`<input type="hidden" name="code_challenge_method" value="${codeChallengeMethod}" />` : ""}
+
+        <!-- Trust Option -->
+        <div class="form-group">
+          <div class="form-check">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              id="trust_application"
+              name="trust_application"
+              value="1"
+            />
+            <label class="form-check-label" for="trust_application">
+              Trust this application (don't ask again)
+            </label>
+          </div>
+          <small class="form-text">
+            You won't be asked for permission next time this application requests access with the same permissions.
+          </small>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <button
+            type="submit"
+            name="decision"
+            value="deny"
+            class="btn btn-secondary"
+            style="order: 1;"
+          >
+            Deny
+          </button>
+          <button
+            type="submit"
+            name="decision"
+            value="allow"
+            class="btn btn-primary"
+            style="order: 2;"
+          >
+            Allow
+          </button>
+        </div>
+      </form>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <a href="/logout" style="color: var(--color-text-muted); font-size: 0.875rem;">
+          Not ${user.name}? Sign out
+        </a>
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: `Authorize ${client.name || "Application"}`,
+    content,
+    config,
+    user,
+    error: null
+    // Error shown in page
+  });
+}
+
 const DEFAULT_PASSWORD_POLICY = {
   minLength: 8,
   maxLength: 128,
@@ -55383,6 +55622,180 @@ function registerUIRoutes(app, plugin) {
     } catch (error) {
       console.error("[Identity Plugin] Toggle admin error:", error);
       return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/oauth/authorize", sessionAuth(sessionManager, { required: false }), async (c) => {
+    const query = c.req.query();
+    const {
+      response_type,
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method = "plain"
+    } = query;
+    try {
+      if (!response_type || !client_id || !redirect_uri) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Request</h1>
+              <p>response_type, client_id, and redirect_uri are required</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      const user = c.get("user");
+      if (!user) {
+        const returnUrl = `/oauth/authorize?${new URLSearchParams(query).toString()}`;
+        return c.redirect(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+      }
+      const [okClient, errClient, clients] = await tryFn(
+        () => plugin.oauth2ClientsResource.query({ clientId: client_id })
+      );
+      if (!okClient || !clients || clients.length === 0) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Client</h1>
+              <p>Client not found</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      const client = clients[0];
+      if (client.active === false) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Client Inactive</h1>
+              <p>This client is not currently active</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      if (!client.redirectUris || !client.redirectUris.includes(redirect_uri)) {
+        return c.html(`
+          <html>
+            <body>
+              <h1>Invalid Redirect URI</h1>
+              <p>The redirect_uri does not match any registered URIs for this client</p>
+            </body>
+          </html>
+        `, 400);
+      }
+      const requestedScopes = scope ? scope.split(" ") : [];
+      if (requestedScopes.length > 0) {
+        const invalidScopes = requestedScopes.filter(
+          (s) => !client.allowedScopes || !client.allowedScopes.includes(s)
+        );
+        if (invalidScopes.length > 0) {
+          return c.html(`
+            <html>
+              <body>
+                <h1>Invalid Scopes</h1>
+                <p>Invalid scopes: ${invalidScopes.join(", ")}</p>
+              </body>
+            </html>
+          `, 400);
+        }
+      }
+      return c.html(ConsentPage({
+        client,
+        scopes: requestedScopes,
+        user,
+        responseType: response_type,
+        redirectUri: redirect_uri,
+        state,
+        codeChallenge: code_challenge,
+        codeChallengeMethod: code_challenge_method,
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error("[Identity Plugin] OAuth authorize error:", error);
+      return c.html(`
+        <html>
+          <body>
+            <h1>Server Error</h1>
+            <p>An error occurred while processing your request</p>
+          </body>
+        </html>
+      `, 500);
+    }
+  });
+  app.post("/oauth/consent", sessionAuth(sessionManager, { required: true }), async (c) => {
+    const body = await c.req.parseBody();
+    const {
+      decision,
+      trust_application,
+      response_type,
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      code_challenge,
+      code_challenge_method = "plain"
+    } = body;
+    const user = c.get("user");
+    try {
+      if (decision === "deny") {
+        const errorParams = new URLSearchParams({
+          error: "access_denied",
+          error_description: "User denied authorization"
+        });
+        if (state) {
+          errorParams.set("state", state);
+        }
+        return c.redirect(`${redirect_uri}?${errorParams.toString()}`);
+      }
+      const authCode = generateAuthCode();
+      const requestedScopes = scope ? scope.split(" ") : [];
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1e3).toISOString();
+      const [okCode, errCode] = await tryFn(
+        () => plugin.oauth2AuthCodesResource.insert({
+          code: authCode,
+          clientId: client_id,
+          userId: user.id,
+          redirectUri: redirect_uri,
+          scope: requestedScopes,
+          codeChallenge: code_challenge || null,
+          codeChallengeMethod: code_challenge_method || "plain",
+          expiresAt,
+          used: false,
+          trusted: trust_application === "1"
+        })
+      );
+      if (!okCode) {
+        console.error("[Identity Plugin] Failed to store auth code:", errCode);
+        return c.html(`
+          <html>
+            <body>
+              <h1>Server Error</h1>
+              <p>Failed to generate authorization code</p>
+            </body>
+          </html>
+        `, 500);
+      }
+      if (trust_application === "1") {
+      }
+      const successParams = new URLSearchParams({
+        code: authCode
+      });
+      if (state) {
+        successParams.set("state", state);
+      }
+      return c.redirect(`${redirect_uri}?${successParams.toString()}`);
+    } catch (error) {
+      console.error("[Identity Plugin] OAuth consent error:", error);
+      return c.html(`
+        <html>
+          <body>
+            <h1>Server Error</h1>
+            <p>An error occurred while processing your consent</p>
+          </body>
+        </html>
+      `, 500);
     }
   });
 }
