@@ -363,8 +363,11 @@ export class ApiPlugin extends Plugin {
   }
 
   /**
-   * Create CORS middleware (placeholder)
+   * Create CORS middleware
    * @private
+   *
+   * Handles Cross-Origin Resource Sharing (CORS) headers and preflight requests.
+   * Supports wildcard origins, credential-based requests, and OPTIONS preflight.
    */
   async _createCorsMiddleware() {
     return async (c, next) => {
@@ -428,8 +431,12 @@ export class ApiPlugin extends Plugin {
   }
 
   /**
-   * Create rate limiting middleware (placeholder)
+   * Create rate limiting middleware
    * @private
+   *
+   * Implements sliding window rate limiting with configurable window size and max requests.
+   * Returns 429 status code with Retry-After header when limit is exceeded.
+   * Uses IP address or custom key generator to track request counts.
    */
   async _createRateLimitMiddleware() {
     const requests = new Map();
@@ -485,10 +492,23 @@ export class ApiPlugin extends Plugin {
   }
 
   /**
-   * Create logging middleware (placeholder)
+   * Create logging middleware with customizable format
    * @private
+   *
+   * Supported tokens:
+   * - :method - HTTP method (GET, POST, etc)
+   * - :path - Request path
+   * - :status - HTTP status code
+   * - :response-time - Response time in milliseconds
+   * - :user - Username or 'anonymous'
+   * - :requestId - Request ID (UUID)
+   *
+   * Example format: ':method :path :status :response-time ms - :user'
+   * Output: 'GET /api/v1/cars 200 45ms - john'
    */
   async _createLoggingMiddleware() {
+    const { format } = this.config.logging;
+
     return async (c, next) => {
       const start = Date.now();
       const method = c.req.method;
@@ -499,9 +519,18 @@ export class ApiPlugin extends Plugin {
 
       const duration = Date.now() - start;
       const status = c.res.status;
-      const user = c.get('user')?.username || 'anonymous';
+      const user = c.get('user')?.username || c.get('user')?.email || 'anonymous';
 
-      console.log(`[API Plugin] ${requestId} - ${method} ${path} ${status} ${duration}ms - ${user}`);
+      // Parse format string with token replacement
+      let logMessage = format
+        .replace(':method', method)
+        .replace(':path', path)
+        .replace(':status', status)
+        .replace(':response-time', duration)
+        .replace(':user', user)
+        .replace(':requestId', requestId);
+
+      console.log(`[API Plugin] ${logMessage}`);
     };
   }
 
