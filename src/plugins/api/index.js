@@ -131,19 +131,83 @@ export class ApiPlugin extends Plugin {
         returnValidationErrors: options.validation?.returnValidationErrors !== false
       },
 
-      // Content Security Policy (CSP) configuration
+      // Security Headers (Helmet-like configuration)
+      security: {
+        enabled: options.security?.enabled !== false, // Enabled by default
+
+        // Content Security Policy (CSP)
+        contentSecurityPolicy: options.security?.contentSecurityPolicy !== false ? {
+          enabled: options.security?.contentSecurityPolicy?.enabled !== false,
+          directives: options.security?.contentSecurityPolicy?.directives || options.csp?.directives || {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/'],
+            'style-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/', 'https://fonts.googleapis.com'],
+            'font-src': ["'self'", 'https://fonts.gstatic.com'],
+            'img-src': ["'self'", 'data:', 'https:'],
+            'connect-src': ["'self'"]
+          },
+          reportOnly: options.security?.contentSecurityPolicy?.reportOnly || options.csp?.reportOnly || false,
+          reportUri: options.security?.contentSecurityPolicy?.reportUri || options.csp?.reportUri || null
+        } : false,
+
+        // X-Frame-Options (clickjacking protection)
+        frameguard: options.security?.frameguard !== false ? {
+          action: options.security?.frameguard?.action || 'deny' // 'deny' or 'sameorigin'
+        } : false,
+
+        // X-Content-Type-Options (MIME sniffing protection)
+        noSniff: options.security?.noSniff !== false, // Enabled by default
+
+        // Strict-Transport-Security (HSTS - force HTTPS)
+        hsts: options.security?.hsts !== false ? {
+          maxAge: options.security?.hsts?.maxAge || 15552000, // 180 days (Helmet default)
+          includeSubDomains: options.security?.hsts?.includeSubDomains !== false,
+          preload: options.security?.hsts?.preload || false
+        } : false,
+
+        // Referrer-Policy (privacy)
+        referrerPolicy: options.security?.referrerPolicy !== false ? {
+          policy: options.security?.referrerPolicy?.policy || 'no-referrer'
+        } : false,
+
+        // X-DNS-Prefetch-Control (DNS leak protection)
+        dnsPrefetchControl: options.security?.dnsPrefetchControl !== false ? {
+          allow: options.security?.dnsPrefetchControl?.allow || false
+        } : false,
+
+        // X-Download-Options (IE8+ download security)
+        ieNoOpen: options.security?.ieNoOpen !== false, // Enabled by default
+
+        // X-Permitted-Cross-Domain-Policies (Flash/PDF security)
+        permittedCrossDomainPolicies: options.security?.permittedCrossDomainPolicies !== false ? {
+          policy: options.security?.permittedCrossDomainPolicies?.policy || 'none'
+        } : false,
+
+        // X-XSS-Protection (legacy XSS filter)
+        xssFilter: options.security?.xssFilter !== false ? {
+          mode: options.security?.xssFilter?.mode || 'block'
+        } : false,
+
+        // Permissions-Policy (modern feature policy)
+        permissionsPolicy: options.security?.permissionsPolicy !== false ? {
+          features: options.security?.permissionsPolicy?.features || {
+            geolocation: [],
+            microphone: [],
+            camera: [],
+            payment: [],
+            usb: [],
+            magnetometer: [],
+            gyroscope: [],
+            accelerometer: []
+          }
+        } : false
+      },
+
+      // Legacy CSP config (backward compatibility)
       csp: {
         enabled: options.csp?.enabled || false,
-        // Default CSP that works with Redoc v2.5.1 (allows CDN scripts/styles)
-        directives: options.csp?.directives || {
-          'default-src': ["'self'"],
-          'script-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/'],
-          'style-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/', 'https://fonts.googleapis.com'],
-          'font-src': ["'self'", 'https://fonts.gstatic.com'],
-          'img-src': ["'self'", 'data:', 'https:'],
-          'connect-src': ["'self'"]
-        },
-        reportOnly: options.csp?.reportOnly || false, // If true, uses Content-Security-Policy-Report-Only
+        directives: options.csp?.directives || {},
+        reportOnly: options.csp?.reportOnly || false,
         reportUri: options.csp?.reportUri || null
       },
 
@@ -263,14 +327,21 @@ export class ApiPlugin extends Plugin {
       await next();
     });
 
+    // Add security headers middleware (FIRST - most critical)
+    if (this.config.security.enabled) {
+      const securityMiddleware = await this._createSecurityMiddleware();
+      middlewares.push(securityMiddleware);
+    }
+
     // Add CORS middleware
     if (this.config.cors.enabled) {
       const corsMiddleware = await this._createCorsMiddleware();
       middlewares.push(corsMiddleware);
     }
 
-    // Add CSP middleware
-    if (this.config.csp.enabled) {
+    // Add legacy CSP middleware (deprecated - use security.contentSecurityPolicy instead)
+    // This is kept for backward compatibility with old configs
+    if (this.config.csp.enabled && !this.config.security.contentSecurityPolicy) {
       const cspMiddleware = await this._createCSPMiddleware();
       middlewares.push(cspMiddleware);
     }
@@ -463,6 +534,121 @@ export class ApiPlugin extends Plugin {
       // 2. Compress response body with zlib.gzip() or zlib.deflate()
       // 3. Set Content-Encoding header
       // 4. Update Content-Length header
+    };
+  }
+
+  /**
+   * Create security headers middleware (Helmet-like)
+   * @private
+   */
+  async _createSecurityMiddleware() {
+    const { security } = this.config;
+
+    return async (c, next) => {
+      // X-Content-Type-Options: nosniff (MIME sniffing protection)
+      if (security.noSniff) {
+        c.header('X-Content-Type-Options', 'nosniff');
+      }
+
+      // X-Frame-Options (clickjacking protection)
+      if (security.frameguard) {
+        const action = security.frameguard.action.toUpperCase();
+        if (action === 'DENY') {
+          c.header('X-Frame-Options', 'DENY');
+        } else if (action === 'SAMEORIGIN') {
+          c.header('X-Frame-Options', 'SAMEORIGIN');
+        }
+      }
+
+      // Strict-Transport-Security (HSTS - force HTTPS)
+      if (security.hsts) {
+        const parts = [`max-age=${security.hsts.maxAge}`];
+        if (security.hsts.includeSubDomains) {
+          parts.push('includeSubDomains');
+        }
+        if (security.hsts.preload) {
+          parts.push('preload');
+        }
+        c.header('Strict-Transport-Security', parts.join('; '));
+      }
+
+      // Referrer-Policy (privacy)
+      if (security.referrerPolicy) {
+        c.header('Referrer-Policy', security.referrerPolicy.policy);
+      }
+
+      // X-DNS-Prefetch-Control (DNS leak protection)
+      if (security.dnsPrefetchControl) {
+        const value = security.dnsPrefetchControl.allow ? 'on' : 'off';
+        c.header('X-DNS-Prefetch-Control', value);
+      }
+
+      // X-Download-Options (IE8+ download security)
+      if (security.ieNoOpen) {
+        c.header('X-Download-Options', 'noopen');
+      }
+
+      // X-Permitted-Cross-Domain-Policies (Flash/PDF security)
+      if (security.permittedCrossDomainPolicies) {
+        c.header('X-Permitted-Cross-Domain-Policies', security.permittedCrossDomainPolicies.policy);
+      }
+
+      // X-XSS-Protection (legacy XSS filter)
+      if (security.xssFilter) {
+        const mode = security.xssFilter.mode;
+        c.header('X-XSS-Protection', mode === 'block' ? '1; mode=block' : '0');
+      }
+
+      // Permissions-Policy (modern feature policy)
+      if (security.permissionsPolicy && security.permissionsPolicy.features) {
+        const features = security.permissionsPolicy.features;
+        const policies = [];
+
+        for (const [feature, allowList] of Object.entries(features)) {
+          if (Array.isArray(allowList)) {
+            const value = allowList.length === 0
+              ? `${feature}=()`
+              : `${feature}=(${allowList.join(' ')})`;
+            policies.push(value);
+          }
+        }
+
+        if (policies.length > 0) {
+          c.header('Permissions-Policy', policies.join(', '));
+        }
+      }
+
+      // Content-Security-Policy (CSP)
+      // Note: This is also handled by _createCSPMiddleware for backward compatibility
+      // We check if legacy csp.enabled is true, otherwise use security.contentSecurityPolicy
+      const cspConfig = this.config.csp.enabled
+        ? this.config.csp
+        : security.contentSecurityPolicy;
+
+      if (cspConfig && cspConfig.enabled !== false && cspConfig.directives) {
+        const cspParts = [];
+        for (const [directive, values] of Object.entries(cspConfig.directives)) {
+          if (Array.isArray(values) && values.length > 0) {
+            cspParts.push(`${directive} ${values.join(' ')}`);
+          } else if (typeof values === 'string') {
+            cspParts.push(`${directive} ${values}`);
+          }
+        }
+
+        if (cspConfig.reportUri) {
+          cspParts.push(`report-uri ${cspConfig.reportUri}`);
+        }
+
+        if (cspParts.length > 0) {
+          const cspValue = cspParts.join('; ');
+          const headerName = cspConfig.reportOnly
+            ? 'Content-Security-Policy-Report-Only'
+            : 'Content-Security-Policy';
+          c.header(headerName, cspValue);
+        }
+      }
+
+      await next();
     };
   }
 
