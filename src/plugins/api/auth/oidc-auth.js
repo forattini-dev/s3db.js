@@ -147,6 +147,33 @@ async function getOrCreateUser(usersResource, claims, config) {
       updates.name = claims.name;
     }
 
+    // Call beforeUpdateUser hook if configured (allows refreshing external API data)
+    if (config.beforeUpdateUser && typeof config.beforeUpdateUser === 'function') {
+      try {
+        const enrichedData = await config.beforeUpdateUser({
+          user,
+          updates,
+          claims,
+          usersResource
+        });
+
+        // Merge enriched data into updates
+        if (enrichedData && typeof enrichedData === 'object') {
+          Object.assign(updates, enrichedData);
+          // Deep merge metadata
+          if (enrichedData.metadata) {
+            updates.metadata = {
+              ...updates.metadata,
+              ...enrichedData.metadata
+            };
+          }
+        }
+      } catch (hookErr) {
+        console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
+        // Continue with default updates (don't block auth)
+      }
+    }
+
     user = await usersResource.update(userId, updates);
     return { user, created: false };
   }
@@ -178,6 +205,32 @@ async function getOrCreateUser(usersResource, claims, config) {
       teamId: config.defaultTeam || null
     }
   };
+
+  // Call beforeCreateUser hook if configured (allows enriching with external API data)
+  if (config.beforeCreateUser && typeof config.beforeCreateUser === 'function') {
+    try {
+      const enrichedData = await config.beforeCreateUser({
+        user: newUser,
+        claims,
+        usersResource
+      });
+
+      // Merge enriched data into newUser
+      if (enrichedData && typeof enrichedData === 'object') {
+        Object.assign(newUser, enrichedData);
+        // Deep merge metadata
+        if (enrichedData.metadata) {
+          newUser.metadata = {
+            ...newUser.metadata,
+            ...enrichedData.metadata
+          };
+        }
+      }
+    } catch (hookErr) {
+      console.error('[OIDC] beforeCreateUser hook failed:', hookErr);
+      // Continue with default user data (don't block auth)
+    }
+  }
 
   user = await usersResource.insert(newUser);
   return { user, created: true };
@@ -533,12 +586,51 @@ export function createOIDCHandler(config, app, usersResource) {
   // ==================== MIDDLEWARE ====================
 
   /**
+   * Simple glob pattern matcher (supports * and **)
+   */
+  function matchPath(path, pattern) {
+    // Exact match
+    if (pattern === path) return true;
+
+    // Convert glob pattern to regex
+    const regexPattern = pattern
+      .replace(/\*\*/g, '___GLOBSTAR___') // Temporary placeholder
+      .replace(/\*/g, '[^/]*')             // * matches anything except /
+      .replace(/___GLOBSTAR___/g, '.*')    // ** matches everything including /
+      .replace(/\//g, '\\/')               // Escape forward slashes
+      + '$';                                // End of string
+
+    const regex = new RegExp('^' + regexPattern);
+    return regex.test(path);
+  }
+
+  /**
    * Authentication middleware
    */
   const middleware = async (c, next) => {
+    // Check if this path should be protected by OIDC
+    const protectedPaths = finalConfig.protectedPaths || [];
+    const currentPath = c.req.path;
+
+    // If protectedPaths is configured, only enforce OIDC on matching paths
+    if (protectedPaths.length > 0) {
+      const isProtected = protectedPaths.some(pattern => matchPath(currentPath, pattern));
+
+      if (!isProtected) {
+        // Not a protected path, skip OIDC check (allows other auth methods)
+        return await next();
+      }
+    }
+
     const sessionCookie = c.req.cookie(cookieName);
 
     if (!sessionCookie) {
+      // No session cookie - require OIDC for protected paths
+      if (protectedPaths.length > 0) {
+        // Redirect to login for protected paths
+        const returnTo = encodeURIComponent(currentPath);
+        return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+      }
       return await next();
     }
 

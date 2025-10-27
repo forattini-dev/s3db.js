@@ -22,6 +22,8 @@ import { unauthorized } from '../utils/response-formatter.js';
  * @param {Function} options.oidc - OIDC middleware (already configured)
  * @param {Object} options.usersResource - Users resource
  * @param {boolean} options.optional - If true, allows requests without auth
+ * @param {string} options.strategy - Auth strategy: 'any' (default, OR logic) or 'priority' (waterfall with explicit order)
+ * @param {Object} options.priorities - Priority map for 'priority' strategy { jwt: 1, oidc: 2, basic: 3 }
  * @returns {Function} Hono middleware
  */
 export function createAuthMiddleware(options = {}) {
@@ -33,7 +35,9 @@ export function createAuthMiddleware(options = {}) {
     oauth2: oauth2Config = {},
     oidc: oidcMiddleware = null,
     usersResource,
-    optional = false
+    optional = false,
+    strategy = 'any',
+    priorities = {}
   } = options;
 
   // If no methods specified, allow all requests
@@ -98,6 +102,15 @@ export function createAuthMiddleware(options = {}) {
     middlewares.push({
       name: 'oidc',
       middleware: oidcMiddleware
+    });
+  }
+
+  // Sort middlewares by priority if strategy is 'priority'
+  if (strategy === 'priority' && Object.keys(priorities).length > 0) {
+    middlewares.sort((a, b) => {
+      const priorityA = priorities[a.name] || 999; // Unspecified = lowest priority
+      const priorityB = priorities[b.name] || 999;
+      return priorityA - priorityB; // Lower number = higher priority
     });
   }
 

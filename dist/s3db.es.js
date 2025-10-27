@@ -7582,7 +7582,9 @@ function createAuthMiddleware(options = {}) {
     oauth2: oauth2Config = {},
     oidc: oidcMiddleware = null,
     usersResource,
-    optional = false
+    optional = false,
+    strategy = "any",
+    priorities = {}
   } = options;
   if (methods.length === 0) {
     return async (c, next) => await next();
@@ -7640,6 +7642,13 @@ function createAuthMiddleware(options = {}) {
       middleware: oidcMiddleware
     });
   }
+  if (strategy === "priority" && Object.keys(priorities).length > 0) {
+    middlewares.sort((a, b) => {
+      const priorityA = priorities[a.name] || 999;
+      const priorityB = priorities[b.name] || 999;
+      return priorityA - priorityB;
+    });
+  }
   return async (c, next) => {
     for (const { name, middleware } of middlewares) {
       let authSuccess = false;
@@ -7694,6 +7703,27 @@ async function getOrCreateUser(usersResource, claims, config) {
     if (claims.name && claims.name !== user.name) {
       updates.name = claims.name;
     }
+    if (config.beforeUpdateUser && typeof config.beforeUpdateUser === "function") {
+      try {
+        const enrichedData = await config.beforeUpdateUser({
+          user,
+          updates,
+          claims,
+          usersResource
+        });
+        if (enrichedData && typeof enrichedData === "object") {
+          Object.assign(updates, enrichedData);
+          if (enrichedData.metadata) {
+            updates.metadata = {
+              ...updates.metadata,
+              ...enrichedData.metadata
+            };
+          }
+        }
+      } catch (hookErr) {
+        console.error("[OIDC] beforeUpdateUser hook failed:", hookErr);
+      }
+    }
     user = await usersResource.update(userId, updates);
     return { user, created: false };
   }
@@ -7724,6 +7754,26 @@ async function getOrCreateUser(usersResource, claims, config) {
       teamId: config.defaultTeam || null
     }
   };
+  if (config.beforeCreateUser && typeof config.beforeCreateUser === "function") {
+    try {
+      const enrichedData = await config.beforeCreateUser({
+        user: newUser,
+        claims,
+        usersResource
+      });
+      if (enrichedData && typeof enrichedData === "object") {
+        Object.assign(newUser, enrichedData);
+        if (enrichedData.metadata) {
+          newUser.metadata = {
+            ...newUser.metadata,
+            ...enrichedData.metadata
+          };
+        }
+      }
+    } catch (hookErr) {
+      console.error("[OIDC] beforeCreateUser hook failed:", hookErr);
+    }
+  }
   user = await usersResource.insert(newUser);
   return { user, created: true };
 }
@@ -7982,9 +8032,27 @@ function createOIDCHandler(config, app, usersResource) {
     }
     return c.redirect(postLogoutRedirect, 302);
   });
+  function matchPath(path, pattern) {
+    if (pattern === path) return true;
+    const regexPattern = pattern.replace(/\*\*/g, "___GLOBSTAR___").replace(/\*/g, "[^/]*").replace(/___GLOBSTAR___/g, ".*").replace(/\//g, "\\/") + "$";
+    const regex = new RegExp("^" + regexPattern);
+    return regex.test(path);
+  }
   const middleware = async (c, next) => {
+    const protectedPaths = finalConfig.protectedPaths || [];
+    const currentPath = c.req.path;
+    if (protectedPaths.length > 0) {
+      const isProtected = protectedPaths.some((pattern) => matchPath(currentPath, pattern));
+      if (!isProtected) {
+        return await next();
+      }
+    }
     const sessionCookie = c.req.cookie(cookieName);
     if (!sessionCookie) {
+      if (protectedPaths.length > 0) {
+        const returnTo = encodeURIComponent(currentPath);
+        return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+      }
       return await next();
     }
     const session = await decodeSession(sessionCookie);
