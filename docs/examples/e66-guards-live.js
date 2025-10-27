@@ -15,7 +15,7 @@ import {
   applyGuardsToInsert,
   applyGuardsToUpdate,
   applyGuardsToDelete
-} from '../../src/concerns/guards-helpers.js';
+} from '../../src/plugins/api/concerns/guards-helpers.js';
 
 // ============================================================================
 // SETUP DATABASE COM GUARDS
