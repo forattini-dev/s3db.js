@@ -5127,6 +5127,7 @@ function createAuthMiddleware(options = {}) {
     apiKey: apiKeyConfig = {},
     basic: basicConfig = {},
     oauth2: oauth2Config = {},
+    oidc: oidcMiddleware = null,
     usersResource,
     optional = false
   } = options;
@@ -5180,6 +5181,12 @@ function createAuthMiddleware(options = {}) {
       }
     });
   }
+  if (oidcMiddleware) {
+    middlewares.push({
+      name: "oidc",
+      middleware: oidcMiddleware
+    });
+  }
   return async (c, next) => {
     for (const { name, middleware } of middlewares) {
       let authSuccess = false;
@@ -5198,6 +5205,191 @@ function createAuthMiddleware(options = {}) {
       `Authentication required. Supported methods: ${methods.join(", ")}`
     );
     return c.json(response, response._status);
+  };
+}
+
+function createOIDCHandler(config, app, usersResource) {
+  const {
+    issuer,
+    clientId,
+    clientSecret,
+    redirectUri,
+    scopes = ["openid", "profile", "email"],
+    cookieSecret,
+    cookieName = "oidc_session",
+    cookieMaxAge = 864e5,
+    // 24 hours
+    loginPath = "/auth/login",
+    callbackPath = "/auth/callback",
+    logoutPath = "/auth/logout",
+    postLoginRedirect = "/",
+    postLogoutRedirect = "/"
+  } = config;
+  if (!issuer) throw new Error("[OIDC Auth] Missing required config: issuer");
+  if (!clientId) throw new Error("[OIDC Auth] Missing required config: clientId");
+  if (!clientSecret) throw new Error("[OIDC Auth] Missing required config: clientSecret");
+  if (!redirectUri) throw new Error("[OIDC Auth] Missing required config: redirectUri");
+  if (!cookieSecret) throw new Error("[OIDC Auth] Missing required config: cookieSecret (32+ chars)");
+  const authorizationEndpoint = `${issuer}/oauth/authorize`;
+  const tokenEndpoint = `${issuer}/oauth/token`;
+  const endSessionEndpoint = `${issuer}/oauth/logout`;
+  async function encodeSession(data) {
+    const secret = new TextEncoder().encode(cookieSecret);
+    const jwt = await new jose.SignJWT(data).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${Math.floor(cookieMaxAge / 1e3)}s`).sign(secret);
+    return jwt;
+  }
+  async function decodeSession(jwt) {
+    try {
+      const secret = new TextEncoder().encode(cookieSecret);
+      const { payload } = await jose.jwtVerify(jwt, secret);
+      return payload;
+    } catch (err) {
+      return null;
+    }
+  }
+  function generateState() {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+  app.get(loginPath, async (c) => {
+    const state = generateState();
+    const stateJWT = await encodeSession({ state, type: "csrf" });
+    c.header("Set-Cookie", `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: scopes.join(" "),
+      state
+    });
+    const authUrl = `${authorizationEndpoint}?${params.toString()}`;
+    return c.redirect(authUrl, 302);
+  });
+  app.get(callbackPath, async (c) => {
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    const stateCookie = c.req.cookie(`${cookieName}_state`);
+    if (!stateCookie) {
+      return c.json({ error: "Missing state cookie (CSRF protection)" }, 400);
+    }
+    const stateData = await decodeSession(stateCookie);
+    if (!stateData || stateData.state !== state) {
+      return c.json({ error: "Invalid state (CSRF protection)" }, 400);
+    }
+    c.header("Set-Cookie", `${cookieName}_state=; Path=/; HttpOnly; Max-Age=0`);
+    if (!code) {
+      return c.json({ error: "Missing authorization code" }, 400);
+    }
+    try {
+      const tokenResponse = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri
+        })
+      });
+      if (!tokenResponse.ok) {
+        const error = await tokenResponse.text();
+        console.error("[OIDC Auth] Token exchange failed:", error);
+        return c.json({ error: "Failed to exchange code for tokens" }, 500);
+      }
+      const tokens = await tokenResponse.json();
+      const sessionJWT = await encodeSession({
+        access_token: tokens.access_token,
+        id_token: tokens.id_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: Date.now() + tokens.expires_in * 1e3
+      });
+      c.header("Set-Cookie", `${cookieName}=${sessionJWT}; Path=/; HttpOnly; Max-Age=${Math.floor(cookieMaxAge / 1e3)}; SameSite=Lax`);
+      return c.redirect(postLoginRedirect, 302);
+    } catch (err) {
+      console.error("[OIDC Auth] Error during token exchange:", err);
+      return c.json({ error: "Authentication failed" }, 500);
+    }
+  });
+  app.get(logoutPath, async (c) => {
+    const sessionCookie = c.req.cookie(cookieName);
+    let idToken = null;
+    if (sessionCookie) {
+      const session = await decodeSession(sessionCookie);
+      idToken = session?.id_token;
+    }
+    c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+    if (idToken && endSessionEndpoint) {
+      const params = new URLSearchParams({
+        id_token_hint: idToken,
+        post_logout_redirect_uri: `${postLogoutRedirect}`
+      });
+      return c.redirect(`${endSessionEndpoint}?${params.toString()}`, 302);
+    }
+    return c.redirect(postLogoutRedirect, 302);
+  });
+  const middleware = async (c, next) => {
+    const sessionCookie = c.req.cookie(cookieName);
+    if (!sessionCookie) {
+      return await next();
+    }
+    const session = await decodeSession(sessionCookie);
+    if (!session || !session.access_token) {
+      return await next();
+    }
+    if (session.expires_at && Date.now() > session.expires_at) {
+      return await next();
+    }
+    let userInfo = {};
+    if (session.id_token) {
+      try {
+        const parts = session.id_token.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+          userInfo = {
+            id: payload.sub,
+            email: payload.email,
+            username: payload.preferred_username || payload.username || payload.email,
+            name: payload.name,
+            picture: payload.picture,
+            role: payload.role || "user",
+            scopes: payload.scope ? payload.scope.split(" ") : payload.scopes || []
+          };
+        }
+      } catch (err) {
+        console.error("[OIDC Auth] Failed to decode id_token:", err);
+      }
+    }
+    let user = null;
+    if (usersResource && userInfo.id) {
+      try {
+        user = await usersResource.get(userInfo.id).catch(() => null);
+        if (!user && userInfo.email) {
+          const users = await usersResource.query({ email: userInfo.email }, { limit: 1 });
+          user = users[0] || null;
+        }
+      } catch (err) {
+      }
+    }
+    c.set("user", user || {
+      ...userInfo,
+      active: true,
+      isVirtual: true,
+      // Not in local database
+      session: {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token
+      }
+    });
+    return await next();
+  };
+  return {
+    middleware,
+    routes: {
+      [loginPath]: "Login (redirect to SSO)",
+      [callbackPath]: "OAuth2 callback",
+      [logoutPath]: "Logout"
+    }
   };
 }
 
@@ -5359,6 +5551,10 @@ class ApiServer {
     if (this.options.oauth2Server) {
       this._setupOAuth2Routes();
     }
+    const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === "oidc");
+    if (oidcDriver) {
+      this._setupOIDCRoutes(oidcDriver.config);
+    }
     if (this.relationsPlugin) {
       this._setupRelationalRoutes();
     }
@@ -5500,6 +5696,27 @@ class ApiServer {
     }
   }
   /**
+   * Setup OIDC routes (when oidc driver is configured)
+   * @private
+   * @param {Object} config - OIDC driver configuration
+   */
+  _setupOIDCRoutes(config) {
+    const { database, auth } = this.options;
+    const authResource = database.resources[auth.resource];
+    if (!authResource) {
+      console.error(`[API Plugin] Auth resource '${auth.resource}' not found for OIDC`);
+      return;
+    }
+    const oidcHandler = createOIDCHandler(config, this.app, authResource);
+    this.oidcMiddleware = oidcHandler.middleware;
+    if (this.options.verbose) {
+      console.log("[API Plugin] Mounted OIDC routes:");
+      for (const [path, description] of Object.entries(oidcHandler.routes)) {
+        console.log(`[API Plugin]   ${path} - ${description}`);
+      }
+    }
+  }
+  /**
    * Create authentication middleware based on configured drivers
    * @private
    * @returns {Function|null} Hono middleware or null
@@ -5525,7 +5742,7 @@ class ApiServer {
     for (const driverDef of drivers) {
       const driverName = driverDef.driver;
       const driverConfig = driverDef.config || {};
-      if (driverName === "oauth2-server") {
+      if (driverName === "oauth2-server" || driverName === "oidc") {
         continue;
       }
       if (!methods.includes(driverName)) {
@@ -5555,6 +5772,8 @@ class ApiServer {
       apiKey: driverConfigs.apiKey,
       basic: driverConfigs.basic,
       oauth2: driverConfigs.oauth2,
+      oidc: this.oidcMiddleware || null,
+      // OIDC middleware (if configured)
       usersResource: authResource,
       optional: true
       // Let guards handle authorization

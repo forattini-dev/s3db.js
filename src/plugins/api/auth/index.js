@@ -18,6 +18,7 @@ import { unauthorized } from '../utils/response-formatter.js';
  * @param {Object} options.apiKey - API Key configuration
  * @param {Object} options.basic - Basic Auth configuration
  * @param {Object} options.oauth2 - OAuth2 configuration
+ * @param {Function} options.oidc - OIDC middleware (already configured)
  * @param {Object} options.usersResource - Users resource
  * @param {boolean} options.optional - If true, allows requests without auth
  * @returns {Function} Hono middleware
@@ -29,6 +30,7 @@ export function createAuthMiddleware(options = {}) {
     apiKey: apiKeyConfig = {},
     basic: basicConfig = {},
     oauth2: oauth2Config = {},
+    oidc: oidcMiddleware = null,
     usersResource,
     optional = false
   } = options;
@@ -87,6 +89,14 @@ export function createAuthMiddleware(options = {}) {
         }
         // No user, try next method
       }
+    });
+  }
+
+  // OIDC middleware (session-based authentication)
+  if (oidcMiddleware) {
+    middlewares.push({
+      name: 'oidc',
+      middleware: oidcMiddleware
     });
   }
 
