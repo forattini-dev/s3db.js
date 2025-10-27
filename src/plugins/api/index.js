@@ -36,6 +36,7 @@ import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
 import { ApiServer } from './server.js';
+import { idGenerator } from '../../concerns/id.js';
 
 /**
  * API Plugin class
@@ -150,6 +151,15 @@ export class ApiPlugin extends Plugin {
       middlewares: options.middlewares || []
     };
 
+    // Validate configuration
+    if (this.config.compression.enabled) {
+      throw new Error(
+        '[API Plugin] Compression is not yet implemented. ' +
+        'Please set compression.enabled to false. ' +
+        'Track progress: https://github.com/forattini-dev/s3db.js/issues'
+      );
+    }
+
     this.server = null;
     this.usersResource = null;
   }
@@ -207,7 +217,7 @@ export class ApiPlugin extends Plugin {
         attributes: {
           id: 'string|required',
           username: 'string|required|minlength:3',
-          email: 'string|optional|email',
+          email: 'string|required|email',  // Required to support email-based auth
           password: 'secret|required|minlength:8',
           apiKey: 'string|optional',
           jwtSecret: 'string|optional',
@@ -248,7 +258,7 @@ export class ApiPlugin extends Plugin {
 
     // Add request ID middleware
     middlewares.push(async (c, next) => {
-      c.set('requestId', crypto.randomUUID());
+      c.set('requestId', idGenerator());
       c.set('verbose', this.config.verbose);
       await next();
     });

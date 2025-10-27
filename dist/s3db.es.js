@@ -1,4 +1,4 @@
-import crypto$1, { createHash } from 'crypto';
+import crypto, { createHash } from 'crypto';
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import EventEmitter from 'events';
 import { Hono } from 'hono';
@@ -961,7 +961,7 @@ function tryFnSync(fn) {
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    lib = crypto$1.webcrypto;
+    lib = crypto.webcrypto;
   } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
@@ -1015,7 +1015,7 @@ async function md5(data) {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
   const [ok, err, result] = await tryFn(async () => {
-    return crypto$1.createHash("md5").update(data).digest("base64");
+    return crypto.createHash("md5").update(data).digest("base64");
   });
   if (!ok) {
     throw new CryptoError("MD5 hashing failed", { original: err, data });
@@ -2954,20 +2954,18 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
       let items;
       let total;
       if (Object.keys(filters).length > 0) {
-        items = await resource.query(filters, { limit: limit + offset });
-        items = items.slice(offset, offset + limit);
+        items = await resource.query(filters, { limit, offset });
         total = items.length;
       } else if (partition && partitionValues) {
         items = await resource.listPartition({
           partition,
           partitionValues,
-          limit: limit + offset
+          limit,
+          offset
         });
-        items = items.slice(offset, offset + limit);
         total = items.length;
       } else {
-        items = await resource.list({ limit: limit + offset });
-        items = items.slice(offset, offset + limit);
+        items = await resource.list({ limit, offset });
         total = items.length;
       }
       const response = list(items, {
@@ -3060,13 +3058,9 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
   if (methods.includes("HEAD")) {
     app.on("HEAD", "/", asyncHandler(async (c) => {
       const total = await resource.count();
-      const allItems = await resource.list({ limit: 1e3 });
-      const stats = {
-        total,
-        version: resource.config?.currentVersion || resource.version || "v1"
-      };
+      const version2 = resource.config?.currentVersion || resource.version || "v1";
       c.header("X-Total-Count", total.toString());
-      c.header("X-Resource-Version", stats.version);
+      c.header("X-Resource-Version", version2);
       c.header("X-Schema-Fields", Object.keys(resource.config?.attributes || {}).length.toString());
       return c.body(null, 200);
     }));
@@ -3126,8 +3120,10 @@ function createRelationalRoutes(sourceResource, relationName, relationConfig, ve
   const app = new Hono();
   const resourceName = sourceResource.name;
   const relatedResourceName = relationConfig.resource;
-  app.get("/:id", asyncHandler(async (c) => {
-    const id = c.req.param("id");
+  app.get("/", asyncHandler(async (c) => {
+    const pathParts = c.req.path.split("/");
+    const relationNameIndex = pathParts.lastIndexOf(relationName);
+    const id = pathParts[relationNameIndex - 1];
     const query = c.req.query();
     const source = await sourceResource.get(id);
     if (!source) {
@@ -5386,6 +5382,11 @@ class ApiPlugin extends Plugin {
       // Custom global middlewares
       middlewares: options.middlewares || []
     };
+    if (this.config.compression.enabled) {
+      throw new Error(
+        "[API Plugin] Compression is not yet implemented. Please set compression.enabled to false. Track progress: https://github.com/forattini-dev/s3db.js/issues"
+      );
+    }
     this.server = null;
     this.usersResource = null;
   }
@@ -5432,7 +5433,8 @@ class ApiPlugin extends Plugin {
         attributes: {
           id: "string|required",
           username: "string|required|minlength:3",
-          email: "string|optional|email",
+          email: "string|required|email",
+          // Required to support email-based auth
           password: "secret|required|minlength:8",
           apiKey: "string|optional",
           jwtSecret: "string|optional",
@@ -5468,7 +5470,7 @@ class ApiPlugin extends Plugin {
   async _setupMiddlewares() {
     const middlewares = [];
     middlewares.push(async (c, next) => {
-      c.set("requestId", crypto.randomUUID());
+      c.set("requestId", idGenerator());
       c.set("verbose", this.config.verbose);
       await next();
     });
@@ -6376,7 +6378,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       `${backupId}.backup`
     );
     const [readOk, readErr] = await tryFn(async () => {
-      const hash = crypto$1.createHash("sha256");
+      const hash = crypto.createHash("sha256");
       const stream = createReadStream(backupPath);
       await pipeline(stream, hash);
       const actualChecksum = hash.digest("hex");
@@ -6633,7 +6635,7 @@ class S3BackupDriver extends BaseBackupDriver {
       });
       const etag = headResponse.ETag?.replace(/"/g, "");
       if (etag && !etag.includes("-")) {
-        const expectedMd5 = crypto$1.createHash("md5").update(expectedChecksum).digest("hex");
+        const expectedMd5 = crypto.createHash("md5").update(expectedChecksum).digest("hex");
         return etag === expectedMd5;
       } else {
         const [streamOk, , stream] = await tryFn(
@@ -6643,7 +6645,7 @@ class S3BackupDriver extends BaseBackupDriver {
           })
         );
         if (!streamOk) return false;
-        const hash = crypto$1.createHash("sha256");
+        const hash = crypto.createHash("sha256");
         for await (const chunk of stream) {
           hash.update(chunk);
         }
@@ -7477,7 +7479,7 @@ class BackupPlugin extends Plugin {
   }
   async _generateChecksum(filePath) {
     const [ok, err, result] = await tryFn(async () => {
-      const hash = crypto$1.createHash("sha256");
+      const hash = crypto.createHash("sha256");
       const stream = createReadStream(filePath);
       await pipeline(stream, hash);
       return hash.digest("hex");
@@ -9403,7 +9405,7 @@ class CachePlugin extends Plugin {
   }
   hashParams(params) {
     const serialized = jsonStableStringify(params) || "empty";
-    return crypto$1.createHash("md5").update(serialized).digest("hex").substring(0, 16);
+    return crypto.createHash("md5").update(serialized).digest("hex").substring(0, 16);
   }
   // Utility methods
   async getCacheStats() {

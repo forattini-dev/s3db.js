@@ -141,22 +141,23 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
       // Use query if filters are present
       if (Object.keys(filters).length > 0) {
-        items = await resource.query(filters, { limit: limit + offset });
-        items = items.slice(offset, offset + limit);
+        // Query with native offset support (efficient!)
+        items = await resource.query(filters, { limit, offset });
+        // Note: total is approximate (length of returned items)
+        // For exact total count with filters, would need separate count query
         total = items.length;
       } else if (partition && partitionValues) {
         // Query specific partition
         items = await resource.listPartition({
           partition,
           partitionValues,
-          limit: limit + offset
+          limit,
+          offset
         });
-        items = items.slice(offset, offset + limit);
         total = items.length;
       } else {
         // Regular list
-        items = await resource.list({ limit: limit + offset });
-        items = items.slice(offset, offset + limit);
+        items = await resource.list({ limit, offset });
         total = items.length;
       }
 
@@ -292,22 +293,11 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
     app.on('HEAD', '/', asyncHandler(async (c) => {
       // Get statistics
       const total = await resource.count();
+      const version = resource.config?.currentVersion || resource.version || 'v1';
 
-      // Get all items to calculate stats (for small datasets)
-      // For large datasets, this might need optimization
-      const allItems = await resource.list({ limit: 1000 });
-
-      // Calculate statistics
-      const stats = {
-        total,
-        version: resource.config?.currentVersion || resource.version || 'v1'
-      };
-
-      // Add resource-specific stats
+      // Set resource metadata headers
       c.header('X-Total-Count', total.toString());
-      c.header('X-Resource-Version', stats.version);
-
-      // Add schema info
+      c.header('X-Resource-Version', version);
       c.header('X-Schema-Fields', Object.keys(resource.config?.attributes || {}).length.toString());
 
       return c.body(null, 200);
@@ -393,8 +383,12 @@ export function createRelationalRoutes(sourceResource, relationName, relationCon
 
   // GET /{version}/{resource}/:id/{relation}
   // Examples: GET /v1/users/user123/posts, GET /v1/users/user123/profile
-  app.get('/:id', asyncHandler(async (c) => {
-    const id = c.req.param('id');
+  // Note: The :id param comes from parent route mounting (see server.js:469)
+  app.get('/', asyncHandler(async (c) => {
+    // Get parent route's :id param
+    const pathParts = c.req.path.split('/');
+    const relationNameIndex = pathParts.lastIndexOf(relationName);
+    const id = pathParts[relationNameIndex - 1];
     const query = c.req.query();
 
     // Check if source resource exists
