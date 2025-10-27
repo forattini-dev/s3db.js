@@ -104,7 +104,7 @@ await users.count();  // First: 180ms (S3)
 await users.count();  // Next: 2ms (cache) - 90x faster!
 ```
 
-**What you get:** Instant 90x speedup on repeat calls, zero config.
+**What you get:** Up to 90x speedup on repeat calls, minimal configuration.
 
 ### Level 2: Add Memory Limits
 

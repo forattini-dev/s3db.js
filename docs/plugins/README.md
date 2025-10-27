@@ -734,7 +734,7 @@ new SomePlugin({
 
 ### Lightweight Core Approach
 
-s3db.js uses a **lightweight core** approach - plugin-specific dependencies are **not bundled** with the main package. This keeps the core package small (~500KB) and lets you install only what you need.
+s3db.js uses a **lightweight core** approach - plugin-specific dependencies are **not bundled** with the main package. This keeps plugin dependencies optional (as peerDependencies) and lets you install only what you need.
 
 ### How It Works
 

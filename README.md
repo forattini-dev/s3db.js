@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Transform AWS S3 into a powerful document database</strong><br>
-  <em>Zero-cost storage • Automatic encryption • ORM-like interface • Streaming API</em>
+  <em>Cost-effective storage • Automatic encryption • ORM-like interface • Streaming API</em>
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 
 ## 🚀 What is s3db.js?
 
-**s3db.js** is a revolutionary document database that transforms AWS S3 into a fully functional database using S3's metadata capabilities. Instead of traditional storage methods, it stores document data in S3's metadata fields (up to 2KB), making it incredibly cost-effective while providing a familiar ORM-like interface.
+**s3db.js** is a document database that transforms AWS S3 into a fully functional database using S3's metadata capabilities. Instead of traditional storage methods, it stores document data in S3's metadata fields (up to 2KB), making it highly cost-effective while providing a familiar ORM-like interface.
 
 **Perfect for:**
 - 🌐 **Serverless applications** - No database servers to manage

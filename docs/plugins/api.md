@@ -8,7 +8,7 @@
 
 **1 line to get started:**
 ```javascript
-await db.usePlugin(new ApiPlugin({ port: 3000 }));  // Instant REST API!
+await db.usePlugin(new ApiPlugin({ port: 3000 }));  // Auto-generated REST API
 ```
 
 **Key features:**
@@ -1168,7 +1168,7 @@ await apiPlugin.uninstall();
 
 The API Plugin provides:
 
-1. **Zero-config REST APIs** - Instant endpoints from resource definitions
+1. **Auto-generated REST APIs** - Endpoints automatically created from resource definitions
 2. **Multiple auth drivers** - JWT, Basic, OIDC, OAuth2, API Keys
 3. **Production features** - Rate limiting, CORS, compression, health checks
 4. **Interactive docs** - Auto-generated Swagger UI at `/docs`
