@@ -1,5 +1,7 @@
 # Identity Plugin - Configuration
 
+[← Back to Identity Plugin](../identity-plugin.md) | [Examples →](../identity-examples.md)
+
 Complete configuration reference for the Identity Provider plugin.
 
 ## Table of Contents
@@ -586,6 +588,7 @@ NODE_ENV=production
 ## See Also
 
 - [UI Customization](./ui-customization.md) - White-label branding and custom pages
-- [Registration Controls](./registration-controls.md) - Detailed registration scenarios
 - [Security Best Practices](./security.md) - Production security guide
+- [Troubleshooting](./troubleshooting.md) - Common configuration issues
+- [Examples Index](../identity-examples.md) - Configuration examples
 - [Main Documentation](../identity-plugin.md) - Overview and quick start
