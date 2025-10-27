@@ -7274,7 +7274,9 @@ function createOIDCHandler(config, app, usersResource) {
                   access_token: tokens.access_token,
                   id_token: tokens.id_token,
                   refresh_token: tokens.refresh_token
-                }
+                },
+                context: c
+                // 🔥 Pass Hono context for cookie/header manipulation
               });
             } catch (hookErr) {
               console.error("[OIDC] onUserAuthenticated hook failed:", hookErr);
@@ -10409,6 +10411,19 @@ class IdentityPlugin extends Plugin {
         requireNumbers: options.passwordPolicy?.requireNumbers !== false,
         requireSymbols: options.passwordPolicy?.requireSymbols || false,
         bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
+      },
+      // Registration Configuration
+      registration: {
+        enabled: options.registration?.enabled !== false,
+        // Enabled by default
+        requireEmailVerification: options.registration?.requireEmailVerification !== false,
+        // Required by default
+        allowedDomains: options.registration?.allowedDomains || null,
+        // null = allow all domains
+        blockedDomains: options.registration?.blockedDomains || [],
+        // Block specific domains
+        customMessage: options.registration?.customMessage || null
+        // Custom message when disabled
       },
       // UI Configuration (white-label customization)
       ui: {
@@ -53204,6 +53219,8 @@ function BaseLayout(props) {
     logo: config.logo || null,
     logoUrl: config.logoUrl || null,
     favicon: config.favicon || null,
+    registrationEnabled: config.registrationEnabled !== false,
+    // Show register link
     // Colors
     primaryColor: config.primaryColor || "#007bff",
     secondaryColor: config.secondaryColor || "#6c757d",
@@ -55447,6 +55464,10 @@ function registerUIRoutes(app, plugin) {
     }
   });
   app.get("/register", async (c) => {
+    if (!config.registration.enabled) {
+      const message = config.registration.customMessage || "Registration is currently disabled. Please contact an administrator for access.";
+      return c.redirect(`/login?error=${encodeURIComponent(message)}`);
+    }
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
     if (sessionId) {
       const { valid } = await sessionManager.validateSession(sessionId);
@@ -55467,6 +55488,10 @@ function registerUIRoutes(app, plugin) {
     }));
   });
   app.post("/register", async (c) => {
+    if (!config.registration.enabled) {
+      const message = config.registration.customMessage || "Registration is currently disabled. Please contact an administrator for access.";
+      return c.redirect(`/login?error=${encodeURIComponent(message)}`);
+    }
     try {
       const body = await c.req.parseBody();
       const { name, email, password, confirm_password, agree_terms } = body;
@@ -55485,10 +55510,21 @@ function registerUIRoutes(app, plugin) {
         return c.redirect(`/register?error=${encodeURIComponent(errorMsg)}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
       }
       const normalizedEmail = email.toLowerCase().trim();
+      const emailDomain = normalizedEmail.split("@")[1];
+      if (config.registration.blockedDomains && config.registration.blockedDomains.length > 0) {
+        if (config.registration.blockedDomains.includes(emailDomain)) {
+          return c.redirect(`/register?error=${encodeURIComponent("Registration with this email domain is not allowed")}&name=${encodeURIComponent(name)}`);
+        }
+      }
+      if (config.registration.allowedDomains && config.registration.allowedDomains.length > 0) {
+        if (!config.registration.allowedDomains.includes(emailDomain)) {
+          return c.redirect(`/register?error=${encodeURIComponent("Registration is restricted to specific email domains")}&name=${encodeURIComponent(name)}`);
+        }
+      }
       const [okCheck, errCheck, existingUsers] = await tryFn(
         () => usersResource.query({ email: normalizedEmail })
       );
-      if (okCheck && existingUsers.length > 0) {
+      if (okCheck && existingUsers && existingUsers.length > 0) {
         return c.redirect(`/register?error=${encodeURIComponent("An account with this email already exists")}&name=${encodeURIComponent(name)}`);
       }
       const [okHash, errHash, passwordHash] = await tryFn(

@@ -109,6 +109,15 @@ export class IdentityPlugin extends Plugin {
         bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
       },
 
+      // Registration Configuration
+      registration: {
+        enabled: options.registration?.enabled !== false,  // Enabled by default
+        requireEmailVerification: options.registration?.requireEmailVerification !== false,  // Required by default
+        allowedDomains: options.registration?.allowedDomains || null,  // null = allow all domains
+        blockedDomains: options.registration?.blockedDomains || [],    // Block specific domains
+        customMessage: options.registration?.customMessage || null     // Custom message when disabled
+      },
+
       // UI Configuration (white-label customization)
       ui: {
         // Branding
