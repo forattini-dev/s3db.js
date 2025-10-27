@@ -2,7 +2,7 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-var crypto$1 = require('crypto');
+var crypto = require('crypto');
 var nanoid = require('nanoid');
 var EventEmitter = require('events');
 var hono = require('hono');
@@ -984,7 +984,7 @@ function tryFnSync(fn) {
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    lib = crypto$1.webcrypto;
+    lib = crypto.webcrypto;
   } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
@@ -1038,7 +1038,7 @@ async function md5(data) {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
   const [ok, err, result] = await tryFn(async () => {
-    return crypto$1.createHash("md5").update(data).digest("base64");
+    return crypto.createHash("md5").update(data).digest("base64");
   });
   if (!ok) {
     throw new CryptoError("MD5 hashing failed", { original: err, data });
@@ -2977,20 +2977,18 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
       let items;
       let total;
       if (Object.keys(filters).length > 0) {
-        items = await resource.query(filters, { limit: limit + offset });
-        items = items.slice(offset, offset + limit);
+        items = await resource.query(filters, { limit, offset });
         total = items.length;
       } else if (partition && partitionValues) {
         items = await resource.listPartition({
           partition,
           partitionValues,
-          limit: limit + offset
+          limit,
+          offset
         });
-        items = items.slice(offset, offset + limit);
         total = items.length;
       } else {
-        items = await resource.list({ limit: limit + offset });
-        items = items.slice(offset, offset + limit);
+        items = await resource.list({ limit, offset });
         total = items.length;
       }
       const response = list(items, {
@@ -3083,13 +3081,9 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
   if (methods.includes("HEAD")) {
     app.on("HEAD", "/", asyncHandler(async (c) => {
       const total = await resource.count();
-      const allItems = await resource.list({ limit: 1e3 });
-      const stats = {
-        total,
-        version: resource.config?.currentVersion || resource.version || "v1"
-      };
+      const version2 = resource.config?.currentVersion || resource.version || "v1";
       c.header("X-Total-Count", total.toString());
-      c.header("X-Resource-Version", stats.version);
+      c.header("X-Resource-Version", version2);
       c.header("X-Schema-Fields", Object.keys(resource.config?.attributes || {}).length.toString());
       return c.body(null, 200);
     }));
@@ -3149,8 +3143,10 @@ function createRelationalRoutes(sourceResource, relationName, relationConfig, ve
   const app = new Hono();
   const resourceName = sourceResource.name;
   const relatedResourceName = relationConfig.resource;
-  app.get("/:id", asyncHandler(async (c) => {
-    const id = c.req.param("id");
+  app.get("/", asyncHandler(async (c) => {
+    const pathParts = c.req.path.split("/");
+    const relationNameIndex = pathParts.lastIndexOf(relationName);
+    const id = pathParts[relationNameIndex - 1];
     const query = c.req.query();
     const source = await sourceResource.get(id);
     if (!source) {
@@ -3214,7 +3210,7 @@ function createToken(payload, secret, expiresIn = "7d") {
   };
   const encodedHeader = Buffer.from(JSON.stringify(header)).toString("base64url");
   const encodedPayload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  const signature = crypto$1.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
+  const signature = crypto.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
   return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
 function verifyToken(token, secret) {
@@ -3223,7 +3219,7 @@ function verifyToken(token, secret) {
     if (!encodedHeader || !encodedPayload || !signature) {
       return null;
     }
-    const expectedSignature = crypto$1.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
+    const expectedSignature = crypto.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
     if (signature !== expectedSignature) {
       return null;
     }
@@ -5409,6 +5405,11 @@ class ApiPlugin extends Plugin {
       // Custom global middlewares
       middlewares: options.middlewares || []
     };
+    if (this.config.compression.enabled) {
+      throw new Error(
+        "[API Plugin] Compression is not yet implemented. Please set compression.enabled to false. Track progress: https://github.com/forattini-dev/s3db.js/issues"
+      );
+    }
     this.server = null;
     this.usersResource = null;
   }
@@ -5455,7 +5456,8 @@ class ApiPlugin extends Plugin {
         attributes: {
           id: "string|required",
           username: "string|required|minlength:3",
-          email: "string|optional|email",
+          email: "string|required|email",
+          // Required to support email-based auth
           password: "secret|required|minlength:8",
           apiKey: "string|optional",
           jwtSecret: "string|optional",
@@ -5491,7 +5493,7 @@ class ApiPlugin extends Plugin {
   async _setupMiddlewares() {
     const middlewares = [];
     middlewares.push(async (c, next) => {
-      c.set("requestId", crypto.randomUUID());
+      c.set("requestId", idGenerator());
       c.set("verbose", this.config.verbose);
       await next();
     });
@@ -6399,7 +6401,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       `${backupId}.backup`
     );
     const [readOk, readErr] = await tryFn(async () => {
-      const hash = crypto$1.createHash("sha256");
+      const hash = crypto.createHash("sha256");
       const stream = fs.createReadStream(backupPath);
       await promises$1.pipeline(stream, hash);
       const actualChecksum = hash.digest("hex");
@@ -6656,7 +6658,7 @@ class S3BackupDriver extends BaseBackupDriver {
       });
       const etag = headResponse.ETag?.replace(/"/g, "");
       if (etag && !etag.includes("-")) {
-        const expectedMd5 = crypto$1.createHash("md5").update(expectedChecksum).digest("hex");
+        const expectedMd5 = crypto.createHash("md5").update(expectedChecksum).digest("hex");
         return etag === expectedMd5;
       } else {
         const [streamOk, , stream] = await tryFn(
@@ -6666,7 +6668,7 @@ class S3BackupDriver extends BaseBackupDriver {
           })
         );
         if (!streamOk) return false;
-        const hash = crypto$1.createHash("sha256");
+        const hash = crypto.createHash("sha256");
         for await (const chunk of stream) {
           hash.update(chunk);
         }
@@ -7500,7 +7502,7 @@ class BackupPlugin extends Plugin {
   }
   async _generateChecksum(filePath) {
     const [ok, err, result] = await tryFn(async () => {
-      const hash = crypto$1.createHash("sha256");
+      const hash = crypto.createHash("sha256");
       const stream = fs.createReadStream(filePath);
       await promises$1.pipeline(stream, hash);
       return hash.digest("hex");
@@ -9426,7 +9428,7 @@ class CachePlugin extends Plugin {
   }
   hashParams(params) {
     const serialized = jsonStableStringify(params) || "empty";
-    return crypto$1.createHash("md5").update(serialized).digest("hex").substring(0, 16);
+    return crypto.createHash("md5").update(serialized).digest("hex").substring(0, 16);
   }
   // Utility methods
   async getCacheStats() {
@@ -14855,7 +14857,7 @@ function generateBase62Mapping(keys) {
 }
 function generatePluginAttributeHash(pluginName, attributeName) {
   const input = `${pluginName}:${attributeName}`;
-  const hash = crypto$1.createHash("sha256").update(input).digest();
+  const hash = crypto.createHash("sha256").update(input).digest();
   const num = hash.readUInt32BE(0);
   const base62Hash = encode(num);
   const paddedHash = base62Hash.padStart(3, "0").substring(0, 3);
@@ -19008,7 +19010,7 @@ ${errorDetails}`,
       behavior: this.behavior
     };
     const stableString = jsonStableStringify(definition);
-    return `sha256:${crypto$1.createHash("sha256").update(stableString).digest("hex")}`;
+    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
    * Extract version from S3 key
@@ -27447,7 +27449,7 @@ class Database extends EventEmitter {
       partitions: definition.partitions || {}
     };
     const stableString = jsonStableStringify(hashObj);
-    return `sha256:${crypto$1.createHash("sha256").update(stableString).digest("hex")}`;
+    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
    * Get the next version number for a resource
@@ -42203,7 +42205,7 @@ class TfStatePlugin extends Plugin {
    */
   _calculateSHA256(state) {
     const stateString = JSON.stringify(state);
-    return crypto$1.createHash("sha256").update(stateString).digest("hex");
+    return crypto.createHash("sha256").update(stateString).digest("hex");
   }
   /**
    * Insert resources into database with controlled parallelism
@@ -44618,7 +44620,7 @@ class MemoryStorage {
    */
   _generateETag(body) {
     const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || "");
-    return crypto$1.createHash("md5").update(buffer).digest("hex");
+    return crypto.createHash("md5").update(buffer).digest("hex");
   }
   /**
    * Calculate metadata size in bytes
