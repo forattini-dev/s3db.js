@@ -1,0 +1,7 @@
+# .mailmap - Consolidate contributor identities
+# Format: Correct Name <correct@email> Wrong Name <wrong@email>
+
+# Consolidate all identities to Filipe Forattini
+Filipe Forattini <filipe@forattini.com.br> Filipe Forattini <filipe.forattini@stone.com.br>
+Filipe Forattini <filipe@forattini.com.br> Cursor Agent <cursoragent@cursor.com>
+Filipe Forattini <filipe@forattini.com.br> Claude <noreply@anthropic.com>
