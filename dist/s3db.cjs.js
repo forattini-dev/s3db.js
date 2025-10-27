@@ -16686,7 +16686,8 @@ ${errorDetails}`,
       asyncEvents = true,
       asyncPartitions = true,
       strictPartitions = false,
-      createdBy = "user"
+      createdBy = "user",
+      guard
     } = config;
     this.name = name;
     this.client = client;
@@ -16785,6 +16786,7 @@ ${errorDetails}`,
         }
       }
     }
+    this.guard = this._normalizeGuard(guard);
     this._initMiddleware();
   }
   /**
@@ -19484,6 +19486,76 @@ ${errorDetails}`,
       filtered.$overflow = behaviorFlags.$overflow;
     }
     return filtered;
+  }
+  // --- GUARDS SYSTEM ---
+  /**
+   * Normalize guard configuration
+   * @param {Object|Array|undefined} guard - Guard configuration
+   * @returns {Object|null} Normalized guard config
+   * @private
+   */
+  _normalizeGuard(guard) {
+    if (!guard) return null;
+    if (Array.isArray(guard)) {
+      return { "*": guard };
+    }
+    return guard;
+  }
+  /**
+   * Execute guard for operation
+   * @param {string} operation - Operation name (list, get, insert, update, etc)
+   * @param {Object} context - Framework-agnostic context
+   * @param {Object} context.user - Decoded JWT token
+   * @param {Object} context.params - Route params
+   * @param {Object} context.body - Request body
+   * @param {Object} context.query - Query string
+   * @param {Object} context.headers - Request headers
+   * @param {Function} context.setPartition - Helper to set partition
+   * @param {Object} [resource] - Resource record (for get/update/delete)
+   * @returns {Promise<boolean>} True if allowed, false if denied
+   */
+  async executeGuard(operation, context, resource = null) {
+    if (!this.guard) return true;
+    let guardFn = this.guard[operation];
+    if (!guardFn) {
+      guardFn = this.guard["*"];
+    }
+    if (!guardFn) return true;
+    if (typeof guardFn === "boolean") {
+      return guardFn;
+    }
+    if (Array.isArray(guardFn)) {
+      return this._checkRolesScopes(guardFn, context.user);
+    }
+    if (typeof guardFn === "function") {
+      try {
+        const result = await guardFn(context, resource);
+        return result === true;
+      } catch (err) {
+        console.error(`Guard error for ${operation}:`, err);
+        return false;
+      }
+    }
+    return false;
+  }
+  /**
+   * Check if user has required roles or scopes
+   * @param {Array<string>} requiredRolesScopes - Required roles/scopes
+   * @param {Object} user - User from JWT token
+   * @returns {boolean} True if user has any of required roles/scopes
+   * @private
+   */
+  _checkRolesScopes(requiredRolesScopes, user) {
+    if (!user) return false;
+    const userScopes = user.scope?.split(" ") || [];
+    const clientId = user.azp || process.env.CLIENT_ID || "default";
+    const clientRoles = user.resource_access?.[clientId]?.roles || [];
+    const realmRoles = user.realm_access?.roles || [];
+    const azureRoles = user.roles || [];
+    const userRoles = [...clientRoles, ...realmRoles, ...azureRoles];
+    return requiredRolesScopes.some((required) => {
+      return userScopes.includes(required) || userRoles.includes(required);
+    });
   }
   // --- MIDDLEWARE SYSTEM ---
   _initMiddleware() {
