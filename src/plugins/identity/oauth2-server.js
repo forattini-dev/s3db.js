@@ -9,7 +9,7 @@
  * - /auth/introspect (Token introspection)
  *
  * @example
- * import { OAuth2Server } from 's3db.js/plugins/api/auth/oauth2-server';
+ * import { OAuth2Server } from 's3db.js/plugins/identity/oauth2-server';
  *
  * const oauth2 = new OAuth2Server({
  *   issuer: 'https://sso.example.com',
