@@ -1,14 +1,53 @@
 # OAuth2 + OpenID Connect Guide
 
-**Complete guide to implementing OAuth2/OIDC Single Sign-On (SSO) with s3db.js API Plugin.**
+**Complete guide to implementing OAuth2/OIDC Single Sign-On (SSO) with s3db.js.**
 
 This guide covers building production-ready SSO architectures for microservices using RS256 asymmetric keys, JWKS, and standard OAuth2/OIDC protocols.
 
 ---
 
-## 📖 Back to API Plugin Documentation
+## 🔐 Recommended: Use IdentityPlugin
 
-See [API Plugin docs](plugins/api.md) for the complete API Plugin reference.
+For production OAuth2/OIDC Authorization Servers, we recommend using the **[IdentityPlugin](plugins/identity.md)** instead of manually configuring OAuth2Server.
+
+**IdentityPlugin benefits:**
+- ✅ **9 endpoints** out-of-the-box (Discovery, JWKS, Token, Authorize, UserInfo, Introspect, Revoke, Register)
+- ✅ **5-minute setup** - Automatic resource creation, RSA key generation
+- ✅ **Built-in login UI** - HTML form for authorization_code flow
+- ✅ **Enterprise features** - Token revocation, dynamic client registration, PKCE
+- ✅ **Zero configuration** - Just instantiate and go
+
+**Quick start with IdentityPlugin:**
+```javascript
+import { IdentityPlugin } from 's3db.js/plugins/identity';
+
+const identityPlugin = new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+  supportedScopes: ['openid', 'profile', 'email'],
+  accessTokenExpiry: '15m'
+});
+
+await db.usePlugin(identityPlugin);
+// 🎉 Full OAuth2/OIDC server ready!
+```
+
+**See:**
+- **[IdentityPlugin Documentation](plugins/identity.md)** - Complete Authorization Server docs
+- **[Example 80](examples/e80-sso-oauth2-server.js)** - SSO Server with IdentityPlugin
+- **[API Plugin docs](plugins/api.md)** - Resource Server (API) documentation
+
+---
+
+## 📖 This Guide
+
+This guide explains OAuth2/OIDC concepts and advanced patterns using the low-level `OAuth2Server` class directly. Most users should use **IdentityPlugin** instead (see above).
+
+**Continue reading if you need:**
+- Deep understanding of OAuth2/OIDC protocols
+- Custom OAuth2 implementation
+- Integration with existing auth systems
+- Advanced debugging and troubleshooting
 
 ---
 
