@@ -2872,6 +2872,134 @@ function asyncHandler(fn) {
   };
 }
 
+function checkGuard(user, guard, context = {}) {
+  if (!guard) {
+    return true;
+  }
+  if (!user && guard !== true) {
+    return false;
+  }
+  if (typeof guard === "boolean") {
+    return guard;
+  }
+  if (typeof guard === "function") {
+    try {
+      return guard(user, context);
+    } catch (err) {
+      console.error("[Guards] Error executing guard function:", err);
+      return false;
+    }
+  }
+  if (typeof guard === "string") {
+    return hasScope(user, guard);
+  }
+  if (Array.isArray(guard)) {
+    return guard.some((scope) => hasScope(user, scope));
+  }
+  if (typeof guard === "object") {
+    if (guard.role) {
+      if (Array.isArray(guard.role)) {
+        if (!guard.role.includes(user.role)) {
+          return false;
+        }
+      } else if (user.role !== guard.role) {
+        return false;
+      }
+    }
+    if (guard.scopes) {
+      const requiredScopes = Array.isArray(guard.scopes) ? guard.scopes : [guard.scopes];
+      if (!requiredScopes.every((scope) => hasScope(user, scope))) {
+        return false;
+      }
+    }
+    if (guard.check && typeof guard.check === "function") {
+      try {
+        return guard.check(user, context);
+      } catch (err) {
+        console.error("[Guards] Error executing guard.check function:", err);
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+function hasScope(user, scope) {
+  if (!user || !user.scopes) {
+    return false;
+  }
+  if (!Array.isArray(user.scopes)) {
+    return false;
+  }
+  if (user.scopes.includes(scope)) {
+    return true;
+  }
+  const wildcards = user.scopes.filter((s) => s.endsWith(":*"));
+  for (const wildcard of wildcards) {
+    const prefix = wildcard.slice(0, -2);
+    if (scope.startsWith(prefix + ":")) {
+      return true;
+    }
+  }
+  if (user.scopes.includes("*")) {
+    return true;
+  }
+  return false;
+}
+function getOperationGuard(guards, operation) {
+  if (!guards) {
+    return null;
+  }
+  if (typeof guards === "function" || typeof guards === "string" || Array.isArray(guards)) {
+    return guards;
+  }
+  if (typeof guards === "object") {
+    if (guards[operation] !== void 0) {
+      return guards[operation];
+    }
+    if (guards.all !== void 0) {
+      return guards.all;
+    }
+    const aliases = {
+      list: "read",
+      get: "read",
+      create: "write",
+      update: "write",
+      delete: "write"
+    };
+    if (aliases[operation] && guards[aliases[operation]] !== void 0) {
+      return guards[aliases[operation]];
+    }
+  }
+  return null;
+}
+function guardMiddleware(guards, operation) {
+  return async (c, next) => {
+    const user = c.get("user");
+    const guard = getOperationGuard(guards, operation);
+    const authorized = checkGuard(user, guard, {
+      operation,
+      resourceName: c.req.param("resource"),
+      data: c.req.method !== "GET" ? await c.req.json().catch(() => ({})) : {}
+    });
+    if (!authorized) {
+      return c.json({
+        success: false,
+        error: {
+          message: "Forbidden: Insufficient permissions",
+          code: "FORBIDDEN",
+          details: {
+            operation,
+            user: user ? { id: user.id, role: user.role } : null
+          }
+        },
+        _status: 403
+      }, 403);
+    }
+    await next();
+  };
+}
+
 function parseCustomRoute(routeDef) {
   let def = routeDef.trim();
   const isAsync = def.startsWith("async ");
@@ -2904,6 +3032,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
   } = config;
   const resourceName = resource.name;
   const basePath = versionPrefix ? `/${versionPrefix}/${resourceName}` : `/${resourceName}`;
+  const guards = resource.config?.guards || null;
   customMiddleware.forEach((middleware) => {
     app.use("*", middleware);
   });
@@ -2934,7 +3063,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
     }
   }
   if (methods.includes("GET")) {
-    app.get("/", asyncHandler(async (c) => {
+    app.get("/", guardMiddleware(guards, "list"), asyncHandler(async (c) => {
       const query = c.req.query();
       const limit = parseInt(query.limit) || 100;
       const offset = parseInt(query.offset) || 0;
@@ -2980,7 +3109,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
   }
   if (methods.includes("GET")) {
-    app.get("/:id", asyncHandler(async (c) => {
+    app.get("/:id", guardMiddleware(guards, "get"), asyncHandler(async (c) => {
       const id = c.req.param("id");
       const query = c.req.query();
       const partition = query.partition;
@@ -3004,7 +3133,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
   }
   if (methods.includes("POST")) {
-    app.post("/", asyncHandler(async (c) => {
+    app.post("/", guardMiddleware(guards, "create"), asyncHandler(async (c) => {
       const data = await c.req.json();
       const item = await resource.insert(data);
       const location = `${basePath}/${item.id}`;
@@ -3014,7 +3143,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
   }
   if (methods.includes("PUT")) {
-    app.put("/:id", asyncHandler(async (c) => {
+    app.put("/:id", guardMiddleware(guards, "update"), asyncHandler(async (c) => {
       const id = c.req.param("id");
       const data = await c.req.json();
       const existing = await resource.get(id);
@@ -3028,7 +3157,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
   }
   if (methods.includes("PATCH")) {
-    app.patch("/:id", asyncHandler(async (c) => {
+    app.patch("/:id", guardMiddleware(guards, "update"), asyncHandler(async (c) => {
       const id = c.req.param("id");
       const data = await c.req.json();
       const existing = await resource.get(id);
@@ -3043,7 +3172,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
   }
   if (methods.includes("DELETE")) {
-    app.delete("/:id", asyncHandler(async (c) => {
+    app.delete("/:id", guardMiddleware(guards, "delete"), asyncHandler(async (c) => {
       const id = c.req.param("id");
       const existing = await resource.get(id);
       if (!existing) {
@@ -3268,6 +3397,45 @@ function generateApiKey(length = 32) {
     apiKey += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return apiKey;
+}
+function apiKeyAuth(options = {}) {
+  const {
+    headerName = "X-API-Key",
+    usersResource,
+    optional = false
+  } = options;
+  if (!usersResource) {
+    throw new Error("usersResource is required for API key authentication");
+  }
+  return async (c, next) => {
+    const apiKey = c.req.header(headerName);
+    if (!apiKey) {
+      if (optional) {
+        return await next();
+      }
+      const response = unauthorized(`Missing ${headerName} header`);
+      return c.json(response, response._status);
+    }
+    try {
+      const users = await usersResource.query({ apiKey });
+      if (!users || users.length === 0) {
+        const response = unauthorized("Invalid API key");
+        return c.json(response, response._status);
+      }
+      const user = users[0];
+      if (!user.active) {
+        const response = unauthorized("User account is inactive");
+        return c.json(response, response._status);
+      }
+      c.set("user", user);
+      c.set("authMethod", "apiKey");
+      await next();
+    } catch (err) {
+      console.error("[API Key Auth] Error validating key:", err);
+      const response = unauthorized("Authentication error");
+      return c.json(response, response._status);
+    }
+  };
 }
 
 function createAuthRoutes(authResource, config = {}) {
@@ -4822,6 +4990,73 @@ function basicAuth(options = {}) {
   };
 }
 
+function createAuthMiddleware(options = {}) {
+  const {
+    methods = [],
+    jwt: jwtConfig = {},
+    apiKey: apiKeyConfig = {},
+    basic: basicConfig = {},
+    usersResource,
+    optional = false
+  } = options;
+  if (methods.length === 0) {
+    return async (c, next) => await next();
+  }
+  const middlewares = [];
+  if (methods.includes("jwt") && jwtConfig.secret) {
+    middlewares.push({
+      name: "jwt",
+      middleware: jwtAuth({
+        secret: jwtConfig.secret,
+        usersResource,
+        optional: true
+        // Check all methods before rejecting
+      })
+    });
+  }
+  if (methods.includes("apiKey") && usersResource) {
+    middlewares.push({
+      name: "apiKey",
+      middleware: apiKeyAuth({
+        headerName: apiKeyConfig.headerName || "X-API-Key",
+        usersResource,
+        optional: true
+        // Check all methods before rejecting
+      })
+    });
+  }
+  if (methods.includes("basic") && usersResource) {
+    middlewares.push({
+      name: "basic",
+      middleware: basicAuth({
+        realm: basicConfig.realm || "API Access",
+        passphrase: basicConfig.passphrase || "secret",
+        optional: true
+        // Check all methods before rejecting
+      })
+    });
+  }
+  return async (c, next) => {
+    for (const { name, middleware } of middlewares) {
+      let authSuccess = false;
+      const tempNext = async () => {
+        authSuccess = true;
+      };
+      await middleware(c, tempNext);
+      if (authSuccess && c.get("user")) {
+        return await next();
+      }
+    }
+    if (optional) {
+      return await next();
+    }
+    const response = unauthorized(
+      `Authentication required. Supported methods: ${methods.join(", ")}`
+    );
+    return c.json(response, response._status);
+  };
+}
+
 class ApiServer {
   /**
    * Create API server
@@ -5001,18 +5236,16 @@ class ApiServer {
    * @private
    */
   _setupResourceRoutes() {
-    const { database, resources: resourceConfigs } = this.options;
+    const { database, resources: legacyResourceConfigs } = this.options;
     const resources = database.resources;
+    const authMiddleware = this._createAuthMiddleware();
     for (const [name, resource] of Object.entries(resources)) {
-      if (name.startsWith("plg_") && !resourceConfigs[name]) {
+      if (name.startsWith("plg_")) {
         continue;
       }
-      const config = resourceConfigs[name] || {
-        methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-        auth: false
-      };
+      const legacyConfig = legacyResourceConfigs[name] || {};
       const version = resource.config?.currentVersion || resource.version || "v1";
-      let versionPrefixConfig = config.versionPrefix !== void 0 ? config.versionPrefix : this.options.versionPrefix !== void 0 ? this.options.versionPrefix : false;
+      let versionPrefixConfig = resource.config?.versionPrefix !== void 0 ? resource.config?.versionPrefix : legacyConfig.versionPrefix !== void 0 ? legacyConfig.versionPrefix : this.options.versionPrefix !== void 0 ? this.options.versionPrefix : false;
       let prefix = "";
       if (versionPrefixConfig === true) {
         prefix = version;
@@ -5021,17 +5254,17 @@ class ApiServer {
       } else if (typeof versionPrefixConfig === "string") {
         prefix = versionPrefixConfig;
       }
-      const middlewares = [...config.customMiddleware || []];
-      if (config.auth && this.options.auth.driver) {
-        const authMiddleware = this._createAuthMiddleware();
-        if (authMiddleware) {
-          middlewares.unshift(authMiddleware);
-        }
+      const middlewares = [];
+      if (authMiddleware) {
+        middlewares.push(authMiddleware);
+      }
+      if (legacyConfig.customMiddleware) {
+        middlewares.push(...legacyConfig.customMiddleware);
       }
       const resourceApp = createResourceRoutes(resource, version, {
-        methods: config.methods,
+        methods: resource.config?.methods || legacyConfig.methods || ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
         customMiddleware: middlewares,
-        enableValidation: config.validation !== false,
+        enableValidation: resource.config?.validation !== false && legacyConfig.validation !== false,
         versionPrefix: prefix
       }, this.Hono);
       const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
@@ -5039,80 +5272,118 @@ class ApiServer {
       if (this.options.verbose) {
         console.log(`[API Plugin] Mounted routes for resource '${name}' at ${mountPath}`);
       }
-      if (config.routes) {
+      const customRoutes = resource.config?.routes || legacyConfig.routes;
+      if (customRoutes) {
         const routeContext = {
           resource,
           database,
           resourceName: name,
           version
         };
-        mountCustomRoutes(resourceApp, config.routes, routeContext, this.options.verbose);
+        mountCustomRoutes(resourceApp, customRoutes, routeContext, this.options.verbose);
       }
     }
   }
   /**
-   * Setup authentication routes (when auth driver is configured)
+   * Setup authentication routes (when auth drivers are configured)
    * @private
    */
   _setupAuthRoutes() {
     const { database, auth } = this.options;
-    const { driver, resource: resourceName, usernameField, passwordField, config } = auth;
+    const { drivers, driver, resource: resourceName, usernameField, passwordField, config } = auth;
+    let authDriver = driver;
+    let driverConfig = config;
+    if (drivers && drivers.length > 0) {
+      const jwtDriver = drivers.find((d) => d.driver === "jwt");
+      if (jwtDriver) {
+        authDriver = "jwt";
+        driverConfig = jwtDriver.config || {};
+      } else if (!driver) {
+        return;
+      }
+    } else if (!driver) {
+      return;
+    }
     const authResource = database.resources[resourceName];
     if (!authResource) {
       console.error(`[API Plugin] Auth resource '${resourceName}' not found. Skipping auth routes.`);
       return;
     }
     const authConfig = {
-      driver,
+      driver: authDriver,
       usernameField,
       passwordField,
-      jwtSecret: config.jwtSecret || config.secret,
-      jwtExpiresIn: config.jwtExpiresIn || config.expiresIn || "7d",
-      passphrase: config.passphrase || "secret",
-      allowRegistration: config.allowRegistration !== false
+      jwtSecret: driverConfig.jwtSecret || driverConfig.secret || config.jwtSecret || config.secret,
+      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || config.jwtExpiresIn || config.expiresIn || "7d",
+      passphrase: driverConfig.passphrase || config.passphrase || "secret",
+      allowRegistration: driverConfig.allowRegistration !== void 0 ? driverConfig.allowRegistration : config.allowRegistration !== false
     };
     const authApp = createAuthRoutes(authResource, authConfig);
     this.app.route("/auth", authApp);
     if (this.options.verbose) {
-      console.log(`[API Plugin] Mounted auth routes (driver: ${driver}) at /auth`);
+      console.log(`[API Plugin] Mounted auth routes (driver: ${authDriver}) at /auth`);
     }
   }
   /**
-   * Create authentication middleware based on driver
+   * Create authentication middleware based on configured drivers
    * @private
-   * @returns {Function|null} Auth middleware function
+   * @returns {Function|null} Hono middleware or null
    */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
-    const { driver, resource: resourceName, usernameField, passwordField, config } = auth;
-    if (!driver) {
+    const { drivers, driver, resource: defaultResourceName, usernameField, passwordField } = auth;
+    if ((!drivers || drivers.length === 0) && !driver) {
       return null;
     }
-    const authResource = database.resources[resourceName];
+    const authDrivers = drivers && drivers.length > 0 ? drivers : driver ? [{ driver, config: auth.config }] : [];
+    if (authDrivers.length === 0) {
+      return null;
+    }
+    const authResource = database.resources[defaultResourceName];
     if (!authResource) {
-      console.error(`[API Plugin] Auth resource '${resourceName}' not found for middleware`);
+      console.error(`[API Plugin] Auth resource '${defaultResourceName}' not found for middleware`);
       return null;
     }
-    if (driver === "jwt") {
-      const jwtSecret = config.jwtSecret || config.secret;
-      if (!jwtSecret) {
-        console.error("[API Plugin] JWT driver requires jwtSecret in config");
-        return null;
+    const methods = [];
+    const driverConfigs = {
+      jwt: {},
+      apiKey: {},
+      basic: {},
+      oauth2: {}
+    };
+    for (const driverDef of authDrivers) {
+      const driverName = driverDef.driver;
+      const driverConfig = driverDef.config || {};
+      if (!methods.includes(driverName)) {
+        methods.push(driverName);
       }
-      return jwtAuth({
-        secret: jwtSecret});
+      if (driverName === "jwt") {
+        driverConfigs.jwt = {
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d"
+        };
+      } else if (driverName === "apiKey") {
+        driverConfigs.apiKey = {
+          headerName: driverConfig.headerName || "X-API-Key"
+        };
+      } else if (driverName === "basic") {
+        driverConfigs.basic = {
+          realm: driverConfig.realm || "API Access",
+          passphrase: driverConfig.passphrase || "secret"
+        };
+      } else if (driverName === "oauth2") {
+        driverConfigs.oauth2 = driverConfig;
+      }
     }
-    if (driver === "basic") {
-      return basicAuth({
-        realm: config.realm || "API Access",
-        authResource,
-        usernameField,
-        passwordField,
-        passphrase: config.passphrase || "secret"
-      });
-    }
-    console.error(`[API Plugin] Unknown auth driver: ${driver}`);
-    return null;
+    return createAuthMiddleware({
+      methods,
+      jwt: driverConfigs.jwt,
+      apiKey: driverConfigs.apiKey,
+      basic: driverConfigs.basic,
+      usersResource: authResource,
+      optional: true
+      // Let guards handle authorization
+    });
   }
   /**
    * Setup relational routes (when RelationPlugin is active)
@@ -5302,26 +5573,29 @@ class ApiPlugin extends Plugin {
         version: options.docs?.version || options.apiVersion || "1.0.0",
         description: options.docs?.description || options.apiDescription || "Auto-generated REST API for s3db.js resources"
       },
-      // Authentication configuration (driver-based)
+      // Authentication configuration (multiple drivers supported)
       auth: options.auth ? {
-        driver: options.auth.driver || null,
-        // 'jwt' or 'basic'
+        // New: Array of authentication drivers (OR logic - any driver can authenticate)
+        drivers: options.auth.drivers || (options.auth.driver ? [{
+          driver: options.auth.driver,
+          config: options.auth.config || {}
+        }] : []),
+        // Global settings
         resource: options.auth.resource || "users",
-        // Resource that manages auth
         usernameField: options.auth.usernameField || "email",
-        // Default: email
         passwordField: options.auth.passwordField || "password",
-        // Default: password
+        // Backward compatibility
+        driver: options.auth.driver || null,
         config: options.auth.config || {}
-        // Driver-specific config
       } : {
-        driver: null,
+        drivers: [],
         resource: "users",
         usernameField: "email",
         passwordField: "password",
+        driver: null,
         config: {}
       },
-      // Resource configuration
+      // Deprecated: Resource configuration moved to resource.config.guards
       resources: options.resources || {},
       // Custom routes (plugin-level)
       routes: options.routes || {},
@@ -5465,7 +5739,7 @@ class ApiPlugin extends Plugin {
       console.error("[API Plugin] Dependency validation failed:", err.message);
       throw err;
     }
-    const authEnabled = this.config.auth.driver !== null;
+    const authEnabled = this.config.auth.drivers.length > 0 || this.config.auth.driver !== null;
     if (authEnabled) {
       await this._createUsersResource();
     }
@@ -5491,6 +5765,8 @@ class ApiPlugin extends Plugin {
           apiKey: "string|optional",
           jwtSecret: "string|optional",
           role: "string|default:user",
+          scopes: "array|items:string|optional",
+          // Authorization scopes (e.g., ['read:users', 'write:cars'])
           active: "boolean|default:true",
           createdAt: "string|optional",
           lastLoginAt: "string|optional",

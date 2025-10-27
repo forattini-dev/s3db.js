@@ -10,8 +10,7 @@ import { mountCustomRoutes } from './utils/custom-routes.js';
 import { errorHandler } from './utils/error-handler.js';
 import * as formatter from './utils/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
-import { jwtAuth } from './auth/jwt-auth.js';
-import { basicAuth } from './auth/basic-auth.js';
+import { createAuthMiddleware } from './auth/index.js';
 
 /**
  * API Server class
@@ -241,33 +240,35 @@ export class ApiServer {
    * @private
    */
   _setupResourceRoutes() {
-    const { database, resources: resourceConfigs } = this.options;
+    const { database, resources: legacyResourceConfigs } = this.options;
 
     // Get all resources from database
     const resources = database.resources;
 
+    // Create global auth middleware (applies to all resources, guards control access)
+    const authMiddleware = this._createAuthMiddleware();
+
     for (const [name, resource] of Object.entries(resources)) {
-      // Skip plugin resources unless explicitly included
-      if (name.startsWith('plg_') && !resourceConfigs[name]) {
+      // Skip plugin resources (they're internal)
+      if (name.startsWith('plg_')) {
         continue;
       }
 
-      // Get resource configuration
-      const config = resourceConfigs[name] || {
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
-        auth: false
-      };
+      // Get legacy resource config (deprecated in favor of resource.config)
+      const legacyConfig = legacyResourceConfigs[name] || {};
 
       // Determine version
       const version = resource.config?.currentVersion || resource.version || 'v1';
 
       // Determine version prefix (resource-level overrides global)
-      // Priority: resource.versionPrefix > global versionPrefix > false (default - no prefix)
-      let versionPrefixConfig = config.versionPrefix !== undefined
-        ? config.versionPrefix
-        : this.options.versionPrefix !== undefined
-          ? this.options.versionPrefix
-          : false;
+      // Priority: resource.versionPrefix > legacy.versionPrefix > global versionPrefix > false (default - no prefix)
+      let versionPrefixConfig = resource.config?.versionPrefix !== undefined
+        ? resource.config?.versionPrefix
+        : legacyConfig.versionPrefix !== undefined
+          ? legacyConfig.versionPrefix
+          : this.options.versionPrefix !== undefined
+            ? this.options.versionPrefix
+            : false;
 
       // Calculate the actual prefix to use
       let prefix = '';
@@ -283,21 +284,23 @@ export class ApiServer {
       }
 
       // Prepare custom middleware
-      const middlewares = [...(config.customMiddleware || [])];
+      const middlewares = [];
 
-      // Add authentication middleware if required
-      if (config.auth && this.options.auth.driver) {
-        const authMiddleware = this._createAuthMiddleware();
-        if (authMiddleware) {
-          middlewares.unshift(authMiddleware); // Add at beginning
-        }
+      // Add global authentication middleware (always applied, guards control authorization)
+      if (authMiddleware) {
+        middlewares.push(authMiddleware);
+      }
+
+      // Add legacy custom middleware (deprecated)
+      if (legacyConfig.customMiddleware) {
+        middlewares.push(...legacyConfig.customMiddleware);
       }
 
       // Create resource routes
       const resourceApp = createResourceRoutes(resource, version, {
-        methods: config.methods,
+        methods: resource.config?.methods || legacyConfig.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
         customMiddleware: middlewares,
-        enableValidation: config.validation !== false,
+        enableValidation: resource.config?.validation !== false && legacyConfig.validation !== false,
         versionPrefix: prefix
       }, this.Hono);
 
@@ -309,8 +312,9 @@ export class ApiServer {
         console.log(`[API Plugin] Mounted routes for resource '${name}' at ${mountPath}`);
       }
 
-      // Mount custom routes for this resource (if defined)
-      if (config.routes) {
+      // Mount custom routes for this resource
+      const customRoutes = resource.config?.routes || legacyConfig.routes;
+      if (customRoutes) {
         const routeContext = {
           resource,
           database,
@@ -319,18 +323,37 @@ export class ApiServer {
         };
 
         // Mount on the resourceApp (nested under resource path)
-        mountCustomRoutes(resourceApp, config.routes, routeContext, this.options.verbose);
+        mountCustomRoutes(resourceApp, customRoutes, routeContext, this.options.verbose);
       }
     }
   }
 
   /**
-   * Setup authentication routes (when auth driver is configured)
+   * Setup authentication routes (when auth drivers are configured)
    * @private
    */
   _setupAuthRoutes() {
     const { database, auth } = this.options;
-    const { driver, resource: resourceName, usernameField, passwordField, config } = auth;
+    const { drivers, driver, resource: resourceName, usernameField, passwordField, config } = auth;
+
+    // Determine which driver to use for /auth routes (JWT only)
+    let authDriver = driver;
+    let driverConfig = config;
+
+    if (drivers && drivers.length > 0) {
+      // Find first JWT driver (for /auth/login endpoint)
+      const jwtDriver = drivers.find(d => d.driver === 'jwt');
+      if (jwtDriver) {
+        authDriver = 'jwt';
+        driverConfig = jwtDriver.config || {};
+      } else if (!driver) {
+        // No JWT driver and no legacy driver = skip auth routes
+        return;
+      }
+    } else if (!driver) {
+      // No drivers configured
+      return;
+    }
 
     // Get auth resource from database
     const authResource = database.resources[resourceName];
@@ -341,13 +364,13 @@ export class ApiServer {
 
     // Prepare auth config for routes
     const authConfig = {
-      driver,
+      driver: authDriver,
       usernameField,
       passwordField,
-      jwtSecret: config.jwtSecret || config.secret,
-      jwtExpiresIn: config.jwtExpiresIn || config.expiresIn || '7d',
-      passphrase: config.passphrase || 'secret',
-      allowRegistration: config.allowRegistration !== false
+      jwtSecret: driverConfig.jwtSecret || driverConfig.secret || config.jwtSecret || config.secret,
+      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || config.jwtExpiresIn || config.expiresIn || '7d',
+      passphrase: driverConfig.passphrase || config.passphrase || 'secret',
+      allowRegistration: driverConfig.allowRegistration !== undefined ? driverConfig.allowRegistration : (config.allowRegistration !== false)
     };
 
     // Create auth routes
@@ -357,56 +380,85 @@ export class ApiServer {
     this.app.route('/auth', authApp);
 
     if (this.options.verbose) {
-      console.log(`[API Plugin] Mounted auth routes (driver: ${driver}) at /auth`);
+      console.log(`[API Plugin] Mounted auth routes (driver: ${authDriver}) at /auth`);
     }
   }
 
   /**
-   * Create authentication middleware based on driver
+   * Create authentication middleware based on configured drivers
    * @private
-   * @returns {Function|null} Auth middleware function
+   * @returns {Function|null} Hono middleware or null
    */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
-    const { driver, resource: resourceName, usernameField, passwordField, config } = auth;
+    const { drivers, driver, resource: defaultResourceName, usernameField, passwordField } = auth;
 
-    if (!driver) {
+    // If no drivers configured (neither new nor legacy), no auth
+    if ((!drivers || drivers.length === 0) && !driver) {
       return null;
     }
 
-    const authResource = database.resources[resourceName];
+    // Use drivers array or fallback to empty (will be handled below)
+    const authDrivers = (drivers && drivers.length > 0) ? drivers : (driver ? [{ driver, config: auth.config }] : []);
+
+    if (authDrivers.length === 0) {
+      return null;
+    }
+
+    // Get auth resource
+    const authResource = database.resources[defaultResourceName];
     if (!authResource) {
-      console.error(`[API Plugin] Auth resource '${resourceName}' not found for middleware`);
+      console.error(`[API Plugin] Auth resource '${defaultResourceName}' not found for middleware`);
       return null;
     }
 
-    if (driver === 'jwt') {
-      const jwtSecret = config.jwtSecret || config.secret;
-      if (!jwtSecret) {
-        console.error('[API Plugin] JWT driver requires jwtSecret in config');
-        return null;
+    // Extract driver names and configs
+    const methods = [];
+    const driverConfigs = {
+      jwt: {},
+      apiKey: {},
+      basic: {},
+      oauth2: {}
+    };
+
+    for (const driverDef of authDrivers) {
+      const driverName = driverDef.driver;
+      const driverConfig = driverDef.config || {};
+
+      if (!methods.includes(driverName)) {
+        methods.push(driverName);
       }
 
-      return jwtAuth({
-        secret: jwtSecret,
-        authResource,
-        usernameField,
-        passwordField
-      });
+      // Map driver configs
+      if (driverName === 'jwt') {
+        driverConfigs.jwt = {
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d'
+        };
+      } else if (driverName === 'apiKey') {
+        driverConfigs.apiKey = {
+          headerName: driverConfig.headerName || 'X-API-Key'
+        };
+      } else if (driverName === 'basic') {
+        driverConfigs.basic = {
+          realm: driverConfig.realm || 'API Access',
+          passphrase: driverConfig.passphrase || 'secret'
+        };
+      } else if (driverName === 'oauth2') {
+        driverConfigs.oauth2 = driverConfig;
+      }
     }
 
-    if (driver === 'basic') {
-      return basicAuth({
-        realm: config.realm || 'API Access',
-        authResource,
-        usernameField,
-        passwordField,
-        passphrase: config.passphrase || 'secret'
-      });
-    }
-
-    console.error(`[API Plugin] Unknown auth driver: ${driver}`);
-    return null;
+    // Create unified auth middleware
+    return createAuthMiddleware({
+      methods,
+      jwt: driverConfigs.jwt,
+      apiKey: driverConfigs.apiKey,
+      basic: driverConfigs.basic,
+      oauth2: driverConfigs.oauth2,
+      usersResource: authResource,
+      optional: true  // Let guards handle authorization
+    });
   }
 
   /**
