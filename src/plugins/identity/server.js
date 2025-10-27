@@ -278,6 +278,15 @@ export class IdentityServer {
         console.log('[Identity Server]   POST /profile/change-password (Change Password)');
         console.log('[Identity Server]   POST /profile/logout-session (Logout Specific Session)');
         console.log('[Identity Server]   POST /profile/logout-all-sessions (Logout All Other Sessions)');
+        console.log('[Identity Server]   GET  /admin (Admin Dashboard - Protected)');
+        console.log('[Identity Server]   GET  /admin/clients (List OAuth2 Clients)');
+        console.log('[Identity Server]   GET  /admin/clients/new (New Client Form)');
+        console.log('[Identity Server]   POST /admin/clients/create (Create Client)');
+        console.log('[Identity Server]   GET  /admin/clients/:id/edit (Edit Client Form)');
+        console.log('[Identity Server]   POST /admin/clients/:id/update (Update Client)');
+        console.log('[Identity Server]   POST /admin/clients/:id/delete (Delete Client)');
+        console.log('[Identity Server]   POST /admin/clients/:id/rotate-secret (Rotate Client Secret)');
+        console.log('[Identity Server]   POST /admin/clients/:id/toggle-active (Toggle Client Active)');
       }
     } catch (error) {
       console.error('[Identity Server] Failed to setup UI routes:', error);
