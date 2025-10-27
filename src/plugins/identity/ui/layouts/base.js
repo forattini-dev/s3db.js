@@ -153,7 +153,7 @@ export function BaseLayout(props) {
               </li>
             ` : html`
               <li><a href="/login">Login</a></li>
-              <li><a href="/register">Register</a></li>
+              ${theme.registrationEnabled ? html`<li><a href="/register">Register</a></li>` : ''}
             `}
           </ul>
         </nav>
