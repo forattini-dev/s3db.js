@@ -5259,16 +5259,15 @@ class ApiServer {
    * @private
    */
   _setupResourceRoutes() {
-    const { database, resources: legacyResourceConfigs } = this.options;
+    const { database } = this.options;
     const resources = database.resources;
     const authMiddleware = this._createAuthMiddleware();
     for (const [name, resource] of Object.entries(resources)) {
       if (name.startsWith("plg_")) {
         continue;
       }
-      const legacyConfig = legacyResourceConfigs[name] || {};
       const version = resource.config?.currentVersion || resource.version || "v1";
-      let versionPrefixConfig = resource.config?.versionPrefix !== void 0 ? resource.config?.versionPrefix : legacyConfig.versionPrefix !== void 0 ? legacyConfig.versionPrefix : this.options.versionPrefix !== void 0 ? this.options.versionPrefix : false;
+      let versionPrefixConfig = resource.config?.versionPrefix !== void 0 ? resource.config?.versionPrefix : this.options.versionPrefix !== void 0 ? this.options.versionPrefix : false;
       let prefix = "";
       if (versionPrefixConfig === true) {
         prefix = version;
@@ -5281,13 +5280,10 @@ class ApiServer {
       if (authMiddleware) {
         middlewares.push(authMiddleware);
       }
-      if (legacyConfig.customMiddleware) {
-        middlewares.push(...legacyConfig.customMiddleware);
-      }
       const resourceApp = createResourceRoutes(resource, version, {
-        methods: resource.config?.methods || legacyConfig.methods || ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+        methods: resource.config?.methods || ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
         customMiddleware: middlewares,
-        enableValidation: resource.config?.validation !== false && legacyConfig.validation !== false,
+        enableValidation: resource.config?.validation !== false,
         versionPrefix: prefix
       }, this.Hono);
       const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
@@ -5295,15 +5291,14 @@ class ApiServer {
       if (this.options.verbose) {
         console.log(`[API Plugin] Mounted routes for resource '${name}' at ${mountPath}`);
       }
-      const customRoutes = resource.config?.routes || legacyConfig.routes;
-      if (customRoutes) {
+      if (resource.config?.routes) {
         const routeContext = {
           resource,
           database,
           resourceName: name,
           version
         };
-        mountCustomRoutes(resourceApp, customRoutes, routeContext, this.options.verbose);
+        mountCustomRoutes(resourceApp, resource.config.routes, routeContext, this.options.verbose);
       }
     }
   }
@@ -5313,18 +5308,9 @@ class ApiServer {
    */
   _setupAuthRoutes() {
     const { database, auth } = this.options;
-    const { drivers, driver, resource: resourceName, usernameField, passwordField, config } = auth;
-    let authDriver = driver;
-    let driverConfig = config;
-    if (drivers && drivers.length > 0) {
-      const jwtDriver = drivers.find((d) => d.driver === "jwt");
-      if (jwtDriver) {
-        authDriver = "jwt";
-        driverConfig = jwtDriver.config || {};
-      } else if (!driver) {
-        return;
-      }
-    } else if (!driver) {
+    const { drivers, resource: resourceName, usernameField, passwordField } = auth;
+    const jwtDriver = drivers.find((d) => d.driver === "jwt");
+    if (!jwtDriver) {
       return;
     }
     const authResource = database.resources[resourceName];
@@ -5332,19 +5318,20 @@ class ApiServer {
       console.error(`[API Plugin] Auth resource '${resourceName}' not found. Skipping auth routes.`);
       return;
     }
+    const driverConfig = jwtDriver.config || {};
     const authConfig = {
-      driver: authDriver,
+      driver: "jwt",
       usernameField,
       passwordField,
-      jwtSecret: driverConfig.jwtSecret || driverConfig.secret || config.jwtSecret || config.secret,
-      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || config.jwtExpiresIn || config.expiresIn || "7d",
-      passphrase: driverConfig.passphrase || config.passphrase || "secret",
-      allowRegistration: driverConfig.allowRegistration !== void 0 ? driverConfig.allowRegistration : config.allowRegistration !== false
+      jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
+      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
+      passphrase: driverConfig.passphrase || "secret",
+      allowRegistration: driverConfig.allowRegistration !== false
     };
     const authApp = createAuthRoutes(authResource, authConfig);
     this.app.route("/auth", authApp);
     if (this.options.verbose) {
-      console.log(`[API Plugin] Mounted auth routes (driver: ${authDriver}) at /auth`);
+      console.log("[API Plugin] Mounted auth routes (driver: jwt) at /auth");
     }
   }
   /**
@@ -5354,12 +5341,8 @@ class ApiServer {
    */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
-    const { drivers, driver, resource: defaultResourceName, usernameField, passwordField } = auth;
-    if ((!drivers || drivers.length === 0) && !driver) {
-      return null;
-    }
-    const authDrivers = drivers && drivers.length > 0 ? drivers : driver ? [{ driver, config: auth.config }] : [];
-    if (authDrivers.length === 0) {
+    const { drivers, resource: defaultResourceName } = auth;
+    if (!drivers || drivers.length === 0) {
       return null;
     }
     const authResource = database.resources[defaultResourceName];
@@ -5374,7 +5357,7 @@ class ApiServer {
       basic: {},
       oauth2: {}
     };
-    for (const driverDef of authDrivers) {
+    for (const driverDef of drivers) {
       const driverName = driverDef.driver;
       const driverConfig = driverDef.config || {};
       if (!methods.includes(driverName)) {
@@ -5596,30 +5579,20 @@ class ApiPlugin extends Plugin {
         version: options.docs?.version || options.apiVersion || "1.0.0",
         description: options.docs?.description || options.apiDescription || "Auto-generated REST API for s3db.js resources"
       },
-      // Authentication configuration (multiple drivers supported)
+      // Authentication configuration (multiple drivers)
       auth: options.auth ? {
-        // New: Array of authentication drivers (OR logic - any driver can authenticate)
-        drivers: options.auth.drivers || (options.auth.driver ? [{
-          driver: options.auth.driver,
-          config: options.auth.config || {}
-        }] : []),
+        // Array of authentication drivers (OR logic - any driver can authenticate)
+        drivers: options.auth.drivers || [],
         // Global settings
         resource: options.auth.resource || "users",
         usernameField: options.auth.usernameField || "email",
-        passwordField: options.auth.passwordField || "password",
-        // Backward compatibility
-        driver: options.auth.driver || null,
-        config: options.auth.config || {}
+        passwordField: options.auth.passwordField || "password"
       } : {
         drivers: [],
         resource: "users",
         usernameField: "email",
-        passwordField: "password",
-        driver: null,
-        config: {}
+        passwordField: "password"
       },
-      // Deprecated: Resource configuration moved to resource.config.guards
-      resources: options.resources || {},
       // Custom routes (plugin-level)
       routes: options.routes || {},
       // CORS configuration
@@ -5762,7 +5735,7 @@ class ApiPlugin extends Plugin {
       console.error("[API Plugin] Dependency validation failed:", err.message);
       throw err;
     }
-    const authEnabled = this.config.auth.drivers.length > 0 || this.config.auth.driver !== null;
+    const authEnabled = this.config.auth.drivers.length > 0;
     if (authEnabled) {
       await this._createUsersResource();
     }

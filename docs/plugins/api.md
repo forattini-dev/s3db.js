@@ -2227,6 +2227,45 @@ resources: {
 
 **Guards** are declarative authorization rules defined directly in resource configuration. They enable **row-level security (RLS)**, **multi-tenancy**, and **ownership checks** with minimal code.
 
+> **⏱️ Guards in 30 Seconds**
+>
+> ```javascript
+> // Multi-tenant SaaS with row-level security - ONE config block!
+> const ordersResource = await db.createResource({
+>   name: 'orders',
+>   attributes: { tenantId: 'string|required', userId: 'string|required', total: 'number' },
+>   guard: {
+>     '*': (ctx) => {
+>       ctx.tenantId = ctx.user.tenantId;  // Extract tenant from JWT
+>       return !!ctx.tenantId;              // Block if no tenant
+>     },
+>     list: (ctx) => {
+>       // Automatic partition isolation - users ONLY see their tenant's data!
+>       ctx.setPartition('byTenantUser', {
+>         tenantId: ctx.tenantId,
+>         userId: ctx.user.sub
+>       });
+>       return true;
+>     },
+>     create: (ctx) => {
+>       // Auto-inject tenant/user - impossible to forget or bypass!
+>       ctx.data.tenantId = ctx.tenantId;
+>       ctx.data.userId = ctx.user.sub;
+>       return true;
+>     }
+>   }
+> });
+>
+> await db.usePlugin(new ApiPlugin({ port: 3000, auth: { driver: 'jwt' } }));
+> ```
+>
+> **What you get:**
+> - ✅ **Zero trust by default** - Every request validates tenant/user
+> - ✅ **Impossible to bypass** - Guards run BEFORE resource operations
+> - ✅ **Auto-partition isolation** - O(1) queries, not O(n) scans
+> - ✅ **DRY** - Write once, works for ALL CRUD operations
+> - ✅ **Framework-agnostic** - Same code works with Hono, Express, Fastify
+
 #### 🎯 Why Guards?
 
 **Before Guards (Manual Authorization):**
