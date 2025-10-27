@@ -20,6 +20,7 @@ import { getContentType, isCompressible } from './mime-types.js';
  * @param {Object} config - Configuration
  * @param {string} config.root - Root directory to serve files from
  * @param {Array<string>} [config.index] - Index files (e.g., ['index.html'])
+ * @param {string|boolean} [config.fallback] - Fallback file for SPA routing (e.g., 'index.html', true uses index[0], false disables)
  * @param {number} [config.maxAge] - Cache max-age in milliseconds
  * @param {string} [config.dotfiles] - How to handle dotfiles ('ignore', 'allow', 'deny')
  * @param {boolean} [config.etag] - Enable ETag generation
@@ -30,6 +31,7 @@ export function createFilesystemHandler(config = {}) {
   const {
     root,
     index = ['index.html'],
+    fallback = false,
     maxAge = 0,
     dotfiles = 'ignore',
     etag = true,
