@@ -109,7 +109,7 @@ export const PLUGIN_DEPENDENCIES = {
         npmUrl: 'https://www.npmjs.com/package/@hono/swagger-ui'
       },
       'jose': {
-        version: '^5.0.0',
+        version: '^5.0.0 || ^6.0.0',
         description: 'Universal JOSE and JWE implementation (for OAuth2 token validation)',
         installCommand: 'pnpm add jose',
         npmUrl: 'https://www.npmjs.com/package/jose'
@@ -131,6 +131,12 @@ export const PLUGIN_DEPENDENCIES = {
         description: 'Node.js adapter for Hono',
         installCommand: 'pnpm add @hono/node-server',
         npmUrl: 'https://www.npmjs.com/package/@hono/node-server'
+      },
+      'jose': {
+        version: '^5.0.0 || ^6.0.0',
+        description: 'Universal JOSE and JWE implementation (for RSA key generation and JWT signing)',
+        installCommand: 'pnpm add jose',
+        npmUrl: 'https://www.npmjs.com/package/jose'
       }
     }
   },
@@ -151,11 +157,17 @@ export const PLUGIN_DEPENDENCIES = {
 /**
  * Simple semver comparison for major version checking
  * @param {string} actual - Actual version (e.g., "8.11.3")
- * @param {string} required - Required version range (e.g., "^8.0.0")
+ * @param {string} required - Required version range (e.g., "^8.0.0" or "^5.0.0 || ^6.0.0")
  * @returns {boolean} True if version is compatible
  */
 function isVersionCompatible(actual, required) {
   if (!actual || !required) return false;
+
+  // Handle OR operators (||)
+  if (required.includes('||')) {
+    const ranges = required.split('||').map(r => r.trim());
+    return ranges.some(range => isVersionCompatible(actual, range));
+  }
 
   // Remove ^ and ~ prefixes
   const cleanRequired = required.replace(/^[\^~]/, '');

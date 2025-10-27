@@ -84,6 +84,43 @@ export class IdentityPlugin extends Plugin {
       logging: {
         enabled: options.logging?.enabled || false,
         format: options.logging?.format || ':method :path :status :response-time ms'
+      },
+
+      // Features (MVP - Phase 1)
+      features: {
+        // Endpoints (can be disabled individually)
+        discovery: options.features?.discovery !== false,                    // GET /.well-known/openid-configuration
+        jwks: options.features?.jwks !== false,                              // GET /.well-known/jwks.json
+        token: options.features?.token !== false,                            // POST /oauth/token
+        authorize: options.features?.authorize !== false,                    // GET/POST /oauth/authorize
+        userinfo: options.features?.userinfo !== false,                      // GET /oauth/userinfo
+        introspection: options.features?.introspection !== false,            // POST /oauth/introspect
+        revocation: options.features?.revocation !== false,                  // POST /oauth/revoke
+        registration: options.features?.registration !== false,              // POST /oauth/register (RFC 7591)
+
+        // Authorization Code Flow UI
+        builtInLoginUI: options.features?.builtInLoginUI !== false,          // HTML login form
+        customLoginHandler: options.features?.customLoginHandler || null,    // Custom UI handler
+
+        // PKCE (Proof Key for Code Exchange - RFC 7636)
+        pkce: {
+          enabled: options.features?.pkce?.enabled !== false,                // PKCE support
+          required: options.features?.pkce?.required || false,               // Force PKCE for public clients
+          methods: options.features?.pkce?.methods || ['S256', 'plain']      // Supported methods
+        },
+
+        // Refresh tokens
+        refreshTokens: options.features?.refreshTokens !== false,            // Enable refresh tokens
+        refreshTokenRotation: options.features?.refreshTokenRotation || false, // Rotate on each use
+        revokeOldRefreshTokens: options.features?.revokeOldRefreshTokens !== false, // Revoke old tokens after rotation
+
+        // Future features (Phase 2 - commented for reference)
+        // admin: { enabled: false, apiKey: null, endpoints: {...} },
+        // consent: { enabled: false, skipForTrustedClients: true },
+        // mfa: { enabled: false, methods: ['totp', 'sms', 'email'] },
+        // emailVerification: { enabled: false, required: false },
+        // passwordPolicy: { enabled: false, minLength: 8, ... },
+        // webhooks: { enabled: false, endpoints: [], events: [] }
       }
     };
 
@@ -148,7 +185,6 @@ export class IdentityPlugin extends Plugin {
       this.database.createResource({
         name: 'plg_oauth_keys',
         attributes: {
-          id: 'string|required',
           kid: 'string|required',
           publicKey: 'string|required',
           privateKey: 'secret|required',
@@ -182,7 +218,6 @@ export class IdentityPlugin extends Plugin {
       this.database.createResource({
         name: 'plg_oauth_clients',
         attributes: {
-          id: 'string|required',
           clientId: 'string|required',
           clientSecret: 'secret|required',
           name: 'string|required',
@@ -217,7 +252,6 @@ export class IdentityPlugin extends Plugin {
       this.database.createResource({
         name: 'plg_auth_codes',
         attributes: {
-          id: 'string|required',
           code: 'string|required',
           clientId: 'string|required',
           userId: 'string|required',
@@ -271,7 +305,6 @@ export class IdentityPlugin extends Plugin {
       this.database.createResource({
         name: resourceName,
         attributes: {
-          id: 'string|required',
           email: 'string|required|email',
           password: 'secret|required',
           name: 'string|optional',

@@ -897,9 +897,23 @@ resources: {
 The API Plugin uses a **driver-based authentication system** where you choose ONE authentication driver for your API. This approach ensures consistency and simplicity across your entire API.
 
 **Available drivers:**
-- **JWT** - Token-based authentication with `/auth/login` endpoint
-- **Basic** - HTTP Basic Auth with Base64-encoded credentials in headers
-- **OAuth2/OIDC** - Microservices SSO with RS256 asymmetric keys ([docs](../oauth2-oidc.md))
+
+| Driver | Use Case | Description | Endpoints |
+|--------|----------|-------------|-----------|
+| `jwt` | Web/Mobile Apps | Token-based auth with login | `/auth/register`, `/auth/login` |
+| `basic` | Simple APIs, Scripts | HTTP Basic Auth (username:password) | None (uses Authorization header) |
+| `api-key` | Service-to-Service | Static API keys | None (uses X-API-Key header) |
+| `oidc` | Microservices (Resource Server) | Validates OAuth2/OIDC tokens from external provider | None (validates Bearer tokens) |
+| `oauth2` | Legacy OAuth2 Clients | Validates OAuth2 tokens (deprecated, use `oidc`) | None (validates Bearer tokens) |
+
+**Choosing a driver:**
+- ✅ **JWT** - Most common, best for user-facing apps with registration/login
+- ✅ **OIDC** - Best for microservices validating tokens from SSO (IdentityPlugin, Azure AD, Keycloak)
+- ✅ **API Key** - Best for service-to-service with static keys
+- ✅ **Basic** - Best for simple scripts/tools, backward compatibility
+- ⚠️ **OAuth2** - Legacy, use OIDC instead
+
+For OAuth2/OIDC Authorization Server (SSO), see [IdentityPlugin](./identity.md).
 
 **Key features:**
 - ✅ Resource-based auth configuration (which resource manages users)

@@ -2570,7 +2570,7 @@ const PLUGIN_DEPENDENCIES = {
         npmUrl: "https://www.npmjs.com/package/@hono/swagger-ui"
       },
       "jose": {
-        version: "^5.0.0",
+        version: "^5.0.0 || ^6.0.0",
         description: "Universal JOSE and JWE implementation (for OAuth2 token validation)",
         installCommand: "pnpm add jose",
         npmUrl: "https://www.npmjs.com/package/jose"
@@ -2592,6 +2592,12 @@ const PLUGIN_DEPENDENCIES = {
         description: "Node.js adapter for Hono",
         installCommand: "pnpm add @hono/node-server",
         npmUrl: "https://www.npmjs.com/package/@hono/node-server"
+      },
+      "jose": {
+        version: "^5.0.0 || ^6.0.0",
+        description: "Universal JOSE and JWE implementation (for RSA key generation and JWT signing)",
+        installCommand: "pnpm add jose",
+        npmUrl: "https://www.npmjs.com/package/jose"
       }
     }
   },
@@ -2610,6 +2616,10 @@ const PLUGIN_DEPENDENCIES = {
 };
 function isVersionCompatible(actual, required) {
   if (!actual || !required) return false;
+  if (required.includes("||")) {
+    const ranges = required.split("||").map((r) => r.trim());
+    return ranges.some((range) => isVersionCompatible(actual, range));
+  }
   const cleanRequired = required.replace(/^[\^~]/, "");
   const actualMajor = parseInt(actual.split(".")[0], 10);
   const requiredMajor = parseInt(cleanRequired.split(".")[0], 10);
@@ -9744,6 +9754,54 @@ class IdentityPlugin extends Plugin {
       logging: {
         enabled: options.logging?.enabled || false,
         format: options.logging?.format || ":method :path :status :response-time ms"
+      },
+      // Features (MVP - Phase 1)
+      features: {
+        // Endpoints (can be disabled individually)
+        discovery: options.features?.discovery !== false,
+        // GET /.well-known/openid-configuration
+        jwks: options.features?.jwks !== false,
+        // GET /.well-known/jwks.json
+        token: options.features?.token !== false,
+        // POST /oauth/token
+        authorize: options.features?.authorize !== false,
+        // GET/POST /oauth/authorize
+        userinfo: options.features?.userinfo !== false,
+        // GET /oauth/userinfo
+        introspection: options.features?.introspection !== false,
+        // POST /oauth/introspect
+        revocation: options.features?.revocation !== false,
+        // POST /oauth/revoke
+        registration: options.features?.registration !== false,
+        // POST /oauth/register (RFC 7591)
+        // Authorization Code Flow UI
+        builtInLoginUI: options.features?.builtInLoginUI !== false,
+        // HTML login form
+        customLoginHandler: options.features?.customLoginHandler || null,
+        // Custom UI handler
+        // PKCE (Proof Key for Code Exchange - RFC 7636)
+        pkce: {
+          enabled: options.features?.pkce?.enabled !== false,
+          // PKCE support
+          required: options.features?.pkce?.required || false,
+          // Force PKCE for public clients
+          methods: options.features?.pkce?.methods || ["S256", "plain"]
+          // Supported methods
+        },
+        // Refresh tokens
+        refreshTokens: options.features?.refreshTokens !== false,
+        // Enable refresh tokens
+        refreshTokenRotation: options.features?.refreshTokenRotation || false,
+        // Rotate on each use
+        revokeOldRefreshTokens: options.features?.revokeOldRefreshTokens !== false
+        // Revoke old tokens after rotation
+        // Future features (Phase 2 - commented for reference)
+        // admin: { enabled: false, apiKey: null, endpoints: {...} },
+        // consent: { enabled: false, skipForTrustedClients: true },
+        // mfa: { enabled: false, methods: ['totp', 'sms', 'email'] },
+        // emailVerification: { enabled: false, required: false },
+        // passwordPolicy: { enabled: false, minLength: 8, ... },
+        // webhooks: { enabled: false, endpoints: [], events: [] }
       }
     };
     this.server = null;
@@ -9792,7 +9850,6 @@ class IdentityPlugin extends Plugin {
       () => this.database.createResource({
         name: "plg_oauth_keys",
         attributes: {
-          id: "string|required",
           kid: "string|required",
           publicKey: "string|required",
           privateKey: "secret|required",
@@ -9823,7 +9880,6 @@ class IdentityPlugin extends Plugin {
       () => this.database.createResource({
         name: "plg_oauth_clients",
         attributes: {
-          id: "string|required",
           clientId: "string|required",
           clientSecret: "secret|required",
           name: "string|required",
@@ -9855,7 +9911,6 @@ class IdentityPlugin extends Plugin {
       () => this.database.createResource({
         name: "plg_auth_codes",
         attributes: {
-          id: "string|required",
           code: "string|required",
           clientId: "string|required",
           userId: "string|required",
@@ -9905,7 +9960,6 @@ class IdentityPlugin extends Plugin {
       () => this.database.createResource({
         name: resourceName,
         attributes: {
-          id: "string|required",
           email: "string|required|email",
           password: "secret|required",
           name: "string|optional",
@@ -50693,6 +50747,18 @@ function createSecurityMiddleware(config = {}) {
   };
 }
 
+function createExpressStyleResponse(c) {
+  let statusCode = 200;
+  return {
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(data) {
+      return c.json(data, statusCode);
+    }
+  };
+}
 class IdentityServer {
   /**
    * Create Identity server
@@ -50797,100 +50863,40 @@ class IdentityServer {
       return;
     }
     this.app.get("/.well-known/openid-configuration", async (c) => {
-      try {
-        const document = await oauth2Server.discoveryHandler(c.req, c);
-        return c.json(document);
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.discoveryHandler(c.req, res);
     });
     this.app.get("/.well-known/jwks.json", async (c) => {
-      try {
-        const jwks = await oauth2Server.jwksHandler(c.req, c);
-        return c.json(jwks);
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.jwksHandler(c.req, res);
     });
     this.app.post("/oauth/token", async (c) => {
-      try {
-        const result = await oauth2Server.tokenHandler(c.req, c);
-        return c.json(result);
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.tokenHandler(c.req, res);
     });
     this.app.get("/oauth/userinfo", async (c) => {
-      try {
-        const userinfo = await oauth2Server.userinfoHandler(c.req, c);
-        return c.json(userinfo);
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.userinfoHandler(c.req, res);
     });
     this.app.post("/oauth/introspect", async (c) => {
-      try {
-        const result = await oauth2Server.introspectHandler(c.req, c);
-        return c.json(result);
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.introspectHandler(c.req, res);
     });
     this.app.get("/oauth/authorize", async (c) => {
-      try {
-        const result = await oauth2Server.authorizeHandler(c.req, c);
-        return result;
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.authorizeHandler(c.req, res);
     });
     this.app.post("/oauth/authorize", async (c) => {
-      try {
-        const result = await oauth2Server.authorizePostHandler(c.req, c);
-        return result;
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.authorizePostHandler(c.req, res);
     });
     this.app.post("/oauth/register", async (c) => {
-      try {
-        const result = await oauth2Server.registerClientHandler(c.req, c);
-        return c.json(result);
-      } catch (error) {
-        return c.json({
-          error: "server_error",
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.registerClientHandler(c.req, res);
     });
     this.app.post("/oauth/revoke", async (c) => {
-      try {
-        const result = await oauth2Server.revokeHandler(c.req, c);
-        return result;
-      } catch (error) {
-        return c.body(null, 200);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.revokeHandler(c.req, res);
     });
     if (this.options.verbose) {
       console.log("[Identity Server] Mounted OAuth2/OIDC routes:");

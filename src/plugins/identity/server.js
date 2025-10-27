@@ -14,6 +14,26 @@ import {
 import { idGenerator } from '../../concerns/id.js';
 
 /**
+ * Create Express-style response adapter for Hono context
+ * Allows OAuth2Server handlers to use res.status().json() API
+ * @param {Object} c - Hono context
+ * @returns {Object} Express-style response object
+ */
+function createExpressStyleResponse(c) {
+  let statusCode = 200;
+
+  return {
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(data) {
+      return c.json(data, statusCode);
+    }
+  };
+}
+
+/**
  * Identity Server class
  * @class
  */
@@ -148,117 +168,56 @@ export class IdentityServer {
 
     // OIDC Discovery endpoint
     this.app.get('/.well-known/openid-configuration', async (c) => {
-      try {
-        const document = await oauth2Server.discoveryHandler(c.req, c);
-        return c.json(document);
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.discoveryHandler(c.req, res);
     });
 
     // JWKS (JSON Web Key Set) endpoint
     this.app.get('/.well-known/jwks.json', async (c) => {
-      try {
-        const jwks = await oauth2Server.jwksHandler(c.req, c);
-        return c.json(jwks);
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.jwksHandler(c.req, res);
     });
 
     // OAuth2 Token endpoint
     this.app.post('/oauth/token', async (c) => {
-      try {
-        const result = await oauth2Server.tokenHandler(c.req, c);
-        return c.json(result);
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.tokenHandler(c.req, res);
     });
 
     // OIDC UserInfo endpoint
     this.app.get('/oauth/userinfo', async (c) => {
-      try {
-        const userinfo = await oauth2Server.userinfoHandler(c.req, c);
-        return c.json(userinfo);
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.userinfoHandler(c.req, res);
     });
 
     // Token introspection endpoint
     this.app.post('/oauth/introspect', async (c) => {
-      try {
-        const result = await oauth2Server.introspectHandler(c.req, c);
-        return c.json(result);
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.introspectHandler(c.req, res);
     });
 
     // Authorization endpoint (GET for user consent UI)
     this.app.get('/oauth/authorize', async (c) => {
-      try {
-        const result = await oauth2Server.authorizeHandler(c.req, c);
-        return result; // May return HTML or redirect
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.authorizeHandler(c.req, res);
     });
 
     // Authorization endpoint (POST for processing login)
     this.app.post('/oauth/authorize', async (c) => {
-      try {
-        const result = await oauth2Server.authorizePostHandler(c.req, c);
-        return result; // Returns redirect
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.authorizePostHandler(c.req, res);
     });
 
     // Client registration endpoint
     this.app.post('/oauth/register', async (c) => {
-      try {
-        const result = await oauth2Server.registerClientHandler(c.req, c);
-        return c.json(result);
-      } catch (error) {
-        return c.json({
-          error: 'server_error',
-          error_description: error.message
-        }, 500);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.registerClientHandler(c.req, res);
     });
 
     // Token revocation endpoint
     this.app.post('/oauth/revoke', async (c) => {
-      try {
-        const result = await oauth2Server.revokeHandler(c.req, c);
-        return result;
-      } catch (error) {
-        // RFC 7009: Always return 200 for security
-        return c.body(null, 200);
-      }
+      const res = createExpressStyleResponse(c);
+      return await oauth2Server.revokeHandler(c.req, res);
     });
 
     if (this.options.verbose) {
