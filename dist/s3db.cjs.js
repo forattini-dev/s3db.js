@@ -9,7 +9,7 @@ var fs = require('fs/promises');
 var path$1 = require('path');
 var fs$1 = require('fs');
 var clientS3 = require('@aws-sdk/client-s3');
-require('@aws-sdk/s3-request-presigner');
+var s3RequestPresigner = require('@aws-sdk/s3-request-presigner');
 var promises = require('stream/promises');
 var stream$1 = require('stream');
 var zlib = require('node:zlib');
@@ -7490,6 +7490,364 @@ function validatePathAuth(pathAuth) {
   }
 }
 
+const MIME_TYPES = {
+  // Text
+  "txt": "text/plain",
+  "html": "text/html",
+  "htm": "text/html",
+  "css": "text/css",
+  "js": "text/javascript",
+  "mjs": "text/javascript",
+  "json": "application/json",
+  "xml": "application/xml",
+  "csv": "text/csv",
+  "md": "text/markdown",
+  // Images
+  "jpg": "image/jpeg",
+  "jpeg": "image/jpeg",
+  "png": "image/png",
+  "gif": "image/gif",
+  "webp": "image/webp",
+  "svg": "image/svg+xml",
+  "ico": "image/x-icon",
+  "bmp": "image/bmp",
+  "tiff": "image/tiff",
+  "tif": "image/tiff",
+  // Audio
+  "mp3": "audio/mpeg",
+  "wav": "audio/wav",
+  "ogg": "audio/ogg",
+  "flac": "audio/flac",
+  "m4a": "audio/mp4",
+  // Video
+  "mp4": "video/mp4",
+  "webm": "video/webm",
+  "ogv": "video/ogg",
+  "avi": "video/x-msvideo",
+  "mov": "video/quicktime",
+  "mkv": "video/x-matroska",
+  // Documents
+  "pdf": "application/pdf",
+  "doc": "application/msword",
+  "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "xls": "application/vnd.ms-excel",
+  "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "ppt": "application/vnd.ms-powerpoint",
+  "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // Archives
+  "zip": "application/zip",
+  "tar": "application/x-tar",
+  "gz": "application/gzip",
+  "bz2": "application/x-bzip2",
+  "7z": "application/x-7z-compressed",
+  "rar": "application/vnd.rar",
+  // Fonts
+  "ttf": "font/ttf",
+  "otf": "font/otf",
+  "woff": "font/woff",
+  "woff2": "font/woff2",
+  "eot": "application/vnd.ms-fontobject",
+  // Application
+  "wasm": "application/wasm",
+  "bin": "application/octet-stream"
+};
+function getMimeType(filename) {
+  if (!filename || typeof filename !== "string") {
+    return "application/octet-stream";
+  }
+  const ext = filename.split(".").pop().toLowerCase();
+  return MIME_TYPES[ext] || "application/octet-stream";
+}
+function getCharset(mimeType) {
+  if (!mimeType) return null;
+  if (mimeType.startsWith("text/")) return "utf-8";
+  if (mimeType.includes("javascript")) return "utf-8";
+  if (mimeType.includes("json")) return "utf-8";
+  if (mimeType.includes("xml")) return "utf-8";
+  return null;
+}
+function getContentType(filename) {
+  const mimeType = getMimeType(filename);
+  const charset = getCharset(mimeType);
+  return charset ? `${mimeType}; charset=${charset}` : mimeType;
+}
+
+function createFilesystemHandler(config = {}) {
+  const {
+    root,
+    index = ["index.html"],
+    maxAge = 0,
+    dotfiles = "ignore",
+    etag = true,
+    cors = false
+  } = config;
+  if (!root) {
+    throw new Error('Filesystem static handler requires "root" directory');
+  }
+  const absoluteRoot = path$1.resolve(root);
+  return async (c) => {
+    try {
+      let requestPath = c.req.path.replace(/^\//, "");
+      const safePath = path$1.normalize(requestPath).replace(/^(\.\.(\/|\\|$))+/, "");
+      const fullPath = path$1.join(absoluteRoot, safePath);
+      if (!fullPath.startsWith(absoluteRoot)) {
+        return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+      }
+      let stats;
+      try {
+        stats = await fs.stat(fullPath);
+      } catch (err) {
+        if (err.code === "ENOENT") {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        }
+        throw err;
+      }
+      let filePath = fullPath;
+      if (stats.isDirectory()) {
+        let indexFound = false;
+        for (const indexFile of index) {
+          const indexPath = path$1.join(fullPath, indexFile);
+          try {
+            const indexStats = await fs.stat(indexPath);
+            if (indexStats.isFile()) {
+              filePath = indexPath;
+              stats = indexStats;
+              indexFound = true;
+              break;
+            }
+          } catch (err) {
+          }
+        }
+        if (!indexFound) {
+          return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+        }
+      }
+      const filename = path$1.basename(filePath);
+      if (filename.startsWith(".")) {
+        if (dotfiles === "deny") {
+          return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+        } else if (dotfiles === "ignore") {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        }
+      }
+      const etagValue = etag ? `"${crypto$1.createHash("md5").update(`${stats.mtime.getTime()}-${stats.size}`).digest("hex")}"` : null;
+      if (etagValue) {
+        const ifNoneMatch = c.req.header("If-None-Match");
+        if (ifNoneMatch === etagValue) {
+          return c.body(null, 304, {
+            "ETag": etagValue,
+            "Cache-Control": maxAge > 0 ? `public, max-age=${Math.floor(maxAge / 1e3)}` : "no-cache"
+          });
+        }
+      }
+      const contentType = getContentType(filename);
+      const headers = {
+        "Content-Type": contentType,
+        "Content-Length": stats.size.toString(),
+        "Last-Modified": stats.mtime.toUTCString()
+      };
+      if (etagValue) {
+        headers["ETag"] = etagValue;
+      }
+      if (maxAge > 0) {
+        headers["Cache-Control"] = `public, max-age=${Math.floor(maxAge / 1e3)}`;
+      } else {
+        headers["Cache-Control"] = "no-cache";
+      }
+      if (cors) {
+        headers["Access-Control-Allow-Origin"] = "*";
+        headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+      }
+      const rangeHeader = c.req.header("Range");
+      if (rangeHeader) {
+        const parts = rangeHeader.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+        if (start >= stats.size || end >= stats.size) {
+          return c.body(null, 416, {
+            "Content-Range": `bytes */${stats.size}`
+          });
+        }
+        const chunkSize = end - start + 1;
+        const stream2 = fs$1.createReadStream(filePath, { start, end });
+        headers["Content-Range"] = `bytes ${start}-${end}/${stats.size}`;
+        headers["Content-Length"] = chunkSize.toString();
+        headers["Accept-Ranges"] = "bytes";
+        return c.body(stream2, 206, headers);
+      }
+      if (c.req.method === "HEAD") {
+        return c.body(null, 200, headers);
+      }
+      const stream = fs$1.createReadStream(filePath);
+      return c.body(stream, 200, headers);
+    } catch (err) {
+      console.error("[Static Filesystem] Error:", err);
+      return c.json({ success: false, error: { message: "Internal Server Error" } }, 500);
+    }
+  };
+}
+function validateFilesystemConfig(config) {
+  if (!config.root || typeof config.root !== "string") {
+    throw new Error('Filesystem static config requires "root" directory (string)');
+  }
+  if (config.index !== void 0 && !Array.isArray(config.index)) {
+    throw new Error('Filesystem static "index" must be an array');
+  }
+  if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
+    throw new Error('Filesystem static "maxAge" must be a number');
+  }
+  if (config.dotfiles !== void 0 && !["ignore", "allow", "deny"].includes(config.dotfiles)) {
+    throw new Error('Filesystem static "dotfiles" must be "ignore", "allow", or "deny"');
+  }
+  if (config.etag !== void 0 && typeof config.etag !== "boolean") {
+    throw new Error('Filesystem static "etag" must be a boolean');
+  }
+  if (config.cors !== void 0 && typeof config.cors !== "boolean") {
+    throw new Error('Filesystem static "cors" must be a boolean');
+  }
+}
+
+function createS3Handler(config = {}) {
+  const {
+    s3Client,
+    bucket,
+    prefix = "",
+    streaming = true,
+    signedUrlExpiry = 300,
+    maxAge = 0,
+    cacheControl,
+    contentDisposition = "inline",
+    etag = true,
+    cors = false
+  } = config;
+  if (!s3Client) {
+    throw new Error('S3 static handler requires "s3Client"');
+  }
+  if (!bucket) {
+    throw new Error('S3 static handler requires "bucket" name');
+  }
+  return async (c) => {
+    try {
+      let requestPath = c.req.path.replace(/^\//, "");
+      const key = prefix ? `${prefix}${requestPath}` : requestPath;
+      if (key.includes("..") || key.includes("//")) {
+        return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+      }
+      let metadata;
+      try {
+        const headCommand = new clientS3.HeadObjectCommand({ Bucket: bucket, Key: key });
+        metadata = await s3Client.send(headCommand);
+      } catch (err) {
+        if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        }
+        throw err;
+      }
+      if (etag && metadata.ETag) {
+        const ifNoneMatch = c.req.header("If-None-Match");
+        if (ifNoneMatch === metadata.ETag) {
+          const headers2 = {
+            "ETag": metadata.ETag,
+            "Cache-Control": cacheControl || (maxAge > 0 ? `public, max-age=${Math.floor(maxAge / 1e3)}` : "no-cache")
+          };
+          if (cors) {
+            headers2["Access-Control-Allow-Origin"] = "*";
+            headers2["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+          }
+          return c.body(null, 304, headers2);
+        }
+      }
+      if (!streaming) {
+        const getCommand2 = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key });
+        const signedUrl = await s3RequestPresigner.getSignedUrl(s3Client, getCommand2, { expiresIn: signedUrlExpiry });
+        return c.redirect(signedUrl, 302);
+      }
+      const contentType = metadata.ContentType || getContentType(key);
+      const headers = {
+        "Content-Type": contentType,
+        "Content-Length": metadata.ContentLength?.toString() || "0",
+        "Last-Modified": metadata.LastModified?.toUTCString() || (/* @__PURE__ */ new Date()).toUTCString()
+      };
+      if (metadata.ETag && etag) {
+        headers["ETag"] = metadata.ETag;
+      }
+      if (cacheControl) {
+        headers["Cache-Control"] = cacheControl;
+      } else if (maxAge > 0) {
+        headers["Cache-Control"] = `public, max-age=${Math.floor(maxAge / 1e3)}`;
+      } else {
+        headers["Cache-Control"] = "no-cache";
+      }
+      if (contentDisposition) {
+        const filename = key.split("/").pop();
+        headers["Content-Disposition"] = `${contentDisposition}; filename="${filename}"`;
+      }
+      if (cors) {
+        headers["Access-Control-Allow-Origin"] = "*";
+        headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+      }
+      const rangeHeader = c.req.header("Range");
+      let getCommand;
+      if (rangeHeader) {
+        const parts = rangeHeader.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : metadata.ContentLength - 1;
+        if (start >= metadata.ContentLength || end >= metadata.ContentLength) {
+          return c.body(null, 416, {
+            "Content-Range": `bytes */${metadata.ContentLength}`
+          });
+        }
+        const range = `bytes=${start}-${end}`;
+        getCommand = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key, Range: range });
+        const chunkSize = end - start + 1;
+        headers["Content-Range"] = `bytes ${start}-${end}/${metadata.ContentLength}`;
+        headers["Content-Length"] = chunkSize.toString();
+        headers["Accept-Ranges"] = "bytes";
+        const response2 = await s3Client.send(getCommand);
+        return c.body(response2.Body, 206, headers);
+      }
+      if (c.req.method === "HEAD") {
+        return c.body(null, 200, headers);
+      }
+      getCommand = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key });
+      const response = await s3Client.send(getCommand);
+      return c.body(response.Body, 200, headers);
+    } catch (err) {
+      console.error("[Static S3] Error:", err);
+      return c.json({ success: false, error: { message: "Internal Server Error" } }, 500);
+    }
+  };
+}
+function validateS3Config(config) {
+  if (!config.bucket || typeof config.bucket !== "string") {
+    throw new Error('S3 static config requires "bucket" name (string)');
+  }
+  if (config.prefix !== void 0 && typeof config.prefix !== "string") {
+    throw new Error('S3 static "prefix" must be a string');
+  }
+  if (config.streaming !== void 0 && typeof config.streaming !== "boolean") {
+    throw new Error('S3 static "streaming" must be a boolean');
+  }
+  if (config.signedUrlExpiry !== void 0 && typeof config.signedUrlExpiry !== "number") {
+    throw new Error('S3 static "signedUrlExpiry" must be a number');
+  }
+  if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
+    throw new Error('S3 static "maxAge" must be a number');
+  }
+  if (config.cacheControl !== void 0 && typeof config.cacheControl !== "string") {
+    throw new Error('S3 static "cacheControl" must be a string');
+  }
+  if (config.contentDisposition !== void 0 && typeof config.contentDisposition !== "string") {
+    throw new Error('S3 static "contentDisposition" must be a string');
+  }
+  if (config.etag !== void 0 && typeof config.etag !== "boolean") {
+    throw new Error('S3 static "etag" must be a boolean');
+  }
+  if (config.cors !== void 0 && typeof config.cors !== "boolean") {
+    throw new Error('S3 static "cors" must be a boolean');
+  }
+}
+
 class ApiServer {
   /**
    * Create API server
@@ -7990,6 +8348,78 @@ class ApiServer {
     mountCustomRoutes(this.app, routes, context, this.options.verbose);
     if (this.options.verbose) {
       console.log(`[API Plugin] Mounted ${Object.keys(routes).length} plugin-level custom routes`);
+    }
+  }
+  /**
+   * Setup static file serving routes
+   * @private
+   */
+  _setupStaticRoutes() {
+    const { static: staticConfigs, database } = this.options;
+    if (!staticConfigs || staticConfigs.length === 0) {
+      return;
+    }
+    if (!Array.isArray(staticConfigs)) {
+      throw new Error("Static config must be an array of mount points");
+    }
+    for (const [index, config] of staticConfigs.entries()) {
+      try {
+        if (!config.driver) {
+          throw new Error(`static[${index}]: "driver" is required (filesystem or s3)`);
+        }
+        if (!config.path) {
+          throw new Error(`static[${index}]: "path" is required (mount path)`);
+        }
+        if (!config.path.startsWith("/")) {
+          throw new Error(`static[${index}]: "path" must start with / (got: ${config.path})`);
+        }
+        const driverConfig = config.config || {};
+        let handler;
+        if (config.driver === "filesystem") {
+          validateFilesystemConfig({ ...config, ...driverConfig });
+          handler = createFilesystemHandler({
+            root: config.root,
+            index: driverConfig.index,
+            maxAge: driverConfig.maxAge,
+            dotfiles: driverConfig.dotfiles,
+            etag: driverConfig.etag,
+            cors: driverConfig.cors
+          });
+        } else if (config.driver === "s3") {
+          validateS3Config({ ...config, ...driverConfig });
+          const s3Client = database?.client?.client;
+          if (!s3Client) {
+            throw new Error(`static[${index}]: S3 driver requires database with S3 client`);
+          }
+          handler = createS3Handler({
+            s3Client,
+            bucket: config.bucket,
+            prefix: config.prefix,
+            streaming: driverConfig.streaming,
+            signedUrlExpiry: driverConfig.signedUrlExpiry,
+            maxAge: driverConfig.maxAge,
+            cacheControl: driverConfig.cacheControl,
+            contentDisposition: driverConfig.contentDisposition,
+            etag: driverConfig.etag,
+            cors: driverConfig.cors
+          });
+        } else {
+          throw new Error(
+            `static[${index}]: invalid driver "${config.driver}". Valid drivers: filesystem, s3`
+          );
+        }
+        const mountPath = config.path === "/" ? "/*" : `${config.path}/*`;
+        this.app.get(mountPath, handler);
+        this.app.head(mountPath, handler);
+        if (this.options.verbose) {
+          console.log(
+            `[API Plugin] Mounted static files (${config.driver}) at ${config.path}` + (config.driver === "filesystem" ? ` -> ${config.root}` : ` -> s3://${config.bucket}/${config.prefix || ""}`)
+          );
+        }
+      } catch (err) {
+        console.error(`[API Plugin] Failed to setup static files for index ${index}:`, err.message);
+        throw err;
+      }
     }
   }
   /**
@@ -52101,6 +52531,8 @@ class IdentityServer {
         console.log("[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)");
         console.log("[Identity Server]   GET  /oauth/authorize (OAuth2 Consent Screen - Overrides OAuth2Server)");
         console.log("[Identity Server]   POST /oauth/consent (Process OAuth2 Consent Decision)");
+        console.log("[Identity Server]   GET  /verify-email (Verify Email with Token)");
+        console.log("[Identity Server]   POST /verify-email/resend (Resend Verification Email)");
       }
     } catch (error) {
       console.error("[Identity Server] Failed to setup UI routes:", error);
@@ -54488,6 +54920,141 @@ function ConsentPage(props = {}) {
   });
 }
 
+function VerifyEmailPage(props = {}) {
+  const { status = "pending", email = "", message = "", config = {} } = props;
+  const statusConfig = {
+    success: {
+      icon: "\u2705",
+      title: "Email Verified!",
+      color: "var(--color-success)",
+      defaultMessage: "Your email address has been successfully verified."
+    },
+    error: {
+      icon: "\u274C",
+      title: "Verification Failed",
+      color: "var(--color-danger)",
+      defaultMessage: "The verification link is invalid or has already been used."
+    },
+    expired: {
+      icon: "\u23F0",
+      title: "Link Expired",
+      color: "var(--color-warning)",
+      defaultMessage: "This verification link has expired. Please request a new one."
+    },
+    pending: {
+      icon: "\u{1F4E7}",
+      title: "Verify Your Email",
+      color: "var(--color-primary)",
+      defaultMessage: "Please check your email for a verification link."
+    }
+  };
+  const currentStatus = statusConfig[status] || statusConfig.pending;
+  const displayMessage = message || currentStatus.defaultMessage;
+  const content = html`
+    <div class="container-sm">
+      <div style="text-align: center; margin-bottom: 2rem;">
+        ${config.logoUrl ? html`
+          <img src="${config.logoUrl}" alt="Logo" style="max-width: 80px; margin-bottom: 1rem;" />
+        ` : ""}
+        <h1 style="font-size: 1.75rem; margin-bottom: 0.5rem;">${currentStatus.title}</h1>
+      </div>
+
+      <div class="card">
+        <div class="p-3" style="text-align: center;">
+          <div style="font-size: 4rem; margin-bottom: 1.5rem;">
+            ${currentStatus.icon}
+          </div>
+
+          <div style="font-size: 1.125rem; color: var(--color-text); margin-bottom: 2rem;">
+            ${displayMessage}
+          </div>
+
+          ${status === "success" ? html`
+            <div style="margin-bottom: 1.5rem;">
+              <a href="/login" class="btn btn-primary">
+                Sign In
+              </a>
+            </div>
+            <div>
+              <a href="/profile" style="color: var(--color-text-muted); font-size: 0.875rem;">
+                Go to your profile
+              </a>
+            </div>
+          ` : status === "error" || status === "expired" ? html`
+            ${email ? html`
+              <form method="POST" action="/verify-email/resend" style="margin-bottom: 1.5rem;">
+                <input type="hidden" name="email" value="${email}" />
+                <button type="submit" class="btn btn-primary">
+                  Send New Verification Email
+                </button>
+              </form>
+            ` : html`
+              <div style="margin-bottom: 1.5rem;">
+                <a href="/login" class="btn btn-primary">
+                  Sign In to Resend
+                </a>
+              </div>
+            `}
+            <div>
+              <a href="/login" style="color: var(--color-text-muted); font-size: 0.875rem;">
+                Sign in
+              </a>
+            </div>
+          ` : html`
+            <!-- Pending status -->
+            <div style="background-color: var(--color-light); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+              <div style="font-weight: 600; margin-bottom: 0.5rem;">
+                Didn't receive the email?
+              </div>
+              <ul style="text-align: left; color: var(--color-text-muted); font-size: 0.875rem; margin: 0; padding-left: 1.5rem;">
+                <li>Check your spam or junk folder</li>
+                <li>Make sure the email address is correct</li>
+                <li>Wait a few minutes and check again</li>
+              </ul>
+            </div>
+
+            ${email ? html`
+              <form method="POST" action="/verify-email/resend" style="margin-bottom: 1.5rem;">
+                <input type="hidden" name="email" value="${email}" />
+                <button type="submit" class="btn btn-secondary">
+                  Resend Verification Email
+                </button>
+              </form>
+            ` : html`
+              <div style="margin-bottom: 1.5rem;">
+                <a href="/login" class="btn btn-secondary">
+                  Sign In to Resend
+                </a>
+              </div>
+            `}
+
+            <div>
+              <a href="/login" style="color: var(--color-text-muted); font-size: 0.875rem;">
+                Back to sign in
+              </a>
+            </div>
+          `}
+        </div>
+      </div>
+
+      ${status === "success" ? html`
+        <div class="alert alert-success mt-4" style="text-align: center;">
+          <strong>Your account is now fully activated!</strong><br>
+          You can now access all features and services.
+        </div>
+      ` : ""}
+    </div>
+  `;
+  return BaseLayout({
+    title: currentStatus.title,
+    content,
+    config,
+    user: null,
+    error: null,
+    success: null
+  });
+}
+
 const DEFAULT_PASSWORD_POLICY = {
   minLength: 8,
   maxLength: 128,
@@ -54749,6 +55316,25 @@ function registerUIRoutes(app, plugin) {
           console.error("[Identity Plugin] User creation failed:", errUser);
         }
         return c.redirect(`/register?error=${encodeURIComponent("Failed to create account. Please try again.")}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+      }
+      const verificationToken = generatePasswordResetToken();
+      const verificationExpiry = calculateExpiration(24);
+      await usersResource.update(user.id, {
+        emailVerificationToken: verificationToken,
+        emailVerificationExpiry: verificationExpiry
+      });
+      if (plugin.emailService) {
+        try {
+          await plugin.emailService.sendEmailVerificationEmail({
+            to: normalizedEmail,
+            name: name.trim(),
+            verificationToken
+          });
+        } catch (emailError) {
+          if (config.verbose) {
+            console.error("[Identity Plugin] Failed to send verification email:", emailError);
+          }
+        }
       }
       return c.redirect(`/login?success=${encodeURIComponent("Account created successfully! Please check your email to verify your account.")}&email=${encodeURIComponent(normalizedEmail)}`);
     } catch (error) {
@@ -55820,6 +56406,140 @@ function registerUIRoutes(app, plugin) {
           </body>
         </html>
       `, 500);
+    }
+  });
+  app.get("/verify-email", async (c) => {
+    const token = c.req.query("token");
+    if (!token) {
+      return c.html(VerifyEmailPage({
+        status: "pending",
+        config: config.ui
+      }));
+    }
+    try {
+      const [okUsers, errUsers, users] = await tryFn(
+        () => usersResource.query({ emailVerificationToken: token })
+      );
+      if (!okUsers || !users || users.length === 0) {
+        return c.html(VerifyEmailPage({
+          status: "error",
+          message: "Invalid verification link. It may have already been used or expired.",
+          config: config.ui
+        }));
+      }
+      const user = users[0];
+      if (user.emailVerified) {
+        return c.html(VerifyEmailPage({
+          status: "success",
+          message: "Your email is already verified! You can sign in now.",
+          config: config.ui
+        }));
+      }
+      if (user.emailVerificationExpiry) {
+        if (isExpired(user.emailVerificationExpiry)) {
+          return c.html(VerifyEmailPage({
+            status: "expired",
+            email: user.email,
+            message: "This verification link has expired. Please request a new one.",
+            config: config.ui
+          }));
+        }
+      }
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.update(user.id, {
+          emailVerified: true,
+          emailVerificationToken: null,
+          emailVerificationExpiry: null,
+          status: "active"
+          // Activate account on email verification
+        })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Email verification update error:", errUpdate);
+        return c.html(VerifyEmailPage({
+          status: "error",
+          message: "Failed to verify email. Please try again later.",
+          config: config.ui
+        }));
+      }
+      return c.html(VerifyEmailPage({
+        status: "success",
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error("[Identity Plugin] Email verification error:", error);
+      return c.html(VerifyEmailPage({
+        status: "error",
+        message: "An error occurred while verifying your email.",
+        config: config.ui
+      }));
+    }
+  });
+  app.post("/verify-email/resend", async (c) => {
+    const body = await c.req.parseBody();
+    const { email } = body;
+    if (!email) {
+      return c.html(VerifyEmailPage({
+        status: "error",
+        message: "Email address is required.",
+        config: config.ui
+      }));
+    }
+    try {
+      const [okUsers, errUsers, users] = await tryFn(
+        () => usersResource.query({ email: email.toLowerCase().trim() })
+      );
+      if (!okUsers || !users || users.length === 0) {
+        return c.html(VerifyEmailPage({
+          status: "pending",
+          message: "If an account exists with this email, a verification link has been sent.",
+          config: config.ui
+        }));
+      }
+      const user = users[0];
+      if (user.emailVerified) {
+        return c.html(VerifyEmailPage({
+          status: "success",
+          message: "Your email is already verified! You can sign in now.",
+          config: config.ui
+        }));
+      }
+      const verificationToken = generatePasswordResetToken();
+      const verificationExpiry = calculateExpiration(24);
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.update(user.id, {
+          emailVerificationToken: verificationToken,
+          emailVerificationExpiry: verificationExpiry
+        })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Verification token update error:", errUpdate);
+        return c.html(VerifyEmailPage({
+          status: "error",
+          message: "Failed to send verification email. Please try again later.",
+          config: config.ui
+        }));
+      }
+      if (plugin.emailService) {
+        await plugin.emailService.sendEmailVerificationEmail({
+          to: user.email,
+          name: user.name,
+          verificationToken
+        });
+      }
+      return c.html(VerifyEmailPage({
+        status: "pending",
+        email: user.email,
+        message: "A new verification link has been sent to your email address.",
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error("[Identity Plugin] Resend verification error:", error);
+      return c.html(VerifyEmailPage({
+        status: "error",
+        message: "An error occurred. Please try again later.",
+        config: config.ui
+      }));
     }
   });
 }

@@ -14,6 +14,7 @@ import { AdminClientFormPage } from './pages/admin/client-form.js';
 import { AdminUsersPage } from './pages/admin/users.js';
 import { AdminUserFormPage } from './pages/admin/user-form.js';
 import { ConsentPage } from './pages/consent.js';
+import { VerifyEmailPage } from './pages/verify-email.js';
 import { hashPassword, verifyPassword, validatePassword } from '../concerns/password.js';
 import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
 import { generateAuthCode } from '../oidc-discovery.js';
@@ -253,7 +254,31 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/register?error=${encodeURIComponent('Failed to create account. Please try again.')}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
       }
 
-      // TODO: Send verification email (FASE 8)
+      // Generate verification token
+      const verificationToken = generatePasswordResetToken();
+      const verificationExpiry = calculateExpiration(24); // 24 hours
+
+      // Update user with verification token
+      await usersResource.update(user.id, {
+        emailVerificationToken: verificationToken,
+        emailVerificationExpiry: verificationExpiry
+      });
+
+      // Send verification email
+      if (plugin.emailService) {
+        try {
+          await plugin.emailService.sendEmailVerificationEmail({
+            to: normalizedEmail,
+            name: name.trim(),
+            verificationToken
+          });
+        } catch (emailError) {
+          if (config.verbose) {
+            console.error('[Identity Plugin] Failed to send verification email:', emailError);
+          }
+          // Don't fail registration if email fails - user can resend later
+        }
+      }
 
       // Redirect to login with success message
       return c.redirect(`/login?success=${encodeURIComponent('Account created successfully! Please check your email to verify your account.')}&email=${encodeURIComponent(normalizedEmail)}`);
@@ -1703,6 +1728,179 @@ export function registerUIRoutes(app, plugin) {
           </body>
         </html>
       `, 500);
+    }
+  });
+
+  // ============================================================================
+  // Email Verification Routes
+  // ============================================================================
+
+  // GET /verify-email - Verify email with token
+  app.get('/verify-email', async (c) => {
+    const token = c.req.query('token');
+
+    // If no token, show pending verification page
+    if (!token) {
+      return c.html(VerifyEmailPage({
+        status: 'pending',
+        config: config.ui
+      }));
+    }
+
+    try {
+      // Find user with this verification token
+      const [okUsers, errUsers, users] = await tryFn(() =>
+        usersResource.query({ emailVerificationToken: token })
+      );
+
+      if (!okUsers || !users || users.length === 0) {
+        // Token not found or invalid
+        return c.html(VerifyEmailPage({
+          status: 'error',
+          message: 'Invalid verification link. It may have already been used or expired.',
+          config: config.ui
+        }));
+      }
+
+      const user = users[0];
+
+      // Check if email is already verified
+      if (user.emailVerified) {
+        return c.html(VerifyEmailPage({
+          status: 'success',
+          message: 'Your email is already verified! You can sign in now.',
+          config: config.ui
+        }));
+      }
+
+      // Check if token is expired
+      if (user.emailVerificationExpiry) {
+        if (isExpired(user.emailVerificationExpiry)) {
+          return c.html(VerifyEmailPage({
+            status: 'expired',
+            email: user.email,
+            message: 'This verification link has expired. Please request a new one.',
+            config: config.ui
+          }));
+        }
+      }
+
+      // Verify the email
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.update(user.id, {
+          emailVerified: true,
+          emailVerificationToken: null,
+          emailVerificationExpiry: null,
+          status: 'active' // Activate account on email verification
+        })
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Email verification update error:', errUpdate);
+        return c.html(VerifyEmailPage({
+          status: 'error',
+          message: 'Failed to verify email. Please try again later.',
+          config: config.ui
+        }));
+      }
+
+      // Email verified successfully
+      return c.html(VerifyEmailPage({
+        status: 'success',
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error('[Identity Plugin] Email verification error:', error);
+      return c.html(VerifyEmailPage({
+        status: 'error',
+        message: 'An error occurred while verifying your email.',
+        config: config.ui
+      }));
+    }
+  });
+
+  // POST /verify-email/resend - Resend verification email
+  app.post('/verify-email/resend', async (c) => {
+    const body = await c.req.parseBody();
+    const { email } = body;
+
+    if (!email) {
+      return c.html(VerifyEmailPage({
+        status: 'error',
+        message: 'Email address is required.',
+        config: config.ui
+      }));
+    }
+
+    try {
+      // Find user by email
+      const [okUsers, errUsers, users] = await tryFn(() =>
+        usersResource.query({ email: email.toLowerCase().trim() })
+      );
+
+      if (!okUsers || !users || users.length === 0) {
+        // Don't reveal that the email doesn't exist for security
+        return c.html(VerifyEmailPage({
+          status: 'pending',
+          message: 'If an account exists with this email, a verification link has been sent.',
+          config: config.ui
+        }));
+      }
+
+      const user = users[0];
+
+      // Check if already verified
+      if (user.emailVerified) {
+        return c.html(VerifyEmailPage({
+          status: 'success',
+          message: 'Your email is already verified! You can sign in now.',
+          config: config.ui
+        }));
+      }
+
+      // Generate new verification token
+      const verificationToken = generatePasswordResetToken(); // Reuse token generator
+      const verificationExpiry = calculateExpiration(24); // 24 hours
+
+      // Update user with new token
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        usersResource.update(user.id, {
+          emailVerificationToken: verificationToken,
+          emailVerificationExpiry: verificationExpiry
+        })
+      );
+
+      if (!okUpdate) {
+        console.error('[Identity Plugin] Verification token update error:', errUpdate);
+        return c.html(VerifyEmailPage({
+          status: 'error',
+          message: 'Failed to send verification email. Please try again later.',
+          config: config.ui
+        }));
+      }
+
+      // Send verification email
+      if (plugin.emailService) {
+        await plugin.emailService.sendEmailVerificationEmail({
+          to: user.email,
+          name: user.name,
+          verificationToken
+        });
+      }
+
+      return c.html(VerifyEmailPage({
+        status: 'pending',
+        email: user.email,
+        message: 'A new verification link has been sent to your email address.',
+        config: config.ui
+      }));
+    } catch (error) {
+      console.error('[Identity Plugin] Resend verification error:', error);
+      return c.html(VerifyEmailPage({
+        status: 'error',
+        message: 'An error occurred. Please try again later.',
+        config: config.ui
+      }));
     }
   });
 }
