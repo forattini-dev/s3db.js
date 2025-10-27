@@ -1,628 +1,409 @@
-# Identity Plugin - Troubleshooting
+# 🐛 Troubleshooting
 
-[← Back to Identity Plugin](../identity-plugin.md) | [Security](./security.md) | [Architecture →](./architecture.md)
+> **Quick Jump:** [Error Handling](#error-handling) | [Common Errors](#common-errors) | [Recovery Patterns](#error-recovery-patterns) | [Performance](#performance-optimization) | [Issues](#common-issues)
 
-Common issues and solutions for the Identity Provider plugin.
+> **Navigation:** [← Back to Identity Plugin](../identity.md) | [← Integration](./integration.md)
 
-## Table of Contents
+---
 
-- [Registration Issues](#registration-issues)
-- [Email Issues](#email-issues)
-- [Session Issues](#session-issues)
-- [Admin Panel Issues](#admin-panel-issues)
-- [OAuth2 Issues](#oauth2-issues)
-- [Database Issues](#database-issues)
-- [Performance Issues](#performance-issues)
+## Overview
 
-## Registration Issues
+Comprehensive troubleshooting guide for Identity Plugin. Covers error handling, common issues, recovery patterns, and performance optimization.
 
-### "Registration is disabled" Error
+---
 
-**Symptoms:** Users cannot access `/register`, redirected to `/login` with error.
+## 🚨 Error Handling
 
-**Cause:** `registration.enabled` is set to `false`.
+### IdentityError
 
-**Solution 1:** Enable registration
-
-```javascript
-registration: {
-  enabled: true
-}
-```
-
-**Solution 2:** Keep disabled, create users via admin panel
-
-```javascript
-// This is intentional for enterprise environments
-// Create users via /admin/users/create
-```
-
-### "Registration is restricted to specific email domains"
-
-**Symptoms:** Users with certain email domains cannot register.
-
-**Cause:** `registration.allowedDomains` whitelist configured.
-
-**Check configuration:**
-
-```javascript
-registration: {
-  allowedDomains: ['company.com', 'partner.com']
-}
-```
-
-**Solutions:**
-1. Add user's domain to whitelist
-2. Remove whitelist (`allowedDomains: null`)
-3. Create user manually via admin panel
-
-### "Registration with this email domain is not allowed"
-
-**Symptoms:** Specific domains blocked from registration.
-
-**Cause:** `registration.blockedDomains` blacklist configured.
-
-**Check configuration:**
-
-```javascript
-registration: {
-  blockedDomains: ['tempmail.com', 'guerrillamail.com']
-}
-```
-
-**Solutions:**
-1. Remove domain from blacklist
-2. Create user manually via admin panel
-
-### Password Validation Fails
-
-**Symptoms:** "Password does not meet requirements" error.
-
-**Cause:** Password doesn't meet policy requirements.
-
-**Check policy:**
-
-```javascript
-passwordPolicy: {
-  minLength: 12,
-  requireUppercase: true,
-  requireLowercase: true,
-  requireNumbers: true,
-  requireSymbols: true
-}
-```
-
-**Solutions:**
-1. Use stronger password meeting all requirements
-2. Relax policy (not recommended for production)
-
-```javascript
-passwordPolicy: {
-  minLength: 8,
-  requireSymbols: false
-}
-```
-
-## Email Issues
-
-### Emails Not Sending
-
-**Symptoms:** Email verification/password reset emails not received.
-
-**Possible Causes:**
-
-#### 1. Email Service Disabled
-
-```javascript
-email: {
-  enabled: false  // ❌ Emails disabled
-}
-```
-
-**Solution:** Enable email service
-
-```javascript
-email: {
-  enabled: true
-}
-```
-
-#### 2. Invalid SMTP Configuration
-
-**Check SMTP settings:**
-
-```javascript
-email: {
-  smtp: {
-    host: process.env.SMTP_HOST,     // Correct hostname?
-    port: parseInt(process.env.SMTP_PORT),  // Correct port (587 or 465)?
-    auth: {
-      user: process.env.SMTP_USER,   // Correct username?
-      pass: process.env.SMTP_PASS    // Correct password?
-    }
-  }
-}
-```
-
-**Common Issues:**
-- Wrong hostname (e.g., `smtp.gmail.com` not `mail.gmail.com`)
-- Wrong port (587 for TLS, 465 for SSL)
-- Missing/incorrect credentials
-- Gmail: Not using app password
-
-#### 3. Gmail App Password Not Used
-
-**Gmail requires app passwords** when 2FA is enabled.
-
-**Steps:**
-1. Enable 2FA: https://myaccount.google.com/security
-2. Generate app password: https://myaccount.google.com/apppasswords
-3. Use app password (not regular password)
-
-```javascript
-email: {
-  smtp: {
-    host: 'smtp.gmail.com',
-    port: 587,
-    auth: {
-      user: 'your-email@gmail.com',
-      pass: 'xxxx xxxx xxxx xxxx'  // 16-char app password
-    }
-  }
-}
-```
-
-#### 4. Firewall Blocking SMTP
-
-**Check firewall allows outbound SMTP:**
-
-```bash
-# Test SMTP connection
-telnet smtp.gmail.com 587
-
-# Should see:
-# 220 smtp.gmail.com ESMTP
-```
-
-**Solution:** Allow outbound port 587 (or 465) in firewall.
-
-### Testing Email Configuration
-
-Use MailHog for development:
-
-```bash
-# Run MailHog
-docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
-
-# Configure Identity Plugin
-email: {
-  smtp: {
-    host: 'localhost',
-    port: 1025,
-    secure: false
-  }
-}
-
-# View emails: http://localhost:8025
-```
-
-## Session Issues
-
-### Session Not Persisting
-
-**Symptoms:** User logged out immediately after login.
-
-**Possible Causes:**
-
-#### 1. Cookie Secure Mismatch
-
-**Development (HTTP):**
-
-```javascript
-session: {
-  cookieSecure: false  // ✅ Correct for HTTP
-}
-```
-
-**Production (HTTPS):**
-
-```javascript
-session: {
-  cookieSecure: true  // ✅ Correct for HTTPS
-}
-```
-
-**Problem:** `cookieSecure: true` on HTTP → cookie rejected.
-
-**Solution:** Match `cookieSecure` to your deployment protocol.
-
-#### 2. SameSite Too Strict
-
-```javascript
-session: {
-  cookieSameSite: 'Strict'  // May break cross-site flows
-}
-```
-
-**Solution:** Use `Lax` for better compatibility:
-
-```javascript
-session: {
-  cookieSameSite: 'Lax'
-}
-```
-
-#### 3. Domain Mismatch
-
-Cookie domain must match request domain.
-
-**Check:** Browser DevTools → Application → Cookies
-
-**Solution:** Ensure `issuer` matches your domain:
-
-```javascript
-issuer: 'http://localhost:4000'  // Development
-// issuer: 'https://auth.company.com'  // Production
-```
-
-### Sessions Expire Too Quickly
-
-**Cause:** Short session expiry
-
-```javascript
-session: {
-  sessionExpiry: '1h'  // Too short?
-}
-```
-
-**Solution:** Increase expiry
-
-```javascript
-session: {
-  sessionExpiry: '24h'  // Development
-  // sessionExpiry: '8h'  // Production
-}
-```
-
-## Admin Panel Issues
-
-### "Admin" Link Not Showing
-
-**Symptoms:** No "Admin" link in navigation after login.
-
-**Cause:** User doesn't have admin role.
-
-**Check user role:**
-
-```javascript
-const user = await usersResource.get(userId);
-console.log(user.role);        // Should be 'admin'
-console.log(user.isAdmin);     // Or true
-```
-
-**Solution:** Grant admin role
-
-```javascript
-await usersResource.update(userId, { role: 'admin' });
-// or
-await usersResource.update(userId, { isAdmin: true });
-```
-
-### Cannot Access `/admin`
-
-**Symptoms:** Redirected to `/login` when visiting `/admin`.
-
-**Possible Causes:**
-
-#### 1. Not Logged In
-
-**Solution:** Login first at `/login`.
-
-#### 2. Session Expired
-
-**Solution:** Login again.
-
-#### 3. Not Admin User
-
-**Solution:** Grant admin role (see above).
-
-### Admin Panel Empty
-
-**Symptoms:** Admin panel loads but no users/clients shown.
-
-**Cause:** S3DB resources not created or empty.
-
-**Check resources:**
-
-```javascript
-console.log('Resources:', Object.keys(db.resources));
-
-// Should include:
-// - users
-// - plg_oauth_clients
-// - plg_sessions
-```
-
-**Solution:** Ensure database initialized:
-
-```javascript
-await db.initialize();
-await identityPlugin.initialize();
-```
-
-## OAuth2 Issues
-
-### "Invalid client credentials"
-
-**Symptoms:** Token endpoint returns 401 error.
-
-**Possible Causes:**
-
-#### 1. Wrong Client ID or Secret
-
-**Check credentials match registered client:**
-
-```javascript
-const client = await db.resources.plg_oauth_clients.get(clientId);
-console.log('Client exists:', !!client);
-
-// Verify secret (bcrypt compare)
-const valid = await bcrypt.compare(clientSecret, client.clientSecret);
-console.log('Secret valid:', valid);
-```
-
-#### 2. Client Inactive
-
-```javascript
-console.log('Client status:', client.status);
-// Should be 'active'
-```
-
-**Solution:** Activate client
-
-```javascript
-await db.resources.plg_oauth_clients.update(clientId, {
-  status: 'active'
-});
-```
-
-### "Invalid redirect_uri"
-
-**Symptoms:** Authorization fails with redirect_uri error.
-
-**Cause:** Redirect URI not registered for client.
-
-**Check registered URIs:**
-
-```javascript
-const client = await db.resources.plg_oauth_clients.get(clientId);
-console.log('Registered URIs:', client.redirectUris);
-```
-
-**Solution:** Add redirect URI to client
-
-```javascript
-await db.resources.plg_oauth_clients.update(clientId, {
-  redirectUris: [
-    ...client.redirectUris,
-    'http://localhost:3000/callback'
-  ]
-});
-```
-
-### "Invalid authorization code"
-
-**Symptoms:** Token exchange fails.
-
-**Possible Causes:**
-
-#### 1. Code Already Used
-
-Authorization codes are single-use.
-
-**Solution:** Request new authorization code.
-
-#### 2. Code Expired
-
-Codes expire after `authCodeExpiry` (default: 10 minutes).
-
-**Solution:** Increase expiry or request new code faster:
-
-```javascript
-authCodeExpiry: '15m'  // Increase to 15 minutes
-```
-
-#### 3. PKCE Verifier Mismatch
-
-**Cause:** `code_verifier` doesn't match original `code_challenge`.
-
-**Solution:** Use same `code_verifier` from authorization request.
-
-## Database Issues
-
-### "Resource not found"
-
-**Symptoms:** Error accessing users or other resources.
-
-**Cause:** S3DB resources not created.
-
-**Check resources:**
-
-```javascript
-console.log('Available resources:', Object.keys(db.resources));
-```
-
-**Solution:** Initialize database and plugin:
-
-```javascript
-await db.initialize();
-await identityPlugin.initialize();
-```
-
-### S3 Connection Errors
-
-**Symptoms:** Cannot connect to S3/MinIO.
-
-**Check connection string:**
-
-```javascript
-// MinIO local
-connectionString: 'http://minioadmin:minioadmin@localhost:9000/bucket'
-
-// AWS S3
-connectionString: 's3://ACCESS_KEY:SECRET_KEY@bucket?region=us-east-1'
-```
-
-**Test connection:**
-
-```bash
-# MinIO
-curl http://localhost:9000/minio/health/live
-
-# AWS S3
-aws s3 ls s3://bucket --region us-east-1
-```
-
-### Metadata File Corrupted
-
-**Symptoms:** Database fails to load metadata.
-
-**Check metadata:**
+All Identity Plugin operations throw `IdentityError` instances:
 
 ```javascript
 try {
-  await db.initialize();
+  await identityPlugin.oauth2.generateToken({});
 } catch (error) {
-  console.error('Metadata error:', error.message);
+  console.error(error.name);        // 'IdentityError'
+  console.error(error.message);     // Brief error summary
+  console.error(error.description); // Detailed explanation
+  console.error(error.context);     // Operation context
 }
 ```
 
-**Solution:** Restore from backup or recreate:
+### OAuth2Error
+
+OAuth2-specific errors follow RFC 6749 standard error codes:
 
 ```javascript
-// S3DB automatically creates backups
-// Check: s3://bucket/.s3db/metadata.json.backup-TIMESTAMP
-
-// Or recreate from scratch (CAUTION: data loss!)
-await db.dropDatabase();
-await db.initialize();
-```
-
-## Performance Issues
-
-### Slow Login/Registration
-
-**Possible Causes:**
-
-#### 1. High bcrypt Rounds
-
-```javascript
-passwordPolicy: {
-  bcryptRounds: 14  // Very slow (~1.6s)
+// Standard OAuth2 error response
+{
+  "error": "invalid_grant",
+  "error_description": "Authorization code has expired",
+  "error_uri": "https://tools.ietf.org/html/rfc6749#section-5.2"
 }
 ```
 
-**Solution:** Reduce rounds for development:
+### Common Errors
 
+#### invalid_client
+
+**When:** Client authentication failed
+**Causes:**
+- ❌ Invalid client_id
+- ❌ Invalid client_secret
+- ❌ Client not found
+- ❌ Client inactive
+
+**Recovery:**
 ```javascript
-passwordPolicy: {
-  bcryptRounds: 10  // ~100ms
-}
+// Verify client credentials
+const client = await clientsResource.query({ clientId: 'app-123' });
+console.log('Client active:', client.active);
+console.log('Client grants:', client.grantTypes);
 ```
 
-**Note:** Keep 12 for production.
+#### invalid_grant
 
-#### 2. S3 Latency
+**When:** Authorization code/refresh token invalid
+**Causes:**
+- ❌ Code expired (default: 10 minutes)
+- ❌ Code already used
+- ❌ Refresh token expired
+- ❌ Refresh token revoked
 
-**Check S3 response times:**
-
-```bash
-time curl http://localhost:9000/bucket/
+**Recovery:**
+```javascript
+// Restart authorization flow
+window.location = '/oauth/authorize?...';
 ```
 
-**Solutions:**
-- Use local MinIO for development
-- Use S3 in same region as application
-- Enable S3 Transfer Acceleration
+#### invalid_scope
 
-### Memory Issues
+**When:** Requested scope not allowed
+**Causes:**
+- ❌ Scope not in `supportedScopes`
+- ❌ Scope not in client's `allowedScopes`
+- ❌ User doesn't have scope
 
-**Symptoms:** High memory usage, OOM errors.
-
-**Possible Causes:**
-
-#### 1. Session Cleanup Disabled
-
+**Recovery:**
 ```javascript
-session: {
-  enableCleanup: false  // ❌ Sessions never deleted
-}
+// Check user scopes
+const user = await usersResource.get(userId);
+console.log('User scopes:', user.scopes);
+
+// Add missing scope
+await usersResource.update(userId, {
+  scopes: [...user.scopes, 'orders:write']
+});
 ```
 
-**Solution:** Enable cleanup
+#### invalid_request
 
+**When:** Missing required parameters
+**Causes:**
+- ❌ Missing grant_type
+- ❌ Missing client_id
+- ❌ Missing redirect_uri
+- ❌ Invalid redirect_uri
+
+**Recovery:**
 ```javascript
-session: {
-  enableCleanup: true,
-  cleanupInterval: 3600000  // 1 hour
-}
+// Verify all required parameters are present
+const params = {
+  grant_type: 'authorization_code',
+  code: authCode,
+  redirect_uri: 'http://localhost:3000/callback',
+  client_id: 'app-123',
+  client_secret: 'secret'
+};
 ```
 
-#### 2. Too Many Sessions
+#### unauthorized_client
 
-**Check session count:**
+**When:** Client not authorized for grant type
+**Causes:**
+- ❌ Grant type not in client's `grantTypes`
 
+**Recovery:**
 ```javascript
-const sessions = await db.resources.plg_sessions.list();
-console.log('Total sessions:', sessions.length);
+// Update client grant types
+await clientsResource.update(clientId, {
+  grantTypes: ['authorization_code', 'refresh_token', 'client_credentials']
+});
 ```
 
-**Solution:** Reduce session expiry
+### Error Recovery Patterns
+
+#### Graceful Degradation
 
 ```javascript
-session: {
-  sessionExpiry: '8h'  // Shorter than 24h
-}
-```
-
-## Debug Mode
-
-Enable verbose logging for troubleshooting:
-
-```javascript
-server: {
-  verbose: true,
-  logging: {
-    enabled: true,
-    format: 'combined'
+async function getTokenWithFallback() {
+  try {
+    return await getAccessToken();
+  } catch (error) {
+    if (error.error === 'invalid_grant') {
+      console.warn('Token expired, redirecting to login');
+      window.location = '/oauth/authorize?...';
+    } else {
+      throw error;
+    }
   }
 }
 ```
 
-**Output:**
+#### Token Refresh on Expiration
+
+```javascript
+async function callAPIWithAutoRefresh(url) {
+  let token = req.session.accessToken;
+
+  try {
+    return await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+  } catch (error) {
+    if (error.status === 401) {
+      // Token expired, refresh it
+      const refreshResponse = await fetch('/oauth/token', {
+        method: 'POST',
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: req.session.refreshToken,
+          client_id: 'app-123',
+          client_secret: 'secret'
+        })
+      });
+
+      const tokens = await refreshResponse.json();
+      req.session.accessToken = tokens.access_token;
+
+      // Retry with new token
+      return await fetch(url, {
+        headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+      });
+    }
+    throw error;
+  }
+}
 ```
-POST /login 200 234ms
-GET /profile 200 45ms
-POST /oauth/token 200 123ms
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← Error Handling](#-error-handling) | [Troubleshooting →](#-troubleshooting)
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue 1: "Invalid token signature"
+
+**Cause:** Resource Server has cached old JWKS.
+
+**Solution:**
+```javascript
+// Set lower JWKS cache TTL
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:4000',
+  jwksCacheTTL: 300000  // 5 minutes (default: 1 hour)
+});
+
+// Force refresh JWKS
+await oidcClient.fetchJWKS(true);
 ```
 
-## Getting Help
+### Issue 2: "Invalid redirect_uri"
 
-If issues persist:
+**Cause:** Redirect URI doesn't match registered URI exactly (including trailing slash).
 
-1. **Check logs:** Enable verbose mode
-2. **Check S3DB docs:** https://github.com/forattini-dev/s3db.js
-3. **Open issue:** https://github.com/forattini-dev/s3db.js/issues
-4. **Provide details:**
-   - Node version
-   - S3DB version
-   - Configuration (sanitized)
-   - Error messages
-   - Steps to reproduce
+**Solution:**
+```javascript
+// Client registration
+redirectUris: [
+  'http://localhost:3000/callback',  // No trailing slash
+  'https://myapp.com/auth/callback'  // Exact match required
+]
 
-## See Also
+// Authorization request - must match exactly
+redirect_uri: 'http://localhost:3000/callback'  // ← Same as registered
+```
 
-- [Configuration](./configuration.md) - Configuration reference
-- [Security](./security.md) - Security best practices
-- [Admin Panel](./admin-panel.md) - Admin panel guide
-- [Main Documentation](../identity-plugin.md) - Overview and quick start
+### Issue 3: "Insufficient scopes"
+
+**Cause:** User doesn't have requested scopes.
+
+**Solution:**
+```javascript
+// Check user scopes
+const user = await usersResource.get(userId);
+console.log('User scopes:', user.scopes);
+
+// Add missing scopes
+await usersResource.update(userId, {
+  scopes: [...user.scopes, 'read:api', 'write:api']
+});
+```
+
+### Issue 4: "Token expired"
+
+**Cause:** Access token expired (15 minutes by default).
+
+**Solution:** Use refresh token to get new access token:
+```bash
+curl -X POST http://localhost:4000/oauth/token \
+  -d "grant_type=refresh_token" \
+  -d "refresh_token=REFRESH_TOKEN" \
+  -d "client_id=app-client-123" \
+  -d "client_secret=super-secret-key-456"
+```
+
+### Issue 5: "CORS error"
+
+**Cause:** Resource Server not allowed in CORS config.
+
+**Solution:**
+```javascript
+const identityPlugin = new IdentityPlugin({
+  cors: {
+    enabled: true,
+    origin: [
+      'http://localhost:3000',  // Add your Resource Server
+      'http://localhost:3001',
+      'http://localhost:3002'
+    ],
+    credentials: true
+  }
+});
+```
+
+### Issue 6: "Public key not found for kid"
+
+**Cause:** Key rotation occurred, old key not in JWKS.
+
+**Solution:**
+```javascript
+// Debug: List all cached keys
+const jwks = oidcClient.getJWKS();
+console.log('Available kids:', jwks.keys.map(k => k.kid));
+
+// Decode token to see kid
+const header = JSON.parse(Buffer.from(token.split('.')[0], 'base64'));
+console.log('Token kid:', header.kid);
+
+// Force refresh JWKS
+await oidcClient.fetchJWKS(true);
+```
+
+### Issue 7: "JWKS endpoint not accessible"
+
+**Cause:** SSO server not running or network issues.
+
+**Solution:**
+```bash
+# Test JWKS endpoint
+curl http://localhost:4000/.well-known/jwks.json
+
+# Expected: JSON with keys array
+# {
+#   "keys": [{
+#     "kty": "RSA",
+#     "kid": "abc123",
+#     ...
+#   }]
+# }
+
+# Verify SSO server is running
+curl http://localhost:4000/.well-known/openid-configuration
+```
+
+### Issue 8: "Clock skew - token not yet valid"
+
+**Cause:** Time difference between SSO and Resource Server.
+
+**Solution:**
+```javascript
+// Increase clock tolerance
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:4000',
+  clockTolerance: 300  // 5 minutes tolerance
+});
+
+// Sync server clocks with NTP
+sudo ntpdate pool.ntp.org
+```
+
+### Performance Optimization
+
+**JWKS Caching:**
+```javascript
+// Aggressive caching (1 hour)
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:4000',
+  jwksCacheTTL: 3600000,  // 1 hour
+  autoRefreshJWKS: true   // Auto-refresh in background
+});
+
+// Impact:
+// Without cache: ~50-100ms per request (network + verify)
+// With cache: <1ms per request (verify only)
+```
+
+**Token Expiry Trade-offs:**
+```javascript
+// Short-lived (more secure, more token requests)
+const identityPlugin = new IdentityPlugin({
+  accessTokenExpiry: '5m',
+  refreshTokenExpiry: '1d'
+});
+
+// Long-lived (less secure, fewer token requests)
+const identityPlugin = new IdentityPlugin({
+  accessTokenExpiry: '1h',
+  refreshTokenExpiry: '30d'
+});
+
+// Recommendation: 15 minutes access, 7 days refresh
+```
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← Troubleshooting](#-troubleshooting) | [FAQ →](#-faq)
+
+---
+
+---
+
+## 🎯 Summary
+
+**Troubleshooting checklist:**
+- ✅ Use `IdentityError` and `OAuth2Error` for structured error handling
+- ✅ Check JWKS cache when signature validation fails
+- ✅ Verify redirect URIs match exactly (including trailing slash)
+- ✅ Ensure user has required scopes
+- ✅ Use refresh tokens for expired access tokens
+- ✅ Configure CORS for all Resource Servers
+- ✅ Sync server clocks to prevent clock skew errors
+- ✅ Optimize JWKS caching for performance
+
+**Next Steps:**
+1. Review configuration: [Configuration Reference →](./configuration.md)
+2. Understand architecture: [Architecture & Token Flow →](./architecture.md)
+3. Explore integration patterns: [Integration Guide →](./integration.md)
+
+---
+
+## 🔗 See Also
+
+**Related Documentation:**
+- [Configuration Reference](./configuration.md) - All configuration options
+- [Architecture & Token Flow](./architecture.md) - System design and flows
+- [API Reference](./api-reference.md) - All endpoints
+- [Integration Guide](./integration.md) - Resource Server and client integration
+- [Identity Plugin Main](../identity.md) - Overview and quickstart
+
+**Examples:**
+- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource Server
+- [e60-oauth2-microservices.js](../../examples/e60-oauth2-microservices.js) - Microservices setup
+
+---
+
+> **Navigation:** [↑ Top](#) | [← Integration](./integration.md) | [← Back to Identity Plugin](../identity.md)

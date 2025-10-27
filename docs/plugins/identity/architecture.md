@@ -1,631 +1,299 @@
-# Identity Plugin - Architecture
+# 🏗️ Architecture & Token Flow
 
-[← Back to Identity Plugin](../identity-plugin.md) | [OAuth2/OIDC](./oauth2-oidc.md) | [Troubleshooting](./troubleshooting.md)
+> **Quick Jump:** [System Arch](#system-architecture) | [SSO Flow](#complete-sso-flow) | [Grant Types](#grant-types-explained) | [Token Structure](#token-structure) | [RS256 vs HS256](#rs256-vs-hs256-security-model)
 
-Technical architecture and implementation details.
+> **Navigation:** [← Back to Identity Plugin](../identity.md) | [← Configuration](./configuration.md) | [API Reference →](./api-reference.md)
 
-## Table of Contents
+---
 
-- [System Architecture](#system-architecture)
-- [S3DB Resources](#s3db-resources)
-- [Token Lifecycle](#token-lifecycle)
-- [Email Flow](#email-flow)
-- [Session Management](#session-management)
-- [OAuth2 Implementation](#oauth2-implementation)
+## Overview
 
-## System Architecture
+Deep dive into Identity Plugin architecture, OAuth2/OIDC flows, and security models. Understand how tokens flow through your microservices ecosystem.
+
+---
+
+### System Architecture
+
+```mermaid
+graph TB
+    Client[Client Application]
+    SSO[SSO Server<br/>Port 4000<br/>Authorization Server]
+    Orders[Orders API<br/>Port 3001<br/>Resource Server]
+    Products[Products API<br/>Port 3002<br/>Resource Server]
+    Payments[Payments API<br/>Port 3003<br/>Resource Server]
+
+    Client -->|1. POST /oauth/token<br/>client_id + client_secret| SSO
+    SSO -->|2. Access Token<br/>RS256 signed JWT| Client
+
+    Client -->|3. GET /orders<br/>Bearer token| Orders
+    Client -->|3. GET /products<br/>SAME token| Products
+    Client -->|3. POST /payments<br/>SAME token| Payments
+
+    SSO -.->|JWKS<br/>Public Keys| Orders
+    SSO -.->|JWKS<br/>Public Keys| Products
+    SSO -.->|JWKS<br/>Public Keys| Payments
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  Identity Provider                       │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │  OAuth2/OIDC │  │  UI/Auth     │  │  Admin Panel │ │
-│  │  Endpoints   │  │  Pages       │  │  Management  │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │           Session & Token Management              │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │                S3DB Resources                     │  │
-│  │  • Users          • Sessions      • Clients      │  │
-│  │  • Auth Codes     • RSA Keys      • Tokens       │  │
-│  └──────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+
+**Key Benefits:**
+- ✅ Centralized authentication (single SSO service)
+- ✅ Distributed authorization (APIs validate independently)
+- ✅ No shared secrets (APIs only need public keys)
+- ✅ One token, multiple services
+
+### Complete SSO Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant SSO as SSO Server<br/>(Port 4000)
+    participant Orders as Orders API<br/>(Port 3001)
+
+    Note over SSO: Initialization
+    SSO->>SSO: Generate RSA key pair<br/>(private + public)
+    SSO->>SSO: Store in plg_oauth_keys<br/>(private key encrypted)
+
+    Note over Orders: Resource Server Init
+    Orders->>SSO: GET /.well-known/jwks.json
+    SSO-->>Orders: Public keys (JWKS)
+    Orders->>Orders: Cache JWKS (1 hour)
+
+    Note over Client,SSO: Step 1: Get Token
+    Client->>SSO: POST /oauth/token<br/>grant_type=client_credentials<br/>client_id + client_secret
+    SSO->>SSO: Validate client credentials
+    SSO->>SSO: Create JWT payload<br/>{iss, sub, aud, scope, exp}
+    SSO->>SSO: Sign with PRIVATE key (RS256)
+    SSO-->>Client: access_token: eyJhbGci...
+
+    Note over Client,Orders: Step 2: Access Orders API
+    Client->>Orders: GET /orders<br/>Authorization: Bearer eyJhbGci...
+    Orders->>Orders: Extract token from header
+    Orders->>Orders: Decode JWT header<br/>Extract kid (key ID)
+    Orders->>Orders: Get public key from JWKS cache
+    Orders->>Orders: Verify signature with PUBLIC key
+    Orders->>Orders: Validate claims<br/>(iss, aud, exp)
+    Orders->>Orders: Check scope: orders:read ✓
+    Orders-->>Client: { orders: [...] }
+
+    Note over Orders: NO communication with SSO!<br/>Validation is 100% local!
 ```
 
-### Components
+### Grant Types Explained
 
-**1. OAuth2/OIDC Server**
-- Authorization endpoints (`/oauth/authorize`, `/oauth/token`)
-- Token generation and validation (JWT with RSA signatures)
-- PKCE support (RFC 7636)
-- Client credentials management
-- Token introspection and revocation
+#### 1. Client Credentials (Service-to-Service)
 
-**2. UI/Auth Pages**
-- Server-side rendered pages (Hono + html templates)
-- Login, registration, profile, password reset
-- White-label customization support
-- Custom page overrides via JavaScript functions
+**Use Case:** Backend services authenticating with each other (no user involved).
 
-**3. Admin Panel**
-- User management (CRUD, status, roles)
-- OAuth2 client management
-- Session monitoring
-- Dashboard with statistics
+**Flow:**
+```
+Service A → POST /oauth/token (client_id + client_secret)
+         ← Access Token (no refresh token)
+```
 
-**4. Session Manager**
-- Cookie-based sessions
-- Device tracking (IP, user agent)
-- Automatic cleanup of expired sessions
-- Session resource stored in S3DB
-
-**5. Email Service**
-- SMTP integration (nodemailer)
-- Email verification tokens
-- Password reset tokens
-- Customizable templates
-
-**6. S3DB Integration**
-- All data stored in S3DB resources
-- Metadata-driven schema
-- Automatic timestamps
-- Query and filtering support
-
-## S3DB Resources
-
-The Identity Plugin creates and manages these resources:
-
-### `plg_oauth_keys`
-
-**Purpose:** RSA key pairs for signing OAuth2 tokens
-
-**Schema:**
-```javascript
+**Token Payload:**
+```json
 {
-  id: 'string',              // Key ID (kid)
-  publicKey: 'string',       // RSA public key (PEM format)
-  privateKey: 'string',      // RSA private key (PEM format, encrypted)
-  algorithm: 'string',       // Signing algorithm (RS256)
-  createdAt: 'timestamp',
-  expiresAt: 'timestamp'     // Key rotation
+  "sub": "service-a",
+  "aud": "http://localhost:4000",
+  "iss": "http://localhost:4000",
+  "scope": "read:api",
+  "client_id": "service-a",
+  "exp": 1705332000,
+  "iat": 1705331100
 }
 ```
 
-**Notes:**
-- Keys generated on first initialize
-- Rotated periodically (configurable)
-- Private key encrypted at rest
+#### 2. Authorization Code (Web Apps)
 
-### `plg_oauth_clients`
+**Use Case:** Web applications with a backend server (user login flow).
 
-**Purpose:** Registered OAuth2 clients
+**Flow:**
+```
+1. User → GET /oauth/authorize?... (browser)
+2. User logs in with email/password
+3. SSO → Redirect to callback?code=AUTH_CODE
+4. App → POST /oauth/token (code + client_secret)
+5. SSO → Access Token + ID Token + Refresh Token
+```
 
-**Schema:**
-```javascript
+#### 3. Refresh Token (Token Renewal)
+
+**Use Case:** Renew expired access tokens without re-authentication.
+
+**Flow:**
+```
+App → POST /oauth/token (refresh_token + client_secret)
+    ← New Access Token + New Refresh Token
+```
+
+#### 4. PKCE (Proof Key for Code Exchange)
+
+**Use Case:** Mobile apps and SPAs (public clients without client_secret).
+
+**Flow:**
+```
+1. App generates code_verifier (random 43-128 chars)
+2. App generates code_challenge = base64url(sha256(code_verifier))
+3. App → GET /oauth/authorize?...&code_challenge=CHALLENGE&code_challenge_method=S256
+4. SSO → Redirect with authorization code
+5. App → POST /oauth/token (code + code_verifier)
+```
+
+**Why PKCE?**
+- ✅ Prevents authorization code interception attacks
+- ✅ Required for mobile and SPA applications
+- ✅ Works without client secret (public clients)
+
+### Token Structure
+
+**Access Token (JWT Payload):**
+```json
 {
-  clientId: 'string',              // Unique client ID
-  clientSecret: 'string',          // bcrypt hashed secret
-  name: 'string',                  // Client display name
-  description: 'string',           // Client description
-  redirectUris: 'array<string>',   // Allowed redirect URIs
-  allowedScopes: 'array<string>',  // Allowed OAuth2 scopes
-  grantTypes: 'array<string>',     // Allowed grant types
-  status: 'string',                // active | inactive
-  createdAt: 'timestamp',
-  updatedAt: 'timestamp'
+  "iss": "http://localhost:4000",           // Issuer (SSO server)
+  "sub": "user-abc123",                     // Subject (user ID)
+  "aud": "http://localhost:3001",           // Audience (target API)
+  "scope": "orders:read orders:write",      // Permissions
+  "exp": 1234567890,                        // Expiration (Unix timestamp)
+  "iat": 1234567000,                        // Issued at
+  "client_id": "mobile-app"                 // OAuth client
 }
 ```
 
-**Notes:**
-- Client secret hashed with bcrypt
-- Multiple redirect URIs supported
-- Can be created via admin panel or API
-
-### `plg_auth_codes`
-
-**Purpose:** Short-lived authorization codes
-
-**Schema:**
-```javascript
-{
-  id: 'string',                    // Authorization code
-  clientId: 'string',              // OAuth2 client
-  userId: 'string',                // User who authorized
-  redirectUri: 'string',           // Callback URL
-  scope: 'string',                 // Granted scopes
-  codeChallenge: 'string',         // PKCE challenge
-  codeChallengeMethod: 'string',   // S256 or plain
-  expiresAt: 'timestamp',          // Expiration (10 minutes)
-  used: 'boolean',                 // Single-use flag
-  createdAt: 'timestamp'
-}
-```
-
-**Notes:**
-- Expires after 10 minutes (configurable)
-- Single-use (deleted after token exchange)
-- PKCE support optional
-
-### `plg_sessions`
-
-**Purpose:** User authentication sessions
-
-**Schema:**
-```javascript
-{
-  id: 'string',              // Session ID (stored in cookie)
-  userId: 'string',          // User ID
-  ipAddress: 'string',       // Client IP
-  userAgent: 'string',       // Client user agent
-  expiresAt: 'timestamp',    // Session expiration
-  createdAt: 'timestamp'
-}
-```
-
-**Notes:**
-- Session ID stored in httpOnly cookie
-- Automatic cleanup of expired sessions
-- Device tracking for security
-
-### `plg_password_reset_tokens`
-
-**Purpose:** Password reset tokens
-
-**Schema:**
-```javascript
-{
-  id: 'string',              // Reset token
-  userId: 'string',          // User requesting reset
-  expiresAt: 'timestamp',    // Token expiration (1 hour)
-  used: 'boolean',           // Single-use flag
-  createdAt: 'timestamp'
-}
-```
-
-**Notes:**
-- Expires after 1 hour
-- Single-use (deleted after reset)
-- Sent via email
-
-### `users`
-
-**Purpose:** User accounts
-
-**Schema:**
-```javascript
-{
-  id: 'string',              // User ID
-  email: 'string',           // Email (unique)
-  name: 'string',            // Display name
-  password: 'password',      // Auto-hashed with bcrypt (one-way, 53 bytes)
-  status: 'string',          // active | suspended | pending_verification
-  emailVerified: 'boolean',  // Email verification status
-  role: 'string',            // user | admin
-  isAdmin: 'boolean',        // Alternative admin flag
-  createdAt: 'timestamp',
-  updatedAt: 'timestamp'
-}
-```
-
-**Notes:**
-- Email must be unique
-- Password automatically hashed with bcrypt (one-way, irreversible)
-- Use `verifyPassword()` from 's3db.js' to verify passwords
-- Status controls login access
-- Admin role grants access to admin panel
-
-## Token Lifecycle
-
-### 1. User Login → Session
-
-```
-User → POST /login (email, password)
-         ↓
-    Validate credentials
-         ↓
-    Create session record
-         ↓
-    Set session cookie
-         ↓
-    Redirect to /profile
-```
-
-**Session Cookie:**
-```
-Set-Cookie: s3db_session=SESSION_ID; HttpOnly; Secure; SameSite=Strict; Max-Age=86400
-```
-
-### 2. OAuth2 Authorization
-
-```
-Client → GET /oauth/authorize (client_id, redirect_uri, scope, state)
-           ↓
-      Check user session (redirect to /login if not authenticated)
-           ↓
-      Show consent screen
-           ↓
-      User approves
-           ↓
-      Create authorization code
-           ↓
-      Redirect to callback (code, state)
-```
-
-**Authorization Code:**
-- Stored in `plg_auth_codes`
-- Expires in 10 minutes
-- Single-use only
-
-### 3. Token Exchange
-
-```
-Client → POST /oauth/token (grant_type=authorization_code, code, client_id, client_secret)
-           ↓
-      Validate client credentials
-           ↓
-      Validate authorization code
-           ↓
-      Generate tokens:
-        • Access Token (JWT, 15 minutes)
-        • ID Token (JWT, 15 minutes, if 'openid' scope)
-        • Refresh Token (opaque, 7 days, if 'offline_access' scope)
-           ↓
-      Mark code as used
-           ↓
-      Return tokens
-```
-
-**Access Token (JWT):**
+**ID Token (OIDC - User Identity):**
 ```json
 {
   "iss": "http://localhost:4000",
-  "sub": "user-id",
-  "aud": "client-id",
+  "sub": "user-abc123",
+  "aud": "webapp",
   "exp": 1234567890,
   "iat": 1234567000,
-  "scope": "openid profile email"
-}
-```
-
-**ID Token (JWT):**
-```json
-{
-  "iss": "http://localhost:4000",
-  "sub": "user-id",
-  "aud": "client-id",
-  "exp": 1234567890,
-  "iat": 1234567000,
-  "email": "user@example.com",
+  "name": "John Doe",
+  "email": "john@example.com",
   "email_verified": true,
-  "name": "User Name"
+  "picture": "https://example.com/avatar.jpg"
 }
 ```
 
-### 4. Token Usage
-
-```
-Client → GET /api/resource
-         Authorization: Bearer ACCESS_TOKEN
-           ↓
-      Validate JWT signature (using public key from JWKS)
-           ↓
-      Check expiration
-           ↓
-      Extract user ID from 'sub' claim
-           ↓
-      Authorize request
-```
-
-### 5. Token Refresh
-
-```
-Client → POST /oauth/token (grant_type=refresh_token, refresh_token, client_id, client_secret)
-           ↓
-      Validate refresh token
-           ↓
-      Generate new access token
-           ↓
-      Optionally rotate refresh token
-           ↓
-      Return new tokens
-```
-
-### 6. Logout
-
-```
-User → POST /logout
-         ↓
-    Delete session from plg_sessions
-         ↓
-    Clear session cookie
-         ↓
-    Redirect to /login
-```
-
-**Note:** OAuth2 tokens remain valid until expiration. To revoke, use `/oauth/revoke`.
-
-## Email Flow
-
-### Registration Flow
-
-```
-User → POST /register (name, email, password)
-         ↓
-    Validate input (password policy, email format)
-         ↓
-    Check domain restrictions (allowedDomains, blockedDomains)
-         ↓
-    Create user (status: pending_verification)
-         ↓
-    Generate verification token
-         ↓
-    Send verification email
-         ↓
-    Redirect to /login (success message)
-```
-
-**Verification Email:**
-- Link: `http://localhost:4000/verify-email?token=TOKEN`
-- Expires: Never (user can request new token)
-- Template: Customizable via `email.templates`
-
-### Email Verification
-
-```
-User clicks link → GET /verify-email?token=TOKEN
-                      ↓
-                 Validate token
-                      ↓
-                 Update user (emailVerified: true, status: active)
-                      ↓
-                 Delete verification token
-                      ↓
-                 Redirect to /login (success message)
-```
-
-### Password Reset Flow
-
-```
-User → POST /forgot-password (email)
-         ↓
-    Find user by email
-         ↓
-    Generate reset token
-         ↓
-    Send reset email
-         ↓
-    Redirect to /login (success message)
-```
-
-**Reset Email:**
-- Link: `http://localhost:4000/reset-password?token=TOKEN`
-- Expires: 1 hour
-- Single-use only
-
-### Password Reset
-
-```
-User clicks link → GET /reset-password?token=TOKEN
-                      ↓
-                 Validate token (not expired, not used)
-                      ↓
-                 Show reset form
-                      ↓
-User submits → POST /reset-password (token, password)
-                      ↓
-                 Validate password (policy)
-                      ↓
-                 Update password hash
-                      ↓
-                 Delete reset token
-                      ↓
-                 Redirect to /login (success message)
-```
-
-## Session Management
-
-### Session Creation
+### Scopes and Permissions
 
 ```javascript
-// 1. Generate session ID
-const sessionId = crypto.randomBytes(32).toString('hex');
+// SSO Server - Define supported scopes
+const identityPlugin = new IdentityPlugin({
+  supportedScopes: [
+    // OIDC standard scopes
+    'openid',          // Required for OIDC
+    'profile',         // User profile (name, picture)
+    'email',           // User email
+    'offline_access',  // Refresh tokens
 
-// 2. Store session
-await sessionsResource.insert({
-  id: sessionId,
-  userId: user.id,
-  ipAddress: request.ip,
-  userAgent: request.headers['user-agent'],
-  expiresAt: new Date(Date.now() + sessionExpiry),
-  createdAt: new Date()
+    // Custom resource scopes
+    'orders:read',
+    'orders:write',
+    'orders:delete',
+    'products:read',
+    'products:write',
+    'payments:process',
+    'admin:all'        // Full admin access
+  ]
 });
 
-// 3. Set cookie
-response.cookie('s3db_session', sessionId, {
-  httpOnly: true,
-  secure: cookieSecure,
-  sameSite: cookieSameSite,
-  maxAge: sessionExpiry,
-  path: cookiePath
+// Resource Server - Check scopes
+api.addRoute({
+  path: '/orders/:id',
+  method: 'DELETE',
+  handler: async (req, res) => {
+    const scopes = req.user.scope.split(' ');
+
+    // Require specific scope
+    if (!scopes.includes('orders:delete')) {
+      return res.status(403).json({
+        error: 'insufficient_scope',
+        error_description: 'Requires scope: orders:delete'
+      });
+    }
+
+    // Check admin scope
+    if (scopes.includes('admin:all')) {
+      // Admin can delete any order
+    } else {
+      // Regular user can only delete own orders
+      const order = await ordersResource.get(req.params.id);
+      if (order.userId !== req.user.sub) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
+    await ordersResource.delete(req.params.id);
+    res.status(204).send();
+  },
+  auth: 'oidc'
 });
 ```
 
-### Session Validation
+### RS256 vs HS256 Security Model
 
-```javascript
-// 1. Get session ID from cookie
-const sessionId = request.cookies.s3db_session;
+```mermaid
+graph LR
+    subgraph "HS256 (Symmetric) - DON'T USE"
+        SSO_H[SSO Server<br/>shared secret]
+        API_H[All APIs<br/>shared secret]
 
-// 2. Fetch session from S3DB
-const session = await sessionsResource.get(sessionId);
+        SSO_H -.->|Same secret<br/>everywhere| API_H
 
-// 3. Check expiration
-if (session.expiresAt < new Date()) {
-  throw new Error('Session expired');
-}
+    end
 
-// 4. Get user
-const user = await usersResource.get(session.userId);
+    subgraph "RS256 (Asymmetric) - CORRECT"
+        SSO_R[SSO Server<br/>PRIVATE key]
+        API_R[All APIs<br/>PUBLIC key]
 
-// 5. Check user status
-if (user.status !== 'active') {
-  throw new Error('User suspended');
-}
+        SSO_R -->|JWKS<br/>public keys only| API_R
 
-// 6. Attach to request
-request.user = user;
-request.session = session;
+    end
 ```
 
-### Session Cleanup
+**Why RS256 is superior:**
 
-```javascript
-// Automatic cleanup runs every cleanupInterval (default: 1 hour)
-async function cleanupExpiredSessions() {
-  const now = new Date();
+| Aspect | HS256 (Symmetric) | RS256 (Asymmetric) |
+|--------|-------------------|-------------------|
+| **Secret Distribution** | ❌ Shared secret on ALL services | ✅ Private key ONLY on SSO |
+| **Security Risk** | ❌ One leak compromises EVERYTHING | ✅ Public key leak is safe |
+| **Token Creation** | ❌ Any service can create fake tokens | ✅ Only SSO can create tokens |
+| **Key Rotation** | ❌ Update ALL services | ✅ Update SSO, APIs auto-fetch JWKS |
+| **Use Case** | Single service | Microservices, SSO |
 
-  // Query expired sessions
-  const expired = await sessionsResource.query({
-    expiresAt: { $lt: now.toISOString() }
-  });
 
-  // Delete in batch
-  for (const session of expired) {
-    await sessionsResource.delete(session.id);
-  }
+---
 
-  console.log(`Cleaned up ${expired.length} expired sessions`);
-}
-```
+## 🎯 Summary
 
-## OAuth2 Implementation
+**Key architecture takeaways:**
+- ✅ Centralized authentication with distributed authorization
+- ✅ RS256 (asymmetric) is superior to HS256 for microservices
+- ✅ 4 grant types cover all authentication scenarios
+- ✅ JWKS enables zero-trust token validation
+- ✅ Scopes provide fine-grained access control
 
-### JWT Token Generation
+**Next Steps:**
+1. Explore all endpoints: [API Reference →](./api-reference.md)
+2. Integrate with your apps: [Integration Guide →](./integration.md)
+3. Solve common issues: [Troubleshooting →](./troubleshooting.md)
 
-```javascript
-import jwt from 'jsonwebtoken';
+---
 
-// 1. Get private key
-const keyPair = await keysResource.list();
-const privateKey = keyPair[0].privateKey;
+## 🔗 See Also
 
-// 2. Create payload
-const payload = {
-  iss: config.issuer,           // Issuer
-  sub: user.id,                 // Subject (user ID)
-  aud: client.clientId,         // Audience (client ID)
-  exp: Math.floor(Date.now() / 1000) + accessTokenExpiry,
-  iat: Math.floor(Date.now() / 1000),
-  scope: grantedScopes
-};
+**Related Documentation:**
+- [Configuration Reference](./configuration.md) - All configuration options
+- [API Reference](./api-reference.md) - All 9 endpoints documented
+- [Integration Guide](./integration.md) - Resource Server and client integration
+- [Troubleshooting](./troubleshooting.md) - Common errors and solutions
+- [Identity Plugin Main](../identity.md) - Overview and quickstart
 
-// 3. Sign token
-const accessToken = jwt.sign(payload, privateKey, {
-  algorithm: 'RS256',
-  keyid: keyPair[0].id
-});
-```
+**Examples:**
+- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource Server
+- [e60-oauth2-microservices.js](../../examples/e60-oauth2-microservices.js) - Microservices setup
 
-### JWT Token Validation
+---
 
-```javascript
-import jwt from 'jsonwebtoken';
-
-// 1. Get public key
-const keyPair = await keysResource.list();
-const publicKey = keyPair[0].publicKey;
-
-// 2. Verify signature and decode
-try {
-  const decoded = jwt.verify(token, publicKey, {
-    algorithms: ['RS256'],
-    issuer: config.issuer
-  });
-
-  // 3. Check expiration (automatic in jwt.verify)
-  // 4. Check audience
-  if (decoded.aud !== expectedClientId) {
-    throw new Error('Invalid audience');
-  }
-
-  return decoded;
-} catch (error) {
-  throw new Error('Invalid token');
-}
-```
-
-### PKCE Validation
-
-```javascript
-import crypto from 'crypto';
-
-// 1. Get code challenge from authorization request
-const { codeChallenge, codeChallengeMethod } = authCode;
-
-// 2. Compute challenge from verifier
-let computedChallenge;
-if (codeChallengeMethod === 'S256') {
-  computedChallenge = crypto
-    .createHash('sha256')
-    .update(codeVerifier)
-    .digest('base64url');
-} else {
-  computedChallenge = codeVerifier;  // plain method
-}
-
-// 3. Compare
-if (computedChallenge !== codeChallenge) {
-  throw new Error('PKCE validation failed');
-}
-```
-
-## Performance Considerations
-
-### Database Queries
-
-- **Session validation**: O(1) lookup by session ID
-- **User lookup**: O(1) lookup by user ID
-- **Email lookup**: O(n) scan (consider partition by email domain)
-- **Client lookup**: O(1) lookup by client ID
-
-### Caching
-
-Consider caching:
-- Public keys (JWKS) - rarely change
-- User data - for token generation
-- Client data - for validation
-
-```javascript
-// Example: Cache public keys
-let cachedKeys = null;
-let cacheExpiry = null;
-
-async function getPublicKeys() {
-  if (cachedKeys && cacheExpiry > Date.now()) {
-    return cachedKeys;
-  }
-
-  cachedKeys = await keysResource.list();
-  cacheExpiry = Date.now() + 3600000;  // 1 hour
-
-  return cachedKeys;
-}
-```
-
-### Token Generation
-
-- **bcrypt**: Slow by design (use 10-12 rounds in production)
-- **JWT signing**: Fast (<1ms with RSA-2048)
-- **Session creation**: Fast (<10ms)
-
-## See Also
-
-- [Configuration](./configuration.md) - Configuration reference
-- [OAuth2/OIDC](./oauth2-oidc.md) - OAuth2 implementation details
-- [Security](./security.md) - Security best practices
-- [Main Documentation](../identity-plugin.md) - Overview and quick start
+> **Navigation:** [↑ Top](#) | [← Configuration](./configuration.md) | [API Reference →](./api-reference.md) | [← Back to Identity Plugin](../identity.md)

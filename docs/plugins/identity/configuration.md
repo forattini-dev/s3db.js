@@ -1,594 +1,347 @@
-# Identity Plugin - Configuration
+# 📊 Configuration Reference
 
-[← Back to Identity Plugin](../identity-plugin.md) | [Examples →](../identity-examples.md)
+> **Quick Jump:** [Core Options](#core-options) | [OAuth2/OIDC](#oauth2oidc-options) | [Security](#security-options) | [Features](#features-options) | [Examples](#-configuration-examples)
 
-Complete configuration reference for the Identity Provider plugin.
+> **Navigation:** [← Back to Identity Plugin](../identity.md) | [Architecture →](./architecture.md) | [API Reference →](./api-reference.md)
 
-## Table of Contents
+---
 
-- [Core Settings](#core-settings)
-- [Token Expiration](#token-expiration)
-- [Registration](#registration)
-- [Password Policy](#password-policy)
-- [Session Management](#session-management)
-- [UI Configuration](#ui-configuration)
-- [Email Configuration](#email-configuration)
-- [Server Settings](#server-settings)
-- [Complete Example](#complete-example)
+## Overview
 
-## Core Settings
+Complete configuration reference for the Identity Plugin. All options with descriptions, types, defaults, and examples.
 
+---
+
+## Core Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `port` | number | `4000` | Port to listen on |
+| `host` | string | `'0.0.0.0'` | Host to bind to |
+| `issuer` | string | **required** | Issuer URL (MUST match public URL) |
+| `verbose` | boolean | `false` | Enable verbose logging |
+| `userResource` | string | `'users'` | Name of users resource |
+
+**Example:**
 ```javascript
-{
-  // OAuth2/OIDC Configuration
-  issuer: 'http://localhost:4000',  // Required - OAuth2 issuer URL
-  database: db,                      // Required - S3DB instance
-  userResource: 'users',             // S3DB resource name for users
-
-  // Supported OAuth2 Features
-  supportedScopes: ['openid', 'profile', 'email', 'offline_access'],
-  supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
-  supportedResponseTypes: ['code', 'token', 'id_token']
-}
-```
-
-## Token Expiration
-
-Configure token lifetimes using human-readable durations:
-
-```javascript
-{
-  accessTokenExpiry: '15m',      // Access token lifetime (default: 15 minutes)
-  idTokenExpiry: '15m',          // ID token lifetime (default: 15 minutes)
-  refreshTokenExpiry: '7d',      // Refresh token lifetime (default: 7 days)
-  authCodeExpiry: '10m'          // Authorization code lifetime (default: 10 minutes)
-}
-```
-
-**Supported formats:**
-- `15m` - 15 minutes
-- `1h` - 1 hour
-- `24h` - 24 hours
-- `7d` - 7 days
-- `30d` - 30 days
-
-**Recommendations:**
-- **Access tokens**: 15-60 minutes
-- **ID tokens**: 15-60 minutes (matches access token)
-- **Refresh tokens**: 7-30 days
-- **Auth codes**: 5-10 minutes (short-lived, single use)
-
-## Registration
-
-Control public registration and email domain restrictions.
-
-### Basic Configuration
-
-```javascript
-registration: {
-  enabled: true,                      // Enable/disable public registration
-  requireEmailVerification: true,     // Require email verification
-  allowedDomains: null,               // null = all domains allowed
-  blockedDomains: [],                 // Block specific domains
-  customMessage: null                 // Custom message when disabled
-}
-```
-
-### Scenario 1: Disable Public Registration
-
-Enterprise/B2B environments where admins create all users:
-
-```javascript
-registration: {
-  enabled: false,
-  customMessage: 'Registration is disabled. Please contact your administrator for access.'
-}
-```
-
-**Result:**
-- `/register` redirects to `/login` with custom message
-- "Register" links hidden throughout UI
-- Only admins can create users via admin panel
-
-### Scenario 2: Corporate Emails Only
-
-Allow only specific email domains:
-
-```javascript
-registration: {
-  enabled: true,
-  requireEmailVerification: true,
-  allowedDomains: ['company.com', 'partner.com'],
-  customMessage: 'Please use your corporate email address'
-}
-```
-
-**Result:**
-- Only `@company.com` and `@partner.com` can register
-- Other domains rejected with error message
-- Email verification required before activation
-
-### Scenario 3: Block Temporary Emails
-
-Block disposable email services:
-
-```javascript
-registration: {
-  enabled: true,
-  blockedDomains: [
-    'tempmail.com',
-    'guerrillamail.com',
-    '10minutemail.com',
-    'mailinator.com',
-    'throwaway.email'
-  ]
-}
-```
-
-**Result:**
-- Blocked domains cannot register
-- Error: "Registration with this email domain is not allowed"
-
-### Scenario 4: Combined (Whitelist + Blacklist)
-
-```javascript
-registration: {
-  enabled: true,
-  requireEmailVerification: true,
-  allowedDomains: ['company.com'],      // Only corporate
-  blockedDomains: ['tempmail.com'],     // Extra safety
-  customMessage: 'Corporate email required'
-}
-```
-
-## Password Policy
-
-Configure password strength requirements:
-
-```javascript
-passwordPolicy: {
-  minLength: 8,              // Minimum password length (default: 8)
-  maxLength: 128,            // Maximum password length (default: 128)
-  requireUppercase: true,    // Require at least one uppercase letter
-  requireLowercase: true,    // Require at least one lowercase letter
-  requireNumbers: true,      // Require at least one number
-  requireSymbols: false,     // Require at least one symbol (!@#$%^&*)
-  bcryptRounds: 10           // bcrypt hashing rounds (default: 10)
-}
-```
-
-### Development (Weak)
-
-```javascript
-passwordPolicy: {
-  minLength: 6,
-  requireSymbols: false,
-  bcryptRounds: 8
-}
-```
-
-### Production (Strong)
-
-```javascript
-passwordPolicy: {
-  minLength: 12,
-  requireUppercase: true,
-  requireLowercase: true,
-  requireNumbers: true,
-  requireSymbols: true,
-  bcryptRounds: 12
-}
-```
-
-### Maximum Security
-
-```javascript
-passwordPolicy: {
-  minLength: 16,
-  requireUppercase: true,
-  requireLowercase: true,
-  requireNumbers: true,
-  requireSymbols: true,
-  bcryptRounds: 14
-}
-```
-
-**bcrypt Rounds:**
-- `8-10`: Development (faster, less secure)
-- `10-12`: Production (balanced)
-- `12-14`: High security (slower, more secure)
-
-## Session Management
-
-Configure session behavior and cookie settings:
-
-```javascript
-session: {
-  sessionExpiry: '24h',           // Session lifetime (default: 24 hours)
-  cookieName: 's3db_session',     // Session cookie name
-  cookiePath: '/',                // Cookie path
-  cookieHttpOnly: true,           // HttpOnly flag (prevents JS access)
-  cookieSecure: false,            // Secure flag (requires HTTPS)
-  cookieSameSite: 'Lax',          // SameSite attribute (Strict/Lax/None)
-  cleanupInterval: 3600000,       // Cleanup interval in ms (1 hour)
-  enableCleanup: true             // Enable automatic session cleanup
-}
-```
-
-### Development (HTTP)
-
-```javascript
-session: {
-  sessionExpiry: '7d',
-  cookieSecure: false,
-  cookieSameSite: 'Lax'
-}
-```
-
-### Production (HTTPS)
-
-```javascript
-session: {
-  sessionExpiry: '8h',              // Shorter for production
-  cookieHttpOnly: true,
-  cookieSecure: true,               // Requires HTTPS
-  cookieSameSite: 'Strict',         // Maximum security
-  cleanupInterval: 1800000          // 30 minutes
-}
-```
-
-**SameSite Options:**
-- `Strict`: Maximum security, may break some OAuth2 flows
-- `Lax`: Balanced (recommended for most cases)
-- `None`: Required for cross-site OAuth2 (requires `cookieSecure: true`)
-
-## UI Configuration
-
-See [UI Customization](./ui-customization.md) for complete white-label options.
-
-Quick reference:
-
-```javascript
-ui: {
-  // Branding
-  companyName: 'My Company',
-  tagline: 'Secure Identity Management',
-  logoUrl: 'https://example.com/logo.svg',
-
-  // Colors
-  primaryColor: '#007bff',
-  successColor: '#28a745',
-  dangerColor: '#dc3545',
-
-  // Company Info
-  supportEmail: 'support@example.com',
-  privacyUrl: '/privacy',
-  termsUrl: '/terms'
-}
-```
-
-## Email Configuration
-
-Configure SMTP for email verification and password reset:
-
-### Basic SMTP
-
-```javascript
-email: {
-  enabled: true,
-  from: 'noreply@example.com',
-  replyTo: 'support@example.com',
-  smtp: {
-    host: 'smtp.example.com',
-    port: 587,
-    secure: false,          // true for port 465
-    auth: {
-      user: 'your-email@example.com',
-      pass: 'your-password'
-    },
-    tls: {
-      rejectUnauthorized: true
-    }
-  }
-}
-```
-
-### Gmail
-
-```javascript
-email: {
-  enabled: true,
-  from: 'noreply@company.com',
-  smtp: {
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user: 'your-email@gmail.com',
-      pass: process.env.GMAIL_APP_PASSWORD  // Use app password!
-    }
-  }
-}
-```
-
-**Gmail Setup:**
-1. Enable 2FA on your Google account
-2. Generate App Password: https://myaccount.google.com/apppasswords
-3. Use app password (not your regular password)
-
-### SendGrid
-
-```javascript
-email: {
-  enabled: true,
-  from: 'noreply@company.com',
-  smtp: {
-    host: 'smtp.sendgrid.net',
-    port: 587,
-    auth: {
-      user: 'apikey',
-      pass: process.env.SENDGRID_API_KEY
-    }
-  }
-}
-```
-
-### AWS SES
-
-```javascript
-email: {
-  enabled: true,
-  from: 'noreply@company.com',
-  smtp: {
-    host: 'email-smtp.us-east-1.amazonaws.com',
-    port: 587,
-    auth: {
-      user: process.env.AWS_SES_USER,
-      pass: process.env.AWS_SES_PASSWORD
-    }
-  }
-}
-```
-
-### Email Templates
-
-Customize email appearance:
-
-```javascript
-email: {
-  enabled: true,
-  from: 'noreply@company.com',
-  templates: {
-    baseUrl: 'https://auth.company.com',
-    brandName: 'My Company',
-    brandLogo: 'https://company.com/logo.png',
-    brandColor: '#007bff',
-    supportEmail: 'support@company.com',
-    customFooter: 'My Company - Secure Identity Solutions'
-  }
-}
-```
-
-### Disable Email (Development)
-
-```javascript
-email: {
-  enabled: false
-}
-```
-
-**Note:** When disabled:
-- Email verification not sent (users must be manually activated)
-- Password reset requires admin intervention
-- Useful for development/testing
-
-## Server Settings
-
-Configure HTTP server, CORS, security headers, and logging:
-
-### Basic Server
-
-```javascript
-server: {
+const identityPlugin = new IdentityPlugin({
   port: 4000,
   host: '0.0.0.0',
-  verbose: true
-}
+  issuer: 'http://localhost:4000',
+  verbose: true,
+  userResource: 'users'
+});
 ```
 
-### CORS Configuration
+---
 
+## OAuth2/OIDC Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `supportedScopes` | string[] | `['openid']` | Allowed scopes (must include 'openid' for OIDC) |
+| `supportedGrantTypes` | string[] | `['authorization_code', 'client_credentials', 'refresh_token']` | Allowed grant types |
+| `supportedResponseTypes` | string[] | `['code']` | Allowed response types |
+| `accessTokenExpiry` | string | `'15m'` | Access token lifetime (e.g., '15m', '1h') |
+| `idTokenExpiry` | string | `'15m'` | ID token lifetime |
+| `refreshTokenExpiry` | string | `'7d'` | Refresh token lifetime |
+| `authCodeExpiry` | string | `'10m'` | Authorization code lifetime |
+
+**Example:**
 ```javascript
-server: {
-  cors: {
-    enabled: true,
-    origin: '*',                    // Development
-    // origin: ['https://app.company.com'],  // Production
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
-    credentials: true,
-    maxAge: 86400
-  }
-}
+const identityPlugin = new IdentityPlugin({
+  supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
+  supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
+  supportedResponseTypes: ['code', 'token', 'id_token'],
+  accessTokenExpiry: '15m',
+  idTokenExpiry: '15m',
+  refreshTokenExpiry: '7d',
+  authCodeExpiry: '10m'
+});
 ```
 
-### Security Headers
+---
 
+## Security Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `security.enabled` | boolean | `true` | Enable security headers |
+| `security.contentSecurityPolicy` | object | `{}` | CSP configuration |
+| `security.hsts` | object | `{}` | HSTS configuration |
+
+**Example:**
 ```javascript
-server: {
+const identityPlugin = new IdentityPlugin({
   security: {
     enabled: true,
-    contentSecurityPolicy: true,
-    hsts: false                     // Set true in production with HTTPS
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"]
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    }
   }
-}
+});
 ```
 
-### Logging
+---
 
+## CORS Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cors.enabled` | boolean | `true` | Enable CORS |
+| `cors.origin` | string/array | `'*'` | Allowed origins (* for dev only!) |
+| `cors.credentials` | boolean | `true` | Allow credentials |
+| `cors.methods` | string[] | `['GET', 'POST', 'PUT', 'DELETE']` | Allowed methods |
+| `cors.allowedHeaders` | string[] | `['Content-Type', 'Authorization']` | Allowed headers |
+
+**Example:**
 ```javascript
-server: {
+const identityPlugin = new IdentityPlugin({
+  cors: {
+    enabled: true,
+    origin: ['https://app.example.com', 'https://admin.example.com'],
+    credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  }
+});
+```
+
+---
+
+## Rate Limiting Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `rateLimit.enabled` | boolean | `false` | Enable rate limiting |
+| `rateLimit.windowMs` | number | `60000` | Time window in ms |
+| `rateLimit.max` | number | `100` | Max requests per window |
+| `rateLimit.message` | string | `'Too many requests'` | Rate limit error message |
+
+**Example:**
+```javascript
+const identityPlugin = new IdentityPlugin({
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,      // 1 minute
+    max: 100,             // 100 requests per minute per IP
+    message: 'Too many requests, please try again later'
+  }
+});
+```
+
+---
+
+## Compression Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `compression.enabled` | boolean | `false` | Enable response compression |
+| `compression.threshold` | number | `1024` | Compress responses > 1KB |
+| `compression.level` | number | `6` | Compression level (0-9) |
+| `compression.preferBrotli` | boolean | `true` | Use Brotli over gzip |
+
+**Example:**
+```javascript
+const identityPlugin = new IdentityPlugin({
+  compression: {
+    enabled: true,
+    threshold: 1024,
+    level: 6,
+    preferBrotli: true
+  }
+});
+```
+
+---
+
+## Logging Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `logging.enabled` | boolean | `false` | Enable request logging |
+| `logging.format` | string | `':method :path :status :response-time ms'` | Log format |
+| `logging.tokens` | object | `{}` | Custom log tokens |
+
+**Example:**
+```javascript
+const identityPlugin = new IdentityPlugin({
   logging: {
     enabled: true,
-    format: ':method :path :status :response-time ms'
-    // format: 'combined'           // Apache combined log format
+    format: ':method :path :status :response-time ms',
+    tokens: {
+      user: (c) => c.get('user')?.sub || 'anonymous',
+      requestId: (c) => c.get('requestId') || 'none'
+    }
   }
-}
+});
 ```
 
-### Complete Server Config
+---
+
+## Features Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `features.tokenRevocation` | boolean | `true` | Enable token revocation (RFC 7009) |
+| `features.dynamicClientRegistration` | boolean | `true` | Enable dynamic client registration (RFC 7591) |
+| `features.pkce` | boolean | `true` | Enable PKCE support |
+| `features.refreshTokenRotation` | boolean | `false` | Rotate refresh tokens on use |
+| `features.multiAudience` | boolean | `false` | Support tokens for multiple audiences |
+
+**Example:**
+```javascript
+const identityPlugin = new IdentityPlugin({
+  features: {
+    tokenRevocation: true,
+    dynamicClientRegistration: true,
+    pkce: true,
+    refreshTokenRotation: true,
+    multiAudience: true
+  }
+});
+```
+
+---
+
+## 📚 Configuration Examples
+
+### Example 1: Minimal SSO Server
+
+Simple SSO for development:
 
 ```javascript
-server: {
+const identityPlugin = new IdentityPlugin({
   port: 4000,
-  host: '0.0.0.0',
-  verbose: true,
+  issuer: 'http://localhost:4000',
+  supportedScopes: ['openid', 'profile', 'email']
+});
+```
+
+### Example 2: Production SSO with All Features
+
+Enterprise-ready configuration:
+
+```javascript
+const identityPlugin = new IdentityPlugin({
+  port: 443,
+  issuer: 'https://sso.example.com',
+
+  supportedScopes: [
+    'openid', 'profile', 'email',
+    'offline_access',
+    'read:api', 'write:api', 'admin:all'
+  ],
+  supportedGrantTypes: [
+    'authorization_code',
+    'client_credentials',
+    'refresh_token'
+  ],
+
+  accessTokenExpiry: '15m',
+  idTokenExpiry: '15m',
+  refreshTokenExpiry: '7d',
 
   cors: {
     enabled: true,
-    origin: ['https://app.company.com'],
+    origin: ['https://app.example.com', 'https://admin.example.com'],
     credentials: true
   },
 
   security: {
     enabled: true,
-    contentSecurityPolicy: true,
-    hsts: true
-  },
-
-  logging: {
-    enabled: true,
-    format: 'combined'
-  }
-}
-```
-
-## Complete Example
-
-### Minimal Configuration
-
-```javascript
-import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js/plugins/identity';
-
-const db = new Database({
-  connectionString: 'http://minioadmin:minioadmin@localhost:9000/myapp'
-});
-
-await db.initialize();
-
-const identityPlugin = new IdentityPlugin({
-  issuer: 'http://localhost:4000',
-  database: db
-});
-
-await identityPlugin.initialize();
-```
-
-### Production Configuration
-
-```javascript
-import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js/plugins/identity';
-
-const db = new Database({
-  connectionString: process.env.MRT_CONNECTION_STRING
-});
-
-await db.initialize();
-
-const identityPlugin = new IdentityPlugin({
-  // Core
-  issuer: 'https://auth.company.com',
-  database: db,
-
-  // Registration
-  registration: {
-    enabled: true,
-    requireEmailVerification: true,
-    allowedDomains: ['company.com']
-  },
-
-  // Password Policy
-  passwordPolicy: {
-    minLength: 12,
-    requireSymbols: true,
-    bcryptRounds: 12
-  },
-
-  // Session
-  session: {
-    sessionExpiry: '8h',
-    cookieSecure: true,
-    cookieSameSite: 'Strict'
-  },
-
-  // Email
-  email: {
-    enabled: true,
-    from: 'noreply@company.com',
-    smtp: {
-      host: process.env.SMTP_HOST,
-      port: 587,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
     }
   },
 
-  // UI
-  ui: {
-    companyName: 'My Company',
-    primaryColor: '#007bff',
-    supportEmail: 'support@company.com'
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,
+    max: 100
   },
 
-  // Server
-  server: {
-    port: 443,
-    cors: {
-      origin: ['https://app.company.com']
-    },
-    security: {
-      enabled: true,
-      hsts: true
-    }
+  compression: {
+    enabled: true,
+    preferBrotli: true
+  },
+
+  features: {
+    tokenRevocation: true,
+    dynamicClientRegistration: true,
+    pkce: true,
+    refreshTokenRotation: true,
+    multiAudience: true
   }
 });
-
-await identityPlugin.initialize();
 ```
 
-## Environment Variables
+### Example 3: PKCE-Only (Mobile Apps)
 
-Recommended environment variables for production:
+Mobile/SPA-focused configuration:
 
-```bash
-# Database
-MRT_CONNECTION_STRING=s3://ACCESS_KEY:SECRET_KEY@bucket/path
+```javascript
+const identityPlugin = new IdentityPlugin({
+  port: 4000,
+  issuer: 'https://api.example.com',
 
-# Email (Gmail)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
+  supportedScopes: ['openid', 'profile', 'offline_access'],
+  supportedGrantTypes: ['authorization_code', 'refresh_token'],
 
-# Email (SendGrid)
-SENDGRID_API_KEY=your-sendgrid-api-key
+  features: {
+    pkce: true,  // Require PKCE for all authorization_code requests
+    refreshTokenRotation: true
+  },
 
-# Server
-IDENTITY_PORT=4000
-IDENTITY_ISSUER=https://auth.company.com
-
-# Security
-NODE_ENV=production
+  cors: {
+    enabled: true,
+    origin: ['myapp://', 'https://app.example.com']
+  }
+});
 ```
 
-## See Also
+---
 
-- [UI Customization](./ui-customization.md) - White-label branding and custom pages
-- [Security Best Practices](./security.md) - Production security guide
-- [Troubleshooting](./troubleshooting.md) - Common configuration issues
-- [Examples Index](../identity-examples.md) - Configuration examples
-- [Main Documentation](../identity-plugin.md) - Overview and quick start
+## 🎯 Summary
+
+**Key configuration takeaways:**
+- ✅ Use `issuer` matching your public URL (HTTPS in production)
+- ✅ Configure appropriate token expiration times (15m access, 7d refresh)
+- ✅ Enable security features (HSTS, CORS, rate limiting)
+- ✅ Use PKCE for public clients (mobile, SPA)
+- ✅ Rotate keys regularly (90 days recommended)
+
+**Next Steps:**
+1. Understand system design: [Architecture & Token Flow →](./architecture.md)
+2. Explore all endpoints: [API Reference →](./api-reference.md)
+3. Integrate with your apps: [Integration Guide →](./integration.md)
+4. Solve common issues: [Troubleshooting →](./troubleshooting.md)
+
+---
+
+## 🔗 See Also
+
+**Related Documentation:**
+- [Architecture & Token Flow](./architecture.md) - System design and grant types
+- [API Reference](./api-reference.md) - All 9 OAuth2/OIDC endpoints
+- [Integration Guide](./integration.md) - Connect Resource Servers and clients
+- [Troubleshooting](./troubleshooting.md) - Common errors and solutions
+- [Identity Plugin Main](../identity.md) - Overview and quickstart
+
+**Examples:**
+- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e82-oidc-web-app.js](../../examples/e82-oidc-web-app.js) - Web app integration
+- [e60-oauth2-microservices.js](../../examples/e60-oauth2-microservices.js) - Microservices setup
+
+---
+
+> **Navigation:** [↑ Top](#) | [← Identity Plugin](../identity.md) | [Architecture →](./architecture.md) | [API Reference →](./api-reference.md)
