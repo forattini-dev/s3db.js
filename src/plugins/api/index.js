@@ -69,33 +69,21 @@ export class ApiPlugin extends Plugin {
         description: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources'
       },
 
-      // Authentication configuration (multiple drivers supported)
+      // Authentication configuration (multiple drivers)
       auth: options.auth ? {
-        // New: Array of authentication drivers (OR logic - any driver can authenticate)
-        drivers: options.auth.drivers || (options.auth.driver ? [{
-          driver: options.auth.driver,
-          config: options.auth.config || {}
-        }] : []),
+        // Array of authentication drivers (OR logic - any driver can authenticate)
+        drivers: options.auth.drivers || [],
 
         // Global settings
         resource: options.auth.resource || 'users',
         usernameField: options.auth.usernameField || 'email',
-        passwordField: options.auth.passwordField || 'password',
-
-        // Backward compatibility
-        driver: options.auth.driver || null,
-        config: options.auth.config || {}
+        passwordField: options.auth.passwordField || 'password'
       } : {
         drivers: [],
         resource: 'users',
         usernameField: 'email',
-        passwordField: 'password',
-        driver: null,
-        config: {}
+        passwordField: 'password'
       },
-
-      // Deprecated: Resource configuration moved to resource.config.guards
-      resources: options.resources || {},
 
       // Custom routes (plugin-level)
       routes: options.routes || {},
@@ -257,7 +245,7 @@ export class ApiPlugin extends Plugin {
     }
 
     // Create users resource if authentication drivers are configured
-    const authEnabled = this.config.auth.drivers.length > 0 || this.config.auth.driver !== null;
+    const authEnabled = this.config.auth.drivers.length > 0;
 
     if (authEnabled) {
       await this._createUsersResource();
