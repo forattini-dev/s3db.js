@@ -93,6 +93,30 @@ export const BASE_CLIENT_ATTRIBUTES = {
 };
 
 /**
+ * Deep merge two objects
+ * @param {Object} target - Target object
+ * @param {Object} source - Source object
+ * @returns {Object} Merged object
+ */
+function deepMerge(target, source) {
+  const output = { ...target };
+
+  for (const key in source) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      if (target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+        output[key] = deepMerge(target[key], source[key]);
+      } else {
+        output[key] = source[key];
+      }
+    } else {
+      output[key] = source[key];
+    }
+  }
+
+  return output;
+}
+
+/**
  * Validate that user-provided attributes don't conflict with base attributes
  * and that optional fields have defaults
  *
@@ -138,31 +162,44 @@ export function validateExtraAttributes(baseAttributes, userAttributes, resource
 }
 
 /**
- * Merge base attributes with user-provided extra attributes
+ * Merge base resource config with user-provided config (deep merge)
  *
- * @param {Object} baseAttributes - Base attributes from plugin
- * @param {Object} userAttributes - User-provided extra attributes
+ * @param {Object} baseConfig - Base resource config from plugin
+ * @param {Object} userConfig - User-provided resource config
  * @param {string} resourceType - Type of resource (for error messages)
- * @returns {Object} mergedAttributes - Combined attributes
+ * @returns {Object} mergedConfig - Combined resource configuration
  * @throws {Error} If validation fails
  */
-export function mergeResourceAttributes(baseAttributes, userAttributes = {}, resourceType) {
-  // Validate user attributes
-  const validation = validateExtraAttributes(baseAttributes, userAttributes, resourceType);
+export function mergeResourceConfig(baseConfig, userConfig = {}, resourceType) {
+  // Validate user attributes if provided
+  if (userConfig.attributes) {
+    const validation = validateExtraAttributes(
+      baseConfig.attributes,
+      userConfig.attributes,
+      resourceType
+    );
 
-  if (!validation.valid) {
-    const errorMsg = [
-      `Invalid extra attributes for ${resourceType} resource:`,
-      ...validation.errors.map(err => `  - ${err}`)
-    ].join('\n');
-    throw new Error(errorMsg);
+    if (!validation.valid) {
+      const errorMsg = [
+        `Invalid extra attributes for ${resourceType} resource:`,
+        ...validation.errors.map(err => `  - ${err}`)
+      ].join('\n');
+      throw new Error(errorMsg);
+    }
   }
 
-  // Merge (base attributes take precedence to prevent override)
-  return {
-    ...userAttributes,  // User extras first
-    ...baseAttributes   // Base overrides (protection)
-  };
+  // Deep merge: user config first, then base config (base takes precedence)
+  const merged = deepMerge(userConfig, baseConfig);
+
+  // Merge attributes specially to ensure base attributes are preserved
+  if (userConfig.attributes || baseConfig.attributes) {
+    merged.attributes = {
+      ...(userConfig.attributes || {}),  // User extras first
+      ...(baseConfig.attributes || {})   // Base overrides (protection)
+    };
+  }
+
+  return merged;
 }
 
 /**
@@ -183,14 +220,11 @@ export function validateResourcesConfig(resourcesConfig) {
   if (!resourcesConfig.users) {
     errors.push(
       'IdentityPlugin requires "resources.users" configuration.\n' +
-      'Example: resources: { users: { name: "users", attributes: {...} } }'
+      'Example: resources: { users: { name: "users", attributes: {...}, hooks: {...} } }'
     );
   } else {
     if (!resourcesConfig.users.name || typeof resourcesConfig.users.name !== 'string') {
       errors.push('resources.users.name is required and must be a string');
-    }
-    if (resourcesConfig.users.attributes && typeof resourcesConfig.users.attributes !== 'object') {
-      errors.push('resources.users.attributes must be an object if provided');
     }
   }
 
@@ -198,14 +232,11 @@ export function validateResourcesConfig(resourcesConfig) {
   if (!resourcesConfig.tenants) {
     errors.push(
       'IdentityPlugin requires "resources.tenants" configuration.\n' +
-      'Example: resources: { tenants: { name: "tenants", attributes: {...} } }'
+      'Example: resources: { tenants: { name: "tenants", attributes: {...}, partitions: {...} } }'
     );
   } else {
     if (!resourcesConfig.tenants.name || typeof resourcesConfig.tenants.name !== 'string') {
       errors.push('resources.tenants.name is required and must be a string');
-    }
-    if (resourcesConfig.tenants.attributes && typeof resourcesConfig.tenants.attributes !== 'object') {
-      errors.push('resources.tenants.attributes must be an object if provided');
     }
   }
 
@@ -213,14 +244,11 @@ export function validateResourcesConfig(resourcesConfig) {
   if (!resourcesConfig.clients) {
     errors.push(
       'IdentityPlugin requires "resources.clients" configuration.\n' +
-      'Example: resources: { clients: { name: "oauth_clients", attributes: {...} } }'
+      'Example: resources: { clients: { name: "oauth_clients", attributes: {...}, behavior: "..." } }'
     );
   } else {
     if (!resourcesConfig.clients.name || typeof resourcesConfig.clients.name !== 'string') {
       errors.push('resources.clients.name is required and must be a string');
-    }
-    if (resourcesConfig.clients.attributes && typeof resourcesConfig.clients.attributes !== 'object') {
-      errors.push('resources.clients.attributes must be an object if provided');
     }
   }
 
@@ -235,6 +263,6 @@ export default {
   BASE_TENANT_ATTRIBUTES,
   BASE_CLIENT_ATTRIBUTES,
   validateExtraAttributes,
-  mergeResourceAttributes,
+  mergeResourceConfig,
   validateResourcesConfig
 };

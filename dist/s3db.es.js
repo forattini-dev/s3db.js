@@ -12471,6 +12471,21 @@ const BASE_CLIENT_ATTRIBUTES = {
   // Metadata
   metadata: "object|optional"
 };
+function deepMerge(target, source) {
+  const output = { ...target };
+  for (const key in source) {
+    if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
+      if (target[key] && typeof target[key] === "object" && !Array.isArray(target[key])) {
+        output[key] = deepMerge(target[key], source[key]);
+      } else {
+        output[key] = source[key];
+      }
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
+}
 function validateExtraAttributes(baseAttributes, userAttributes, resourceType) {
   const errors = [];
   if (!userAttributes || typeof userAttributes !== "object") {
@@ -12497,21 +12512,31 @@ function validateExtraAttributes(baseAttributes, userAttributes, resourceType) {
     errors
   };
 }
-function mergeResourceAttributes(baseAttributes, userAttributes = {}, resourceType) {
-  const validation = validateExtraAttributes(baseAttributes, userAttributes, resourceType);
-  if (!validation.valid) {
-    const errorMsg = [
-      `Invalid extra attributes for ${resourceType} resource:`,
-      ...validation.errors.map((err) => `  - ${err}`)
-    ].join("\n");
-    throw new Error(errorMsg);
+function mergeResourceConfig(baseConfig, userConfig = {}, resourceType) {
+  if (userConfig.attributes) {
+    const validation = validateExtraAttributes(
+      baseConfig.attributes,
+      userConfig.attributes,
+      resourceType
+    );
+    if (!validation.valid) {
+      const errorMsg = [
+        `Invalid extra attributes for ${resourceType} resource:`,
+        ...validation.errors.map((err) => `  - ${err}`)
+      ].join("\n");
+      throw new Error(errorMsg);
+    }
   }
-  return {
-    ...userAttributes,
-    // User extras first
-    ...baseAttributes
-    // Base overrides (protection)
-  };
+  const merged = deepMerge(userConfig, baseConfig);
+  if (userConfig.attributes || baseConfig.attributes) {
+    merged.attributes = {
+      ...userConfig.attributes || {},
+      // User extras first
+      ...baseConfig.attributes || {}
+      // Base overrides (protection)
+    };
+  }
+  return merged;
 }
 function validateResourcesConfig$1(resourcesConfig) {
   const errors = [];
@@ -12521,38 +12546,29 @@ function validateResourcesConfig$1(resourcesConfig) {
   }
   if (!resourcesConfig.users) {
     errors.push(
-      'IdentityPlugin requires "resources.users" configuration.\nExample: resources: { users: { name: "users", attributes: {...} } }'
+      'IdentityPlugin requires "resources.users" configuration.\nExample: resources: { users: { name: "users", attributes: {...}, hooks: {...} } }'
     );
   } else {
     if (!resourcesConfig.users.name || typeof resourcesConfig.users.name !== "string") {
       errors.push("resources.users.name is required and must be a string");
     }
-    if (resourcesConfig.users.attributes && typeof resourcesConfig.users.attributes !== "object") {
-      errors.push("resources.users.attributes must be an object if provided");
-    }
   }
   if (!resourcesConfig.tenants) {
     errors.push(
-      'IdentityPlugin requires "resources.tenants" configuration.\nExample: resources: { tenants: { name: "tenants", attributes: {...} } }'
+      'IdentityPlugin requires "resources.tenants" configuration.\nExample: resources: { tenants: { name: "tenants", attributes: {...}, partitions: {...} } }'
     );
   } else {
     if (!resourcesConfig.tenants.name || typeof resourcesConfig.tenants.name !== "string") {
       errors.push("resources.tenants.name is required and must be a string");
     }
-    if (resourcesConfig.tenants.attributes && typeof resourcesConfig.tenants.attributes !== "object") {
-      errors.push("resources.tenants.attributes must be an object if provided");
-    }
   }
   if (!resourcesConfig.clients) {
     errors.push(
-      'IdentityPlugin requires "resources.clients" configuration.\nExample: resources: { clients: { name: "oauth_clients", attributes: {...} } }'
+      'IdentityPlugin requires "resources.clients" configuration.\nExample: resources: { clients: { name: "oauth_clients", attributes: {...}, behavior: "..." } }'
     );
   } else {
     if (!resourcesConfig.clients.name || typeof resourcesConfig.clients.name !== "string") {
       errors.push("resources.clients.name is required and must be a string");
-    }
-    if (resourcesConfig.clients.attributes && typeof resourcesConfig.clients.attributes !== "object") {
-      errors.push("resources.clients.attributes must be an object if provided");
     }
   }
   return {
@@ -12574,19 +12590,19 @@ class IdentityPlugin extends Plugin {
         "IdentityPlugin configuration error:\n" + resourcesValidation.errors.join("\n")
       );
     }
-    mergeResourceAttributes(
-      BASE_USER_ATTRIBUTES,
-      options.resources.users.attributes || {},
+    mergeResourceConfig(
+      { attributes: BASE_USER_ATTRIBUTES },
+      options.resources.users,
       "users"
     );
-    mergeResourceAttributes(
-      BASE_TENANT_ATTRIBUTES,
-      options.resources.tenants.attributes || {},
+    mergeResourceConfig(
+      { attributes: BASE_TENANT_ATTRIBUTES },
+      options.resources.tenants,
       "tenants"
     );
-    mergeResourceAttributes(
-      BASE_CLIENT_ATTRIBUTES,
-      options.resources.clients.attributes || {},
+    mergeResourceConfig(
+      { attributes: BASE_CLIENT_ATTRIBUTES },
+      options.resources.clients,
       "clients"
     );
     this.config = {
@@ -12605,23 +12621,21 @@ class IdentityPlugin extends Plugin {
       refreshTokenExpiry: options.refreshTokenExpiry || "7d",
       authCodeExpiry: options.authCodeExpiry || "10m",
       // Resource configuration (REQUIRED)
-      // User must declare: users, tenants, clients with name + optional extra attributes
+      // User must declare: users, tenants, clients with full resource config
       resources: {
         users: {
-          name: options.resources.users.name,
-          extraAttributes: options.resources.users.attributes || {},
-          mergedAttributes: null
+          userConfig: options.resources.users,
+          // Store user's full config
+          mergedConfig: null
           // Will be populated in _createResources()
         },
         tenants: {
-          name: options.resources.tenants.name,
-          extraAttributes: options.resources.tenants.attributes || {},
-          mergedAttributes: null
+          userConfig: options.resources.tenants,
+          mergedConfig: null
         },
         clients: {
-          name: options.resources.clients.name,
-          extraAttributes: options.resources.clients.attributes || {},
-          mergedAttributes: null
+          userConfig: options.resources.clients,
+          mergedConfig: null
         }
       },
       // CORS configuration
@@ -12969,90 +12983,90 @@ class IdentityPlugin extends Plugin {
     }
   }
   /**
-   * Create user-managed resources (users, tenants, clients) with merged attributes
+   * Create user-managed resources (users, tenants, clients) with merged config
    * @private
    */
   async _createUserManagedResources() {
     const usersConfig = this.config.resources.users;
-    const usersMergedAttrs = mergeResourceAttributes(
-      BASE_USER_ATTRIBUTES,
-      usersConfig.extraAttributes,
+    const usersBaseConfig = {
+      attributes: BASE_USER_ATTRIBUTES,
+      behavior: "body-overflow",
+      timestamps: true
+    };
+    const usersMergedConfig = mergeResourceConfig(
+      usersBaseConfig,
+      usersConfig.userConfig,
       "users"
     );
-    usersConfig.mergedAttributes = usersMergedAttrs;
+    usersConfig.mergedConfig = usersMergedConfig;
     const [okUsers, errUsers, usersResource] = await tryFn(
-      () => this.database.createResource({
-        name: usersConfig.name,
-        attributes: usersMergedAttrs,
-        behavior: "body-overflow",
-        timestamps: true
-      })
+      () => this.database.createResource(usersMergedConfig)
     );
     if (okUsers) {
       this.usersResource = usersResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${usersConfig.name} resource with merged attributes`);
+        console.log(`[Identity Plugin] Created ${usersMergedConfig.name} resource with merged config`);
       }
-    } else if (this.database.resources[usersConfig.name]) {
-      this.usersResource = this.database.resources[usersConfig.name];
+    } else if (this.database.resources[usersMergedConfig.name]) {
+      this.usersResource = this.database.resources[usersMergedConfig.name];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${usersConfig.name} resource`);
+        console.log(`[Identity Plugin] Using existing ${usersMergedConfig.name} resource`);
       }
     } else {
       throw errUsers;
     }
     const tenantsConfig = this.config.resources.tenants;
-    const tenantsMergedAttrs = mergeResourceAttributes(
-      BASE_TENANT_ATTRIBUTES,
-      tenantsConfig.extraAttributes,
+    const tenantsBaseConfig = {
+      attributes: BASE_TENANT_ATTRIBUTES,
+      behavior: "body-overflow",
+      timestamps: true
+    };
+    const tenantsMergedConfig = mergeResourceConfig(
+      tenantsBaseConfig,
+      tenantsConfig.userConfig,
       "tenants"
     );
-    tenantsConfig.mergedAttributes = tenantsMergedAttrs;
+    tenantsConfig.mergedConfig = tenantsMergedConfig;
     const [okTenants, errTenants, tenantsResource] = await tryFn(
-      () => this.database.createResource({
-        name: tenantsConfig.name,
-        attributes: tenantsMergedAttrs,
-        behavior: "body-overflow",
-        timestamps: true
-      })
+      () => this.database.createResource(tenantsMergedConfig)
     );
     if (okTenants) {
       this.tenantsResource = tenantsResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${tenantsConfig.name} resource with merged attributes`);
+        console.log(`[Identity Plugin] Created ${tenantsMergedConfig.name} resource with merged config`);
       }
-    } else if (this.database.resources[tenantsConfig.name]) {
-      this.tenantsResource = this.database.resources[tenantsConfig.name];
+    } else if (this.database.resources[tenantsMergedConfig.name]) {
+      this.tenantsResource = this.database.resources[tenantsMergedConfig.name];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${tenantsConfig.name} resource`);
+        console.log(`[Identity Plugin] Using existing ${tenantsMergedConfig.name} resource`);
       }
     } else {
       throw errTenants;
     }
     const clientsConfig = this.config.resources.clients;
-    const clientsMergedAttrs = mergeResourceAttributes(
-      BASE_CLIENT_ATTRIBUTES,
-      clientsConfig.extraAttributes,
+    const clientsBaseConfig = {
+      attributes: BASE_CLIENT_ATTRIBUTES,
+      behavior: "body-overflow",
+      timestamps: true
+    };
+    const clientsMergedConfig = mergeResourceConfig(
+      clientsBaseConfig,
+      clientsConfig.userConfig,
       "clients"
     );
-    clientsConfig.mergedAttributes = clientsMergedAttrs;
+    clientsConfig.mergedConfig = clientsMergedConfig;
     const [okClients, errClients, clientsResource] = await tryFn(
-      () => this.database.createResource({
-        name: clientsConfig.name,
-        attributes: clientsMergedAttrs,
-        behavior: "body-overflow",
-        timestamps: true
-      })
+      () => this.database.createResource(clientsMergedConfig)
     );
     if (okClients) {
       this.clientsResource = clientsResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${clientsConfig.name} resource with merged attributes`);
+        console.log(`[Identity Plugin] Created ${clientsMergedConfig.name} resource with merged config`);
       }
-    } else if (this.database.resources[clientsConfig.name]) {
-      this.clientsResource = this.database.resources[clientsConfig.name];
+    } else if (this.database.resources[clientsMergedConfig.name]) {
+      this.clientsResource = this.database.resources[clientsMergedConfig.name];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${clientsConfig.name} resource`);
+        console.log(`[Identity Plugin] Using existing ${clientsMergedConfig.name} resource`);
       }
     } else {
       throw errClients;
