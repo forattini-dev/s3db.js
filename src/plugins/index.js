@@ -2,8 +2,9 @@ export * from './plugin.class.js'
 export * from './plugin.obj.js'
 
 // plugins:
-// ApiPlugin is exported separately to avoid bundling hono dependencies
+// ApiPlugin and IdentityPlugin are exported separately to avoid bundling hono dependencies
 export { ApiPlugin } from './api/index.js'
+export { IdentityPlugin } from './identity/index.js'
 export * from './audit.plugin.js'
 export * from './backup.plugin.js'
 export * from './cache.plugin.js'

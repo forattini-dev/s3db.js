@@ -3,7 +3,6 @@
 Object.defineProperty(exports, '__esModule', { value: true });
 
 var crypto$1 = require('crypto');
-var nanoid = require('nanoid');
 var EventEmitter = require('events');
 var hono = require('hono');
 var promises = require('fs/promises');
@@ -16,6 +15,7 @@ var os = require('os');
 var jsonStableStringify = require('json-stable-stringify');
 var os$1 = require('node:os');
 var promisePool = require('@supercharge/promise-pool');
+var nanoid = require('nanoid');
 var lodashEs = require('lodash-es');
 var flat = require('flat');
 var FastestValidator = require('fastest-validator');
@@ -31,6 +31,8 @@ var promises$2 = require('node:fs/promises');
 var node_events = require('node:events');
 var Stream = require('node:stream');
 var node_string_decoder = require('node:string_decoder');
+var zlib$1 = require('zlib');
+var util = require('util');
 
 function _interopNamespaceDefault(e) {
   var n = Object.create(null);
@@ -2572,6 +2574,24 @@ const PLUGIN_DEPENDENCIES = {
         description: "Universal JOSE and JWE implementation (for OAuth2 token validation)",
         installCommand: "pnpm add jose",
         npmUrl: "https://www.npmjs.com/package/jose"
+      }
+    }
+  },
+  "identity-plugin": {
+    name: "Identity Provider Plugin",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/identity.md",
+    dependencies: {
+      "hono": {
+        version: "^4.0.0",
+        description: "Ultra-light HTTP server framework",
+        installCommand: "pnpm add hono",
+        npmUrl: "https://www.npmjs.com/package/hono"
+      },
+      "@hono/node-server": {
+        version: "^1.0.0",
+        description: "Node.js adapter for Hono",
+        installCommand: "pnpm add @hono/node-server",
+        npmUrl: "https://www.npmjs.com/package/@hono/node-server"
       }
     }
   },
@@ -8502,6 +8522,1507 @@ class ApiPlugin extends Plugin {
    */
   getApp() {
     return this.server ? this.server.getApp() : null;
+  }
+}
+
+function generateKeyPair(modulusLength = 2048) {
+  const { publicKey, privateKey } = crypto$1.generateKeyPairSync("rsa", {
+    modulusLength,
+    publicKeyEncoding: {
+      type: "spki",
+      format: "pem"
+    },
+    privateKeyEncoding: {
+      type: "pkcs8",
+      format: "pem"
+    }
+  });
+  const kid = crypto$1.createHash("sha256").update(publicKey).digest("hex").substring(0, 16);
+  return {
+    publicKey,
+    privateKey,
+    kid,
+    algorithm: "RS256",
+    use: "sig",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function pemToJwk(publicKeyPem, kid) {
+  const keyObject = crypto$1.createPublicKey(publicKeyPem);
+  const exported = keyObject.export({ format: "jwk" });
+  return {
+    kty: "RSA",
+    use: "sig",
+    alg: "RS256",
+    kid,
+    n: exported.n,
+    // modulus
+    e: exported.e
+    // exponent
+  };
+}
+function createRS256Token(payload, privateKey, kid, expiresIn = "15m") {
+  const match = expiresIn.match(/^(\d+)([smhd])$/);
+  if (!match) {
+    throw new Error("Invalid expiresIn format. Use: 60s, 30m, 24h, 7d");
+  }
+  const [, value, unit] = match;
+  const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
+  const expiresInSeconds = parseInt(value) * multipliers[unit];
+  const header = {
+    alg: "RS256",
+    typ: "JWT",
+    kid
+  };
+  const now = Math.floor(Date.now() / 1e3);
+  const data = {
+    ...payload,
+    iat: now,
+    exp: now + expiresInSeconds
+  };
+  const encodedHeader = Buffer.from(JSON.stringify(header)).toString("base64url");
+  const encodedPayload = Buffer.from(JSON.stringify(data)).toString("base64url");
+  const sign = crypto$1.createSign("RSA-SHA256");
+  sign.update(`${encodedHeader}.${encodedPayload}`);
+  sign.end();
+  const signature = sign.sign(privateKey, "base64url");
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+function verifyRS256Token(token, publicKey) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) {
+      return null;
+    }
+    const [encodedHeader, encodedPayload, signature] = parts;
+    const verify = crypto$1.createVerify("RSA-SHA256");
+    verify.update(`${encodedHeader}.${encodedPayload}`);
+    verify.end();
+    const isValid = verify.verify(publicKey, signature, "base64url");
+    if (!isValid) {
+      return null;
+    }
+    const header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString());
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString());
+    if (header.alg !== "RS256") {
+      return null;
+    }
+    const now = Math.floor(Date.now() / 1e3);
+    if (payload.exp && payload.exp < now) {
+      return null;
+    }
+    return {
+      header,
+      payload
+    };
+  } catch (err) {
+    return null;
+  }
+}
+function getKidFromToken(token) {
+  try {
+    const [encodedHeader] = token.split(".");
+    const header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString());
+    return header.kid || null;
+  } catch (err) {
+    return null;
+  }
+}
+class KeyManager {
+  constructor(keyResource) {
+    this.keyResource = keyResource;
+    this.currentKey = null;
+    this.keys = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Initialize key manager - load or generate keys
+   */
+  async initialize() {
+    const existingKeys = await this.keyResource.list();
+    if (existingKeys.length > 0) {
+      for (const keyRecord of existingKeys) {
+        this.keys.set(keyRecord.kid, {
+          publicKey: keyRecord.publicKey,
+          privateKey: keyRecord.privateKey,
+          kid: keyRecord.kid,
+          createdAt: keyRecord.createdAt,
+          active: keyRecord.active
+        });
+        if (keyRecord.active) {
+          this.currentKey = keyRecord;
+        }
+      }
+    }
+    if (!this.currentKey) {
+      await this.rotateKey();
+    }
+  }
+  /**
+   * Rotate keys - generate new key pair
+   */
+  async rotateKey() {
+    const keyPair = generateKeyPair();
+    const oldKeys = await this.keyResource.query({ active: true });
+    for (const oldKey of oldKeys) {
+      await this.keyResource.update(oldKey.id, { active: false });
+    }
+    const keyRecord = await this.keyResource.insert({
+      kid: keyPair.kid,
+      publicKey: keyPair.publicKey,
+      privateKey: keyPair.privateKey,
+      algorithm: keyPair.algorithm,
+      use: keyPair.use,
+      active: true,
+      createdAt: keyPair.createdAt
+    });
+    this.currentKey = keyRecord;
+    this.keys.set(keyRecord.kid, keyRecord);
+    return keyRecord;
+  }
+  /**
+   * Get current active key
+   */
+  getCurrentKey() {
+    return this.currentKey;
+  }
+  /**
+   * Get key by kid
+   */
+  getKey(kid) {
+    return this.keys.get(kid);
+  }
+  /**
+   * Get all public keys in JWKS format
+   */
+  async getJWKS() {
+    const keys = Array.from(this.keys.values()).map((key) => ({
+      kty: "RSA",
+      use: "sig",
+      alg: "RS256",
+      kid: key.kid,
+      ...pemToJwk(key.publicKey, key.kid)
+    }));
+    return { keys };
+  }
+  /**
+   * Create JWT with current active key
+   */
+  createToken(payload, expiresIn = "15m") {
+    if (!this.currentKey) {
+      throw new Error("No active key available");
+    }
+    return createRS256Token(
+      payload,
+      this.currentKey.privateKey,
+      this.currentKey.kid,
+      expiresIn
+    );
+  }
+  /**
+   * Verify JWT token
+   */
+  async verifyToken(token) {
+    const kid = getKidFromToken(token);
+    if (!kid) {
+      return null;
+    }
+    const key = this.getKey(kid);
+    if (!key) {
+      return null;
+    }
+    return verifyRS256Token(token, key.publicKey);
+  }
+}
+
+var rsaKeys = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  KeyManager: KeyManager,
+  createRS256Token: createRS256Token,
+  generateKeyPair: generateKeyPair,
+  getKidFromToken: getKidFromToken,
+  pemToJwk: pemToJwk,
+  verifyRS256Token: verifyRS256Token
+});
+
+function generateDiscoveryDocument(options = {}) {
+  const {
+    issuer,
+    grantTypes = ["authorization_code", "client_credentials", "refresh_token"],
+    responseTypes = ["code", "token", "id_token", "code id_token", "code token", "id_token token", "code id_token token"],
+    scopes = ["openid", "profile", "email", "offline_access"]
+  } = options;
+  if (!issuer) {
+    throw new Error("Issuer URL is required for OIDC discovery");
+  }
+  const baseUrl = issuer.replace(/\/$/, "");
+  return {
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/auth/authorize`,
+    token_endpoint: `${baseUrl}/auth/token`,
+    userinfo_endpoint: `${baseUrl}/auth/userinfo`,
+    jwks_uri: `${baseUrl}/.well-known/jwks.json`,
+    registration_endpoint: `${baseUrl}/auth/register`,
+    introspection_endpoint: `${baseUrl}/auth/introspect`,
+    revocation_endpoint: `${baseUrl}/auth/revoke`,
+    end_session_endpoint: `${baseUrl}/auth/logout`,
+    // Supported features
+    scopes_supported: scopes,
+    response_types_supported: responseTypes,
+    response_modes_supported: ["query", "fragment", "form_post"],
+    grant_types_supported: grantTypes,
+    subject_types_supported: ["public"],
+    id_token_signing_alg_values_supported: ["RS256"],
+    token_endpoint_auth_methods_supported: [
+      "client_secret_basic",
+      "client_secret_post",
+      "none"
+    ],
+    // Claims
+    claims_supported: [
+      "sub",
+      "iss",
+      "aud",
+      "exp",
+      "iat",
+      "auth_time",
+      "nonce",
+      "email",
+      "email_verified",
+      "name",
+      "given_name",
+      "family_name",
+      "picture",
+      "locale"
+    ],
+    // Code challenge methods (PKCE)
+    code_challenge_methods_supported: ["plain", "S256"],
+    // UI locales
+    ui_locales_supported: ["en", "pt-BR"],
+    // Service documentation
+    service_documentation: `${baseUrl}/docs`,
+    // Additional metadata
+    claim_types_supported: ["normal"],
+    claims_parameter_supported: false,
+    request_parameter_supported: false,
+    request_uri_parameter_supported: false,
+    require_request_uri_registration: false,
+    // Discovery document version
+    version: "1.0"
+  };
+}
+function validateClaims(payload, options = {}) {
+  const {
+    issuer,
+    audience,
+    clockTolerance = 60
+  } = options;
+  const now = Math.floor(Date.now() / 1e3);
+  if (!payload.sub) {
+    return { valid: false, error: "Missing required claim: sub" };
+  }
+  if (!payload.iat) {
+    return { valid: false, error: "Missing required claim: iat" };
+  }
+  if (!payload.exp) {
+    return { valid: false, error: "Missing required claim: exp" };
+  }
+  if (issuer && payload.iss !== issuer) {
+    return {
+      valid: false,
+      error: `Invalid issuer. Expected: ${issuer}, Got: ${payload.iss}`
+    };
+  }
+  if (audience) {
+    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!audiences.includes(audience)) {
+      return {
+        valid: false,
+        error: `Invalid audience. Expected: ${audience}, Got: ${audiences.join(", ")}`
+      };
+    }
+  }
+  if (payload.exp < now - clockTolerance) {
+    return { valid: false, error: "Token has expired" };
+  }
+  if (payload.nbf && payload.nbf > now + clockTolerance) {
+    return { valid: false, error: "Token not yet valid (nbf)" };
+  }
+  if (payload.iat > now + clockTolerance) {
+    return { valid: false, error: "Token issued in the future" };
+  }
+  return { valid: true, error: null };
+}
+function extractUserClaims(user, scopes = []) {
+  const claims = {
+    sub: user.id
+    // Subject - user ID
+  };
+  if (scopes.includes("email") && user.email) {
+    claims.email = user.email;
+    claims.email_verified = user.emailVerified || false;
+  }
+  if (scopes.includes("profile")) {
+    if (user.name) claims.name = user.name;
+    if (user.givenName) claims.given_name = user.givenName;
+    if (user.familyName) claims.family_name = user.familyName;
+    if (user.picture) claims.picture = user.picture;
+    if (user.locale) claims.locale = user.locale;
+    if (user.zoneinfo) claims.zoneinfo = user.zoneinfo;
+    if (user.birthdate) claims.birthdate = user.birthdate;
+    if (user.gender) claims.gender = user.gender;
+  }
+  return claims;
+}
+function parseScopes(scopeString) {
+  if (!scopeString || typeof scopeString !== "string") {
+    return [];
+  }
+  return scopeString.trim().split(/\s+/).filter((s) => s.length > 0);
+}
+function validateScopes(requestedScopes, supportedScopes) {
+  if (!Array.isArray(requestedScopes)) {
+    requestedScopes = parseScopes(requestedScopes);
+  }
+  const invalidScopes = requestedScopes.filter((scope) => !supportedScopes.includes(scope));
+  if (invalidScopes.length > 0) {
+    return {
+      valid: false,
+      error: `Unsupported scopes: ${invalidScopes.join(", ")}`,
+      scopes: []
+    };
+  }
+  return {
+    valid: true,
+    error: null,
+    scopes: requestedScopes
+  };
+}
+function generateAuthCode(length = 32) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+function generateClientId() {
+  return crypto$1.randomUUID();
+}
+function generateClientSecret(length = 64) {
+  return crypto$1.randomBytes(length / 2).toString("hex");
+}
+
+class OAuth2Server {
+  constructor(options = {}) {
+    const {
+      issuer,
+      keyResource,
+      userResource,
+      clientResource,
+      authCodeResource,
+      supportedScopes = ["openid", "profile", "email", "offline_access"],
+      supportedGrantTypes = ["authorization_code", "client_credentials", "refresh_token"],
+      supportedResponseTypes = ["code", "token", "id_token"],
+      accessTokenExpiry = "15m",
+      idTokenExpiry = "15m",
+      refreshTokenExpiry = "7d",
+      authCodeExpiry = "10m"
+    } = options;
+    if (!issuer) {
+      throw new Error("Issuer URL is required for OAuth2Server");
+    }
+    if (!keyResource) {
+      throw new Error("keyResource is required for OAuth2Server");
+    }
+    if (!userResource) {
+      throw new Error("userResource is required for OAuth2Server");
+    }
+    this.issuer = issuer.replace(/\/$/, "");
+    this.keyResource = keyResource;
+    this.userResource = userResource;
+    this.clientResource = clientResource;
+    this.authCodeResource = authCodeResource;
+    this.supportedScopes = supportedScopes;
+    this.supportedGrantTypes = supportedGrantTypes;
+    this.supportedResponseTypes = supportedResponseTypes;
+    this.accessTokenExpiry = accessTokenExpiry;
+    this.idTokenExpiry = idTokenExpiry;
+    this.refreshTokenExpiry = refreshTokenExpiry;
+    this.authCodeExpiry = authCodeExpiry;
+    this.keyManager = new KeyManager(keyResource);
+  }
+  /**
+   * Initialize OAuth2 server - load keys
+   */
+  async initialize() {
+    await this.keyManager.initialize();
+  }
+  /**
+   * OIDC Discovery endpoint handler
+   * GET /.well-known/openid-configuration
+   */
+  async discoveryHandler(req, res) {
+    try {
+      const document = generateDiscoveryDocument({
+        issuer: this.issuer,
+        grantTypes: this.supportedGrantTypes,
+        responseTypes: this.supportedResponseTypes,
+        scopes: this.supportedScopes
+      });
+      res.status(200).json(document);
+    } catch (error) {
+      res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * JWKS endpoint handler
+   * GET /.well-known/jwks.json
+   */
+  async jwksHandler(req, res) {
+    try {
+      const jwks = await this.keyManager.getJWKS();
+      res.status(200).json(jwks);
+    } catch (error) {
+      res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Token endpoint handler
+   * POST /auth/token
+   *
+   * Supports:
+   * - client_credentials grant
+   * - authorization_code grant (if authCodeResource provided)
+   * - refresh_token grant (if authCodeResource provided)
+   */
+  async tokenHandler(req, res) {
+    try {
+      const { grant_type, scope, client_id, client_secret } = req.body;
+      if (!grant_type) {
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "grant_type is required"
+        });
+      }
+      if (!this.supportedGrantTypes.includes(grant_type)) {
+        return res.status(400).json({
+          error: "unsupported_grant_type",
+          error_description: `Grant type ${grant_type} is not supported`
+        });
+      }
+      if (!client_id) {
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "client_id is required"
+        });
+      }
+      if (this.clientResource) {
+        const client = await this.authenticateClient(client_id, client_secret);
+        if (!client) {
+          return res.status(401).json({
+            error: "invalid_client",
+            error_description: "Client authentication failed"
+          });
+        }
+      }
+      switch (grant_type) {
+        case "client_credentials":
+          return await this.handleClientCredentials(req, res, { client_id, scope });
+        case "authorization_code":
+          return await this.handleAuthorizationCode(req, res);
+        case "refresh_token":
+          return await this.handleRefreshToken(req, res);
+        default:
+          return res.status(400).json({
+            error: "unsupported_grant_type",
+            error_description: `Grant type ${grant_type} is not supported`
+          });
+      }
+    } catch (error) {
+      res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Client Credentials flow handler
+   */
+  async handleClientCredentials(req, res, { client_id, scope }) {
+    const scopes = parseScopes(scope);
+    const scopeValidation = validateScopes(scopes, this.supportedScopes);
+    if (!scopeValidation.valid) {
+      return res.status(400).json({
+        error: "invalid_scope",
+        error_description: scopeValidation.error
+      });
+    }
+    const accessToken = this.keyManager.createToken({
+      iss: this.issuer,
+      sub: client_id,
+      aud: this.issuer,
+      scope: scopeValidation.scopes.join(" "),
+      token_type: "access_token"
+    }, this.accessTokenExpiry);
+    return res.status(200).json({
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry),
+      scope: scopeValidation.scopes.join(" ")
+    });
+  }
+  /**
+   * Authorization Code flow handler
+   */
+  async handleAuthorizationCode(req, res) {
+    if (!this.authCodeResource) {
+      return res.status(400).json({
+        error: "unsupported_grant_type",
+        error_description: "Authorization code flow requires authCodeResource"
+      });
+    }
+    const { code, redirect_uri, code_verifier } = req.body;
+    if (!code) {
+      return res.status(400).json({
+        error: "invalid_request",
+        error_description: "code is required"
+      });
+    }
+    const authCodes = await this.authCodeResource.query({ code });
+    if (authCodes.length === 0) {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "Invalid authorization code"
+      });
+    }
+    const authCode = authCodes[0];
+    const now = Math.floor(Date.now() / 1e3);
+    if (authCode.expiresAt < now) {
+      await this.authCodeResource.remove(authCode.id);
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "Authorization code has expired"
+      });
+    }
+    if (authCode.redirectUri !== redirect_uri) {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "redirect_uri mismatch"
+      });
+    }
+    if (authCode.codeChallenge) {
+      if (!code_verifier) {
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "code_verifier is required"
+        });
+      }
+      const isValid = await this.validatePKCE(
+        code_verifier,
+        authCode.codeChallenge,
+        authCode.codeChallengeMethod
+      );
+      if (!isValid) {
+        return res.status(400).json({
+          error: "invalid_grant",
+          error_description: "Invalid code_verifier"
+        });
+      }
+    }
+    const user = await this.userResource.get(authCode.userId);
+    if (!user) {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "User not found"
+      });
+    }
+    const scopes = parseScopes(authCode.scope);
+    const accessToken = this.keyManager.createToken({
+      iss: this.issuer,
+      sub: user.id,
+      aud: authCode.audience || this.issuer,
+      scope: scopes.join(" "),
+      token_type: "access_token"
+    }, this.accessTokenExpiry);
+    const response = {
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry)
+    };
+    if (scopes.includes("openid")) {
+      const userClaims = extractUserClaims(user, scopes);
+      const idToken = this.keyManager.createToken({
+        iss: this.issuer,
+        sub: user.id,
+        aud: authCode.clientId,
+        nonce: authCode.nonce,
+        ...userClaims
+      }, this.idTokenExpiry);
+      response.id_token = idToken;
+    }
+    if (scopes.includes("offline_access")) {
+      const refreshToken = this.keyManager.createToken({
+        iss: this.issuer,
+        sub: user.id,
+        aud: this.issuer,
+        scope: scopes.join(" "),
+        token_type: "refresh_token"
+      }, this.refreshTokenExpiry);
+      response.refresh_token = refreshToken;
+    }
+    await this.authCodeResource.remove(authCode.id);
+    return res.status(200).json(response);
+  }
+  /**
+   * Refresh Token flow handler
+   */
+  async handleRefreshToken(req, res) {
+    const { refresh_token, scope } = req.body;
+    if (!refresh_token) {
+      return res.status(400).json({
+        error: "invalid_request",
+        error_description: "refresh_token is required"
+      });
+    }
+    const verified = await this.keyManager.verifyToken(refresh_token);
+    if (!verified) {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "Invalid refresh token"
+      });
+    }
+    const { payload } = verified;
+    if (payload.token_type !== "refresh_token") {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "Token is not a refresh token"
+      });
+    }
+    const claimValidation = validateClaims(payload, {
+      issuer: this.issuer,
+      clockTolerance: 60
+    });
+    if (!claimValidation.valid) {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: claimValidation.error
+      });
+    }
+    const requestedScopes = scope ? parseScopes(scope) : parseScopes(payload.scope);
+    const originalScopes = parseScopes(payload.scope);
+    const invalidScopes = requestedScopes.filter((s) => !originalScopes.includes(s));
+    if (invalidScopes.length > 0) {
+      return res.status(400).json({
+        error: "invalid_scope",
+        error_description: `Cannot request scopes not in original grant: ${invalidScopes.join(", ")}`
+      });
+    }
+    const user = await this.userResource.get(payload.sub);
+    if (!user) {
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "User not found"
+      });
+    }
+    const accessToken = this.keyManager.createToken({
+      iss: this.issuer,
+      sub: user.id,
+      aud: payload.aud,
+      scope: requestedScopes.join(" "),
+      token_type: "access_token"
+    }, this.accessTokenExpiry);
+    const response = {
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry)
+    };
+    if (requestedScopes.includes("openid")) {
+      const userClaims = extractUserClaims(user, requestedScopes);
+      const idToken = this.keyManager.createToken({
+        iss: this.issuer,
+        sub: user.id,
+        aud: payload.aud,
+        ...userClaims
+      }, this.idTokenExpiry);
+      response.id_token = idToken;
+    }
+    return res.status(200).json(response);
+  }
+  /**
+   * UserInfo endpoint handler
+   * GET /auth/userinfo
+   */
+  async userinfoHandler(req, res) {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({
+          error: "invalid_token",
+          error_description: "Missing or invalid Authorization header"
+        });
+      }
+      const token = authHeader.substring(7);
+      const verified = await this.keyManager.verifyToken(token);
+      if (!verified) {
+        return res.status(401).json({
+          error: "invalid_token",
+          error_description: "Invalid access token"
+        });
+      }
+      const { payload } = verified;
+      const claimValidation = validateClaims(payload, {
+        issuer: this.issuer,
+        clockTolerance: 60
+      });
+      if (!claimValidation.valid) {
+        return res.status(401).json({
+          error: "invalid_token",
+          error_description: claimValidation.error
+        });
+      }
+      const user = await this.userResource.get(payload.sub);
+      if (!user) {
+        return res.status(404).json({
+          error: "not_found",
+          error_description: "User not found"
+        });
+      }
+      const scopes = parseScopes(payload.scope);
+      const userClaims = extractUserClaims(user, scopes);
+      return res.status(200).json({
+        sub: user.id,
+        ...userClaims
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Token Introspection endpoint handler (RFC 7662)
+   * POST /auth/introspect
+   */
+  async introspectHandler(req, res) {
+    try {
+      const { token, token_type_hint } = req.body;
+      if (!token) {
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "token is required"
+        });
+      }
+      const verified = await this.keyManager.verifyToken(token);
+      if (!verified) {
+        return res.status(200).json({ active: false });
+      }
+      const { payload } = verified;
+      const claimValidation = validateClaims(payload, {
+        issuer: this.issuer,
+        clockTolerance: 60
+      });
+      if (!claimValidation.valid) {
+        return res.status(200).json({ active: false });
+      }
+      return res.status(200).json({
+        active: true,
+        scope: payload.scope,
+        client_id: payload.aud,
+        username: payload.sub,
+        token_type: payload.token_type || "access_token",
+        exp: payload.exp,
+        iat: payload.iat,
+        sub: payload.sub,
+        iss: payload.iss,
+        aud: payload.aud
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Authenticate client with credentials
+   */
+  async authenticateClient(clientId, clientSecret) {
+    if (!this.clientResource) {
+      return null;
+    }
+    try {
+      const clients = await this.clientResource.query({ clientId });
+      if (clients.length === 0) {
+        return null;
+      }
+      const client = clients[0];
+      if (client.clientSecret !== clientSecret) {
+        return null;
+      }
+      return client;
+    } catch (error) {
+      return null;
+    }
+  }
+  /**
+   * Validate PKCE code verifier
+   */
+  async validatePKCE(codeVerifier, codeChallenge, codeChallengeMethod = "plain") {
+    if (codeChallengeMethod === "plain") {
+      return codeVerifier === codeChallenge;
+    }
+    if (codeChallengeMethod === "S256") {
+      const crypto = await import('crypto');
+      const hash = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+      return hash === codeChallenge;
+    }
+    return false;
+  }
+  /**
+   * Parse expiry string to seconds
+   */
+  parseExpiryToSeconds(expiresIn) {
+    const match = expiresIn.match(/^(\d+)([smhd])$/);
+    if (!match) {
+      throw new Error("Invalid expiresIn format");
+    }
+    const [, value, unit] = match;
+    const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
+    return parseInt(value) * multipliers[unit];
+  }
+  /**
+   * Authorization endpoint handler (GET /oauth/authorize)
+   * Implements OAuth2 authorization code flow
+   *
+   * Query params:
+   * - response_type: 'code' (required)
+   * - client_id: Client identifier (required)
+   * - redirect_uri: Callback URL (required)
+   * - scope: Requested scopes (optional)
+   * - state: CSRF protection (recommended)
+   * - code_challenge: PKCE challenge (optional)
+   * - code_challenge_method: PKCE method (optional, default: plain)
+   */
+  async authorizeHandler(req, res) {
+    try {
+      const {
+        response_type,
+        client_id,
+        redirect_uri,
+        scope,
+        state,
+        code_challenge,
+        code_challenge_method = "plain"
+      } = req.query || {};
+      if (!response_type || !client_id || !redirect_uri) {
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "response_type, client_id, and redirect_uri are required"
+        });
+      }
+      if (!this.supportedResponseTypes.includes(response_type)) {
+        return res.status(400).json({
+          error: "unsupported_response_type",
+          error_description: `Response type ${response_type} is not supported`
+        });
+      }
+      if (this.clientResource) {
+        const clients = await this.clientResource.query({ clientId: client_id });
+        if (clients.length === 0) {
+          return res.status(400).json({
+            error: "invalid_client",
+            error_description: "Client not found"
+          });
+        }
+        const client = clients[0];
+        if (!client.redirectUris.includes(redirect_uri)) {
+          return res.status(400).json({
+            error: "invalid_request",
+            error_description: "Invalid redirect_uri"
+          });
+        }
+        if (scope) {
+          const requestedScopes = scope.split(" ");
+          const invalidScopes = requestedScopes.filter(
+            (s) => !client.allowedScopes.includes(s)
+          );
+          if (invalidScopes.length > 0) {
+            return res.status(400).json({
+              error: "invalid_scope",
+              error_description: `Invalid scopes: ${invalidScopes.join(", ")}`
+            });
+          }
+        }
+      }
+      const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Authorization - ${this.issuer}</title>
+  <style>
+    body { font-family: system-ui; max-width: 400px; margin: 100px auto; padding: 20px; }
+    form { background: #f5f5f5; padding: 20px; border-radius: 8px; }
+    input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    .info { background: #e7f3ff; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="info">
+    <strong>Application requesting access:</strong><br>
+    Client ID: ${client_id}<br>
+    Scopes: ${scope || "none"}<br>
+    Redirect: ${redirect_uri}
+  </div>
+  <form method="POST" action="/oauth/authorize">
+    <input type="hidden" name="response_type" value="${response_type}">
+    <input type="hidden" name="client_id" value="${client_id}">
+    <input type="hidden" name="redirect_uri" value="${redirect_uri}">
+    <input type="hidden" name="scope" value="${scope || ""}">
+    <input type="hidden" name="state" value="${state || ""}">
+    <input type="hidden" name="code_challenge" value="${code_challenge || ""}">
+    <input type="hidden" name="code_challenge_method" value="${code_challenge_method}">
+
+    <input type="email" name="username" placeholder="Email" required>
+    <input type="password" name="password" placeholder="Password" required>
+    <button type="submit">Authorize</button>
+  </form>
+</body>
+</html>`;
+      return res.status(200).header("Content-Type", "text/html").send(html);
+    } catch (error) {
+      console.error("[OAuth2Server] Authorization error:", error);
+      return res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Authorization endpoint handler (POST /oauth/authorize)
+   * Processes user authentication and generates authorization code
+   */
+  async authorizePostHandler(req, res) {
+    try {
+      const {
+        response_type,
+        client_id,
+        redirect_uri,
+        scope,
+        state,
+        code_challenge,
+        code_challenge_method = "plain",
+        username,
+        password
+      } = req.body || {};
+      const users = await this.userResource.query({ email: username });
+      if (users.length === 0) {
+        return res.status(401).json({
+          error: "access_denied",
+          error_description: "Invalid credentials"
+        });
+      }
+      const user = users[0];
+      if (user.password !== password) {
+        return res.status(401).json({
+          error: "access_denied",
+          error_description: "Invalid credentials"
+        });
+      }
+      const code = generateAuthCode();
+      const expiresAt = new Date(Date.now() + this.parseExpiryToSeconds(this.authCodeExpiry) * 1e3).toISOString();
+      if (this.authCodeResource) {
+        await this.authCodeResource.insert({
+          code,
+          clientId: client_id,
+          userId: user.id,
+          redirectUri: redirect_uri,
+          scope: scope || "",
+          expiresAt,
+          used: false,
+          codeChallenge: code_challenge || null,
+          codeChallengeMethod: code_challenge_method
+        });
+      }
+      const url = new URL(redirect_uri);
+      url.searchParams.set("code", code);
+      if (state) {
+        url.searchParams.set("state", state);
+      }
+      return res.redirect(url.toString());
+    } catch (error) {
+      console.error("[OAuth2Server] Authorization POST error:", error);
+      return res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Client Registration endpoint handler (POST /oauth/register)
+   * Implements RFC 7591 - OAuth 2.0 Dynamic Client Registration
+   *
+   * Request body:
+   * - redirect_uris: Array of redirect URIs (required)
+   * - token_endpoint_auth_method: 'client_secret_basic' | 'client_secret_post'
+   * - grant_types: Array of grant types (optional)
+   * - response_types: Array of response types (optional)
+   * - client_name: Human-readable name (optional)
+   * - client_uri: URL of client homepage (optional)
+   * - logo_uri: URL of client logo (optional)
+   * - scope: Space-separated scopes (optional)
+   * - contacts: Array of contact emails (optional)
+   * - tos_uri: Terms of service URL (optional)
+   * - policy_uri: Privacy policy URL (optional)
+   */
+  async registerClientHandler(req, res) {
+    try {
+      const {
+        redirect_uris,
+        token_endpoint_auth_method = "client_secret_basic",
+        grant_types,
+        response_types,
+        client_name,
+        client_uri,
+        logo_uri,
+        scope,
+        contacts,
+        tos_uri,
+        policy_uri
+      } = req.body || {};
+      if (!redirect_uris || !Array.isArray(redirect_uris) || redirect_uris.length === 0) {
+        return res.status(400).json({
+          error: "invalid_redirect_uri",
+          error_description: "redirect_uris is required and must be a non-empty array"
+        });
+      }
+      for (const uri of redirect_uris) {
+        try {
+          new URL(uri);
+        } catch {
+          return res.status(400).json({
+            error: "invalid_redirect_uri",
+            error_description: `Invalid redirect URI: ${uri}`
+          });
+        }
+      }
+      const clientId = generateClientId();
+      const clientSecret = generateClientSecret();
+      const clientData = {
+        clientId,
+        clientSecret,
+        name: client_name || `Client ${clientId}`,
+        redirectUris: redirect_uris,
+        allowedScopes: scope ? scope.split(" ") : this.supportedScopes,
+        grantTypes: grant_types || ["authorization_code", "refresh_token"],
+        responseTypes: response_types || ["code"],
+        tokenEndpointAuthMethod: token_endpoint_auth_method,
+        active: true
+      };
+      if (client_uri) clientData.clientUri = client_uri;
+      if (logo_uri) clientData.logoUri = logo_uri;
+      if (contacts) clientData.contacts = contacts;
+      if (tos_uri) clientData.tosUri = tos_uri;
+      if (policy_uri) clientData.policyUri = policy_uri;
+      if (!this.clientResource) {
+        return res.status(500).json({
+          error: "server_error",
+          error_description: "Client registration not available"
+        });
+      }
+      const client = await this.clientResource.insert(clientData);
+      return res.status(201).json({
+        client_id: clientId,
+        client_secret: clientSecret,
+        client_id_issued_at: Math.floor(Date.now() / 1e3),
+        client_secret_expires_at: 0,
+        // 0 = never expires
+        redirect_uris,
+        token_endpoint_auth_method,
+        grant_types: clientData.grantTypes,
+        response_types: clientData.responseTypes,
+        client_name: clientData.name,
+        client_uri,
+        logo_uri,
+        scope: clientData.allowedScopes.join(" "),
+        contacts,
+        tos_uri,
+        policy_uri
+      });
+    } catch (error) {
+      console.error("[OAuth2Server] Client registration error:", error);
+      return res.status(500).json({
+        error: "server_error",
+        error_description: error.message
+      });
+    }
+  }
+  /**
+   * Token Revocation endpoint handler (POST /oauth/revoke)
+   * Implements RFC 7009 - OAuth 2.0 Token Revocation
+   *
+   * Request body:
+   * - token: Token to revoke (required)
+   * - token_type_hint: 'access_token' | 'refresh_token' (optional)
+   */
+  async revokeHandler(req, res) {
+    try {
+      const { token, token_type_hint } = req.body || {};
+      if (!token) {
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "token is required"
+        });
+      }
+      const { publicKey, privateKey, kid } = await this.keyManager.getCurrentKey();
+      const { verifyRS256Token } = await Promise.resolve().then(function () { return rsaKeys; });
+      const [valid, payload] = verifyRS256Token(token, publicKey);
+      if (!valid) {
+        return res.status(200).send();
+      }
+      return res.status(200).send();
+    } catch (error) {
+      console.error("[OAuth2Server] Token revocation error:", error);
+      return res.status(200).send();
+    }
+  }
+  /**
+   * Rotate signing keys
+   */
+  async rotateKeys() {
+    return await this.keyManager.rotateKey();
+  }
+}
+
+class IdentityPlugin extends Plugin {
+  /**
+   * Create Identity Provider Plugin instance
+   * @param {Object} options - Plugin configuration
+   */
+  constructor(options = {}) {
+    super(options);
+    this.config = {
+      // Server configuration
+      port: options.port || 4e3,
+      host: options.host || "0.0.0.0",
+      verbose: options.verbose || false,
+      // OAuth2/OIDC configuration
+      issuer: options.issuer || `http://localhost:${options.port || 4e3}`,
+      supportedScopes: options.supportedScopes || ["openid", "profile", "email", "offline_access"],
+      supportedGrantTypes: options.supportedGrantTypes || ["authorization_code", "client_credentials", "refresh_token"],
+      supportedResponseTypes: options.supportedResponseTypes || ["code", "token", "id_token"],
+      // Token expiration
+      accessTokenExpiry: options.accessTokenExpiry || "15m",
+      idTokenExpiry: options.idTokenExpiry || "15m",
+      refreshTokenExpiry: options.refreshTokenExpiry || "7d",
+      authCodeExpiry: options.authCodeExpiry || "10m",
+      // User resource (for authentication)
+      userResource: options.userResource || "users",
+      // CORS configuration
+      cors: {
+        enabled: options.cors?.enabled !== false,
+        // Enabled by default for identity servers
+        origin: options.cors?.origin || "*",
+        methods: options.cors?.methods || ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allowedHeaders: options.cors?.allowedHeaders || ["Content-Type", "Authorization", "X-API-Key"],
+        credentials: options.cors?.credentials !== false,
+        maxAge: options.cors?.maxAge || 86400
+      },
+      // Security headers
+      security: {
+        enabled: options.security?.enabled !== false
+      },
+      // Logging
+      logging: {
+        enabled: options.logging?.enabled || false,
+        format: options.logging?.format || ":method :path :status :response-time ms"
+      }
+    };
+    this.server = null;
+    this.oauth2Server = null;
+    this.oauth2KeysResource = null;
+    this.oauth2ClientsResource = null;
+    this.oauth2AuthCodesResource = null;
+    this.usersResource = null;
+  }
+  /**
+   * Validate plugin dependencies
+   * @private
+   */
+  async _validateDependencies() {
+    await requirePluginDependency("identity-plugin", {
+      throwOnError: true,
+      checkVersions: true
+    });
+  }
+  /**
+   * Install plugin
+   */
+  async onInstall() {
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Installing...");
+    }
+    try {
+      await this._validateDependencies();
+    } catch (err) {
+      console.error("[Identity Plugin] Dependency validation failed:", err.message);
+      throw err;
+    }
+    await this._createOAuth2Resources();
+    await this._ensureUsersResource();
+    await this._initializeOAuth2Server();
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Installed successfully");
+    }
+  }
+  /**
+   * Create OAuth2 resources for authorization server
+   * @private
+   */
+  async _createOAuth2Resources() {
+    const [okKeys, errKeys, keysResource] = await tryFn(
+      () => this.database.createResource({
+        name: "plg_oauth_keys",
+        attributes: {
+          id: "string|required",
+          kid: "string|required",
+          publicKey: "string|required",
+          privateKey: "secret|required",
+          algorithm: "string|default:RS256",
+          use: "string|default:sig",
+          active: "boolean|default:true",
+          createdAt: "string|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        createdBy: "IdentityPlugin"
+      })
+    );
+    if (okKeys) {
+      this.oauth2KeysResource = keysResource;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Created plg_oauth_keys resource");
+      }
+    } else if (this.database.resources.plg_oauth_keys) {
+      this.oauth2KeysResource = this.database.resources.plg_oauth_keys;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Using existing plg_oauth_keys resource");
+      }
+    } else {
+      throw errKeys;
+    }
+    const [okClients, errClients, clientsResource] = await tryFn(
+      () => this.database.createResource({
+        name: "plg_oauth_clients",
+        attributes: {
+          id: "string|required",
+          clientId: "string|required",
+          clientSecret: "secret|required",
+          name: "string|required",
+          redirectUris: "array|items:string|required",
+          allowedScopes: "array|items:string|optional",
+          grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
+          active: "boolean|default:true",
+          createdAt: "string|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        createdBy: "IdentityPlugin"
+      })
+    );
+    if (okClients) {
+      this.oauth2ClientsResource = clientsResource;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Created plg_oauth_clients resource");
+      }
+    } else if (this.database.resources.plg_oauth_clients) {
+      this.oauth2ClientsResource = this.database.resources.plg_oauth_clients;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Using existing plg_oauth_clients resource");
+      }
+    } else {
+      throw errClients;
+    }
+    const [okCodes, errCodes, codesResource] = await tryFn(
+      () => this.database.createResource({
+        name: "plg_auth_codes",
+        attributes: {
+          id: "string|required",
+          code: "string|required",
+          clientId: "string|required",
+          userId: "string|required",
+          redirectUri: "string|required",
+          scope: "string|optional",
+          expiresAt: "string|required",
+          used: "boolean|default:false",
+          codeChallenge: "string|optional",
+          // PKCE support
+          codeChallengeMethod: "string|optional",
+          // PKCE support
+          createdAt: "string|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        createdBy: "IdentityPlugin"
+      })
+    );
+    if (okCodes) {
+      this.oauth2AuthCodesResource = codesResource;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Created plg_auth_codes resource");
+      }
+    } else if (this.database.resources.plg_auth_codes) {
+      this.oauth2AuthCodesResource = this.database.resources.plg_auth_codes;
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Using existing plg_auth_codes resource");
+      }
+    } else {
+      throw errCodes;
+    }
+  }
+  /**
+   * Ensure users resource exists (for authentication)
+   * @private
+   */
+  async _ensureUsersResource() {
+    const resourceName = this.config.userResource;
+    if (this.database.resources[resourceName]) {
+      this.usersResource = this.database.resources[resourceName];
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Using existing ${resourceName} resource`);
+      }
+      return;
+    }
+    const [ok, err, resource] = await tryFn(
+      () => this.database.createResource({
+        name: resourceName,
+        attributes: {
+          id: "string|required",
+          email: "string|required|email",
+          password: "secret|required",
+          name: "string|optional",
+          scopes: "array|items:string|optional",
+          active: "boolean|default:true"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        createdBy: "IdentityPlugin"
+      })
+    );
+    if (ok) {
+      this.usersResource = resource;
+      if (this.config.verbose) {
+        console.log(`[Identity Plugin] Created ${resourceName} resource`);
+      }
+    } else {
+      throw err;
+    }
+  }
+  /**
+   * Initialize OAuth2 Server instance
+   * @private
+   */
+  async _initializeOAuth2Server() {
+    this.oauth2Server = new OAuth2Server({
+      issuer: this.config.issuer,
+      keyResource: this.oauth2KeysResource,
+      userResource: this.usersResource,
+      clientResource: this.oauth2ClientsResource,
+      authCodeResource: this.oauth2AuthCodesResource,
+      supportedScopes: this.config.supportedScopes,
+      supportedGrantTypes: this.config.supportedGrantTypes,
+      supportedResponseTypes: this.config.supportedResponseTypes,
+      accessTokenExpiry: this.config.accessTokenExpiry,
+      idTokenExpiry: this.config.idTokenExpiry,
+      refreshTokenExpiry: this.config.refreshTokenExpiry,
+      authCodeExpiry: this.config.authCodeExpiry
+    });
+    await this.oauth2Server.initialize();
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] OAuth2 Server initialized");
+      console.log(`[Identity Plugin] Issuer: ${this.config.issuer}`);
+      console.log(`[Identity Plugin] Supported scopes: ${this.config.supportedScopes.join(", ")}`);
+      console.log(`[Identity Plugin] Supported grant types: ${this.config.supportedGrantTypes.join(", ")}`);
+    }
+  }
+  /**
+   * Start plugin
+   */
+  async onStart() {
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Starting server...");
+    }
+    const { IdentityServer } = await Promise.resolve().then(function () { return server; });
+    this.server = new IdentityServer({
+      port: this.config.port,
+      host: this.config.host,
+      verbose: this.config.verbose,
+      issuer: this.config.issuer,
+      oauth2Server: this.oauth2Server,
+      cors: this.config.cors,
+      security: this.config.security,
+      logging: this.config.logging
+    });
+    await this.server.start();
+    this.emit("plugin.started", {
+      port: this.config.port,
+      host: this.config.host,
+      issuer: this.config.issuer
+    });
+  }
+  /**
+   * Stop plugin
+   */
+  async onStop() {
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Stopping server...");
+    }
+    if (this.server) {
+      await this.server.stop();
+      this.server = null;
+    }
+    this.emit("plugin.stopped");
+  }
+  /**
+   * Uninstall plugin
+   */
+  async onUninstall(options = {}) {
+    const { purgeData = false } = options;
+    await this.onStop();
+    if (purgeData) {
+      const resourcesToDelete = ["plg_oauth_keys", "plg_oauth_clients", "plg_auth_codes"];
+      for (const resourceName of resourcesToDelete) {
+        const [ok] = await tryFn(() => this.database.deleteResource(resourceName));
+        if (ok && this.config.verbose) {
+          console.log(`[Identity Plugin] Deleted ${resourceName} resource`);
+        }
+      }
+    }
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Uninstalled successfully");
+    }
+  }
+  /**
+   * Get server information
+   * @returns {Object} Server info
+   */
+  getServerInfo() {
+    return this.server ? this.server.getInfo() : { isRunning: false };
+  }
+  /**
+   * Get OAuth2 Server instance (for advanced usage)
+   * @returns {OAuth2Server|null}
+   */
+  getOAuth2Server() {
+    return this.oauth2Server;
   }
 }
 
@@ -49015,6 +50536,460 @@ class Seeder {
   }
 }
 
+function createCorsMiddleware(config = {}) {
+  const {
+    origin = "*",
+    methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders = ["Content-Type", "Authorization", "X-API-Key"],
+    exposedHeaders = ["X-Total-Count", "X-Page-Count"],
+    credentials = true,
+    maxAge = 86400
+  } = config;
+  return async (c, next) => {
+    c.header("Access-Control-Allow-Origin", origin);
+    c.header("Access-Control-Allow-Methods", methods.join(", "));
+    c.header("Access-Control-Allow-Headers", allowedHeaders.join(", "));
+    c.header("Access-Control-Expose-Headers", exposedHeaders.join(", "));
+    if (credentials) {
+      c.header("Access-Control-Allow-Credentials", "true");
+    }
+    c.header("Access-Control-Max-Age", maxAge.toString());
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204);
+    }
+    await next();
+  };
+}
+
+function createLoggingMiddleware(config = {}) {
+  const {
+    format = ":method :path :status :response-time ms",
+    verbose = false
+  } = config;
+  return async (c, next) => {
+    const start = Date.now();
+    const method = c.req.method;
+    const path = c.req.path;
+    const requestId = c.get("requestId");
+    await next();
+    const duration = Date.now() - start;
+    const status = c.res.status;
+    const user = c.get("user")?.username || c.get("user")?.email || "anonymous";
+    let logMessage = format.replace(":method", method).replace(":path", path).replace(":status", status).replace(":response-time", duration).replace(":user", user).replace(":requestId", requestId);
+    console.log(`[HTTP] ${logMessage}`);
+  };
+}
+
+util.promisify(zlib$1.gzip);
+util.promisify(zlib$1.brotliCompress);
+
+function createSecurityMiddleware(config = {}) {
+  const {
+    contentSecurityPolicy = {
+      enabled: true,
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'", "'unsafe-inline'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:", "https:"]
+      },
+      reportOnly: false,
+      reportUri: null
+    },
+    frameguard = { action: "deny" },
+    noSniff = true,
+    hsts = {
+      maxAge: 15552e3,
+      // 180 days
+      includeSubDomains: true,
+      preload: false
+    },
+    referrerPolicy = { policy: "no-referrer" },
+    dnsPrefetchControl = { allow: false },
+    ieNoOpen = true,
+    permittedCrossDomainPolicies = { policy: "none" },
+    xssFilter = { mode: "block" },
+    permissionsPolicy = {
+      features: {
+        geolocation: [],
+        microphone: [],
+        camera: [],
+        payment: [],
+        usb: []
+      }
+    }
+  } = config;
+  return async (c, next) => {
+    if (noSniff) {
+      c.header("X-Content-Type-Options", "nosniff");
+    }
+    if (frameguard) {
+      const action = frameguard.action.toUpperCase();
+      if (action === "DENY") {
+        c.header("X-Frame-Options", "DENY");
+      } else if (action === "SAMEORIGIN") {
+        c.header("X-Frame-Options", "SAMEORIGIN");
+      }
+    }
+    if (hsts) {
+      const parts = [`max-age=${hsts.maxAge}`];
+      if (hsts.includeSubDomains) {
+        parts.push("includeSubDomains");
+      }
+      if (hsts.preload) {
+        parts.push("preload");
+      }
+      c.header("Strict-Transport-Security", parts.join("; "));
+    }
+    if (referrerPolicy) {
+      c.header("Referrer-Policy", referrerPolicy.policy);
+    }
+    if (dnsPrefetchControl) {
+      const value = dnsPrefetchControl.allow ? "on" : "off";
+      c.header("X-DNS-Prefetch-Control", value);
+    }
+    if (ieNoOpen) {
+      c.header("X-Download-Options", "noopen");
+    }
+    if (permittedCrossDomainPolicies) {
+      c.header("X-Permitted-Cross-Domain-Policies", permittedCrossDomainPolicies.policy);
+    }
+    if (xssFilter) {
+      const mode = xssFilter.mode;
+      c.header("X-XSS-Protection", mode === "block" ? "1; mode=block" : "0");
+    }
+    if (permissionsPolicy && permissionsPolicy.features) {
+      const features = permissionsPolicy.features;
+      const policies = [];
+      for (const [feature, allowList] of Object.entries(features)) {
+        if (Array.isArray(allowList)) {
+          const value = allowList.length === 0 ? `${feature}=()` : `${feature}=(${allowList.join(" ")})`;
+          policies.push(value);
+        }
+      }
+      if (policies.length > 0) {
+        c.header("Permissions-Policy", policies.join(", "));
+      }
+    }
+    if (contentSecurityPolicy && contentSecurityPolicy.enabled !== false && contentSecurityPolicy.directives) {
+      const cspParts = [];
+      for (const [directive, values] of Object.entries(contentSecurityPolicy.directives)) {
+        if (Array.isArray(values) && values.length > 0) {
+          cspParts.push(`${directive} ${values.join(" ")}`);
+        } else if (typeof values === "string") {
+          cspParts.push(`${directive} ${values}`);
+        }
+      }
+      if (contentSecurityPolicy.reportUri) {
+        cspParts.push(`report-uri ${contentSecurityPolicy.reportUri}`);
+      }
+      if (cspParts.length > 0) {
+        const cspValue = cspParts.join("; ");
+        const headerName = contentSecurityPolicy.reportOnly ? "Content-Security-Policy-Report-Only" : "Content-Security-Policy";
+        c.header(headerName, cspValue);
+      }
+    }
+    await next();
+  };
+}
+
+class IdentityServer {
+  /**
+   * Create Identity server
+   * @param {Object} options - Server options
+   */
+  constructor(options = {}) {
+    this.options = {
+      port: options.port || 4e3,
+      host: options.host || "0.0.0.0",
+      verbose: options.verbose || false,
+      issuer: options.issuer,
+      oauth2Server: options.oauth2Server,
+      cors: options.cors || {},
+      security: options.security || {},
+      logging: options.logging || {}
+    };
+    this.app = null;
+    this.server = null;
+    this.isRunning = false;
+    this.initialized = false;
+  }
+  /**
+   * Setup all routes
+   * @private
+   */
+  _setupRoutes() {
+    this.app.use("*", async (c, next) => {
+      c.set("requestId", idGenerator());
+      c.set("verbose", this.options.verbose);
+      await next();
+    });
+    if (this.options.cors.enabled) {
+      const corsMiddleware = createCorsMiddleware(this.options.cors);
+      this.app.use("*", corsMiddleware);
+    }
+    if (this.options.security.enabled) {
+      const securityMiddleware = createSecurityMiddleware(this.options.security);
+      this.app.use("*", securityMiddleware);
+    }
+    if (this.options.logging.enabled) {
+      const loggingMiddleware = createLoggingMiddleware(this.options.logging);
+      this.app.use("*", loggingMiddleware);
+    }
+    this.app.get("/health", (c) => {
+      const response = success({
+        status: "ok",
+        service: "identity-provider",
+        uptime: process.uptime(),
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/health/live", (c) => {
+      const response = success({
+        status: "alive",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/health/ready", (c) => {
+      const isReady = this.options.oauth2Server !== null;
+      if (!isReady) {
+        const response2 = error("Service not ready", {
+          status: 503,
+          code: "NOT_READY"
+        });
+        return c.json(response2, 503);
+      }
+      const response = success({
+        status: "ready",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/", (c) => {
+      return c.redirect("/.well-known/openid-configuration", 302);
+    });
+    this._setupOAuth2Routes();
+    this.app.onError((err, c) => {
+      return errorHandler(err, c);
+    });
+    this.app.notFound((c) => {
+      const response = error("Route not found", {
+        status: 404,
+        code: "NOT_FOUND",
+        details: {
+          path: c.req.path,
+          method: c.req.method
+        }
+      });
+      return c.json(response, 404);
+    });
+  }
+  /**
+   * Setup OAuth2/OIDC routes
+   * @private
+   */
+  _setupOAuth2Routes() {
+    const { oauth2Server } = this.options;
+    if (!oauth2Server) {
+      console.error("[Identity Server] OAuth2 Server not provided");
+      return;
+    }
+    this.app.get("/.well-known/openid-configuration", async (c) => {
+      try {
+        const document = await oauth2Server.discoveryHandler(c.req, c);
+        return c.json(document);
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.get("/.well-known/jwks.json", async (c) => {
+      try {
+        const jwks = await oauth2Server.jwksHandler(c.req, c);
+        return c.json(jwks);
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.post("/oauth/token", async (c) => {
+      try {
+        const result = await oauth2Server.tokenHandler(c.req, c);
+        return c.json(result);
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.get("/oauth/userinfo", async (c) => {
+      try {
+        const userinfo = await oauth2Server.userinfoHandler(c.req, c);
+        return c.json(userinfo);
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.post("/oauth/introspect", async (c) => {
+      try {
+        const result = await oauth2Server.introspectHandler(c.req, c);
+        return c.json(result);
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.get("/oauth/authorize", async (c) => {
+      try {
+        const result = await oauth2Server.authorizeHandler(c.req, c);
+        return result;
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.post("/oauth/authorize", async (c) => {
+      try {
+        const result = await oauth2Server.authorizePostHandler(c.req, c);
+        return result;
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.post("/oauth/register", async (c) => {
+      try {
+        const result = await oauth2Server.registerClientHandler(c.req, c);
+        return c.json(result);
+      } catch (error) {
+        return c.json({
+          error: "server_error",
+          error_description: error.message
+        }, 500);
+      }
+    });
+    this.app.post("/oauth/revoke", async (c) => {
+      try {
+        const result = await oauth2Server.revokeHandler(c.req, c);
+        return result;
+      } catch (error) {
+        return c.body(null, 200);
+      }
+    });
+    if (this.options.verbose) {
+      console.log("[Identity Server] Mounted OAuth2/OIDC routes:");
+      console.log("[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)");
+      console.log("[Identity Server]   GET  /.well-known/jwks.json (JWKS)");
+      console.log("[Identity Server]   GET  /oauth/authorize (Authorization UI)");
+      console.log("[Identity Server]   POST /oauth/authorize (Process Login)");
+      console.log("[Identity Server]   POST /oauth/token (Token)");
+      console.log("[Identity Server]   GET  /oauth/userinfo (UserInfo)");
+      console.log("[Identity Server]   POST /oauth/introspect (Introspection)");
+      console.log("[Identity Server]   POST /oauth/register (Client Registration)");
+      console.log("[Identity Server]   POST /oauth/revoke (Token Revocation)");
+    }
+  }
+  /**
+   * Start the server
+   * @returns {Promise<void>}
+   */
+  async start() {
+    if (this.isRunning) {
+      console.warn("[Identity Server] Server is already running");
+      return;
+    }
+    if (!this.initialized) {
+      const { Hono } = await import('hono');
+      const { serve } = await import('@hono/node-server');
+      this.Hono = Hono;
+      this.serve = serve;
+      this.app = new Hono();
+      this._setupRoutes();
+      this.initialized = true;
+    }
+    const { port, host } = this.options;
+    return new Promise((resolve, reject) => {
+      try {
+        this.server = this.serve({
+          fetch: this.app.fetch,
+          port,
+          hostname: host
+        }, (info) => {
+          this.isRunning = true;
+          console.log(`[Identity Server] Server listening on http://${info.address}:${info.port}`);
+          console.log(`[Identity Server] Issuer: ${this.options.issuer}`);
+          console.log(`[Identity Server] Discovery: ${this.options.issuer}/.well-known/openid-configuration`);
+          resolve();
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+  /**
+   * Stop the server
+   * @returns {Promise<void>}
+   */
+  async stop() {
+    if (!this.isRunning) {
+      console.warn("[Identity Server] Server is not running");
+      return;
+    }
+    if (this.server && typeof this.server.close === "function") {
+      await new Promise((resolve) => {
+        this.server.close(() => {
+          this.isRunning = false;
+          console.log("[Identity Server] Server stopped");
+          resolve();
+        });
+      });
+    } else {
+      this.isRunning = false;
+      console.log("[Identity Server] Server stopped");
+    }
+  }
+  /**
+   * Get server info
+   * @returns {Object} Server information
+   */
+  getInfo() {
+    return {
+      isRunning: this.isRunning,
+      port: this.options.port,
+      host: this.options.host,
+      issuer: this.options.issuer
+    };
+  }
+  /**
+   * Get Hono app instance
+   * @returns {Hono} Hono app
+   */
+  getApp() {
+    return this.app;
+  }
+}
+
+var server = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  IdentityServer: IdentityServer
+});
+
 function sanitizeLabel(value) {
   if (typeof value !== "string") {
     value = String(value);
@@ -49421,6 +51396,7 @@ exports.FilesystemBackupDriver = FilesystemBackupDriver;
 exports.FilesystemCache = FilesystemCache;
 exports.FullTextPlugin = FullTextPlugin;
 exports.GeoPlugin = GeoPlugin;
+exports.IdentityPlugin = IdentityPlugin;
 exports.InvalidResourceItem = InvalidResourceItem;
 exports.MLPlugin = MLPlugin;
 exports.MemoryCache = MemoryCache;
