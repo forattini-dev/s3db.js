@@ -1192,11 +1192,6 @@ graph TB
     SSO -.->|JWKS<br/>Public Keys| Products
     SSO -.->|JWKS<br/>Public Keys| Payments
 
-    style SSO fill:#e1f5ff,stroke:#01579b,stroke-width:3px
-    style Orders fill:#f3e5f5,stroke:#4a148c
-    style Products fill:#f3e5f5,stroke:#4a148c
-    style Payments fill:#f3e5f5,stroke:#4a148c
-    style Client fill:#fff3e0,stroke:#e65100
 ```
 
 **Key Benefits:**
@@ -1239,7 +1234,7 @@ sequenceDiagram
     Orders->>Orders: Check scope: orders:read ✓
     Orders-->>Client: { orders: [...] }
 
-    Note over Orders: ✅ NO communication with SSO!<br/>✅ Validation is 100% local!
+    Note over Orders: NO communication with SSO!<br/>Validation is 100% local!
 ```
 
 ### Grant Types Explained
@@ -1398,24 +1393,20 @@ api.addRoute({
 
 ```mermaid
 graph LR
-    subgraph "❌ HS256 (Symmetric) - DON'T USE"
+    subgraph "HS256 (Symmetric) - DON'T USE"
         SSO_H[SSO Server<br/>shared secret]
         API_H[All APIs<br/>shared secret]
 
         SSO_H -.->|Same secret<br/>everywhere| API_H
 
-        style SSO_H fill:#ffcdd2,stroke:#c62828
-        style API_H fill:#ffcdd2,stroke:#c62828
     end
 
-    subgraph "✅ RS256 (Asymmetric) - CORRECT"
-        SSO_R[SSO Server<br/>🔒 PRIVATE key]
-        API_R[All APIs<br/>🔓 PUBLIC key]
+    subgraph "RS256 (Asymmetric) - CORRECT"
+        SSO_R[SSO Server<br/>PRIVATE key]
+        API_R[All APIs<br/>PUBLIC key]
 
         SSO_R -->|JWKS<br/>public keys only| API_R
 
-        style SSO_R fill:#c8e6c9,stroke:#2e7d32
-        style API_R fill:#e1f5fe,stroke:#01579b
     end
 ```
 
