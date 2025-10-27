@@ -2722,7 +2722,7 @@ async function requirePluginDependency(pluginId, options = {}) {
   return { valid, missing, incompatible, messages };
 }
 
-function success(data, options = {}) {
+function success$1(data, options = {}) {
   const { status = 200, meta = {} } = options;
   return {
     success: true,
@@ -2734,7 +2734,7 @@ function success(data, options = {}) {
     _status: status
   };
 }
-function error(error2, options = {}) {
+function error$1(error2, options = {}) {
   const { status = 500, code = "INTERNAL_ERROR", details = {} } = options;
   const errorMessage = error2 instanceof Error ? error2.message : error2;
   const errorStack = error2 instanceof Error && process.env.NODE_ENV !== "production" ? error2.stack : void 0;
@@ -2791,39 +2791,27 @@ function noContent() {
   };
 }
 function validationError(errors) {
-  return error("Validation failed", {
+  return error$1("Validation failed", {
     status: 400,
     code: "VALIDATION_ERROR",
     details: { errors }
   });
 }
 function notFound(resource, id) {
-  return error(`${resource} with id '${id}' not found`, {
+  return error$1(`${resource} with id '${id}' not found`, {
     status: 404,
     code: "NOT_FOUND",
     details: { resource, id }
   });
 }
 function unauthorized(message = "Unauthorized") {
-  return error(message, {
+  return error$1(message, {
     status: 401,
     code: "UNAUTHORIZED"
   });
 }
-function payloadTooLarge(size, limit) {
-  return error("Request payload too large", {
-    status: 413,
-    code: "PAYLOAD_TOO_LARGE",
-    details: {
-      receivedSize: size,
-      maxSize: limit,
-      receivedMB: (size / 1024 / 1024).toFixed(2),
-      maxMB: (limit / 1024 / 1024).toFixed(2)
-    }
-  });
-}
 
-const errorStatusMap = {
+const errorStatusMap$1 = {
   "ValidationError": 400,
   "InvalidResourceItem": 400,
   "ResourceNotFound": 404,
@@ -2835,12 +2823,12 @@ const errorStatusMap = {
   "QueueError": 500,
   "ResourceError": 500
 };
-function getStatusFromError(err) {
-  if (err.name && errorStatusMap[err.name]) {
-    return errorStatusMap[err.name];
+function getStatusFromError$1(err) {
+  if (err.name && errorStatusMap$1[err.name]) {
+    return errorStatusMap$1[err.name];
   }
-  if (err.constructor && err.constructor.name && errorStatusMap[err.constructor.name]) {
-    return errorStatusMap[err.constructor.name];
+  if (err.constructor && err.constructor.name && errorStatusMap$1[err.constructor.name]) {
+    return errorStatusMap$1[err.constructor.name];
   }
   if (err.message) {
     if (err.message.includes("not found") || err.message.includes("does not exist")) {
@@ -2858,8 +2846,8 @@ function getStatusFromError(err) {
   }
   return 500;
 }
-function errorHandler(err, c) {
-  const status = getStatusFromError(err);
+function errorHandler$1(err, c) {
+  const status = getStatusFromError$1(err);
   const code = err.name || "INTERNAL_ERROR";
   const details = {};
   if (err.resource) details.resource = err.resource;
@@ -2868,7 +2856,7 @@ function errorHandler(err, c) {
   if (err.operation) details.operation = err.operation;
   if (err.suggestion) details.suggestion = err.suggestion;
   if (err.availableResources) details.availableResources = err.availableResources;
-  const response = error(err, {
+  const response = error$1(err, {
     status,
     code,
     details
@@ -2896,7 +2884,7 @@ function asyncHandler(fn) {
     try {
       return await fn(c);
     } catch (err) {
-      return errorHandler(err, c);
+      return errorHandler$1(err, c);
     }
   };
 }
@@ -3078,7 +3066,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
             return result;
           }
           if (result !== void 0 && result !== null) {
-            return c.json(success(result));
+            return c.json(success$1(result));
           }
           return c.json(noContent(), 204);
         }));
@@ -3157,7 +3145,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
         const response2 = notFound(resourceName, id);
         return c.json(response2, response2._status);
       }
-      const response = success(item);
+      const response = success$1(item);
       return c.json(response, response._status);
     }));
   }
@@ -3181,7 +3169,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response2, response2._status);
       }
       const updated = await resource.update(id, data);
-      const response = success(updated);
+      const response = success$1(updated);
       return c.json(response, response._status);
     }));
   }
@@ -3196,7 +3184,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
       }
       const merged = { ...existing, ...data, id };
       const updated = await resource.update(id, merged);
-      const response = success(updated);
+      const response = success$1(updated);
       return c.json(response, response._status);
     }));
   }
@@ -3321,7 +3309,7 @@ function createRelationalRoutes(sourceResource, relationName, relationConfig, ve
       c.header("X-Page-Count", Math.ceil(items.length / limit).toString());
       return c.json(response, response._status);
     } else {
-      const response = success(relatedData);
+      const response = success$1(relatedData);
       return c.json(response, response._status);
     }
   }));
@@ -3503,7 +3491,7 @@ function createAuthRoutes(authResource, config = {}) {
       const queryFilter = { [usernameField]: username };
       const existing = await authResource.query(queryFilter);
       if (existing && existing.length > 0) {
-        const response2 = error(`${usernameField} already exists`, {
+        const response2 = error$1(`${usernameField} already exists`, {
           status: 409,
           code: "CONFLICT"
         });
@@ -3588,7 +3576,7 @@ function createAuthRoutes(authResource, config = {}) {
         );
       }
       const { [passwordField]: _, ...userWithoutPassword } = user;
-      const response = success({
+      const response = success$1({
         user: userWithoutPassword,
         token,
         expiresIn: jwtExpiresIn
@@ -3608,7 +3596,7 @@ function createAuthRoutes(authResource, config = {}) {
         jwtSecret,
         jwtExpiresIn
       );
-      const response = success({
+      const response = success$1({
         token,
         expiresIn: jwtExpiresIn
       });
@@ -3622,11 +3610,11 @@ function createAuthRoutes(authResource, config = {}) {
       return c.json(response2, response2._status);
     }
     if (!user.password) {
-      const response2 = success(user);
+      const response2 = success$1(user);
       return c.json(response2, response2._status);
     }
     const { password: _, ...userWithoutPassword } = user;
-    const response = success(userWithoutPassword);
+    const response = success$1(userWithoutPassword);
     return c.json(response, response._status);
   }));
   app.post("/api-key/regenerate", asyncHandler(async (c) => {
@@ -3639,7 +3627,7 @@ function createAuthRoutes(authResource, config = {}) {
     await usersResource.update(user.id, {
       apiKey: newApiKey
     });
-    const response = success({
+    const response = success$1({
       apiKey: newApiKey,
       message: "API key regenerated successfully"
     });
@@ -3677,6 +3665,118 @@ function mountCustomRoutes(app, routes, context = {}, verbose = false) {
       console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
     }
   }
+}
+
+function success(data, options = {}) {
+  const { status = 200, meta = {} } = options;
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      ...meta
+    },
+    _status: status
+  };
+}
+function error(error2, options = {}) {
+  const { status = 500, code = "INTERNAL_ERROR", details = {} } = options;
+  const errorMessage = error2 instanceof Error ? error2.message : error2;
+  const errorStack = error2 instanceof Error && process.env.NODE_ENV !== "production" ? error2.stack : void 0;
+  return {
+    success: false,
+    error: {
+      message: errorMessage,
+      code,
+      details,
+      stack: errorStack
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: status
+  };
+}
+function payloadTooLarge(size, limit) {
+  return error("Request payload too large", {
+    status: 413,
+    code: "PAYLOAD_TOO_LARGE",
+    details: {
+      receivedSize: size,
+      maxSize: limit,
+      receivedMB: (size / 1024 / 1024).toFixed(2),
+      maxMB: (limit / 1024 / 1024).toFixed(2)
+    }
+  });
+}
+
+const errorStatusMap = {
+  "ValidationError": 400,
+  "InvalidResourceItem": 400,
+  "ResourceNotFound": 404,
+  "NoSuchKey": 404,
+  "NoSuchBucket": 404,
+  "PartitionError": 400,
+  "CryptoError": 500,
+  "SchemaError": 400,
+  "QueueError": 500,
+  "ResourceError": 500
+};
+function getStatusFromError(err) {
+  if (err.name && errorStatusMap[err.name]) {
+    return errorStatusMap[err.name];
+  }
+  if (err.constructor && err.constructor.name && errorStatusMap[err.constructor.name]) {
+    return errorStatusMap[err.constructor.name];
+  }
+  if (err.message) {
+    if (err.message.includes("not found") || err.message.includes("does not exist")) {
+      return 404;
+    }
+    if (err.message.includes("validation") || err.message.includes("invalid")) {
+      return 400;
+    }
+    if (err.message.includes("unauthorized") || err.message.includes("authentication")) {
+      return 401;
+    }
+    if (err.message.includes("forbidden") || err.message.includes("permission")) {
+      return 403;
+    }
+  }
+  return 500;
+}
+function errorHandler(err, c) {
+  const status = getStatusFromError(err);
+  const code = err.name || "INTERNAL_ERROR";
+  const details = {};
+  if (err.resource) details.resource = err.resource;
+  if (err.bucket) details.bucket = err.bucket;
+  if (err.key) details.key = err.key;
+  if (err.operation) details.operation = err.operation;
+  if (err.suggestion) details.suggestion = err.suggestion;
+  if (err.availableResources) details.availableResources = err.availableResources;
+  const response = error(err, {
+    status,
+    code,
+    details
+  });
+  if (status >= 500) {
+    console.error("[API Plugin] Error:", {
+      message: err.message,
+      code,
+      status,
+      stack: err.stack,
+      details
+    });
+  } else if (status >= 400 && status < 500 && c.get("verbose")) {
+    console.warn("[API Plugin] Client error:", {
+      message: err.message,
+      code,
+      status,
+      details
+    });
+  }
+  return c.json(response, response._status);
 }
 
 function mapFieldTypeToOpenAPI(fieldType) {
@@ -7434,9 +7534,6 @@ class ApiServer {
     if (this.options.auth.driver) {
       this._setupAuthRoutes();
     }
-    if (this.options.oauth2Server) {
-      this._setupOAuth2Routes();
-    }
     const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === "oidc");
     if (oidcDriver) {
       this._setupOIDCRoutes(oidcDriver.config);
@@ -7538,47 +7635,6 @@ class ApiServer {
     this.app.route("/auth", authApp);
     if (this.options.verbose) {
       console.log("[API Plugin] Mounted auth routes (driver: jwt) at /auth");
-    }
-  }
-  /**
-   * Setup OAuth2 Server routes (when oauth2-server driver is configured)
-   * @private
-   */
-  _setupOAuth2Routes() {
-    const { oauth2Server } = this.options;
-    if (!oauth2Server) {
-      return;
-    }
-    this.app.get("/.well-known/openid-configuration", async (c) => {
-      return oauth2Server.discoveryHandler(c);
-    });
-    this.app.get("/.well-known/jwks.json", async (c) => {
-      return oauth2Server.jwksHandler(c);
-    });
-    this.app.post("/oauth/token", async (c) => {
-      return oauth2Server.tokenHandler(c);
-    });
-    this.app.get("/oauth/userinfo", async (c) => {
-      return oauth2Server.userinfoHandler(c);
-    });
-    this.app.post("/oauth/introspect", async (c) => {
-      return oauth2Server.introspectHandler(c);
-    });
-    this.app.get("/oauth/authorize", async (c) => {
-      return oauth2Server.authorizeHandler(c);
-    });
-    this.app.post("/oauth/register", async (c) => {
-      return oauth2Server.registerClientHandler(c);
-    });
-    if (this.options.verbose) {
-      console.log("[API Plugin] Mounted OAuth2 Server routes:");
-      console.log("[API Plugin]   GET  /.well-known/openid-configuration (OIDC Discovery)");
-      console.log("[API Plugin]   GET  /.well-known/jwks.json (JWKS)");
-      console.log("[API Plugin]   GET  /oauth/authorize (Authorization)");
-      console.log("[API Plugin]   POST /oauth/token (Token)");
-      console.log("[API Plugin]   GET  /oauth/userinfo (UserInfo)");
-      console.log("[API Plugin]   POST /oauth/introspect (Introspection)");
-      console.log("[API Plugin]   POST /oauth/register (Client Registration)");
     }
   }
   /**
@@ -7985,10 +8041,6 @@ class ApiPlugin extends Plugin {
     };
     this.server = null;
     this.usersResource = null;
-    this.oauth2KeysResource = null;
-    this.oauth2ClientsResource = null;
-    this.oauth2AuthCodesResource = null;
-    this.oauth2ServerInstance = null;
   }
   /**
    * Validate plugin dependencies
@@ -8016,11 +8068,6 @@ class ApiPlugin extends Plugin {
     const authEnabled = this.config.auth.drivers.length > 0;
     if (authEnabled) {
       await this._createUsersResource();
-    }
-    const oauth2ServerDriver = this.config.auth.drivers.find((d) => d.driver === "oauth2-server");
-    if (oauth2ServerDriver) {
-      await this._createOAuth2Resources();
-      await this._initializeOAuth2Server(oauth2ServerDriver.config || {});
     }
     await this._setupMiddlewares();
     if (this.config.verbose) {
@@ -8068,140 +8115,6 @@ class ApiPlugin extends Plugin {
       }
     } else {
       throw err;
-    }
-  }
-  /**
-   * Create OAuth2 resources for authorization server
-   * @private
-   */
-  async _createOAuth2Resources() {
-    const [okKeys, errKeys, keysResource] = await tryFn(
-      () => this.database.createResource({
-        name: "plg_oauth_keys",
-        attributes: {
-          id: "string|required",
-          kid: "string|required",
-          publicKey: "string|required",
-          privateKey: "secret|required",
-          algorithm: "string|default:RS256",
-          use: "string|default:sig",
-          active: "boolean|default:true",
-          createdAt: "string|optional"
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        createdBy: "ApiPlugin"
-      })
-    );
-    if (okKeys) {
-      this.oauth2KeysResource = keysResource;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Created plg_oauth_keys resource");
-      }
-    } else if (this.database.resources.plg_oauth_keys) {
-      this.oauth2KeysResource = this.database.resources.plg_oauth_keys;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Using existing plg_oauth_keys resource");
-      }
-    } else {
-      throw errKeys;
-    }
-    const [okClients, errClients, clientsResource] = await tryFn(
-      () => this.database.createResource({
-        name: "plg_oauth_clients",
-        attributes: {
-          id: "string|required",
-          clientId: "string|required",
-          clientSecret: "secret|required",
-          name: "string|required",
-          redirectUris: "array|items:string|required",
-          allowedScopes: "array|items:string|optional",
-          grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
-          active: "boolean|default:true",
-          createdAt: "string|optional"
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        createdBy: "ApiPlugin"
-      })
-    );
-    if (okClients) {
-      this.oauth2ClientsResource = clientsResource;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Created plg_oauth_clients resource");
-      }
-    } else if (this.database.resources.plg_oauth_clients) {
-      this.oauth2ClientsResource = this.database.resources.plg_oauth_clients;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Using existing plg_oauth_clients resource");
-      }
-    } else {
-      throw errClients;
-    }
-    const [okCodes, errCodes, codesResource] = await tryFn(
-      () => this.database.createResource({
-        name: "plg_auth_codes",
-        attributes: {
-          id: "string|required",
-          code: "string|required",
-          clientId: "string|required",
-          userId: "string|required",
-          redirectUri: "string|required",
-          scope: "string|optional",
-          expiresAt: "string|required",
-          used: "boolean|default:false",
-          createdAt: "string|optional"
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        createdBy: "ApiPlugin"
-      })
-    );
-    if (okCodes) {
-      this.oauth2AuthCodesResource = codesResource;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Created plg_auth_codes resource");
-      }
-    } else if (this.database.resources.plg_auth_codes) {
-      this.oauth2AuthCodesResource = this.database.resources.plg_auth_codes;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Using existing plg_auth_codes resource");
-      }
-    } else {
-      throw errCodes;
-    }
-  }
-  /**
-   * Initialize OAuth2 Server instance
-   * @private
-   * @param {Object} config - OAuth2 Server configuration from driver config
-   */
-  async _initializeOAuth2Server(config) {
-    const { OAuth2Server } = await Promise.resolve().then(function () { return oauth2Server; });
-    const issuer = config.issuer || `http://localhost:${this.config.port}`;
-    const supportedScopes = config.supportedScopes || ["openid", "profile", "email"];
-    const supportedGrantTypes = config.supportedGrantTypes || ["authorization_code", "refresh_token"];
-    const accessTokenExpiry = config.accessTokenExpiry || "15m";
-    const idTokenExpiry = config.idTokenExpiry || "15m";
-    const refreshTokenExpiry = config.refreshTokenExpiry || "7d";
-    this.oauth2ServerInstance = new OAuth2Server({
-      issuer,
-      keyResource: this.oauth2KeysResource,
-      userResource: this.usersResource || this.database.resources[this.config.auth.resource],
-      clientResource: this.oauth2ClientsResource,
-      authCodeResource: this.oauth2AuthCodesResource,
-      supportedScopes,
-      supportedGrantTypes,
-      accessTokenExpiry,
-      idTokenExpiry,
-      refreshTokenExpiry
-    });
-    await this.oauth2ServerInstance.initialize();
-    if (this.config.verbose) {
-      console.log("[API Plugin] OAuth2 Server initialized");
-      console.log(`[API Plugin] Issuer: ${issuer}`);
-      console.log(`[API Plugin] Supported scopes: ${supportedScopes.join(", ")}`);
-      console.log(`[API Plugin] Supported grant types: ${supportedGrantTypes.join(", ")}`);
     }
   }
   /**
@@ -8535,7 +8448,6 @@ class ApiPlugin extends Plugin {
       middlewares: this.compiledMiddlewares,
       verbose: this.config.verbose,
       auth: this.config.auth,
-      oauth2Server: this.oauth2ServerInstance,
       docsEnabled: this.config.docs.enabled,
       docsUI: this.config.docs.ui,
       apiTitle: this.config.docs.title,
@@ -49102,867 +49014,6 @@ class Seeder {
     this.log("\u2705 Database reset complete");
   }
 }
-
-function generateKeyPair(modulusLength = 2048) {
-  const { publicKey, privateKey } = crypto$1.generateKeyPairSync("rsa", {
-    modulusLength,
-    publicKeyEncoding: {
-      type: "spki",
-      format: "pem"
-    },
-    privateKeyEncoding: {
-      type: "pkcs8",
-      format: "pem"
-    }
-  });
-  const kid = crypto$1.createHash("sha256").update(publicKey).digest("hex").substring(0, 16);
-  return {
-    publicKey,
-    privateKey,
-    kid,
-    algorithm: "RS256",
-    use: "sig",
-    createdAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-}
-function pemToJwk(publicKeyPem, kid) {
-  const keyObject = crypto$1.createPublicKey(publicKeyPem);
-  const exported = keyObject.export({ format: "jwk" });
-  return {
-    kty: "RSA",
-    use: "sig",
-    alg: "RS256",
-    kid,
-    n: exported.n,
-    // modulus
-    e: exported.e
-    // exponent
-  };
-}
-function createRS256Token(payload, privateKey, kid, expiresIn = "15m") {
-  const match = expiresIn.match(/^(\d+)([smhd])$/);
-  if (!match) {
-    throw new Error("Invalid expiresIn format. Use: 60s, 30m, 24h, 7d");
-  }
-  const [, value, unit] = match;
-  const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
-  const expiresInSeconds = parseInt(value) * multipliers[unit];
-  const header = {
-    alg: "RS256",
-    typ: "JWT",
-    kid
-  };
-  const now = Math.floor(Date.now() / 1e3);
-  const data = {
-    ...payload,
-    iat: now,
-    exp: now + expiresInSeconds
-  };
-  const encodedHeader = Buffer.from(JSON.stringify(header)).toString("base64url");
-  const encodedPayload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  const sign = crypto$1.createSign("RSA-SHA256");
-  sign.update(`${encodedHeader}.${encodedPayload}`);
-  sign.end();
-  const signature = sign.sign(privateKey, "base64url");
-  return `${encodedHeader}.${encodedPayload}.${signature}`;
-}
-function verifyRS256Token(token, publicKey) {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) {
-      return null;
-    }
-    const [encodedHeader, encodedPayload, signature] = parts;
-    const verify = crypto$1.createVerify("RSA-SHA256");
-    verify.update(`${encodedHeader}.${encodedPayload}`);
-    verify.end();
-    const isValid = verify.verify(publicKey, signature, "base64url");
-    if (!isValid) {
-      return null;
-    }
-    const header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString());
-    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString());
-    if (header.alg !== "RS256") {
-      return null;
-    }
-    const now = Math.floor(Date.now() / 1e3);
-    if (payload.exp && payload.exp < now) {
-      return null;
-    }
-    return {
-      header,
-      payload
-    };
-  } catch (err) {
-    return null;
-  }
-}
-function getKidFromToken(token) {
-  try {
-    const [encodedHeader] = token.split(".");
-    const header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString());
-    return header.kid || null;
-  } catch (err) {
-    return null;
-  }
-}
-class KeyManager {
-  constructor(keyResource) {
-    this.keyResource = keyResource;
-    this.currentKey = null;
-    this.keys = /* @__PURE__ */ new Map();
-  }
-  /**
-   * Initialize key manager - load or generate keys
-   */
-  async initialize() {
-    const existingKeys = await this.keyResource.list();
-    if (existingKeys.length > 0) {
-      for (const keyRecord of existingKeys) {
-        this.keys.set(keyRecord.kid, {
-          publicKey: keyRecord.publicKey,
-          privateKey: keyRecord.privateKey,
-          kid: keyRecord.kid,
-          createdAt: keyRecord.createdAt,
-          active: keyRecord.active
-        });
-        if (keyRecord.active) {
-          this.currentKey = keyRecord;
-        }
-      }
-    }
-    if (!this.currentKey) {
-      await this.rotateKey();
-    }
-  }
-  /**
-   * Rotate keys - generate new key pair
-   */
-  async rotateKey() {
-    const keyPair = generateKeyPair();
-    const oldKeys = await this.keyResource.query({ active: true });
-    for (const oldKey of oldKeys) {
-      await this.keyResource.update(oldKey.id, { active: false });
-    }
-    const keyRecord = await this.keyResource.insert({
-      kid: keyPair.kid,
-      publicKey: keyPair.publicKey,
-      privateKey: keyPair.privateKey,
-      algorithm: keyPair.algorithm,
-      use: keyPair.use,
-      active: true,
-      createdAt: keyPair.createdAt
-    });
-    this.currentKey = keyRecord;
-    this.keys.set(keyRecord.kid, keyRecord);
-    return keyRecord;
-  }
-  /**
-   * Get current active key
-   */
-  getCurrentKey() {
-    return this.currentKey;
-  }
-  /**
-   * Get key by kid
-   */
-  getKey(kid) {
-    return this.keys.get(kid);
-  }
-  /**
-   * Get all public keys in JWKS format
-   */
-  async getJWKS() {
-    const keys = Array.from(this.keys.values()).map((key) => ({
-      kty: "RSA",
-      use: "sig",
-      alg: "RS256",
-      kid: key.kid,
-      ...pemToJwk(key.publicKey, key.kid)
-    }));
-    return { keys };
-  }
-  /**
-   * Create JWT with current active key
-   */
-  createToken(payload, expiresIn = "15m") {
-    if (!this.currentKey) {
-      throw new Error("No active key available");
-    }
-    return createRS256Token(
-      payload,
-      this.currentKey.privateKey,
-      this.currentKey.kid,
-      expiresIn
-    );
-  }
-  /**
-   * Verify JWT token
-   */
-  async verifyToken(token) {
-    const kid = getKidFromToken(token);
-    if (!kid) {
-      return null;
-    }
-    const key = this.getKey(kid);
-    if (!key) {
-      return null;
-    }
-    return verifyRS256Token(token, key.publicKey);
-  }
-}
-
-function generateDiscoveryDocument(options = {}) {
-  const {
-    issuer,
-    grantTypes = ["authorization_code", "client_credentials", "refresh_token"],
-    responseTypes = ["code", "token", "id_token", "code id_token", "code token", "id_token token", "code id_token token"],
-    scopes = ["openid", "profile", "email", "offline_access"]
-  } = options;
-  if (!issuer) {
-    throw new Error("Issuer URL is required for OIDC discovery");
-  }
-  const baseUrl = issuer.replace(/\/$/, "");
-  return {
-    issuer: baseUrl,
-    authorization_endpoint: `${baseUrl}/auth/authorize`,
-    token_endpoint: `${baseUrl}/auth/token`,
-    userinfo_endpoint: `${baseUrl}/auth/userinfo`,
-    jwks_uri: `${baseUrl}/.well-known/jwks.json`,
-    registration_endpoint: `${baseUrl}/auth/register`,
-    introspection_endpoint: `${baseUrl}/auth/introspect`,
-    revocation_endpoint: `${baseUrl}/auth/revoke`,
-    end_session_endpoint: `${baseUrl}/auth/logout`,
-    // Supported features
-    scopes_supported: scopes,
-    response_types_supported: responseTypes,
-    response_modes_supported: ["query", "fragment", "form_post"],
-    grant_types_supported: grantTypes,
-    subject_types_supported: ["public"],
-    id_token_signing_alg_values_supported: ["RS256"],
-    token_endpoint_auth_methods_supported: [
-      "client_secret_basic",
-      "client_secret_post",
-      "none"
-    ],
-    // Claims
-    claims_supported: [
-      "sub",
-      "iss",
-      "aud",
-      "exp",
-      "iat",
-      "auth_time",
-      "nonce",
-      "email",
-      "email_verified",
-      "name",
-      "given_name",
-      "family_name",
-      "picture",
-      "locale"
-    ],
-    // Code challenge methods (PKCE)
-    code_challenge_methods_supported: ["plain", "S256"],
-    // UI locales
-    ui_locales_supported: ["en", "pt-BR"],
-    // Service documentation
-    service_documentation: `${baseUrl}/docs`,
-    // Additional metadata
-    claim_types_supported: ["normal"],
-    claims_parameter_supported: false,
-    request_parameter_supported: false,
-    request_uri_parameter_supported: false,
-    require_request_uri_registration: false,
-    // Discovery document version
-    version: "1.0"
-  };
-}
-function validateClaims(payload, options = {}) {
-  const {
-    issuer,
-    audience,
-    clockTolerance = 60
-  } = options;
-  const now = Math.floor(Date.now() / 1e3);
-  if (!payload.sub) {
-    return { valid: false, error: "Missing required claim: sub" };
-  }
-  if (!payload.iat) {
-    return { valid: false, error: "Missing required claim: iat" };
-  }
-  if (!payload.exp) {
-    return { valid: false, error: "Missing required claim: exp" };
-  }
-  if (issuer && payload.iss !== issuer) {
-    return {
-      valid: false,
-      error: `Invalid issuer. Expected: ${issuer}, Got: ${payload.iss}`
-    };
-  }
-  if (audience) {
-    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!audiences.includes(audience)) {
-      return {
-        valid: false,
-        error: `Invalid audience. Expected: ${audience}, Got: ${audiences.join(", ")}`
-      };
-    }
-  }
-  if (payload.exp < now - clockTolerance) {
-    return { valid: false, error: "Token has expired" };
-  }
-  if (payload.nbf && payload.nbf > now + clockTolerance) {
-    return { valid: false, error: "Token not yet valid (nbf)" };
-  }
-  if (payload.iat > now + clockTolerance) {
-    return { valid: false, error: "Token issued in the future" };
-  }
-  return { valid: true, error: null };
-}
-function extractUserClaims(user, scopes = []) {
-  const claims = {
-    sub: user.id
-    // Subject - user ID
-  };
-  if (scopes.includes("email") && user.email) {
-    claims.email = user.email;
-    claims.email_verified = user.emailVerified || false;
-  }
-  if (scopes.includes("profile")) {
-    if (user.name) claims.name = user.name;
-    if (user.givenName) claims.given_name = user.givenName;
-    if (user.familyName) claims.family_name = user.familyName;
-    if (user.picture) claims.picture = user.picture;
-    if (user.locale) claims.locale = user.locale;
-    if (user.zoneinfo) claims.zoneinfo = user.zoneinfo;
-    if (user.birthdate) claims.birthdate = user.birthdate;
-    if (user.gender) claims.gender = user.gender;
-  }
-  return claims;
-}
-function parseScopes(scopeString) {
-  if (!scopeString || typeof scopeString !== "string") {
-    return [];
-  }
-  return scopeString.trim().split(/\s+/).filter((s) => s.length > 0);
-}
-function validateScopes(requestedScopes, supportedScopes) {
-  if (!Array.isArray(requestedScopes)) {
-    requestedScopes = parseScopes(requestedScopes);
-  }
-  const invalidScopes = requestedScopes.filter((scope) => !supportedScopes.includes(scope));
-  if (invalidScopes.length > 0) {
-    return {
-      valid: false,
-      error: `Unsupported scopes: ${invalidScopes.join(", ")}`,
-      scopes: []
-    };
-  }
-  return {
-    valid: true,
-    error: null,
-    scopes: requestedScopes
-  };
-}
-
-class OAuth2Server {
-  constructor(options = {}) {
-    const {
-      issuer,
-      keyResource,
-      userResource,
-      clientResource,
-      authCodeResource,
-      supportedScopes = ["openid", "profile", "email", "offline_access"],
-      supportedGrantTypes = ["authorization_code", "client_credentials", "refresh_token"],
-      supportedResponseTypes = ["code", "token", "id_token"],
-      accessTokenExpiry = "15m",
-      idTokenExpiry = "15m",
-      refreshTokenExpiry = "7d",
-      authCodeExpiry = "10m"
-    } = options;
-    if (!issuer) {
-      throw new Error("Issuer URL is required for OAuth2Server");
-    }
-    if (!keyResource) {
-      throw new Error("keyResource is required for OAuth2Server");
-    }
-    if (!userResource) {
-      throw new Error("userResource is required for OAuth2Server");
-    }
-    this.issuer = issuer.replace(/\/$/, "");
-    this.keyResource = keyResource;
-    this.userResource = userResource;
-    this.clientResource = clientResource;
-    this.authCodeResource = authCodeResource;
-    this.supportedScopes = supportedScopes;
-    this.supportedGrantTypes = supportedGrantTypes;
-    this.supportedResponseTypes = supportedResponseTypes;
-    this.accessTokenExpiry = accessTokenExpiry;
-    this.idTokenExpiry = idTokenExpiry;
-    this.refreshTokenExpiry = refreshTokenExpiry;
-    this.authCodeExpiry = authCodeExpiry;
-    this.keyManager = new KeyManager(keyResource);
-  }
-  /**
-   * Initialize OAuth2 server - load keys
-   */
-  async initialize() {
-    await this.keyManager.initialize();
-  }
-  /**
-   * OIDC Discovery endpoint handler
-   * GET /.well-known/openid-configuration
-   */
-  async discoveryHandler(req, res) {
-    try {
-      const document = generateDiscoveryDocument({
-        issuer: this.issuer,
-        grantTypes: this.supportedGrantTypes,
-        responseTypes: this.supportedResponseTypes,
-        scopes: this.supportedScopes
-      });
-      res.status(200).json(document);
-    } catch (error) {
-      res.status(500).json({
-        error: "server_error",
-        error_description: error.message
-      });
-    }
-  }
-  /**
-   * JWKS endpoint handler
-   * GET /.well-known/jwks.json
-   */
-  async jwksHandler(req, res) {
-    try {
-      const jwks = await this.keyManager.getJWKS();
-      res.status(200).json(jwks);
-    } catch (error) {
-      res.status(500).json({
-        error: "server_error",
-        error_description: error.message
-      });
-    }
-  }
-  /**
-   * Token endpoint handler
-   * POST /auth/token
-   *
-   * Supports:
-   * - client_credentials grant
-   * - authorization_code grant (if authCodeResource provided)
-   * - refresh_token grant (if authCodeResource provided)
-   */
-  async tokenHandler(req, res) {
-    try {
-      const { grant_type, scope, client_id, client_secret } = req.body;
-      if (!grant_type) {
-        return res.status(400).json({
-          error: "invalid_request",
-          error_description: "grant_type is required"
-        });
-      }
-      if (!this.supportedGrantTypes.includes(grant_type)) {
-        return res.status(400).json({
-          error: "unsupported_grant_type",
-          error_description: `Grant type ${grant_type} is not supported`
-        });
-      }
-      if (!client_id) {
-        return res.status(400).json({
-          error: "invalid_request",
-          error_description: "client_id is required"
-        });
-      }
-      if (this.clientResource) {
-        const client = await this.authenticateClient(client_id, client_secret);
-        if (!client) {
-          return res.status(401).json({
-            error: "invalid_client",
-            error_description: "Client authentication failed"
-          });
-        }
-      }
-      switch (grant_type) {
-        case "client_credentials":
-          return await this.handleClientCredentials(req, res, { client_id, scope });
-        case "authorization_code":
-          return await this.handleAuthorizationCode(req, res);
-        case "refresh_token":
-          return await this.handleRefreshToken(req, res);
-        default:
-          return res.status(400).json({
-            error: "unsupported_grant_type",
-            error_description: `Grant type ${grant_type} is not supported`
-          });
-      }
-    } catch (error) {
-      res.status(500).json({
-        error: "server_error",
-        error_description: error.message
-      });
-    }
-  }
-  /**
-   * Client Credentials flow handler
-   */
-  async handleClientCredentials(req, res, { client_id, scope }) {
-    const scopes = parseScopes(scope);
-    const scopeValidation = validateScopes(scopes, this.supportedScopes);
-    if (!scopeValidation.valid) {
-      return res.status(400).json({
-        error: "invalid_scope",
-        error_description: scopeValidation.error
-      });
-    }
-    const accessToken = this.keyManager.createToken({
-      iss: this.issuer,
-      sub: client_id,
-      aud: this.issuer,
-      scope: scopeValidation.scopes.join(" "),
-      token_type: "access_token"
-    }, this.accessTokenExpiry);
-    return res.status(200).json({
-      access_token: accessToken,
-      token_type: "Bearer",
-      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry),
-      scope: scopeValidation.scopes.join(" ")
-    });
-  }
-  /**
-   * Authorization Code flow handler
-   */
-  async handleAuthorizationCode(req, res) {
-    if (!this.authCodeResource) {
-      return res.status(400).json({
-        error: "unsupported_grant_type",
-        error_description: "Authorization code flow requires authCodeResource"
-      });
-    }
-    const { code, redirect_uri, code_verifier } = req.body;
-    if (!code) {
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: "code is required"
-      });
-    }
-    const authCodes = await this.authCodeResource.query({ code });
-    if (authCodes.length === 0) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Invalid authorization code"
-      });
-    }
-    const authCode = authCodes[0];
-    const now = Math.floor(Date.now() / 1e3);
-    if (authCode.expiresAt < now) {
-      await this.authCodeResource.remove(authCode.id);
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Authorization code has expired"
-      });
-    }
-    if (authCode.redirectUri !== redirect_uri) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "redirect_uri mismatch"
-      });
-    }
-    if (authCode.codeChallenge) {
-      if (!code_verifier) {
-        return res.status(400).json({
-          error: "invalid_request",
-          error_description: "code_verifier is required"
-        });
-      }
-      const isValid = await this.validatePKCE(
-        code_verifier,
-        authCode.codeChallenge,
-        authCode.codeChallengeMethod
-      );
-      if (!isValid) {
-        return res.status(400).json({
-          error: "invalid_grant",
-          error_description: "Invalid code_verifier"
-        });
-      }
-    }
-    const user = await this.userResource.get(authCode.userId);
-    if (!user) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "User not found"
-      });
-    }
-    const scopes = parseScopes(authCode.scope);
-    const accessToken = this.keyManager.createToken({
-      iss: this.issuer,
-      sub: user.id,
-      aud: authCode.audience || this.issuer,
-      scope: scopes.join(" "),
-      token_type: "access_token"
-    }, this.accessTokenExpiry);
-    const response = {
-      access_token: accessToken,
-      token_type: "Bearer",
-      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry)
-    };
-    if (scopes.includes("openid")) {
-      const userClaims = extractUserClaims(user, scopes);
-      const idToken = this.keyManager.createToken({
-        iss: this.issuer,
-        sub: user.id,
-        aud: authCode.clientId,
-        nonce: authCode.nonce,
-        ...userClaims
-      }, this.idTokenExpiry);
-      response.id_token = idToken;
-    }
-    if (scopes.includes("offline_access")) {
-      const refreshToken = this.keyManager.createToken({
-        iss: this.issuer,
-        sub: user.id,
-        aud: this.issuer,
-        scope: scopes.join(" "),
-        token_type: "refresh_token"
-      }, this.refreshTokenExpiry);
-      response.refresh_token = refreshToken;
-    }
-    await this.authCodeResource.remove(authCode.id);
-    return res.status(200).json(response);
-  }
-  /**
-   * Refresh Token flow handler
-   */
-  async handleRefreshToken(req, res) {
-    const { refresh_token, scope } = req.body;
-    if (!refresh_token) {
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: "refresh_token is required"
-      });
-    }
-    const verified = await this.keyManager.verifyToken(refresh_token);
-    if (!verified) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Invalid refresh token"
-      });
-    }
-    const { payload } = verified;
-    if (payload.token_type !== "refresh_token") {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Token is not a refresh token"
-      });
-    }
-    const claimValidation = validateClaims(payload, {
-      issuer: this.issuer,
-      clockTolerance: 60
-    });
-    if (!claimValidation.valid) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: claimValidation.error
-      });
-    }
-    const requestedScopes = scope ? parseScopes(scope) : parseScopes(payload.scope);
-    const originalScopes = parseScopes(payload.scope);
-    const invalidScopes = requestedScopes.filter((s) => !originalScopes.includes(s));
-    if (invalidScopes.length > 0) {
-      return res.status(400).json({
-        error: "invalid_scope",
-        error_description: `Cannot request scopes not in original grant: ${invalidScopes.join(", ")}`
-      });
-    }
-    const user = await this.userResource.get(payload.sub);
-    if (!user) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "User not found"
-      });
-    }
-    const accessToken = this.keyManager.createToken({
-      iss: this.issuer,
-      sub: user.id,
-      aud: payload.aud,
-      scope: requestedScopes.join(" "),
-      token_type: "access_token"
-    }, this.accessTokenExpiry);
-    const response = {
-      access_token: accessToken,
-      token_type: "Bearer",
-      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry)
-    };
-    if (requestedScopes.includes("openid")) {
-      const userClaims = extractUserClaims(user, requestedScopes);
-      const idToken = this.keyManager.createToken({
-        iss: this.issuer,
-        sub: user.id,
-        aud: payload.aud,
-        ...userClaims
-      }, this.idTokenExpiry);
-      response.id_token = idToken;
-    }
-    return res.status(200).json(response);
-  }
-  /**
-   * UserInfo endpoint handler
-   * GET /auth/userinfo
-   */
-  async userinfoHandler(req, res) {
-    try {
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({
-          error: "invalid_token",
-          error_description: "Missing or invalid Authorization header"
-        });
-      }
-      const token = authHeader.substring(7);
-      const verified = await this.keyManager.verifyToken(token);
-      if (!verified) {
-        return res.status(401).json({
-          error: "invalid_token",
-          error_description: "Invalid access token"
-        });
-      }
-      const { payload } = verified;
-      const claimValidation = validateClaims(payload, {
-        issuer: this.issuer,
-        clockTolerance: 60
-      });
-      if (!claimValidation.valid) {
-        return res.status(401).json({
-          error: "invalid_token",
-          error_description: claimValidation.error
-        });
-      }
-      const user = await this.userResource.get(payload.sub);
-      if (!user) {
-        return res.status(404).json({
-          error: "not_found",
-          error_description: "User not found"
-        });
-      }
-      const scopes = parseScopes(payload.scope);
-      const userClaims = extractUserClaims(user, scopes);
-      return res.status(200).json({
-        sub: user.id,
-        ...userClaims
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: "server_error",
-        error_description: error.message
-      });
-    }
-  }
-  /**
-   * Token Introspection endpoint handler (RFC 7662)
-   * POST /auth/introspect
-   */
-  async introspectHandler(req, res) {
-    try {
-      const { token, token_type_hint } = req.body;
-      if (!token) {
-        return res.status(400).json({
-          error: "invalid_request",
-          error_description: "token is required"
-        });
-      }
-      const verified = await this.keyManager.verifyToken(token);
-      if (!verified) {
-        return res.status(200).json({ active: false });
-      }
-      const { payload } = verified;
-      const claimValidation = validateClaims(payload, {
-        issuer: this.issuer,
-        clockTolerance: 60
-      });
-      if (!claimValidation.valid) {
-        return res.status(200).json({ active: false });
-      }
-      return res.status(200).json({
-        active: true,
-        scope: payload.scope,
-        client_id: payload.aud,
-        username: payload.sub,
-        token_type: payload.token_type || "access_token",
-        exp: payload.exp,
-        iat: payload.iat,
-        sub: payload.sub,
-        iss: payload.iss,
-        aud: payload.aud
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: "server_error",
-        error_description: error.message
-      });
-    }
-  }
-  /**
-   * Authenticate client with credentials
-   */
-  async authenticateClient(clientId, clientSecret) {
-    if (!this.clientResource) {
-      return null;
-    }
-    try {
-      const clients = await this.clientResource.query({ clientId });
-      if (clients.length === 0) {
-        return null;
-      }
-      const client = clients[0];
-      if (client.clientSecret !== clientSecret) {
-        return null;
-      }
-      return client;
-    } catch (error) {
-      return null;
-    }
-  }
-  /**
-   * Validate PKCE code verifier
-   */
-  async validatePKCE(codeVerifier, codeChallenge, codeChallengeMethod = "plain") {
-    if (codeChallengeMethod === "plain") {
-      return codeVerifier === codeChallenge;
-    }
-    if (codeChallengeMethod === "S256") {
-      const crypto = await import('crypto');
-      const hash = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
-      return hash === codeChallenge;
-    }
-    return false;
-  }
-  /**
-   * Parse expiry string to seconds
-   */
-  parseExpiryToSeconds(expiresIn) {
-    const match = expiresIn.match(/^(\d+)([smhd])$/);
-    if (!match) {
-      throw new Error("Invalid expiresIn format");
-    }
-    const [, value, unit] = match;
-    const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
-    return parseInt(value) * multipliers[unit];
-  }
-  /**
-   * Rotate signing keys
-   */
-  async rotateKeys() {
-    return await this.keyManager.rotateKey();
-  }
-}
-
-var oauth2Server = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  OAuth2Server: OAuth2Server
-});
 
 function sanitizeLabel(value) {
   if (typeof value !== "string") {
