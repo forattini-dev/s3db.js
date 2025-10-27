@@ -7660,6 +7660,9 @@ function createAuthMiddleware(options = {}) {
     return c.json(response, response._status);
   };
 }
+({
+  OIDCClient
+});
 
 async function getOrCreateUser(usersResource, claims, config) {
   const userId = claims.email || claims.preferred_username || claims.sub;

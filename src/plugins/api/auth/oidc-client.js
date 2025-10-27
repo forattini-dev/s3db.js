@@ -31,7 +31,72 @@
  */
 
 import { createVerify, createPublicKey } from 'crypto';
-import { validateClaims } from './oidc-discovery.js';
+
+/**
+ * Validate JWT claims
+ * @param {Object} payload - Token payload
+ * @param {Object} options - Validation options
+ * @returns {Object} Validation result
+ */
+function validateClaims(payload, options = {}) {
+  const {
+    issuer,
+    audience,
+    clockTolerance = 60
+  } = options;
+
+  const now = Math.floor(Date.now() / 1000);
+
+  // Check required claims
+  if (!payload.sub) {
+    return { valid: false, error: 'Missing required claim: sub' };
+  }
+
+  if (!payload.iat) {
+    return { valid: false, error: 'Missing required claim: iat' };
+  }
+
+  if (!payload.exp) {
+    return { valid: false, error: 'Missing required claim: exp' };
+  }
+
+  // Validate issuer
+  if (issuer && payload.iss !== issuer) {
+    return {
+      valid: false,
+      error: `Invalid issuer. Expected: ${issuer}, Got: ${payload.iss}`
+    };
+  }
+
+  // Validate audience
+  if (audience) {
+    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+
+    if (!audiences.includes(audience)) {
+      return {
+        valid: false,
+        error: `Invalid audience. Expected: ${audience}, Got: ${audiences.join(', ')}`
+      };
+    }
+  }
+
+  // Validate expiration with clock tolerance
+  if (payload.exp < (now - clockTolerance)) {
+    return { valid: false, error: 'Token has expired' };
+  }
+
+  // Validate not before (if present)
+  if (payload.nbf && payload.nbf > (now + clockTolerance)) {
+    return { valid: false, error: 'Token not yet valid (nbf)' };
+  }
+
+  // Validate issued at (basic sanity check - not in future)
+  if (payload.iat > (now + clockTolerance)) {
+    return { valid: false, error: 'Token issued in the future' };
+  }
+
+  return { valid: true, error: null };
+}
 
 /**
  * OIDC Client for validating tokens from Authorization Server
