@@ -1,5 +1,7 @@
 # 🌐 API Plugin
 
+> **Quick Jump:** [🚀 Quick Start](#-quick-start) | [📖 Guides](#-detailed-documentation) | [⚙️ Config](#-configuration-reference) | [🔧 API](#-api-endpoints) | [❓ FAQ](#-faq) | [📚 Examples](#-examples)
+
 ## ⚡ TLDR
 
 **Transform s3db.js resources into production-ready REST API endpoints** with automatic versioning, multiple authentication methods, and enterprise features.
@@ -732,7 +734,7 @@ await apiPlugin.uninstall();
 
 ---
 
-## 🎉 Summary
+## 🎯 Summary
 
 The API Plugin provides:
 
@@ -744,11 +746,30 @@ The API Plugin provides:
 6. **Kubernetes-ready** - Health probes, graceful shutdown, horizontal scaling
 7. **Framework flexibility** - Works with Hono, Express, Fastify
 
-**Next steps:**
-- Read [Authentication](./api/authentication.md) to secure your API
-- Read [Guards](./api/guards.md) for row-level security
-- Read [Deployment](./api/deployment.md) for production deployment
-- Check [Examples](../examples/) for complete working code
+**Next Steps:**
+1. Secure your API: [Authentication →](./api/authentication.md)
+2. Implement row-level security: [Guards →](./api/guards.md)
+3. Deploy to production: [Deployment →](./api/deployment.md)
+4. Try example code: [Example 47](../examples/e47-api-plugin-basic.js) | [Example 49](../examples/e49-api-plugin-complete.js)
+
+---
+
+## 🔗 See Also
+
+**Related Documentation:**
+- [Authentication](./api/authentication.md) - JWT, Basic Auth, OIDC, OAuth2
+- [Guards](./api/guards.md) - Row-level security and authorization
+- [Static Files](./api/static-files.md) - Serve React/Vue/Angular apps
+- [Configuration](./api/configuration.md) - Complete config reference
+- [Deployment](./api/deployment.md) - Docker, Kubernetes, production
+- [Identity Plugin](./identity.md) - OAuth2/OIDC Authorization Server
+
+**Examples:**
+- [e47-api-plugin-basic.js](../examples/e47-api-plugin-basic.js) - Basic usage
+- [e49-api-plugin-complete.js](../examples/e49-api-plugin-complete.js) - Complete features
+- [e58-api-rest-complete.js](../examples/e58-api-rest-complete.js) - Full REST API
+- [e84-static-files.js](../examples/e84-static-files.js) - Static file serving
+- [e85-protected-spa.js](../examples/e85-protected-spa.js) - Protected SPA
 
 ---
 

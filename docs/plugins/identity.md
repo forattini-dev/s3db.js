@@ -1,5 +1,7 @@
 # 🔐 Identity Provider Plugin
 
+> **Quick Jump:** [⚡ Quick Start](#-quickstart) | [📖 Usage Journey](#-usage-journey) | [📊 Config](#-configuration-reference) | [🔧 API](#-api-reference) | [❓ FAQ](#-faq) | [🎯 Summary](#-summary)
+
 **OAuth2/OIDC Authorization Server** - Enterprise-grade Single Sign-On (SSO) for microservices with Azure AD/Keycloak feature parity.
 
 ## ⚡ TLDR
@@ -507,6 +509,10 @@ setInterval(async () => {
 
 ---
 
+> **Section Navigation:** [↑ Top](#) | [← Usage Journey](#-usage-journey) | [Configuration Reference →](#-configuration-reference)
+
+---
+
 ## 📊 Configuration Reference
 
 ### Core Options
@@ -712,6 +718,10 @@ await azureOIDC.initialize();
 // Add to API
 api.addAuthDriver('azure', azureOIDC.middleware.bind(azureOIDC));
 ```
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← Configuration](#-configuration-reference) | [API Reference →](#-api-reference)
 
 ---
 
@@ -1035,6 +1045,10 @@ await usersResource.delete(userId);
 
 ---
 
+> **Section Navigation:** [↑ Top](#) | [← API Reference](#-api-reference) | [Best Practices →](#-best-practices)
+
+---
+
 ## ✅ Best Practices
 
 ### Security
@@ -1148,6 +1162,10 @@ cors: {
   allowedHeaders: ['Content-Type', 'Authorization']
 }
 ```
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← Best Practices](#-best-practices) | [Architecture →](#️-architecture--token-flow)
 
 ---
 
@@ -1413,17 +1431,32 @@ graph LR
 
 ---
 
+> **Section Navigation:** [↑ Top](#) | [← Architecture](#️-architecture--token-flow) | [Error Handling →](#-error-handling)
+
+---
+
 ## 🔗 See Also
 
-- **[API Plugin](./api.md)** - Resource Server documentation
+**Related API Plugin Documentation:**
+- **[API Plugin](./api.md)** - Resource Server documentation (uses IdentityPlugin tokens)
+- **[API Authentication](./api/authentication.md)** - OIDC driver for Resource Servers
+- **[API Guards](./api/guards.md)** - Row-level security with OIDC tokens
+- **[API Deployment](./api/deployment.md)** - Deploy SSO + Resource Servers
+
+**Guides:**
 - **[OAuth2/OIDC Guide](../oauth2-guide.md)** - Complete OAuth2 guide (architecture, testing, troubleshooting)
-- **[Examples](../examples/)** - Working examples:
-  - `e80-sso-oauth2-server.js` - SSO Server with IdentityPlugin
-  - `e81-oauth2-resource-server.js` - Resource Server (API) validating tokens
-  - `e82-oidc-web-app.js` - Web app with "Login with SSO"
-  - `e60-oauth2-microservices.js` - Complete microservices setup
-  - `e62-azure-ad-integration.js` - Azure AD integration
-  - `e63-keycloak-integration.js` - Keycloak integration
+
+**Examples:**
+- [e80-sso-oauth2-server.js](../examples/e80-sso-oauth2-server.js) - SSO Server with IdentityPlugin
+- [e81-oauth2-resource-server.js](../examples/e81-oauth2-resource-server.js) - Resource Server (API) validating tokens
+- [e82-oidc-web-app.js](../examples/e82-oidc-web-app.js) - Web app with "Login with SSO"
+- [e60-oauth2-microservices.js](../examples/e60-oauth2-microservices.js) - Complete microservices setup
+- [e62-azure-ad-integration.js](../examples/e62-azure-ad-integration.js) - Azure AD integration
+- [e63-keycloak-integration.js](../examples/e63-keycloak-integration.js) - Keycloak integration
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← See Also](#-see-also) | [Error Handling →](#-error-handling)
 
 ---
 
@@ -1603,6 +1636,10 @@ async function callAPIWithAutoRefresh(url) {
 
 ---
 
+> **Section Navigation:** [↑ Top](#) | [← Error Handling](#-error-handling) | [Troubleshooting →](#-troubleshooting)
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Issue 1: "Invalid token signature"
@@ -1773,6 +1810,10 @@ const identityPlugin = new IdentityPlugin({
 
 // Recommendation: 15 minutes access, 7 days refresh
 ```
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← Troubleshooting](#-troubleshooting) | [FAQ →](#-faq)
 
 ---
 
@@ -2057,6 +2098,10 @@ A:
 | **Customization** | Full | Very Limited | High |
 | **Database** | S3/MinIO | Azure SQL | PostgreSQL |
 | **Best For** | Simple SSO, S3 backend | Enterprise, Office 365 | Complex auth, self-hosted |
+
+---
+
+> **Section Navigation:** [↑ Top](#) | [← FAQ](#-faq) | [Summary →](#-summary)
 
 ---
 

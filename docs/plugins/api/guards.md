@@ -1,5 +1,7 @@
 # 🛡️ Declarative Guards (Authorization)
 
+> **Quick Jump:** [🎯 Why Guards?](#-why-guards) | [📖 Syntax](#-guard-syntax) | [🔌 Integration](#-framework-integration) | [🎯 Patterns](#-common-patterns) | [📚 Helpers](#-helper-functions)
+
 > **Navigation:** [← Back to API Plugin](../api.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
 
 ---
@@ -330,9 +332,9 @@ applyGuardsToDelete(resource, context, record)   // Throws if denied
 
 ## 🔗 Examples & Documentation
 
-- **Complete Example**: [docs/examples/e66-guards-live.js](../../docs/examples/e66-guards-live.js)
-- **Before/After Comparison**: [docs/examples/e65-guards-comparison.js](../../docs/examples/e65-guards-comparison.js)
-- **Design Document**: [docs/guards-design.md](../../docs/guards-design.md)
+- **Complete Example**: [docs/examples/e66-guards-live.js](../../examples/e66-guards-live.js)
+- **Before/After Comparison**: [docs/examples/e65-guards-comparison.js](../../examples/e65-guards-comparison.js)
+- **Design Document**: [docs/guards-design.md](../../guards-design.md)
 
 ---
 
@@ -344,6 +346,39 @@ applyGuardsToDelete(resource, context, record)   // Throws if denied
 4. **Use 404 instead of 403** - Prevents information leakage (don't reveal resource exists)
 5. **Guards run BEFORE database operations** - Failed guards never hit the database
 6. **Partitions = O(1) RLS** - Use `ctx.setPartition()` for optimal performance
+
+---
+
+## 🎯 Summary
+
+You learned:
+- ✅ **Declarative Guards** - Define authorization rules in resource config (not middleware)
+- ✅ **70+ lines → 20 lines** - DRY principle with impossible-to-forget protection
+- ✅ **Multi-Tenancy** - Row-level security with O(1) partition isolation
+- ✅ **Ownership Checks** - Ensure users can only modify their own resources
+- ✅ **RBAC** - Role-based and scope-based authorization
+- ✅ **Framework Integration** - Works with Hono, Express, Fastify
+
+**Next Steps:**
+1. Try the examples: [e66-guards-live.js](../../examples/e66-guards-live.js) | [e65-guards-comparison.js](../../examples/e65-guards-comparison.js)
+2. Read authentication docs: [Authentication →](./authentication.md)
+3. Learn about partitions: [Resource Documentation](../../resource.md)
+4. Deploy to production: [Deployment →](./deployment.md)
+
+---
+
+## 🔗 See Also
+
+**Related Documentation:**
+- [API Plugin](../api.md) - Main API Plugin documentation
+- [Authentication](./authentication.md) - Set up JWT/OIDC authentication
+- [Resource Documentation](../../resource.md) - Partitions and resource config
+- [Guards Design](../../guards-design.md) - Detailed design document
+
+**Examples:**
+- [e66-guards-live.js](../../examples/e66-guards-live.js) - Complete guards example with live API
+- [e65-guards-comparison.js](../../examples/e65-guards-comparison.js) - Before/after comparison
+- [e49-api-plugin-complete.js](../../examples/e49-api-plugin-complete.js) - API with guards
 
 ---
 
