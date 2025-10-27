@@ -33,7 +33,10 @@ var Stream = require('node:stream');
 var node_string_decoder = require('node:string_decoder');
 var zlib$1 = require('zlib');
 var util = require('util');
+var url = require('url');
+var bcrypt = require('bcrypt');
 
+var _documentCurrentScript = typeof document !== 'undefined' ? document.currentScript : null;
 function _interopNamespaceDefault(e) {
   var n = Object.create(null);
   if (e) {
@@ -9790,6 +9793,13 @@ class IdentityPlugin extends Plugin {
         requireSymbols: options.passwordPolicy?.requireSymbols || false,
         bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
       },
+      // UI Configuration (white-label customization)
+      ui: {
+        title: options.ui?.title || "S3DB Identity",
+        logo: options.ui?.logo || null,
+        primaryColor: options.ui?.primaryColor || "#007bff",
+        customCSS: options.ui?.customCSS || null
+      },
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -10104,6 +10114,9 @@ class IdentityPlugin extends Plugin {
       verbose: this.config.verbose,
       issuer: this.config.issuer,
       oauth2Server: this.oauth2Server,
+      sessionManager: this.sessionManager,
+      usersResource: this.usersResource,
+      identityPlugin: this,
       cors: this.config.cors,
       security: this.config.security,
       logging: this.config.logging
@@ -51264,6 +51277,9 @@ class IdentityServer {
       verbose: options.verbose || false,
       issuer: options.issuer,
       oauth2Server: options.oauth2Server,
+      sessionManager: options.sessionManager || null,
+      usersResource: options.usersResource || null,
+      identityPlugin: options.identityPlugin || null,
       cors: options.cors || {},
       security: options.security || {},
       logging: options.logging || {}
@@ -51330,6 +51346,7 @@ class IdentityServer {
       return c.redirect("/.well-known/openid-configuration", 302);
     });
     this._setupOAuth2Routes();
+    this._setupUIRoutes();
     this.app.onError((err, c) => {
       return errorHandler(err, c);
     });
@@ -51402,6 +51419,34 @@ class IdentityServer {
       console.log("[Identity Server]   POST /oauth/introspect (Introspection)");
       console.log("[Identity Server]   POST /oauth/register (Client Registration)");
       console.log("[Identity Server]   POST /oauth/revoke (Token Revocation)");
+    }
+  }
+  /**
+   * Setup UI routes (login, register, profile, etc.)
+   * @private
+   */
+  async _setupUIRoutes() {
+    const { sessionManager, identityPlugin } = this.options;
+    if (!sessionManager || !identityPlugin) {
+      if (this.options.verbose) {
+        console.log("[Identity Server] SessionManager or IdentityPlugin not provided, skipping UI routes");
+      }
+      return;
+    }
+    try {
+      const { registerUIRoutes } = await Promise.resolve().then(function () { return routes; });
+      registerUIRoutes(this.app, identityPlugin);
+      if (this.options.verbose) {
+        console.log("[Identity Server] Mounted UI routes:");
+        console.log("[Identity Server]   GET  /login (Login Form)");
+        console.log("[Identity Server]   POST /login (Process Login)");
+        console.log("[Identity Server]   GET  /register (Registration Form)");
+        console.log("[Identity Server]   POST /register (Process Registration)");
+        console.log("[Identity Server]   GET  /logout (Logout)");
+        console.log("[Identity Server]   POST /logout (Logout)");
+      }
+    } catch (error) {
+      console.error("[Identity Server] Failed to setup UI routes:", error);
     }
   }
   /**
@@ -51861,6 +51906,674 @@ var metrics = /*#__PURE__*/Object.freeze({
   daviesBouldinIndex: daviesBouldinIndex,
   gapStatistic: gapStatistic,
   silhouetteScore: silhouetteScore
+});
+
+// src/utils/html.ts
+var HtmlEscapedCallbackPhase = {
+  Stringify: 1};
+var raw = (value, callbacks) => {
+  const escapedString = new String(value);
+  escapedString.isEscaped = true;
+  escapedString.callbacks = callbacks;
+  return escapedString;
+};
+var escapeRe = /[&<>'"]/;
+var stringBufferToString = async (buffer, callbacks) => {
+  let str = "";
+  callbacks ||= [];
+  const resolvedBuffer = await Promise.all(buffer);
+  for (let i = resolvedBuffer.length - 1; ; i--) {
+    str += resolvedBuffer[i];
+    i--;
+    if (i < 0) {
+      break;
+    }
+    let r = resolvedBuffer[i];
+    if (typeof r === "object") {
+      callbacks.push(...r.callbacks || []);
+    }
+    const isEscaped = r.isEscaped;
+    r = await (typeof r === "object" ? r.toString() : r);
+    if (typeof r === "object") {
+      callbacks.push(...r.callbacks || []);
+    }
+    if (r.isEscaped ?? isEscaped) {
+      str += r;
+    } else {
+      const buf = [str];
+      escapeToBuffer(r, buf);
+      str = buf[0];
+    }
+  }
+  return raw(str, callbacks);
+};
+var escapeToBuffer = (str, buffer) => {
+  const match = str.search(escapeRe);
+  if (match === -1) {
+    buffer[0] += str;
+    return;
+  }
+  let escape;
+  let index;
+  let lastIndex = 0;
+  for (index = match; index < str.length; index++) {
+    switch (str.charCodeAt(index)) {
+      case 34:
+        escape = "&quot;";
+        break;
+      case 39:
+        escape = "&#39;";
+        break;
+      case 38:
+        escape = "&amp;";
+        break;
+      case 60:
+        escape = "&lt;";
+        break;
+      case 62:
+        escape = "&gt;";
+        break;
+      default:
+        continue;
+    }
+    buffer[0] += str.substring(lastIndex, index) + escape;
+    lastIndex = index + 1;
+  }
+  buffer[0] += str.substring(lastIndex, index);
+};
+var resolveCallbackSync = (str) => {
+  const callbacks = str.callbacks;
+  if (!callbacks?.length) {
+    return str;
+  }
+  const buffer = [str];
+  const context = {};
+  callbacks.forEach((c) => c({ phase: HtmlEscapedCallbackPhase.Stringify, buffer, context }));
+  return buffer[0];
+};
+
+// src/helper/html/index.ts
+var html = (strings, ...values) => {
+  const buffer = [""];
+  for (let i = 0, len = strings.length - 1; i < len; i++) {
+    buffer[0] += strings[i];
+    const children = Array.isArray(values[i]) ? values[i].flat(Infinity) : [values[i]];
+    for (let i2 = 0, len2 = children.length; i2 < len2; i2++) {
+      const child = children[i2];
+      if (typeof child === "string") {
+        escapeToBuffer(child, buffer);
+      } else if (typeof child === "number") {
+        buffer[0] += child;
+      } else if (typeof child === "boolean" || child === null || child === void 0) {
+        continue;
+      } else if (typeof child === "object" && child.isEscaped) {
+        if (child.callbacks) {
+          buffer.unshift("", child);
+        } else {
+          const tmp = child.toString();
+          if (tmp instanceof Promise) {
+            buffer.unshift("", tmp);
+          } else {
+            buffer[0] += tmp;
+          }
+        }
+      } else if (child instanceof Promise) {
+        buffer.unshift("", child);
+      } else {
+        escapeToBuffer(child.toString(), buffer);
+      }
+    }
+  }
+  buffer[0] += strings.at(-1);
+  return buffer.length === 1 ? "callbacks" in buffer ? raw(resolveCallbackSync(raw(buffer[0], buffer.callbacks))) : raw(buffer[0]) : stringBufferToString(buffer, buffer.callbacks);
+};
+
+const __filename$1 = url.fileURLToPath((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (_documentCurrentScript && _documentCurrentScript.tagName.toUpperCase() === 'SCRIPT' && _documentCurrentScript.src || new URL('s3db.cjs.js', document.baseURI).href)));
+const __dirname$1 = path$1.dirname(__filename$1);
+const cssPath = path$1.join(__dirname$1, "../styles/main.css");
+let cachedCSS = null;
+function getCSS() {
+  if (!cachedCSS) {
+    cachedCSS = fs.readFileSync(cssPath, "utf-8");
+  }
+  return cachedCSS;
+}
+function BaseLayout(props) {
+  const {
+    title = "Identity Provider",
+    content = "",
+    user = null,
+    config = {},
+    error = null,
+    success = null
+  } = props;
+  const appTitle = config.title || "S3DB Identity";
+  const logo = config.logo || null;
+  const primaryColor = config.primaryColor || "#007bff";
+  return html`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - ${appTitle}</title>
+  <style>${getCSS()}</style>
+  ${config.customCSS ? html`<style>${config.customCSS}</style>` : ""}
+  ${primaryColor !== "#007bff" ? html`<style>:root { --color-primary: ${primaryColor}; }</style>` : ""}
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <div class="header-content">
+        <a href="/" class="logo">
+          ${logo ? html`<img src="${logo}" alt="${appTitle}" height="32" />` : appTitle}
+        </a>
+        <nav>
+          <ul class="nav">
+            ${user ? html`
+              <li><a href="/profile">Profile</a></li>
+              ${user.isAdmin ? html`<li><a href="/admin">Admin</a></li>` : ""}
+              <li>
+                <form method="POST" action="/logout" style="display: inline;">
+                  <button type="submit" class="btn-link" style="cursor: pointer;">Logout</button>
+                </form>
+              </li>
+            ` : html`
+              <li><a href="/login">Login</a></li>
+              <li><a href="/register">Register</a></li>
+            `}
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    ${error ? html`
+      <div class="container">
+        <div class="alert alert-danger" role="alert">
+          ${error}
+        </div>
+      </div>
+    ` : ""}
+
+    ${success ? html`
+      <div class="container">
+        <div class="alert alert-success" role="alert">
+          ${success}
+        </div>
+      </div>
+    ` : ""}
+
+    ${content}
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p>Powered by <a href="https://github.com/forattini-dev/s3db.js" target="_blank">S3DB Identity Provider</a></p>
+    </div>
+  </footer>
+</body>
+</html>`;
+}
+
+function LoginPage(props = {}) {
+  const { error = null, success = null, email = "", config = {} } = props;
+  const content = html`
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="card">
+          <div class="card-header">
+            Sign In
+          </div>
+
+          <form method="POST" action="/login">
+            <div class="form-group">
+              <label for="email" class="form-label form-label-required">Email address</label>
+              <input
+                type="email"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="email"
+                name="email"
+                value="${email}"
+                required
+                autofocus
+                autocomplete="email"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="password" class="form-label form-label-required">Password</label>
+              <input
+                type="password"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="password"
+                name="password"
+                required
+                autocomplete="current-password"
+              />
+              ${error ? html`<div class="invalid-feedback">${error}</div>` : ""}
+            </div>
+
+            <div class="form-group">
+              <div class="form-check">
+                <input
+                  type="checkbox"
+                  class="form-check-input"
+                  id="remember"
+                  name="remember"
+                  value="1"
+                />
+                <label class="form-check-label" for="remember">
+                  Remember me
+                </label>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">
+              Sign In
+            </button>
+          </form>
+
+          <div class="auth-links">
+            <p class="text-muted">
+              <a href="/forgot-password" class="btn-link">Forgot your password?</a>
+            </p>
+            <p class="mt-3">
+              Don't have an account? <a href="/register" class="btn-link">Sign up</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: "Sign In",
+    content,
+    config,
+    error: null,
+    // Error shown in form
+    success
+    // Success shown at top
+  });
+}
+
+function RegisterPage(props = {}) {
+  const { error = null, email = "", name = "", passwordPolicy = {}, config = {} } = props;
+  const minLength = passwordPolicy.minLength || 8;
+  const maxLength = passwordPolicy.maxLength || 128;
+  const requireUppercase = passwordPolicy.requireUppercase !== false;
+  const requireLowercase = passwordPolicy.requireLowercase !== false;
+  const requireNumbers = passwordPolicy.requireNumbers !== false;
+  const requireSymbols = passwordPolicy.requireSymbols || false;
+  const requirements = [];
+  requirements.push(`${minLength}-${maxLength} characters`);
+  if (requireUppercase) requirements.push("uppercase letter");
+  if (requireLowercase) requirements.push("lowercase letter");
+  if (requireNumbers) requirements.push("number");
+  if (requireSymbols) requirements.push("symbol");
+  const content = html`
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="card">
+          <div class="card-header">
+            Create Account
+          </div>
+
+          <form method="POST" action="/register">
+            <div class="form-group">
+              <label for="name" class="form-label form-label-required">Full Name</label>
+              <input
+                type="text"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="name"
+                name="name"
+                value="${name}"
+                required
+                autofocus
+                autocomplete="name"
+                minlength="2"
+                maxlength="100"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="email" class="form-label form-label-required">Email address</label>
+              <input
+                type="email"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="email"
+                name="email"
+                value="${email}"
+                required
+                autocomplete="email"
+              />
+              <small class="form-text">We'll send you a verification email</small>
+            </div>
+
+            <div class="form-group">
+              <label for="password" class="form-label form-label-required">Password</label>
+              <input
+                type="password"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="password"
+                name="password"
+                required
+                autocomplete="new-password"
+                minlength="${minLength}"
+                maxlength="${maxLength}"
+              />
+              <small class="form-text">
+                Must contain: ${requirements.join(", ")}
+              </small>
+            </div>
+
+            <div class="form-group">
+              <label for="confirm_password" class="form-label form-label-required">Confirm Password</label>
+              <input
+                type="password"
+                class="form-control ${error ? "is-invalid" : ""}"
+                id="confirm_password"
+                name="confirm_password"
+                required
+                autocomplete="new-password"
+              />
+              ${error ? html`<div class="invalid-feedback">${error}</div>` : ""}
+            </div>
+
+            <div class="form-group">
+              <div class="form-check">
+                <input
+                  type="checkbox"
+                  class="form-check-input"
+                  id="agree_terms"
+                  name="agree_terms"
+                  value="1"
+                  required
+                />
+                <label class="form-check-label" for="agree_terms">
+                  I agree to the <a href="/terms" class="btn-link" target="_blank">Terms of Service</a> and <a href="/privacy" class="btn-link" target="_blank">Privacy Policy</a>
+                </label>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">
+              Create Account
+            </button>
+          </form>
+
+          <div class="auth-links">
+            <p class="mt-3">
+              Already have an account? <a href="/login" class="btn-link">Sign in</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: "Create Account",
+    content,
+    config,
+    error: null
+    // Error shown in form
+  });
+}
+
+const DEFAULT_PASSWORD_POLICY = {
+  minLength: 8,
+  maxLength: 128,
+  requireUppercase: true,
+  requireLowercase: true,
+  requireNumbers: true,
+  requireSymbols: false,
+  bcryptRounds: 10
+};
+async function hashPassword(password, rounds = 10) {
+  if (!password || typeof password !== "string") {
+    throw new Error("Password must be a non-empty string");
+  }
+  if (password.length > 72) {
+    throw new Error("Password too long (max 72 characters)");
+  }
+  return await bcrypt.hash(password, rounds);
+}
+async function verifyPassword(plaintext, hash) {
+  if (!plaintext || typeof plaintext !== "string") {
+    return false;
+  }
+  if (!hash || typeof hash !== "string") {
+    return false;
+  }
+  try {
+    return await bcrypt.compare(plaintext, hash);
+  } catch (error) {
+    return false;
+  }
+}
+function validatePassword(password, policy = DEFAULT_PASSWORD_POLICY) {
+  const errors = [];
+  if (!password || typeof password !== "string") {
+    return { valid: false, errors: ["Password must be a string"] };
+  }
+  const rules = { ...DEFAULT_PASSWORD_POLICY, ...policy };
+  if (password.length < rules.minLength) {
+    errors.push(`Password must be at least ${rules.minLength} characters long`);
+  }
+  if (password.length > rules.maxLength) {
+    errors.push(`Password must not exceed ${rules.maxLength} characters`);
+  }
+  if (rules.requireUppercase && !/[A-Z]/.test(password)) {
+    errors.push("Password must contain at least one uppercase letter");
+  }
+  if (rules.requireLowercase && !/[a-z]/.test(password)) {
+    errors.push("Password must contain at least one lowercase letter");
+  }
+  if (rules.requireNumbers && !/[0-9]/.test(password)) {
+    errors.push("Password must contain at least one number");
+  }
+  if (rules.requireSymbols && !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    errors.push("Password must contain at least one symbol");
+  }
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+function registerUIRoutes(app, plugin) {
+  const { sessionManager, usersResource, config } = plugin;
+  app.get("/login", async (c) => {
+    const sessionId = sessionManager.getSessionIdFromRequest(c.req);
+    if (sessionId) {
+      const { valid } = await sessionManager.validateSession(sessionId);
+      if (valid) {
+        return c.redirect("/profile");
+      }
+    }
+    const error = c.req.query("error");
+    const success = c.req.query("success");
+    const email = c.req.query("email") || "";
+    return c.html(LoginPage({
+      error: error ? decodeURIComponent(error) : null,
+      success: success ? decodeURIComponent(success) : null,
+      email,
+      config: config.ui
+    }));
+  });
+  app.post("/login", async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const { email, password, remember } = body;
+      if (!email || !password) {
+        return c.redirect(`/login?error=${encodeURIComponent("Email and password are required")}&email=${encodeURIComponent(email || "")}`);
+      }
+      const [okQuery, errQuery, users] = await tryFn(
+        () => usersResource.query({ email: email.toLowerCase().trim() })
+      );
+      if (!okQuery || users.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email)}`);
+      }
+      const user = users[0];
+      const [okVerify, errVerify, isValid] = await tryFn(
+        () => verifyPassword(password, user.passwordHash)
+      );
+      if (!okVerify || !isValid) {
+        return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email)}`);
+      }
+      if (user.status !== "active") {
+        const message = user.status === "suspended" ? "Your account has been suspended. Please contact support." : "Your account is inactive. Please verify your email or contact support.";
+        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
+      }
+      const ipAddress = c.req.header("x-forwarded-for")?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
+      const userAgent = c.req.header("user-agent") || "unknown";
+      const sessionExpiry = remember === "1" ? "30d" : config.session.sessionExpiry;
+      const [okSession, errSession, session] = await tryFn(
+        () => sessionManager.createSession({
+          userId: user.id,
+          metadata: {
+            email: user.email,
+            name: user.name,
+            isAdmin: user.isAdmin || false
+          },
+          ipAddress,
+          userAgent,
+          expiresIn: sessionExpiry
+        })
+      );
+      if (!okSession) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to create session:", errSession);
+        }
+        return c.redirect(`/login?error=${encodeURIComponent("Failed to create session. Please try again.")}&email=${encodeURIComponent(email)}`);
+      }
+      sessionManager.setSessionCookie(c, session.id, session.expiresAt);
+      await tryFn(
+        () => usersResource.patch(user.id, {
+          lastLoginAt: (/* @__PURE__ */ new Date()).toISOString(),
+          lastLoginIp: ipAddress
+        })
+      );
+      const redirectTo = c.req.query("redirect") || "/profile";
+      return c.redirect(redirectTo);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Login error:", error);
+      }
+      return c.redirect(`/login?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/register", async (c) => {
+    const sessionId = sessionManager.getSessionIdFromRequest(c.req);
+    if (sessionId) {
+      const { valid } = await sessionManager.validateSession(sessionId);
+      if (valid) {
+        return c.redirect("/profile");
+      }
+    }
+    const error = c.req.query("error");
+    const email = c.req.query("email") || "";
+    const name = c.req.query("name") || "";
+    return c.html(RegisterPage({
+      error: error ? decodeURIComponent(error) : null,
+      email,
+      name,
+      passwordPolicy: config.passwordPolicy,
+      config: config.ui
+    }));
+  });
+  app.post("/register", async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const { name, email, password, confirm_password, agree_terms } = body;
+      if (!name || !email || !password || !confirm_password) {
+        return c.redirect(`/register?error=${encodeURIComponent("All fields are required")}&email=${encodeURIComponent(email || "")}&name=${encodeURIComponent(name || "")}`);
+      }
+      if (!agree_terms || agree_terms !== "1") {
+        return c.redirect(`/register?error=${encodeURIComponent("You must agree to the Terms of Service and Privacy Policy")}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+      }
+      if (password !== confirm_password) {
+        return c.redirect(`/register?error=${encodeURIComponent("Passwords do not match")}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+      }
+      const passwordValidation = validatePassword(password, config.passwordPolicy);
+      if (!passwordValidation.valid) {
+        const errorMsg = passwordValidation.errors.join(", ");
+        return c.redirect(`/register?error=${encodeURIComponent(errorMsg)}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+      }
+      const normalizedEmail = email.toLowerCase().trim();
+      const [okCheck, errCheck, existingUsers] = await tryFn(
+        () => usersResource.query({ email: normalizedEmail })
+      );
+      if (okCheck && existingUsers.length > 0) {
+        return c.redirect(`/register?error=${encodeURIComponent("An account with this email already exists")}&name=${encodeURIComponent(name)}`);
+      }
+      const [okHash, errHash, passwordHash] = await tryFn(
+        () => hashPassword(password, config.passwordPolicy.bcryptRounds)
+      );
+      if (!okHash) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Password hashing failed:", errHash);
+        }
+        return c.redirect(`/register?error=${encodeURIComponent("Failed to process password. Please try again.")}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+      }
+      const ipAddress = c.req.header("x-forwarded-for")?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
+      const [okUser, errUser, user] = await tryFn(
+        () => usersResource.insert({
+          email: normalizedEmail,
+          name: name.trim(),
+          passwordHash,
+          status: "pending_verification",
+          // Requires email verification
+          isAdmin: false,
+          emailVerified: false,
+          registrationIp: ipAddress,
+          lastLoginAt: null,
+          lastLoginIp: null
+        })
+      );
+      if (!okUser) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] User creation failed:", errUser);
+        }
+        return c.redirect(`/register?error=${encodeURIComponent("Failed to create account. Please try again.")}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+      }
+      return c.redirect(`/login?success=${encodeURIComponent("Account created successfully! Please check your email to verify your account.")}&email=${encodeURIComponent(normalizedEmail)}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Registration error:", error);
+      }
+      return c.redirect(`/register?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/logout", async (c) => {
+    try {
+      const sessionId = sessionManager.getSessionIdFromRequest(c.req);
+      if (sessionId) {
+        await sessionManager.destroySession(sessionId);
+      }
+      sessionManager.clearSessionCookie(c);
+      return c.redirect("/login?success=You have been logged out successfully");
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Logout error:", error);
+      }
+      sessionManager.clearSessionCookie(c);
+      return c.redirect("/login");
+    }
+  });
+  app.get("/logout", async (c) => {
+    const sessionId = sessionManager.getSessionIdFromRequest(c.req);
+    if (sessionId) {
+      await sessionManager.destroySession(sessionId);
+    }
+    sessionManager.clearSessionCookie(c);
+    return c.redirect("/login?success=You have been logged out successfully");
+  });
+}
+
+var routes = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  registerUIRoutes: registerUIRoutes
 });
 
 exports.AVAILABLE_BEHAVIORS = AVAILABLE_BEHAVIORS;

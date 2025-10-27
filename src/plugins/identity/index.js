@@ -109,6 +109,14 @@ export class IdentityPlugin extends Plugin {
         bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
       },
 
+      // UI Configuration (white-label customization)
+      ui: {
+        title: options.ui?.title || 'S3DB Identity',
+        logo: options.ui?.logo || null,
+        primaryColor: options.ui?.primaryColor || '#007bff',
+        customCSS: options.ui?.customCSS || null
+      },
+
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -454,6 +462,9 @@ export class IdentityPlugin extends Plugin {
       verbose: this.config.verbose,
       issuer: this.config.issuer,
       oauth2Server: this.oauth2Server,
+      sessionManager: this.sessionManager,
+      usersResource: this.usersResource,
+      identityPlugin: this,
       cors: this.config.cors,
       security: this.config.security,
       logging: this.config.logging
