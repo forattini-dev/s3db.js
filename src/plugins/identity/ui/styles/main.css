@@ -63,21 +63,38 @@
   --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Reset & Base */
-*, *::before, *::after {
+/* CSS Reset - Tailwind CSS 4 Preflight (MIT License - Copyright (c) Tailwind Labs, Inc.) */
+*,
+::after,
+::backdrop,
+::before,
+::file-selector-button {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  border: 0 solid;
 }
 
+:host,
 html {
-  -webkit-text-size-adjust: 100%;
+  line-height: 1.5;
+  font-family: var(
+    --default-font-family,
+    ui-sans-serif,
+    system-ui,
+    sans-serif,
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Segoe UI Symbol",
+    "Noto Color Emoji"
+  );
+  -webkit-tap-highlight-color: #0000;
 }
 
 body {
+  line-height: inherit;
   font-family: var(--font-family);
   font-size: 16px;
-  line-height: 1.6;
   color: var(--color-base-content);
   /* Modern gradient mesh background */
   background:
@@ -94,6 +111,105 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+hr {
+  height: 0;
+  color: inherit;
+  border-top-width: 1px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+a {
+  color: inherit;
+  -webkit-text-decoration: inherit;
+  text-decoration: inherit;
+}
+
+table {
+  text-indent: 0;
+  border-color: inherit;
+  border-collapse: collapse;
+}
+
+::file-selector-button,
+button,
+input,
+optgroup,
+select,
+textarea {
+  font: inherit;
+  font-feature-settings: inherit;
+  font-variation-settings: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: 0 0;
+}
+
+input:where(:not([type="button"], [type="reset"], [type="submit"])),
+select,
+textarea {
+  border-width: 1px;
+}
+
+::file-selector-button,
+button,
+input:where([type="button"], [type="reset"], [type="submit"]) {
+  appearance: button;
+}
+
+:-moz-focusring {
+  outline: auto;
+}
+
+:-moz-ui-invalid {
+  box-shadow: none;
+}
+
+::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+menu,
+ol,
+ul {
+  list-style: none;
+}
+
+textarea {
+  resize: vertical;
+}
+
+::placeholder {
+  opacity: 1;
+  color: color-mix(in oklch, currentColor 50%, #0000);
+}
+
+audio,
+canvas,
+embed,
+iframe,
+img,
+object,
+svg,
+video {
+  display: block;
+  vertical-align: middle;
+}
+
+img,
+video {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Container */
