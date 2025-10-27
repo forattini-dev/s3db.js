@@ -215,6 +215,12 @@ export class ApiPlugin extends Plugin {
 
     this.server = null;
     this.usersResource = null;
+
+    // OAuth2 Server resources and instance
+    this.oauth2KeysResource = null;
+    this.oauth2ClientsResource = null;
+    this.oauth2AuthCodesResource = null;
+    this.oauth2ServerInstance = null;
   }
 
   /**
@@ -249,6 +255,13 @@ export class ApiPlugin extends Plugin {
 
     if (authEnabled) {
       await this._createUsersResource();
+    }
+
+    // Check if OAuth2 Server driver is configured
+    const oauth2ServerDriver = this.config.auth.drivers.find(d => d.driver === 'oauth2-server');
+    if (oauth2ServerDriver) {
+      await this._createOAuth2Resources();
+      await this._initializeOAuth2Server(oauth2ServerDriver.config || {});
     }
 
     // Setup middlewares
@@ -300,6 +313,155 @@ export class ApiPlugin extends Plugin {
       }
     } else {
       throw err;
+    }
+  }
+
+  /**
+   * Create OAuth2 resources for authorization server
+   * @private
+   */
+  async _createOAuth2Resources() {
+    // 1. OAuth Keys Resource (RSA keys for token signing)
+    const [okKeys, errKeys, keysResource] = await tryFn(() =>
+      this.database.createResource({
+        name: 'plg_oauth_keys',
+        attributes: {
+          id: 'string|required',
+          kid: 'string|required',
+          publicKey: 'string|required',
+          privateKey: 'secret|required',
+          algorithm: 'string|default:RS256',
+          use: 'string|default:sig',
+          active: 'boolean|default:true',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'ApiPlugin'
+      })
+    );
+
+    if (okKeys) {
+      this.oauth2KeysResource = keysResource;
+      if (this.config.verbose) {
+        console.log('[API Plugin] Created plg_oauth_keys resource');
+      }
+    } else if (this.database.resources.plg_oauth_keys) {
+      this.oauth2KeysResource = this.database.resources.plg_oauth_keys;
+      if (this.config.verbose) {
+        console.log('[API Plugin] Using existing plg_oauth_keys resource');
+      }
+    } else {
+      throw errKeys;
+    }
+
+    // 2. OAuth Clients Resource (registered applications)
+    const [okClients, errClients, clientsResource] = await tryFn(() =>
+      this.database.createResource({
+        name: 'plg_oauth_clients',
+        attributes: {
+          id: 'string|required',
+          clientId: 'string|required',
+          clientSecret: 'secret|required',
+          name: 'string|required',
+          redirectUris: 'array|items:string|required',
+          allowedScopes: 'array|items:string|optional',
+          grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
+          active: 'boolean|default:true',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'ApiPlugin'
+      })
+    );
+
+    if (okClients) {
+      this.oauth2ClientsResource = clientsResource;
+      if (this.config.verbose) {
+        console.log('[API Plugin] Created plg_oauth_clients resource');
+      }
+    } else if (this.database.resources.plg_oauth_clients) {
+      this.oauth2ClientsResource = this.database.resources.plg_oauth_clients;
+      if (this.config.verbose) {
+        console.log('[API Plugin] Using existing plg_oauth_clients resource');
+      }
+    } else {
+      throw errClients;
+    }
+
+    // 3. OAuth Authorization Codes Resource (authorization_code flow)
+    const [okCodes, errCodes, codesResource] = await tryFn(() =>
+      this.database.createResource({
+        name: 'plg_auth_codes',
+        attributes: {
+          id: 'string|required',
+          code: 'string|required',
+          clientId: 'string|required',
+          userId: 'string|required',
+          redirectUri: 'string|required',
+          scope: 'string|optional',
+          expiresAt: 'string|required',
+          used: 'boolean|default:false',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'ApiPlugin'
+      })
+    );
+
+    if (okCodes) {
+      this.oauth2AuthCodesResource = codesResource;
+      if (this.config.verbose) {
+        console.log('[API Plugin] Created plg_auth_codes resource');
+      }
+    } else if (this.database.resources.plg_auth_codes) {
+      this.oauth2AuthCodesResource = this.database.resources.plg_auth_codes;
+      if (this.config.verbose) {
+        console.log('[API Plugin] Using existing plg_auth_codes resource');
+      }
+    } else {
+      throw errCodes;
+    }
+  }
+
+  /**
+   * Initialize OAuth2 Server instance
+   * @private
+   * @param {Object} config - OAuth2 Server configuration from driver config
+   */
+  async _initializeOAuth2Server(config) {
+    const { OAuth2Server } = await import('./auth/oauth2-server.js');
+
+    // Apply defaults
+    const issuer = config.issuer || `http://localhost:${this.config.port}`;
+    const supportedScopes = config.supportedScopes || ['openid', 'profile', 'email'];
+    const supportedGrantTypes = config.supportedGrantTypes || ['authorization_code', 'refresh_token'];
+    const accessTokenExpiry = config.accessTokenExpiry || '15m';
+    const idTokenExpiry = config.idTokenExpiry || '15m';
+    const refreshTokenExpiry = config.refreshTokenExpiry || '7d';
+
+    this.oauth2ServerInstance = new OAuth2Server({
+      issuer,
+      keyResource: this.oauth2KeysResource,
+      userResource: this.usersResource || this.database.resources[this.config.auth.resource],
+      clientResource: this.oauth2ClientsResource,
+      authCodeResource: this.oauth2AuthCodesResource,
+      supportedScopes,
+      supportedGrantTypes,
+      accessTokenExpiry,
+      idTokenExpiry,
+      refreshTokenExpiry
+    });
+
+    await this.oauth2ServerInstance.initialize();
+
+    if (this.config.verbose) {
+      console.log('[API Plugin] OAuth2 Server initialized');
+      console.log(`[API Plugin] Issuer: ${issuer}`);
+      console.log(`[API Plugin] Supported scopes: ${supportedScopes.join(', ')}`);
+      console.log(`[API Plugin] Supported grant types: ${supportedGrantTypes.join(', ')}`);
     }
   }
 
@@ -769,6 +931,7 @@ export class ApiPlugin extends Plugin {
       middlewares: this.compiledMiddlewares,
       verbose: this.config.verbose,
       auth: this.config.auth,
+      oauth2Server: this.oauth2ServerInstance,
       docsEnabled: this.config.docs.enabled,
       docsUI: this.config.docs.ui,
       apiTitle: this.config.docs.title,

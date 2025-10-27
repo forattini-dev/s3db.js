@@ -208,6 +208,11 @@ export class ApiServer {
       this._setupAuthRoutes();
     }
 
+    // Setup OAuth2 Server routes if configured
+    if (this.options.oauth2Server) {
+      this._setupOAuth2Routes();
+    }
+
     // Setup relational routes if RelationPlugin is active
     if (this.relationsPlugin) {
       this._setupRelationalRoutes();
@@ -364,6 +369,64 @@ export class ApiServer {
   }
 
   /**
+   * Setup OAuth2 Server routes (when oauth2-server driver is configured)
+   * @private
+   */
+  _setupOAuth2Routes() {
+    const { oauth2Server } = this.options;
+
+    if (!oauth2Server) {
+      return;
+    }
+
+    // OIDC Discovery endpoint
+    this.app.get('/.well-known/openid-configuration', async (c) => {
+      return oauth2Server.discoveryHandler(c);
+    });
+
+    // JWKS (JSON Web Key Set) endpoint
+    this.app.get('/.well-known/jwks.json', async (c) => {
+      return oauth2Server.jwksHandler(c);
+    });
+
+    // OAuth2 Token endpoint
+    this.app.post('/oauth/token', async (c) => {
+      return oauth2Server.tokenHandler(c);
+    });
+
+    // OIDC UserInfo endpoint
+    this.app.get('/oauth/userinfo', async (c) => {
+      return oauth2Server.userinfoHandler(c);
+    });
+
+    // Token introspection endpoint
+    this.app.post('/oauth/introspect', async (c) => {
+      return oauth2Server.introspectHandler(c);
+    });
+
+    // Authorization endpoint (GET for user consent UI)
+    this.app.get('/oauth/authorize', async (c) => {
+      return oauth2Server.authorizeHandler(c);
+    });
+
+    // Client registration endpoint (requires authentication)
+    this.app.post('/oauth/register', async (c) => {
+      return oauth2Server.registerClientHandler(c);
+    });
+
+    if (this.options.verbose) {
+      console.log('[API Plugin] Mounted OAuth2 Server routes:');
+      console.log('[API Plugin]   GET  /.well-known/openid-configuration (OIDC Discovery)');
+      console.log('[API Plugin]   GET  /.well-known/jwks.json (JWKS)');
+      console.log('[API Plugin]   GET  /oauth/authorize (Authorization)');
+      console.log('[API Plugin]   POST /oauth/token (Token)');
+      console.log('[API Plugin]   GET  /oauth/userinfo (UserInfo)');
+      console.log('[API Plugin]   POST /oauth/introspect (Introspection)');
+      console.log('[API Plugin]   POST /oauth/register (Client Registration)');
+    }
+  }
+
+  /**
    * Create authentication middleware based on configured drivers
    * @private
    * @returns {Function|null} Hono middleware or null
@@ -396,6 +459,11 @@ export class ApiServer {
     for (const driverDef of drivers) {
       const driverName = driverDef.driver;
       const driverConfig = driverDef.config || {};
+
+      // Skip oauth2-server driver (it's for Authorization Server, not authentication)
+      if (driverName === 'oauth2-server') {
+        continue;
+      }
 
       if (!methods.includes(driverName)) {
         methods.push(driverName);

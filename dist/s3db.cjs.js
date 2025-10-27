@@ -5235,6 +5235,9 @@ class ApiServer {
     if (this.options.auth.driver) {
       this._setupAuthRoutes();
     }
+    if (this.options.oauth2Server) {
+      this._setupOAuth2Routes();
+    }
     if (this.relationsPlugin) {
       this._setupRelationalRoutes();
     }
@@ -5335,6 +5338,47 @@ class ApiServer {
     }
   }
   /**
+   * Setup OAuth2 Server routes (when oauth2-server driver is configured)
+   * @private
+   */
+  _setupOAuth2Routes() {
+    const { oauth2Server } = this.options;
+    if (!oauth2Server) {
+      return;
+    }
+    this.app.get("/.well-known/openid-configuration", async (c) => {
+      return oauth2Server.discoveryHandler(c);
+    });
+    this.app.get("/.well-known/jwks.json", async (c) => {
+      return oauth2Server.jwksHandler(c);
+    });
+    this.app.post("/oauth/token", async (c) => {
+      return oauth2Server.tokenHandler(c);
+    });
+    this.app.get("/oauth/userinfo", async (c) => {
+      return oauth2Server.userinfoHandler(c);
+    });
+    this.app.post("/oauth/introspect", async (c) => {
+      return oauth2Server.introspectHandler(c);
+    });
+    this.app.get("/oauth/authorize", async (c) => {
+      return oauth2Server.authorizeHandler(c);
+    });
+    this.app.post("/oauth/register", async (c) => {
+      return oauth2Server.registerClientHandler(c);
+    });
+    if (this.options.verbose) {
+      console.log("[API Plugin] Mounted OAuth2 Server routes:");
+      console.log("[API Plugin]   GET  /.well-known/openid-configuration (OIDC Discovery)");
+      console.log("[API Plugin]   GET  /.well-known/jwks.json (JWKS)");
+      console.log("[API Plugin]   GET  /oauth/authorize (Authorization)");
+      console.log("[API Plugin]   POST /oauth/token (Token)");
+      console.log("[API Plugin]   GET  /oauth/userinfo (UserInfo)");
+      console.log("[API Plugin]   POST /oauth/introspect (Introspection)");
+      console.log("[API Plugin]   POST /oauth/register (Client Registration)");
+    }
+  }
+  /**
    * Create authentication middleware based on configured drivers
    * @private
    * @returns {Function|null} Hono middleware or null
@@ -5360,6 +5404,9 @@ class ApiServer {
     for (const driverDef of drivers) {
       const driverName = driverDef.driver;
       const driverConfig = driverDef.config || {};
+      if (driverName === "oauth2-server") {
+        continue;
+      }
       if (!methods.includes(driverName)) {
         methods.push(driverName);
       }

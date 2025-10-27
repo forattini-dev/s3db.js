@@ -14,7 +14,6 @@
 
 import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
-import { OAuth2Server } from '../../src/plugins/api/auth/oauth2-server.js';
 
 const SSO_PORT = 4000;
 const SSO_URL = `http://localhost:${SSO_PORT}`;
@@ -28,89 +27,32 @@ async function setupSSOServer() {
 
   await db.connect();
 
-  // 2. Criar resources necessários para OAuth2/OIDC
-
-  // Resource para chaves RSA (assinatura de tokens)
-  const keysResource = await db.createResource({
-    name: 'oauth_keys',
-    attributes: {
-      kid: 'string|required',
-      publicKey: 'string|required',
-      privateKey: 'secret|required',
-      algorithm: 'string',
-      use: 'string',
-      active: 'boolean',
-      createdAt: 'string'
-    }
-  });
-
-  // Resource para usuários (fonte de autenticação)
-  const usersResource = await db.createResource({
-    name: 'users',
-    attributes: {
-      email: 'string|required|email',
-      password: 'secret|required',
-      name: 'string|required',
-      picture: 'url|optional',
-      role: 'string|default:user',
-      scopes: 'array|items:string|optional',  // Scopes do usuário
-      active: 'boolean|default:true'
-    }
-  });
-
-  // Resource para OAuth2 clients (aplicações que vão conectar)
-  const clientsResource = await db.createResource({
-    name: 'oauth_clients',
-    attributes: {
-      clientId: 'string|required',
-      clientSecret: 'secret|required',
-      name: 'string|required',
-      redirectUris: 'array|items:string|required',
-      allowedScopes: 'array|items:string|optional',
-      grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
-      active: 'boolean|default:true'
-    }
-  });
-
-  // Resource para authorization codes (fluxo authorization_code)
-  const authCodesResource = await db.createResource({
-    name: 'auth_codes',
-    attributes: {
-      code: 'string|required',
-      clientId: 'string|required',
-      userId: 'string|required',
-      redirectUri: 'string|required',
-      scope: 'string',
-      expiresAt: 'string|required',
-      used: 'boolean|default:false'
-    }
-  });
-
-  // 3. Criar instância do OAuth2 Server
-  const oauth2 = new OAuth2Server({
-    issuer: SSO_URL,
-    keyResource: keysResource,
-    userResource: usersResource,
-    clientResource: clientsResource,
-    authCodeResource: authCodesResource,
-    supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api', 'offline_access'],
-    supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
-    accessTokenExpiry: '15m',
-    idTokenExpiry: '15m',
-    refreshTokenExpiry: '7d'
-  });
-
-  await oauth2.initialize();
-
-  // 4. Configurar API Plugin com OAuth2 Server
+  // 2. Configurar API Plugin com OAuth2 Server
+  // Basta adicionar o driver 'oauth2-server' na lista de drivers!
   const apiPlugin = new ApiPlugin({
     port: SSO_PORT,
     verbose: true,
 
-    // Autenticação básica para gerenciar usuários
+    // Autenticação: JWT para login de usuários + OAuth2 Server para emitir tokens
     auth: {
       drivers: [
-        { driver: 'jwt', config: { secret: 'sso-jwt-secret' } }
+        // JWT para autenticação básica (/auth/login, /auth/register)
+        { driver: 'jwt', config: { secret: 'sso-jwt-secret' } },
+
+        // OAuth2 Server - Torna este servidor um Authorization Server
+        // O plugin automaticamente cria os resources (plg_oauth_keys, plg_oauth_clients, plg_auth_codes)
+        // e registra as rotas OAuth2 (/.well-known/*, /oauth/*)
+        {
+          driver: 'oauth2-server',
+          config: {
+            issuer: SSO_URL,
+            supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api', 'offline_access'],
+            supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
+            accessTokenExpiry: '15m',
+            idTokenExpiry: '15m',
+            refreshTokenExpiry: '7d'
+          }
+        }
       ],
       resource: 'users'
     },
@@ -120,68 +62,25 @@ async function setupSSOServer() {
       enabled: true,
       origin: '*',
       credentials: true
-    },
-
-    // Custom routes para OAuth2/OIDC endpoints
-    routes: {
-      // OIDC Discovery
-      'GET /.well-known/openid-configuration': {
-        handler: oauth2.discoveryHandler.bind(oauth2),
-        auth: false
-      },
-
-      // JWKS (public keys)
-      'GET /.well-known/jwks.json': {
-        handler: oauth2.jwksHandler.bind(oauth2),
-        auth: false
-      },
-
-      // Token endpoint (POST /auth/token)
-      'POST /oauth/token': {
-        handler: oauth2.tokenHandler.bind(oauth2),
-        auth: false
-      },
-
-      // UserInfo endpoint (GET /oauth/userinfo)
-      'GET /oauth/userinfo': {
-        handler: oauth2.userinfoHandler.bind(oauth2),
-        auth: false
-      },
-
-      // Token introspection (POST /oauth/introspect)
-      'POST /oauth/introspect': {
-        handler: oauth2.introspectHandler.bind(oauth2),
-        auth: false
-      },
-
-      // Authorization endpoint (GET /oauth/authorize)
-      'GET /oauth/authorize': {
-        handler: oauth2.authorizeHandler.bind(oauth2),
-        auth: false
-      },
-
-      // Client registration (POST /oauth/register)
-      'POST /oauth/register': {
-        handler: oauth2.registerClientHandler.bind(oauth2),
-        auth: true  // Requer autenticação JWT
-      }
     }
   });
 
   await db.usePlugin(apiPlugin);
 
-  return { db, oauth2, usersResource, clientsResource };
+  return { db, apiPlugin };
 }
 
-async function seedData(usersResource, clientsResource) {
+async function seedData(db) {
   console.log('\n📝 Criando dados de exemplo...\n');
+
+  const usersResource = db.resources.plg_users;
+  const clientsResource = db.resources.plg_oauth_clients;
 
   // Criar usuário de teste
   const user = await usersResource.insert({
+    username: 'admin',
     email: 'admin@sso.local',
     password: 'Admin123!',
-    name: 'Admin User',
-    picture: 'https://i.pravatar.cc/150?u=admin',
     role: 'admin',
     scopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
     active: true
@@ -190,7 +89,7 @@ async function seedData(usersResource, clientsResource) {
   console.log('✅ Usuário criado:', {
     id: user.id,
     email: user.email,
-    name: user.name,
+    username: user.username,
     scopes: user.scopes
   });
 
@@ -282,9 +181,9 @@ async function testDiscovery() {
 async function main() {
   console.log('🔐 Configurando SSO Server (OAuth2 + OIDC)...\n');
 
-  const { db, oauth2, usersResource, clientsResource } = await setupSSOServer();
+  const { db } = await setupSSOServer();
 
-  await seedData(usersResource, clientsResource);
+  await seedData(db);
   await printEndpoints();
   await demonstrateFlow();
 
