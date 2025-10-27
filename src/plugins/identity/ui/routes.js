@@ -8,10 +8,14 @@ import { RegisterPage } from './pages/register.js';
 import { ForgotPasswordPage } from './pages/forgot-password.js';
 import { ResetPasswordPage } from './pages/reset-password.js';
 import { ProfilePage } from './pages/profile.js';
+import { AdminDashboardPage } from './pages/admin/dashboard.js';
+import { AdminClientsPage } from './pages/admin/clients.js';
+import { AdminClientFormPage } from './pages/admin/client-form.js';
 import { hashPassword, verifyPassword, validatePassword } from '../concerns/password.js';
 import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
 import { tryFn } from '../../../concerns/try-fn.js';
-import { sessionAuth } from './middleware.js';
+import { sessionAuth, adminOnly } from './middleware.js';
+import { idGenerator } from '../../../concerns/id.js';
 
 /**
  * Register all UI routes
@@ -825,6 +829,343 @@ export function registerUIRoutes(app, plugin) {
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
+
+  // ============================================================================
+  // ADMIN ROUTES (Protected - Admin Only)
+  // ============================================================================
+
+  // GET /admin - Admin dashboard
+  app.get('/admin', adminOnly(sessionManager), async (c) => {
+    try {
+      const user = c.get('user');
+
+      // Gather statistics
+      const [okUsers, errUsers, allUsers] = await tryFn(() => usersResource.list({ limit: 1000 }));
+      const [okClients, errClients, allClients] = await tryFn(() => plugin.oauth2ClientsResource.list({ limit: 100 }));
+      const [okSessions, errSessions, allSessions] = await tryFn(() => plugin.sessionsResource.list({ limit: 1000 }));
+      const [okCodes, errCodes, allCodes] = await tryFn(() => plugin.oauth2AuthCodesResource.list({ limit: 1000 }));
+
+      const users = okUsers ? allUsers : [];
+      const clients = okClients ? allClients : [];
+      const sessions = okSessions ? allSessions : [];
+      const codes = okCodes ? allCodes : [];
+
+      const now = new Date();
+      const stats = {
+        totalUsers: users.length,
+        activeUsers: users.filter(u => u.status === 'active').length,
+        pendingUsers: users.filter(u => u.status === 'pending_verification').length,
+        totalClients: clients.length,
+        activeClients: clients.filter(c => c.active !== false).length,
+        activeSessions: sessions.filter(s => new Date(s.expiresAt) > now).length,
+        uniqueUsers: new Set(sessions.filter(s => new Date(s.expiresAt) > now).map(s => s.userId)).size,
+        totalAuthCodes: codes.length,
+        unusedAuthCodes: codes.filter(c => !c.used).length,
+        recentUsers: users.slice(-5).reverse(),
+        serverUptime: formatUptime(process.uptime())
+      };
+
+      return c.html(AdminDashboardPage({
+        stats,
+        user,
+        config: config.ui
+      }));
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Admin dashboard error:', error);
+      }
+      return c.redirect(`/profile?error=${encodeURIComponent('Failed to load admin dashboard')}`);
+    }
+  });
+
+  // GET /admin/clients - List OAuth2 clients
+  app.get('/admin/clients', adminOnly(sessionManager), async (c) => {
+    try {
+      const user = c.get('user');
+      const error = c.req.query('error');
+      const success = c.req.query('success');
+
+      const [okClients, errClients, clients] = await tryFn(() =>
+        plugin.oauth2ClientsResource.list({ limit: 100 })
+      );
+
+      if (!okClients) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to load clients:', errClients);
+        }
+        return c.redirect(`/admin?error=${encodeURIComponent('Failed to load clients')}`);
+      }
+
+      return c.html(AdminClientsPage({
+        clients,
+        user,
+        error: error ? decodeURIComponent(error) : null,
+        success: success ? decodeURIComponent(success) : null,
+        config: config.ui
+      }));
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Admin clients error:', error);
+      }
+      return c.redirect(`/admin?error=${encodeURIComponent('Failed to load clients')}`);
+    }
+  });
+
+  // GET /admin/clients/new - New client form
+  app.get('/admin/clients/new', adminOnly(sessionManager), async (c) => {
+    const user = c.get('user');
+    const error = c.req.query('error');
+
+    return c.html(AdminClientFormPage({
+      user,
+      error: error ? decodeURIComponent(error) : null,
+      availableScopes: config.supportedScopes || ['openid', 'profile', 'email', 'offline_access'],
+      availableGrantTypes: config.supportedGrantTypes || ['authorization_code', 'refresh_token', 'client_credentials'],
+      config: config.ui
+    }));
+  });
+
+  // POST /admin/clients/create - Create new client
+  app.post('/admin/clients/create', adminOnly(sessionManager), async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const { name, redirectUris, grantTypes, allowedScopes, active } = body;
+
+      if (!name) {
+        return c.redirect(`/admin/clients/new?error=${encodeURIComponent('Client name is required')}`);
+      }
+
+      // Parse arrays from form data
+      const redirectUrisArray = Array.isArray(redirectUris) ? redirectUris : [redirectUris];
+      const grantTypesArray = Array.isArray(grantTypes) ? grantTypes : (grantTypes ? [grantTypes] : []);
+      const allowedScopesArray = Array.isArray(allowedScopes) ? allowedScopes : (allowedScopes ? [allowedScopes] : []);
+
+      if (redirectUrisArray.length === 0 || redirectUrisArray[0] === '') {
+        return c.redirect(`/admin/clients/new?error=${encodeURIComponent('At least one redirect URI is required')}`);
+      }
+
+      // Generate client ID and secret
+      const clientId = idGenerator();
+      const clientSecret = idGenerator() + idGenerator(); // 44 chars
+
+      // Create client
+      const [okClient, errClient, client] = await tryFn(() =>
+        plugin.oauth2ClientsResource.insert({
+          clientId,
+          clientSecret,
+          name: name.trim(),
+          redirectUris: redirectUrisArray.filter(uri => uri && uri.trim() !== ''),
+          grantTypes: grantTypesArray,
+          allowedScopes: allowedScopesArray,
+          active: active === '1'
+        })
+      );
+
+      if (!okClient) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to create client:', errClient);
+        }
+        return c.redirect(`/admin/clients/new?error=${encodeURIComponent('Failed to create client. Please try again.')}`);
+      }
+
+      return c.redirect(`/admin/clients?success=${encodeURIComponent('Client created successfully. Client ID: ' + clientId + ' | Client Secret: ' + clientSecret + ' (Save this secret now - it cannot be displayed again!)')}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Create client error:', error);
+      }
+      return c.redirect(`/admin/clients/new?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // GET /admin/clients/:id/edit - Edit client form
+  app.get('/admin/clients/:id/edit', adminOnly(sessionManager), async (c) => {
+    try {
+      const user = c.get('user');
+      const clientId = c.req.param('id');
+      const error = c.req.query('error');
+
+      const [okClient, errClient, client] = await tryFn(() =>
+        plugin.oauth2ClientsResource.get(clientId)
+      );
+
+      if (!okClient) {
+        return c.redirect(`/admin/clients?error=${encodeURIComponent('Client not found')}`);
+      }
+
+      return c.html(AdminClientFormPage({
+        client,
+        user,
+        error: error ? decodeURIComponent(error) : null,
+        availableScopes: config.supportedScopes || ['openid', 'profile', 'email', 'offline_access'],
+        availableGrantTypes: config.supportedGrantTypes || ['authorization_code', 'refresh_token', 'client_credentials'],
+        config: config.ui
+      }));
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Edit client error:', error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to load client')}`);
+    }
+  });
+
+  // POST /admin/clients/:id/update - Update client
+  app.post('/admin/clients/:id/update', adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param('id');
+      const body = await c.req.parseBody();
+      const { name, redirectUris, grantTypes, allowedScopes, active } = body;
+
+      if (!name) {
+        return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent('Client name is required')}`);
+      }
+
+      // Parse arrays from form data
+      const redirectUrisArray = Array.isArray(redirectUris) ? redirectUris : [redirectUris];
+      const grantTypesArray = Array.isArray(grantTypes) ? grantTypes : (grantTypes ? [grantTypes] : []);
+      const allowedScopesArray = Array.isArray(allowedScopes) ? allowedScopes : (allowedScopes ? [allowedScopes] : []);
+
+      if (redirectUrisArray.length === 0 || redirectUrisArray[0] === '') {
+        return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent('At least one redirect URI is required')}`);
+      }
+
+      // Update client
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        plugin.oauth2ClientsResource.patch(clientId, {
+          name: name.trim(),
+          redirectUris: redirectUrisArray.filter(uri => uri && uri.trim() !== ''),
+          grantTypes: grantTypesArray,
+          allowedScopes: allowedScopesArray,
+          active: active === '1'
+        })
+      );
+
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to update client:', errUpdate);
+        }
+        return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent('Failed to update client. Please try again.')}`);
+      }
+
+      return c.redirect(`/admin/clients?success=${encodeURIComponent('Client updated successfully')}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Update client error:', error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/clients/:id/delete - Delete client
+  app.post('/admin/clients/:id/delete', adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param('id');
+
+      const [okDelete, errDelete] = await tryFn(() =>
+        plugin.oauth2ClientsResource.delete(clientId)
+      );
+
+      if (!okDelete) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to delete client:', errDelete);
+        }
+        return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to delete client')}`);
+      }
+
+      return c.redirect(`/admin/clients?success=${encodeURIComponent('Client deleted successfully')}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Delete client error:', error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/clients/:id/rotate-secret - Rotate client secret
+  app.post('/admin/clients/:id/rotate-secret', adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param('id');
+
+      // Generate new secret
+      const newSecret = idGenerator() + idGenerator();
+
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        plugin.oauth2ClientsResource.patch(clientId, {
+          clientSecret: newSecret
+        })
+      );
+
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to rotate secret:', errUpdate);
+        }
+        return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to rotate secret')}`);
+      }
+
+      return c.redirect(`/admin/clients?success=${encodeURIComponent('Secret rotated successfully. New secret: ' + newSecret + ' (Save this now - it cannot be displayed again!)')}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Rotate secret error:', error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+
+  // POST /admin/clients/:id/toggle-active - Toggle client active status
+  app.post('/admin/clients/:id/toggle-active', adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param('id');
+
+      const [okClient, errClient, client] = await tryFn(() =>
+        plugin.oauth2ClientsResource.get(clientId)
+      );
+
+      if (!okClient) {
+        return c.redirect(`/admin/clients?error=${encodeURIComponent('Client not found')}`);
+      }
+
+      const [okUpdate, errUpdate] = await tryFn(() =>
+        plugin.oauth2ClientsResource.patch(clientId, {
+          active: !client.active
+        })
+      );
+
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error('[Identity Plugin] Failed to toggle active:', errUpdate);
+        }
+        return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to update client')}`);
+      }
+
+      return c.redirect(`/admin/clients?success=${encodeURIComponent(`Client ${client.active ? 'deactivated' : 'activated'} successfully`)}`);
+
+    } catch (error) {
+      if (config.verbose) {
+        console.error('[Identity Plugin] Toggle active error:', error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
+    }
+  });
+}
+
+// Helper function to format uptime
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+
+  return parts.length > 0 ? parts.join(' ') : '< 1m';
 }
 
 export default registerUIRoutes;

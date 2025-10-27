@@ -52053,6 +52053,15 @@ class IdentityServer {
         console.log("[Identity Server]   POST /profile/change-password (Change Password)");
         console.log("[Identity Server]   POST /profile/logout-session (Logout Specific Session)");
         console.log("[Identity Server]   POST /profile/logout-all-sessions (Logout All Other Sessions)");
+        console.log("[Identity Server]   GET  /admin (Admin Dashboard - Protected)");
+        console.log("[Identity Server]   GET  /admin/clients (List OAuth2 Clients)");
+        console.log("[Identity Server]   GET  /admin/clients/new (New Client Form)");
+        console.log("[Identity Server]   POST /admin/clients/create (Create Client)");
+        console.log("[Identity Server]   GET  /admin/clients/:id/edit (Edit Client Form)");
+        console.log("[Identity Server]   POST /admin/clients/:id/update (Update Client)");
+        console.log("[Identity Server]   POST /admin/clients/:id/delete (Delete Client)");
+        console.log("[Identity Server]   POST /admin/clients/:id/rotate-secret (Rotate Client Secret)");
+        console.log("[Identity Server]   POST /admin/clients/:id/toggle-active (Toggle Client Active)");
       }
     } catch (error) {
       console.error("[Identity Server] Failed to setup UI routes:", error);
@@ -53307,6 +53316,436 @@ function ProfilePage(props = {}) {
   });
 }
 
+function AdminDashboardPage(props = {}) {
+  const { stats = {}, user = {}, config = {} } = props;
+  const content = html`
+    <div class="container">
+      <h1 class="mb-4">Admin Dashboard</h1>
+
+      <!-- Statistics Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+        <!-- Users Card -->
+        <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+          <div class="p-3">
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Total Users</div>
+            <div style="font-size: 2rem; font-weight: bold;">${stats.totalUsers || 0}</div>
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
+              ${stats.activeUsers || 0} active · ${stats.pendingUsers || 0} pending
+            </div>
+          </div>
+        </div>
+
+        <!-- OAuth2 Clients Card -->
+        <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+          <div class="p-3">
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">OAuth2 Clients</div>
+            <div style="font-size: 2rem; font-weight: bold;">${stats.totalClients || 0}</div>
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
+              ${stats.activeClients || 0} active
+            </div>
+          </div>
+        </div>
+
+        <!-- Sessions Card -->
+        <div class="card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
+          <div class="p-3">
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Active Sessions</div>
+            <div style="font-size: 2rem; font-weight: bold;">${stats.activeSessions || 0}</div>
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
+              ${stats.uniqueUsers || 0} unique users
+            </div>
+          </div>
+        </div>
+
+        <!-- Auth Codes Card -->
+        <div class="card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white;">
+          <div class="p-3">
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Auth Codes</div>
+            <div style="font-size: 2rem; font-weight: bold;">${stats.totalAuthCodes || 0}</div>
+            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
+              ${stats.unusedAuthCodes || 0} unused
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="card mb-4">
+        <div class="card-header">
+          Quick Actions
+        </div>
+        <div class="p-3">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+            <a href="/admin/clients" class="btn btn-primary" style="text-decoration: none; text-align: center;">
+              📱 Manage Clients
+            </a>
+            <a href="/admin/users" class="btn btn-primary" style="text-decoration: none; text-align: center;">
+              👥 Manage Users
+            </a>
+            <a href="/admin/sessions" class="btn btn-primary" style="text-decoration: none; text-align: center;">
+              🔐 View Sessions
+            </a>
+            <a href="/admin/auth-codes" class="btn btn-primary" style="text-decoration: none; text-align: center;">
+              🎫 Auth Codes
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      ${stats.recentUsers && stats.recentUsers.length > 0 ? html`
+        <div class="card mb-4">
+          <div class="card-header">
+            Recent Users
+          </div>
+          <div class="p-3">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="border-bottom: 2px solid var(--color-border);">
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Email</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Name</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Status</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.recentUsers.map((user2) => html`
+                  <tr style="border-bottom: 1px solid var(--color-border);">
+                    <td style="padding: 0.75rem;">${user2.email}</td>
+                    <td style="padding: 0.75rem;">${user2.name}</td>
+                    <td style="padding: 0.75rem;">
+                      <span class="badge" style="background-color: ${user2.status === "active" ? "var(--color-success)" : user2.status === "suspended" ? "var(--color-danger)" : "var(--color-warning)"}; color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
+                        ${user2.status}
+                      </span>
+                    </td>
+                    <td style="padding: 0.75rem; color: var(--color-text-muted); font-size: 0.875rem;">
+                      ${new Date(user2.createdAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ""}
+
+      <!-- System Information -->
+      <div class="card">
+        <div class="card-header">
+          System Information
+        </div>
+        <div class="p-3">
+          <div style="display: grid; gap: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
+              <span style="font-weight: 500;">Identity Provider:</span>
+              <span>${config.title || "S3DB Identity"}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
+              <span style="font-weight: 500;">Your Role:</span>
+              <span style="color: var(--color-primary);">Administrator</span>
+            </div>
+            ${stats.serverUptime ? html`
+              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
+                <span style="font-weight: 500;">Server Uptime:</span>
+                <span>${stats.serverUptime}</span>
+              </div>
+            ` : ""}
+            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
+              <span style="font-weight: 500;">Database Type:</span>
+              <span>S3DB (S3-based Document Database)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: "Admin Dashboard",
+    content,
+    config,
+    user
+  });
+}
+
+function AdminClientsPage(props = {}) {
+  const { clients = [], user = {}, error = null, success = null, config = {} } = props;
+  const content = html`
+    <div class="container">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <h1>OAuth2 Clients</h1>
+        <a href="/admin/clients/new" class="btn btn-primary">
+          + New Client
+        </a>
+      </div>
+
+      ${clients.length === 0 ? html`
+        <div class="card">
+          <div class="p-3 text-center">
+            <p class="text-muted">No OAuth2 clients registered yet.</p>
+            <a href="/admin/clients/new" class="btn btn-primary mt-3">
+              Create Your First Client
+            </a>
+          </div>
+        </div>
+      ` : html`
+        <div style="display: grid; gap: 1.5rem;">
+          ${clients.map((client) => {
+    const grantTypes = Array.isArray(client.grantTypes) ? client.grantTypes : [];
+    const allowedScopes = Array.isArray(client.allowedScopes) ? client.allowedScopes : [];
+    const redirectUris = Array.isArray(client.redirectUris) ? client.redirectUris : [];
+    return html`
+              <div class="card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${client.name}</strong>
+                    ${!client.active ? html`
+                      <span class="badge" style="background-color: var(--color-danger); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem; margin-left: 0.5rem;">
+                        Inactive
+                      </span>
+                    ` : ""}
+                  </div>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <a href="/admin/clients/${client.id}/edit" class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                      Edit
+                    </a>
+                    <form method="POST" action="/admin/clients/${client.id}/delete" style="margin: 0; display: inline;">
+                      <button
+                        type="submit"
+                        class="btn btn-danger"
+                        style="font-size: 0.875rem; padding: 0.5rem 1rem;"
+                        onclick="return confirm('Are you sure you want to delete this client? This action cannot be undone.')"
+                      >
+                        Delete
+                      </button>
+                    </form>
+                  </div>
+                </div>
+                <div class="p-3">
+                  <div style="display: grid; gap: 1rem;">
+                    <!-- Client ID -->
+                    <div>
+                      <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                        Client ID
+                      </div>
+                      <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem; word-break: break-all;">
+                        ${client.clientId}
+                      </code>
+                    </div>
+
+                    <!-- Redirect URIs -->
+                    ${redirectUris.length > 0 ? html`
+                      <div>
+                        <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                          Redirect URIs (${redirectUris.length})
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                          ${redirectUris.map((uri) => html`
+                            <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem;">
+                              ${uri}
+                            </code>
+                          `)}
+                        </div>
+                      </div>
+                    ` : ""}
+
+                    <!-- Grant Types -->
+                    ${grantTypes.length > 0 ? html`
+                      <div>
+                        <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                          Grant Types
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                          ${grantTypes.map((type) => html`
+                            <span class="badge" style="background-color: var(--color-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
+                              ${type}
+                            </span>
+                          `)}
+                        </div>
+                      </div>
+                    ` : ""}
+
+                    <!-- Allowed Scopes -->
+                    ${allowedScopes.length > 0 ? html`
+                      <div>
+                        <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
+                          Allowed Scopes
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                          ${allowedScopes.map((scope) => html`
+                            <span class="badge" style="background-color: var(--color-success); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
+                              ${scope}
+                            </span>
+                          `)}
+                        </div>
+                      </div>
+                    ` : ""}
+
+                    <!-- Created Date -->
+                    ${client.createdAt ? html`
+                      <div style="color: var(--color-text-muted); font-size: 0.875rem;">
+                        Created: ${new Date(client.createdAt).toLocaleString()}
+                      </div>
+                    ` : ""}
+                  </div>
+
+                  <!-- Actions -->
+                  <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--color-border); display: flex; gap: 1rem;">
+                    <form method="POST" action="/admin/clients/${client.id}/rotate-secret" style="margin: 0;">
+                      <button type="submit" class="btn btn-secondary" style="font-size: 0.875rem;">
+                        🔄 Rotate Secret
+                      </button>
+                    </form>
+                    <form method="POST" action="/admin/clients/${client.id}/toggle-active" style="margin: 0;">
+                      <button type="submit" class="btn ${client.active ? "btn-danger" : "btn-success"}" style="font-size: 0.875rem;">
+                        ${client.active ? "\u{1F534} Deactivate" : "\u{1F7E2} Activate"}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            `;
+  })}
+        </div>
+      `}
+    </div>
+  `;
+  return BaseLayout({
+    title: "OAuth2 Clients - Admin",
+    content,
+    config,
+    user,
+    error,
+    success
+  });
+}
+
+var __freeze = Object.freeze;
+var __defProp = Object.defineProperty;
+var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
+var _a;
+function AdminClientFormPage(props = {}) {
+  const { client = null, user = {}, error = null, availableScopes = [], availableGrantTypes = [], config = {} } = props;
+  const isEditMode = !!client;
+  const clientData = client || {
+    name: "",
+    redirectUris: [""],
+    grantTypes: ["authorization_code", "refresh_token"],
+    allowedScopes: ["openid", "profile", "email"],
+    active: true
+  };
+  const content = html(_a || (_a = __template(['\n    <div class="container-sm">\n      <div style="margin-bottom: 2rem;">\n        <a href="/admin/clients" class="btn-link" style="font-size: 0.875rem;">\u2190 Back to Clients</a>\n        <h1 class="mt-3">', ' OAuth2 Client</h1>\n      </div>\n\n      <div class="card">\n        <form method="POST" action="', '">\n          <div class="p-3">\n            <!-- Client Name -->\n            <div class="form-group">\n              <label for="name" class="form-label form-label-required">Client Name</label>\n              <input\n                type="text"\n                class="form-control ', '"\n                id="name"\n                name="name"\n                value="', '"\n                required\n                autofocus\n                placeholder="My Application"\n              />\n              <small class="form-text">A friendly name for this OAuth2 client</small>\n              ', '\n            </div>\n\n            <!-- Redirect URIs -->\n            <div class="form-group">\n              <label class="form-label form-label-required">Redirect URIs</label>\n              <div id="redirect-uris-container">\n                ', '\n              </div>\n              <button type="button" class="btn btn-secondary mt-2" onclick="addRedirectUri()">\n                + Add Another URI\n              </button>\n              <small class="form-text">Where users will be redirected after authorization</small>\n            </div>\n\n            <!-- Grant Types -->\n            <div class="form-group">\n              <label class="form-label form-label-required">Grant Types</label>\n              ', '\n              <small class="form-text">OAuth2 grant types this client can use</small>\n            </div>\n\n            <!-- Allowed Scopes -->\n            <div class="form-group">\n              <label class="form-label form-label-required">Allowed Scopes</label>\n              ', '\n              <small class="form-text">Scopes this client is allowed to request</small>\n            </div>\n\n            <!-- Active Status -->\n            <div class="form-group">\n              <div class="form-check">\n                <input\n                  type="checkbox"\n                  class="form-check-input"\n                  id="active"\n                  name="active"\n                  value="1"\n                  ', '\n                />\n                <label class="form-check-label" for="active">\n                  <strong>Active</strong> - Client can authenticate and receive tokens\n                </label>\n              </div>\n            </div>\n\n            <!-- Submit Buttons -->\n            <div class="form-group mb-0" style="display: flex; gap: 1rem;">\n              <button type="submit" class="btn btn-primary">\n                ', '\n              </button>\n              <a href="/admin/clients" class="btn btn-secondary">\n                Cancel\n              </a>\n            </div>\n          </div>\n        </form>\n      </div>\n\n      ', `
+    </div>
+
+    <script>
+      function addRedirectUri() {
+        const container = document.getElementById('redirect-uris-container');
+        const div = document.createElement('div');
+        div.className = 'redirect-uri-row';
+        div.style.cssText = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem;';
+        div.innerHTML = \`
+          <input
+            type="url"
+            class="form-control"
+            name="redirectUris[]"
+            required
+            placeholder="https://example.com/callback"
+          />
+          <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()" style="padding: 0.75rem 1rem;">
+            \u2715
+          </button>
+        \`;
+        container.appendChild(div);
+      }
+    <\/script>
+  `], ['\n    <div class="container-sm">\n      <div style="margin-bottom: 2rem;">\n        <a href="/admin/clients" class="btn-link" style="font-size: 0.875rem;">\u2190 Back to Clients</a>\n        <h1 class="mt-3">', ' OAuth2 Client</h1>\n      </div>\n\n      <div class="card">\n        <form method="POST" action="', '">\n          <div class="p-3">\n            <!-- Client Name -->\n            <div class="form-group">\n              <label for="name" class="form-label form-label-required">Client Name</label>\n              <input\n                type="text"\n                class="form-control ', '"\n                id="name"\n                name="name"\n                value="', '"\n                required\n                autofocus\n                placeholder="My Application"\n              />\n              <small class="form-text">A friendly name for this OAuth2 client</small>\n              ', '\n            </div>\n\n            <!-- Redirect URIs -->\n            <div class="form-group">\n              <label class="form-label form-label-required">Redirect URIs</label>\n              <div id="redirect-uris-container">\n                ', '\n              </div>\n              <button type="button" class="btn btn-secondary mt-2" onclick="addRedirectUri()">\n                + Add Another URI\n              </button>\n              <small class="form-text">Where users will be redirected after authorization</small>\n            </div>\n\n            <!-- Grant Types -->\n            <div class="form-group">\n              <label class="form-label form-label-required">Grant Types</label>\n              ', '\n              <small class="form-text">OAuth2 grant types this client can use</small>\n            </div>\n\n            <!-- Allowed Scopes -->\n            <div class="form-group">\n              <label class="form-label form-label-required">Allowed Scopes</label>\n              ', '\n              <small class="form-text">Scopes this client is allowed to request</small>\n            </div>\n\n            <!-- Active Status -->\n            <div class="form-group">\n              <div class="form-check">\n                <input\n                  type="checkbox"\n                  class="form-check-input"\n                  id="active"\n                  name="active"\n                  value="1"\n                  ', '\n                />\n                <label class="form-check-label" for="active">\n                  <strong>Active</strong> - Client can authenticate and receive tokens\n                </label>\n              </div>\n            </div>\n\n            <!-- Submit Buttons -->\n            <div class="form-group mb-0" style="display: flex; gap: 1rem;">\n              <button type="submit" class="btn btn-primary">\n                ', '\n              </button>\n              <a href="/admin/clients" class="btn btn-secondary">\n                Cancel\n              </a>\n            </div>\n          </div>\n        </form>\n      </div>\n\n      ', `
+    </div>
+
+    <script>
+      function addRedirectUri() {
+        const container = document.getElementById('redirect-uris-container');
+        const div = document.createElement('div');
+        div.className = 'redirect-uri-row';
+        div.style.cssText = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem;';
+        div.innerHTML = \\\`
+          <input
+            type="url"
+            class="form-control"
+            name="redirectUris[]"
+            required
+            placeholder="https://example.com/callback"
+          />
+          <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()" style="padding: 0.75rem 1rem;">
+            \u2715
+          </button>
+        \\\`;
+        container.appendChild(div);
+      }
+    <\/script>
+  `])), isEditMode ? "Edit" : "Create", isEditMode ? `/admin/clients/${client.id}/update` : "/admin/clients/create", error ? "is-invalid" : "", clientData.name, error ? html`<div class="invalid-feedback">${error}</div>` : "", (Array.isArray(clientData.redirectUris) ? clientData.redirectUris : [""]).map((uri, index) => html`
+                  <div class="redirect-uri-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <input
+                      type="url"
+                      class="form-control"
+                      name="redirectUris[]"
+                      value="${uri}"
+                      required
+                      placeholder="https://example.com/callback"
+                    />
+                    ${index > 0 ? html`
+                      <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()" style="padding: 0.75rem 1rem;">
+                        ✕
+                      </button>
+                    ` : ""}
+                  </div>
+                `), (availableGrantTypes.length > 0 ? availableGrantTypes : ["authorization_code", "refresh_token", "client_credentials"]).map((type) => {
+    const isChecked = Array.isArray(clientData.grantTypes) && clientData.grantTypes.includes(type);
+    return html`
+                  <div class="form-check">
+                    <input
+                      type="checkbox"
+                      class="form-check-input"
+                      id="grant_${type}"
+                      name="grantTypes[]"
+                      value="${type}"
+                      ${isChecked ? "checked" : ""}
+                    />
+                    <label class="form-check-label" for="grant_${type}">
+                      <code>${type}</code>
+                    </label>
+                  </div>
+                `;
+  }), (availableScopes.length > 0 ? availableScopes : ["openid", "profile", "email", "offline_access"]).map((scope) => {
+    const isChecked = Array.isArray(clientData.allowedScopes) && clientData.allowedScopes.includes(scope);
+    return html`
+                  <div class="form-check">
+                    <input
+                      type="checkbox"
+                      class="form-check-input"
+                      id="scope_${scope}"
+                      name="allowedScopes[]"
+                      value="${scope}"
+                      ${isChecked ? "checked" : ""}
+                    />
+                    <label class="form-check-label" for="scope_${scope}">
+                      <code>${scope}</code>
+                    </label>
+                  </div>
+                `;
+  }), clientData.active !== false ? "checked" : "", isEditMode ? "Update Client" : "Create Client", isEditMode ? html`
+        <div class="alert alert-info mt-4">
+          <strong>Note:</strong> The client secret cannot be displayed again after creation. If you need a new secret, use the "Rotate Secret" button on the clients list page.
+        </div>
+      ` : "");
+  return BaseLayout({
+    title: `${isEditMode ? "Edit" : "Create"} OAuth2 Client - Admin`,
+    content,
+    config,
+    user,
+    error: null
+    // Error shown in form
+  });
+}
+
 const DEFAULT_PASSWORD_POLICY = {
   minLength: 8,
   maxLength: 128,
@@ -53404,6 +53843,12 @@ function sessionAuth(sessionManager, options = {}) {
     c.set("isAdmin", user?.isAdmin || false);
     await next();
   };
+}
+function adminOnly(sessionManager) {
+  return sessionAuth(sessionManager, {
+    required: true,
+    requireAdmin: true
+  });
 }
 
 function registerUIRoutes(app, plugin) {
@@ -53964,6 +54409,266 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/profile?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
   });
+  app.get("/admin", adminOnly(sessionManager), async (c) => {
+    try {
+      const user = c.get("user");
+      const [okUsers, errUsers, allUsers] = await tryFn(() => usersResource.list({ limit: 1e3 }));
+      const [okClients, errClients, allClients] = await tryFn(() => plugin.oauth2ClientsResource.list({ limit: 100 }));
+      const [okSessions, errSessions, allSessions] = await tryFn(() => plugin.sessionsResource.list({ limit: 1e3 }));
+      const [okCodes, errCodes, allCodes] = await tryFn(() => plugin.oauth2AuthCodesResource.list({ limit: 1e3 }));
+      const users = okUsers ? allUsers : [];
+      const clients = okClients ? allClients : [];
+      const sessions = okSessions ? allSessions : [];
+      const codes = okCodes ? allCodes : [];
+      const now = /* @__PURE__ */ new Date();
+      const stats = {
+        totalUsers: users.length,
+        activeUsers: users.filter((u) => u.status === "active").length,
+        pendingUsers: users.filter((u) => u.status === "pending_verification").length,
+        totalClients: clients.length,
+        activeClients: clients.filter((c2) => c2.active !== false).length,
+        activeSessions: sessions.filter((s) => new Date(s.expiresAt) > now).length,
+        uniqueUsers: new Set(sessions.filter((s) => new Date(s.expiresAt) > now).map((s) => s.userId)).size,
+        totalAuthCodes: codes.length,
+        unusedAuthCodes: codes.filter((c2) => !c2.used).length,
+        recentUsers: users.slice(-5).reverse(),
+        serverUptime: formatUptime(process.uptime())
+      };
+      return c.html(AdminDashboardPage({
+        stats,
+        user,
+        config: config.ui
+      }));
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Admin dashboard error:", error);
+      }
+      return c.redirect(`/profile?error=${encodeURIComponent("Failed to load admin dashboard")}`);
+    }
+  });
+  app.get("/admin/clients", adminOnly(sessionManager), async (c) => {
+    try {
+      const user = c.get("user");
+      const error = c.req.query("error");
+      const success = c.req.query("success");
+      const [okClients, errClients, clients] = await tryFn(
+        () => plugin.oauth2ClientsResource.list({ limit: 100 })
+      );
+      if (!okClients) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to load clients:", errClients);
+        }
+        return c.redirect(`/admin?error=${encodeURIComponent("Failed to load clients")}`);
+      }
+      return c.html(AdminClientsPage({
+        clients,
+        user,
+        error: error ? decodeURIComponent(error) : null,
+        success: success ? decodeURIComponent(success) : null,
+        config: config.ui
+      }));
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Admin clients error:", error);
+      }
+      return c.redirect(`/admin?error=${encodeURIComponent("Failed to load clients")}`);
+    }
+  });
+  app.get("/admin/clients/new", adminOnly(sessionManager), async (c) => {
+    const user = c.get("user");
+    const error = c.req.query("error");
+    return c.html(AdminClientFormPage({
+      user,
+      error: error ? decodeURIComponent(error) : null,
+      availableScopes: config.supportedScopes || ["openid", "profile", "email", "offline_access"],
+      availableGrantTypes: config.supportedGrantTypes || ["authorization_code", "refresh_token", "client_credentials"],
+      config: config.ui
+    }));
+  });
+  app.post("/admin/clients/create", adminOnly(sessionManager), async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const { name, redirectUris, grantTypes, allowedScopes, active } = body;
+      if (!name) {
+        return c.redirect(`/admin/clients/new?error=${encodeURIComponent("Client name is required")}`);
+      }
+      const redirectUrisArray = Array.isArray(redirectUris) ? redirectUris : [redirectUris];
+      const grantTypesArray = Array.isArray(grantTypes) ? grantTypes : grantTypes ? [grantTypes] : [];
+      const allowedScopesArray = Array.isArray(allowedScopes) ? allowedScopes : allowedScopes ? [allowedScopes] : [];
+      if (redirectUrisArray.length === 0 || redirectUrisArray[0] === "") {
+        return c.redirect(`/admin/clients/new?error=${encodeURIComponent("At least one redirect URI is required")}`);
+      }
+      const clientId = idGenerator();
+      const clientSecret = idGenerator() + idGenerator();
+      const [okClient, errClient, client] = await tryFn(
+        () => plugin.oauth2ClientsResource.insert({
+          clientId,
+          clientSecret,
+          name: name.trim(),
+          redirectUris: redirectUrisArray.filter((uri) => uri && uri.trim() !== ""),
+          grantTypes: grantTypesArray,
+          allowedScopes: allowedScopesArray,
+          active: active === "1"
+        })
+      );
+      if (!okClient) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to create client:", errClient);
+        }
+        return c.redirect(`/admin/clients/new?error=${encodeURIComponent("Failed to create client. Please try again.")}`);
+      }
+      return c.redirect(`/admin/clients?success=${encodeURIComponent("Client created successfully. Client ID: " + clientId + " | Client Secret: " + clientSecret + " (Save this secret now - it cannot be displayed again!)")}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Create client error:", error);
+      }
+      return c.redirect(`/admin/clients/new?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/admin/clients/:id/edit", adminOnly(sessionManager), async (c) => {
+    try {
+      const user = c.get("user");
+      const clientId = c.req.param("id");
+      const error = c.req.query("error");
+      const [okClient, errClient, client] = await tryFn(
+        () => plugin.oauth2ClientsResource.get(clientId)
+      );
+      if (!okClient) {
+        return c.redirect(`/admin/clients?error=${encodeURIComponent("Client not found")}`);
+      }
+      return c.html(AdminClientFormPage({
+        client,
+        user,
+        error: error ? decodeURIComponent(error) : null,
+        availableScopes: config.supportedScopes || ["openid", "profile", "email", "offline_access"],
+        availableGrantTypes: config.supportedGrantTypes || ["authorization_code", "refresh_token", "client_credentials"],
+        config: config.ui
+      }));
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Edit client error:", error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent("Failed to load client")}`);
+    }
+  });
+  app.post("/admin/clients/:id/update", adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param("id");
+      const body = await c.req.parseBody();
+      const { name, redirectUris, grantTypes, allowedScopes, active } = body;
+      if (!name) {
+        return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent("Client name is required")}`);
+      }
+      const redirectUrisArray = Array.isArray(redirectUris) ? redirectUris : [redirectUris];
+      const grantTypesArray = Array.isArray(grantTypes) ? grantTypes : grantTypes ? [grantTypes] : [];
+      const allowedScopesArray = Array.isArray(allowedScopes) ? allowedScopes : allowedScopes ? [allowedScopes] : [];
+      if (redirectUrisArray.length === 0 || redirectUrisArray[0] === "") {
+        return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent("At least one redirect URI is required")}`);
+      }
+      const [okUpdate, errUpdate] = await tryFn(
+        () => plugin.oauth2ClientsResource.patch(clientId, {
+          name: name.trim(),
+          redirectUris: redirectUrisArray.filter((uri) => uri && uri.trim() !== ""),
+          grantTypes: grantTypesArray,
+          allowedScopes: allowedScopesArray,
+          active: active === "1"
+        })
+      );
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to update client:", errUpdate);
+        }
+        return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent("Failed to update client. Please try again.")}`);
+      }
+      return c.redirect(`/admin/clients?success=${encodeURIComponent("Client updated successfully")}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Update client error:", error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/clients/:id/delete", adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param("id");
+      const [okDelete, errDelete] = await tryFn(
+        () => plugin.oauth2ClientsResource.delete(clientId)
+      );
+      if (!okDelete) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to delete client:", errDelete);
+        }
+        return c.redirect(`/admin/clients?error=${encodeURIComponent("Failed to delete client")}`);
+      }
+      return c.redirect(`/admin/clients?success=${encodeURIComponent("Client deleted successfully")}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Delete client error:", error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/clients/:id/rotate-secret", adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param("id");
+      const newSecret = idGenerator() + idGenerator();
+      const [okUpdate, errUpdate] = await tryFn(
+        () => plugin.oauth2ClientsResource.patch(clientId, {
+          clientSecret: newSecret
+        })
+      );
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to rotate secret:", errUpdate);
+        }
+        return c.redirect(`/admin/clients?error=${encodeURIComponent("Failed to rotate secret")}`);
+      }
+      return c.redirect(`/admin/clients?success=${encodeURIComponent("Secret rotated successfully. New secret: " + newSecret + " (Save this now - it cannot be displayed again!)")}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Rotate secret error:", error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/clients/:id/toggle-active", adminOnly(sessionManager), async (c) => {
+    try {
+      const clientId = c.req.param("id");
+      const [okClient, errClient, client] = await tryFn(
+        () => plugin.oauth2ClientsResource.get(clientId)
+      );
+      if (!okClient) {
+        return c.redirect(`/admin/clients?error=${encodeURIComponent("Client not found")}`);
+      }
+      const [okUpdate, errUpdate] = await tryFn(
+        () => plugin.oauth2ClientsResource.patch(clientId, {
+          active: !client.active
+        })
+      );
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to toggle active:", errUpdate);
+        }
+        return c.redirect(`/admin/clients?error=${encodeURIComponent("Failed to update client")}`);
+      }
+      return c.redirect(`/admin/clients?success=${encodeURIComponent(`Client ${client.active ? "deactivated" : "activated"} successfully`)}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] Toggle active error:", error);
+      }
+      return c.redirect(`/admin/clients?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+}
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor(seconds % 86400 / 3600);
+  const minutes = Math.floor(seconds % 3600 / 60);
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  return parts.length > 0 ? parts.join(" ") : "< 1m";
 }
 
 var routes = /*#__PURE__*/Object.freeze({
