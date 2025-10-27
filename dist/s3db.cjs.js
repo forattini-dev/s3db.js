@@ -2,11 +2,10 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-var crypto = require('crypto');
+var crypto$1 = require('crypto');
 var nanoid = require('nanoid');
 var EventEmitter = require('events');
 var hono = require('hono');
-var jose = require('jose');
 var promises = require('fs/promises');
 var fs = require('fs');
 var promises$1 = require('stream/promises');
@@ -55,11 +54,11 @@ var actualFS__namespace = /*#__PURE__*/_interopNamespaceDefault(actualFS);
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const base = alphabet.length;
 const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
-const encode = (n) => {
+const encode$1 = (n) => {
   if (typeof n !== "number" || isNaN(n)) return "undefined";
   if (!isFinite(n)) return "undefined";
   if (n === 0) return alphabet[0];
-  if (n < 0) return "-" + encode(-Math.floor(n));
+  if (n < 0) return "-" + encode$1(-Math.floor(n));
   n = Math.floor(n);
   let s = "";
   while (n) {
@@ -68,7 +67,7 @@ const encode = (n) => {
   }
   return s;
 };
-const decode = (s) => {
+const decode$1 = (s) => {
   if (typeof s !== "string") return NaN;
   if (s === "") return 0;
   let negative = false;
@@ -90,7 +89,7 @@ const encodeDecimal = (n) => {
   const negative = n < 0;
   n = Math.abs(n);
   const [intPart, decPart] = n.toString().split(".");
-  const encodedInt = encode(Number(intPart));
+  const encodedInt = encode$1(Number(intPart));
   if (decPart) {
     return (negative ? "-" : "") + encodedInt + "." + decPart;
   }
@@ -104,7 +103,7 @@ const decodeDecimal = (s) => {
     s = s.slice(1);
   }
   const [intPart, decPart] = s.split(".");
-  const decodedInt = decode(intPart);
+  const decodedInt = decode$1(intPart);
   if (isNaN(decodedInt)) return NaN;
   const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
   return negative ? -num : num;
@@ -985,7 +984,7 @@ function tryFnSync(fn) {
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    lib = crypto.webcrypto;
+    lib = crypto$1.webcrypto;
   } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
@@ -1039,7 +1038,7 @@ async function md5(data) {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
   const [ok, err, result] = await tryFn(async () => {
-    return crypto.createHash("md5").update(data).digest("base64");
+    return crypto$1.createHash("md5").update(data).digest("base64");
   });
   if (!ok) {
     throw new CryptoError("MD5 hashing failed", { original: err, data });
@@ -3346,7 +3345,7 @@ function createToken(payload, secret, expiresIn = "7d") {
   };
   const encodedHeader = Buffer.from(JSON.stringify(header)).toString("base64url");
   const encodedPayload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  const signature = crypto.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
+  const signature = crypto$1.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
   return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
 function verifyToken(token, secret) {
@@ -3355,7 +3354,7 @@ function verifyToken(token, secret) {
     if (!encodedHeader || !encodedPayload || !signature) {
       return null;
     }
-    const expectedSignature = crypto.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
+    const expectedSignature = crypto$1.createHash("sha256").update(`${encodedHeader}.${encodedPayload}.${secret}`).digest("base64url");
     if (signature !== expectedSignature) {
       return null;
     }
@@ -5020,6 +5019,1711 @@ function basicAuth(options = {}) {
   };
 }
 
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+function concat(...buffers) {
+    const size = buffers.reduce((acc, { length }) => acc + length, 0);
+    const buf = new Uint8Array(size);
+    let i = 0;
+    for (const buffer of buffers) {
+        buf.set(buffer, i);
+        i += buffer.length;
+    }
+    return buf;
+}
+
+function encodeBase64(input) {
+    if (Uint8Array.prototype.toBase64) {
+        return input.toBase64();
+    }
+    const CHUNK_SIZE = 0x8000;
+    const arr = [];
+    for (let i = 0; i < input.length; i += CHUNK_SIZE) {
+        arr.push(String.fromCharCode.apply(null, input.subarray(i, i + CHUNK_SIZE)));
+    }
+    return btoa(arr.join(''));
+}
+function decodeBase64(encoded) {
+    if (Uint8Array.fromBase64) {
+        return Uint8Array.fromBase64(encoded);
+    }
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function decode(input) {
+    if (Uint8Array.fromBase64) {
+        return Uint8Array.fromBase64(typeof input === 'string' ? input : decoder.decode(input), {
+            alphabet: 'base64url',
+        });
+    }
+    let encoded = input;
+    if (encoded instanceof Uint8Array) {
+        encoded = decoder.decode(encoded);
+    }
+    encoded = encoded.replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
+    try {
+        return decodeBase64(encoded);
+    }
+    catch {
+        throw new TypeError('The input to be decoded is not correctly encoded.');
+    }
+}
+function encode(input) {
+    let unencoded = input;
+    if (typeof unencoded === 'string') {
+        unencoded = encoder.encode(unencoded);
+    }
+    if (Uint8Array.prototype.toBase64) {
+        return unencoded.toBase64({ alphabet: 'base64url', omitPadding: true });
+    }
+    return encodeBase64(unencoded).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+class JOSEError extends Error {
+    static code = 'ERR_JOSE_GENERIC';
+    code = 'ERR_JOSE_GENERIC';
+    constructor(message, options) {
+        super(message, options);
+        this.name = this.constructor.name;
+        Error.captureStackTrace?.(this, this.constructor);
+    }
+}
+class JWTClaimValidationFailed extends JOSEError {
+    static code = 'ERR_JWT_CLAIM_VALIDATION_FAILED';
+    code = 'ERR_JWT_CLAIM_VALIDATION_FAILED';
+    claim;
+    reason;
+    payload;
+    constructor(message, payload, claim = 'unspecified', reason = 'unspecified') {
+        super(message, { cause: { claim, reason, payload } });
+        this.claim = claim;
+        this.reason = reason;
+        this.payload = payload;
+    }
+}
+class JWTExpired extends JOSEError {
+    static code = 'ERR_JWT_EXPIRED';
+    code = 'ERR_JWT_EXPIRED';
+    claim;
+    reason;
+    payload;
+    constructor(message, payload, claim = 'unspecified', reason = 'unspecified') {
+        super(message, { cause: { claim, reason, payload } });
+        this.claim = claim;
+        this.reason = reason;
+        this.payload = payload;
+    }
+}
+class JOSEAlgNotAllowed extends JOSEError {
+    static code = 'ERR_JOSE_ALG_NOT_ALLOWED';
+    code = 'ERR_JOSE_ALG_NOT_ALLOWED';
+}
+class JOSENotSupported extends JOSEError {
+    static code = 'ERR_JOSE_NOT_SUPPORTED';
+    code = 'ERR_JOSE_NOT_SUPPORTED';
+}
+class JWSInvalid extends JOSEError {
+    static code = 'ERR_JWS_INVALID';
+    code = 'ERR_JWS_INVALID';
+}
+class JWTInvalid extends JOSEError {
+    static code = 'ERR_JWT_INVALID';
+    code = 'ERR_JWT_INVALID';
+}
+class JWKSInvalid extends JOSEError {
+    static code = 'ERR_JWKS_INVALID';
+    code = 'ERR_JWKS_INVALID';
+}
+class JWKSNoMatchingKey extends JOSEError {
+    static code = 'ERR_JWKS_NO_MATCHING_KEY';
+    code = 'ERR_JWKS_NO_MATCHING_KEY';
+    constructor(message = 'no applicable key found in the JSON Web Key Set', options) {
+        super(message, options);
+    }
+}
+class JWKSMultipleMatchingKeys extends JOSEError {
+    [Symbol.asyncIterator];
+    static code = 'ERR_JWKS_MULTIPLE_MATCHING_KEYS';
+    code = 'ERR_JWKS_MULTIPLE_MATCHING_KEYS';
+    constructor(message = 'multiple matching keys found in the JSON Web Key Set', options) {
+        super(message, options);
+    }
+}
+class JWKSTimeout extends JOSEError {
+    static code = 'ERR_JWKS_TIMEOUT';
+    code = 'ERR_JWKS_TIMEOUT';
+    constructor(message = 'request timed out', options) {
+        super(message, options);
+    }
+}
+class JWSSignatureVerificationFailed extends JOSEError {
+    static code = 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED';
+    code = 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED';
+    constructor(message = 'signature verification failed', options) {
+        super(message, options);
+    }
+}
+
+function unusable(name, prop = 'algorithm.name') {
+    return new TypeError(`CryptoKey does not support this operation, its ${prop} must be ${name}`);
+}
+function isAlgorithm(algorithm, name) {
+    return algorithm.name === name;
+}
+function getHashLength(hash) {
+    return parseInt(hash.name.slice(4), 10);
+}
+function getNamedCurve(alg) {
+    switch (alg) {
+        case 'ES256':
+            return 'P-256';
+        case 'ES384':
+            return 'P-384';
+        case 'ES512':
+            return 'P-521';
+        default:
+            throw new Error('unreachable');
+    }
+}
+function checkUsage(key, usage) {
+    if (usage && !key.usages.includes(usage)) {
+        throw new TypeError(`CryptoKey does not support this operation, its usages must include ${usage}.`);
+    }
+}
+function checkSigCryptoKey(key, alg, usage) {
+    switch (alg) {
+        case 'HS256':
+        case 'HS384':
+        case 'HS512': {
+            if (!isAlgorithm(key.algorithm, 'HMAC'))
+                throw unusable('HMAC');
+            const expected = parseInt(alg.slice(2), 10);
+            const actual = getHashLength(key.algorithm.hash);
+            if (actual !== expected)
+                throw unusable(`SHA-${expected}`, 'algorithm.hash');
+            break;
+        }
+        case 'RS256':
+        case 'RS384':
+        case 'RS512': {
+            if (!isAlgorithm(key.algorithm, 'RSASSA-PKCS1-v1_5'))
+                throw unusable('RSASSA-PKCS1-v1_5');
+            const expected = parseInt(alg.slice(2), 10);
+            const actual = getHashLength(key.algorithm.hash);
+            if (actual !== expected)
+                throw unusable(`SHA-${expected}`, 'algorithm.hash');
+            break;
+        }
+        case 'PS256':
+        case 'PS384':
+        case 'PS512': {
+            if (!isAlgorithm(key.algorithm, 'RSA-PSS'))
+                throw unusable('RSA-PSS');
+            const expected = parseInt(alg.slice(2), 10);
+            const actual = getHashLength(key.algorithm.hash);
+            if (actual !== expected)
+                throw unusable(`SHA-${expected}`, 'algorithm.hash');
+            break;
+        }
+        case 'Ed25519':
+        case 'EdDSA': {
+            if (!isAlgorithm(key.algorithm, 'Ed25519'))
+                throw unusable('Ed25519');
+            break;
+        }
+        case 'ML-DSA-44':
+        case 'ML-DSA-65':
+        case 'ML-DSA-87': {
+            if (!isAlgorithm(key.algorithm, alg))
+                throw unusable(alg);
+            break;
+        }
+        case 'ES256':
+        case 'ES384':
+        case 'ES512': {
+            if (!isAlgorithm(key.algorithm, 'ECDSA'))
+                throw unusable('ECDSA');
+            const expected = getNamedCurve(alg);
+            const actual = key.algorithm.namedCurve;
+            if (actual !== expected)
+                throw unusable(expected, 'algorithm.namedCurve');
+            break;
+        }
+        default:
+            throw new TypeError('CryptoKey does not support this operation');
+    }
+    checkUsage(key, usage);
+}
+
+function message(msg, actual, ...types) {
+    types = types.filter(Boolean);
+    if (types.length > 2) {
+        const last = types.pop();
+        msg += `one of type ${types.join(', ')}, or ${last}.`;
+    }
+    else if (types.length === 2) {
+        msg += `one of type ${types[0]} or ${types[1]}.`;
+    }
+    else {
+        msg += `of type ${types[0]}.`;
+    }
+    if (actual == null) {
+        msg += ` Received ${actual}`;
+    }
+    else if (typeof actual === 'function' && actual.name) {
+        msg += ` Received function ${actual.name}`;
+    }
+    else if (typeof actual === 'object' && actual != null) {
+        if (actual.constructor?.name) {
+            msg += ` Received an instance of ${actual.constructor.name}`;
+        }
+    }
+    return msg;
+}
+var invalidKeyInput = (actual, ...types) => {
+    return message('Key must be ', actual, ...types);
+};
+function withAlg(alg, actual, ...types) {
+    return message(`Key for the ${alg} algorithm must be `, actual, ...types);
+}
+
+function isCryptoKey(key) {
+    return key?.[Symbol.toStringTag] === 'CryptoKey';
+}
+function isKeyObject(key) {
+    return key?.[Symbol.toStringTag] === 'KeyObject';
+}
+var isKeyLike = (key) => {
+    return isCryptoKey(key) || isKeyObject(key);
+};
+
+var isDisjoint = (...headers) => {
+    const sources = headers.filter(Boolean);
+    if (sources.length === 0 || sources.length === 1) {
+        return true;
+    }
+    let acc;
+    for (const header of sources) {
+        const parameters = Object.keys(header);
+        if (!acc || acc.size === 0) {
+            acc = new Set(parameters);
+            continue;
+        }
+        for (const parameter of parameters) {
+            if (acc.has(parameter)) {
+                return false;
+            }
+            acc.add(parameter);
+        }
+    }
+    return true;
+};
+
+function isObjectLike(value) {
+    return typeof value === 'object' && value !== null;
+}
+var isObject = (input) => {
+    if (!isObjectLike(input) || Object.prototype.toString.call(input) !== '[object Object]') {
+        return false;
+    }
+    if (Object.getPrototypeOf(input) === null) {
+        return true;
+    }
+    let proto = input;
+    while (Object.getPrototypeOf(proto) !== null) {
+        proto = Object.getPrototypeOf(proto);
+    }
+    return Object.getPrototypeOf(input) === proto;
+};
+
+var checkKeyLength = (alg, key) => {
+    if (alg.startsWith('RS') || alg.startsWith('PS')) {
+        const { modulusLength } = key.algorithm;
+        if (typeof modulusLength !== 'number' || modulusLength < 2048) {
+            throw new TypeError(`${alg} requires key modulusLength to be 2048 bits or larger`);
+        }
+    }
+};
+
+function subtleMapping(jwk) {
+    let algorithm;
+    let keyUsages;
+    switch (jwk.kty) {
+        case 'AKP': {
+            switch (jwk.alg) {
+                case 'ML-DSA-44':
+                case 'ML-DSA-65':
+                case 'ML-DSA-87':
+                    algorithm = { name: jwk.alg };
+                    keyUsages = jwk.priv ? ['sign'] : ['verify'];
+                    break;
+                default:
+                    throw new JOSENotSupported('Invalid or unsupported JWK "alg" (Algorithm) Parameter value');
+            }
+            break;
+        }
+        case 'RSA': {
+            switch (jwk.alg) {
+                case 'PS256':
+                case 'PS384':
+                case 'PS512':
+                    algorithm = { name: 'RSA-PSS', hash: `SHA-${jwk.alg.slice(-3)}` };
+                    keyUsages = jwk.d ? ['sign'] : ['verify'];
+                    break;
+                case 'RS256':
+                case 'RS384':
+                case 'RS512':
+                    algorithm = { name: 'RSASSA-PKCS1-v1_5', hash: `SHA-${jwk.alg.slice(-3)}` };
+                    keyUsages = jwk.d ? ['sign'] : ['verify'];
+                    break;
+                case 'RSA-OAEP':
+                case 'RSA-OAEP-256':
+                case 'RSA-OAEP-384':
+                case 'RSA-OAEP-512':
+                    algorithm = {
+                        name: 'RSA-OAEP',
+                        hash: `SHA-${parseInt(jwk.alg.slice(-3), 10) || 1}`,
+                    };
+                    keyUsages = jwk.d ? ['decrypt', 'unwrapKey'] : ['encrypt', 'wrapKey'];
+                    break;
+                default:
+                    throw new JOSENotSupported('Invalid or unsupported JWK "alg" (Algorithm) Parameter value');
+            }
+            break;
+        }
+        case 'EC': {
+            switch (jwk.alg) {
+                case 'ES256':
+                    algorithm = { name: 'ECDSA', namedCurve: 'P-256' };
+                    keyUsages = jwk.d ? ['sign'] : ['verify'];
+                    break;
+                case 'ES384':
+                    algorithm = { name: 'ECDSA', namedCurve: 'P-384' };
+                    keyUsages = jwk.d ? ['sign'] : ['verify'];
+                    break;
+                case 'ES512':
+                    algorithm = { name: 'ECDSA', namedCurve: 'P-521' };
+                    keyUsages = jwk.d ? ['sign'] : ['verify'];
+                    break;
+                case 'ECDH-ES':
+                case 'ECDH-ES+A128KW':
+                case 'ECDH-ES+A192KW':
+                case 'ECDH-ES+A256KW':
+                    algorithm = { name: 'ECDH', namedCurve: jwk.crv };
+                    keyUsages = jwk.d ? ['deriveBits'] : [];
+                    break;
+                default:
+                    throw new JOSENotSupported('Invalid or unsupported JWK "alg" (Algorithm) Parameter value');
+            }
+            break;
+        }
+        case 'OKP': {
+            switch (jwk.alg) {
+                case 'Ed25519':
+                case 'EdDSA':
+                    algorithm = { name: 'Ed25519' };
+                    keyUsages = jwk.d ? ['sign'] : ['verify'];
+                    break;
+                case 'ECDH-ES':
+                case 'ECDH-ES+A128KW':
+                case 'ECDH-ES+A192KW':
+                case 'ECDH-ES+A256KW':
+                    algorithm = { name: jwk.crv };
+                    keyUsages = jwk.d ? ['deriveBits'] : [];
+                    break;
+                default:
+                    throw new JOSENotSupported('Invalid or unsupported JWK "alg" (Algorithm) Parameter value');
+            }
+            break;
+        }
+        default:
+            throw new JOSENotSupported('Invalid or unsupported JWK "kty" (Key Type) Parameter value');
+    }
+    return { algorithm, keyUsages };
+}
+var importJWK$1 = async (jwk) => {
+    if (!jwk.alg) {
+        throw new TypeError('"alg" argument is required when "jwk.alg" is not present');
+    }
+    const { algorithm, keyUsages } = subtleMapping(jwk);
+    const keyData = { ...jwk };
+    if (keyData.kty !== 'AKP') {
+        delete keyData.alg;
+    }
+    delete keyData.use;
+    return crypto.subtle.importKey('jwk', keyData, algorithm, jwk.ext ?? (jwk.d || jwk.priv ? false : true), jwk.key_ops ?? keyUsages);
+};
+
+async function importJWK(jwk, alg, options) {
+    if (!isObject(jwk)) {
+        throw new TypeError('JWK must be an object');
+    }
+    let ext;
+    alg ??= jwk.alg;
+    ext ??= jwk.ext;
+    switch (jwk.kty) {
+        case 'oct':
+            if (typeof jwk.k !== 'string' || !jwk.k) {
+                throw new TypeError('missing "k" (Key Value) Parameter value');
+            }
+            return decode(jwk.k);
+        case 'RSA':
+            if ('oth' in jwk && jwk.oth !== undefined) {
+                throw new JOSENotSupported('RSA JWK "oth" (Other Primes Info) Parameter value is not supported');
+            }
+            return importJWK$1({ ...jwk, alg, ext });
+        case 'AKP': {
+            if (typeof jwk.alg !== 'string' || !jwk.alg) {
+                throw new TypeError('missing "alg" (Algorithm) Parameter value');
+            }
+            if (alg !== undefined && alg !== jwk.alg) {
+                throw new TypeError('JWK alg and alg option value mismatch');
+            }
+            return importJWK$1({ ...jwk, ext });
+        }
+        case 'EC':
+        case 'OKP':
+            return importJWK$1({ ...jwk, alg, ext });
+        default:
+            throw new JOSENotSupported('Unsupported "kty" (Key Type) Parameter value');
+    }
+}
+
+var validateCrit = (Err, recognizedDefault, recognizedOption, protectedHeader, joseHeader) => {
+    if (joseHeader.crit !== undefined && protectedHeader?.crit === undefined) {
+        throw new Err('"crit" (Critical) Header Parameter MUST be integrity protected');
+    }
+    if (!protectedHeader || protectedHeader.crit === undefined) {
+        return new Set();
+    }
+    if (!Array.isArray(protectedHeader.crit) ||
+        protectedHeader.crit.length === 0 ||
+        protectedHeader.crit.some((input) => typeof input !== 'string' || input.length === 0)) {
+        throw new Err('"crit" (Critical) Header Parameter MUST be an array of non-empty strings when present');
+    }
+    let recognized;
+    if (recognizedOption !== undefined) {
+        recognized = new Map([...Object.entries(recognizedOption), ...recognizedDefault.entries()]);
+    }
+    else {
+        recognized = recognizedDefault;
+    }
+    for (const parameter of protectedHeader.crit) {
+        if (!recognized.has(parameter)) {
+            throw new JOSENotSupported(`Extension Header Parameter "${parameter}" is not recognized`);
+        }
+        if (joseHeader[parameter] === undefined) {
+            throw new Err(`Extension Header Parameter "${parameter}" is missing`);
+        }
+        if (recognized.get(parameter) && protectedHeader[parameter] === undefined) {
+            throw new Err(`Extension Header Parameter "${parameter}" MUST be integrity protected`);
+        }
+    }
+    return new Set(protectedHeader.crit);
+};
+
+var validateAlgorithms = (option, algorithms) => {
+    if (algorithms !== undefined &&
+        (!Array.isArray(algorithms) || algorithms.some((s) => typeof s !== 'string'))) {
+        throw new TypeError(`"${option}" option must be an array of strings`);
+    }
+    if (!algorithms) {
+        return undefined;
+    }
+    return new Set(algorithms);
+};
+
+function isJWK(key) {
+    return isObject(key) && typeof key.kty === 'string';
+}
+function isPrivateJWK(key) {
+    return (key.kty !== 'oct' &&
+        ((key.kty === 'AKP' && typeof key.priv === 'string') || typeof key.d === 'string'));
+}
+function isPublicJWK(key) {
+    return key.kty !== 'oct' && typeof key.d === 'undefined' && typeof key.priv === 'undefined';
+}
+function isSecretJWK(key) {
+    return key.kty === 'oct' && typeof key.k === 'string';
+}
+
+let cache;
+const handleJWK = async (key, jwk, alg, freeze = false) => {
+    cache ||= new WeakMap();
+    let cached = cache.get(key);
+    if (cached?.[alg]) {
+        return cached[alg];
+    }
+    const cryptoKey = await importJWK$1({ ...jwk, alg });
+    if (freeze)
+        Object.freeze(key);
+    if (!cached) {
+        cache.set(key, { [alg]: cryptoKey });
+    }
+    else {
+        cached[alg] = cryptoKey;
+    }
+    return cryptoKey;
+};
+const handleKeyObject = (keyObject, alg) => {
+    cache ||= new WeakMap();
+    let cached = cache.get(keyObject);
+    if (cached?.[alg]) {
+        return cached[alg];
+    }
+    const isPublic = keyObject.type === 'public';
+    const extractable = isPublic ? true : false;
+    let cryptoKey;
+    if (keyObject.asymmetricKeyType === 'x25519') {
+        switch (alg) {
+            case 'ECDH-ES':
+            case 'ECDH-ES+A128KW':
+            case 'ECDH-ES+A192KW':
+            case 'ECDH-ES+A256KW':
+                break;
+            default:
+                throw new TypeError('given KeyObject instance cannot be used for this algorithm');
+        }
+        cryptoKey = keyObject.toCryptoKey(keyObject.asymmetricKeyType, extractable, isPublic ? [] : ['deriveBits']);
+    }
+    if (keyObject.asymmetricKeyType === 'ed25519') {
+        if (alg !== 'EdDSA' && alg !== 'Ed25519') {
+            throw new TypeError('given KeyObject instance cannot be used for this algorithm');
+        }
+        cryptoKey = keyObject.toCryptoKey(keyObject.asymmetricKeyType, extractable, [
+            isPublic ? 'verify' : 'sign',
+        ]);
+    }
+    switch (keyObject.asymmetricKeyType) {
+        case 'ml-dsa-44':
+        case 'ml-dsa-65':
+        case 'ml-dsa-87': {
+            if (alg !== keyObject.asymmetricKeyType.toUpperCase()) {
+                throw new TypeError('given KeyObject instance cannot be used for this algorithm');
+            }
+            cryptoKey = keyObject.toCryptoKey(keyObject.asymmetricKeyType, extractable, [
+                isPublic ? 'verify' : 'sign',
+            ]);
+        }
+    }
+    if (keyObject.asymmetricKeyType === 'rsa') {
+        let hash;
+        switch (alg) {
+            case 'RSA-OAEP':
+                hash = 'SHA-1';
+                break;
+            case 'RS256':
+            case 'PS256':
+            case 'RSA-OAEP-256':
+                hash = 'SHA-256';
+                break;
+            case 'RS384':
+            case 'PS384':
+            case 'RSA-OAEP-384':
+                hash = 'SHA-384';
+                break;
+            case 'RS512':
+            case 'PS512':
+            case 'RSA-OAEP-512':
+                hash = 'SHA-512';
+                break;
+            default:
+                throw new TypeError('given KeyObject instance cannot be used for this algorithm');
+        }
+        if (alg.startsWith('RSA-OAEP')) {
+            return keyObject.toCryptoKey({
+                name: 'RSA-OAEP',
+                hash,
+            }, extractable, isPublic ? ['encrypt'] : ['decrypt']);
+        }
+        cryptoKey = keyObject.toCryptoKey({
+            name: alg.startsWith('PS') ? 'RSA-PSS' : 'RSASSA-PKCS1-v1_5',
+            hash,
+        }, extractable, [isPublic ? 'verify' : 'sign']);
+    }
+    if (keyObject.asymmetricKeyType === 'ec') {
+        const nist = new Map([
+            ['prime256v1', 'P-256'],
+            ['secp384r1', 'P-384'],
+            ['secp521r1', 'P-521'],
+        ]);
+        const namedCurve = nist.get(keyObject.asymmetricKeyDetails?.namedCurve);
+        if (!namedCurve) {
+            throw new TypeError('given KeyObject instance cannot be used for this algorithm');
+        }
+        if (alg === 'ES256' && namedCurve === 'P-256') {
+            cryptoKey = keyObject.toCryptoKey({
+                name: 'ECDSA',
+                namedCurve,
+            }, extractable, [isPublic ? 'verify' : 'sign']);
+        }
+        if (alg === 'ES384' && namedCurve === 'P-384') {
+            cryptoKey = keyObject.toCryptoKey({
+                name: 'ECDSA',
+                namedCurve,
+            }, extractable, [isPublic ? 'verify' : 'sign']);
+        }
+        if (alg === 'ES512' && namedCurve === 'P-521') {
+            cryptoKey = keyObject.toCryptoKey({
+                name: 'ECDSA',
+                namedCurve,
+            }, extractable, [isPublic ? 'verify' : 'sign']);
+        }
+        if (alg.startsWith('ECDH-ES')) {
+            cryptoKey = keyObject.toCryptoKey({
+                name: 'ECDH',
+                namedCurve,
+            }, extractable, isPublic ? [] : ['deriveBits']);
+        }
+    }
+    if (!cryptoKey) {
+        throw new TypeError('given KeyObject instance cannot be used for this algorithm');
+    }
+    if (!cached) {
+        cache.set(keyObject, { [alg]: cryptoKey });
+    }
+    else {
+        cached[alg] = cryptoKey;
+    }
+    return cryptoKey;
+};
+var normalizeKey = async (key, alg) => {
+    if (key instanceof Uint8Array) {
+        return key;
+    }
+    if (isCryptoKey(key)) {
+        return key;
+    }
+    if (isKeyObject(key)) {
+        if (key.type === 'secret') {
+            return key.export();
+        }
+        if ('toCryptoKey' in key && typeof key.toCryptoKey === 'function') {
+            try {
+                return handleKeyObject(key, alg);
+            }
+            catch (err) {
+                if (err instanceof TypeError) {
+                    throw err;
+                }
+            }
+        }
+        let jwk = key.export({ format: 'jwk' });
+        return handleJWK(key, jwk, alg);
+    }
+    if (isJWK(key)) {
+        if (key.k) {
+            return decode(key.k);
+        }
+        return handleJWK(key, key, alg, true);
+    }
+    throw new Error('unreachable');
+};
+
+const tag = (key) => key?.[Symbol.toStringTag];
+const jwkMatchesOp = (alg, key, usage) => {
+    if (key.use !== undefined) {
+        let expected;
+        switch (usage) {
+            case 'sign':
+            case 'verify':
+                expected = 'sig';
+                break;
+            case 'encrypt':
+            case 'decrypt':
+                expected = 'enc';
+                break;
+        }
+        if (key.use !== expected) {
+            throw new TypeError(`Invalid key for this operation, its "use" must be "${expected}" when present`);
+        }
+    }
+    if (key.alg !== undefined && key.alg !== alg) {
+        throw new TypeError(`Invalid key for this operation, its "alg" must be "${alg}" when present`);
+    }
+    if (Array.isArray(key.key_ops)) {
+        let expectedKeyOp;
+        switch (true) {
+            case usage === 'sign' || usage === 'verify':
+            case alg === 'dir':
+            case alg.includes('CBC-HS'):
+                expectedKeyOp = usage;
+                break;
+            case alg.startsWith('PBES2'):
+                expectedKeyOp = 'deriveBits';
+                break;
+            case /^A\d{3}(?:GCM)?(?:KW)?$/.test(alg):
+                if (!alg.includes('GCM') && alg.endsWith('KW')) {
+                    expectedKeyOp = usage === 'encrypt' ? 'wrapKey' : 'unwrapKey';
+                }
+                else {
+                    expectedKeyOp = usage;
+                }
+                break;
+            case usage === 'encrypt' && alg.startsWith('RSA'):
+                expectedKeyOp = 'wrapKey';
+                break;
+            case usage === 'decrypt':
+                expectedKeyOp = alg.startsWith('RSA') ? 'unwrapKey' : 'deriveBits';
+                break;
+        }
+        if (expectedKeyOp && key.key_ops?.includes?.(expectedKeyOp) === false) {
+            throw new TypeError(`Invalid key for this operation, its "key_ops" must include "${expectedKeyOp}" when present`);
+        }
+    }
+    return true;
+};
+const symmetricTypeCheck = (alg, key, usage) => {
+    if (key instanceof Uint8Array)
+        return;
+    if (isJWK(key)) {
+        if (isSecretJWK(key) && jwkMatchesOp(alg, key, usage))
+            return;
+        throw new TypeError(`JSON Web Key for symmetric algorithms must have JWK "kty" (Key Type) equal to "oct" and the JWK "k" (Key Value) present`);
+    }
+    if (!isKeyLike(key)) {
+        throw new TypeError(withAlg(alg, key, 'CryptoKey', 'KeyObject', 'JSON Web Key', 'Uint8Array'));
+    }
+    if (key.type !== 'secret') {
+        throw new TypeError(`${tag(key)} instances for symmetric algorithms must be of type "secret"`);
+    }
+};
+const asymmetricTypeCheck = (alg, key, usage) => {
+    if (isJWK(key)) {
+        switch (usage) {
+            case 'decrypt':
+            case 'sign':
+                if (isPrivateJWK(key) && jwkMatchesOp(alg, key, usage))
+                    return;
+                throw new TypeError(`JSON Web Key for this operation be a private JWK`);
+            case 'encrypt':
+            case 'verify':
+                if (isPublicJWK(key) && jwkMatchesOp(alg, key, usage))
+                    return;
+                throw new TypeError(`JSON Web Key for this operation be a public JWK`);
+        }
+    }
+    if (!isKeyLike(key)) {
+        throw new TypeError(withAlg(alg, key, 'CryptoKey', 'KeyObject', 'JSON Web Key'));
+    }
+    if (key.type === 'secret') {
+        throw new TypeError(`${tag(key)} instances for asymmetric algorithms must not be of type "secret"`);
+    }
+    if (key.type === 'public') {
+        switch (usage) {
+            case 'sign':
+                throw new TypeError(`${tag(key)} instances for asymmetric algorithm signing must be of type "private"`);
+            case 'decrypt':
+                throw new TypeError(`${tag(key)} instances for asymmetric algorithm decryption must be of type "private"`);
+        }
+    }
+    if (key.type === 'private') {
+        switch (usage) {
+            case 'verify':
+                throw new TypeError(`${tag(key)} instances for asymmetric algorithm verifying must be of type "public"`);
+            case 'encrypt':
+                throw new TypeError(`${tag(key)} instances for asymmetric algorithm encryption must be of type "public"`);
+        }
+    }
+};
+var checkKeyType = (alg, key, usage) => {
+    const symmetric = alg.startsWith('HS') ||
+        alg === 'dir' ||
+        alg.startsWith('PBES2') ||
+        /^A(?:128|192|256)(?:GCM)?(?:KW)?$/.test(alg) ||
+        /^A(?:128|192|256)CBC-HS(?:256|384|512)$/.test(alg);
+    if (symmetric) {
+        symmetricTypeCheck(alg, key, usage);
+    }
+    else {
+        asymmetricTypeCheck(alg, key, usage);
+    }
+};
+
+var subtleAlgorithm = (alg, algorithm) => {
+    const hash = `SHA-${alg.slice(-3)}`;
+    switch (alg) {
+        case 'HS256':
+        case 'HS384':
+        case 'HS512':
+            return { hash, name: 'HMAC' };
+        case 'PS256':
+        case 'PS384':
+        case 'PS512':
+            return { hash, name: 'RSA-PSS', saltLength: parseInt(alg.slice(-3), 10) >> 3 };
+        case 'RS256':
+        case 'RS384':
+        case 'RS512':
+            return { hash, name: 'RSASSA-PKCS1-v1_5' };
+        case 'ES256':
+        case 'ES384':
+        case 'ES512':
+            return { hash, name: 'ECDSA', namedCurve: algorithm.namedCurve };
+        case 'Ed25519':
+        case 'EdDSA':
+            return { name: 'Ed25519' };
+        case 'ML-DSA-44':
+        case 'ML-DSA-65':
+        case 'ML-DSA-87':
+            return { name: alg };
+        default:
+            throw new JOSENotSupported(`alg ${alg} is not supported either by JOSE or your javascript runtime`);
+    }
+};
+
+var getSignKey = async (alg, key, usage) => {
+    if (key instanceof Uint8Array) {
+        if (!alg.startsWith('HS')) {
+            throw new TypeError(invalidKeyInput(key, 'CryptoKey', 'KeyObject', 'JSON Web Key'));
+        }
+        return crypto.subtle.importKey('raw', key, { hash: `SHA-${alg.slice(-3)}`, name: 'HMAC' }, false, [usage]);
+    }
+    checkSigCryptoKey(key, alg, usage);
+    return key;
+};
+
+var verify = async (alg, key, signature, data) => {
+    const cryptoKey = await getSignKey(alg, key, 'verify');
+    checkKeyLength(alg, cryptoKey);
+    const algorithm = subtleAlgorithm(alg, cryptoKey.algorithm);
+    try {
+        return await crypto.subtle.verify(algorithm, cryptoKey, signature, data);
+    }
+    catch {
+        return false;
+    }
+};
+
+async function flattenedVerify(jws, key, options) {
+    if (!isObject(jws)) {
+        throw new JWSInvalid('Flattened JWS must be an object');
+    }
+    if (jws.protected === undefined && jws.header === undefined) {
+        throw new JWSInvalid('Flattened JWS must have either of the "protected" or "header" members');
+    }
+    if (jws.protected !== undefined && typeof jws.protected !== 'string') {
+        throw new JWSInvalid('JWS Protected Header incorrect type');
+    }
+    if (jws.payload === undefined) {
+        throw new JWSInvalid('JWS Payload missing');
+    }
+    if (typeof jws.signature !== 'string') {
+        throw new JWSInvalid('JWS Signature missing or incorrect type');
+    }
+    if (jws.header !== undefined && !isObject(jws.header)) {
+        throw new JWSInvalid('JWS Unprotected Header incorrect type');
+    }
+    let parsedProt = {};
+    if (jws.protected) {
+        try {
+            const protectedHeader = decode(jws.protected);
+            parsedProt = JSON.parse(decoder.decode(protectedHeader));
+        }
+        catch {
+            throw new JWSInvalid('JWS Protected Header is invalid');
+        }
+    }
+    if (!isDisjoint(parsedProt, jws.header)) {
+        throw new JWSInvalid('JWS Protected and JWS Unprotected Header Parameter names must be disjoint');
+    }
+    const joseHeader = {
+        ...parsedProt,
+        ...jws.header,
+    };
+    const extensions = validateCrit(JWSInvalid, new Map([['b64', true]]), options?.crit, parsedProt, joseHeader);
+    let b64 = true;
+    if (extensions.has('b64')) {
+        b64 = parsedProt.b64;
+        if (typeof b64 !== 'boolean') {
+            throw new JWSInvalid('The "b64" (base64url-encode payload) Header Parameter must be a boolean');
+        }
+    }
+    const { alg } = joseHeader;
+    if (typeof alg !== 'string' || !alg) {
+        throw new JWSInvalid('JWS "alg" (Algorithm) Header Parameter missing or invalid');
+    }
+    const algorithms = options && validateAlgorithms('algorithms', options.algorithms);
+    if (algorithms && !algorithms.has(alg)) {
+        throw new JOSEAlgNotAllowed('"alg" (Algorithm) Header Parameter value not allowed');
+    }
+    if (b64) {
+        if (typeof jws.payload !== 'string') {
+            throw new JWSInvalid('JWS Payload must be a string');
+        }
+    }
+    else if (typeof jws.payload !== 'string' && !(jws.payload instanceof Uint8Array)) {
+        throw new JWSInvalid('JWS Payload must be a string or an Uint8Array instance');
+    }
+    let resolvedKey = false;
+    if (typeof key === 'function') {
+        key = await key(parsedProt, jws);
+        resolvedKey = true;
+    }
+    checkKeyType(alg, key, 'verify');
+    const data = concat(encoder.encode(jws.protected ?? ''), encoder.encode('.'), typeof jws.payload === 'string' ? encoder.encode(jws.payload) : jws.payload);
+    let signature;
+    try {
+        signature = decode(jws.signature);
+    }
+    catch {
+        throw new JWSInvalid('Failed to base64url decode the signature');
+    }
+    const k = await normalizeKey(key, alg);
+    const verified = await verify(alg, k, signature, data);
+    if (!verified) {
+        throw new JWSSignatureVerificationFailed();
+    }
+    let payload;
+    if (b64) {
+        try {
+            payload = decode(jws.payload);
+        }
+        catch {
+            throw new JWSInvalid('Failed to base64url decode the payload');
+        }
+    }
+    else if (typeof jws.payload === 'string') {
+        payload = encoder.encode(jws.payload);
+    }
+    else {
+        payload = jws.payload;
+    }
+    const result = { payload };
+    if (jws.protected !== undefined) {
+        result.protectedHeader = parsedProt;
+    }
+    if (jws.header !== undefined) {
+        result.unprotectedHeader = jws.header;
+    }
+    if (resolvedKey) {
+        return { ...result, key: k };
+    }
+    return result;
+}
+
+async function compactVerify(jws, key, options) {
+    if (jws instanceof Uint8Array) {
+        jws = decoder.decode(jws);
+    }
+    if (typeof jws !== 'string') {
+        throw new JWSInvalid('Compact JWS must be a string or Uint8Array');
+    }
+    const { 0: protectedHeader, 1: payload, 2: signature, length } = jws.split('.');
+    if (length !== 3) {
+        throw new JWSInvalid('Invalid Compact JWS');
+    }
+    const verified = await flattenedVerify({ payload, protected: protectedHeader, signature }, key, options);
+    const result = { payload: verified.payload, protectedHeader: verified.protectedHeader };
+    if (typeof key === 'function') {
+        return { ...result, key: verified.key };
+    }
+    return result;
+}
+
+var epoch = (date) => Math.floor(date.getTime() / 1000);
+
+const minute = 60;
+const hour = minute * 60;
+const day = hour * 24;
+const week = day * 7;
+const year = day * 365.25;
+const REGEX = /^(\+|\-)? ?(\d+|\d+\.\d+) ?(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)(?: (ago|from now))?$/i;
+var secs = (str) => {
+    const matched = REGEX.exec(str);
+    if (!matched || (matched[4] && matched[1])) {
+        throw new TypeError('Invalid time period format');
+    }
+    const value = parseFloat(matched[2]);
+    const unit = matched[3].toLowerCase();
+    let numericDate;
+    switch (unit) {
+        case 'sec':
+        case 'secs':
+        case 'second':
+        case 'seconds':
+        case 's':
+            numericDate = Math.round(value);
+            break;
+        case 'minute':
+        case 'minutes':
+        case 'min':
+        case 'mins':
+        case 'm':
+            numericDate = Math.round(value * minute);
+            break;
+        case 'hour':
+        case 'hours':
+        case 'hr':
+        case 'hrs':
+        case 'h':
+            numericDate = Math.round(value * hour);
+            break;
+        case 'day':
+        case 'days':
+        case 'd':
+            numericDate = Math.round(value * day);
+            break;
+        case 'week':
+        case 'weeks':
+        case 'w':
+            numericDate = Math.round(value * week);
+            break;
+        default:
+            numericDate = Math.round(value * year);
+            break;
+    }
+    if (matched[1] === '-' || matched[4] === 'ago') {
+        return -numericDate;
+    }
+    return numericDate;
+};
+
+function validateInput(label, input) {
+    if (!Number.isFinite(input)) {
+        throw new TypeError(`Invalid ${label} input`);
+    }
+    return input;
+}
+const normalizeTyp = (value) => {
+    if (value.includes('/')) {
+        return value.toLowerCase();
+    }
+    return `application/${value.toLowerCase()}`;
+};
+const checkAudiencePresence = (audPayload, audOption) => {
+    if (typeof audPayload === 'string') {
+        return audOption.includes(audPayload);
+    }
+    if (Array.isArray(audPayload)) {
+        return audOption.some(Set.prototype.has.bind(new Set(audPayload)));
+    }
+    return false;
+};
+function validateClaimsSet(protectedHeader, encodedPayload, options = {}) {
+    let payload;
+    try {
+        payload = JSON.parse(decoder.decode(encodedPayload));
+    }
+    catch {
+    }
+    if (!isObject(payload)) {
+        throw new JWTInvalid('JWT Claims Set must be a top-level JSON object');
+    }
+    const { typ } = options;
+    if (typ &&
+        (typeof protectedHeader.typ !== 'string' ||
+            normalizeTyp(protectedHeader.typ) !== normalizeTyp(typ))) {
+        throw new JWTClaimValidationFailed('unexpected "typ" JWT header value', payload, 'typ', 'check_failed');
+    }
+    const { requiredClaims = [], issuer, subject, audience, maxTokenAge } = options;
+    const presenceCheck = [...requiredClaims];
+    if (maxTokenAge !== undefined)
+        presenceCheck.push('iat');
+    if (audience !== undefined)
+        presenceCheck.push('aud');
+    if (subject !== undefined)
+        presenceCheck.push('sub');
+    if (issuer !== undefined)
+        presenceCheck.push('iss');
+    for (const claim of new Set(presenceCheck.reverse())) {
+        if (!(claim in payload)) {
+            throw new JWTClaimValidationFailed(`missing required "${claim}" claim`, payload, claim, 'missing');
+        }
+    }
+    if (issuer &&
+        !(Array.isArray(issuer) ? issuer : [issuer]).includes(payload.iss)) {
+        throw new JWTClaimValidationFailed('unexpected "iss" claim value', payload, 'iss', 'check_failed');
+    }
+    if (subject && payload.sub !== subject) {
+        throw new JWTClaimValidationFailed('unexpected "sub" claim value', payload, 'sub', 'check_failed');
+    }
+    if (audience &&
+        !checkAudiencePresence(payload.aud, typeof audience === 'string' ? [audience] : audience)) {
+        throw new JWTClaimValidationFailed('unexpected "aud" claim value', payload, 'aud', 'check_failed');
+    }
+    let tolerance;
+    switch (typeof options.clockTolerance) {
+        case 'string':
+            tolerance = secs(options.clockTolerance);
+            break;
+        case 'number':
+            tolerance = options.clockTolerance;
+            break;
+        case 'undefined':
+            tolerance = 0;
+            break;
+        default:
+            throw new TypeError('Invalid clockTolerance option type');
+    }
+    const { currentDate } = options;
+    const now = epoch(currentDate || new Date());
+    if ((payload.iat !== undefined || maxTokenAge) && typeof payload.iat !== 'number') {
+        throw new JWTClaimValidationFailed('"iat" claim must be a number', payload, 'iat', 'invalid');
+    }
+    if (payload.nbf !== undefined) {
+        if (typeof payload.nbf !== 'number') {
+            throw new JWTClaimValidationFailed('"nbf" claim must be a number', payload, 'nbf', 'invalid');
+        }
+        if (payload.nbf > now + tolerance) {
+            throw new JWTClaimValidationFailed('"nbf" claim timestamp check failed', payload, 'nbf', 'check_failed');
+        }
+    }
+    if (payload.exp !== undefined) {
+        if (typeof payload.exp !== 'number') {
+            throw new JWTClaimValidationFailed('"exp" claim must be a number', payload, 'exp', 'invalid');
+        }
+        if (payload.exp <= now - tolerance) {
+            throw new JWTExpired('"exp" claim timestamp check failed', payload, 'exp', 'check_failed');
+        }
+    }
+    if (maxTokenAge) {
+        const age = now - payload.iat;
+        const max = typeof maxTokenAge === 'number' ? maxTokenAge : secs(maxTokenAge);
+        if (age - tolerance > max) {
+            throw new JWTExpired('"iat" claim timestamp check failed (too far in the past)', payload, 'iat', 'check_failed');
+        }
+        if (age < 0 - tolerance) {
+            throw new JWTClaimValidationFailed('"iat" claim timestamp check failed (it should be in the past)', payload, 'iat', 'check_failed');
+        }
+    }
+    return payload;
+}
+class JWTClaimsBuilder {
+    #payload;
+    constructor(payload) {
+        if (!isObject(payload)) {
+            throw new TypeError('JWT Claims Set MUST be an object');
+        }
+        this.#payload = structuredClone(payload);
+    }
+    data() {
+        return encoder.encode(JSON.stringify(this.#payload));
+    }
+    get iss() {
+        return this.#payload.iss;
+    }
+    set iss(value) {
+        this.#payload.iss = value;
+    }
+    get sub() {
+        return this.#payload.sub;
+    }
+    set sub(value) {
+        this.#payload.sub = value;
+    }
+    get aud() {
+        return this.#payload.aud;
+    }
+    set aud(value) {
+        this.#payload.aud = value;
+    }
+    set jti(value) {
+        this.#payload.jti = value;
+    }
+    set nbf(value) {
+        if (typeof value === 'number') {
+            this.#payload.nbf = validateInput('setNotBefore', value);
+        }
+        else if (value instanceof Date) {
+            this.#payload.nbf = validateInput('setNotBefore', epoch(value));
+        }
+        else {
+            this.#payload.nbf = epoch(new Date()) + secs(value);
+        }
+    }
+    set exp(value) {
+        if (typeof value === 'number') {
+            this.#payload.exp = validateInput('setExpirationTime', value);
+        }
+        else if (value instanceof Date) {
+            this.#payload.exp = validateInput('setExpirationTime', epoch(value));
+        }
+        else {
+            this.#payload.exp = epoch(new Date()) + secs(value);
+        }
+    }
+    set iat(value) {
+        if (typeof value === 'undefined') {
+            this.#payload.iat = epoch(new Date());
+        }
+        else if (value instanceof Date) {
+            this.#payload.iat = validateInput('setIssuedAt', epoch(value));
+        }
+        else if (typeof value === 'string') {
+            this.#payload.iat = validateInput('setIssuedAt', epoch(new Date()) + secs(value));
+        }
+        else {
+            this.#payload.iat = validateInput('setIssuedAt', value);
+        }
+    }
+}
+
+async function jwtVerify(jwt, key, options) {
+    const verified = await compactVerify(jwt, key, options);
+    if (verified.protectedHeader.crit?.includes('b64') && verified.protectedHeader.b64 === false) {
+        throw new JWTInvalid('JWTs MUST NOT use unencoded payload');
+    }
+    const payload = validateClaimsSet(verified.protectedHeader, verified.payload, options);
+    const result = { payload, protectedHeader: verified.protectedHeader };
+    if (typeof key === 'function') {
+        return { ...result, key: verified.key };
+    }
+    return result;
+}
+
+var sign = async (alg, key, data) => {
+    const cryptoKey = await getSignKey(alg, key, 'sign');
+    checkKeyLength(alg, cryptoKey);
+    const signature = await crypto.subtle.sign(subtleAlgorithm(alg, cryptoKey.algorithm), cryptoKey, data);
+    return new Uint8Array(signature);
+};
+
+class FlattenedSign {
+    #payload;
+    #protectedHeader;
+    #unprotectedHeader;
+    constructor(payload) {
+        if (!(payload instanceof Uint8Array)) {
+            throw new TypeError('payload must be an instance of Uint8Array');
+        }
+        this.#payload = payload;
+    }
+    setProtectedHeader(protectedHeader) {
+        if (this.#protectedHeader) {
+            throw new TypeError('setProtectedHeader can only be called once');
+        }
+        this.#protectedHeader = protectedHeader;
+        return this;
+    }
+    setUnprotectedHeader(unprotectedHeader) {
+        if (this.#unprotectedHeader) {
+            throw new TypeError('setUnprotectedHeader can only be called once');
+        }
+        this.#unprotectedHeader = unprotectedHeader;
+        return this;
+    }
+    async sign(key, options) {
+        if (!this.#protectedHeader && !this.#unprotectedHeader) {
+            throw new JWSInvalid('either setProtectedHeader or setUnprotectedHeader must be called before #sign()');
+        }
+        if (!isDisjoint(this.#protectedHeader, this.#unprotectedHeader)) {
+            throw new JWSInvalid('JWS Protected and JWS Unprotected Header Parameter names must be disjoint');
+        }
+        const joseHeader = {
+            ...this.#protectedHeader,
+            ...this.#unprotectedHeader,
+        };
+        const extensions = validateCrit(JWSInvalid, new Map([['b64', true]]), options?.crit, this.#protectedHeader, joseHeader);
+        let b64 = true;
+        if (extensions.has('b64')) {
+            b64 = this.#protectedHeader.b64;
+            if (typeof b64 !== 'boolean') {
+                throw new JWSInvalid('The "b64" (base64url-encode payload) Header Parameter must be a boolean');
+            }
+        }
+        const { alg } = joseHeader;
+        if (typeof alg !== 'string' || !alg) {
+            throw new JWSInvalid('JWS "alg" (Algorithm) Header Parameter missing or invalid');
+        }
+        checkKeyType(alg, key, 'sign');
+        let payload = this.#payload;
+        if (b64) {
+            payload = encoder.encode(encode(payload));
+        }
+        let protectedHeader;
+        if (this.#protectedHeader) {
+            protectedHeader = encoder.encode(encode(JSON.stringify(this.#protectedHeader)));
+        }
+        else {
+            protectedHeader = encoder.encode('');
+        }
+        const data = concat(protectedHeader, encoder.encode('.'), payload);
+        const k = await normalizeKey(key, alg);
+        const signature = await sign(alg, k, data);
+        const jws = {
+            signature: encode(signature),
+            payload: '',
+        };
+        if (b64) {
+            jws.payload = decoder.decode(payload);
+        }
+        if (this.#unprotectedHeader) {
+            jws.header = this.#unprotectedHeader;
+        }
+        if (this.#protectedHeader) {
+            jws.protected = decoder.decode(protectedHeader);
+        }
+        return jws;
+    }
+}
+
+class CompactSign {
+    #flattened;
+    constructor(payload) {
+        this.#flattened = new FlattenedSign(payload);
+    }
+    setProtectedHeader(protectedHeader) {
+        this.#flattened.setProtectedHeader(protectedHeader);
+        return this;
+    }
+    async sign(key, options) {
+        const jws = await this.#flattened.sign(key, options);
+        if (jws.payload === undefined) {
+            throw new TypeError('use the flattened module for creating JWS with b64: false');
+        }
+        return `${jws.protected}.${jws.payload}.${jws.signature}`;
+    }
+}
+
+class SignJWT {
+    #protectedHeader;
+    #jwt;
+    constructor(payload = {}) {
+        this.#jwt = new JWTClaimsBuilder(payload);
+    }
+    setIssuer(issuer) {
+        this.#jwt.iss = issuer;
+        return this;
+    }
+    setSubject(subject) {
+        this.#jwt.sub = subject;
+        return this;
+    }
+    setAudience(audience) {
+        this.#jwt.aud = audience;
+        return this;
+    }
+    setJti(jwtId) {
+        this.#jwt.jti = jwtId;
+        return this;
+    }
+    setNotBefore(input) {
+        this.#jwt.nbf = input;
+        return this;
+    }
+    setExpirationTime(input) {
+        this.#jwt.exp = input;
+        return this;
+    }
+    setIssuedAt(input) {
+        this.#jwt.iat = input;
+        return this;
+    }
+    setProtectedHeader(protectedHeader) {
+        this.#protectedHeader = protectedHeader;
+        return this;
+    }
+    async sign(key, options) {
+        const sig = new CompactSign(this.#jwt.data());
+        sig.setProtectedHeader(this.#protectedHeader);
+        if (Array.isArray(this.#protectedHeader?.crit) &&
+            this.#protectedHeader.crit.includes('b64') &&
+            this.#protectedHeader.b64 === false) {
+            throw new JWTInvalid('JWTs MUST NOT use unencoded payload');
+        }
+        return sig.sign(key, options);
+    }
+}
+
+function getKtyFromAlg(alg) {
+    switch (typeof alg === 'string' && alg.slice(0, 2)) {
+        case 'RS':
+        case 'PS':
+            return 'RSA';
+        case 'ES':
+            return 'EC';
+        case 'Ed':
+            return 'OKP';
+        case 'ML':
+            return 'AKP';
+        default:
+            throw new JOSENotSupported('Unsupported "alg" value for a JSON Web Key Set');
+    }
+}
+function isJWKSLike(jwks) {
+    return (jwks &&
+        typeof jwks === 'object' &&
+        Array.isArray(jwks.keys) &&
+        jwks.keys.every(isJWKLike));
+}
+function isJWKLike(key) {
+    return isObject(key);
+}
+class LocalJWKSet {
+    #jwks;
+    #cached = new WeakMap();
+    constructor(jwks) {
+        if (!isJWKSLike(jwks)) {
+            throw new JWKSInvalid('JSON Web Key Set malformed');
+        }
+        this.#jwks = structuredClone(jwks);
+    }
+    jwks() {
+        return this.#jwks;
+    }
+    async getKey(protectedHeader, token) {
+        const { alg, kid } = { ...protectedHeader, ...token?.header };
+        const kty = getKtyFromAlg(alg);
+        const candidates = this.#jwks.keys.filter((jwk) => {
+            let candidate = kty === jwk.kty;
+            if (candidate && typeof kid === 'string') {
+                candidate = kid === jwk.kid;
+            }
+            if (candidate && (typeof jwk.alg === 'string' || kty === 'AKP')) {
+                candidate = alg === jwk.alg;
+            }
+            if (candidate && typeof jwk.use === 'string') {
+                candidate = jwk.use === 'sig';
+            }
+            if (candidate && Array.isArray(jwk.key_ops)) {
+                candidate = jwk.key_ops.includes('verify');
+            }
+            if (candidate) {
+                switch (alg) {
+                    case 'ES256':
+                        candidate = jwk.crv === 'P-256';
+                        break;
+                    case 'ES384':
+                        candidate = jwk.crv === 'P-384';
+                        break;
+                    case 'ES512':
+                        candidate = jwk.crv === 'P-521';
+                        break;
+                    case 'Ed25519':
+                    case 'EdDSA':
+                        candidate = jwk.crv === 'Ed25519';
+                        break;
+                }
+            }
+            return candidate;
+        });
+        const { 0: jwk, length } = candidates;
+        if (length === 0) {
+            throw new JWKSNoMatchingKey();
+        }
+        if (length !== 1) {
+            const error = new JWKSMultipleMatchingKeys();
+            const _cached = this.#cached;
+            error[Symbol.asyncIterator] = async function* () {
+                for (const jwk of candidates) {
+                    try {
+                        yield await importWithAlgCache(_cached, jwk, alg);
+                    }
+                    catch { }
+                }
+            };
+            throw error;
+        }
+        return importWithAlgCache(this.#cached, jwk, alg);
+    }
+}
+async function importWithAlgCache(cache, jwk, alg) {
+    const cached = cache.get(jwk) || cache.set(jwk, {}).get(jwk);
+    if (cached[alg] === undefined) {
+        const key = await importJWK({ ...jwk, ext: true }, alg);
+        if (key instanceof Uint8Array || key.type !== 'public') {
+            throw new JWKSInvalid('JSON Web Key Set members must be public keys');
+        }
+        cached[alg] = key;
+    }
+    return cached[alg];
+}
+function createLocalJWKSet(jwks) {
+    const set = new LocalJWKSet(jwks);
+    const localJWKSet = async (protectedHeader, token) => set.getKey(protectedHeader, token);
+    Object.defineProperties(localJWKSet, {
+        jwks: {
+            value: () => structuredClone(set.jwks()),
+            enumerable: false,
+            configurable: false,
+            writable: false,
+        },
+    });
+    return localJWKSet;
+}
+
+function isCloudflareWorkers() {
+    return (typeof WebSocketPair !== 'undefined' ||
+        (typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers') ||
+        (typeof EdgeRuntime !== 'undefined' && EdgeRuntime === 'vercel'));
+}
+let USER_AGENT;
+if (typeof navigator === 'undefined' || !navigator.userAgent?.startsWith?.('Mozilla/5.0 ')) {
+    const NAME = 'jose';
+    const VERSION = 'v6.1.0';
+    USER_AGENT = `${NAME}/${VERSION}`;
+}
+const customFetch = Symbol();
+async function fetchJwks(url, headers, signal, fetchImpl = fetch) {
+    const response = await fetchImpl(url, {
+        method: 'GET',
+        signal,
+        redirect: 'manual',
+        headers,
+    }).catch((err) => {
+        if (err.name === 'TimeoutError') {
+            throw new JWKSTimeout();
+        }
+        throw err;
+    });
+    if (response.status !== 200) {
+        throw new JOSEError('Expected 200 OK from the JSON Web Key Set HTTP response');
+    }
+    try {
+        return await response.json();
+    }
+    catch {
+        throw new JOSEError('Failed to parse the JSON Web Key Set HTTP response as JSON');
+    }
+}
+const jwksCache$1 = Symbol();
+function isFreshJwksCache(input, cacheMaxAge) {
+    if (typeof input !== 'object' || input === null) {
+        return false;
+    }
+    if (!('uat' in input) || typeof input.uat !== 'number' || Date.now() - input.uat >= cacheMaxAge) {
+        return false;
+    }
+    if (!('jwks' in input) ||
+        !isObject(input.jwks) ||
+        !Array.isArray(input.jwks.keys) ||
+        !Array.prototype.every.call(input.jwks.keys, isObject)) {
+        return false;
+    }
+    return true;
+}
+class RemoteJWKSet {
+    #url;
+    #timeoutDuration;
+    #cooldownDuration;
+    #cacheMaxAge;
+    #jwksTimestamp;
+    #pendingFetch;
+    #headers;
+    #customFetch;
+    #local;
+    #cache;
+    constructor(url, options) {
+        if (!(url instanceof URL)) {
+            throw new TypeError('url must be an instance of URL');
+        }
+        this.#url = new URL(url.href);
+        this.#timeoutDuration =
+            typeof options?.timeoutDuration === 'number' ? options?.timeoutDuration : 5000;
+        this.#cooldownDuration =
+            typeof options?.cooldownDuration === 'number' ? options?.cooldownDuration : 30000;
+        this.#cacheMaxAge = typeof options?.cacheMaxAge === 'number' ? options?.cacheMaxAge : 600000;
+        this.#headers = new Headers(options?.headers);
+        if (USER_AGENT && !this.#headers.has('User-Agent')) {
+            this.#headers.set('User-Agent', USER_AGENT);
+        }
+        if (!this.#headers.has('accept')) {
+            this.#headers.set('accept', 'application/json');
+            this.#headers.append('accept', 'application/jwk-set+json');
+        }
+        this.#customFetch = options?.[customFetch];
+        if (options?.[jwksCache$1] !== undefined) {
+            this.#cache = options?.[jwksCache$1];
+            if (isFreshJwksCache(options?.[jwksCache$1], this.#cacheMaxAge)) {
+                this.#jwksTimestamp = this.#cache.uat;
+                this.#local = createLocalJWKSet(this.#cache.jwks);
+            }
+        }
+    }
+    pendingFetch() {
+        return !!this.#pendingFetch;
+    }
+    coolingDown() {
+        return typeof this.#jwksTimestamp === 'number'
+            ? Date.now() < this.#jwksTimestamp + this.#cooldownDuration
+            : false;
+    }
+    fresh() {
+        return typeof this.#jwksTimestamp === 'number'
+            ? Date.now() < this.#jwksTimestamp + this.#cacheMaxAge
+            : false;
+    }
+    jwks() {
+        return this.#local?.jwks();
+    }
+    async getKey(protectedHeader, token) {
+        if (!this.#local || !this.fresh()) {
+            await this.reload();
+        }
+        try {
+            return await this.#local(protectedHeader, token);
+        }
+        catch (err) {
+            if (err instanceof JWKSNoMatchingKey) {
+                if (this.coolingDown() === false) {
+                    await this.reload();
+                    return this.#local(protectedHeader, token);
+                }
+            }
+            throw err;
+        }
+    }
+    async reload() {
+        if (this.#pendingFetch && isCloudflareWorkers()) {
+            this.#pendingFetch = undefined;
+        }
+        this.#pendingFetch ||= fetchJwks(this.#url.href, this.#headers, AbortSignal.timeout(this.#timeoutDuration), this.#customFetch)
+            .then((json) => {
+            this.#local = createLocalJWKSet(json);
+            if (this.#cache) {
+                this.#cache.uat = Date.now();
+                this.#cache.jwks = json;
+            }
+            this.#jwksTimestamp = Date.now();
+            this.#pendingFetch = undefined;
+        })
+            .catch((err) => {
+            this.#pendingFetch = undefined;
+            throw err;
+        });
+        await this.#pendingFetch;
+    }
+}
+function createRemoteJWKSet(url, options) {
+    const set = new RemoteJWKSet(url, options);
+    const remoteJWKSet = async (protectedHeader, token) => set.getKey(protectedHeader, token);
+    Object.defineProperties(remoteJWKSet, {
+        coolingDown: {
+            get: () => set.coolingDown(),
+            enumerable: true,
+            configurable: false,
+        },
+        fresh: {
+            get: () => set.fresh(),
+            enumerable: true,
+            configurable: false,
+        },
+        reload: {
+            value: () => set.reload(),
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        },
+        reloading: {
+            get: () => set.pendingFetch(),
+            enumerable: true,
+            configurable: false,
+        },
+        jwks: {
+            value: () => set.jwks(),
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        },
+    });
+    return remoteJWKSet;
+}
+
 const jwksCache = /* @__PURE__ */ new Map();
 function createOAuth2Handler(config, usersResource) {
   const {
@@ -5046,7 +6750,7 @@ function createOAuth2Handler(config, usersResource) {
         return cached.jwks;
       }
     }
-    const jwks = jose.createRemoteJWKSet(new URL(finalJwksUri), {
+    const jwks = createRemoteJWKSet(new URL(finalJwksUri), {
       cooldownDuration: 3e4,
       // 30 seconds cooldown between fetches
       cacheMaxAge: cacheTTL
@@ -5073,7 +6777,7 @@ function createOAuth2Handler(config, usersResource) {
       if (audience) {
         verifyOptions.audience = audience;
       }
-      const { payload } = await jose.jwtVerify(token, jwks, verifyOptions);
+      const { payload } = await jwtVerify(token, jwks, verifyOptions);
       const userId = payload.sub;
       const email = payload.email || null;
       const username = payload.preferred_username || payload.username || email;
@@ -5208,51 +6912,179 @@ function createAuthMiddleware(options = {}) {
   };
 }
 
+async function getOrCreateUser(usersResource, claims, config) {
+  const userId = claims.email || claims.preferred_username || claims.sub;
+  if (!userId) {
+    throw new Error("Cannot extract user ID from OIDC claims (no email/preferred_username/sub)");
+  }
+  let user = null;
+  try {
+    user = await usersResource.get(userId);
+  } catch (err) {
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (user) {
+    const updates = {
+      lastLoginAt: now,
+      metadata: {
+        ...user.metadata,
+        oidc: {
+          sub: claims.sub,
+          provider: config.issuer,
+          lastSync: now,
+          claims: {
+            name: claims.name,
+            email: claims.email,
+            picture: claims.picture
+          }
+        }
+      }
+    };
+    if (claims.name && claims.name !== user.name) {
+      updates.name = claims.name;
+    }
+    user = await usersResource.update(userId, updates);
+    return user;
+  }
+  const newUser = {
+    id: userId,
+    email: claims.email || userId,
+    username: claims.preferred_username || claims.email || userId,
+    name: claims.name || claims.email || userId,
+    picture: claims.picture || null,
+    role: config.defaultRole || "user",
+    scopes: config.defaultScopes || ["openid", "profile", "email"],
+    active: true,
+    apiKey: null,
+    // Will be generated on first API usage if needed
+    lastLoginAt: now,
+    metadata: {
+      oidc: {
+        sub: claims.sub,
+        provider: config.issuer,
+        createdAt: now,
+        claims: {
+          name: claims.name,
+          email: claims.email,
+          picture: claims.picture
+        }
+      },
+      costCenterId: config.defaultCostCenter || null,
+      teamId: config.defaultTeam || null
+    }
+  };
+  user = await usersResource.insert(newUser);
+  return user;
+}
+async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
+  const response = await fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`Token refresh failed: ${response.status}`);
+  }
+  return await response.json();
+}
 function createOIDCHandler(config, app, usersResource) {
+  const finalConfig = {
+    scopes: ["openid", "profile", "email", "offline_access"],
+    cookieName: "oidc_session",
+    cookieMaxAge: 6048e5,
+    // 7 days (same as absolute duration)
+    rollingDuration: 864e5,
+    // 24 hours
+    absoluteDuration: 6048e5,
+    // 7 days
+    loginPath: "/auth/login",
+    callbackPath: "/auth/callback",
+    logoutPath: "/auth/logout",
+    postLoginRedirect: "/",
+    postLogoutRedirect: "/",
+    idpLogout: true,
+    autoCreateUser: true,
+    autoRefreshTokens: true,
+    refreshThreshold: 3e5,
+    // 5 minutes before expiry
+    cookieSecure: process.env.NODE_ENV === "production",
+    cookieSameSite: "Lax",
+    defaultRole: "user",
+    defaultScopes: ["openid", "profile", "email"],
+    ...config
+  };
   const {
     issuer,
     clientId,
     clientSecret,
     redirectUri,
-    scopes = ["openid", "profile", "email"],
+    scopes,
     cookieSecret,
-    cookieName = "oidc_session",
-    cookieMaxAge = 864e5,
-    // 24 hours
-    loginPath = "/auth/login",
-    callbackPath = "/auth/callback",
-    logoutPath = "/auth/logout",
-    postLoginRedirect = "/",
-    postLogoutRedirect = "/"
-  } = config;
-  if (!issuer) throw new Error("[OIDC Auth] Missing required config: issuer");
-  if (!clientId) throw new Error("[OIDC Auth] Missing required config: clientId");
-  if (!clientSecret) throw new Error("[OIDC Auth] Missing required config: clientSecret");
-  if (!redirectUri) throw new Error("[OIDC Auth] Missing required config: redirectUri");
-  if (!cookieSecret) throw new Error("[OIDC Auth] Missing required config: cookieSecret (32+ chars)");
+    cookieName,
+    cookieMaxAge,
+    rollingDuration,
+    absoluteDuration,
+    loginPath,
+    callbackPath,
+    logoutPath,
+    postLoginRedirect,
+    postLogoutRedirect,
+    idpLogout,
+    autoCreateUser,
+    autoRefreshTokens,
+    refreshThreshold,
+    cookieSecure,
+    cookieSameSite
+  } = finalConfig;
   const authorizationEndpoint = `${issuer}/oauth/authorize`;
   const tokenEndpoint = `${issuer}/oauth/token`;
-  const endSessionEndpoint = `${issuer}/oauth/logout`;
+  const logoutEndpoint = `${issuer}/oauth2/v2.0/logout`;
   async function encodeSession(data) {
     const secret = new TextEncoder().encode(cookieSecret);
-    const jwt = await new jose.SignJWT(data).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${Math.floor(cookieMaxAge / 1e3)}s`).sign(secret);
+    const jwt = await new SignJWT(data).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${Math.floor(cookieMaxAge / 1e3)}s`).sign(secret);
     return jwt;
   }
   async function decodeSession(jwt) {
     try {
       const secret = new TextEncoder().encode(cookieSecret);
-      const { payload } = await jose.jwtVerify(jwt, secret);
+      const { payload } = await jwtVerify(jwt, secret);
       return payload;
     } catch (err) {
       return null;
     }
   }
+  function validateSessionDuration(session) {
+    const now = Date.now();
+    if (session.issued_at + absoluteDuration < now) {
+      return { valid: false, reason: "absolute_expired" };
+    }
+    if (session.last_activity + rollingDuration < now) {
+      return { valid: false, reason: "rolling_expired" };
+    }
+    return { valid: true };
+  }
   function generateState() {
     return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
   }
+  function decodeIdToken(idToken) {
+    try {
+      const parts = idToken.split(".");
+      if (parts.length !== 3) return null;
+      const payload = Buffer.from(parts[1], "base64").toString("utf-8");
+      return JSON.parse(payload);
+    } catch (err) {
+      return null;
+    }
+  }
   app.get(loginPath, async (c) => {
     const state = generateState();
-    const stateJWT = await encodeSession({ state, type: "csrf" });
+    const stateJWT = await encodeSession({ state, type: "csrf", expires: Date.now() + 6e5 });
     c.header("Set-Cookie", `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
     const params = new URLSearchParams({
       response_type: "code",
@@ -5261,8 +7093,7 @@ function createOIDCHandler(config, app, usersResource) {
       scope: scopes.join(" "),
       state
     });
-    const authUrl = `${authorizationEndpoint}?${params.toString()}`;
-    return c.redirect(authUrl, 302);
+    return c.redirect(`${authorizationEndpoint}?${params.toString()}`, 302);
   });
   app.get(callbackPath, async (c) => {
     const code = c.req.query("code");
@@ -5294,20 +7125,71 @@ function createOIDCHandler(config, app, usersResource) {
       });
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
-        console.error("[OIDC Auth] Token exchange failed:", error);
+        console.error("[OIDC] Token exchange failed:", error);
         return c.json({ error: "Failed to exchange code for tokens" }, 500);
       }
       const tokens = await tokenResponse.json();
-      const sessionJWT = await encodeSession({
+      const idTokenClaims = decodeIdToken(tokens.id_token);
+      if (!idTokenClaims) {
+        return c.json({ error: "Failed to decode id_token" }, 500);
+      }
+      let user = null;
+      if (autoCreateUser && usersResource) {
+        try {
+          user = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+        } catch (err) {
+          console.error("[OIDC] Failed to create/update user:", err);
+        }
+      }
+      const now = Date.now();
+      const sessionData = {
         access_token: tokens.access_token,
         id_token: tokens.id_token,
         refresh_token: tokens.refresh_token,
-        expires_at: Date.now() + tokens.expires_in * 1e3
-      });
-      c.header("Set-Cookie", `${cookieName}=${sessionJWT}; Path=/; HttpOnly; Max-Age=${Math.floor(cookieMaxAge / 1e3)}; SameSite=Lax`);
+        expires_at: now + tokens.expires_in * 1e3,
+        issued_at: now,
+        last_activity: now,
+        // User data (avoid DB lookup on every request)
+        user: user ? {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          name: user.name,
+          picture: user.picture,
+          role: user.role,
+          scopes: user.scopes,
+          active: user.active,
+          metadata: {
+            costCenterId: user.metadata?.costCenterId,
+            teamId: user.metadata?.teamId
+          }
+        } : {
+          id: idTokenClaims.sub,
+          email: idTokenClaims.email,
+          username: idTokenClaims.preferred_username || idTokenClaims.email,
+          name: idTokenClaims.name,
+          picture: idTokenClaims.picture,
+          role: "user",
+          scopes,
+          active: true,
+          isVirtual: true
+        }
+      };
+      const sessionJWT = await encodeSession(sessionData);
+      const cookieOptions = [
+        `${cookieName}=${sessionJWT}`,
+        "Path=/",
+        "HttpOnly",
+        `Max-Age=${Math.floor(cookieMaxAge / 1e3)}`,
+        `SameSite=${cookieSameSite}`
+      ];
+      if (cookieSecure) {
+        cookieOptions.push("Secure");
+      }
+      c.header("Set-Cookie", cookieOptions.join("; "));
       return c.redirect(postLoginRedirect, 302);
     } catch (err) {
-      console.error("[OIDC Auth] Error during token exchange:", err);
+      console.error("[OIDC] Error during token exchange:", err);
       return c.json({ error: "Authentication failed" }, 500);
     }
   });
@@ -5319,12 +7201,12 @@ function createOIDCHandler(config, app, usersResource) {
       idToken = session?.id_token;
     }
     c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
-    if (idToken && endSessionEndpoint) {
+    if (idpLogout && idToken) {
       const params = new URLSearchParams({
         id_token_hint: idToken,
         post_logout_redirect_uri: `${postLogoutRedirect}`
       });
-      return c.redirect(`${endSessionEndpoint}?${params.toString()}`, 302);
+      return c.redirect(`${logoutEndpoint}?${params.toString()}`, 302);
     }
     return c.redirect(postLogoutRedirect, 302);
   });
@@ -5337,50 +7219,53 @@ function createOIDCHandler(config, app, usersResource) {
     if (!session || !session.access_token) {
       return await next();
     }
-    if (session.expires_at && Date.now() > session.expires_at) {
+    const validation = validateSessionDuration(session);
+    if (!validation.valid) {
+      c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
       return await next();
     }
-    let userInfo = {};
-    if (session.id_token) {
-      try {
-        const parts = session.id_token.split(".");
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
-          userInfo = {
-            id: payload.sub,
-            email: payload.email,
-            username: payload.preferred_username || payload.username || payload.email,
-            name: payload.name,
-            picture: payload.picture,
-            role: payload.role || "user",
-            scopes: payload.scope ? payload.scope.split(" ") : payload.scopes || []
-          };
+    if (autoRefreshTokens && session.refresh_token && session.expires_at) {
+      const timeUntilExpiry = session.expires_at - Date.now();
+      if (timeUntilExpiry < refreshThreshold) {
+        try {
+          const newTokens = await refreshAccessToken(
+            tokenEndpoint,
+            session.refresh_token,
+            clientId,
+            clientSecret
+          );
+          session.access_token = newTokens.access_token;
+          session.expires_at = Date.now() + newTokens.expires_in * 1e3;
+          if (newTokens.refresh_token) {
+            session.refresh_token = newTokens.refresh_token;
+          }
+        } catch (err) {
+          console.error("[OIDC] Token refresh failed:", err);
         }
-      } catch (err) {
-        console.error("[OIDC Auth] Failed to decode id_token:", err);
       }
     }
-    let user = null;
-    if (usersResource && userInfo.id) {
-      try {
-        user = await usersResource.get(userInfo.id).catch(() => null);
-        if (!user && userInfo.email) {
-          const users = await usersResource.query({ email: userInfo.email }, { limit: 1 });
-          user = users[0] || null;
-        }
-      } catch (err) {
-      }
-    }
-    c.set("user", user || {
-      ...userInfo,
-      active: true,
-      isVirtual: true,
-      // Not in local database
+    session.last_activity = Date.now();
+    c.set("user", {
+      ...session.user,
+      authMethod: "oidc",
       session: {
         access_token: session.access_token,
-        refresh_token: session.refresh_token
+        refresh_token: session.refresh_token,
+        expires_at: session.expires_at
       }
     });
+    const newSessionJWT = await encodeSession(session);
+    const cookieOptions = [
+      `${cookieName}=${newSessionJWT}`,
+      "Path=/",
+      "HttpOnly",
+      `Max-Age=${Math.floor(cookieMaxAge / 1e3)}`,
+      `SameSite=${cookieSameSite}`
+    ];
+    if (cookieSecure) {
+      cookieOptions.push("Secure");
+    }
+    c.header("Set-Cookie", cookieOptions.join("; "));
     return await next();
   };
   return {
@@ -5388,8 +7273,9 @@ function createOIDCHandler(config, app, usersResource) {
     routes: {
       [loginPath]: "Login (redirect to SSO)",
       [callbackPath]: "OAuth2 callback",
-      [logoutPath]: "Logout"
-    }
+      [logoutPath]: "Logout (local + IdP)"
+    },
+    config: finalConfig
   };
 }
 
@@ -7405,7 +9291,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       `${backupId}.backup`
     );
     const [readOk, readErr] = await tryFn(async () => {
-      const hash = crypto.createHash("sha256");
+      const hash = crypto$1.createHash("sha256");
       const stream = fs.createReadStream(backupPath);
       await promises$1.pipeline(stream, hash);
       const actualChecksum = hash.digest("hex");
@@ -7662,7 +9548,7 @@ class S3BackupDriver extends BaseBackupDriver {
       });
       const etag = headResponse.ETag?.replace(/"/g, "");
       if (etag && !etag.includes("-")) {
-        const expectedMd5 = crypto.createHash("md5").update(expectedChecksum).digest("hex");
+        const expectedMd5 = crypto$1.createHash("md5").update(expectedChecksum).digest("hex");
         return etag === expectedMd5;
       } else {
         const [streamOk, , stream] = await tryFn(
@@ -7672,7 +9558,7 @@ class S3BackupDriver extends BaseBackupDriver {
           })
         );
         if (!streamOk) return false;
-        const hash = crypto.createHash("sha256");
+        const hash = crypto$1.createHash("sha256");
         for await (const chunk of stream) {
           hash.update(chunk);
         }
@@ -8506,7 +10392,7 @@ class BackupPlugin extends Plugin {
   }
   async _generateChecksum(filePath) {
     const [ok, err, result] = await tryFn(async () => {
-      const hash = crypto.createHash("sha256");
+      const hash = crypto$1.createHash("sha256");
       const stream = fs.createReadStream(filePath);
       await promises$1.pipeline(stream, hash);
       return hash.digest("hex");
@@ -10432,7 +12318,7 @@ class CachePlugin extends Plugin {
   }
   hashParams(params) {
     const serialized = jsonStableStringify(params) || "empty";
-    return crypto.createHash("md5").update(serialized).digest("hex").substring(0, 16);
+    return crypto$1.createHash("md5").update(serialized).digest("hex").substring(0, 16);
   }
   // Utility methods
   async getCacheStats() {
@@ -15801,12 +17687,12 @@ function encodeGeoLat(lat, precision = 6) {
   const normalized = lat + 90;
   const scale = Math.pow(10, precision);
   const scaled = Math.round(normalized * scale);
-  return "~" + encode(scaled);
+  return "~" + encode$1(scaled);
 }
 function decodeGeoLat(encoded, precision = 6) {
   if (typeof encoded !== "string") return encoded;
   if (!encoded.startsWith("~")) return encoded;
-  const scaled = decode(encoded.slice(1));
+  const scaled = decode$1(encoded.slice(1));
   if (isNaN(scaled)) return NaN;
   const scale = Math.pow(10, precision);
   const normalized = scaled / scale;
@@ -15822,12 +17708,12 @@ function encodeGeoLon(lon, precision = 6) {
   const normalized = lon + 180;
   const scale = Math.pow(10, precision);
   const scaled = Math.round(normalized * scale);
-  return "~" + encode(scaled);
+  return "~" + encode$1(scaled);
 }
 function decodeGeoLon(encoded, precision = 6) {
   if (typeof encoded !== "string") return encoded;
   if (!encoded.startsWith("~")) return encoded;
-  const scaled = decode(encoded.slice(1));
+  const scaled = decode$1(encoded.slice(1));
   if (isNaN(scaled)) return NaN;
   const scale = Math.pow(10, precision);
   const normalized = scaled / scale;
@@ -15853,7 +17739,7 @@ function generateBase62Mapping(keys) {
   const mapping = {};
   const reversedMapping = {};
   keys.forEach((key, index) => {
-    const base62Key = encode(index);
+    const base62Key = encode$1(index);
     mapping[key] = base62Key;
     reversedMapping[base62Key] = key;
   });
@@ -15861,9 +17747,9 @@ function generateBase62Mapping(keys) {
 }
 function generatePluginAttributeHash(pluginName, attributeName) {
   const input = `${pluginName}:${attributeName}`;
-  const hash = crypto.createHash("sha256").update(input).digest();
+  const hash = crypto$1.createHash("sha256").update(input).digest();
   const num = hash.readUInt32BE(0);
-  const base62Hash = encode(num);
+  const base62Hash = encode$1(num);
   const paddedHash = base62Hash.padStart(3, "0").substring(0, 3);
   return "p" + paddedHash.toLowerCase();
 }
@@ -15972,7 +17858,7 @@ const SchemaActions = {
     if (value === null || value === void 0 || value === "") return value;
     if (typeof value === "number") return value;
     if (typeof value === "string") {
-      const n = decode(value);
+      const n = decode$1(value);
       return isNaN(n) ? void 0 : n;
     }
     return void 0;
@@ -15980,11 +17866,11 @@ const SchemaActions = {
   toBase62: (value) => {
     if (value === null || value === void 0 || value === "") return value;
     if (typeof value === "number") {
-      return encode(value);
+      return encode$1(value);
     }
     if (typeof value === "string") {
       const n = Number(value);
-      return isNaN(n) ? value : encode(n);
+      return isNaN(n) ? value : encode$1(n);
     }
     return value;
   },
@@ -16017,16 +17903,16 @@ const SchemaActions = {
     }
     const base62Items = value.map((item) => {
       if (typeof item === "number" && !isNaN(item)) {
-        return encode(item);
+        return encode$1(item);
       }
       const n = Number(item);
-      return isNaN(n) ? "" : encode(n);
+      return isNaN(n) ? "" : encode$1(n);
     });
     return base62Items.join(separator);
   },
   toArrayOfNumbers: (value, { separator }) => {
     if (Array.isArray(value)) {
-      return value.map((v) => typeof v === "number" ? v : decode(v));
+      return value.map((v) => typeof v === "number" ? v : decode$1(v));
     }
     if (value === null || value === void 0) {
       return value;
@@ -16055,7 +17941,7 @@ const SchemaActions = {
     return items.map((v) => {
       if (typeof v === "number") return v;
       if (typeof v === "string" && v !== "") {
-        const n = decode(v);
+        const n = decode$1(v);
         return isNaN(n) ? NaN : n;
       }
       return NaN;
@@ -16196,14 +18082,14 @@ const SchemaActions = {
     if (typeof value !== "number") return value;
     const multiplier = Math.pow(10, decimals);
     const integerValue = Math.round(value * multiplier);
-    const [ok, err, encoded] = tryFnSync(() => "$" + encode(integerValue));
+    const [ok, err, encoded] = tryFnSync(() => "$" + encode$1(integerValue));
     return ok ? encoded : value;
   },
   decodeMoney: (value, { decimals = 2 } = {}) => {
     if (value === null || value === void 0) return value;
     if (typeof value !== "string") return value;
     if (!value.startsWith("$")) return value;
-    const [ok, err, integerValue] = tryFnSync(() => decode(value.slice(1)));
+    const [ok, err, integerValue] = tryFnSync(() => decode$1(value.slice(1)));
     if (!ok || isNaN(integerValue)) return value;
     const divisor = Math.pow(10, decimals);
     return integerValue / divisor;
@@ -16688,7 +18574,7 @@ class Schema {
       const mappedKey = this.pluginMap[key] || this.map[key] || key;
       const attrDef = this.getAttributeDefinition(key);
       if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
-        rest[mappedKey] = encode(value);
+        rest[mappedKey] = encode$1(value);
       } else if (typeof value === "string") {
         if (value === "[object Object]") {
           rest[mappedKey] = "{}";
@@ -16723,7 +18609,7 @@ class Schema {
       const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
       if (!hasAfterUnmapHook && typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
         if (typeof parsedValue === "string" && parsedValue !== "") {
-          parsedValue = decode(parsedValue);
+          parsedValue = decode$1(parsedValue);
         } else if (typeof parsedValue === "number") ; else {
           parsedValue = void 0;
         }
@@ -20014,7 +21900,7 @@ ${errorDetails}`,
       behavior: this.behavior
     };
     const stableString = jsonStableStringify(definition);
-    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+    return `sha256:${crypto$1.createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
    * Extract version from S3 key
@@ -28453,7 +30339,7 @@ class Database extends EventEmitter {
       partitions: definition.partitions || {}
     };
     const stableString = jsonStableStringify(hashObj);
-    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+    return `sha256:${crypto$1.createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
    * Get the next version number for a resource
@@ -43209,7 +45095,7 @@ class TfStatePlugin extends Plugin {
    */
   _calculateSHA256(state) {
     const stateString = JSON.stringify(state);
-    return crypto.createHash("sha256").update(stateString).digest("hex");
+    return crypto$1.createHash("sha256").update(stateString).digest("hex");
   }
   /**
    * Insert resources into database with controlled parallelism
@@ -45624,7 +47510,7 @@ class MemoryStorage {
    */
   _generateETag(body) {
     const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || "");
-    return crypto.createHash("md5").update(buffer).digest("hex");
+    return crypto$1.createHash("md5").update(buffer).digest("hex");
   }
   /**
    * Calculate metadata size in bytes
@@ -47218,7 +49104,7 @@ class Seeder {
 }
 
 function generateKeyPair(modulusLength = 2048) {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+  const { publicKey, privateKey } = crypto$1.generateKeyPairSync("rsa", {
     modulusLength,
     publicKeyEncoding: {
       type: "spki",
@@ -47229,7 +49115,7 @@ function generateKeyPair(modulusLength = 2048) {
       format: "pem"
     }
   });
-  const kid = crypto.createHash("sha256").update(publicKey).digest("hex").substring(0, 16);
+  const kid = crypto$1.createHash("sha256").update(publicKey).digest("hex").substring(0, 16);
   return {
     publicKey,
     privateKey,
@@ -47240,7 +49126,7 @@ function generateKeyPair(modulusLength = 2048) {
   };
 }
 function pemToJwk(publicKeyPem, kid) {
-  const keyObject = crypto.createPublicKey(publicKeyPem);
+  const keyObject = crypto$1.createPublicKey(publicKeyPem);
   const exported = keyObject.export({ format: "jwk" });
   return {
     kty: "RSA",
@@ -47274,7 +49160,7 @@ function createRS256Token(payload, privateKey, kid, expiresIn = "15m") {
   };
   const encodedHeader = Buffer.from(JSON.stringify(header)).toString("base64url");
   const encodedPayload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  const sign = crypto.createSign("RSA-SHA256");
+  const sign = crypto$1.createSign("RSA-SHA256");
   sign.update(`${encodedHeader}.${encodedPayload}`);
   sign.end();
   const signature = sign.sign(privateKey, "base64url");
@@ -47287,7 +49173,7 @@ function verifyRS256Token(token, publicKey) {
       return null;
     }
     const [encodedHeader, encodedPayload, signature] = parts;
-    const verify = crypto.createVerify("RSA-SHA256");
+    const verify = crypto$1.createVerify("RSA-SHA256");
     verify.update(`${encodedHeader}.${encodedPayload}`);
     verify.end();
     const isValid = verify.verify(publicKey, signature, "base64url");
@@ -48554,13 +50440,13 @@ exports.clearUTF8Memory = clearUTF8Memory;
 exports.createBackupDriver = createBackupDriver;
 exports.createConsumer = createConsumer;
 exports.createReplicator = createReplicator;
-exports.decode = decode;
+exports.decode = decode$1;
 exports.decodeDecimal = decodeDecimal;
 exports.decodeFixedPoint = decodeFixedPoint;
 exports.decodeFixedPointBatch = decodeFixedPointBatch;
 exports.decrypt = decrypt;
 exports.default = S3db;
-exports.encode = encode;
+exports.encode = encode$1;
 exports.encodeDecimal = encodeDecimal;
 exports.encodeFixedPoint = encodeFixedPoint;
 exports.encodeFixedPointBatch = encodeFixedPointBatch;

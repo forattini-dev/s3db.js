@@ -35,6 +35,9 @@ importers:
       glob:
         specifier: ^11.0.3
         version: 11.0.3
+      jose:
+        specifier: ^6.1.0
+        version: 6.1.0
       json-stable-stringify:
         specifier: ^1.3.0
         version: 1.3.0
@@ -3487,6 +3490,9 @@ packages:
     peerDependenciesMeta:
       node-notifier:
         optional: true
+
+  jose@6.1.0:
+    resolution: {integrity: sha512-TTQJyoEoKcC1lscpVDCSsVgYzUDg/0Bt3WE//WiTPK6uOCQC2KZS4MpugbMWt/zyjkopgZoXhZuCi00gLudfUA==}
 
   js-base64@3.7.8:
     resolution: {integrity: sha512-hNngCeKxIUQiEUN3GPJOkz4wF/YvdUdbNL9hsBcMQTkKzboD7T/q3OYOuuPZLUE6dBxSGpwhk5mwuDud7JVAow==}
@@ -8967,6 +8973,8 @@ snapshots:
       - esbuild-register
       - supports-color
       - ts-node
+
+  jose@6.1.0: {}
 
   js-base64@3.7.8: {}
 

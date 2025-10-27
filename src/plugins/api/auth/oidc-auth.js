@@ -1,11 +1,13 @@
 /**
- * OIDC Authentication Driver (Authorization Code Flow)
+ * OIDC Authentication Driver (Authorization Code Flow) - Production Ready
  *
- * Implements OpenID Connect Authorization Code Flow for client applications.
- * Redirects users to SSO server for login, exchanges authorization code for tokens,
- * and maintains session with cookies.
- *
- * Use this driver when you want "Login with SSO" functionality in your application.
+ * Implements OpenID Connect Authorization Code Flow with enterprise features:
+ * - Auto user creation/update from token claims
+ * - Session management (rolling + absolute duration)
+ * - Token refresh before expiry
+ * - IdP logout support (Azure AD/Entra compatible)
+ * - Startup configuration validation
+ * - User data cached in session (zero DB lookups per request)
  *
  * @example
  * {
@@ -15,10 +17,12 @@
  *     clientId: 'app-client-123',
  *     clientSecret: 'super-secret-key-456',
  *     redirectUri: 'http://localhost:3000/auth/callback',
- *     scopes: ['openid', 'profile', 'email'],
+ *     scopes: ['openid', 'profile', 'email', 'offline_access'],
  *     cookieSecret: 'my-cookie-secret-32-chars!!!',
- *     cookieName: 'oidc_session',
- *     cookieMaxAge: 86400000  // 24 hours
+ *     rollingDuration: 86400000,  // 24 hours
+ *     absoluteDuration: 604800000, // 7 days
+ *     idpLogout: true,
+ *     autoCreateUser: true
  *   }
  * }
  */
@@ -26,43 +30,218 @@
 import { SignJWT, jwtVerify } from 'jose';
 
 /**
- * Create OIDC authentication handler and routes
- * @param {Object} config - OIDC configuration
- * @param {Object} app - Hono app instance
+ * Validate OIDC configuration at startup
+ * @throws {Error} If configuration is invalid
+ */
+export function validateOidcConfig(config) {
+  const errors = [];
+
+  // Required fields
+  if (!config.issuer) {
+    errors.push('issuer is required');
+  } else if (config.issuer.includes('{tenant-id}')) {
+    errors.push('issuer contains placeholder {tenant-id}');
+  }
+
+  if (!config.clientId) {
+    errors.push('clientId is required');
+  } else if (config.clientId === 'your-client-id-here') {
+    errors.push('clientId contains placeholder value');
+  }
+
+  if (!config.clientSecret) {
+    errors.push('clientSecret is required');
+  } else if (config.clientSecret === 'your-client-secret-here') {
+    errors.push('clientSecret contains placeholder value');
+  }
+
+  if (!config.redirectUri) {
+    errors.push('redirectUri is required');
+  }
+
+  if (!config.cookieSecret) {
+    errors.push('cookieSecret is required');
+  } else if (config.cookieSecret.length < 32) {
+    errors.push('cookieSecret must be at least 32 characters');
+  } else if (config.cookieSecret === 'CHANGE_THIS_SECRET' || config.cookieSecret === 'long-random-string-for-session-encryption') {
+    errors.push('cookieSecret contains placeholder/default value');
+  }
+
+  // Validate UUID format for clientId (common for Azure AD/Entra)
+  if (config.clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.clientId)) {
+    console.warn('[OIDC] clientId is not in UUID format (may be expected for some providers)');
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`OIDC driver configuration is invalid:\n${errors.map(e => `  - ${e}`).join('\n')}\n\nSee documentation for configuration requirements.`);
+  }
+}
+
+/**
+ * Get or create user from OIDC claims
  * @param {Object} usersResource - s3db.js users resource
- * @returns {Object} Routes and middleware
+ * @param {Object} claims - ID token claims
+ * @param {Object} config - OIDC config
+ * @returns {Promise<Object>} User object
+ */
+async function getOrCreateUser(usersResource, claims, config) {
+  const userId = claims.email || claims.preferred_username || claims.sub;
+
+  if (!userId) {
+    throw new Error('Cannot extract user ID from OIDC claims (no email/preferred_username/sub)');
+  }
+
+  // Try to get existing user
+  let user = null;
+  try {
+    user = await usersResource.get(userId);
+  } catch (err) {
+    // User not found, will create below
+  }
+
+  const now = new Date().toISOString();
+
+  if (user) {
+    // Update existing user
+    const updates = {
+      lastLoginAt: now,
+      metadata: {
+        ...user.metadata,
+        oidc: {
+          sub: claims.sub,
+          provider: config.issuer,
+          lastSync: now,
+          claims: {
+            name: claims.name,
+            email: claims.email,
+            picture: claims.picture
+          }
+        }
+      }
+    };
+
+    // Update name if changed
+    if (claims.name && claims.name !== user.name) {
+      updates.name = claims.name;
+    }
+
+    user = await usersResource.update(userId, updates);
+    return user;
+  }
+
+  // Create new user
+  const newUser = {
+    id: userId,
+    email: claims.email || userId,
+    username: claims.preferred_username || claims.email || userId,
+    name: claims.name || claims.email || userId,
+    picture: claims.picture || null,
+    role: config.defaultRole || 'user',
+    scopes: config.defaultScopes || ['openid', 'profile', 'email'],
+    active: true,
+    apiKey: null, // Will be generated on first API usage if needed
+    lastLoginAt: now,
+    metadata: {
+      oidc: {
+        sub: claims.sub,
+        provider: config.issuer,
+        createdAt: now,
+        claims: {
+          name: claims.name,
+          email: claims.email,
+          picture: claims.picture
+        }
+      },
+      costCenterId: config.defaultCostCenter || null,
+      teamId: config.defaultTeam || null
+    }
+  };
+
+  user = await usersResource.insert(newUser);
+  return user;
+}
+
+/**
+ * Refresh access token using refresh token
+ */
+async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
+  const response = await fetch(tokenEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Token refresh failed: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Create OIDC authentication handler and routes
  */
 export function createOIDCHandler(config, app, usersResource) {
+  // Apply defaults
+  const finalConfig = {
+    scopes: ['openid', 'profile', 'email', 'offline_access'],
+    cookieName: 'oidc_session',
+    cookieMaxAge: 604800000, // 7 days (same as absolute duration)
+    rollingDuration: 86400000, // 24 hours
+    absoluteDuration: 604800000, // 7 days
+    loginPath: '/auth/login',
+    callbackPath: '/auth/callback',
+    logoutPath: '/auth/logout',
+    postLoginRedirect: '/',
+    postLogoutRedirect: '/',
+    idpLogout: true,
+    autoCreateUser: true,
+    autoRefreshTokens: true,
+    refreshThreshold: 300000, // 5 minutes before expiry
+    cookieSecure: process.env.NODE_ENV === 'production',
+    cookieSameSite: 'Lax',
+    defaultRole: 'user',
+    defaultScopes: ['openid', 'profile', 'email'],
+    ...config
+  };
+
   const {
     issuer,
     clientId,
     clientSecret,
     redirectUri,
-    scopes = ['openid', 'profile', 'email'],
+    scopes,
     cookieSecret,
-    cookieName = 'oidc_session',
-    cookieMaxAge = 86400000, // 24 hours
-    loginPath = '/auth/login',
-    callbackPath = '/auth/callback',
-    logoutPath = '/auth/logout',
-    postLoginRedirect = '/',
-    postLogoutRedirect = '/'
-  } = config;
-
-  if (!issuer) throw new Error('[OIDC Auth] Missing required config: issuer');
-  if (!clientId) throw new Error('[OIDC Auth] Missing required config: clientId');
-  if (!clientSecret) throw new Error('[OIDC Auth] Missing required config: clientSecret');
-  if (!redirectUri) throw new Error('[OIDC Auth] Missing required config: redirectUri');
-  if (!cookieSecret) throw new Error('[OIDC Auth] Missing required config: cookieSecret (32+ chars)');
+    cookieName,
+    cookieMaxAge,
+    rollingDuration,
+    absoluteDuration,
+    loginPath,
+    callbackPath,
+    logoutPath,
+    postLoginRedirect,
+    postLogoutRedirect,
+    idpLogout,
+    autoCreateUser,
+    autoRefreshTokens,
+    refreshThreshold,
+    cookieSecure,
+    cookieSameSite
+  } = finalConfig;
 
   // OAuth2 endpoints
   const authorizationEndpoint = `${issuer}/oauth/authorize`;
   const tokenEndpoint = `${issuer}/oauth/token`;
-  const userinfoEndpoint = `${issuer}/oauth/userinfo`;
-  const endSessionEndpoint = `${issuer}/oauth/logout`;
+  const logoutEndpoint = `${issuer}/oauth2/v2.0/logout`; // Azure AD format
 
   /**
-   * Encode session data as signed JWT (stored in cookie)
+   * Encode session data as signed JWT
    */
   async function encodeSession(data) {
     const secret = new TextEncoder().encode(cookieSecret);
@@ -75,7 +254,7 @@ export function createOIDCHandler(config, app, usersResource) {
   }
 
   /**
-   * Decode and verify session JWT from cookie
+   * Decode and verify session JWT
    */
   async function decodeSession(jwt) {
     try {
@@ -88,6 +267,25 @@ export function createOIDCHandler(config, app, usersResource) {
   }
 
   /**
+   * Validate session (rolling + absolute duration)
+   */
+  function validateSessionDuration(session) {
+    const now = Date.now();
+
+    // Check absolute expiry
+    if (session.issued_at + absoluteDuration < now) {
+      return { valid: false, reason: 'absolute_expired' };
+    }
+
+    // Check rolling expiry
+    if (session.last_activity + rollingDuration < now) {
+      return { valid: false, reason: 'rolling_expired' };
+    }
+
+    return { valid: true };
+  }
+
+  /**
    * Generate random state for CSRF protection
    */
   function generateState() {
@@ -95,18 +293,30 @@ export function createOIDCHandler(config, app, usersResource) {
            Math.random().toString(36).substring(2, 15);
   }
 
+  /**
+   * Decode JWT without verification (for id_token claims)
+   */
+  function decodeIdToken(idToken) {
+    try {
+      const parts = idToken.split('.');
+      if (parts.length !== 3) return null;
+      const payload = Buffer.from(parts[1], 'base64').toString('utf-8');
+      return JSON.parse(payload);
+    } catch (err) {
+      return null;
+    }
+  }
+
   // ==================== ROUTES ====================
 
   /**
-   * LOGIN Route - Redirects to SSO authorization endpoint
-   * GET /auth/login
+   * LOGIN Route
    */
   app.get(loginPath, async (c) => {
-    // Generate CSRF state
     const state = generateState();
 
-    // Store state in session cookie (short-lived)
-    const stateJWT = await encodeSession({ state, type: 'csrf' });
+    // Store state in short-lived cookie
+    const stateJWT = await encodeSession({ state, type: 'csrf', expires: Date.now() + 600000 });
     c.header('Set-Cookie', `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
 
     // Build authorization URL
@@ -118,15 +328,11 @@ export function createOIDCHandler(config, app, usersResource) {
       state
     });
 
-    const authUrl = `${authorizationEndpoint}?${params.toString()}`;
-
-    // Redirect to SSO
-    return c.redirect(authUrl, 302);
+    return c.redirect(`${authorizationEndpoint}?${params.toString()}`, 302);
   });
 
   /**
-   * CALLBACK Route - Receives authorization code and exchanges for tokens
-   * GET /auth/callback?code=xxx&state=xxx
+   * CALLBACK Route
    */
   app.get(callbackPath, async (c) => {
     const code = c.req.query('code');
@@ -167,37 +373,95 @@ export function createOIDCHandler(config, app, usersResource) {
 
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
-        console.error('[OIDC Auth] Token exchange failed:', error);
+        console.error('[OIDC] Token exchange failed:', error);
         return c.json({ error: 'Failed to exchange code for tokens' }, 500);
       }
 
       const tokens = await tokenResponse.json();
 
-      // Store tokens in session cookie
-      const sessionJWT = await encodeSession({
+      // Decode id_token claims
+      const idTokenClaims = decodeIdToken(tokens.id_token);
+      if (!idTokenClaims) {
+        return c.json({ error: 'Failed to decode id_token' }, 500);
+      }
+
+      // Auto-create/update user
+      let user = null;
+      if (autoCreateUser && usersResource) {
+        try {
+          user = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+        } catch (err) {
+          console.error('[OIDC] Failed to create/update user:', err);
+          // Continue without user (will use token claims only)
+        }
+      }
+
+      // Create session with user data
+      const now = Date.now();
+      const sessionData = {
         access_token: tokens.access_token,
         id_token: tokens.id_token,
         refresh_token: tokens.refresh_token,
-        expires_at: Date.now() + (tokens.expires_in * 1000)
-      });
+        expires_at: now + (tokens.expires_in * 1000),
+        issued_at: now,
+        last_activity: now,
 
-      c.header('Set-Cookie', `${cookieName}=${sessionJWT}; Path=/; HttpOnly; Max-Age=${Math.floor(cookieMaxAge / 1000)}; SameSite=Lax`);
+        // User data (avoid DB lookup on every request)
+        user: user ? {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          name: user.name,
+          picture: user.picture,
+          role: user.role,
+          scopes: user.scopes,
+          active: user.active,
+          metadata: {
+            costCenterId: user.metadata?.costCenterId,
+            teamId: user.metadata?.teamId
+          }
+        } : {
+          id: idTokenClaims.sub,
+          email: idTokenClaims.email,
+          username: idTokenClaims.preferred_username || idTokenClaims.email,
+          name: idTokenClaims.name,
+          picture: idTokenClaims.picture,
+          role: 'user',
+          scopes: scopes,
+          active: true,
+          isVirtual: true
+        }
+      };
 
-      // Redirect to post-login page
+      const sessionJWT = await encodeSession(sessionData);
+
+      // Set session cookie
+      const cookieOptions = [
+        `${cookieName}=${sessionJWT}`,
+        'Path=/',
+        'HttpOnly',
+        `Max-Age=${Math.floor(cookieMaxAge / 1000)}`,
+        `SameSite=${cookieSameSite}`
+      ];
+
+      if (cookieSecure) {
+        cookieOptions.push('Secure');
+      }
+
+      c.header('Set-Cookie', cookieOptions.join('; '));
+
       return c.redirect(postLoginRedirect, 302);
 
     } catch (err) {
-      console.error('[OIDC Auth] Error during token exchange:', err);
+      console.error('[OIDC] Error during token exchange:', err);
       return c.json({ error: 'Authentication failed' }, 500);
     }
   });
 
   /**
-   * LOGOUT Route - Clears session and optionally redirects to SSO logout
-   * GET /auth/logout
+   * LOGOUT Route
    */
   app.get(logoutPath, async (c) => {
-    // Get session to extract id_token (for SSO logout)
     const sessionCookie = c.req.cookie(cookieName);
     let idToken = null;
 
@@ -209,91 +473,101 @@ export function createOIDCHandler(config, app, usersResource) {
     // Clear session cookie
     c.header('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
 
-    // Redirect to SSO logout endpoint (optional)
-    if (idToken && endSessionEndpoint) {
+    // IdP logout (Azure AD/Entra compatible)
+    if (idpLogout && idToken) {
       const params = new URLSearchParams({
         id_token_hint: idToken,
         post_logout_redirect_uri: `${postLogoutRedirect}`
       });
-      return c.redirect(`${endSessionEndpoint}?${params.toString()}`, 302);
+      return c.redirect(`${logoutEndpoint}?${params.toString()}`, 302);
     }
 
-    // Or just redirect to post-logout page
     return c.redirect(postLogoutRedirect, 302);
   });
 
   // ==================== MIDDLEWARE ====================
 
   /**
-   * Authentication middleware - Validates session cookie
+   * Authentication middleware
    */
   const middleware = async (c, next) => {
     const sessionCookie = c.req.cookie(cookieName);
 
     if (!sessionCookie) {
-      return await next(); // No session, try next auth method
+      return await next();
     }
 
     const session = await decodeSession(sessionCookie);
 
     if (!session || !session.access_token) {
-      return await next(); // Invalid session
-    }
-
-    // Check if token expired
-    if (session.expires_at && Date.now() > session.expires_at) {
-      // TODO: Refresh token logic
       return await next();
     }
 
-    // Decode id_token to get user info (without verification - just for claims)
-    let userInfo = {};
-    if (session.id_token) {
-      try {
-        const parts = session.id_token.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-          userInfo = {
-            id: payload.sub,
-            email: payload.email,
-            username: payload.preferred_username || payload.username || payload.email,
-            name: payload.name,
-            picture: payload.picture,
-            role: payload.role || 'user',
-            scopes: payload.scope ? payload.scope.split(' ') : (payload.scopes || [])
-          };
+    // Validate session duration
+    const validation = validateSessionDuration(session);
+    if (!validation.valid) {
+      // Session expired, clear cookie
+      c.header('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+      return await next();
+    }
+
+    // Auto-refresh tokens if needed
+    if (autoRefreshTokens && session.refresh_token && session.expires_at) {
+      const timeUntilExpiry = session.expires_at - Date.now();
+
+      if (timeUntilExpiry < refreshThreshold) {
+        try {
+          const newTokens = await refreshAccessToken(
+            tokenEndpoint,
+            session.refresh_token,
+            clientId,
+            clientSecret
+          );
+
+          session.access_token = newTokens.access_token;
+          session.expires_at = Date.now() + (newTokens.expires_in * 1000);
+
+          // If new refresh token provided, update it
+          if (newTokens.refresh_token) {
+            session.refresh_token = newTokens.refresh_token;
+          }
+        } catch (err) {
+          console.error('[OIDC] Token refresh failed:', err);
+          // Continue with existing token (will expire soon)
         }
-      } catch (err) {
-        console.error('[OIDC Auth] Failed to decode id_token:', err);
       }
     }
 
-    // Optionally fetch user from database
-    let user = null;
-    if (usersResource && userInfo.id) {
-      try {
-        user = await usersResource.get(userInfo.id).catch(() => null);
-
-        // Try by email if not found by ID
-        if (!user && userInfo.email) {
-          const users = await usersResource.query({ email: userInfo.email }, { limit: 1 });
-          user = users[0] || null;
-        }
-      } catch (err) {
-        // User not in database
-      }
-    }
+    // Update last_activity (rolling session)
+    session.last_activity = Date.now();
 
     // Set user in context
-    c.set('user', user || {
-      ...userInfo,
-      active: true,
-      isVirtual: true, // Not in local database
+    c.set('user', {
+      ...session.user,
+      authMethod: 'oidc',
       session: {
         access_token: session.access_token,
-        refresh_token: session.refresh_token
+        refresh_token: session.refresh_token,
+        expires_at: session.expires_at
       }
     });
+
+    // Re-encode session with updated last_activity and tokens
+    const newSessionJWT = await encodeSession(session);
+
+    const cookieOptions = [
+      `${cookieName}=${newSessionJWT}`,
+      'Path=/',
+      'HttpOnly',
+      `Max-Age=${Math.floor(cookieMaxAge / 1000)}`,
+      `SameSite=${cookieSameSite}`
+    ];
+
+    if (cookieSecure) {
+      cookieOptions.push('Secure');
+    }
+
+    c.header('Set-Cookie', cookieOptions.join('; '));
 
     return await next();
   };
@@ -303,8 +577,9 @@ export function createOIDCHandler(config, app, usersResource) {
     routes: {
       [loginPath]: 'Login (redirect to SSO)',
       [callbackPath]: 'OAuth2 callback',
-      [logoutPath]: 'Logout'
-    }
+      [logoutPath]: 'Logout (local + IdP)'
+    },
+    config: finalConfig
   };
 }
 
