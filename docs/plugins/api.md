@@ -654,37 +654,467 @@ GET /cars?brand=Toyota  // O(1) partition lookup!
 
 ## ❓ FAQ
 
-### For Developers
-
-**Q: Can I use the API Plugin with existing authentication systems (Auth0, Firebase, etc.)?**
-
-A: Yes! Use custom middlewares to integrate with any auth provider. See [Authentication](./api/authentication.md) for examples.
-
-**Q: How do I handle file uploads?**
-
-A: For large files, use multipart/form-data and store files directly in S3, then store the S3 key in s3db. See [Static Files](./api/static-files.md) for details.
-
-**Q: Can I customize the OpenAPI/Swagger documentation?**
-
-A: Yes! The plugin auto-generates OpenAPI specs from your resource schemas. Access the raw spec at `/openapi.json` and modify it externally.
-
-**Q: Can I serve the API behind a reverse proxy (nginx, Cloudflare)?**
-
-A: Yes! The API works perfectly behind reverse proxies. See [Deployment](./api/deployment.md) for configuration examples.
-
-**Q: How do I implement pagination with cursor-based navigation?**
-
-A: Use query filters with comparison operators. See the Advanced Usage section above for examples.
-
-### For AI Agents
+### Basics
 
 **Q: What problem does the API Plugin solve?**
 
-A: It transforms s3db.js resources into production-ready REST API endpoints with automatic CRUD operations, authentication, validation, and enterprise features (rate limiting, CORS, compression, health checks). Eliminates need to manually write API routes.
+A: It transforms s3db.js resources into production-ready REST API endpoints with automatic CRUD operations, authentication, validation, and enterprise features (rate limiting, CORS, compression, health checks). **Zero boilerplate** - eliminates need to manually write API routes.
+
+**Q: Do I need to write any route handlers?**
+
+A: No! The API Plugin automatically generates REST endpoints for all your resources. Just define your data schema and you get a full CRUD API instantly.
+
+**Q: Can I use this with existing authentication systems (Auth0, Firebase, Keycloak)?**
+
+A: Yes! The API Plugin supports:
+- **JWT** - Works with any JWT issuer (Auth0, Firebase, custom)
+- **OIDC** - Auto-discovers configuration from any OIDC provider
+- **Custom middlewares** - Integrate with any auth system
+
+See [Authentication](./api/authentication.md) for examples.
+
+**Q: How does it compare to Express, Fastify, or other frameworks?**
+
+A:
+
+| Feature | API Plugin | Express/Fastify |
+|---------|-----------|----------------|
+| **Setup Time** | 1 line of code | Write routes manually |
+| **CRUD Endpoints** | Automatic | Manual |
+| **Schema Validation** | Automatic from resource | Manual (Joi, Yup, etc.) |
+| **Swagger Docs** | Auto-generated | Manual setup |
+| **Authentication** | Built-in (JWT, OIDC, Basic) | Manual integration |
+| **Health Probes** | Built-in (Kubernetes-ready) | Manual implementation |
+| **Multi-Tenancy** | Built-in (Guards + Partitions) | Manual implementation |
+
+**Q: Is it production-ready?**
+
+A: Yes! The API Plugin includes enterprise features out-of-the-box:
+- ✅ **Health probes** - Kubernetes liveness/readiness
+- ✅ **Rate limiting** - Prevent abuse
+- ✅ **CORS** - Cross-origin requests
+- ✅ **Compression** - Reduce bandwidth
+- ✅ **Logging** - Request/response tracking
+- ✅ **Schema validation** - Automatic from resource definitions
+- ✅ **Graceful shutdown** - Zero downtime deployments
+
+---
+
+### Authentication & Authorization
+
+**Q: How do I protect my API endpoints?**
+
+A: Use the `auth` configuration:
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  auth: {
+    driver: 'jwt',
+    resource: 'users',
+    config: { jwtSecret: process.env.JWT_SECRET }
+  },
+  resources: {
+    orders: { auth: true },  // Protected
+    products: { auth: false } // Public
+  }
+}));
+```
+
+See [Authentication](./api/authentication.md) for complete guide.
+
+**Q: How do I implement row-level security (users can only see their own data)?**
+
+A: Use Guards with partitions:
+```javascript
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: {
+    userId: 'string|required',
+    total: 'number|required'
+  },
+  partitions: {
+    byUser: { fields: { userId: 'string' } }
+  },
+  guard: {
+    list: (ctx) => {
+      ctx.setPartition('byUser', { userId: ctx.user.sub });
+      return true;
+    },
+    get: (ctx, record) => record.userId === ctx.user.sub
+  }
+});
+```
+
+See [Guards](./api/guards.md) for complete authorization guide.
+
+**Q: Can I use path-based authentication (different rules for different URLs)?**
+
+A: Yes! Use `pathAuth`:
+```javascript
+auth: {
+  drivers: [
+    { driver: 'jwt', config: { jwtSecret: 'secret' } }
+  ],
+  pathAuth: [
+    { pattern: '/public/**', required: false },
+    { pattern: '/api/**', drivers: ['jwt'], required: true },
+    { pattern: '/admin/**', drivers: ['jwt'], required: true }
+  ]
+}
+```
+
+See [Path-Based Authentication](./api/authentication.md#️-path-based-authentication) for details.
+
+**Q: How do I integrate with Azure AD or Keycloak?**
+
+A: Use the OIDC driver:
+```javascript
+auth: {
+  drivers: [
+    {
+      driver: 'oidc',
+      config: {
+        issuer: 'https://login.microsoftonline.com/{tenantId}/v2.0',
+        clientId: 'your-client-id',
+        audience: 'api://your-api-id'
+      }
+    }
+  ]
+}
+```
+
+The OIDC driver auto-discovers configuration and validates JWT tokens from any OIDC-compliant provider.
+
+---
+
+### Static Files & SPAs
+
+**Q: Can I serve a React/Vue/Angular app alongside my API?**
+
+A: Yes! Use static file serving with SPA fallback:
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  static: [
+    {
+      driver: 'filesystem',
+      path: '/app',
+      root: './build',
+      config: {
+        fallback: 'index.html',  // SPA routing support
+        maxAge: 3600000
+      }
+    }
+  ]
+}));
+
+// GET /app → React app
+// GET /api/orders → API endpoint
+```
+
+See [Static Files](./api/static-files.md) for complete guide.
+
+**Q: Can I serve files from S3?**
+
+A: Yes! Use the S3 driver:
+```javascript
+static: [
+  {
+    driver: 's3',
+    path: '/uploads',
+    bucket: 'my-uploads-bucket',
+    config: {
+      streaming: true,  // Stream through server
+      maxAge: 3600000
+    }
+  }
+]
+```
+
+Supports both streaming (server proxies) and presigned URL redirect (direct S3 access).
+
+**Q: How do I protect static files with authentication?**
+
+A: Use `pathAuth`:
+```javascript
+auth: {
+  drivers: [{ driver: 'jwt', config: { jwtSecret: 'secret' } }],
+  pathAuth: [
+    { pattern: '/public/**', required: false },
+    { pattern: '/app/**', drivers: ['jwt'], required: true }
+  ]
+},
+static: [
+  {
+    driver: 'filesystem',
+    path: '/app',
+    root: './build',
+    config: { fallback: 'index.html' }
+  }
+]
+```
+
+---
+
+### Configuration & Deployment
+
+**Q: How do I handle file uploads?**
+
+A: For large files:
+1. Accept multipart/form-data
+2. Store file directly in S3 (use AWS SDK)
+3. Store S3 key in s3db record
+
+```javascript
+// Store S3 key, not file data
+await files.insert({
+  name: 'document.pdf',
+  s3Key: 's3://bucket/uploads/abc123.pdf',
+  size: 1024000
+});
+```
+
+See [Static Files](./api/static-files.md) for serving uploaded files.
+
+**Q: How do I serve the API behind a reverse proxy (nginx, Cloudflare)?**
+
+A: Configure trust proxy settings:
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  trustProxy: true,  // Trust X-Forwarded-* headers
+  cors: {
+    origin: 'https://yourdomain.com'
+  }
+}));
+```
+
+See [Deployment](./api/deployment.md) for nginx configuration examples.
+
+**Q: How do I implement pagination?**
+
+A: Use query parameters:
+```bash
+# Offset-based (simple)
+GET /cars?limit=50&offset=100
+
+# Cursor-based (performant)
+GET /cars?limit=50&cursor=abc123
+
+# With filters
+GET /cars?brand=Toyota&limit=50&offset=0
+```
+
+The API Plugin automatically handles pagination from query parameters.
+
+**Q: Can I customize the OpenAPI/Swagger documentation?**
+
+A: Yes! The plugin auto-generates OpenAPI specs from your resource schemas. Access the raw spec at `/openapi.json` and modify it with external tools or custom routes:
+```javascript
+customRoutes: [
+  {
+    method: 'GET',
+    path: '/openapi.json',
+    handler: async (c) => {
+      const spec = await generateOpenAPISpec();
+      // Customize spec here
+      return c.json(spec);
+    }
+  }
+]
+```
+
+**Q: How do I deploy to Kubernetes?**
+
+A: The API Plugin is Kubernetes-ready out-of-the-box:
+- ✅ Health probes: `/health/live`, `/health/ready`
+- ✅ Graceful shutdown: Handles SIGTERM
+- ✅ Horizontal scaling: Stateless design
+
+See [Deployment](./api/deployment.md) for complete Kubernetes manifests.
+
+---
+
+### Troubleshooting
+
+**Q: Getting CORS errors?**
+
+A: Enable CORS and specify allowed origins:
+```javascript
+cors: {
+  enabled: true,
+  origin: ['http://localhost:3000', 'https://yourdomain.com'],
+  credentials: true
+}
+```
+
+For development, use `origin: '*'` (but never in production!).
+
+**Q: Why are my endpoints returning 401 Unauthorized?**
+
+A: Check authentication configuration:
+1. **JWT**: Verify `jwtSecret` matches token issuer
+2. **OIDC**: Check `issuer` and `audience` match token claims
+3. **Path-based**: Ensure `pattern` matches your route
+
+Debug with:
+```bash
+# Decode JWT token manually
+echo $TOKEN | cut -d. -f2 | base64 -d | jq
+
+# Check issuer, audience, expiration
+```
+
+**Q: Why am I getting 403 Forbidden even though I'm authenticated?**
+
+A: Authentication succeeded but authorization failed. Check:
+1. **Guards**: Verify guard functions return `true`
+2. **Resource permissions**: Check `resources.{name}.auth` is correctly configured
+3. **Path-based auth**: Verify `pathAuth` patterns match your routes
+
+**Q: Rate limiting is blocking legitimate requests?**
+
+A: Adjust rate limit configuration:
+```javascript
+rateLimit: {
+  enabled: true,
+  windowMs: 60000,      // Increase window
+  maxRequests: 1000,    // Increase limit
+  keyGenerator: (c) => {
+    // Use user ID instead of IP for authenticated requests
+    return c.get('user')?.sub || c.req.header('x-forwarded-for');
+  }
+}
+```
+
+**Q: API is slow - how do I optimize performance?**
+
+A: Performance tips:
+1. **Use partitions** for O(1) lookups instead of O(n) scans
+2. **Enable compression** for large responses
+3. **Add pagination** with reasonable limits (50-100 records)
+4. **Use `patch()` instead of `update()`** for metadata-only updates (40-60% faster)
+5. **Cache frequently accessed data** using CachePlugin
+6. **Use CDN** for static files
+
+See [Best Practices](#-best-practices) section.
+
+**Q: How do I debug issues?**
+
+A: Enable verbose logging:
+```javascript
+logging: {
+  enabled: true,
+  verbose: true,  // Detailed request/response logs
+  format: ':method :path :status :response-time ms - :user'
+}
+```
+
+Check logs for:
+- Request parameters
+- Authentication status
+- Validation errors
+- S3 operations
+
+---
+
+### Advanced
+
+**Q: Can I use custom middlewares?**
+
+A: Yes! Add custom logic at plugin or resource level:
+```javascript
+// Global middleware
+middlewares: [
+  async (c, next) => {
+    console.log(`${c.req.method} ${c.req.path}`);
+    await next();
+  }
+],
+
+// Resource-specific middleware
+resources: {
+  orders: {
+    customMiddleware: [
+      async (c, next) => {
+        // Custom logic here
+        await next();
+      }
+    ]
+  }
+}
+```
+
+**Q: Can I add custom routes?**
+
+A: Yes! Add custom endpoints alongside auto-generated ones:
+```javascript
+customRoutes: [
+  {
+    method: 'POST',
+    path: '/orders/:id/ship',
+    handler: async (c) => {
+      const id = c.req.param('id');
+      // Custom shipping logic
+      return c.json({ shipped: true });
+    }
+  }
+]
+```
+
+**Q: How do I implement multi-tenancy?**
+
+A: Use Guards + Partitions for tenant isolation:
+```javascript
+const data = await db.createResource({
+  name: 'data',
+  attributes: {
+    tenantId: 'string|required',
+    content: 'string'
+  },
+  partitions: {
+    byTenant: { fields: { tenantId: 'string' } }
+  },
+  guard: {
+    '*': (ctx) => {
+      ctx.tenantId = ctx.user.tenantId;  // Extract from JWT
+      return !!ctx.tenantId;
+    },
+    list: (ctx) => {
+      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
+      return true;
+    },
+    create: (ctx) => {
+      ctx.body.tenantId = ctx.tenantId;  // Auto-inject
+      return true;
+    },
+    get: (ctx, record) => record.tenantId === ctx.tenantId
+  }
+});
+```
+
+This provides **O(1) tenant isolation** with zero cross-tenant data leakage.
+
+**Q: Can I use this with Express or Fastify instead of Hono?**
+
+A: The API Plugin uses Hono internally, but you can integrate it with Express/Fastify using custom middlewares or by accessing the underlying Hono app:
+```javascript
+const apiPlugin = new ApiPlugin({ port: 3000 });
+await db.usePlugin(apiPlugin);
+
+// Access Hono app for custom integration
+const honoApp = apiPlugin.getApp();
+```
 
 **Q: What are all the configuration parameters?**
 
-A: See [Configuration](./api/configuration.md) for complete parameter documentation.
+A: See [Configuration](./api/configuration.md) for complete parameter documentation including:
+- Server options (port, host, trust proxy)
+- Authentication (drivers, pathAuth, resource)
+- Static files (filesystem, S3, SPA fallback)
+- Security (CORS, rate limiting, compression)
+- Logging (format, verbose, custom tokens)
+- Resources (per-resource auth, middlewares, guards)
 
 ---
 
