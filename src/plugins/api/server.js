@@ -12,6 +12,7 @@ import * as formatter from '../shared/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
 import { createAuthMiddleware } from './auth/index.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
+import { findBestMatch, validatePathAuth } from './utils/path-matcher.js';
 
 /**
  * API Server class
@@ -405,7 +406,7 @@ export class ApiServer {
    */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
-    const { drivers, resource: defaultResourceName } = auth;
+    const { drivers, resource: defaultResourceName, pathAuth } = auth;
 
     // If no drivers configured, no auth
     if (!drivers || drivers.length === 0) {
@@ -419,7 +420,126 @@ export class ApiServer {
       return null;
     }
 
-    // Extract driver names and configs
+    // Validate pathAuth config if provided
+    if (pathAuth) {
+      try {
+        validatePathAuth(pathAuth);
+      } catch (err) {
+        console.error(`[API Plugin] Invalid pathAuth configuration: ${err.message}`);
+        throw err;
+      }
+    }
+
+    // Helper: Extract driver configs from drivers array
+    const extractDriverConfigs = (driverNames) => {
+      const configs = {
+        jwt: {},
+        apiKey: {},
+        basic: {},
+        oauth2: {}
+      };
+
+      for (const driverDef of drivers) {
+        const driverName = driverDef.driver;
+        const driverConfig = driverDef.config || {};
+
+        // Skip if not in requested drivers
+        if (driverNames && !driverNames.includes(driverName)) {
+          continue;
+        }
+
+        // Skip oauth2-server and oidc drivers (they're handled separately)
+        if (driverName === 'oauth2-server' || driverName === 'oidc') {
+          continue;
+        }
+
+        // Map driver configs
+        if (driverName === 'jwt') {
+          configs.jwt = {
+            secret: driverConfig.jwtSecret || driverConfig.secret,
+            expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d'
+          };
+        } else if (driverName === 'apiKey') {
+          configs.apiKey = {
+            headerName: driverConfig.headerName || 'X-API-Key'
+          };
+        } else if (driverName === 'basic') {
+          configs.basic = {
+            realm: driverConfig.realm || 'API Access',
+            passphrase: driverConfig.passphrase || 'secret'
+          };
+        } else if (driverName === 'oauth2') {
+          configs.oauth2 = driverConfig;
+        }
+      }
+
+      return configs;
+    };
+
+    // If pathAuth is defined, create path-based conditional middleware
+    if (pathAuth) {
+      return async (c, next) => {
+        const requestPath = c.req.path;
+
+        // Find best matching rule for this path
+        const matchedRule = findBestMatch(pathAuth, requestPath);
+
+        if (this.options.verbose) {
+          if (matchedRule) {
+            console.log(`[API Plugin] Path ${requestPath} matched rule: ${matchedRule.pattern}`);
+          } else {
+            console.log(`[API Plugin] Path ${requestPath} no pathAuth rule matched (using global auth)`);
+          }
+        }
+
+        // If no rule matched, use global auth (all drivers, optional)
+        if (!matchedRule) {
+          const methods = drivers
+            .map(d => d.driver)
+            .filter(d => d !== 'oauth2-server' && d !== 'oidc');
+
+          const driverConfigs = extractDriverConfigs(null); // all drivers
+
+          const globalAuth = createAuthMiddleware({
+            methods,
+            jwt: driverConfigs.jwt,
+            apiKey: driverConfigs.apiKey,
+            basic: driverConfigs.basic,
+            oauth2: driverConfigs.oauth2,
+            oidc: this.oidcMiddleware || null,
+            usersResource: authResource,
+            optional: true
+          });
+
+          return await globalAuth(c, next);
+        }
+
+        // Rule matched - check if auth is required
+        if (!matchedRule.required) {
+          // Public path - no auth required
+          return await next();
+        }
+
+        // Auth required - apply with specific drivers from rule
+        const ruleMethods = matchedRule.drivers || [];
+        const driverConfigs = extractDriverConfigs(ruleMethods);
+
+        const ruleAuth = createAuthMiddleware({
+          methods: ruleMethods,
+          jwt: driverConfigs.jwt,
+          apiKey: driverConfigs.apiKey,
+          basic: driverConfigs.basic,
+          oauth2: driverConfigs.oauth2,
+          oidc: this.oidcMiddleware || null,
+          usersResource: authResource,
+          optional: false  // Auth is required for this path
+        });
+
+        return await ruleAuth(c, next);
+      };
+    }
+
+    // No pathAuth - use original behavior (global auth, all drivers)
     const methods = [];
     const driverConfigs = {
       jwt: {},

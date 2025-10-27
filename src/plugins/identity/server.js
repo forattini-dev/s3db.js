@@ -273,6 +273,11 @@ export class IdentityServer {
         console.log('[Identity Server]   POST /forgot-password (Process Forgot Password)');
         console.log('[Identity Server]   GET  /reset-password (Reset Password Form)');
         console.log('[Identity Server]   POST /reset-password (Process Password Reset)');
+        console.log('[Identity Server]   GET  /profile (User Profile - Protected)');
+        console.log('[Identity Server]   POST /profile/update (Update Profile)');
+        console.log('[Identity Server]   POST /profile/change-password (Change Password)');
+        console.log('[Identity Server]   POST /profile/logout-session (Logout Specific Session)');
+        console.log('[Identity Server]   POST /profile/logout-all-sessions (Logout All Other Sessions)');
       }
     } catch (error) {
       console.error('[Identity Server] Failed to setup UI routes:', error);
