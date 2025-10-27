@@ -1350,6 +1350,744 @@ services:
 | **Key Management** | Asymmetric | Symmetric | N/A |
 | **Standards** | OAuth2/OIDC | JWT | HTTP Basic |
 
+#### Testing OAuth2/OIDC
+
+##### Test Suite Overview
+
+s3db.js includes comprehensive OAuth2/OIDC tests (~101 tests) covering all components:
+
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| `api.plugin.oauth2.rsa-keys.test.js` | 28 | RSA key generation, signing, verification |
+| `api.plugin.oauth2.oidc-discovery.test.js` | 43 | Discovery, claims, scopes validation |
+| `api.plugin.oauth2.test.js` | ~30 | End-to-end SSO + Resource Servers |
+
+**Run tests:**
+```bash
+# All OAuth2/OIDC tests
+pnpm test:js -- oauth2
+
+# Specific test files
+pnpm test:js -- oauth2.rsa-keys
+pnpm test:js -- oauth2.oidc-discovery
+pnpm test:js -- oauth2.test
+```
+
+##### What Tests Guarantee
+
+**SSO Server:**
+- ✅ Generates valid RSA 2048-bit key pairs
+- ✅ Signs tokens with RS256 correctly
+- ✅ Exposes OIDC discovery document
+- ✅ Returns public keys via JWKS endpoint
+- ✅ Validates client credentials
+- ✅ Issues tokens with correct claims (iss, sub, exp, iat)
+
+**Resource Servers:**
+- ✅ Validate tokens locally without SSO communication
+- ✅ Verify RS256 signatures using public keys
+- ✅ Validate all claims (issuer, audience, expiration)
+- ✅ Handle clock skew tolerance
+- ✅ Block invalid/expired/tampered tokens (401)
+- ✅ Enforce scope requirements (403)
+
+**Security Tests:**
+- ✅ Token tampering blocked (modified payload rejected)
+- ✅ Expired tokens rejected
+- ✅ Wrong issuer rejected
+- ✅ Algorithm confusion prevented (RS256 vs HS256)
+- ✅ Missing claims rejected
+
+##### Testing Your Implementation
+
+**Test SSO Server:**
+```bash
+# 1. Check JWKS endpoint
+curl http://localhost:3000/.well-known/jwks.json
+
+# Expected:
+# {
+#   "keys": [{
+#     "kty": "RSA",
+#     "kid": "abc123",
+#     "use": "sig",
+#     "alg": "RS256",
+#     "n": "modulus...",
+#     "e": "AQAB"
+#   }]
+# }
+
+# 2. Get access token
+curl -X POST http://localhost:3000/auth/token \
+  -d "grant_type=client_credentials" \
+  -d "client_id=test" \
+  -d "client_secret=secret" \
+  -d "scope=openid orders:read"
+
+# Expected:
+# {
+#   "access_token": "eyJhbGci...",
+#   "token_type": "Bearer",
+#   "expires_in": 900,
+#   "scope": "openid orders:read"
+# }
+
+# 3. Decode token to verify claims
+TOKEN="eyJhbGci..."
+echo $TOKEN | cut -d. -f2 | base64 -d | jq
+
+# Expected payload:
+# {
+#   "iss": "http://localhost:3000",
+#   "sub": "user-123",
+#   "aud": "http://localhost:3001",
+#   "scope": "openid orders:read",
+#   "exp": 1234567890,
+#   "iat": 1234567000
+# }
+```
+
+**Test Resource Server:**
+```bash
+# 1. Test without token (should fail)
+curl http://localhost:3001/orders
+# Expected: 401 Unauthorized
+
+# 2. Test with invalid token (should fail)
+curl http://localhost:3001/orders \
+  -H "Authorization: Bearer invalid-token"
+# Expected: 401 Unauthorized
+
+# 3. Test with valid token (should succeed)
+curl http://localhost:3001/orders \
+  -H "Authorization: Bearer $TOKEN"
+# Expected: 200 OK + data
+
+# 4. Test scope enforcement
+curl -X POST http://localhost:3001/orders \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"productId":"p1","quantity":1}'
+# Expected: 403 Forbidden if missing 'orders:write' scope
+```
+
+**Test Token Validation:**
+```javascript
+// Manual token verification for debugging
+const verification = await oidcClient.verifyToken(token);
+
+if (!verification.valid) {
+  console.error('Token invalid:', verification.error);
+  // Common errors:
+  // - "Token expired" → exp claim < current time
+  // - "Invalid issuer" → iss claim doesn't match
+  // - "Invalid audience" → aud claim doesn't match
+  // - "Invalid signature" → Tampered token or wrong key
+  // - "Public key not found" → JWKS not cached
+}
+
+console.log('Payload:', verification.payload);
+// { sub: 'user-123', scope: 'orders:read', ... }
+```
+
+##### Integration Testing
+
+```javascript
+// tests/oauth2-integration.test.js
+import { expect, beforeAll, afterAll, describe, it } from 'bun:test';
+
+describe('OAuth2 Microservices Integration', () => {
+  let ssoServer, ordersAPI, token;
+
+  beforeAll(async () => {
+    // Start SSO server
+    ssoServer = await startSSOServer(3000);
+
+    // Start Orders API
+    ordersAPI = await startOrdersAPI(3001);
+
+    // Wait for services to be ready
+    await waitForHealth('http://localhost:3000/health');
+    await waitForHealth('http://localhost:3001/health');
+  });
+
+  afterAll(async () => {
+    await ssoServer.close();
+    await ordersAPI.close();
+  });
+
+  it('should get token from SSO', async () => {
+    const response = await fetch('http://localhost:3000/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grant_type=client_credentials&client_id=test&client_secret=secret&scope=orders:read'
+    });
+
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.access_token).toBeDefined();
+    expect(data.token_type).toBe('Bearer');
+
+    token = data.access_token;
+  });
+
+  it('should access Orders API with token', async () => {
+    const response = await fetch('http://localhost:3001/orders', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.orders).toBeDefined();
+  });
+
+  it('should reject invalid token', async () => {
+    const response = await fetch('http://localhost:3001/orders', {
+      headers: { 'Authorization': 'Bearer invalid-token' }
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('should enforce scope requirements', async () => {
+    // Get token without 'orders:write' scope
+    const tokenResponse = await fetch('http://localhost:3000/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grant_type=client_credentials&client_id=test&client_secret=secret&scope=orders:read'
+    });
+
+    const { access_token } = await tokenResponse.json();
+
+    // Try to POST (requires orders:write)
+    const response = await fetch('http://localhost:3001/orders', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ productId: 'p1', quantity: 1 })
+    });
+
+    expect(response.status).toBe(403);  // Forbidden (missing scope)
+  });
+});
+```
+
+#### Integrating with External Identity Providers
+
+s3db.js resource servers can validate tokens from **any** OAuth2/OIDC-compliant identity provider, not just s3db.js SSO servers.
+
+##### Azure AD (Microsoft Entra ID) Integration
+
+**Use case:** Your resource server validates tokens issued by Azure AD - no user management needed!
+
+```javascript
+import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+
+// Configure OIDC client for Azure AD
+const azureOIDC = new OIDCClient({
+  issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+  audience: 'api://YOUR_API_CLIENT_ID',  // Your API's app registration ID
+  discoveryUri: `https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration`,
+  jwksCacheTTL: 3600000,  // 1 hour
+  clockTolerance: 60
+});
+
+await azureOIDC.initialize();
+
+// Add to API
+api.addAuthDriver('azure', azureOIDC.middleware.bind(azureOIDC));
+
+// Protected route
+api.addRoute({
+  path: '/orders',
+  method: 'GET',
+  handler: async (req, res) => {
+    // Azure AD token claims
+    const userId = req.user.oid;  // Azure Object ID
+    const email = req.user.upn || req.user.email;
+    const roles = req.user.roles || [];  // App Roles
+    const scopes = req.user.scp?.split(' ') || [];  // Delegated permissions
+
+    // Check Azure AD App Role
+    if (!roles.includes('Orders.Read')) {
+      return res.status(403).json({ error: 'Missing required role' });
+    }
+
+    const orders = await ordersResource.query({ userId });
+    res.json({ orders });
+  },
+  auth: 'azure'
+});
+```
+
+**Azure AD token claims:**
+```json
+{
+  "iss": "https://login.microsoftonline.com/{tenant-id}/v2.0",
+  "aud": "api://YOUR_API_CLIENT_ID",
+  "sub": "unique-user-id",
+  "oid": "object-id",  // User's Azure AD Object ID
+  "upn": "user@tenant.com",  // User Principal Name
+  "email": "user@tenant.com",
+  "roles": ["Orders.Read", "Products.Write"],  // App Roles
+  "scp": "Orders.Read Orders.Write",  // Delegated scopes
+  "tid": "tenant-id",
+  "exp": 1234567890,
+  "iat": 1234567000
+}
+```
+
+**Setup steps:**
+1. Create App Registration in Azure Portal
+2. Configure API permissions and App Roles
+3. Expose API (api://YOUR_API_CLIENT_ID)
+4. Configure your resource server with Azure AD issuer
+5. Users get tokens from Azure AD, your API validates them
+
+See [`docs/examples/e62-azure-ad-integration.js`](../examples/e62-azure-ad-integration.js) for complete example.
+
+##### Keycloak Integration
+
+**Use case:** Self-hosted open-source identity provider
+
+```javascript
+import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+
+// Configure OIDC client for Keycloak
+const keycloakOIDC = new OIDCClient({
+  issuer: `http://localhost:8080/realms/production`,
+  audience: 'orders-api',  // Client ID in Keycloak
+  discoveryUri: `http://localhost:8080/realms/production/.well-known/openid-configuration`
+});
+
+await keycloakOIDC.initialize();
+
+api.addAuthDriver('keycloak', keycloakOIDC.middleware.bind(keycloakOIDC));
+
+api.addRoute({
+  path: '/orders',
+  method: 'GET',
+  handler: async (req, res) => {
+    // Keycloak token claims
+    const userId = req.user.sub;
+    const username = req.user.preferred_username;
+    const email = req.user.email;
+
+    // Check Keycloak Realm Roles
+    const realmRoles = req.user.realm_access?.roles || [];
+    if (!realmRoles.includes('orders-viewer')) {
+      return res.status(403).json({ error: 'Missing realm role' });
+    }
+
+    // Check Keycloak Client Roles
+    const clientRoles = req.user.resource_access?.['orders-api']?.roles || [];
+    if (!clientRoles.includes('read')) {
+      return res.status(403).json({ error: 'Missing client role' });
+    }
+
+    const orders = await ordersResource.query({ userId });
+    res.json({ orders });
+  },
+  auth: 'keycloak'
+});
+```
+
+**Keycloak token claims:**
+```json
+{
+  "iss": "http://localhost:8080/realms/production",
+  "aud": "orders-api",
+  "sub": "user-uuid",
+  "preferred_username": "john",
+  "email": "john@example.com",
+  "email_verified": true,
+  "realm_access": {
+    "roles": ["orders-viewer", "products-editor"]
+  },
+  "resource_access": {
+    "orders-api": {
+      "roles": ["read", "write"]
+    }
+  },
+  "scope": "openid profile email",
+  "exp": 1234567890,
+  "iat": 1234567000
+}
+```
+
+**Run Keycloak with Docker:**
+```bash
+docker run -d -p 8080:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:latest start-dev
+```
+
+See [`docs/examples/e63-keycloak-integration.js`](../examples/e63-keycloak-integration.js) for complete example.
+
+##### Comparison: Azure AD vs Keycloak vs s3db.js SSO
+
+| Feature | Azure AD | Keycloak | s3db.js SSO |
+|---------|----------|----------|-------------|
+| **Cost** | Paid (per user) | Free (self-hosted) | Free (built-in) |
+| **Hosting** | Microsoft-managed | Self-hosted | Built into your app |
+| **Setup** | Azure Portal | Admin Console | JavaScript code |
+| **Customization** | Limited | High | Total |
+| **User Management** | Azure Portal | Keycloak UI | Your database |
+| **Multi-tenant** | Built-in | Realms | DIY |
+| **Integration** | Office 365, AD | LDAP, SAML | S3 storage |
+| **Best For** | Enterprise, Office 365 | Self-hosted, custom | Simple microservices |
+
+**All three work seamlessly with s3db.js resource servers!** The API just validates tokens using `OIDCClient` - it doesn't care who issued them.
+
+#### Advanced OAuth2/OIDC Patterns
+
+##### Multi-Audience Tokens
+
+Support tokens valid for multiple APIs:
+
+```javascript
+// SSO Server - Issue token for multiple audiences
+const oauth2 = new OAuth2Server({
+  issuer: 'http://localhost:3000',
+  // Token will include aud: ["api://orders", "api://products"]
+});
+
+// Resource Servers validate their audience
+const ordersOIDC = new OIDCClient({
+  issuer: 'http://localhost:3000',
+  audience: 'api://orders'  // Accepts if aud includes this
+});
+
+const productsOIDC = new OIDCClient({
+  issuer: 'http://localhost:3000',
+  audience: 'api://products'  // Accepts if aud includes this
+});
+```
+
+##### PKCE (Proof Key for Code Exchange)
+
+Protect authorization code flow from interception:
+
+```javascript
+// Client-side: Generate code verifier and challenge
+import crypto from 'crypto';
+
+const codeVerifier = crypto.randomBytes(32).toString('base64url');
+const codeChallenge = crypto.createHash('sha256')
+  .update(codeVerifier)
+  .digest('base64url');
+
+// Step 1: Authorization request with PKCE
+const authUrl = new URL('http://localhost:3000/auth/authorize');
+authUrl.searchParams.set('response_type', 'code');
+authUrl.searchParams.set('client_id', 'mobile-app');
+authUrl.searchParams.set('redirect_uri', 'myapp://callback');
+authUrl.searchParams.set('code_challenge', codeChallenge);
+authUrl.searchParams.set('code_challenge_method', 'S256');
+authUrl.searchParams.set('scope', 'openid profile');
+
+// Redirect user to authUrl
+
+// Step 2: Exchange code for token (with code_verifier)
+const tokenResponse = await fetch('http://localhost:3000/auth/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: authCode,
+    redirect_uri: 'myapp://callback',
+    client_id: 'mobile-app',
+    code_verifier: codeVerifier  // Proves you initiated the request
+  })
+});
+```
+
+**Why PKCE?**
+- ✅ Prevents authorization code interception attacks
+- ✅ Required for mobile and SPA applications
+- ✅ Works without client secret (public clients)
+
+##### Token Refresh Flow
+
+Maintain long-lived sessions:
+
+```javascript
+// SSO Server - Enable refresh tokens
+const oauth2 = new OAuth2Server({
+  supportedScopes: ['openid', 'profile', 'offline_access'],  // offline_access = refresh tokens
+  refreshTokenExpiry: '30d'
+});
+
+// Client - Request refresh token
+const initialResponse = await fetch('http://localhost:3000/auth/token', {
+  method: 'POST',
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: authCode,
+    scope: 'openid profile offline_access',  // Request refresh token
+    ...
+  })
+});
+
+const { access_token, refresh_token, expires_in } = await initialResponse.json();
+
+// Later: Use refresh token to get new access token
+const refreshResponse = await fetch('http://localhost:3000/auth/token', {
+  method: 'POST',
+  body: new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refresh_token,
+    client_id: 'webapp',
+    client_secret: 'secret'
+  })
+});
+
+const { access_token: newAccessToken } = await refreshResponse.json();
+```
+
+##### Token Introspection
+
+Validate tokens server-side (optional):
+
+```javascript
+// Resource Server - Introspect token at SSO
+const introspection = await oidcClient.introspectToken(
+  token,
+  'orders-api',  // client_id
+  'client-secret'
+);
+
+if (introspection.active) {
+  console.log('Token is valid');
+  console.log('User ID:', introspection.sub);
+  console.log('Scopes:', introspection.scope);
+} else {
+  console.log('Token is invalid or expired');
+}
+```
+
+**Note:** Introspection requires SSO communication (not needed for RS256 validation).
+
+#### OAuth2/OIDC Troubleshooting Guide
+
+##### Common Issues and Solutions
+
+**1. Token validation fails with "Invalid signature"**
+
+```javascript
+// Debug: Check if JWKS is cached correctly
+const jwks = oidcClient.getJWKS();
+console.log('Cached keys:', jwks.keys.map(k => k.kid));
+
+// Force refresh JWKS
+await oidcClient.fetchJWKS(true);
+
+// Verify token manually
+const verification = await oidcClient.verifyToken(token);
+console.log('Valid:', verification.valid);
+console.log('Error:', verification.error);
+```
+
+**Causes:**
+- ❌ JWKS not fetched from SSO
+- ❌ Key rotation occurred (old token with new JWKS)
+- ❌ Wrong issuer URL in OIDC client
+- ❌ Network issues fetching JWKS
+
+**Solutions:**
+- ✅ Ensure `.initialize()` is called and completes
+- ✅ Check JWKS endpoint is accessible: `curl http://sso/.well-known/jwks.json`
+- ✅ Verify issuer URL matches exactly (no trailing slash)
+- ✅ Increase `jwksCacheTTL` if rotation is frequent
+
+**2. Token validation fails with "Token expired"**
+
+```javascript
+// Check token expiration
+const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64'));
+const now = Math.floor(Date.now() / 1000);
+console.log('Token exp:', payload.exp);
+console.log('Current time:', now);
+console.log('Expired by:', now - payload.exp, 'seconds');
+```
+
+**Causes:**
+- ❌ Access token expired (default: 15 minutes)
+- ❌ Clock skew between servers
+
+**Solutions:**
+- ✅ Request new token using refresh token
+- ✅ Increase `clockTolerance`: `new OIDCClient({ clockTolerance: 300 })` (5 minutes)
+- ✅ Sync server clocks with NTP
+- ✅ Use longer token expiry: `accessTokenExpiry: '1h'` (trade-off: less secure)
+
+**3. Token validation fails with "Invalid issuer"**
+
+```javascript
+// Check issuer claim
+const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64'));
+console.log('Token iss:', payload.iss);
+console.log('Expected iss:', oidcClient.issuer);
+```
+
+**Causes:**
+- ❌ Token issued by different SSO
+- ❌ Issuer URL mismatch (http vs https, trailing slash, port)
+
+**Solutions:**
+- ✅ Ensure SSO `issuer` matches OIDC `issuer` exactly
+- ✅ Use same protocol (http/https) in both
+- ✅ Remove trailing slashes: `http://sso` not `http://sso/`
+
+**4. Token validation fails with "Invalid audience"**
+
+```javascript
+// Check audience claim
+const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64'));
+console.log('Token aud:', payload.aud);
+console.log('Expected aud:', oidcClient.audience);
+```
+
+**Causes:**
+- ❌ Token issued for different API
+- ❌ Audience not specified in OIDC client
+
+**Solutions:**
+- ✅ Set correct `audience` in OIDC client: `audience: 'http://localhost:3001'`
+- ✅ Request token with correct audience in SSO
+- ✅ Omit `audience` in OIDC client if not enforcing (less secure)
+
+**5. Scope enforcement fails (403 Forbidden)**
+
+```javascript
+// Check scopes in token
+const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64'));
+const scopes = payload.scope?.split(' ') || [];
+console.log('Token scopes:', scopes);
+console.log('Required scope:', 'orders:write');
+console.log('Has scope?', scopes.includes('orders:write'));
+```
+
+**Causes:**
+- ❌ Token doesn't include required scope
+- ❌ Scope name mismatch
+
+**Solutions:**
+- ✅ Request correct scopes when getting token: `scope=orders:read orders:write`
+- ✅ Update user scopes in SSO database
+- ✅ Check scope validation logic in handler
+
+**6. JWKS endpoint not accessible**
+
+```bash
+# Test JWKS endpoint
+curl http://localhost:3000/.well-known/jwks.json
+
+# Expected: JSON with keys array
+# {
+#   "keys": [
+#     {
+#       "kty": "RSA",
+#       "kid": "abc123",
+#       ...
+#     }
+#   ]
+# }
+```
+
+**Causes:**
+- ❌ SSO server not running
+- ❌ JWKS route not registered
+- ❌ Network/firewall blocking request
+
+**Solutions:**
+- ✅ Verify SSO server is running: `curl http://localhost:3000/health`
+- ✅ Check JWKS route is registered: `api.addRoute({ path: '/.well-known/jwks.json', ... })`
+- ✅ Test from resource server host: `curl http://sso:3000/.well-known/jwks.json`
+- ✅ Check Docker network / Kubernetes service discovery
+
+**7. Public key not found for kid**
+
+```javascript
+// Debug: List all cached keys
+const jwks = oidcClient.getJWKS();
+console.log('Available kids:', jwks.keys.map(k => k.kid));
+
+// Decode token to see kid
+const header = JSON.parse(Buffer.from(token.split('.')[0], 'base64'));
+console.log('Token kid:', header.kid);
+```
+
+**Causes:**
+- ❌ Key rotation occurred, old key not in JWKS
+- ❌ Token signed with different key
+
+**Solutions:**
+- ✅ Force refresh JWKS: `await oidcClient.fetchJWKS(true)`
+- ✅ Check SSO has active key: Query `oauth_keys` resource
+- ✅ Wait for JWKS cache to refresh (auto-refresh enabled by default)
+
+**8. OAuth2Server initialization fails**
+
+```javascript
+try {
+  await oauth2.initialize();
+} catch (err) {
+  console.error('OAuth2 init error:', err.message);
+
+  // Common errors:
+  // "Resource 'oauth_keys' not found" → Create keys resource first
+  // "No active keys found" → Generate keys: await oauth2.rotateKeys()
+}
+```
+
+**Solutions:**
+- ✅ Create all required resources before `initialize()`
+- ✅ Verify resource names match: `keyResource: keysResource`
+- ✅ Check database connection is established
+
+##### Performance Optimization
+
+**JWKS Caching:**
+```javascript
+// Aggressive caching (1 hour)
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:3000',
+  jwksCacheTTL: 3600000,  // 1 hour
+  autoRefreshJWKS: true   // Auto-refresh in background
+});
+
+// Conservative caching (5 minutes)
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:3000',
+  jwksCacheTTL: 300000,   // 5 minutes
+  autoRefreshJWKS: true
+});
+```
+
+**Impact:**
+- Without cache: ~50-100ms per request (network + verify)
+- With cache: <1ms per request (verify only)
+
+**Token Expiry Trade-offs:**
+```javascript
+// Short-lived (more secure, more token requests)
+const oauth2 = new OAuth2Server({
+  accessTokenExpiry: '5m',
+  refreshTokenExpiry: '1d'
+});
+
+// Long-lived (less secure, fewer token requests)
+const oauth2 = new OAuth2Server({
+  accessTokenExpiry: '1h',
+  refreshTokenExpiry: '30d'
+});
+```
+
+**Recommendation:** 15 minutes for access tokens, 7 days for refresh tokens (default).
+
 #### Additional Resources
 
 - **OAuth 2.0 Spec**: [RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)
@@ -1357,6 +2095,11 @@ services:
 - **JWT Best Practices**: [RFC 8725](https://datatracker.ietf.org/doc/html/rfc8725)
 - **PKCE**: [RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)
 - **Token Introspection**: [RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)
+- **Complete Examples**:
+  - [`e60-oauth2-microservices.js`](../examples/e60-oauth2-microservices.js) - Full SSO architecture
+  - [`e61-sso-architecture-explained.js`](../examples/e61-sso-architecture-explained.js) - Detailed walkthrough
+  - [`e62-azure-ad-integration.js`](../examples/e62-azure-ad-integration.js) - Azure AD integration
+  - [`e63-keycloak-integration.js`](../examples/e63-keycloak-integration.js) - Keycloak integration
 
 ### Custom Username/Password Fields
 
