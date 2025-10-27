@@ -86,6 +86,29 @@ export class IdentityPlugin extends Plugin {
         format: options.logging?.format || ':method :path :status :response-time ms'
       },
 
+      // Session Management
+      session: {
+        sessionExpiry: options.session?.sessionExpiry || '24h',
+        cookieName: options.session?.cookieName || 's3db_session',
+        cookiePath: options.session?.cookiePath || '/',
+        cookieHttpOnly: options.session?.cookieHttpOnly !== false,
+        cookieSecure: options.session?.cookieSecure || false, // Set true in production with HTTPS
+        cookieSameSite: options.session?.cookieSameSite || 'Lax',
+        cleanupInterval: options.session?.cleanupInterval || 3600000, // 1 hour
+        enableCleanup: options.session?.enableCleanup !== false
+      },
+
+      // Password Policy
+      passwordPolicy: {
+        minLength: options.passwordPolicy?.minLength || 8,
+        maxLength: options.passwordPolicy?.maxLength || 128,
+        requireUppercase: options.passwordPolicy?.requireUppercase !== false,
+        requireLowercase: options.passwordPolicy?.requireLowercase !== false,
+        requireNumbers: options.passwordPolicy?.requireNumbers !== false,
+        requireSymbols: options.passwordPolicy?.requireSymbols || false,
+        bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
+      },
+
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -126,11 +149,13 @@ export class IdentityPlugin extends Plugin {
 
     this.server = null;
     this.oauth2Server = null;
+    this.sessionManager = null;
 
     // Resources
     this.oauth2KeysResource = null;
     this.oauth2ClientsResource = null;
     this.oauth2AuthCodesResource = null;
+    this.sessionsResource = null;
     this.usersResource = null;
   }
 
@@ -169,6 +194,9 @@ export class IdentityPlugin extends Plugin {
 
     // Initialize OAuth2 Server
     await this._initializeOAuth2Server();
+
+    // Initialize Session Manager
+    await this._initializeSessionManager();
 
     if (this.config.verbose) {
       console.log('[Identity Plugin] Installed successfully');
@@ -282,6 +310,38 @@ export class IdentityPlugin extends Plugin {
     } else {
       throw errCodes;
     }
+
+    // 4. Sessions Resource (user sessions for UI/admin)
+    const [okSessions, errSessions, sessionsResource] = await tryFn(() =>
+      this.database.createResource({
+        name: 'plg_sessions',
+        attributes: {
+          userId: 'string|required',
+          expiresAt: 'string|required',
+          ipAddress: 'ip4|optional',
+          userAgent: 'string|optional',
+          metadata: 'object|optional',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'IdentityPlugin'
+      })
+    );
+
+    if (okSessions) {
+      this.sessionsResource = sessionsResource;
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] Created plg_sessions resource');
+      }
+    } else if (this.database.resources.plg_sessions) {
+      this.sessionsResource = this.database.resources.plg_sessions;
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] Using existing plg_sessions resource');
+      }
+    } else {
+      throw errSessions;
+    }
   }
 
   /**
@@ -358,6 +418,25 @@ export class IdentityPlugin extends Plugin {
   }
 
   /**
+   * Initialize Session Manager
+   * @private
+   */
+  async _initializeSessionManager() {
+    const { SessionManager } = await import('./session-manager.js');
+
+    this.sessionManager = new SessionManager({
+      sessionResource: this.sessionsResource,
+      config: this.config.session
+    });
+
+    if (this.config.verbose) {
+      console.log('[Identity Plugin] Session Manager initialized');
+      console.log(`[Identity Plugin] Session expiry: ${this.config.session.sessionExpiry}`);
+      console.log(`[Identity Plugin] Cookie name: ${this.config.session.cookieName}`);
+    }
+  }
+
+  /**
    * Start plugin
    */
   async onStart() {
@@ -401,6 +480,11 @@ export class IdentityPlugin extends Plugin {
     if (this.server) {
       await this.server.stop();
       this.server = null;
+    }
+
+    // Stop session cleanup timer
+    if (this.sessionManager) {
+      this.sessionManager.stopCleanup();
     }
 
     this.emit('plugin.stopped');
