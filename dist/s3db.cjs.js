@@ -12090,9 +12090,9 @@ class OAuth2Server {
         responseTypes: this.supportedResponseTypes,
         scopes: this.supportedScopes
       });
-      res.status(200).json(document);
+      return res.status(200).json(document);
     } catch (error) {
-      res.status(500).json({
+      return res.status(500).json({
         error: "server_error",
         error_description: error.message
       });
@@ -12105,9 +12105,9 @@ class OAuth2Server {
   async jwksHandler(req, res) {
     try {
       const jwks = await this.keyManager.getJWKS();
-      res.status(200).json(jwks);
+      return res.status(200).json(jwks);
     } catch (error) {
-      res.status(500).json({
+      return res.status(500).json({
         error: "server_error",
         error_description: error.message
       });
@@ -12166,7 +12166,7 @@ class OAuth2Server {
           });
       }
     } catch (error) {
-      res.status(500).json({
+      return res.status(500).json({
         error: "server_error",
         error_description: error.message
       });
@@ -12421,7 +12421,7 @@ class OAuth2Server {
         ...userClaims
       });
     } catch (error) {
-      res.status(500).json({
+      return res.status(500).json({
         error: "server_error",
         error_description: error.message
       });
@@ -12465,7 +12465,7 @@ class OAuth2Server {
         aud: payload.aud
       });
     } catch (error) {
-      res.status(500).json({
+      return res.status(500).json({
         error: "server_error",
         error_description: error.message
       });

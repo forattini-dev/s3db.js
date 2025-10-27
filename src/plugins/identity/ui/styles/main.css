@@ -5,64 +5,6 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-:root {
-  /* Base Colors (oklch) - Clean & Modern */
-  --color-base-100: oklch(99% 0 0);
-  --color-base-200: oklch(96% 0.002 247);
-  --color-base-300: oklch(92% 0.004 247);
-  --color-base-content: oklch(25% 0.015 252);
-
-  /* Primary - Modern Purple/Blue */
-  --color-primary: oklch(65% 0.25 275);
-  --color-primary-focus: oklch(58% 0.28 275);
-  --color-primary-content: oklch(98% 0.01 275);
-
-  /* Secondary - Elegant Pink */
-  --color-secondary: oklch(70% 0.18 350);
-  --color-secondary-focus: oklch(63% 0.20 350);
-  --color-secondary-content: oklch(98% 0.01 350);
-
-  /* Accent - Fresh Cyan */
-  --color-accent: oklch(75% 0.15 195);
-  --color-accent-focus: oklch(68% 0.17 195);
-  --color-accent-content: oklch(20% 0.05 195);
-
-  /* Neutral */
-  --color-neutral: oklch(30% 0.01 252);
-  --color-neutral-focus: oklch(24% 0.01 252);
-  --color-neutral-content: oklch(95% 0.01 252);
-
-  /* Semantic Colors */
-  --color-success: oklch(72% 0.16 155);
-  --color-success-content: oklch(20% 0.05 155);
-  --color-warning: oklch(75% 0.15 75);
-  --color-warning-content: oklch(25% 0.06 75);
-  --color-error: oklch(65% 0.22 25);
-  --color-error-content: oklch(98% 0.01 25);
-  --color-info: oklch(70% 0.15 230);
-  --color-info-content: oklch(20% 0.05 230);
-
-  /* Typography */
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-
-  /* Sizing */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 oklch(0% 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.08), 0 2px 4px -2px oklch(0% 0 0 / 0.05);
-  --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.1), 0 4px 6px -4px oklch(0% 0 0 / 0.05);
-  --shadow-xl: 0 20px 25px -5px oklch(0% 0 0 / 0.12), 0 8px 10px -6px oklch(0% 0 0 / 0.08);
-
-  /* Transitions */
-  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 /* CSS Reset - Tailwind CSS 4 Preflight (MIT License - Copyright (c) Tailwind Labs, Inc.) */
 *,
 ::after,
@@ -93,24 +35,6 @@ html {
 
 body {
   line-height: inherit;
-  font-family: var(--font-family);
-  font-size: 16px;
-  color: var(--color-base-content);
-  /* Modern gradient mesh background */
-  background:
-    radial-gradient(at 0% 0%, oklch(95% 0.02 275 / 0.3) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, oklch(95% 0.02 350 / 0.2) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, oklch(95% 0.02 195 / 0.25) 0px, transparent 50%),
-    radial-gradient(at 0% 100%, oklch(95% 0.02 275 / 0.2) 0px, transparent 50%),
-    linear-gradient(135deg,
-      oklch(99% 0 0) 0%,
-      oklch(97% 0.005 270) 50%,
-      oklch(98% 0.003 190) 100%
-    );
-  background-attachment: fixed;
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 hr {
@@ -210,6 +134,162 @@ img,
 video {
   max-width: 100%;
   height: auto;
+}
+
+/* CSS Variables - Light Theme (Default) */
+:root {
+  color-scheme: light;
+
+  /* Base Colors (oklch) - Clean & Modern */
+  --color-base-100: oklch(99% 0 0);
+  --color-base-200: oklch(96% 0.002 247);
+  --color-base-300: oklch(92% 0.004 247);
+  --color-base-content: oklch(25% 0.015 252);
+
+  /* Primary - Modern Purple/Blue */
+  --color-primary: oklch(65% 0.25 275);
+  --color-primary-focus: oklch(58% 0.28 275);
+  --color-primary-content: oklch(98% 0.01 275);
+
+  /* Secondary - Elegant Pink */
+  --color-secondary: oklch(70% 0.18 350);
+  --color-secondary-focus: oklch(63% 0.20 350);
+  --color-secondary-content: oklch(98% 0.01 350);
+
+  /* Accent - Fresh Cyan */
+  --color-accent: oklch(75% 0.15 195);
+  --color-accent-focus: oklch(68% 0.17 195);
+  --color-accent-content: oklch(20% 0.05 195);
+
+  /* Neutral */
+  --color-neutral: oklch(30% 0.01 252);
+  --color-neutral-focus: oklch(24% 0.01 252);
+  --color-neutral-content: oklch(95% 0.01 252);
+
+  /* Semantic Colors */
+  --color-success: oklch(72% 0.16 155);
+  --color-success-content: oklch(20% 0.05 155);
+  --color-warning: oklch(75% 0.15 75);
+  --color-warning-content: oklch(25% 0.06 75);
+  --color-error: oklch(65% 0.22 25);
+  --color-error-content: oklch(98% 0.01 25);
+  --color-info: oklch(70% 0.15 230);
+  --color-info-content: oklch(20% 0.05 230);
+
+  /* Typography */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Sizing */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  /* Borders & Effects */
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 oklch(0% 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.08), 0 2px 4px -2px oklch(0% 0 0 / 0.05);
+  --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.1), 0 4px 6px -4px oklch(0% 0 0 / 0.05);
+  --shadow-xl: 0 20px 25px -5px oklch(0% 0 0 / 0.12), 0 8px 10px -6px oklch(0% 0 0 / 0.08);
+
+  /* Transitions */
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Theme - Auto-detected via prefers-color-scheme */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    /* Base Colors - Dark Mode */
+    --color-base-100: oklch(25.33% 0.016 252.42);
+    --color-base-200: oklch(23.26% 0.014 253.1);
+    --color-base-300: oklch(21.15% 0.012 254.09);
+    --color-base-content: oklch(97.807% 0.029 256.847);
+
+    /* Primary - Adjusted for Dark */
+    --color-primary: oklch(58% 0.233 277.117);
+    --color-primary-focus: oklch(51% 0.26 277.117);
+    --color-primary-content: oklch(96% 0.018 272.314);
+
+    /* Secondary - Adjusted for Dark */
+    --color-secondary: oklch(65% 0.241 354.308);
+    --color-secondary-focus: oklch(58% 0.27 354.308);
+    --color-secondary-content: oklch(94% 0.028 342.258);
+
+    /* Accent - Adjusted for Dark */
+    --color-accent: oklch(77% 0.152 181.912);
+    --color-accent-focus: oklch(70% 0.17 181.912);
+    --color-accent-content: oklch(38% 0.063 188.416);
+
+    /* Neutral - Dark */
+    --color-neutral: oklch(14% 0.005 285.823);
+    --color-neutral-focus: oklch(11% 0.005 285.823);
+    --color-neutral-content: oklch(92% 0.004 286.32);
+
+    /* Semantic Colors - Dark Mode */
+    --color-success: oklch(76% 0.177 163.223);
+    --color-success-content: oklch(37% 0.077 168.94);
+    --color-warning: oklch(82% 0.189 84.429);
+    --color-warning-content: oklch(41% 0.112 45.904);
+    --color-error: oklch(71% 0.194 13.428);
+    --color-error-content: oklch(27% 0.105 12.094);
+    --color-info: oklch(74% 0.16 232.661);
+    --color-info-content: oklch(29% 0.066 243.157);
+
+    /* Shadows - Lighter for dark mode */
+    --shadow-sm: 0 1px 2px 0 oklch(0% 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.4), 0 2px 4px -2px oklch(0% 0 0 / 0.3);
+    --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.5), 0 4px 6px -4px oklch(0% 0 0 / 0.4);
+    --shadow-xl: 0 20px 25px -5px oklch(0% 0 0 / 0.6), 0 8px 10px -6px oklch(0% 0 0 / 0.5);
+  }
+
+  /* Dark mode background */
+  body {
+    background:
+      radial-gradient(at 0% 0%, oklch(30% 0.08 277 / 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, oklch(30% 0.08 354 / 0.1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, oklch(30% 0.08 182 / 0.12) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, oklch(30% 0.08 277 / 0.1) 0px, transparent 50%),
+      linear-gradient(135deg,
+        oklch(23% 0.012 252) 0%,
+        oklch(25% 0.015 270) 50%,
+        oklch(24% 0.013 240) 100%
+      );
+  }
+}
+
+/* Body Styling */
+body {
+  font-family: var(--font-family);
+  font-size: 16px;
+  color: var(--color-base-content);
+  /* Modern gradient mesh background */
+  background:
+    radial-gradient(at 0% 0%, oklch(95% 0.02 275 / 0.3) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, oklch(95% 0.02 350 / 0.2) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, oklch(95% 0.02 195 / 0.25) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, oklch(95% 0.02 275 / 0.2) 0px, transparent 50%),
+    linear-gradient(135deg,
+      oklch(99% 0 0) 0%,
+      oklch(97% 0.005 270) 50%,
+      oklch(98% 0.003 190) 100%
+    );
+  background-attachment: fixed;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Container */
