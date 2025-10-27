@@ -11,6 +11,7 @@ import { errorHandler } from './utils/error-handler.js';
 import * as formatter from './utils/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
 import { createAuthMiddleware } from './auth/index.js';
+import { createOIDCHandler } from './auth/oidc-auth.js';
 
 /**
  * API Server class
@@ -211,6 +212,12 @@ export class ApiServer {
     // Setup OAuth2 Server routes if configured
     if (this.options.oauth2Server) {
       this._setupOAuth2Routes();
+    }
+
+    // Setup OIDC routes if configured
+    const oidcDriver = this.options.auth?.drivers?.find(d => d.driver === 'oidc');
+    if (oidcDriver) {
+      this._setupOIDCRoutes(oidcDriver.config);
     }
 
     // Setup relational routes if RelationPlugin is active
@@ -427,6 +434,34 @@ export class ApiServer {
   }
 
   /**
+   * Setup OIDC routes (when oidc driver is configured)
+   * @private
+   * @param {Object} config - OIDC driver configuration
+   */
+  _setupOIDCRoutes(config) {
+    const { database, auth } = this.options;
+    const authResource = database.resources[auth.resource];
+
+    if (!authResource) {
+      console.error(`[API Plugin] Auth resource '${auth.resource}' not found for OIDC`);
+      return;
+    }
+
+    // Create OIDC handler (which creates routes + middleware)
+    const oidcHandler = createOIDCHandler(config, this.app, authResource);
+
+    // Store middleware for later use in _createAuthMiddleware
+    this.oidcMiddleware = oidcHandler.middleware;
+
+    if (this.options.verbose) {
+      console.log('[API Plugin] Mounted OIDC routes:');
+      for (const [path, description] of Object.entries(oidcHandler.routes)) {
+        console.log(`[API Plugin]   ${path} - ${description}`);
+      }
+    }
+  }
+
+  /**
    * Create authentication middleware based on configured drivers
    * @private
    * @returns {Function|null} Hono middleware or null
@@ -460,8 +495,8 @@ export class ApiServer {
       const driverName = driverDef.driver;
       const driverConfig = driverDef.config || {};
 
-      // Skip oauth2-server driver (it's for Authorization Server, not authentication)
-      if (driverName === 'oauth2-server') {
+      // Skip oauth2-server and oidc drivers (they're handled separately)
+      if (driverName === 'oauth2-server' || driverName === 'oidc') {
         continue;
       }
 
@@ -496,6 +531,7 @@ export class ApiServer {
       apiKey: driverConfigs.apiKey,
       basic: driverConfigs.basic,
       oauth2: driverConfigs.oauth2,
+      oidc: this.oidcMiddleware || null,  // OIDC middleware (if configured)
       usersResource: authResource,
       optional: true  // Let guards handle authorization
     });
