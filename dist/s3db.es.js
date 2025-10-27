@@ -53313,7 +53313,7 @@ function BaseLayout(props) {
               </li>
             ` : html`
               <li><a href="/login">Login</a></li>
-              <li><a href="/register">Register</a></li>
+              ${theme.registrationEnabled ? html`<li><a href="/register">Register</a></li>` : ""}
             `}
           </ul>
         </nav>
@@ -53482,9 +53482,11 @@ function LoginPage(props = {}) {
             <p class="text-muted">
               <a href="/forgot-password" class="btn-link">Forgot your password?</a>
             </p>
-            <p class="mt-3">
-              Don't have an account? <a href="/register" class="btn-link">Sign up</a>
-            </p>
+            ${config.registrationEnabled !== false ? html`
+              <p class="mt-3">
+                Don't have an account? <a href="/register" class="btn-link">Sign up</a>
+              </p>
+            ` : ""}
           </div>
         </div>
       </div>
@@ -55381,6 +55383,10 @@ function getPageComponent(customPages, pageName, defaultPage) {
 function registerUIRoutes(app, plugin) {
   const { sessionManager, usersResource, config } = plugin;
   const customPages = config.ui.customPages || {};
+  const uiConfig = {
+    ...config.ui,
+    registrationEnabled: config.registration.enabled
+  };
   app.get("/login", async (c) => {
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
     if (sessionId) {
@@ -55397,7 +55403,7 @@ function registerUIRoutes(app, plugin) {
       error: error ? decodeURIComponent(error) : null,
       success: success ? decodeURIComponent(success) : null,
       email,
-      config: config.ui
+      config: uiConfig
     }));
   });
   app.post("/login", async (c) => {
@@ -55484,7 +55490,7 @@ function registerUIRoutes(app, plugin) {
       email,
       name,
       passwordPolicy: config.passwordPolicy,
-      config: config.ui
+      config: uiConfig
     }));
   });
   app.post("/register", async (c) => {
@@ -55617,7 +55623,7 @@ function registerUIRoutes(app, plugin) {
       error: error ? decodeURIComponent(error) : null,
       success: success ? decodeURIComponent(success) : null,
       email,
-      config: config.ui
+      config: uiConfig
     }));
   });
   app.post("/forgot-password", async (c) => {
@@ -55697,7 +55703,7 @@ function registerUIRoutes(app, plugin) {
       error: error ? decodeURIComponent(error) : null,
       token,
       passwordPolicy: config.passwordPolicy,
-      config: config.ui
+      config: uiConfig
     }));
   });
   app.post("/reset-password", async (c) => {
@@ -55789,7 +55795,7 @@ function registerUIRoutes(app, plugin) {
         error: error ? decodeURIComponent(error) : null,
         success: success ? decodeURIComponent(success) : null,
         passwordPolicy: config.passwordPolicy,
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       if (config.verbose) {
@@ -56008,7 +56014,7 @@ function registerUIRoutes(app, plugin) {
       return c.html(AdminDashboardPage({
         stats,
         user,
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       if (config.verbose) {
@@ -56036,7 +56042,7 @@ function registerUIRoutes(app, plugin) {
         user,
         error: error ? decodeURIComponent(error) : null,
         success: success ? decodeURIComponent(success) : null,
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       if (config.verbose) {
@@ -56053,7 +56059,7 @@ function registerUIRoutes(app, plugin) {
       error: error ? decodeURIComponent(error) : null,
       availableScopes: config.supportedScopes || ["openid", "profile", "email", "offline_access"],
       availableGrantTypes: config.supportedGrantTypes || ["authorization_code", "refresh_token", "client_credentials"],
-      config: config.ui
+      config: uiConfig
     }));
   });
   app.post("/admin/clients/create", adminOnly(sessionManager), async (c) => {
@@ -56113,7 +56119,7 @@ function registerUIRoutes(app, plugin) {
         error: error ? decodeURIComponent(error) : null,
         availableScopes: config.supportedScopes || ["openid", "profile", "email", "offline_access"],
         availableGrantTypes: config.supportedGrantTypes || ["authorization_code", "refresh_token", "client_credentials"],
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       if (config.verbose) {
@@ -56244,7 +56250,7 @@ function registerUIRoutes(app, plugin) {
           user: c.get("user"),
           error: "Failed to load users",
           success: success ? decodeURIComponent(success) : null,
-          config: config.ui
+          config: uiConfig
         }));
       }
       const users = allUsers || [];
@@ -56253,7 +56259,7 @@ function registerUIRoutes(app, plugin) {
         user: c.get("user"),
         error: error ? decodeURIComponent(error) : null,
         success: success ? decodeURIComponent(success) : null,
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error2) {
       console.error("[Identity Plugin] List users error:", error2);
@@ -56261,7 +56267,7 @@ function registerUIRoutes(app, plugin) {
         users: [],
         user: c.get("user"),
         error: "An error occurred. Please try again.",
-        config: config.ui
+        config: uiConfig
       }));
     }
   });
@@ -56279,7 +56285,7 @@ function registerUIRoutes(app, plugin) {
         editUser,
         user: c.get("user"),
         error: error ? decodeURIComponent(error) : null,
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error2) {
       console.error("[Identity Plugin] Get user error:", error2);
@@ -56308,7 +56314,7 @@ function registerUIRoutes(app, plugin) {
             editUser: { ...editUser, name, email },
             user: currentUser,
             error: "Email already in use",
-            config: config.ui
+            config: uiConfig
           }));
         }
       }
@@ -56337,7 +56343,7 @@ function registerUIRoutes(app, plugin) {
           editUser: { ...editUser, ...updates },
           user: currentUser,
           error: "Failed to update user",
-          config: config.ui
+          config: uiConfig
         }));
       }
       return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${name} updated successfully`)}`);
@@ -56564,7 +56570,7 @@ function registerUIRoutes(app, plugin) {
         state,
         codeChallenge: code_challenge,
         codeChallengeMethod: code_challenge_method,
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       console.error("[Identity Plugin] OAuth authorize error:", error);
@@ -56658,7 +56664,7 @@ function registerUIRoutes(app, plugin) {
     if (!token) {
       return c.html(PageComponent({
         status: "pending",
-        config: config.ui
+        config: uiConfig
       }));
     }
     try {
@@ -56669,7 +56675,7 @@ function registerUIRoutes(app, plugin) {
         return c.html(PageComponent({
           status: "error",
           message: "Invalid verification link. It may have already been used or expired.",
-          config: config.ui
+          config: uiConfig
         }));
       }
       const user = users[0];
@@ -56677,7 +56683,7 @@ function registerUIRoutes(app, plugin) {
         return c.html(PageComponent({
           status: "success",
           message: "Your email is already verified! You can sign in now.",
-          config: config.ui
+          config: uiConfig
         }));
       }
       if (user.emailVerificationExpiry) {
@@ -56686,7 +56692,7 @@ function registerUIRoutes(app, plugin) {
             status: "expired",
             email: user.email,
             message: "This verification link has expired. Please request a new one.",
-            config: config.ui
+            config: uiConfig
           }));
         }
       }
@@ -56704,19 +56710,19 @@ function registerUIRoutes(app, plugin) {
         return c.html(PageComponent({
           status: "error",
           message: "Failed to verify email. Please try again later.",
-          config: config.ui
+          config: uiConfig
         }));
       }
       return c.html(PageComponent({
         status: "success",
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       console.error("[Identity Plugin] Email verification error:", error);
       return c.html(PageComponent({
         status: "error",
         message: "An error occurred while verifying your email.",
-        config: config.ui
+        config: uiConfig
       }));
     }
   });
@@ -56728,7 +56734,7 @@ function registerUIRoutes(app, plugin) {
       return c.html(PageComponent({
         status: "error",
         message: "Email address is required.",
-        config: config.ui
+        config: uiConfig
       }));
     }
     try {
@@ -56739,7 +56745,7 @@ function registerUIRoutes(app, plugin) {
         return c.html(PageComponent({
           status: "pending",
           message: "If an account exists with this email, a verification link has been sent.",
-          config: config.ui
+          config: uiConfig
         }));
       }
       const user = users[0];
@@ -56747,7 +56753,7 @@ function registerUIRoutes(app, plugin) {
         return c.html(PageComponent({
           status: "success",
           message: "Your email is already verified! You can sign in now.",
-          config: config.ui
+          config: uiConfig
         }));
       }
       const verificationToken = generatePasswordResetToken();
@@ -56763,7 +56769,7 @@ function registerUIRoutes(app, plugin) {
         return c.html(PageComponent({
           status: "error",
           message: "Failed to send verification email. Please try again later.",
-          config: config.ui
+          config: uiConfig
         }));
       }
       if (plugin.emailService) {
@@ -56777,14 +56783,14 @@ function registerUIRoutes(app, plugin) {
         status: "pending",
         email: user.email,
         message: "A new verification link has been sent to your email address.",
-        config: config.ui
+        config: uiConfig
       }));
     } catch (error) {
       console.error("[Identity Plugin] Resend verification error:", error);
       return c.html(PageComponent({
         status: "error",
         message: "An error occurred. Please try again later.",
-        config: config.ui
+        config: uiConfig
       }));
     }
   });

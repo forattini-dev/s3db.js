@@ -77,9 +77,11 @@ export function LoginPage(props = {}) {
             <p class="text-muted">
               <a href="/forgot-password" class="btn-link">Forgot your password?</a>
             </p>
-            <p class="mt-3">
-              Don't have an account? <a href="/register" class="btn-link">Sign up</a>
-            </p>
+            ${config.registrationEnabled !== false ? html`
+              <p class="mt-3">
+                Don't have an account? <a href="/register" class="btn-link">Sign up</a>
+              </p>
+            ` : ''}
           </div>
         </div>
       </div>
