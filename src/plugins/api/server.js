@@ -15,6 +15,7 @@ import { createOIDCHandler } from './auth/oidc-auth.js';
 import { findBestMatch, validatePathAuth } from './utils/path-matcher.js';
 import { createFilesystemHandler, validateFilesystemConfig } from './utils/static-filesystem.js';
 import { createS3Handler, validateS3Config } from './utils/static-s3.js';
+import { setupTemplateEngine } from './utils/template-engine.js';
 
 /**
  * API Server class
@@ -37,6 +38,7 @@ export class ApiServer {
       database: options.database,
       resources: options.resources || {},
       routes: options.routes || {}, // Plugin-level custom routes
+      templates: options.templates || { enabled: false, engine: 'jsx' }, // Template engine config
       middlewares: options.middlewares || [],
       verbose: options.verbose || false,
       auth: options.auth || {},
@@ -76,6 +78,16 @@ export class ApiServer {
     this.options.middlewares.forEach(middleware => {
       this.app.use('*', middleware);
     });
+
+    // Template engine middleware (if enabled)
+    if (this.options.templates?.enabled) {
+      const templateMiddleware = setupTemplateEngine(this.options.templates);
+      this.app.use('*', templateMiddleware);
+
+      if (this.options.verbose) {
+        console.log(`[API Server] Template engine enabled: ${this.options.templates.engine}`);
+      }
+    }
 
     // Body size limit middleware (only for POST, PUT, PATCH)
     this.app.use('*', async (c, next) => {

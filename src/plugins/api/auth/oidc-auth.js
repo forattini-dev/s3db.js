@@ -689,6 +689,23 @@ export function createOIDCHandler(config, app, usersResource) {
     // Update last_activity (rolling session)
     session.last_activity = Date.now();
 
+    // Check if user is active (if field exists)
+    if (session.user.active !== undefined && !session.user.active) {
+      // User account is inactive, clear session
+      c.header('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+
+      // Content negotiation for inactive account
+      const acceptHeader = c.req.header('accept') || '';
+      const acceptsHtml = acceptHeader.includes('text/html');
+
+      if (acceptsHtml) {
+        return c.redirect(`${loginPath}?error=account_inactive`, 302);
+      } else {
+        const response = unauthorized('User account is inactive');
+        return c.json(response, response._status);
+      }
+    }
+
     // Set user in context
     c.set('user', {
       ...session.user,
