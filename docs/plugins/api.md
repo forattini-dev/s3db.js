@@ -47,6 +47,11 @@ GET /cars?limit=50&offset=100&brand=Toyota
 - [Schema Validation](#-schema-validation)
 - [URL Versioning Configuration](#-url-versioning-configuration)
 - [Authentication](#-authentication)
+  - [JWT Authentication](#jwt-authentication)
+  - [Basic Authentication](#basic-authentication)
+  - [OAuth2 + OpenID Connect (SSO Authorization Server)](#oauth2--openid-connect-sso-authorization-server)
+  - [OIDC Authentication with User Hooks](#oidc-authentication-with-user-hooks)
+  - [Path-Based Authentication](#️-path-based-authentication)
 - [Security & Validation](#️-security--validation)
 - [Declarative Guards (Authorization)](#️-declarative-guards-authorization)
 - [API Endpoints](#-api-endpoints)
@@ -56,6 +61,10 @@ GET /cars?limit=50&offset=100&brand=Toyota
 - [Request Logging](#-request-logging)
 - [Response Compression](#-response-compression)
 - [CORS Configuration](#-cors-configuration)
+- [Static File Serving](#-static-file-serving)
+  - [Filesystem Driver](#filesystem-driver)
+  - [SPA (Single Page Application) Support](#spa-single-page-application-support)
+  - [S3 Driver](#s3-driver)
 - [Production Deployment](#-production-deployment)
   - [Docker Setup](#docker-setup)
   - [Kubernetes Deployment](#kubernetes-deployment)
@@ -1135,6 +1144,224 @@ await db.usePlugin(apiPlugin);
 - **[Example 81](../examples/e81-oauth2-resource-server.js)** - Resource Server with ApiPlugin + OIDC driver
 - **[Example 82](../examples/e82-oidc-web-app.js)** - Web App with Authorization Code Flow
 
+#### OIDC Authentication with User Hooks
+
+When using OIDC for **web application login** (Authorization Code Flow), you can execute custom logic after a user authenticates using the `onUserAuthenticated` hook. This is useful for:
+- Creating user profiles with extra data not in the IDP
+- Sending welcome emails to new users
+- Logging authentication events for audit
+- Initializing user preferences/settings
+- Setting cookies for API token management
+
+**Configuration:**
+
+```javascript
+import { ApiPlugin } from 's3db.js/plugins/api';
+
+const apiPlugin = new ApiPlugin({
+  port: 3000,
+  auth: {
+    drivers: [
+      {
+        driver: 'oidc',
+        config: {
+          // OIDC/OAuth2 Configuration
+          issuer: 'https://accounts.google.com',
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          redirectUri: 'http://localhost:3000/auth/oidc/callback',
+          scopes: ['openid', 'profile', 'email'],
+
+          // Session Configuration
+          cookieSecret: 'my-super-secret-cookie-key-minimum-32-chars!!!',
+          rollingDuration: 86400000,  // 24 hours
+          absoluteDuration: 604800000, // 7 days
+
+          // Auto-create user in database
+          autoCreateUser: true,
+
+          // 🎯 Hook: Called after user authentication
+          onUserAuthenticated: async ({ user, created, claims, tokens, context }) => {
+            console.log('User authenticated:', user.email);
+
+            // 1. Create profile if new user
+            if (created) {
+              await db.resources.profiles.insert({
+                id: `profile-${user.id}`,
+                userId: user.id,
+                bio: '',
+                company: '',
+                preferences: {
+                  theme: 'light',
+                  language: 'en',
+                  notifications: true
+                }
+              });
+
+              // 2. Send welcome email
+              await sendWelcomeEmail(user.email, claims.name);
+
+              // 3. Log first login event
+              await db.resources.auth_events.insert({
+                id: generateId(),
+                userId: user.id,
+                event: 'first_login',
+                provider: claims.iss,
+                metadata: {
+                  name: claims.name,
+                  picture: claims.picture,
+                  locale: claims.locale
+                }
+              });
+            } else {
+              // Existing user - log regular login
+              await db.resources.auth_events.insert({
+                id: generateId(),
+                userId: user.id,
+                event: 'login',
+                provider: claims.iss
+              });
+            }
+
+            // 4. Set cookie with API token (for independent API usage)
+            if (user.apiToken) {
+              context.cookie('api_token', user.apiToken, {
+                httpOnly: true,        // Cannot be accessed by JavaScript
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'Lax',       // CSRF protection
+                maxAge: 7 * 24 * 60 * 60,  // 7 days in seconds
+                path: '/'
+              });
+            }
+          }
+        }
+      }
+    ],
+    resource: 'users'
+  }
+}));
+
+await db.usePlugin(apiPlugin);
+```
+
+**Hook Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `user` | Object | User object from the users resource (after create/update) |
+| `created` | Boolean | `true` if this is a new user, `false` if existing user |
+| `claims` | Object | ID token claims from the IDP (email, name, picture, etc.) |
+| `tokens` | Object | OAuth2 tokens: `{ access_token, id_token, refresh_token }` |
+| `context` | HonoContext | Hono request/response context for cookie/header manipulation |
+
+**Common Use Cases:**
+
+**1. Create User Profile**
+```javascript
+onUserAuthenticated: async ({ user, created, claims }) => {
+  if (created) {
+    await db.resources.profiles.insert({
+      id: `profile-${user.id}`,
+      userId: user.id,
+      bio: '',
+      avatar: claims.picture,
+      locale: claims.locale || 'en'
+    });
+  }
+}
+```
+
+**2. Send Welcome Email**
+```javascript
+onUserAuthenticated: async ({ user, created, claims }) => {
+  if (created) {
+    await emailService.send({
+      to: user.email,
+      subject: 'Welcome!',
+      template: 'welcome',
+      data: { name: claims.name }
+    });
+  }
+}
+```
+
+**3. Set API Token Cookie**
+```javascript
+// This pattern allows users to login once via OIDC, then use your API
+// independently without re-authenticating with the IDP
+onUserAuthenticated: async ({ user, context }) => {
+  // Get user with API token (generated by database event hook)
+  const updatedUser = await db.resources.users.get(user.id);
+
+  // Set secure cookie
+  context.cookie('api_token', updatedUser.apiToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    maxAge: 7 * 24 * 60 * 60
+  });
+}
+```
+
+**4. Log Authentication Events**
+```javascript
+onUserAuthenticated: async ({ user, created, claims }) => {
+  await db.resources.auth_events.insert({
+    id: generateId(),
+    userId: user.id,
+    event: created ? 'first_login' : 'login',
+    provider: claims.iss,
+    metadata: {
+      ip: context.req.header('x-forwarded-for'),
+      userAgent: context.req.header('user-agent')
+    }
+  });
+}
+```
+
+**Cookie Manipulation:**
+
+The `context` parameter is a Hono context object, giving you full control over cookies and headers:
+
+```javascript
+onUserAuthenticated: async ({ context }) => {
+  // Set cookie
+  context.cookie('session_id', 'abc123', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Strict',
+    maxAge: 3600  // seconds
+  });
+
+  // Delete cookie
+  context.cookie('old_session', '', { maxAge: 0 });
+
+  // Set custom header
+  context.header('X-User-ID', user.id);
+}
+```
+
+**Error Handling:**
+
+If the hook fails, authentication continues but the error is logged. This ensures that hook failures don't block user login.
+
+```javascript
+onUserAuthenticated: async ({ user, created }) => {
+  try {
+    // Your custom logic
+    await db.resources.profiles.insert({ ... });
+  } catch (err) {
+    console.error('Hook failed:', err);
+    // Authentication continues despite error
+  }
+}
+```
+
+**Examples:**
+
+- **[Example 86: OIDC User Hooks](../examples/e86-oidc-user-hooks.js)** - Profile creation, welcome emails, event logging
+- **[Example 87: OIDC + API Token Cookie](../examples/e87-oidc-api-token-cookie.js)** - Complete flow: OIDC login → generate API token → set cookie → independent API usage
+
 ---
 
 
@@ -1586,6 +1813,201 @@ applyGuardsToDelete(resource, context, record)   // Throws if denied
 4. **Use 404 instead of 403** - Prevents information leakage (don't reveal resource exists)
 5. **Guards run BEFORE database operations** - Failed guards never hit the database
 6. **Partitions = O(1) RLS** - Use `ctx.setPartition()` for optimal performance
+
+---
+
+### 🛤️ Path-Based Authentication
+
+**Path-based authentication** allows you to apply different authentication rules to different URL patterns. This is useful for scenarios like:
+- Protecting admin panels with different authentication
+- Serving public static files alongside protected APIs
+- Mixing authenticated and unauthenticated routes
+- Implementing different auth strategies for different parts of your app
+
+#### Configuration
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  auth: {
+    drivers: [
+      {
+        driver: 'jwt',
+        config: { secret: 'jwt-secret' }
+      },
+      {
+        driver: 'apiKey',
+        config: {
+          headerName: 'X-API-Key',
+          cookieName: 'api_token',
+          tokenField: 'apiToken'
+        }
+      }
+    ],
+    resource: 'users',
+
+    // 🔥 pathAuth: Define authentication per URL pattern
+    pathAuth: [
+      // Public routes - no authentication
+      {
+        pattern: '/health/**',
+        required: false
+      },
+
+      // Auth endpoints - public (for login/register)
+      {
+        pattern: '/auth/**',
+        required: false
+      },
+
+      // Protected API - requires JWT
+      {
+        pattern: '/api/**',
+        drivers: ['jwt'],
+        required: true
+      },
+
+      // Admin panel - requires API Key
+      {
+        pattern: '/admin/**',
+        drivers: ['apiKey'],
+        required: true
+      },
+
+      // Static files - public
+      {
+        pattern: '/public/**',
+        required: false
+      }
+    ]
+  }
+}));
+```
+
+#### Pattern Matching
+
+Patterns support wildcards:
+- `*` - Matches any single path segment (e.g., `/users/*` matches `/users/123` but not `/users/123/posts`)
+- `**` - Matches any path including sub-paths (e.g., `/api/**` matches `/api/v1/users`, `/api/v1/users/123/posts`, etc.)
+
+**Examples:**
+
+| Pattern | Matches | Doesn't Match |
+|---------|---------|---------------|
+| `/api/*` | `/api/users`, `/api/orders` | `/api/v1/users` (nested) |
+| `/api/**` | `/api/users`, `/api/v1/users`, `/api/v1/users/123/posts` | `/apiv1/users` (no slash) |
+| `/admin/*/dashboard` | `/admin/123/dashboard` | `/admin/123/reports/dashboard` |
+| `/files/*.pdf` | `/files/report.pdf` | `/files/2024/report.pdf` |
+
+#### Evaluation Order
+
+Path patterns are evaluated **in the order they are defined**. The first matching pattern wins.
+
+```javascript
+pathAuth: [
+  // More specific patterns first
+  {
+    pattern: '/api/admin/**',
+    drivers: ['apiKey'],
+    required: true
+  },
+
+  // Less specific patterns later
+  {
+    pattern: '/api/**',
+    drivers: ['jwt'],
+    required: true
+  },
+
+  // Catch-all public
+  {
+    pattern: '/**',
+    required: false
+  }
+]
+```
+
+#### Driver Selection
+
+You can specify which authentication drivers to use for each pattern:
+
+```javascript
+pathAuth: [
+  // Use JWT for API
+  {
+    pattern: '/api/**',
+    drivers: ['jwt'],  // Only JWT driver
+    required: true
+  },
+
+  // Use API Key for admin
+  {
+    pattern: '/admin/**',
+    drivers: ['apiKey'],  // Only API Key driver
+    required: true
+  },
+
+  // Use either JWT or API Key for internal
+  {
+    pattern: '/internal/**',
+    drivers: ['jwt', 'apiKey'],  // Try JWT first, then API Key
+    required: true
+  }
+]
+```
+
+#### Use Cases
+
+**1. Protected SPA with Public Login**
+```javascript
+pathAuth: [
+  {
+    pattern: '/auth/**',
+    required: false  // Login page public
+  },
+  {
+    pattern: '/app/**',
+    drivers: ['jwt'],
+    required: true   // React app protected
+  }
+]
+```
+
+**2. Mixed Public/Protected API**
+```javascript
+pathAuth: [
+  {
+    pattern: '/api/public/**',
+    required: false  // Public product catalog
+  },
+  {
+    pattern: '/api/**',
+    drivers: ['jwt'],
+    required: true   // Protected user data
+  }
+]
+```
+
+**3. Multi-Level Authentication**
+```javascript
+pathAuth: [
+  {
+    pattern: '/api/admin/**',
+    drivers: ['apiKey'],
+    required: true   // Admin: API Key only
+  },
+  {
+    pattern: '/api/**',
+    drivers: ['jwt', 'apiKey'],
+    required: true   // API: JWT or API Key
+  }
+]
+```
+
+#### Examples
+
+- **[Example 85: Protected SPA](../examples/e85-protected-spa.js)** - Protect React app with JWT using pathAuth
+- **[Example 87: OIDC + API Token Cookie](../examples/e87-oidc-api-token-cookie.js)** - Login via OIDC, use API token cookie for subsequent requests
 
 ---
 
@@ -3497,6 +3919,392 @@ new ApiPlugin({
   }
 })
 ```
+
+---
+
+## 📁 Static File Serving
+
+The API Plugin can serve static files from the filesystem or S3, making it ideal for:
+- Serving React/Vue/Angular applications
+- Hosting static assets (images, CSS, JavaScript)
+- Delivering user-uploaded content from S3
+- Serving documentation or landing pages
+
+### Overview
+
+The API Plugin supports **two drivers** for static file serving:
+
+| Driver | Purpose | Features |
+|--------|---------|----------|
+| **filesystem** | Serve files from local directory | ETag, Range requests, Directory index, SPA fallback |
+| **s3** | Serve files from S3 bucket | Streaming or presigned URL redirect, ETag, Range requests |
+
+Both drivers support:
+- ✅ **ETag support** (304 Not Modified responses)
+- ✅ **Range requests** (206 Partial Content for video/audio streaming)
+- ✅ **Cache-Control headers** (client-side caching)
+- ✅ **CORS support** (cross-origin requests)
+- ✅ **Content-Type detection** (automatic MIME type detection)
+- ✅ **Path traversal prevention** (security)
+
+### Filesystem Driver
+
+Serve files from a local directory.
+
+**Basic Configuration:**
+
+```javascript
+import { ApiPlugin } from 's3db.js/plugins/api';
+
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+
+  // Static file configuration
+  static: [
+    {
+      driver: 'filesystem',
+      path: '/public',           // Mount point (/public/*)
+      root: './static',          // Local directory to serve from
+      config: {
+        index: ['index.html'],   // Directory index files
+        fallback: false,         // No fallback (404 for missing files)
+        maxAge: 86400000,        // Cache for 24 hours (milliseconds)
+        dotfiles: 'ignore',      // Ignore dotfiles (.env, .git, etc.)
+        etag: true,              // Enable ETag (304 responses)
+        cors: true               // Enable CORS
+      }
+    }
+  ]
+}));
+```
+
+**Examples:**
+- `GET /public/index.html` → serves `./static/index.html`
+- `GET /public/images/logo.png` → serves `./static/images/logo.png`
+- `GET /public/` → serves `./static/index.html` (directory index)
+
+### SPA (Single Page Application) Support
+
+For React Router, Vue Router, or any client-side routing framework, use the `fallback` option to serve `index.html` for non-existent routes:
+
+```javascript
+static: [
+  {
+    driver: 'filesystem',
+    path: '/app',              // Mount React app at /app/*
+    root: './build',           // React build directory
+    config: {
+      fallback: 'index.html',  // ⭐ Serve index.html for missing files
+      maxAge: 3600000,         // Cache for 1 hour
+      etag: true,
+      cors: true
+    }
+  }
+]
+```
+
+**How it works:**
+- `GET /app/` → serves `./build/index.html`
+- `GET /app/login` → serves `./build/index.html` (file doesn't exist, fallback kicks in)
+- `GET /app/dashboard` → serves `./build/index.html` (React Router handles routing)
+- `GET /app/static/js/main.js` → serves `./build/static/js/main.js` (file exists, serve it)
+
+**Fallback Options:**
+- `fallback: 'index.html'` - Serve specific file for 404s
+- `fallback: true` - Serve `index.html` from root for 404s
+- `fallback: false` - Return 404 for missing files (default)
+
+### S3 Driver
+
+Serve files directly from an S3 bucket.
+
+**Basic Configuration:**
+
+```javascript
+static: [
+  {
+    driver: 's3',
+    path: '/uploads',                 // Mount point (/uploads/*)
+    bucket: 'my-uploads-bucket',      // S3 bucket name
+    prefix: 'public/',                // S3 key prefix (optional)
+    config: {
+      streaming: true,                // Stream through server (false = presigned URL redirect)
+      maxAge: 3600000,                // Cache for 1 hour
+      etag: true,                     // Enable ETag
+      cors: true,                     // Enable CORS
+      contentDisposition: 'inline',   // Display in browser ('attachment' = force download)
+      signedUrlExpiry: 300            // Presigned URL expiry (seconds, if streaming: false)
+    }
+  }
+]
+```
+
+**Examples:**
+- `GET /uploads/profile.jpg` → serves `s3://my-uploads-bucket/public/profile.jpg`
+- `GET /uploads/documents/report.pdf` → serves `s3://my-uploads-bucket/public/documents/report.pdf`
+
+### Streaming vs Presigned URL Redirect
+
+The S3 driver supports two modes:
+
+**1. Streaming (streaming: true)**
+```javascript
+config: {
+  streaming: true  // Server fetches from S3 and streams to client
+}
+```
+- ✅ Server proxies the file
+- ✅ Better for small files or when S3 is private
+- ✅ Allows middleware/authentication before serving
+- ⚠️ Higher server bandwidth usage
+- ⚠️ Slower than direct S3 access
+
+**2. Presigned URL Redirect (streaming: false)**
+```javascript
+config: {
+  streaming: false,       // Redirect client to presigned S3 URL
+  signedUrlExpiry: 300    // URL valid for 5 minutes
+}
+```
+- ✅ Client downloads directly from S3 (fastest)
+- ✅ Lower server bandwidth usage
+- ✅ Better for large files (videos, downloads)
+- ⚠️ Exposes S3 URL to client (temporary)
+- ⚠️ Less control over delivery
+
+### Multiple Mount Points
+
+You can configure multiple static file locations:
+
+```javascript
+static: [
+  // Serve React app
+  {
+    driver: 'filesystem',
+    path: '/app',
+    root: './build',
+    config: { fallback: 'index.html', maxAge: 3600000 }
+  },
+
+  // Serve public assets
+  {
+    driver: 'filesystem',
+    path: '/public',
+    root: './static',
+    config: { maxAge: 86400000, cors: true }
+  },
+
+  // Serve user uploads from S3 (streaming)
+  {
+    driver: 's3',
+    path: '/uploads',
+    bucket: 'user-uploads',
+    prefix: 'public/',
+    config: { streaming: true, maxAge: 3600000 }
+  },
+
+  // Serve large downloads from S3 (presigned redirect)
+  {
+    driver: 's3',
+    path: '/downloads',
+    bucket: 'downloads',
+    config: {
+      streaming: false,
+      signedUrlExpiry: 900,
+      contentDisposition: 'attachment'  // Force download
+    }
+  }
+]
+```
+
+### Configuration Options
+
+#### Filesystem Driver Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `root` | string | Required | Root directory to serve files from |
+| `index` | string[] | `['index.html']` | Directory index files |
+| `fallback` | string\|boolean | `false` | Fallback file for SPA routing (e.g., 'index.html') |
+| `maxAge` | number | `0` | Cache max-age in milliseconds |
+| `dotfiles` | string | `'ignore'` | Handle dotfiles: 'ignore', 'allow', 'deny' |
+| `etag` | boolean | `true` | Enable ETag generation |
+| `cors` | boolean | `false` | Enable CORS headers |
+
+#### S3 Driver Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `bucket` | string | Required | S3 bucket name |
+| `prefix` | string | `''` | S3 key prefix |
+| `streaming` | boolean | `true` | Stream through server (false = redirect to presigned URL) |
+| `signedUrlExpiry` | number | `300` | Presigned URL expiry in seconds (if streaming: false) |
+| `maxAge` | number | `0` | Cache max-age in milliseconds |
+| `cacheControl` | string | - | Custom Cache-Control header |
+| `contentDisposition` | string | `'inline'` | 'inline' or 'attachment' |
+| `etag` | boolean | `true` | Enable ETag support |
+| `cors` | boolean | `false` | Enable CORS headers |
+
+### Combining with Authentication
+
+Static files can be protected using **path-based authentication**:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+
+  auth: {
+    drivers: [
+      {
+        driver: 'jwt',
+        config: { secret: 'jwt-secret' }
+      }
+    ],
+    resource: 'users',
+
+    // Path-based auth
+    pathAuth: [
+      {
+        pattern: '/auth/**',
+        required: false  // Login public
+      },
+      {
+        pattern: '/app/**',
+        drivers: ['jwt'],
+        required: true   // Protected React app
+      },
+      {
+        pattern: '/public/**',
+        required: false  // Public assets
+      }
+    ]
+  },
+
+  // Static files
+  static: [
+    {
+      driver: 'filesystem',
+      path: '/app',
+      root: './build',
+      config: { fallback: 'index.html' }
+    },
+    {
+      driver: 'filesystem',
+      path: '/public',
+      root: './static',
+      config: { maxAge: 86400000 }
+    }
+  ]
+}));
+```
+
+**Flow:**
+1. User visits `/app` → 401 Unauthorized (no JWT)
+2. User visits `/auth/login` → Public login page
+3. User logs in → Gets JWT token
+4. User visits `/app` with JWT → Serves React app
+5. React Router handles client-side routing (`/app/dashboard`, etc.)
+
+### Advanced Features
+
+#### ETag Support (304 Not Modified)
+
+Both drivers automatically generate ETags for efficient caching:
+
+```bash
+# First request - returns full file
+curl -I http://localhost:3000/public/index.html
+# HTTP/1.1 200 OK
+# ETag: "abc123xyz"
+
+# Subsequent request with ETag - returns 304 if unchanged
+curl -I -H "If-None-Match: abc123xyz" http://localhost:3000/public/index.html
+# HTTP/1.1 304 Not Modified
+```
+
+#### Range Requests (Partial Content)
+
+Support for video/audio streaming:
+
+```bash
+# Request first 100 bytes
+curl -H "Range: bytes=0-99" http://localhost:3000/videos/movie.mp4
+# HTTP/1.1 206 Partial Content
+# Content-Range: bytes 0-99/1000000
+```
+
+#### CORS Headers
+
+Enable cross-origin requests:
+
+```javascript
+config: {
+  cors: true  // Adds CORS headers to responses
+}
+```
+
+### Use Cases
+
+**1. Serve React App with API**
+```javascript
+static: [
+  {
+    driver: 'filesystem',
+    path: '/app',
+    root: './build',
+    config: { fallback: 'index.html' }
+  }
+],
+resources: {
+  orders: { auth: true }
+}
+// GET /app → React app
+// GET /api/v1/orders → API endpoint
+```
+
+**2. Public Landing Page + Protected Dashboard**
+```javascript
+static: [
+  {
+    driver: 'filesystem',
+    path: '/',
+    root: './landing',
+    config: { index: ['index.html'] }
+  },
+  {
+    driver: 'filesystem',
+    path: '/dashboard',
+    root: './dashboard-build',
+    config: { fallback: 'index.html' }
+  }
+],
+pathAuth: [
+  { pattern: '/', required: false },
+  { pattern: '/dashboard/**', drivers: ['jwt'], required: true }
+]
+```
+
+**3. User Uploads from S3**
+```javascript
+static: [
+  {
+    driver: 's3',
+    path: '/uploads',
+    bucket: 'user-uploads',
+    config: {
+      streaming: true,
+      contentDisposition: 'inline'
+    }
+  }
+]
+// GET /uploads/avatars/user123.jpg → Serves from S3
+```
+
+### Examples
+
+- **[Example 84: Static File Serving](../examples/e84-static-files.js)** - Filesystem + S3 drivers, ETag, Range requests, CORS
+- **[Example 85: Protected SPA](../examples/e85-protected-spa.js)** - React app with JWT authentication and pathAuth
+- **[Example 87: OIDC + API Token Cookie](../examples/e87-oidc-api-token-cookie.js)** - OIDC login with static file serving
 
 ---
 
