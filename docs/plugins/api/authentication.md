@@ -1,5 +1,7 @@
 # 🔐 Authentication
 
+> **Quick Jump:** [🔑 JWT](#jwt-authentication) | [🔒 Basic Auth](#basic-authentication) | [🌐 OIDC/OAuth2](#oauth2--openid-connect-sso-authorization-server) | [🎣 User Hooks](#oidc-authentication-with-user-hooks) | [🛡️ Security](#️-security--validation) | [🛤️ Path Auth](#️-path-based-authentication)
+
 > **Navigation:** [← Back to API Plugin](../api.md) | [Guards →](./guards.md) | [Static Files →](./static-files.md)
 
 ---
@@ -793,6 +795,44 @@ pathAuth: [
 
 - **[Example 85: Protected SPA](../examples/e85-protected-spa.js)** - Protect React app with JWT using pathAuth
 - **[Example 87: OIDC + API Token Cookie](../examples/e87-oidc-api-token-cookie.js)** - Login via OIDC, use API token cookie for subsequent requests
+
+---
+
+## 🎯 Summary
+
+You learned:
+- ✅ **JWT Authentication** - Token-based auth with registration/login endpoints
+- ✅ **Basic Authentication** - HTTP Basic Auth for simple APIs and scripts
+- ✅ **OIDC/OAuth2** - Validating tokens from external providers (SSO, Azure AD, Keycloak)
+- ✅ **User Hooks** - Custom logic after OIDC authentication (profiles, emails, cookies)
+- ✅ **Path-Based Auth** - Different authentication rules for different URL patterns
+- ✅ **Security Best Practices** - HTTPS, strong secrets, token expiration, rate limiting
+
+**Next Steps:**
+1. Add authorization logic: [Guards →](./guards.md)
+2. Serve static files: [Static Files →](./static-files.md)
+3. Try JWT example: [Example 47](../../examples/e47-api-plugin-basic.js)
+4. Try OIDC example: [Example 86](../../examples/e86-oidc-user-hooks.js)
+5. Create SSO server: [Identity Plugin →](../identity.md)
+
+---
+
+## 🔗 See Also
+
+**Related Documentation:**
+- [API Plugin](../api.md) - Main API Plugin documentation
+- [Guards](./guards.md) - Row-level security and authorization
+- [Static Files](./static-files.md) - Serve React/Vue/Angular apps with auth
+- [Identity Plugin](../identity.md) - OAuth2/OIDC Authorization Server (SSO)
+- [Configuration](./configuration.md) - Complete configuration reference
+
+**Examples:**
+- [e47-api-plugin-basic.js](../../examples/e47-api-plugin-basic.js) - JWT basic usage
+- [e49-api-plugin-complete.js](../../examples/e49-api-plugin-complete.js) - All auth drivers
+- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - SSO server with IdentityPlugin
+- [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource server (API)
+- [e86-oidc-user-hooks.js](../../examples/e86-oidc-user-hooks.js) - OIDC with user hooks
+- [e87-oidc-api-token-cookie.js](../../examples/e87-oidc-api-token-cookie.js) - OIDC + API token cookie
 
 ---
 
