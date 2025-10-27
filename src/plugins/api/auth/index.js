@@ -7,15 +7,17 @@
 import { jwtAuth } from './jwt-auth.js';
 import { apiKeyAuth } from './api-key-auth.js';
 import { basicAuth } from './basic-auth.js';
+import { createOAuth2Handler } from './oauth2-auth.js';
 import { unauthorized } from '../utils/response-formatter.js';
 
 /**
  * Create authentication middleware that supports multiple auth methods
  * @param {Object} options - Authentication options
- * @param {Array<string>} options.methods - Allowed auth methods (['jwt', 'apiKey', 'basic'])
+ * @param {Array<string>} options.methods - Allowed auth methods (['jwt', 'apiKey', 'basic', 'oauth2'])
  * @param {Object} options.jwt - JWT configuration
  * @param {Object} options.apiKey - API Key configuration
  * @param {Object} options.basic - Basic Auth configuration
+ * @param {Object} options.oauth2 - OAuth2 configuration
  * @param {Object} options.usersResource - Users resource
  * @param {boolean} options.optional - If true, allows requests without auth
  * @returns {Function} Hono middleware
@@ -26,6 +28,7 @@ export function createAuthMiddleware(options = {}) {
     jwt: jwtConfig = {},
     apiKey: apiKeyConfig = {},
     basic: basicConfig = {},
+    oauth2: oauth2Config = {},
     usersResource,
     optional = false
   } = options;
@@ -72,6 +75,21 @@ export function createAuthMiddleware(options = {}) {
     });
   }
 
+  if (methods.includes('oauth2') && oauth2Config.issuer) {
+    const oauth2Handler = createOAuth2Handler(oauth2Config, usersResource);
+    middlewares.push({
+      name: 'oauth2',
+      middleware: async (c, next) => {
+        const user = await oauth2Handler(c);
+        if (user) {
+          c.set('user', user);
+          return await next();
+        }
+        // No user, try next method
+      }
+    });
+  }
+
   // Return combined middleware
   return async (c, next) => {
     // Try each auth method
@@ -108,5 +126,6 @@ export default {
   createAuthMiddleware,
   jwtAuth,
   apiKeyAuth,
-  basicAuth
+  basicAuth,
+  createOAuth2Handler
 };
