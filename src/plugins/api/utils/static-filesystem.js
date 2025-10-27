@@ -45,6 +45,14 @@ export function createFilesystemHandler(config = {}) {
   // Resolve root to absolute path
   const absoluteRoot = path.resolve(root);
 
+  // Determine fallback file
+  let fallbackFile = null;
+  if (fallback === true) {
+    fallbackFile = index[0]; // Use first index file
+  } else if (typeof fallback === 'string') {
+    fallbackFile = fallback;
+  }
+
   return async (c) => {
     try {
       // Get requested path (remove leading slash)
@@ -61,18 +69,34 @@ export function createFilesystemHandler(config = {}) {
 
       // Check if path exists
       let stats;
+      let useFallback = false;
       try {
         stats = await fs.stat(fullPath);
       } catch (err) {
-        if (err.code === 'ENOENT') {
+        if (err.code === 'ENOENT' && fallbackFile) {
+          // File not found, try fallback
+          useFallback = true;
+        } else if (err.code === 'ENOENT') {
+          return c.json({ success: false, error: { message: 'Not Found' } }, 404);
+        } else {
+          throw err;
+        }
+      }
+
+      // Use fallback file if needed
+      let filePath = fullPath;
+      if (useFallback) {
+        filePath = path.join(absoluteRoot, fallbackFile);
+        try {
+          stats = await fs.stat(filePath);
+        } catch (err) {
+          // Fallback file doesn't exist
           return c.json({ success: false, error: { message: 'Not Found' } }, 404);
         }
-        throw err;
       }
 
       // Handle directories
-      let filePath = fullPath;
-      if (stats.isDirectory()) {
+      if (!useFallback && stats.isDirectory()) {
         // Try index files
         let indexFound = false;
         for (const indexFile of index) {
@@ -91,7 +115,17 @@ export function createFilesystemHandler(config = {}) {
         }
 
         if (!indexFound) {
-          return c.json({ success: false, error: { message: 'Forbidden' } }, 403);
+          // Directory with no index file, try fallback for SPA routing
+          if (fallbackFile) {
+            filePath = path.join(absoluteRoot, fallbackFile);
+            try {
+              stats = await fs.stat(filePath);
+            } catch (err) {
+              return c.json({ success: false, error: { message: 'Forbidden' } }, 403);
+            }
+          } else {
+            return c.json({ success: false, error: { message: 'Forbidden' } }, 403);
+          }
         }
       }
 
@@ -199,6 +233,10 @@ export function validateFilesystemConfig(config) {
 
   if (config.index !== undefined && !Array.isArray(config.index)) {
     throw new Error('Filesystem static "index" must be an array');
+  }
+
+  if (config.fallback !== undefined && typeof config.fallback !== 'string' && typeof config.fallback !== 'boolean') {
+    throw new Error('Filesystem static "fallback" must be a string (filename) or boolean');
   }
 
   if (config.maxAge !== undefined && typeof config.maxAge !== 'number') {

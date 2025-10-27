@@ -8411,6 +8411,7 @@ class ApiServer {
           handler = createFilesystemHandler({
             root: config.root,
             index: driverConfig.index,
+            fallback: driverConfig.fallback,
             maxAge: driverConfig.maxAge,
             dotfiles: driverConfig.dotfiles,
             etag: driverConfig.etag,
