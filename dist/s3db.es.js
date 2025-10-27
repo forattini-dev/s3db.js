@@ -5713,7 +5713,8 @@ function basicAuth(options = {}) {
     usernameField = "email",
     passwordField = "password",
     passphrase = "secret",
-    optional = false
+    optional = false,
+    adminUser = null
   } = options;
   if (!authResource) {
     throw new Error("authResource is required for Basic authentication");
@@ -5735,6 +5736,20 @@ function basicAuth(options = {}) {
       return c.json(response, response._status);
     }
     const { username, password } = credentials;
+    if (adminUser && adminUser.enabled === true) {
+      if (username === adminUser.username && password === adminUser.password) {
+        c.set("user", {
+          id: "root",
+          username: adminUser.username,
+          email: adminUser.username,
+          scopes: adminUser.scopes || ["admin"],
+          authMethod: "basic-admin"
+        });
+        c.set("authMethod", "basic");
+        await next();
+        return;
+      }
+    }
     try {
       const queryFilter = { [usernameField]: username };
       const users = await authResource.query(queryFilter);
@@ -8050,8 +8065,15 @@ function createOIDCHandler(config, app, usersResource) {
     const sessionCookie = c.req.cookie(cookieName);
     if (!sessionCookie) {
       if (protectedPaths.length > 0) {
-        const returnTo = encodeURIComponent(currentPath);
-        return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+        const acceptHeader = c.req.header("accept") || "";
+        const acceptsHtml = acceptHeader.includes("text/html");
+        if (acceptsHtml) {
+          const returnTo = encodeURIComponent(currentPath);
+          return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+        } else {
+          const response = unauthorized("Authentication required");
+          return c.json(response, response._status);
+        }
       }
       return await next();
     }

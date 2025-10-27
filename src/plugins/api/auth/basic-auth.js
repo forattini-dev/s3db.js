@@ -72,6 +72,11 @@ async function verifyPassword(inputPassword, storedPassword, passphrase) {
  * @param {string} options.passwordField - Field name for password (default: 'password')
  * @param {string} options.passphrase - Passphrase for password decryption
  * @param {boolean} options.optional - If true, allows requests without auth
+ * @param {Object} options.adminUser - Root admin credentials (bypasses DB lookup)
+ * @param {boolean} options.adminUser.enabled - Enable admin root user bypass (default: false)
+ * @param {string} options.adminUser.username - Admin username
+ * @param {string} options.adminUser.password - Admin password (plain text)
+ * @param {Array<string>} options.adminUser.scopes - Admin scopes (default: ['admin'])
  * @returns {Function} Hono middleware
  */
 export function basicAuth(options = {}) {
@@ -81,7 +86,8 @@ export function basicAuth(options = {}) {
     usernameField = 'email',
     passwordField = 'password',
     passphrase = 'secret',
-    optional = false
+    optional = false,
+    adminUser = null
   } = options;
 
   if (!authResource) {
@@ -110,6 +116,22 @@ export function basicAuth(options = {}) {
     }
 
     const { username, password } = credentials;
+
+    // Check admin user first (bypasses DB lookup)
+    if (adminUser && adminUser.enabled === true) {
+      if (username === adminUser.username && password === adminUser.password) {
+        c.set('user', {
+          id: 'root',
+          username: adminUser.username,
+          email: adminUser.username,
+          scopes: adminUser.scopes || ['admin'],
+          authMethod: 'basic-admin'
+        });
+        c.set('authMethod', 'basic');
+        await next();
+        return;
+      }
+    }
 
     // Query user by configured username field
     try {

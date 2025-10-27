@@ -48,6 +48,7 @@
  */
 
 import { SignJWT, jwtVerify } from 'jose';
+import { unauthorized } from '../utils/response-formatter.js';
 
 /**
  * Validate OIDC configuration at startup
@@ -627,9 +628,19 @@ export function createOIDCHandler(config, app, usersResource) {
     if (!sessionCookie) {
       // No session cookie - require OIDC for protected paths
       if (protectedPaths.length > 0) {
-        // Redirect to login for protected paths
-        const returnTo = encodeURIComponent(currentPath);
-        return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+        // Content negotiation: check if client expects HTML
+        const acceptHeader = c.req.header('accept') || '';
+        const acceptsHtml = acceptHeader.includes('text/html');
+
+        if (acceptsHtml) {
+          // Browser request - redirect to login
+          const returnTo = encodeURIComponent(currentPath);
+          return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+        } else {
+          // API request - return JSON 401
+          const response = unauthorized('Authentication required');
+          return c.json(response, response._status);
+        }
       }
       return await next();
     }
