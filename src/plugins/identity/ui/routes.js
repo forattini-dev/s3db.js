@@ -23,12 +23,24 @@ import { sessionAuth, adminOnly } from './middleware.js';
 import { idGenerator } from '../../../concerns/id.js';
 
 /**
+ * Get page component (custom or default)
+ * @param {Object} customPages - Custom page overrides
+ * @param {string} pageName - Page name (login, register, etc.)
+ * @param {Function} defaultPage - Default page component
+ * @returns {Function} Page component to use
+ */
+function getPageComponent(customPages, pageName, defaultPage) {
+  return customPages[pageName] || defaultPage;
+}
+
+/**
  * Register all UI routes
  * @param {Object} app - Hono app instance
  * @param {Object} plugin - IdentityPlugin instance
  */
 export function registerUIRoutes(app, plugin) {
   const { sessionManager, usersResource, config } = plugin;
+  const customPages = config.ui.customPages || {};
 
   // ============================================================================
   // GET /login - Show login form
@@ -47,7 +59,8 @@ export function registerUIRoutes(app, plugin) {
     const success = c.req.query('success');
     const email = c.req.query('email') || '';
 
-    return c.html(LoginPage({
+    const PageComponent = getPageComponent(customPages, 'login', LoginPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       success: success ? decodeURIComponent(success) : null,
       email,
@@ -167,7 +180,8 @@ export function registerUIRoutes(app, plugin) {
     const email = c.req.query('email') || '';
     const name = c.req.query('name') || '';
 
-    return c.html(RegisterPage({
+    const PageComponent = getPageComponent(customPages, 'register', RegisterPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       email,
       name,
@@ -342,7 +356,8 @@ export function registerUIRoutes(app, plugin) {
     const success = c.req.query('success');
     const email = c.req.query('email') || '';
 
-    return c.html(ForgotPasswordPage({
+    const PageComponent = getPageComponent(customPages, 'forgotPassword', ForgotPasswordPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       success: success ? decodeURIComponent(success) : null,
       email,
@@ -455,7 +470,8 @@ export function registerUIRoutes(app, plugin) {
       return c.redirect(`/forgot-password?error=${encodeURIComponent('Reset link has already been used. Please request a new one.')}`);
     }
 
-    return c.html(ResetPasswordPage({
+    const PageComponent = getPageComponent(customPages, 'resetPassword', ResetPasswordPage);
+    return c.html(PageComponent({
       error: error ? decodeURIComponent(error) : null,
       token,
       passwordPolicy: config.passwordPolicy,
@@ -586,7 +602,8 @@ export function registerUIRoutes(app, plugin) {
       const error = c.req.query('error');
       const success = c.req.query('success');
 
-      return c.html(ProfilePage({
+      const PageComponent = getPageComponent(customPages, 'profile', ProfilePage);
+      return c.html(PageComponent({
         user: userData,
         sessions,
         error: error ? decodeURIComponent(error) : null,
@@ -1614,7 +1631,8 @@ export function registerUIRoutes(app, plugin) {
       // For now, always show consent screen. In FASE 8, we'll implement "trust" feature.
 
       // Show consent screen
-      return c.html(ConsentPage({
+      const PageComponent = getPageComponent(customPages, 'consent', ConsentPage);
+      return c.html(PageComponent({
         client,
         scopes: requestedScopes,
         user,
@@ -1738,10 +1756,11 @@ export function registerUIRoutes(app, plugin) {
   // GET /verify-email - Verify email with token
   app.get('/verify-email', async (c) => {
     const token = c.req.query('token');
+    const PageComponent = getPageComponent(customPages, 'verifyEmail', VerifyEmailPage);
 
     // If no token, show pending verification page
     if (!token) {
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: 'pending',
         config: config.ui
       }));
@@ -1755,7 +1774,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUsers || !users || users.length === 0) {
         // Token not found or invalid
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: 'error',
           message: 'Invalid verification link. It may have already been used or expired.',
           config: config.ui
@@ -1766,7 +1785,7 @@ export function registerUIRoutes(app, plugin) {
 
       // Check if email is already verified
       if (user.emailVerified) {
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: 'success',
           message: 'Your email is already verified! You can sign in now.',
           config: config.ui
@@ -1776,7 +1795,7 @@ export function registerUIRoutes(app, plugin) {
       // Check if token is expired
       if (user.emailVerificationExpiry) {
         if (isExpired(user.emailVerificationExpiry)) {
-          return c.html(VerifyEmailPage({
+          return c.html(PageComponent({
             status: 'expired',
             email: user.email,
             message: 'This verification link has expired. Please request a new one.',
@@ -1797,7 +1816,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         console.error('[Identity Plugin] Email verification update error:', errUpdate);
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: 'error',
           message: 'Failed to verify email. Please try again later.',
           config: config.ui
@@ -1805,13 +1824,13 @@ export function registerUIRoutes(app, plugin) {
       }
 
       // Email verified successfully
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: 'success',
         config: config.ui
       }));
     } catch (error) {
       console.error('[Identity Plugin] Email verification error:', error);
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: 'error',
         message: 'An error occurred while verifying your email.',
         config: config.ui
@@ -1823,9 +1842,10 @@ export function registerUIRoutes(app, plugin) {
   app.post('/verify-email/resend', async (c) => {
     const body = await c.req.parseBody();
     const { email } = body;
+    const PageComponent = getPageComponent(customPages, 'verifyEmail', VerifyEmailPage);
 
     if (!email) {
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: 'error',
         message: 'Email address is required.',
         config: config.ui
@@ -1840,7 +1860,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUsers || !users || users.length === 0) {
         // Don't reveal that the email doesn't exist for security
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: 'pending',
           message: 'If an account exists with this email, a verification link has been sent.',
           config: config.ui
@@ -1851,7 +1871,7 @@ export function registerUIRoutes(app, plugin) {
 
       // Check if already verified
       if (user.emailVerified) {
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: 'success',
           message: 'Your email is already verified! You can sign in now.',
           config: config.ui
@@ -1872,7 +1892,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         console.error('[Identity Plugin] Verification token update error:', errUpdate);
-        return c.html(VerifyEmailPage({
+        return c.html(PageComponent({
           status: 'error',
           message: 'Failed to send verification email. Please try again later.',
           config: config.ui
@@ -1888,7 +1908,7 @@ export function registerUIRoutes(app, plugin) {
         });
       }
 
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: 'pending',
         email: user.email,
         message: 'A new verification link has been sent to your email address.',
@@ -1896,7 +1916,7 @@ export function registerUIRoutes(app, plugin) {
       }));
     } catch (error) {
       console.error('[Identity Plugin] Resend verification error:', error);
-      return c.html(VerifyEmailPage({
+      return c.html(PageComponent({
         status: 'error',
         message: 'An error occurred. Please try again later.',
         config: config.ui

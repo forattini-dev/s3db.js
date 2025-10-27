@@ -111,10 +111,51 @@ export class IdentityPlugin extends Plugin {
 
       // UI Configuration (white-label customization)
       ui: {
+        // Branding
         title: options.ui?.title || 'S3DB Identity',
-        logo: options.ui?.logo || null,
+        companyName: options.ui?.companyName || 'S3DB',
+        tagline: options.ui?.tagline || 'Secure Identity & Access Management',
+        logoUrl: options.ui?.logoUrl || null,
+        logo: options.ui?.logo || null,  // Deprecated, use logoUrl
+        favicon: options.ui?.favicon || null,
+
+        // Colors (11 options)
         primaryColor: options.ui?.primaryColor || '#007bff',
+        secondaryColor: options.ui?.secondaryColor || '#6c757d',
+        successColor: options.ui?.successColor || '#28a745',
+        dangerColor: options.ui?.dangerColor || '#dc3545',
+        warningColor: options.ui?.warningColor || '#ffc107',
+        infoColor: options.ui?.infoColor || '#17a2b8',
+        textColor: options.ui?.textColor || '#212529',
+        textMuted: options.ui?.textMuted || '#6c757d',
+        backgroundColor: options.ui?.backgroundColor || '#ffffff',
+        backgroundLight: options.ui?.backgroundLight || '#f8f9fa',
+        borderColor: options.ui?.borderColor || '#dee2e6',
+
+        // Typography
+        fontFamily: options.ui?.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: options.ui?.fontSize || '16px',
+
+        // Layout
+        borderRadius: options.ui?.borderRadius || '0.375rem',
+        boxShadow: options.ui?.boxShadow || '0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)',
+
+        // Company Info
+        footerText: options.ui?.footerText || null,
+        supportEmail: options.ui?.supportEmail || null,
+        privacyUrl: options.ui?.privacyUrl || '/privacy',
+        termsUrl: options.ui?.termsUrl || '/terms',
+
+        // Social Links
+        socialLinks: options.ui?.socialLinks || null,
+
+        // Custom CSS
         customCSS: options.ui?.customCSS || null,
+
+        // Custom Pages (override default pages)
+        customPages: options.ui?.customPages || {},
+
+        // Base URL
         baseUrl: options.ui?.baseUrl || `http://localhost:${options.port || 4000}`
       },
 
