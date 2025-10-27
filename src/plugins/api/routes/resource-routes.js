@@ -6,6 +6,7 @@
 
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
+import { guardMiddleware } from '../utils/guards.js';
 
 /**
  * Parse custom route definition (e.g., "GET /healthcheck" or "async POST /custom")
@@ -65,6 +66,9 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
   const resourceName = resource.name;
   const basePath = versionPrefix ? `/${versionPrefix}/${resourceName}` : `/${resourceName}`;
 
+  // Get guards configuration from resource config
+  const guards = resource.config?.guards || null;
+
   // Apply custom middleware
   customMiddleware.forEach(middleware => {
     app.use('*', middleware);
@@ -112,7 +116,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // LIST - GET /{version}/{resource}
   if (methods.includes('GET')) {
-    app.get('/', asyncHandler(async (c) => {
+    app.get('/', guardMiddleware(guards, 'list'), asyncHandler(async (c) => {
       const query = c.req.query();
       const limit = parseInt(query.limit) || 100;
       const offset = parseInt(query.offset) || 0;
@@ -178,7 +182,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // GET ONE - GET /{version}/{resource}/:id
   if (methods.includes('GET')) {
-    app.get('/:id', asyncHandler(async (c) => {
+    app.get('/:id', guardMiddleware(guards, 'get'), asyncHandler(async (c) => {
       const id = c.req.param('id');
       const query = c.req.query();
       const partition = query.partition;
@@ -212,7 +216,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // CREATE - POST /{version}/{resource}
   if (methods.includes('POST')) {
-    app.post('/', asyncHandler(async (c) => {
+    app.post('/', guardMiddleware(guards, 'create'), asyncHandler(async (c) => {
       const data = await c.req.json();
 
       // Validation middleware will run if enabled
@@ -228,7 +232,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // UPDATE (full) - PUT /{version}/{resource}/:id
   if (methods.includes('PUT')) {
-    app.put('/:id', asyncHandler(async (c) => {
+    app.put('/:id', guardMiddleware(guards, 'update'), asyncHandler(async (c) => {
       const id = c.req.param('id');
       const data = await c.req.json();
 
@@ -249,7 +253,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // UPDATE (partial) - PATCH /{version}/{resource}/:id
   if (methods.includes('PATCH')) {
-    app.patch('/:id', asyncHandler(async (c) => {
+    app.patch('/:id', guardMiddleware(guards, 'update'), asyncHandler(async (c) => {
       const id = c.req.param('id');
       const data = await c.req.json();
 
@@ -271,7 +275,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // DELETE - DELETE /{version}/{resource}/:id
   if (methods.includes('DELETE')) {
-    app.delete('/:id', asyncHandler(async (c) => {
+    app.delete('/:id', guardMiddleware(guards, 'delete'), asyncHandler(async (c) => {
       const id = c.req.param('id');
 
       // Check if exists

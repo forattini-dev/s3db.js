@@ -69,22 +69,32 @@ export class ApiPlugin extends Plugin {
         description: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources'
       },
 
-      // Authentication configuration (driver-based)
+      // Authentication configuration (multiple drivers supported)
       auth: options.auth ? {
-        driver: options.auth.driver || null,             // 'jwt' or 'basic'
-        resource: options.auth.resource || 'users',      // Resource that manages auth
-        usernameField: options.auth.usernameField || 'email',   // Default: email
-        passwordField: options.auth.passwordField || 'password', // Default: password
-        config: options.auth.config || {}                // Driver-specific config
+        // New: Array of authentication drivers (OR logic - any driver can authenticate)
+        drivers: options.auth.drivers || (options.auth.driver ? [{
+          driver: options.auth.driver,
+          config: options.auth.config || {}
+        }] : []),
+
+        // Global settings
+        resource: options.auth.resource || 'users',
+        usernameField: options.auth.usernameField || 'email',
+        passwordField: options.auth.passwordField || 'password',
+
+        // Backward compatibility
+        driver: options.auth.driver || null,
+        config: options.auth.config || {}
       } : {
-        driver: null,
+        drivers: [],
         resource: 'users',
         usernameField: 'email',
         passwordField: 'password',
+        driver: null,
         config: {}
       },
 
-      // Resource configuration
+      // Deprecated: Resource configuration moved to resource.config.guards
       resources: options.resources || {},
 
       // Custom routes (plugin-level)
@@ -246,8 +256,8 @@ export class ApiPlugin extends Plugin {
       throw err;
     }
 
-    // Create users resource if authentication driver is configured
-    const authEnabled = this.config.auth.driver !== null;
+    // Create users resource if authentication drivers are configured
+    const authEnabled = this.config.auth.drivers.length > 0 || this.config.auth.driver !== null;
 
     if (authEnabled) {
       await this._createUsersResource();
@@ -277,6 +287,7 @@ export class ApiPlugin extends Plugin {
           apiKey: 'string|optional',
           jwtSecret: 'string|optional',
           role: 'string|default:user',
+          scopes: 'array|items:string|optional',  // Authorization scopes (e.g., ['read:users', 'write:cars'])
           active: 'boolean|default:true',
           createdAt: 'string|optional',
           lastLoginAt: 'string|optional',
