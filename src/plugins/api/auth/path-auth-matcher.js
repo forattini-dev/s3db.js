@@ -65,6 +65,13 @@ function patternToRegex(pattern) {
     .replace(/\*/g, '[^/]*')              // * matches anything except /
     .replace(/___GLOBSTAR___/g, '.*');    // ** matches everything including /
 
+  // Special case: if pattern ends with /**, it should match with or without trailing content
+  // e.g., /app/** should match both /app and /app/dashboard
+  if (pattern.endsWith('/**')) {
+    // Remove the /.*$ part and make it optional
+    regexPattern = regexPattern.replace(/\/\.\*$/, '(?:/.*)?');
+  }
+
   // Anchor to start and end
   regexPattern = '^' + regexPattern + '$';
 
@@ -127,7 +134,8 @@ export function createPathBasedAuthMiddleware(options = {}) {
   const {
     rules = [],
     authMiddlewares = {},
-    unauthorizedHandler = null
+    unauthorizedHandler = null,
+    events = null
   } = options;
 
   return async (c, next) => {
@@ -195,11 +203,68 @@ export function createPathBasedAuthMiddleware(options = {}) {
 
       // If auth succeeded, continue
       if (authSuccess && c.get('user')) {
+        // Emit auth:success event
+        if (events) {
+          events.emitAuthEvent('success', {
+            method: name,
+            user: c.get('user'),
+            path: currentPath,
+            rule: rule.path
+          });
+        }
         return await next();
       }
     }
 
-    // No auth method succeeded
+    // Emit auth:failure event
+    if (events) {
+      events.emitAuthEvent('failure', {
+        path: currentPath,
+        rule: rule.path,
+        allowedMethods: rule.methods,
+        ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip')
+      });
+    }
+
+    // No auth method succeeded - apply content negotiation
+    const acceptHeader = c.req.header('accept') || '';
+    const acceptsHtml = acceptHeader.includes('text/html');
+
+    // Get unauthorized behavior from rule (default: 'auto')
+    const unauthorizedBehavior = rule.unauthorizedBehavior || 'auto';
+
+    // Auto mode: HTML → redirect, JSON → 401
+    if (unauthorizedBehavior === 'auto') {
+      if (acceptsHtml) {
+        // Browser request - redirect to login
+        const returnTo = encodeURIComponent(c.req.path);
+        return c.redirect(`/auth/login?returnTo=${returnTo}`);
+      } else {
+        // API request - return 401 JSON
+        return c.json({
+          error: 'Unauthorized',
+          message: `Authentication required. Allowed methods: ${rule.methods.join(', ')}`
+        }, 401);
+      }
+    }
+
+    // Custom behavior object: { html: 'redirect', json: { status: 401 } }
+    if (typeof unauthorizedBehavior === 'object') {
+      if (acceptsHtml && unauthorizedBehavior.html === 'redirect') {
+        const returnTo = encodeURIComponent(c.req.path);
+        const loginPath = unauthorizedBehavior.loginPath || '/auth/login';
+        return c.redirect(`${loginPath}?returnTo=${returnTo}`);
+      }
+
+      if (!acceptsHtml && unauthorizedBehavior.json) {
+        return c.json(
+          unauthorizedBehavior.json,
+          unauthorizedBehavior.json.status || 401
+        );
+      }
+    }
+
+    // Fallback: use custom handler or default 401
     if (unauthorizedHandler) {
       return unauthorizedHandler(c, `Authentication required. Allowed methods: ${rule.methods.join(', ')}`);
     }
