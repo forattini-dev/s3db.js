@@ -40,7 +40,7 @@ GET     /docs            → Interactive Swagger UI
 
 ### Security & Protection 🛡️
 
-- **🚨 Failban Plugin** - fail2ban-style automatic IP banning
+- **🚨 Failban** - fail2ban-style automatic IP banning (internal feature)
   - Ban after N violations (rate limit, auth failures)
   - TTL-based auto-unban using S3DB partitions
   - IP Whitelist/Blacklist support
@@ -769,9 +769,9 @@ apiPlugin.events.on('order:created', async ({ order, items }) => {
 
 ## 🛡️ Security Features
 
-### 1. Failban Plugin (NEW!)
+### 1. Failban (NEW!)
 
-Automatic IP banning for security violations with GeoIP country blocking:
+Automatic IP banning for security violations with GeoIP country blocking (internal feature, not a separate plugin):
 
 ```javascript
 await db.use(new ApiPlugin({

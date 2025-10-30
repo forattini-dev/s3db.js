@@ -26,7 +26,7 @@ import { createSecurityHeadersMiddleware } from './middlewares/security-headers.
 import { createSessionTrackingMiddleware } from './middlewares/session-tracking.js';
 import { createAuthDriverRateLimiter } from './middlewares/rate-limit.js';
 import { createFailbanMiddleware, setupFailbanViolationListener, createFailbanAdminRoutes } from './middlewares/failban.js';
-import { FailbanPlugin } from './security/failban-plugin.js';
+import { FailbanManager } from './concerns/failban-manager.js';
 import { ApiEventEmitter } from './concerns/event-emitter.js';
 import { MetricsCollector } from './concerns/metrics-collector.js';
 
@@ -105,10 +105,11 @@ export class ApiServer {
       this._setupMetricsEventListeners();
     }
 
-    // Failban plugin (fail2ban-style automatic banning)
+    // Failban manager (fail2ban-style automatic banning - internal feature)
     this.failban = null;
     if (this.options.failban?.enabled) {
-      this.failban = new FailbanPlugin({
+      this.failban = new FailbanManager({
+        database: this.options.database,
         enabled: true,
         maxViolations: this.options.failban.maxViolations || 3,
         violationWindow: this.options.failban.violationWindow || 3600000,
@@ -116,13 +117,9 @@ export class ApiServer {
         whitelist: this.options.failban.whitelist || ['127.0.0.1', '::1'],
         blacklist: this.options.failban.blacklist || [],
         persistViolations: this.options.failban.persistViolations !== false,
-        verbose: this.options.failban.verbose || this.options.verbose
+        verbose: this.options.failban.verbose || this.options.verbose,
+        geo: this.options.failban.geo || {}
       });
-
-      // Install plugin in database
-      if (this.options.database) {
-        this.options.database.use(this.failban);
-      }
     }
 
     // Detect if RelationPlugin is installed
@@ -1421,6 +1418,11 @@ export class ApiServer {
 
       // Initialize app
       this.app = new Hono();
+
+      // Initialize failban manager if enabled
+      if (this.failban) {
+        await this.failban.initialize();
+      }
 
       // Setup all routes
       this._setupRoutes();
