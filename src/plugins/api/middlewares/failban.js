@@ -2,13 +2,13 @@
  * Failban Middleware
  *
  * Checks if IP is banned or blocked by country restrictions before processing request.
- * Integrates with FailbanPlugin for automatic banning and GeoIP filtering.
+ * Integrates with FailbanManager for automatic banning and GeoIP filtering.
  *
  * @example
  * import { createFailbanMiddleware } from './middlewares/failban.js';
  *
  * const middleware = createFailbanMiddleware({
- *   plugin: failbanPlugin,
+ *   plugin: failbanManager,
  *   events: eventEmitter
  * });
  *
@@ -19,7 +19,7 @@
  * Create failban middleware
  *
  * @param {Object} config - Middleware configuration
- * @param {FailbanPlugin} config.plugin - FailbanPlugin instance
+ * @param {FailbanManager} config.plugin - FailbanManager instance
  * @param {ApiEventEmitter} config.events - Event emitter for violations
  * @param {Function} config.handler - Custom handler for banned IPs
  * @returns {Function} Hono middleware
@@ -124,7 +124,7 @@ export function createFailbanMiddleware(config = {}) {
  * Listens to rate limit events and records violations
  *
  * @param {Object} config - Configuration
- * @param {FailbanPlugin} config.plugin - FailbanPlugin instance
+ * @param {FailbanManager} config.plugin - FailbanManager instance
  * @param {ApiEventEmitter} config.events - Event emitter
  * @returns {void}
  */
@@ -167,7 +167,7 @@ export function setupFailbanViolationListener(config = {}) {
  * Create admin routes for ban management
  *
  * @param {Object} Hono - Hono constructor
- * @param {FailbanPlugin} plugin - FailbanPlugin instance
+ * @param {FailbanManager} plugin - FailbanManager instance
  * @returns {Hono} Hono app with admin routes
  */
 export function createFailbanAdminRoutes(Hono, plugin) {
