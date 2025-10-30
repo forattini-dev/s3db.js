@@ -8,8 +8,10 @@
  * - Auto-ban after multiple rate limit violations
  * - Persistent ban storage in S3DB
  * - TTL-based auto-unban
- * - Whitelist/Blacklist support
- * - Events: security:banned, security:unbanned, security:violation
+ * - IP Whitelist/Blacklist support
+ * - Country-based restrictions (whitelist/blacklist)
+ * - GeoIP lookup with MaxMind GeoLite2
+ * - Events: security:banned, security:unbanned, security:violation, security:country_blocked
  * - Admin endpoints for manual ban management
  *
  * @example
@@ -21,7 +23,14 @@
  *   violationWindow: 3600000, // 1 hour
  *   banDuration: 86400000, // 24 hours
  *   whitelist: ['127.0.0.1'],
- *   blacklist: []
+ *   blacklist: [],
+ *   geo: {
+ *     enabled: true,
+ *     databasePath: '/path/to/GeoLite2-Country.mmdb',
+ *     allowedCountries: ['BR', 'US'], // ISO 3166-1 alpha-2 codes
+ *     blockedCountries: ['CN', 'RU'], // Block these countries
+ *     blockUnknown: false // Block IPs with unknown country
+ *   }
  * });
  *
  * db.use(failban);
@@ -29,6 +38,7 @@
 
 import { Plugin } from '../../plugin.class.js';
 import { TTLPlugin } from '../../ttl.plugin.js';
+import { requirePluginDependency } from '../../concerns/plugin-dependencies.js';
 
 export class FailbanPlugin extends Plugin {
   constructor(options = {}) {
@@ -43,12 +53,22 @@ export class FailbanPlugin extends Plugin {
       blacklist: options.blacklist || [], // Always ban
       persistViolations: options.persistViolations !== false, // Track violations in DB
       verbose: options.verbose || false,
+      geo: {
+        enabled: options.geo?.enabled || false,
+        databasePath: options.geo?.databasePath || null,
+        allowedCountries: options.geo?.allowedCountries || [], // ISO 3166-1 alpha-2
+        blockedCountries: options.geo?.blockedCountries || [], // ISO 3166-1 alpha-2
+        blockUnknown: options.geo?.blockUnknown || false, // Block unknown countries
+        cacheResults: options.geo?.cacheResults !== false // Cache GeoIP lookups
+      },
       ...options
     };
 
     this.bansResource = null;
     this.violationsResource = null;
     this.memoryCache = new Map(); // In-memory cache for fast lookups
+    this.geoCache = new Map(); // GeoIP lookup cache
+    this.geoReader = null; // MaxMind reader instance
   }
 
   /**
@@ -62,6 +82,11 @@ export class FailbanPlugin extends Plugin {
         console.log('[FailbanPlugin] Disabled, skipping initialization');
       }
       return;
+    }
+
+    // Initialize GeoIP if enabled
+    if (this.options.geo.enabled) {
+      await this._initializeGeoIP();
     }
 
     // Create bans resource with TTL
@@ -84,6 +109,13 @@ export class FailbanPlugin extends Plugin {
       console.log(`[FailbanPlugin] Violation window: ${this.options.violationWindow}ms`);
       console.log(`[FailbanPlugin] Ban duration: ${this.options.banDuration}ms`);
       console.log(`[FailbanPlugin] Whitelist: ${this.options.whitelist.join(', ')}`);
+
+      if (this.options.geo.enabled) {
+        console.log(`[FailbanPlugin] GeoIP enabled`);
+        console.log(`[FailbanPlugin] Allowed countries: ${this.options.geo.allowedCountries.join(', ') || 'none'}`);
+        console.log(`[FailbanPlugin] Blocked countries: ${this.options.geo.blockedCountries.join(', ') || 'none'}`);
+        console.log(`[FailbanPlugin] Block unknown: ${this.options.geo.blockUnknown}`);
+      }
     }
   }
 
@@ -228,6 +260,138 @@ export class FailbanPlugin extends Plugin {
         console.log(`[FailbanPlugin] Cleaned ${cleaned} expired bans from cache`);
       }
     }, 60000); // Every minute
+  }
+
+  /**
+   * Initialize GeoIP reader
+   * @private
+   */
+  async _initializeGeoIP() {
+    if (!this.options.geo.databasePath) {
+      console.warn('[FailbanPlugin] GeoIP enabled but no databasePath provided');
+      return;
+    }
+
+    try {
+      // Dynamic import to avoid requiring @maxmind/geoip2-node for all users
+      const Reader = await requirePluginDependency(
+        '@maxmind/geoip2-node',
+        'FailbanPlugin',
+        'GeoIP country blocking'
+      );
+
+      this.geoReader = await Reader.open(this.options.geo.databasePath);
+
+      if (this.options.verbose) {
+        console.log(`[FailbanPlugin] GeoIP database loaded from ${this.options.geo.databasePath}`);
+      }
+    } catch (err) {
+      console.error('[FailbanPlugin] Failed to initialize GeoIP:', err.message);
+      console.warn('[FailbanPlugin] GeoIP features will be disabled');
+      this.options.geo.enabled = false;
+    }
+  }
+
+  /**
+   * Get country code for IP address
+   * @param {string} ip - IP address
+   * @returns {string|null} ISO 3166-1 alpha-2 country code or null
+   */
+  getCountryCode(ip) {
+    if (!this.options.geo.enabled || !this.geoReader) {
+      return null;
+    }
+
+    // Check cache first
+    if (this.options.geo.cacheResults && this.geoCache.has(ip)) {
+      return this.geoCache.get(ip);
+    }
+
+    try {
+      const response = this.geoReader.country(ip);
+      const countryCode = response?.country?.isoCode || null;
+
+      // Cache result
+      if (this.options.geo.cacheResults) {
+        this.geoCache.set(ip, countryCode);
+
+        // Limit cache size (keep last 10000 lookups)
+        if (this.geoCache.size > 10000) {
+          const firstKey = this.geoCache.keys().next().value;
+          this.geoCache.delete(firstKey);
+        }
+      }
+
+      return countryCode;
+    } catch (err) {
+      // IP not found in database or invalid IP
+      if (this.options.verbose) {
+        console.log(`[FailbanPlugin] GeoIP lookup failed for ${ip}: ${err.message}`);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Check if country is blocked
+   * @param {string} countryCode - ISO 3166-1 alpha-2 country code
+   * @returns {boolean}
+   */
+  isCountryBlocked(countryCode) {
+    if (!this.options.geo.enabled) {
+      return false;
+    }
+
+    // Unknown country handling
+    if (!countryCode) {
+      return this.options.geo.blockUnknown;
+    }
+
+    const upperCode = countryCode.toUpperCase();
+
+    // Check blocklist first (takes precedence)
+    if (this.options.geo.blockedCountries.length > 0) {
+      if (this.options.geo.blockedCountries.includes(upperCode)) {
+        return true;
+      }
+    }
+
+    // Check allowlist
+    if (this.options.geo.allowedCountries.length > 0) {
+      // If allowlist is set, only allowed countries can pass
+      return !this.options.geo.allowedCountries.includes(upperCode);
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if IP is blocked by country restrictions
+   * @param {string} ip - IP address
+   * @returns {Object|null} Block info or null if not blocked
+   */
+  checkCountryBlock(ip) {
+    if (!this.options.geo.enabled) {
+      return null;
+    }
+
+    // Whitelisted IPs bypass country checks
+    if (this.isWhitelisted(ip)) {
+      return null;
+    }
+
+    const countryCode = this.getCountryCode(ip);
+
+    if (this.isCountryBlocked(countryCode)) {
+      return {
+        blocked: true,
+        reason: 'country_restricted',
+        country: countryCode || 'unknown',
+        ip
+      };
+    }
+
+    return null;
   }
 
   /**
@@ -507,6 +671,13 @@ export class FailbanPlugin extends Plugin {
     }
 
     this.memoryCache.clear();
+    this.geoCache.clear();
+
+    // Close GeoIP reader
+    if (this.geoReader) {
+      // MaxMind reader doesn't have explicit close, just dereference
+      this.geoReader = null;
+    }
 
     if (this.options.verbose) {
       console.log('[FailbanPlugin] Cleaned up');
