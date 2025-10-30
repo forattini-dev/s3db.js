@@ -1,70 +1,132 @@
 # 🌐 API Plugin
 
-> **Quick Jump:** [🚀 Quick Start](#-quick-start) | [📖 Guides](#-detailed-documentation) | [⚙️ Config](#-configuration-reference) | [🔧 API](#-api-endpoints) | [❓ FAQ](#-faq) | [📚 Examples](#-examples)
+> **Production-ready REST API with zero boilerplate** - Transform s3db.js resources into enterprise-grade APIs with authentication, observability, security, and auto-scaling.
+
+> **Quick Jump:** [🚀 Quick Start](#-quick-start) | [🔥 New Features](#-whats-new-in-v2) | [📖 Guides](#-detailed-documentation) | [⚙️ Config](#-configuration-reference) | [🎯 Real-World Examples](#-real-world-examples) | [❓ FAQ](#-faq)
 
 ## ⚡ TLDR
 
-**Transform s3db.js resources into production-ready REST API endpoints** with automatic versioning, multiple authentication methods, and enterprise features.
+**Transform s3db.js resources into production-ready REST APIs** in one line:
 
-**1 line to get started:**
 ```javascript
-await db.usePlugin(new ApiPlugin({ port: 3000 }));  // Auto-generated REST API
+await db.use(new ApiPlugin({ port: 3000 }));  // That's it! 🎉
 ```
 
-**Key features:**
-- ✅ **Automatic REST endpoints** for all resources
-- ✅ **Swagger UI documentation**: Interactive API docs at `/docs`
-- ✅ **Kubernetes health probes**: `/health/live`, `/health/ready`, `/health`
-- ✅ **Auth drivers**: JWT, Basic Auth, OAuth2/OIDC (microservices SSO)
-- ✅ **Clean URLs by default**: `/cars` (optional versioning: `/v1/cars`)
-- ✅ **Production ready**: CORS, Rate Limiting, Logging, Compression
-- ✅ **Schema validation**: Automatic validation using resource schemas
-- ✅ **Custom middlewares**: Add your own middleware functions
+**What you get:**
+- ✅ **Auto-generated REST endpoints** - CRUD for all resources
+- ✅ **Enterprise security** - Rate limiting, failban, CORS, CSP headers
+- ✅ **Observability** - Metrics, events, distributed tracing, health checks
+- ✅ **Multiple auth methods** - JWT, Basic, OIDC/Azure AD, API Keys
+- ✅ **Zero-downtime deploys** - Graceful shutdown, health probes
+- ✅ **Interactive docs** - Auto-generated Swagger UI at `/docs`
 
 **Generated endpoints:**
 ```
-GET     /cars           → resource.list() or resource.query() with filters
-GET     /cars/:id       → resource.get(id)
-POST    /cars           → resource.insert(data)
-PUT     /cars/:id       → resource.update(id, data)
-PATCH   /cars/:id       → resource.update(id, partial)
-DELETE  /cars/:id       → resource.delete(id)
-HEAD    /cars           → resource.count() + statistics in headers
-OPTIONS /cars           → resource metadata (schema, methods, endpoints)
+GET     /users           → List/query users
+GET     /users/:id       → Get user by ID
+POST    /users           → Create user
+PUT     /users/:id       → Update user (full)
+PATCH   /users/:id       → Update user (partial)
+DELETE  /users/:id       → Delete user
+
+GET     /health          → Health check (Kubernetes-ready)
+GET     /metrics         → Prometheus-compatible metrics
+GET     /docs            → Interactive Swagger UI
 ```
 
-**Filtering via query strings:**
-```
-GET /cars?status=active&year=2024&inStock=true
-GET /cars?limit=50&offset=100&brand=Toyota
-```
+---
+
+## 🔥 What's New in v2.0
+
+### Security & Protection 🛡️
+
+- **🚨 Failban Plugin** - fail2ban-style automatic IP banning
+  - Ban after N violations (rate limit, auth failures)
+  - TTL-based auto-unban using S3DB partitions
+  - Whitelist/Blacklist support
+  - Admin endpoints for ban management
+
+- **⏱️ Advanced Rate Limiting** - Per-driver rate limiting with sliding windows
+  - Different limits per auth method (OIDC: 5/15min, JWT: 20/5min, API Key: 100/1min)
+  - Skip successful requests option
+  - Retry-After headers
+  - Auto-cleanup
+
+- **🔒 Security Headers** - Production-grade security
+  - Content-Security-Policy (CSP)
+  - HTTP Strict-Transport-Security (HSTS)
+  - X-Frame-Options, X-Content-Type-Options
+  - Permissions-Policy
+
+### Observability & Monitoring 📊
+
+- **📈 Metrics Collector** - Real-time API metrics
+  - Request counts, durations (p50/p95/p99), RPS
+  - Auth success/failure rates
+  - Resource operations tracking
+  - Top paths, error rates
+  - `/metrics` endpoint (Prometheus-compatible)
+
+- **🎯 Event Hooks System** - React to API events
+  - `user:created`, `user:login`
+  - `auth:success`, `auth:failure`
+  - `resource:created`, `resource:updated`, `resource:deleted`
+  - `request:start`, `request:end`, `request:error`
+  - Wildcard support (`resource:*`)
+
+- **🔍 Request ID Tracking** - Distributed tracing
+  - X-Request-ID header correlation
+  - Auto-generation or pass-through
+  - Included in all logs and events
+
+- **🏥 Extensible Health Checks** - Custom readiness checks
+  - Built-in: S3DB connection check
+  - Custom: Add database, cache, external API checks
+  - Timeout handling, optional checks
+  - Kubernetes liveness/readiness probes
+
+### Performance & Reliability 🚀
+
+- **♻️ Graceful Shutdown** - Zero-downtime deploys
+  - SIGTERM/SIGINT handling
+  - In-flight request tracking
+  - Configurable timeout
+  - Reject new requests during shutdown
+
+- **🍪 Session Tracking** - Analytics-grade session management
+  - Encrypted cookies (AES-256-GCM)
+  - Optional S3DB persistence
+  - IP, User-Agent, Referer tracking
+  - Auto-update on each request
+
+- **🎭 Content Negotiation** - Smart response handling
+  - HTML requests → Redirect to login
+  - JSON requests → 401 with details
+  - Based on Accept header
+
+### Developer Experience 🛠️
+
+- **🛡️ Guard Helpers** - Declarative authorization
+  - `requireScopes(['admin'])` - Check user scopes
+  - `requireRole('admin')` - Check user role
+  - `requireOwnership()` - Check record ownership
+  - `requireTenant()` - Multi-tenancy check
+  - `anyOf(...guards)` - OR logic
+  - `allOf(...guards)` - AND logic
 
 ---
 
 ## 📑 Table of Contents
 
 - [Quick Start](#-quick-start)
-- [Interactive API Documentation](#-interactive-api-documentation)
-- [Common Scenarios](#-common-scenarios)
+- [Real-World Examples](#-real-world-examples)
 - [📖 Detailed Documentation](#-detailed-documentation)
-  - [Authentication](./api/authentication.md) - JWT, Basic Auth, OIDC, OAuth2, Path-based auth
-  - [Guards (Authorization)](./api/guards.md) - Row-level security, multi-tenancy, RBAC
-  - [Static File Serving](./api/static-files.md) - Serve React/Vue/Angular apps, S3 files
-  - [Configuration](./api/configuration.md) - Complete configuration options
-  - [Deployment](./api/deployment.md) - Docker, Kubernetes, Prometheus, Production
+- [Security Features](#-security-features)
+- [Observability Features](#-observability-features)
+- [Configuration Reference](#-configuration-reference)
 - [API Endpoints](#-api-endpoints)
-- [Custom Middlewares](#-custom-middlewares)
-- [Custom Routes](#️-custom-routes)
-- [Rate Limiting](#-rate-limiting)
-- [Request Logging](#-request-logging)
-- [Response Compression](#-response-compression)
-- [CORS Configuration](#-cors-configuration)
 - [Best Practices](#-best-practices)
-- [Advanced Usage](#-advanced-usage)
 - [FAQ](#-faq)
-- [Examples](#-examples)
-- [Plugin Methods](#-plugin-methods)
-- [HTTP Status Codes](#-http-status-codes---complete-reference)
 
 ---
 
@@ -74,7 +136,7 @@ GET /cars?limit=50&offset=100&brand=Toyota
 
 ```bash
 # Install required dependencies
-pnpm add hono @hono/node-server @hono/swagger-ui
+pnpm add hono @hono/node-server @hono/swagger-ui jose
 ```
 
 ### Basic Usage
@@ -86,171 +148,580 @@ const db = new Database({ connectionString: 's3://...' });
 await db.connect();
 
 // Create resource
-const cars = await db.createResource({
-  name: 'cars',
+const users = await db.createResource({
+  name: 'users',
   attributes: {
-    brand: 'string|required',
-    model: 'string|required',
-    year: 'number|required|min:1900|max:2025',
-    price: 'number|required|min:0'
+    email: 'string|required|email',
+    name: 'string|required',
+    role: 'string|default:user'
   }
 });
 
-// Add API Plugin
-await db.usePlugin(new ApiPlugin({
+// Add API Plugin - that's it!
+await db.use(new ApiPlugin({
   port: 3000,
-  docs: { enabled: true },
-  cors: { enabled: true },
-  validation: { enabled: true }
+  verbose: true
 }));
 
 // Server running at http://localhost:3000
-// GET http://localhost:3000/cars (clean URLs by default!)
+// GET http://localhost:3000/users
 // View docs at http://localhost:3000/docs
 ```
 
 ---
 
-## 📚 Interactive API Documentation
+## 🎯 Real-World Examples
 
-The API Plugin automatically generates **Swagger UI documentation** at `/docs`:
+### 1. 📊 Analytics & Tracking Platform
+
+**Scenario:** You need to track events, sessions, and user behavior with real-time analytics.
 
 ```javascript
-await db.usePlugin(new ApiPlugin({ port: 3000 }));
+import { ApiPlugin, TTLPlugin } from 's3db.js';
 
-// Visit http://localhost:3000/docs
-// - Interactive API documentation
-// - Try requests directly from browser
-// - View all schemas and endpoints
-// - See authentication requirements
+// Event tracking with TTL (auto-cleanup old events)
+const events = await db.createResource({
+  name: 'events',
+  attributes: {
+    sessionId: 'string|required',
+    type: 'string|required',
+    path: 'string',
+    referrer: 'string',
+    timestamp: 'string|required',
+    expiresAt: 'string|required'  // TTL field
+  },
+  partitions: {
+    bySession: { fields: { sessionId: 'string' } },
+    byExpiry: { fields: { expiresAtCohort: 'string' } }  // TTL partition
+  }
+});
+
+// Sessions with encrypted cookies
+const sessions = await db.createResource({
+  name: 'sessions',
+  attributes: {
+    fingerprint: 'string',
+    ip: 'string',
+    userAgent: 'string',
+    country: 'string',
+    firstSeen: 'string',
+    lastSeen: 'string'
+  }
+});
+
+// Setup API with session tracking + events
+await db.use(new TTLPlugin({
+  resources: {
+    events: { enabled: true, field: 'expiresAt' }
+  }
+}));
+
+await db.use(new ApiPlugin({
+  port: 3000,
+
+  // Session tracking (encrypted cookies)
+  sessionTracking: {
+    enabled: true,
+    resource: 'sessions',
+    cookieName: 'session_id',
+    passphrase: process.env.SESSION_SECRET,
+    updateOnRequest: true,
+    enrichSession: async ({ session, context }) => ({
+      // Enrich with custom data
+      country: context.req.header('cf-ipcountry'),  // Cloudflare
+      fingerprint: context.req.header('x-visitor-id')  // FingerprintJS
+    })
+  },
+
+  // Event hooks for analytics
+  events: { enabled: true },
+
+  // Metrics for dashboards
+  metrics: {
+    enabled: true,
+    maxPathsTracked: 200
+  }
+}));
+
+// Listen to events for real-time processing
+apiPlugin.events.on('request:end', async (data) => {
+  // Record event
+  await events.insert({
+    sessionId: data.sessionId,
+    type: 'pageview',
+    path: data.path,
+    timestamp: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 30*24*60*60*1000).toISOString()  // 30 days
+  });
+});
+
+// Endpoints:
+// POST /track     → Custom tracking endpoint
+// GET  /metrics   → Real-time metrics (RPS, p95 latency, etc.)
+// GET  /sessions  → View sessions
+// GET  /events    → Query events
 ```
+
+**Key Features:**
+- ✅ Encrypted session cookies with visitor tracking
+- ✅ Event tracking with auto-cleanup (TTL)
+- ✅ Real-time metrics (`/metrics` endpoint)
+- ✅ Event hooks for custom processing
 
 ---
 
-## 🎯 Common Scenarios
+### 2. 🔗 URL Shortener Service
 
-**Quick-win patterns for typical use cases** - copy-paste and customize!
-
-### 1. Simple CRUD API (Blog, E-commerce, CMS)
+**Scenario:** Build a production URL shortener with analytics, QR codes, and expiration.
 
 ```javascript
-import Database from 's3db.js';
-import { ApiPlugin } from 's3db.js';
-
-const db = new Database({ connectionString: 's3://...' });
-await db.connect();
-
-// Define resources
-const posts = await db.createResource({
-  name: 'posts',
+// URLs resource with TTL support
+const urls = await db.createResource({
+  name: 'urls',
   attributes: {
-    title: 'string|required',
-    content: 'string|required',
-    author: 'string|required',
-    published: 'boolean|default:false'
+    shortId: 'string|required',  // e.g., "abc123"
+    target: 'string|required',    // Original URL
+    userId: 'string|required',
+    title: 'string',
+    expiresAt: 'string',
+    metadata: {
+      qrCode: 'string',           // Base64 QR code
+      ogImage: 'string',          // Open Graph image
+      ogTitle: 'string',
+      ogDescription: 'string'
+    }
+  },
+  partitions: {
+    byUser: { fields: { userId: 'string' } }
+  },
+  guard: {
+    list: (ctx) => {
+      // Users only see their own URLs
+      ctx.setPartition('byUser', { userId: ctx.user.sub });
+      return true;
+    },
+    create: (ctx) => {
+      // Auto-inject userId
+      ctx.body.userId = ctx.user.sub;
+      return true;
+    }
   }
 });
 
-const comments = await db.createResource({
-  name: 'comments',
+// Click tracking
+const clicks = await db.createResource({
+  name: 'clicks',
   attributes: {
-    postId: 'string|required',
-    author: 'string|required',
-    text: 'string|required'
+    shortId: 'string|required',
+    timestamp: 'string|required',
+    ip: 'string',
+    userAgent: 'string',
+    referrer: 'string',
+    country: 'string'
+  },
+  partitions: {
+    byShortId: { fields: { shortId: 'string' } }
   }
 });
 
-// ✅ That's it! API ready at http://localhost:3000
-await db.use(new ApiPlugin({ port: 3000 }));
-// GET /posts, POST /posts, GET /posts/:id, etc.
+await db.use(new ApiPlugin({
+  port: 3000,
+
+  // OIDC for admin dashboard
+  auth: {
+    resource: 'users',
+    drivers: {
+      oidc: {
+        issuer: process.env.OIDC_ISSUER,
+        clientId: process.env.OIDC_CLIENT_ID,
+        clientSecret: process.env.OIDC_CLIENT_SECRET,
+        redirectUri: 'http://localhost:3000/auth/callback'
+      },
+      basic: {
+        usernameField: 'email',
+        passwordField: 'apiToken'
+      }
+    },
+    pathRules: [
+      { path: '/admin/**', methods: ['oidc'], required: true },
+      { path: '/api/**', methods: ['basic'], required: true },
+      { path: '/r/**', required: false }  // Public redirects
+    ]
+  },
+
+  // Session tracking for analytics
+  sessionTracking: {
+    enabled: true,
+    resource: 'sessions',
+    passphrase: process.env.SESSION_SECRET
+  },
+
+  // Rate limiting to prevent abuse
+  failban: {
+    enabled: true,
+    maxViolations: 10,
+    violationWindow: 3600000,  // 1 hour
+    banDuration: 86400000      // 24 hours
+  },
+
+  // Metrics for monitoring
+  metrics: { enabled: true },
+  events: { enabled: true },
+
+  // Custom routes for redirects and QR codes
+  routes: {
+    '/r/:id': {
+      GET: async (c) => {
+        const id = c.req.param('id');
+        const url = await urls.get(id);
+
+        if (!url) {
+          return c.notFound();
+        }
+
+        // Track click asynchronously
+        const sessionId = c.get('sessionId');
+        clicks.insert({
+          shortId: id,
+          timestamp: new Date().toISOString(),
+          ip: c.req.header('x-forwarded-for'),
+          userAgent: c.req.header('user-agent'),
+          referrer: c.req.header('referer')
+        }).catch(console.error);
+
+        // Redirect
+        return c.redirect(url.target, 302);
+      }
+    },
+
+    '/qr/:id': {
+      GET: async (c) => {
+        const id = c.req.param('id');
+        const url = await urls.get(id);
+
+        if (!url || !url.metadata?.qrCode) {
+          return c.notFound();
+        }
+
+        // Return QR code image
+        const qrBuffer = Buffer.from(url.metadata.qrCode, 'base64');
+        return c.body(qrBuffer, 200, { 'Content-Type': 'image/png' });
+      }
+    }
+  }
+}));
+
+// Event listeners for notifications
+apiPlugin.events.on('resource:created', async (data) => {
+  if (data.resource === 'urls') {
+    // Send notification that URL was created
+    console.log(`New URL created: ${data.id}`);
+  }
+});
+
+// Endpoints:
+// GET  /r/:id          → Redirect (public)
+// GET  /qr/:id         → QR code image (public)
+// GET  /api/urls       → List URLs (API token)
+// POST /api/urls       → Create URL (API token)
+// GET  /admin          → Admin dashboard (OIDC)
+// GET  /metrics        → Metrics (protected)
 ```
 
-### 2. Multi-Tenant SaaS (Isolated Data per Tenant)
+**Key Features:**
+- ✅ Public redirects with analytics
+- ✅ QR code generation
+- ✅ Dual auth (OIDC for dashboard, Basic for API)
+- ✅ Automatic banning of abusive IPs
+- ✅ Session tracking for visitor analytics
+
+---
+
+### 3. 🏢 Multi-Tenant SaaS Platform
+
+**Scenario:** Build a SaaS where each tenant's data is completely isolated.
 
 ```javascript
-const orders = await db.createResource({
-  name: 'orders',
+import { requireTenant, requireScopes, anyOf } from 's3db.js/plugins/api/concerns/guards-helpers';
+
+// Projects (tenant-isolated)
+const projects = await db.createResource({
+  name: 'projects',
   attributes: {
     tenantId: 'string|required',
-    userId: 'string|required',
-    total: 'number|required'
+    name: 'string|required',
+    ownerId: 'string|required',
+    status: 'string|default:active'
   },
   partitions: {
     byTenant: { fields: { tenantId: 'string' } }
   },
   guard: {
     '*': (ctx) => {
-      ctx.tenantId = ctx.user.tenantId;  // Extract from JWT
+      // Extract tenant from JWT
+      ctx.tenantId = ctx.user.tenantId || ctx.user.tid;
       return !!ctx.tenantId;
     },
     list: (ctx) => {
-      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });  // O(1) isolation!
+      // O(1) tenant isolation via partition
+      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
       return true;
     },
     create: (ctx) => {
-      ctx.data.tenantId = ctx.tenantId;  // Auto-inject
-      ctx.data.userId = ctx.user.sub;
+      // Auto-inject tenantId and ownerId
+      ctx.body.tenantId = ctx.tenantId;
+      ctx.body.ownerId = ctx.user.sub;
       return true;
-    }
+    },
+    update: anyOf(
+      requireScopes(['admin']),         // Admins can edit anything
+      (ctx, record) => record.ownerId === ctx.user.sub  // Owners can edit their own
+    ),
+    delete: requireScopes(['admin'])  // Only admins can delete
+  }
+});
+
+// Users (multi-tenant with role-based access)
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'string|required|email',
+    name: 'string|required',
+    tenantId: 'string|required',
+    role: 'string|default:member',    // member, admin
+    scopes: 'array|default:["read"]'  // read, write, admin
+  },
+  partitions: {
+    byTenant: { fields: { tenantId: 'string' } }
   }
 });
 
 await db.use(new ApiPlugin({
   port: 3000,
+
+  // JWT authentication with tenant claims
   auth: {
-    driver: 'jwt',
-    secret: 'your-secret-key'
-  }
+    resource: 'users',
+    drivers: {
+      jwt: {
+        secret: process.env.JWT_SECRET,
+        audience: 'api.myapp.com'
+      }
+    },
+    pathRules: [
+      { path: '/api/**', methods: ['jwt'], required: true }
+    ]
+  },
+
+  // Security
+  security: {
+    enabled: true,
+    headers: {
+      csp: "default-src 'self'",
+      hsts: { maxAge: 31536000, includeSubDomains: true }
+    }
+  },
+
+  // Rate limiting per tenant
+  failban: {
+    enabled: true,
+    maxViolations: 5,
+    violationWindow: 900000,   // 15 min
+    banDuration: 3600000       // 1 hour
+  },
+
+  // Observability
+  requestId: { enabled: true },
+  metrics: { enabled: true },
+  events: { enabled: true }
 }));
 
-// ✅ Row-level security + O(1) tenant isolation!
-// Each tenant only sees their own orders
+// Monitor tenant activity
+apiPlugin.events.on('resource:created', (data) => {
+  const tenantId = data.user?.tenantId;
+  console.log(`Tenant ${tenantId} created ${data.resource}`);
+});
+
+// Endpoints:
+// GET  /api/projects     → List tenant's projects (O(1) via partition)
+// POST /api/projects     → Create project (auto-inject tenantId)
+// GET  /api/users        → List tenant's users
+// GET  /metrics          → Tenant-specific metrics
 ```
 
-### 3. Protected API with JWT Authentication
+**Key Features:**
+- ✅ O(1) tenant isolation via partitions
+- ✅ Declarative guards with helper functions
+- ✅ Auto-injection of tenantId/userId
+- ✅ Role-based access control (RBAC)
+- ✅ Comprehensive audit trail via events
+
+---
+
+### 4. 🛒 E-commerce API with Inventory Management
+
+**Scenario:** Build an e-commerce backend with real-time inventory tracking.
 
 ```javascript
-// Create users resource
-const users = await db.createResource({
-  name: 'users',
+import { requireOwnership, requireScopes, anyOf } from 's3db.js/plugins/api/concerns/guards-helpers';
+
+// Products (public read, admin write)
+const products = await db.createResource({
+  name: 'products',
   attributes: {
-    email: 'string|required|email',
-    password: 'password|required|min:8',  // Automatically hashed with bcrypt
-    role: 'string|default:user'
+    sku: 'string|required',
+    name: 'string|required',
+    price: 'number|required|min:0',
+    stock: 'number|required|min:0',
+    category: 'string|required'
+  },
+  partitions: {
+    byCategory: { fields: { category: 'string' } }
   }
 });
 
-// Create protected resources
+// Orders (user-specific with guards)
 const orders = await db.createResource({
   name: 'orders',
   attributes: {
     userId: 'string|required',
     items: 'array|required',
-    total: 'number|required'
+    total: 'number|required',
+    status: 'string|default:pending',
+    shippingAddress: {
+      street: 'string|required',
+      city: 'string|required',
+      zip: 'string|required'
+    }
+  },
+  partitions: {
+    byUser: { fields: { userId: 'string' } },
+    byStatus: { fields: { status: 'string' } }
+  },
+  guard: {
+    list: (ctx) => {
+      // Users see only their orders, admins see all
+      if (ctx.user.scopes?.includes('admin')) {
+        return true;
+      }
+      ctx.setPartition('byUser', { userId: ctx.user.sub });
+      return true;
+    },
+    get: anyOf(
+      requireScopes(['admin']),
+      requireOwnership('userId')
+    ),
+    create: (ctx) => {
+      // Auto-inject userId
+      ctx.body.userId = ctx.user.sub;
+      return true;
+    },
+    update: requireScopes(['admin']),  // Only admins can change orders
+    delete: requireScopes(['admin'])
   }
 });
 
-await db.usePlugin(new ApiPlugin({
+await db.use(new ApiPlugin({
   port: 3000,
+
+  // JWT + API Key authentication
   auth: {
-    driver: 'jwt',
     resource: 'users',
-    config: {
-      jwtSecret: process.env.JWT_SECRET,
-      jwtExpiresIn: '7d'
-    }
+    drivers: {
+      jwt: {
+        secret: process.env.JWT_SECRET
+      },
+      apikey: {
+        headerName: 'X-API-Key',
+        field: 'apiKey'
+      }
+    },
+    pathRules: [
+      { path: '/products', methods: [], required: false },      // Public
+      { path: '/api/products', methods: ['jwt'], required: true },  // Admin
+      { path: '/api/orders', methods: ['jwt', 'apikey'], required: true }
+    ]
   },
-  resources: {
-    orders: { auth: true }  // Protected
+
+  // Rate limiting
+  failban: {
+    enabled: true,
+    maxViolations: 20,
+    violationWindow: 3600000,
+    banDuration: 86400000,
+    whitelist: ['10.0.0.0/8']  // Internal IPs
+  },
+
+  // Observability
+  requestId: { enabled: true },
+  metrics: { enabled: true },
+  events: { enabled: true },
+
+  // Custom routes for checkout flow
+  routes: {
+    '/api/checkout': {
+      POST: async (c) => {
+        const { items } = await c.req.json();
+
+        // Validate stock availability
+        for (const item of items) {
+          const product = await products.get(item.sku);
+          if (!product || product.stock < item.quantity) {
+            return c.json({ error: 'Insufficient stock' }, 400);
+          }
+        }
+
+        // Calculate total
+        const total = items.reduce((sum, item) => {
+          const product = products.get(item.sku);
+          return sum + (product.price * item.quantity);
+        }, 0);
+
+        // Create order
+        const order = await orders.insert({
+          userId: c.get('user').sub,
+          items,
+          total,
+          status: 'pending'
+        });
+
+        // Update inventory (in event listener)
+        apiPlugin.events.emit('order:created', { order, items });
+
+        return c.json({ success: true, orderId: order.id });
+      }
+    }
   }
 }));
 
-// ✅ Auto-generated auth endpoints:
-// POST /auth/register
-// POST /auth/login
-// GET /auth/me
-// Protected: GET /orders (requires JWT token)
+// Event listeners for inventory management
+apiPlugin.events.on('order:created', async ({ order, items }) => {
+  // Decrease stock
+  for (const item of items) {
+    const product = await products.get(item.sku);
+    await products.update(item.sku, {
+      stock: product.stock - item.quantity
+    });
+  }
+
+  // Send confirmation email (via external service)
+  // await emailService.send({ to: order.userId, template: 'order-confirmation' });
+});
+
+// Endpoints:
+// GET  /products           → List products (public)
+// GET  /api/products       → Manage products (admin)
+// POST /api/checkout       → Create order with stock validation
+// GET  /api/orders         → List user's orders
+// GET  /metrics            → API metrics
 ```
+
+**Key Features:**
+- ✅ Public product catalog with O(1) category filtering
+- ✅ User-specific order management
+- ✅ Real-time inventory tracking via events
+- ✅ Automatic IP banning for abuse prevention
+- ✅ Dual auth (JWT for users, API keys for integrations)
 
 ---
 
@@ -259,1033 +730,714 @@ await db.usePlugin(new ApiPlugin({
 ### Core Topics
 
 - **[Authentication](./api/authentication.md)** - Complete authentication guide
-  - JWT Authentication
-  - Basic Authentication
-  - OAuth2 + OpenID Connect
-  - OIDC with User Hooks
+  - JWT, Basic Auth, API Keys
+  - OAuth2 + OpenID Connect (Azure AD, Keycloak)
   - Path-Based Authentication
-  - Security & Validation
+  - Rate Limiting per Driver
 
 - **[Guards (Authorization)](./api/guards.md)** - Declarative authorization
   - Row-Level Security (RLS)
   - Multi-Tenancy
-  - Ownership Checks
-  - Role-Based Access Control (RBAC)
-  - Framework Integration (Hono, Express, Fastify)
+  - Guard Helpers (requireScopes, requireOwnership, anyOf, allOf)
+  - Framework Integration
 
-- **[Static File Serving](./api/static-files.md)** - Serve files and SPAs
+- **[Security](./api/security.md)** - Enterprise security features
+  - Failban Plugin (fail2ban-style)
+  - Security Headers (CSP, HSTS)
+  - Rate Limiting
+  - CORS Configuration
+
+- **[Observability](./api/observability.md)** - Monitoring and tracing
+  - Metrics Collector (`/metrics`)
+  - Event Hooks System
+  - Request ID Tracking
+  - Health Checks (Kubernetes-ready)
+
+- **[Static Files](./api/static-files.md)** - Serve files and SPAs
   - Filesystem Driver
   - S3 Driver
   - SPA Support (React, Vue, Angular)
-  - Multiple Mount Points
-  - Authentication Integration
-
-- **[Configuration](./api/configuration.md)** - Complete configuration options
-  - Server Configuration
-  - Schema Validation
-  - URL Versioning
-  - Best Practices
 
 - **[Deployment](./api/deployment.md)** - Production deployment
   - Docker Setup
   - Kubernetes Manifests
-  - AWS IAM Policies
+  - Zero-Downtime Deploys
   - Prometheus Monitoring
-  - Scaling Limits & Constraints
-  - Production Best Practices
 
 ---
 
-## 🛣️ API Endpoints
+## 🛡️ Security Features
 
-### Resource Endpoints
+### 1. Failban Plugin (NEW!)
 
-For each resource, the following endpoints are automatically created:
-
-**GET /resource** - List/Query
-```bash
-# List all records
-GET /cars
-
-# Query with filters
-GET /cars?brand=Toyota&year=2024
-
-# Pagination
-GET /cars?limit=50&offset=100
-
-# Sorting
-GET /cars?sortBy=price&sortOrder=desc
-```
-
-**GET /resource/:id** - Get by ID
-```bash
-GET /cars/abc123
-```
-
-**POST /resource** - Create
-```bash
-POST /cars
-Content-Type: application/json
-
-{
-  "brand": "Toyota",
-  "model": "Camry",
-  "year": 2024,
-  "price": 28000
-}
-```
-
-**PUT /resource/:id** - Update (full)
-```bash
-PUT /cars/abc123
-Content-Type: application/json
-
-{
-  "brand": "Toyota",
-  "model": "Camry",
-  "year": 2024,
-  "price": 29000
-}
-```
-
-**PATCH /resource/:id** - Update (partial)
-```bash
-PATCH /cars/abc123
-Content-Type: application/json
-
-{
-  "price": 29000
-}
-```
-
-**DELETE /resource/:id** - Delete
-```bash
-DELETE /cars/abc123
-```
-
-**HEAD /resource** - Count/Statistics
-```bash
-HEAD /cars
-
-# Response headers:
-# X-Total-Count: 1234
-# X-Resource-Name: cars
-```
-
-**OPTIONS /resource** - Metadata
-```bash
-OPTIONS /cars
-
-# Returns resource schema, methods, endpoints
-```
-
-### Health Check Endpoints (Kubernetes)
-
-```bash
-# Liveness probe - checks if app is alive
-# If this fails, Kubernetes will restart the pod
-GET /health/live
-
-# Readiness probe - checks if app is ready to receive traffic
-# If this fails, Kubernetes will remove pod from service endpoints
-GET /health/ready
-
-# Generic health check with links to other probes
-GET /health
-```
-
-### Other Utility Endpoints
-
-```bash
-# API information and available resources
-GET /
-
-# Interactive Swagger UI documentation
-GET /docs
-
-# OpenAPI 3.0 specification (JSON)
-GET /openapi.json
-```
-
----
-
-## 🎛️ Custom Middlewares
-
-### Global Middlewares
+Automatic IP banning for security violations:
 
 ```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  middlewares: [
-    async (c, next) => {
-      console.log(`${c.req.method} ${c.req.path}`);
-      await next();
-    }
-  ]
-}));
-```
-
-### Resource-Specific Middlewares
-
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  resources: {
-    cars: {
-      customMiddleware: [
-        async (c, next) => {
-          // Resource-specific logic
-          await next();
-        }
-      ]
-    }
+await db.use(new ApiPlugin({
+  failban: {
+    enabled: true,
+    maxViolations: 3,           // Ban after 3 violations
+    violationWindow: 3600000,   // Within 1 hour
+    banDuration: 86400000,      // Ban for 24 hours
+    whitelist: ['127.0.0.1'],   // Never ban
+    blacklist: [],              // Always ban
+    persistViolations: true     // Track in S3DB
   }
 }));
+
+// Admin endpoints:
+// GET    /admin/security/bans       → List active bans
+// GET    /admin/security/bans/:ip   → Get ban details
+// POST   /admin/security/bans       → Manually ban IP
+// DELETE /admin/security/bans/:ip   → Unban IP
+// GET    /admin/security/stats      → Ban statistics
+```
+
+**How it works:**
+1. Rate limit exceeded → Violation recorded
+2. Auth failure → Violation recorded
+3. After N violations → IP automatically banned
+4. TTLPlugin auto-unbans after duration
+5. Events emitted: `security:banned`, `security:unbanned`, `security:violation`
+
+### 2. Rate Limiting per Driver
+
+Different limits for different auth methods:
+
+```javascript
+auth: {
+  drivers: {
+    oidc: {
+      // ... config
+      rateLimit: {
+        enabled: true,
+        windowMs: 900000,          // 15 minutes
+        maxAttempts: 5,            // 5 attempts
+        skipSuccessfulRequests: true  // Only count failures
+      }
+    },
+    jwt: {
+      // ... config
+      rateLimit: {
+        windowMs: 300000,          // 5 minutes
+        maxAttempts: 20
+      }
+    },
+    apikey: {
+      // ... config
+      rateLimit: {
+        windowMs: 60000,           // 1 minute
+        maxAttempts: 100
+      }
+    }
+  }
+}
+```
+
+### 3. Security Headers
+
+Production-grade HTTP security headers:
+
+```javascript
+security: {
+  enabled: true,
+  headers: {
+    csp: "default-src 'self'; script-src 'self' 'unsafe-inline'",
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    },
+    xFrameOptions: 'DENY',
+    xContentTypeOptions: 'nosniff',
+    referrerPolicy: 'strict-origin-when-cross-origin',
+    permissionsPolicy: 'geolocation=(), microphone=(), camera=()'
+  }
+}
+```
+
+### 4. CORS with Preflight Cache
+
+```javascript
+cors: {
+  enabled: true,
+  origin: ['https://app.example.com'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+  exposeHeaders: ['X-Request-ID', 'X-Total-Count'],
+  credentials: true,
+  maxAge: 86400  // 24 hour preflight cache
+}
 ```
 
 ---
 
-## 🛤️ Custom Routes
+## 📊 Observability Features
 
-### Plugin-Level Custom Routes
+### 1. Metrics Collector (NEW!)
+
+Real-time API metrics at `/metrics`:
 
 ```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  customRoutes: [
-    {
-      method: 'GET',
-      path: '/custom',
-      handler: async (c) => {
-        return c.json({ message: 'Custom endpoint' });
-      }
-    }
-  ]
-}));
+metrics: {
+  enabled: true,
+  maxPathsTracked: 100,    // Limit memory usage
+  resetInterval: 300000    // Reset every 5 minutes
+}
+
+// Visit http://localhost:3000/metrics for:
 ```
 
-### Resource-Level Custom Routes
+**Metrics included:**
+```json
+{
+  "uptime": {
+    "milliseconds": 3600000,
+    "seconds": 3600,
+    "formatted": "1h 0m 0s"
+  },
+  "requests": {
+    "total": 12543,
+    "rps": "3.48",
+    "byMethod": { "GET": 10234, "POST": 2309 },
+    "byStatus": { "2xx": 11891, "4xx": 543, "5xx": 109 },
+    "topPaths": [
+      {
+        "path": "/api/users",
+        "count": 5432,
+        "avgDuration": "45.32",
+        "errors": 12,
+        "errorRate": "0.22%"
+      }
+    ],
+    "duration": {
+      "p50": 23,
+      "p95": 156,
+      "p99": 342,
+      "avg": "45.67"
+    }
+  },
+  "auth": {
+    "total": 234,
+    "success": 221,
+    "failure": 13,
+    "successRate": "94.44%",
+    "byMethod": {
+      "oidc": { "success": 145, "failure": 3 },
+      "jwt": { "success": 76, "failure": 10 }
+    }
+  },
+  "resources": {
+    "total": 2309,
+    "created": 543,
+    "updated": 1234,
+    "deleted": 532,
+    "byResource": {
+      "users": { "created": 123, "updated": 456, "deleted": 78 }
+    }
+  },
+  "users": {
+    "logins": 145,
+    "newUsers": 23
+  },
+  "errors": {
+    "total": 109,
+    "rate": "0.87%",
+    "byType": { "request": 87, "database": 22 }
+  }
+}
+```
+
+### 2. Event Hooks System (NEW!)
+
+React to API events in real-time:
 
 ```javascript
-await db.createResource({
-  name: 'cars',
-  attributes: { /* ... */ },
-  customRoutes: [
-    {
-      method: 'GET',
-      path: '/:id/history',
-      handler: async (c) => {
-        const id = c.req.param('id');
-        // Custom logic
-        return c.json({ id, history: [] });
-      }
-    }
-  ]
+events: { enabled: true }
+
+// Listen to events
+apiPlugin.events.on('user:created', (data) => {
+  console.log('New user:', data.user);
+  // Send welcome email, etc.
+});
+
+apiPlugin.events.on('auth:failure', (data) => {
+  console.log('Auth failed:', data.ip, data.path);
+  // Alert security team
+});
+
+apiPlugin.events.on('resource:*', (data) => {
+  console.log('Resource event:', data.event, data.resource);
+  // Replicate to BigQuery, SQS, etc.
+});
+
+apiPlugin.events.on('request:end', (data) => {
+  if (data.duration > 1000) {
+    console.warn('Slow request:', data.path, data.duration);
+  }
 });
 ```
 
----
+**Available events:**
+- `user:created` - New user created via OIDC
+- `user:login` - User logged in
+- `auth:success` - Authentication succeeded
+- `auth:failure` - Authentication failed
+- `resource:created` - Resource record created
+- `resource:updated` - Resource record updated
+- `resource:deleted` - Resource record deleted
+- `request:start` - Request started
+- `request:end` - Request ended
+- `request:error` - Request errored
+- `security:banned` - IP banned
+- `security:unbanned` - IP unbanned
+- `security:violation` - Security violation detected
 
-## 📊 Rate Limiting
+### 3. Request ID Tracking (NEW!)
 
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  rateLimit: {
-    enabled: true,
-    windowMs: 60000,        // 1 minute
-    maxRequests: 100,       // 100 requests per window
-    keyGenerator: (c) => {
-      return c.req.header('x-forwarded-for') || 'unknown';
-    }
-  }
-}));
-```
-
----
-
-## 📝 Request Logging
+Distributed tracing with X-Request-ID:
 
 ```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  logging: {
-    enabled: true,
-    format: ':method :path :status :response-time ms - :user',
-    verbose: false
-  }
-}));
-```
-
----
-
-## 🗜️ Response Compression
-
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  compression: {
-    enabled: true,
-    threshold: 1024,  // Only compress if >1KB
-    level: 6          // gzip compression level (1-9)
-  }
-}));
-```
-
----
-
-## 🌍 CORS Configuration
-
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  cors: {
-    enabled: true,
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    exposedHeaders: ['X-Total-Count'],
-    credentials: true,
-    maxAge: 86400  // 24 hours
-  }
-}));
-```
-
----
-
-## 🎯 Best Practices
-
-### 1. Use Environment Variables
-
-```javascript
-new ApiPlugin({
-  port: process.env.API_PORT || 3000,
-  auth: {
-    driver: 'jwt',
-    config: {
-      jwtSecret: process.env.JWT_SECRET,
-      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d'
-    }
-  }
-})
-```
-
-### 2. Configure Resources Appropriately
-
-```javascript
-resources: {
-  // Public resources
-  products: {
-    auth: false,
-    methods: ['GET']
-  },
-
-  // Protected resources
-  orders: {
-    auth: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE']
-  }
+requestId: {
+  enabled: true,
+  headerName: 'X-Request-ID',     // Header name
+  generator: () => generateId(),  // Custom ID generator
+  includeInResponse: true         // Add to response headers
 }
 ```
 
-### 3. Enable Production Features
+**Usage:**
+- Pass `X-Request-ID` from client → Preserved throughout request
+- No ID provided → Auto-generated
+- Included in all logs and events
+- Correlate requests across services
+
+### 4. Session Tracking (NEW!)
+
+Analytics-grade session management:
 
 ```javascript
-new ApiPlugin({
-  cors: { enabled: true },
-  rateLimit: { enabled: true, maxRequests: 100 },
-  compression: { enabled: true },
-  logging: { enabled: true }
-})
+sessionTracking: {
+  enabled: true,
+  resource: 'sessions',
+  cookieName: 'session_id',
+  cookieMaxAge: 2592000000,       // 30 days
+  passphrase: process.env.SESSION_SECRET,
+  updateOnRequest: true,          // Update lastSeenAt on each request
+  enrichSession: async ({ session, context }) => ({
+    // Custom enrichment
+    country: context.req.header('cf-ipcountry'),
+    fingerprint: context.req.header('x-visitor-id')
+  })
+}
+
+// Access in routes:
+const sessionId = c.get('sessionId');
+const session = c.get('session');
 ```
 
----
+**Features:**
+- AES-256-GCM encrypted cookies
+- Optional S3DB persistence
+- Auto-update on each request
+- IP, User-Agent, Referer tracking
+- Custom enrichment function
 
-## 🚀 Advanced Usage
+### 5. Extensible Health Checks (NEW!)
 
-### Custom Authentication
+Kubernetes-ready with custom checks:
 
 ```javascript
-resources: {
-  cars: {
-    customMiddleware: [
-      async (c, next) => {
-        const token = c.req.header('authorization')?.replace('Bearer ', '');
-        const user = await verifyCustomToken(token);
-
-        if (!user) {
-          return c.json({ error: 'Unauthorized' }, 401);
-        }
-
-        c.set('user', user);
-        await next();
+health: {
+  liveness: {
+    // Always returns 200 OK (is process alive?)
+  },
+  readiness: {
+    timeout: 5000,
+    checks: [
+      {
+        name: 'redis',
+        check: async () => {
+          const ping = await redis.ping();
+          return { healthy: ping === 'PONG' };
+        },
+        optional: false
+      },
+      {
+        name: 'external_api',
+        check: async () => {
+          const response = await fetch('https://api.example.com/health');
+          return { healthy: response.ok };
+        },
+        optional: true  // Don't fail readiness if this fails
       }
     ]
   }
 }
 ```
 
-### Pagination Helpers
+**Endpoints:**
+- `GET /health/live` - Liveness probe (Kubernetes)
+- `GET /health/ready` - Readiness probe (Kubernetes)
+- `GET /health` - Generic health check
+
+### 6. Graceful Shutdown (NEW!)
+
+Zero-downtime deployments:
 
 ```javascript
-// Cursor-based pagination
-GET /cars?cursor=abc123&limit=50
+// Automatic SIGTERM/SIGINT handling
 
-// Offset-based pagination
-GET /cars?offset=100&limit=50
+// How it works:
+// 1. SIGTERM received
+// 2. Stop accepting new requests (returns 503)
+// 3. Wait for in-flight requests to finish (max 30s)
+// 4. Close HTTP server
+// 5. Exit process
+
+// Kubernetes readiness probe will remove pod from service
+// No dropped requests!
 ```
 
-### Filtering with Partitions
+---
+
+## ⚙️ Configuration Reference
+
+### Complete Configuration Example
 
 ```javascript
-const cars = await db.createResource({
-  name: 'cars',
-  attributes: { /* ... */ },
-  partitions: {
-    byBrand: { fields: { brand: 'string' } }
+await db.use(new ApiPlugin({
+  // Server
+  port: 3000,
+  host: '0.0.0.0',
+  verbose: true,
+
+  // Security
+  security: {
+    enabled: true,
+    headers: {
+      csp: "default-src 'self'",
+      hsts: { maxAge: 31536000, includeSubDomains: true }
+    }
+  },
+
+  cors: {
+    enabled: true,
+    origin: ['https://app.example.com'],
+    credentials: true,
+    maxAge: 86400
+  },
+
+  failban: {
+    enabled: true,
+    maxViolations: 3,
+    violationWindow: 3600000,
+    banDuration: 86400000,
+    whitelist: ['127.0.0.1']
+  },
+
+  // Authentication
+  auth: {
+    resource: 'users',
+    drivers: {
+      oidc: {
+        issuer: process.env.OIDC_ISSUER,
+        clientId: process.env.OIDC_CLIENT_ID,
+        clientSecret: process.env.OIDC_CLIENT_SECRET,
+        redirectUri: 'http://localhost:3000/auth/callback',
+        rateLimit: {
+          enabled: true,
+          maxAttempts: 5,
+          windowMs: 900000
+        }
+      },
+      jwt: {
+        secret: process.env.JWT_SECRET,
+        expiresIn: '7d'
+      }
+    },
+    pathRules: [
+      { path: '/admin/**', methods: ['oidc'], required: true },
+      { path: '/api/**', methods: ['jwt'], required: true },
+      { path: '/**', required: false }
+    ]
+  },
+
+  // Observability
+  requestId: { enabled: true },
+
+  sessionTracking: {
+    enabled: true,
+    resource: 'sessions',
+    passphrase: process.env.SESSION_SECRET,
+    updateOnRequest: true
+  },
+
+  events: { enabled: true },
+
+  metrics: {
+    enabled: true,
+    maxPathsTracked: 100,
+    resetInterval: 300000
+  },
+
+  health: {
+    readiness: {
+      timeout: 5000,
+      checks: [
+        {
+          name: 'database',
+          check: async () => ({ healthy: true })
+        }
+      ]
+    }
+  },
+
+  // Resources
+  resources: {
+    users: {
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      validation: true
+    }
+  },
+
+  // Custom routes
+  routes: {
+    '/custom': {
+      GET: async (c) => c.json({ custom: true })
+    }
+  },
+
+  // Static files
+  static: [
+    {
+      driver: 'filesystem',
+      path: '/app',
+      root: './build',
+      config: { fallback: 'index.html' }
+    }
+  ]
+}));
+```
+
+---
+
+## 🎯 API Endpoints
+
+### Resource Endpoints
+
+```bash
+GET     /{resource}           # List/query
+GET     /{resource}/:id       # Get by ID
+POST    /{resource}           # Create
+PUT     /{resource}/:id       # Update (full)
+PATCH   /{resource}/:id       # Update (partial)
+DELETE  /{resource}/:id       # Delete
+HEAD    /{resource}           # Count
+OPTIONS /{resource}           # Metadata
+```
+
+### System Endpoints
+
+```bash
+GET     /                     # API information
+GET     /docs                 # Swagger UI
+GET     /openapi.json         # OpenAPI spec
+GET     /health               # Generic health
+GET     /health/live          # Liveness probe
+GET     /health/ready         # Readiness probe
+GET     /metrics              # Metrics (if enabled)
+```
+
+### Admin Endpoints (if failban enabled)
+
+```bash
+GET     /admin/security/bans        # List bans
+GET     /admin/security/bans/:ip    # Get ban
+POST    /admin/security/bans        # Ban IP
+DELETE  /admin/security/bans/:ip    # Unban IP
+GET     /admin/security/stats       # Statistics
+```
+
+---
+
+## 🏆 Best Practices
+
+### 1. Use Environment Variables
+
+```javascript
+new ApiPlugin({
+  port: process.env.PORT || 3000,
+  auth: {
+    drivers: {
+      oidc: {
+        issuer: process.env.OIDC_ISSUER,
+        clientSecret: process.env.OIDC_CLIENT_SECRET
+      }
+    }
+  },
+  sessionTracking: {
+    passphrase: process.env.SESSION_SECRET
   }
+})
+```
+
+### 2. Enable All Production Features
+
+```javascript
+new ApiPlugin({
+  // Security
+  security: { enabled: true },
+  cors: { enabled: true },
+  failban: { enabled: true },
+
+  // Observability
+  requestId: { enabled: true },
+  metrics: { enabled: true },
+  events: { enabled: true },
+  sessionTracking: { enabled: true },
+
+  // Health checks
+  health: {
+    readiness: {
+      checks: [/* your checks */]
+    }
+  }
+})
+```
+
+### 3. Use Guards for Authorization
+
+```javascript
+import { requireScopes, anyOf, requireOwnership } from 's3db.js/plugins/api/concerns/guards-helpers';
+
+guard: {
+  update: anyOf(
+    requireScopes(['admin']),
+    requireOwnership()
+  ),
+  delete: requireScopes(['admin'])
+}
+```
+
+### 4. Monitor with Events
+
+```javascript
+apiPlugin.events.on('request:error', (data) => {
+  // Send to error tracking service
+  errorTracker.report(data.error);
 });
 
-// Query uses partition automatically
-GET /cars?brand=Toyota  // O(1) partition lookup!
+apiPlugin.events.on('security:banned', (data) => {
+  // Alert security team
+  slack.send(`IP banned: ${data.ip}`);
+});
+```
+
+### 5. Use Partitions for Performance
+
+```javascript
+partitions: {
+  byTenant: { fields: { tenantId: 'string' } },
+  byStatus: { fields: { status: 'string' } }
+}
+
+// O(1) lookups instead of O(n) scans
 ```
 
 ---
 
 ## ❓ FAQ
 
-### Basics
+**Q: Is this production-ready?**
 
-**Q: What problem does the API Plugin solve?**
+A: Yes! Includes enterprise features:
+- ✅ Automatic IP banning (failban)
+- ✅ Rate limiting per auth driver
+- ✅ Security headers (CSP, HSTS)
+- ✅ Distributed tracing (Request ID)
+- ✅ Real-time metrics
+- ✅ Event hooks for integrations
+- ✅ Graceful shutdown
+- ✅ Health probes (Kubernetes)
+- ✅ Session tracking
 
-A: It transforms s3db.js resources into production-ready REST API endpoints with automatic CRUD operations, authentication, validation, and enterprise features (rate limiting, CORS, compression, health checks). **Zero boilerplate** - eliminates need to manually write API routes.
+**Q: How do I protect against brute force attacks?**
 
-**Q: Do I need to write any route handlers?**
-
-A: No! The API Plugin automatically generates REST endpoints for all your resources. Just define your data schema and you get a full CRUD API instantly.
-
-**Q: Can I use this with existing authentication systems (Auth0, Firebase, Keycloak)?**
-
-A: Yes! The API Plugin supports:
-- **JWT** - Works with any JWT issuer (Auth0, Firebase, custom)
-- **OIDC** - Auto-discovers configuration from any OIDC provider
-- **Custom middlewares** - Integrate with any auth system
-
-See [Authentication](./api/authentication.md) for examples.
-
-**Q: How does it compare to Express, Fastify, or other frameworks?**
-
-A:
-
-| Feature | API Plugin | Express/Fastify |
-|---------|-----------|----------------|
-| **Setup Time** | 1 line of code | Write routes manually |
-| **CRUD Endpoints** | Automatic | Manual |
-| **Schema Validation** | Automatic from resource | Manual (Joi, Yup, etc.) |
-| **Swagger Docs** | Auto-generated | Manual setup |
-| **Authentication** | Built-in (JWT, OIDC, Basic) | Manual integration |
-| **Health Probes** | Built-in (Kubernetes-ready) | Manual implementation |
-| **Multi-Tenancy** | Built-in (Guards + Partitions) | Manual implementation |
-
-**Q: Is it production-ready?**
-
-A: Yes! The API Plugin includes enterprise features out-of-the-box:
-- ✅ **Health probes** - Kubernetes liveness/readiness
-- ✅ **Rate limiting** - Prevent abuse
-- ✅ **CORS** - Cross-origin requests
-- ✅ **Compression** - Reduce bandwidth
-- ✅ **Logging** - Request/response tracking
-- ✅ **Schema validation** - Automatic from resource definitions
-- ✅ **Graceful shutdown** - Zero downtime deployments
-
----
-
-### Authentication & Authorization
-
-**Q: How do I protect my API endpoints?**
-
-A: Use the `auth` configuration:
+A: Use failban + rate limiting:
 ```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  auth: {
-    driver: 'jwt',
-    resource: 'users',
-    config: { jwtSecret: process.env.JWT_SECRET }
-  },
-  resources: {
-    orders: { auth: true },  // Protected
-    products: { auth: false } // Public
-  }
-}));
-```
-
-See [Authentication](./api/authentication.md) for complete guide.
-
-**Q: How do I implement row-level security (users can only see their own data)?**
-
-A: Use Guards with partitions:
-```javascript
-const orders = await db.createResource({
-  name: 'orders',
-  attributes: {
-    userId: 'string|required',
-    total: 'number|required'
-  },
-  partitions: {
-    byUser: { fields: { userId: 'string' } }
-  },
-  guard: {
-    list: (ctx) => {
-      ctx.setPartition('byUser', { userId: ctx.user.sub });
-      return true;
-    },
-    get: (ctx, record) => record.userId === ctx.user.sub
-  }
-});
-```
-
-See [Guards](./api/guards.md) for complete authorization guide.
-
-**Q: Can I use path-based authentication (different rules for different URLs)?**
-
-A: Yes! Use `pathAuth`:
-```javascript
-auth: {
-  drivers: [
-    { driver: 'jwt', config: { jwtSecret: 'secret' } }
-  ],
-  pathAuth: [
-    { pattern: '/public/**', required: false },
-    { pattern: '/api/**', drivers: ['jwt'], required: true },
-    { pattern: '/admin/**', drivers: ['jwt'], required: true }
-  ]
-}
-```
-
-See [Path-Based Authentication](./api/authentication.md#️-path-based-authentication) for details.
-
-**Q: How do I integrate with Azure AD or Keycloak?**
-
-A: Use the OIDC driver:
-```javascript
-auth: {
-  drivers: [
-    {
-      driver: 'oidc',
-      config: {
-        issuer: 'https://login.microsoftonline.com/{tenantId}/v2.0',
-        clientId: 'your-client-id',
-        audience: 'api://your-api-id'
-      }
-    }
-  ]
-}
-```
-
-The OIDC driver auto-discovers configuration and validates JWT tokens from any OIDC-compliant provider.
-
----
-
-### Static Files & SPAs
-
-**Q: Can I serve a React/Vue/Angular app alongside my API?**
-
-A: Yes! Use static file serving with SPA fallback:
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  static: [
-    {
-      driver: 'filesystem',
-      path: '/app',
-      root: './build',
-      config: {
-        fallback: 'index.html',  // SPA routing support
-        maxAge: 3600000
-      }
-    }
-  ]
-}));
-
-// GET /app → React app
-// GET /api/orders → API endpoint
-```
-
-See [Static Files](./api/static-files.md) for complete guide.
-
-**Q: Can I serve files from S3?**
-
-A: Yes! Use the S3 driver:
-```javascript
-static: [
-  {
-    driver: 's3',
-    path: '/uploads',
-    bucket: 'my-uploads-bucket',
-    config: {
-      streaming: true,  // Stream through server
-      maxAge: 3600000
-    }
-  }
-]
-```
-
-Supports both streaming (server proxies) and presigned URL redirect (direct S3 access).
-
-**Q: How do I protect static files with authentication?**
-
-A: Use `pathAuth`:
-```javascript
-auth: {
-  drivers: [{ driver: 'jwt', config: { jwtSecret: 'secret' } }],
-  pathAuth: [
-    { pattern: '/public/**', required: false },
-    { pattern: '/app/**', drivers: ['jwt'], required: true }
-  ]
-},
-static: [
-  {
-    driver: 'filesystem',
-    path: '/app',
-    root: './build',
-    config: { fallback: 'index.html' }
-  }
-]
-```
-
----
-
-### Configuration & Deployment
-
-**Q: How do I handle file uploads?**
-
-A: For large files:
-1. Accept multipart/form-data
-2. Store file directly in S3 (use AWS SDK)
-3. Store S3 key in s3db record
-
-```javascript
-// Store S3 key, not file data
-await files.insert({
-  name: 'document.pdf',
-  s3Key: 's3://bucket/uploads/abc123.pdf',
-  size: 1024000
-});
-```
-
-See [Static Files](./api/static-files.md) for serving uploaded files.
-
-**Q: How do I serve the API behind a reverse proxy (nginx, Cloudflare)?**
-
-A: Configure trust proxy settings:
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  trustProxy: true,  // Trust X-Forwarded-* headers
-  cors: {
-    origin: 'https://yourdomain.com'
-  }
-}));
-```
-
-See [Deployment](./api/deployment.md) for nginx configuration examples.
-
-**Q: How do I implement pagination?**
-
-A: Use query parameters:
-```bash
-# Offset-based (simple)
-GET /cars?limit=50&offset=100
-
-# Cursor-based (performant)
-GET /cars?limit=50&cursor=abc123
-
-# With filters
-GET /cars?brand=Toyota&limit=50&offset=0
-```
-
-The API Plugin automatically handles pagination from query parameters.
-
-**Q: Can I customize the OpenAPI/Swagger documentation?**
-
-A: Yes! The plugin auto-generates OpenAPI specs from your resource schemas. Access the raw spec at `/openapi.json` and modify it with external tools or custom routes:
-```javascript
-customRoutes: [
-  {
-    method: 'GET',
-    path: '/openapi.json',
-    handler: async (c) => {
-      const spec = await generateOpenAPISpec();
-      // Customize spec here
-      return c.json(spec);
-    }
-  }
-]
-```
-
-**Q: How do I deploy to Kubernetes?**
-
-A: The API Plugin is Kubernetes-ready out-of-the-box:
-- ✅ Health probes: `/health/live`, `/health/ready`
-- ✅ Graceful shutdown: Handles SIGTERM
-- ✅ Horizontal scaling: Stateless design
-
-See [Deployment](./api/deployment.md) for complete Kubernetes manifests.
-
----
-
-### Troubleshooting
-
-**Q: Getting CORS errors?**
-
-A: Enable CORS and specify allowed origins:
-```javascript
-cors: {
+failban: {
   enabled: true,
-  origin: ['http://localhost:3000', 'https://yourdomain.com'],
-  credentials: true
+  maxViolations: 3,
+  banDuration: 86400000
 }
 ```
 
-For development, use `origin: '*'` (but never in production!).
+After 3 violations (rate limit, auth failures), IP is automatically banned for 24 hours.
 
-**Q: Why are my endpoints returning 401 Unauthorized?**
+**Q: How do I track user sessions?**
 
-A: Check authentication configuration:
-1. **JWT**: Verify `jwtSecret` matches token issuer
-2. **OIDC**: Check `issuer` and `audience` match token claims
-3. **Path-based**: Ensure `pattern` matches your route
-
-Debug with:
-```bash
-# Decode JWT token manually
-echo $TOKEN | cut -d. -f2 | base64 -d | jq
-
-# Check issuer, audience, expiration
-```
-
-**Q: Why am I getting 403 Forbidden even though I'm authenticated?**
-
-A: Authentication succeeded but authorization failed. Check:
-1. **Guards**: Verify guard functions return `true`
-2. **Resource permissions**: Check `resources.{name}.auth` is correctly configured
-3. **Path-based auth**: Verify `pathAuth` patterns match your routes
-
-**Q: Rate limiting is blocking legitimate requests?**
-
-A: Adjust rate limit configuration:
+A: Use session tracking:
 ```javascript
-rateLimit: {
+sessionTracking: {
   enabled: true,
-  windowMs: 60000,      // Increase window
-  maxRequests: 1000,    // Increase limit
-  keyGenerator: (c) => {
-    // Use user ID instead of IP for authenticated requests
-    return c.get('user')?.sub || c.req.header('x-forwarded-for');
-  }
+  resource: 'sessions',
+  passphrase: process.env.SESSION_SECRET
 }
 ```
 
-**Q: API is slow - how do I optimize performance?**
+**Q: How do I monitor API performance?**
 
-A: Performance tips:
-1. **Use partitions** for O(1) lookups instead of O(n) scans
-2. **Enable compression** for large responses
-3. **Add pagination** with reasonable limits (50-100 records)
-4. **Use `patch()` instead of `update()`** for metadata-only updates (40-60% faster)
-5. **Cache frequently accessed data** using CachePlugin
-6. **Use CDN** for static files
-
-See [Best Practices](#-best-practices) section.
-
-**Q: How do I debug issues?**
-
-A: Enable verbose logging:
+A: Use metrics + events:
 ```javascript
-logging: {
-  enabled: true,
-  verbose: true,  // Detailed request/response logs
-  format: ':method :path :status :response-time ms - :user'
-}
-```
+metrics: { enabled: true },
+events: { enabled: true }
 
-Check logs for:
-- Request parameters
-- Authentication status
-- Validation errors
-- S3 operations
-
----
-
-**Q: How do I implement dual authentication (OIDC + Basic Auth)?**
-
-A: Use priority-based authentication strategy for sophisticated auth flows:
-```javascript
-auth: {
-  strategy: 'priority',  // NEW: Waterfall authentication
-  priorities: {
-    oidc: 1,    // Try OIDC first (browser/SSO)
-    basic: 2    // Fallback to Basic Auth (API tokens)
-  },
-  drivers: [
-    {
-      type: 'oidc',
-      protectedPaths: ['/app/**', '/dashboard/**'],  // OIDC required
-      beforeCreateUser: async ({ user, claims }) => {
-        // Enrich with external API data
-        const employee = await peopleAPI.getByEmail(claims.email);
-        return {
-          costCenterId: employee.costCenter.id,
-          team: employee.team,
-          apiToken: generateToken()  // Auto-generate API token
-        };
-      },
-      beforeUpdateUser: async ({ user, updates, claims }) => {
-        // Refresh data on every login
-        const employee = await peopleAPI.getByEmail(claims.email);
-        return {
-          costCenterId: employee.costCenter.id,
-          team: employee.team
-        };
-      }
-    },
-    {
-      type: 'basic',
-      resource: 'users',
-      usernameField: 'email',
-      passwordField: 'apiToken'
-    }
-  ]
-}
-```
-
-**Use cases:**
-- **mrt-shortner architecture**: OIDC for `/app` (browser), Basic Auth for `/api` (tokens)
-- **Microservices**: OIDC for user-facing, Basic for service-to-service
-- **Migration**: Keep Basic Auth during OIDC rollout
-
-**How it works:**
-1. Request to `/app` → OIDC middleware checks session → redirect to login if missing
-2. Request to `/api/urls` → OIDC tries first → falls back to Basic Auth
-3. Request to `/health` (not protected) → skips all auth
-
-See `docs/examples/e83-api-oidc-dual-auth.js` for complete example.
-
----
-
-### Advanced
-
-**Q: Can I use custom middlewares?**
-
-A: Yes! Add custom logic at plugin or resource level:
-```javascript
-// Global middleware
-middlewares: [
-  async (c, next) => {
-    console.log(`${c.req.method} ${c.req.path}`);
-    await next();
-  }
-],
-
-// Resource-specific middleware
-resources: {
-  orders: {
-    customMiddleware: [
-      async (c, next) => {
-        // Custom logic here
-        await next();
-      }
-    ]
-  }
-}
-```
-
-**Q: Can I add custom routes?**
-
-A: Yes! Add custom endpoints alongside auto-generated ones:
-```javascript
-customRoutes: [
-  {
-    method: 'POST',
-    path: '/orders/:id/ship',
-    handler: async (c) => {
-      const id = c.req.param('id');
-      // Custom shipping logic
-      return c.json({ shipped: true });
-    }
-  }
-]
+// Visit /metrics for real-time stats
+// Listen to events for custom processing
 ```
 
 **Q: How do I implement multi-tenancy?**
 
-A: Use Guards + Partitions for tenant isolation:
+A: Use guards + partitions:
 ```javascript
-const data = await db.createResource({
-  name: 'data',
-  attributes: {
-    tenantId: 'string|required',
-    content: 'string'
+guard: {
+  '*': (ctx) => {
+    ctx.tenantId = ctx.user.tenantId;
+    return !!ctx.tenantId;
   },
-  partitions: {
-    byTenant: { fields: { tenantId: 'string' } }
-  },
-  guard: {
-    '*': (ctx) => {
-      ctx.tenantId = ctx.user.tenantId;  // Extract from JWT
-      return !!ctx.tenantId;
-    },
-    list: (ctx) => {
-      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
-      return true;
-    },
-    create: (ctx) => {
-      ctx.body.tenantId = ctx.tenantId;  // Auto-inject
-      return true;
-    },
-    get: (ctx, record) => record.tenantId === ctx.tenantId
+  list: (ctx) => {
+    ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
+    return true;
   }
-});
+}
 ```
 
-This provides **O(1) tenant isolation** with zero cross-tenant data leakage.
+**Q: Can I use this with Azure AD?**
 
-**Q: Can I use this with Express or Fastify instead of Hono?**
-
-A: The API Plugin uses Hono internally, but you can integrate it with Express/Fastify using custom middlewares or by accessing the underlying Hono app:
+A: Yes! Use OIDC driver:
 ```javascript
-const apiPlugin = new ApiPlugin({ port: 3000 });
-await db.usePlugin(apiPlugin);
-
-// Access Hono app for custom integration
-const honoApp = apiPlugin.getApp();
+auth: {
+  drivers: {
+    oidc: {
+      issuer: 'https://login.microsoftonline.com/{tenantId}/v2.0',
+      clientId: process.env.AZURE_CLIENT_ID,
+      clientSecret: process.env.AZURE_CLIENT_SECRET
+    }
+  }
+}
 ```
-
-**Q: What are all the configuration parameters?**
-
-A: See [Configuration](./api/configuration.md) for complete parameter documentation including:
-- Server options (port, host, trust proxy)
-- Authentication (drivers, pathAuth, resource)
-- Static files (filesystem, S3, SPA fallback)
-- Security (CORS, rate limiting, compression)
-- Logging (format, verbose, custom tokens)
-- Resources (per-resource auth, middlewares, guards)
-
----
-
-## 📚 Examples
-
-See complete examples:
-- [e47-api-plugin-basic.js](../examples/e47-api-plugin-basic.js) - Basic usage
-- [e49-api-plugin-complete.js](../examples/e49-api-plugin-complete.js) - Complete features demo
-- [e58-api-rest-complete.js](../examples/e58-api-rest-complete.js) - Complete REST API
-- [e59-api-rest-simple.js](../examples/e59-api-rest-simple.js) - Simple REST API
-- [e84-static-files.js](../examples/e84-static-files.js) - Static file serving
-- [e85-protected-spa.js](../examples/e85-protected-spa.js) - Protected SPA
-- [e86-oidc-user-hooks.js](../examples/e86-oidc-user-hooks.js) - OIDC user hooks
-- [e87-oidc-api-token-cookie.js](../examples/e87-oidc-api-token-cookie.js) - OIDC + API token cookie
-
----
-
-## 🔧 Plugin Methods
-
-### getServerInfo()
-
-```javascript
-const info = await apiPlugin.getServerInfo();
-// Returns: { port, host, baseUrl, resources }
-```
-
-### getApp()
-
-```javascript
-const app = apiPlugin.getApp();
-// Returns: Hono app instance for custom route registration
-```
-
-### stop()
-
-```javascript
-await apiPlugin.stop();
-// Gracefully stops the HTTP server
-```
-
-### uninstall()
-
-```javascript
-await apiPlugin.uninstall();
-// Removes plugin from database and stops server
-```
-
----
-
-## 🎯 Summary
-
-The API Plugin provides:
-
-1. **Auto-generated REST APIs** - Endpoints automatically created from resource definitions
-2. **Multiple auth drivers** - JWT, Basic, OIDC, OAuth2, API Keys
-3. **Production features** - Rate limiting, CORS, compression, health checks
-4. **Interactive docs** - Auto-generated Swagger UI at `/docs`
-5. **Type safety** - Automatic schema validation from resource definitions
-6. **Kubernetes-ready** - Health probes, graceful shutdown, horizontal scaling
-7. **Framework flexibility** - Works with Hono, Express, Fastify
-
-**Next Steps:**
-1. Secure your API: [Authentication →](./api/authentication.md)
-2. Implement row-level security: [Guards →](./api/guards.md)
-3. Deploy to production: [Deployment →](./api/deployment.md)
-4. Try example code: [Example 47](../examples/e47-api-plugin-basic.js) | [Example 49](../examples/e49-api-plugin-complete.js)
 
 ---
 
 ## 🔗 See Also
 
-**Related Documentation:**
-- [Authentication](./api/authentication.md) - JWT, Basic Auth, OIDC, OAuth2
-- [Guards](./api/guards.md) - Row-level security and authorization
-- [Static Files](./api/static-files.md) - Serve React/Vue/Angular apps
-- [Configuration](./api/configuration.md) - Complete config reference
-- [Deployment](./api/deployment.md) - Docker, Kubernetes, production
-- [Identity Plugin](./identity.md) - OAuth2/OIDC Authorization Server
-
-**Examples:**
-- [e47-api-plugin-basic.js](../examples/e47-api-plugin-basic.js) - Basic usage
-- [e49-api-plugin-complete.js](../examples/e49-api-plugin-complete.js) - Complete features
-- [e58-api-rest-complete.js](../examples/e58-api-rest-complete.js) - Full REST API
-- [e84-static-files.js](../examples/e84-static-files.js) - Static file serving
-- [e85-protected-spa.js](../examples/e85-protected-spa.js) - Protected SPA
+- [Authentication](./api/authentication.md)
+- [Guards (Authorization)](./api/guards.md)
+- [Security Features](./api/security.md)
+- [Observability](./api/observability.md)
+- [Deployment](./api/deployment.md)
 
 ---
 
-## 📊 HTTP Status Codes - Complete Reference
-
-### ✅ Success Codes (2xx)
-
-- **200 OK** - GET, PUT, PATCH, DELETE successful
-- **201 Created** - POST successful (resource created)
-- **204 No Content** - DELETE successful (no response body)
-
-### ❌ Client Error Codes (4xx)
-
-- **400 Bad Request** - Invalid request body or parameters
-- **401 Unauthorized** - Missing or invalid authentication
-- **403 Forbidden** - Authenticated but not authorized
-- **404 Not Found** - Resource or record not found
-- **409 Conflict** - Resource already exists (duplicate ID)
-- **429 Too Many Requests** - Rate limit exceeded
-
-### 💥 Server Error Codes (5xx)
-
-- **500 Internal Server Error** - Unexpected server error
-- **503 Service Unavailable** - Server overloaded or S3 throttling
-
----
-
-> **📖 For detailed documentation, see:**
-> - [Authentication](./api/authentication.md)
-> - [Guards (Authorization)](./api/guards.md)
-> - [Static File Serving](./api/static-files.md)
-> - [Configuration](./api/configuration.md)
-> - [Deployment](./api/deployment.md)
+> **🎉 Ready to build?** Start with the [Quick Start](#-quick-start) or explore [Real-World Examples](#-real-world-examples)!
