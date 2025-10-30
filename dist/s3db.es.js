@@ -7355,590 +7355,47 @@ function createFailbanAdminRoutes(Hono, plugin) {
   return app;
 }
 
-const ONE_HOUR_SEC = 3600;
-const ONE_DAY_SEC = 86400;
-const THIRTY_DAYS_SEC = 2592e3;
-const TEN_SECONDS_MS = 1e4;
-const ONE_MINUTE_MS = 6e4;
-const TEN_MINUTES_MS = 6e5;
-const ONE_HOUR_MS = 36e5;
-const ONE_DAY_MS = 864e5;
-const ONE_WEEK_MS = 6048e5;
-const SECONDS_TO_MS = 1e3;
-const GRANULARITIES = {
-  minute: {
-    threshold: ONE_HOUR_SEC,
-    // TTL < 1 hour
-    interval: TEN_SECONDS_MS,
-    // Check every 10 seconds
-    cohortsToCheck: 3,
-    // Check last 3 minutes
-    cohortFormat: (date) => date.toISOString().substring(0, 16)
-    // '2024-10-25T14:30'
-  },
-  hour: {
-    threshold: ONE_DAY_SEC,
-    // TTL < 24 hours
-    interval: TEN_MINUTES_MS,
-    // Check every 10 minutes
-    cohortsToCheck: 2,
-    // Check last 2 hours
-    cohortFormat: (date) => date.toISOString().substring(0, 13)
-    // '2024-10-25T14'
-  },
-  day: {
-    threshold: THIRTY_DAYS_SEC,
-    // TTL < 30 days
-    interval: ONE_HOUR_MS,
-    // Check every 1 hour
-    cohortsToCheck: 2,
-    // Check last 2 days
-    cohortFormat: (date) => date.toISOString().substring(0, 10)
-    // '2024-10-25'
-  },
-  week: {
-    threshold: Infinity,
-    // TTL >= 30 days
-    interval: ONE_DAY_MS,
-    // Check every 24 hours
-    cohortsToCheck: 2,
-    // Check last 2 weeks
-    cohortFormat: (date) => {
-      const year = date.getUTCFullYear();
-      const week = getWeekNumber(date);
-      return `${year}-W${String(week).padStart(2, "0")}`;
-    }
-  }
-};
-function getWeekNumber(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - yearStart) / ONE_DAY_MS + 1) / 7);
-}
-function detectGranularity(ttl) {
-  if (!ttl) return "day";
-  if (ttl < GRANULARITIES.minute.threshold) return "minute";
-  if (ttl < GRANULARITIES.hour.threshold) return "hour";
-  if (ttl < GRANULARITIES.day.threshold) return "day";
-  return "week";
-}
-function getExpiredCohorts(granularity, count) {
-  const config = GRANULARITIES[granularity];
-  const cohorts = [];
-  const now = /* @__PURE__ */ new Date();
-  for (let i = 0; i < count; i++) {
-    let checkDate;
-    switch (granularity) {
-      case "minute":
-        checkDate = new Date(now.getTime() - i * ONE_MINUTE_MS);
-        break;
-      case "hour":
-        checkDate = new Date(now.getTime() - i * ONE_HOUR_MS);
-        break;
-      case "day":
-        checkDate = new Date(now.getTime() - i * ONE_DAY_MS);
-        break;
-      case "week":
-        checkDate = new Date(now.getTime() - i * ONE_WEEK_MS);
-        break;
-    }
-    cohorts.push(config.cohortFormat(checkDate));
-  }
-  return cohorts;
-}
-class TTLPlugin extends Plugin {
-  constructor(config = {}) {
-    super(config);
-    this.verbose = config.verbose !== void 0 ? config.verbose : false;
-    this.resources = config.resources || {};
-    this.batchSize = config.batchSize || 100;
-    this.stats = {
-      totalScans: 0,
-      totalExpired: 0,
-      totalDeleted: 0,
-      totalArchived: 0,
-      totalSoftDeleted: 0,
-      totalCallbacks: 0,
-      totalErrors: 0,
-      lastScanAt: null,
-      lastScanDuration: 0
-    };
-    this.intervals = [];
-    this.isRunning = false;
-    this.expirationIndex = null;
-  }
-  /**
-   * Install the plugin
-   */
-  async install(database) {
-    await super.install(database);
-    for (const [resourceName, config] of Object.entries(this.resources)) {
-      this._validateResourceConfig(resourceName, config);
-    }
-    await this._createExpirationIndex();
-    for (const [resourceName, config] of Object.entries(this.resources)) {
-      this._setupResourceHooks(resourceName, config);
-    }
-    this._startIntervals();
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
-    }
-    this.emit("db:plugin:installed", {
-      plugin: "TTLPlugin",
-      resources: Object.keys(this.resources)
-    });
-  }
-  /**
-   * Validate resource configuration
-   */
-  _validateResourceConfig(resourceName, config) {
-    if (!config.ttl && !config.field) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" must have either "ttl" (seconds) or "field" (timestamp field name)`
-      );
-    }
-    const validStrategies = ["soft-delete", "hard-delete", "archive", "callback"];
-    if (!config.onExpire || !validStrategies.includes(config.onExpire)) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" must have an "onExpire" value. Valid options: ${validStrategies.join(", ")}`
-      );
-    }
-    if (config.onExpire === "soft-delete" && !config.deleteField) {
-      config.deleteField = "deletedat";
-    }
-    if (config.onExpire === "archive" && !config.archiveResource) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" with onExpire="archive" must have an "archiveResource" specified`
-      );
-    }
-    if (config.onExpire === "callback" && typeof config.callback !== "function") {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" with onExpire="callback" must have a "callback" function`
-      );
-    }
-    if (!config.field) {
-      config.field = "_createdAt";
-    }
-    if (config.field === "_createdAt" && this.database) {
-      const resource = this.database.resources[resourceName];
-      if (resource && resource.config && resource.config.timestamps === false) {
-        console.warn(
-          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
-        );
-      }
-    }
-    config.granularity = detectGranularity(config.ttl);
-  }
-  /**
-   * Create expiration index (plugin resource)
-   */
-  async _createExpirationIndex() {
-    this.expirationIndex = await this.database.createResource({
-      name: "plg_ttl_expiration_index",
-      attributes: {
-        resourceName: "string|required",
-        recordId: "string|required",
-        expiresAtCohort: "string|required",
-        expiresAtTimestamp: "number|required",
-        // Exact expiration timestamp for precise checking
-        granularity: "string|required",
-        createdAt: "number"
-      },
-      partitions: {
-        byExpiresAtCohort: {
-          fields: { expiresAtCohort: "string" }
-        }
-      },
-      asyncPartitions: false
-      // Sync partitions for deterministic behavior
-    });
-    if (this.verbose) {
-      console.log("[TTLPlugin] Created expiration index with partition");
-    }
-  }
-  /**
-   * Setup hooks for a resource
-   */
-  _setupResourceHooks(resourceName, config) {
-    if (!this.database.resources[resourceName]) {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
-      }
-      return;
-    }
-    const resource = this.database.resources[resourceName];
-    if (typeof resource.insert !== "function" || typeof resource.delete !== "function") {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
-      }
-      return;
-    }
-    this.addMiddleware(resource, "insert", async (next, data, options) => {
-      const result = await next(data, options);
-      await this._addToIndex(resourceName, result, config);
-      return result;
-    });
-    this.addMiddleware(resource, "delete", async (next, id, options) => {
-      const result = await next(id, options);
-      await this._removeFromIndex(resourceName, id);
-      return result;
-    });
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
-    }
-  }
-  /**
-   * Add record to expiration index
-   */
-  async _addToIndex(resourceName, record, config) {
-    try {
-      let baseTime = record[config.field];
-      if (!baseTime && config.field === "_createdAt") {
-        baseTime = Date.now();
-      }
-      if (!baseTime) {
-        if (this.verbose) {
-          console.warn(
-            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
-          );
-        }
-        return;
-      }
-      const baseTimestamp = typeof baseTime === "number" ? baseTime : new Date(baseTime).getTime();
-      const expiresAt = config.ttl ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS) : new Date(baseTimestamp);
-      const cohortConfig = GRANULARITIES[config.granularity];
-      const cohort = cohortConfig.cohortFormat(expiresAt);
-      const indexId = `${resourceName}:${record.id}`;
-      await this.expirationIndex.insert({
-        id: indexId,
-        resourceName,
-        recordId: record.id,
-        expiresAtCohort: cohort,
-        expiresAtTimestamp: expiresAt.getTime(),
-        // Store exact timestamp for precise checking
-        granularity: config.granularity,
-        createdAt: Date.now()
-      });
-      if (this.verbose) {
-        console.log(
-          `[TTLPlugin] Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
-        );
-      }
-    } catch (error) {
-      console.error(`[TTLPlugin] Error adding to index:`, error);
-      this.stats.totalErrors++;
-    }
-  }
-  /**
-   * Remove record from expiration index (O(1) using deterministic ID)
-   */
-  async _removeFromIndex(resourceName, recordId) {
-    try {
-      const indexId = `${resourceName}:${recordId}`;
-      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
-      if (this.verbose && ok) {
-        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
-      }
-      if (!ok && err?.code !== "NoSuchKey") {
-        throw err;
-      }
-    } catch (error) {
-      console.error(`[TTLPlugin] Error removing from index:`, error);
-    }
-  }
-  /**
-   * Start interval-based cleanup for each granularity
-   */
-  _startIntervals() {
-    const byGranularity = {
-      minute: [],
-      hour: [],
-      day: [],
-      week: []
-    };
-    for (const [name, config] of Object.entries(this.resources)) {
-      byGranularity[config.granularity].push({ name, config });
-    }
-    for (const [granularity, resources] of Object.entries(byGranularity)) {
-      if (resources.length === 0) continue;
-      const granularityConfig = GRANULARITIES[granularity];
-      const handle = setInterval(
-        () => this._cleanupGranularity(granularity, resources),
-        granularityConfig.interval
-      );
-      this.intervals.push(handle);
-      if (this.verbose) {
-        console.log(
-          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) for ${resources.length} resources`
-        );
-      }
-    }
-    this.isRunning = true;
-  }
-  /**
-   * Stop all intervals
-   */
-  _stopIntervals() {
-    for (const handle of this.intervals) {
-      clearInterval(handle);
-    }
-    this.intervals = [];
-    this.isRunning = false;
-    if (this.verbose) {
-      console.log("[TTLPlugin] Stopped all intervals");
-    }
-  }
-  /**
-   * Cleanup expired records for a specific granularity
-   */
-  async _cleanupGranularity(granularity, resources) {
-    const startTime = Date.now();
-    this.stats.totalScans++;
-    try {
-      const granularityConfig = GRANULARITIES[granularity];
-      const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
-      if (this.verbose) {
-        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
-      }
-      for (const cohort of cohorts) {
-        const expired = await this.expirationIndex.listPartition({
-          partition: "byExpiresAtCohort",
-          partitionValues: { expiresAtCohort: cohort }
-        });
-        const resourceNames = new Set(resources.map((r) => r.name));
-        const filtered = expired.filter((e) => resourceNames.has(e.resourceName));
-        if (this.verbose && filtered.length > 0) {
-          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
-        }
-        for (let i = 0; i < filtered.length; i += this.batchSize) {
-          const batch = filtered.slice(i, i + this.batchSize);
-          for (const entry of batch) {
-            const config = this.resources[entry.resourceName];
-            await this._processExpiredEntry(entry, config);
-          }
-        }
-      }
-      this.stats.lastScanAt = (/* @__PURE__ */ new Date()).toISOString();
-      this.stats.lastScanDuration = Date.now() - startTime;
-      this.emit("plg:ttl:scan-completed", {
-        granularity,
-        duration: this.stats.lastScanDuration,
-        cohorts
-      });
-    } catch (error) {
-      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
-      this.stats.totalErrors++;
-      this.emit("plg:ttl:cleanup-error", { granularity, error });
-    }
-  }
-  /**
-   * Process a single expired index entry
-   */
-  async _processExpiredEntry(entry, config) {
-    try {
-      if (!this.database.resources[entry.resourceName]) {
-        if (this.verbose) {
-          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
-        }
-        return;
-      }
-      const resource = this.database.resources[entry.resourceName];
-      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
-      if (!ok || !record) {
-        await this.expirationIndex.delete(entry.id);
-        return;
-      }
-      if (entry.expiresAtTimestamp && Date.now() < entry.expiresAtTimestamp) {
-        return;
-      }
-      switch (config.onExpire) {
-        case "soft-delete":
-          await this._softDelete(resource, record, config);
-          this.stats.totalSoftDeleted++;
-          break;
-        case "hard-delete":
-          await this._hardDelete(resource, record);
-          this.stats.totalDeleted++;
-          break;
-        case "archive":
-          await this._archive(resource, record, config);
-          this.stats.totalArchived++;
-          this.stats.totalDeleted++;
-          break;
-        case "callback":
-          const shouldDelete = await config.callback(record, resource);
-          this.stats.totalCallbacks++;
-          if (shouldDelete) {
-            await this._hardDelete(resource, record);
-            this.stats.totalDeleted++;
-          }
-          break;
-      }
-      await this.expirationIndex.delete(entry.id);
-      this.stats.totalExpired++;
-      this.emit("plg:ttl:record-expired", { resource: entry.resourceName, record });
-    } catch (error) {
-      console.error(`[TTLPlugin] Error processing expired entry:`, error);
-      this.stats.totalErrors++;
-    }
-  }
-  /**
-   * Soft delete: Mark record as deleted
-   */
-  async _softDelete(resource, record, config) {
-    const deleteField = config.deleteField || "deletedat";
-    const updates = {
-      [deleteField]: (/* @__PURE__ */ new Date()).toISOString(),
-      isdeleted: "true"
-      // Add isdeleted field for partition compatibility
-    };
-    await resource.update(record.id, updates);
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
-    }
-  }
-  /**
-   * Hard delete: Remove record from S3
-   */
-  async _hardDelete(resource, record) {
-    await resource.delete(record.id);
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
-    }
-  }
-  /**
-   * Archive: Copy to another resource then delete
-   */
-  async _archive(resource, record, config) {
-    if (!this.database.resources[config.archiveResource]) {
-      throw new Error(`Archive resource "${config.archiveResource}" not found`);
-    }
-    const archiveResource = this.database.resources[config.archiveResource];
-    const archiveData = {};
-    for (const [key, value] of Object.entries(record)) {
-      if (!key.startsWith("_")) {
-        archiveData[key] = value;
-      }
-    }
-    archiveData.archivedAt = (/* @__PURE__ */ new Date()).toISOString();
-    archiveData.archivedFrom = resource.name;
-    archiveData.originalId = record.id;
-    if (!config.keepOriginalId) {
-      delete archiveData.id;
-    }
-    await archiveResource.insert(archiveData);
-    await resource.delete(record.id);
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
-    }
-  }
-  /**
-   * Manual cleanup of a specific resource
-   */
-  async cleanupResource(resourceName) {
-    const config = this.resources[resourceName];
-    if (!config) {
-      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
-    }
-    const granularity = config.granularity;
-    await this._cleanupGranularity(granularity, [{ name: resourceName, config }]);
-    return {
-      resource: resourceName,
-      granularity
-    };
-  }
-  /**
-   * Manual cleanup of all resources
-   */
-  async runCleanup() {
-    const byGranularity = {
-      minute: [],
-      hour: [],
-      day: [],
-      week: []
-    };
-    for (const [name, config] of Object.entries(this.resources)) {
-      byGranularity[config.granularity].push({ name, config });
-    }
-    for (const [granularity, resources] of Object.entries(byGranularity)) {
-      if (resources.length > 0) {
-        await this._cleanupGranularity(granularity, resources);
-      }
-    }
-  }
-  /**
-   * Get plugin statistics
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      resources: Object.keys(this.resources).length,
-      isRunning: this.isRunning,
-      intervals: this.intervals.length
-    };
-  }
-  /**
-   * Uninstall the plugin
-   */
-  async uninstall() {
-    this._stopIntervals();
-    await super.uninstall();
-    if (this.verbose) {
-      console.log("[TTLPlugin] Uninstalled");
-    }
-  }
-}
-
-class FailbanPlugin extends Plugin {
+class FailbanManager {
   constructor(options = {}) {
-    super("FailbanPlugin", "1.0.0");
     this.options = {
       enabled: options.enabled !== false,
+      database: options.database,
       maxViolations: options.maxViolations || 3,
-      // Ban after 3 violations
       violationWindow: options.violationWindow || 36e5,
-      // 1 hour window
       banDuration: options.banDuration || 864e5,
-      // 24 hour ban
       whitelist: options.whitelist || ["127.0.0.1", "::1"],
-      // Never ban
       blacklist: options.blacklist || [],
-      // Always ban
       persistViolations: options.persistViolations !== false,
-      // Track violations in DB
       verbose: options.verbose || false,
       geo: {
         enabled: options.geo?.enabled || false,
         databasePath: options.geo?.databasePath || null,
         allowedCountries: options.geo?.allowedCountries || [],
-        // ISO 3166-1 alpha-2
         blockedCountries: options.geo?.blockedCountries || [],
-        // ISO 3166-1 alpha-2
         blockUnknown: options.geo?.blockUnknown || false,
-        // Block unknown countries
         cacheResults: options.geo?.cacheResults !== false
-        // Cache GeoIP lookups
-      },
-      ...options
+      }
     };
+    this.database = options.database;
     this.bansResource = null;
     this.violationsResource = null;
     this.memoryCache = /* @__PURE__ */ new Map();
     this.geoCache = /* @__PURE__ */ new Map();
     this.geoReader = null;
+    this.cleanupTimer = null;
   }
   /**
-   * Initialize plugin
+   * Initialize failban manager
    */
-  async initialize(database) {
-    await super.initialize(database);
+  async initialize() {
     if (!this.options.enabled) {
       if (this.options.verbose) {
-        console.log("[FailbanPlugin] Disabled, skipping initialization");
+        console.log("[Failban] Disabled, skipping initialization");
       }
       return;
+    }
+    if (!this.database) {
+      throw new Error("[Failban] Database instance is required");
     }
     if (this.options.geo.enabled) {
       await this._initializeGeoIP();
@@ -7950,16 +7407,16 @@ class FailbanPlugin extends Plugin {
     await this._loadBansIntoCache();
     this._setupCleanupTimer();
     if (this.options.verbose) {
-      console.log("[FailbanPlugin] Initialized");
-      console.log(`[FailbanPlugin] Max violations: ${this.options.maxViolations}`);
-      console.log(`[FailbanPlugin] Violation window: ${this.options.violationWindow}ms`);
-      console.log(`[FailbanPlugin] Ban duration: ${this.options.banDuration}ms`);
-      console.log(`[FailbanPlugin] Whitelist: ${this.options.whitelist.join(", ")}`);
+      console.log("[Failban] Initialized");
+      console.log(`[Failban] Max violations: ${this.options.maxViolations}`);
+      console.log(`[Failban] Violation window: ${this.options.violationWindow}ms`);
+      console.log(`[Failban] Ban duration: ${this.options.banDuration}ms`);
+      console.log(`[Failban] Whitelist: ${this.options.whitelist.join(", ")}`);
       if (this.options.geo.enabled) {
-        console.log(`[FailbanPlugin] GeoIP enabled`);
-        console.log(`[FailbanPlugin] Allowed countries: ${this.options.geo.allowedCountries.join(", ") || "none"}`);
-        console.log(`[FailbanPlugin] Blocked countries: ${this.options.geo.blockedCountries.join(", ") || "none"}`);
-        console.log(`[FailbanPlugin] Block unknown: ${this.options.geo.blockUnknown}`);
+        console.log(`[Failban] GeoIP enabled`);
+        console.log(`[Failban] Allowed countries: ${this.options.geo.allowedCountries.join(", ") || "none"}`);
+        console.log(`[Failban] Blocked countries: ${this.options.geo.blockedCountries.join(", ") || "none"}`);
+        console.log(`[Failban] Block unknown: ${this.options.geo.blockUnknown}`);
       }
     }
   }
@@ -7968,7 +7425,7 @@ class FailbanPlugin extends Plugin {
    * @private
    */
   async _createBansResource() {
-    const resourceName = "_failban_bans";
+    const resourceName = "_api_failban_bans";
     try {
       return await this.database.getResource(resourceName);
     } catch (err) {
@@ -8002,10 +7459,10 @@ class FailbanPlugin extends Plugin {
           field: "expiresAt"
         };
         if (this.options.verbose) {
-          console.log("[FailbanPlugin] TTL configured for bans resource");
+          console.log("[Failban] TTL configured for bans resource");
         }
       } else {
-        console.warn("[FailbanPlugin] TTLPlugin not found - bans will not auto-expire from DB");
+        console.warn("[Failban] TTLPlugin not found - bans will not auto-expire from DB");
       }
       return resource;
     }
@@ -8015,7 +7472,7 @@ class FailbanPlugin extends Plugin {
    * @private
    */
   async _createViolationsResource() {
-    const resourceName = "_failban_violations";
+    const resourceName = "_api_failban_violations";
     try {
       return await this.database.getResource(resourceName);
     } catch (err) {
@@ -8025,7 +7482,6 @@ class FailbanPlugin extends Plugin {
           ip: "string|required",
           timestamp: "string|required",
           type: "string",
-          // 'rate_limit', 'auth_failure', etc.
           path: "string",
           userAgent: "string"
         },
@@ -8058,10 +7514,10 @@ class FailbanPlugin extends Plugin {
         }
       }
       if (this.options.verbose) {
-        console.log(`[FailbanPlugin] Loaded ${this.memoryCache.size} active bans into cache`);
+        console.log(`[Failban] Loaded ${this.memoryCache.size} active bans into cache`);
       }
     } catch (err) {
-      console.error("[FailbanPlugin] Failed to load bans:", err.message);
+      console.error("[Failban] Failed to load bans:", err.message);
     }
   }
   /**
@@ -8084,7 +7540,7 @@ class FailbanPlugin extends Plugin {
         }
       }
       if (this.options.verbose && cleaned > 0) {
-        console.log(`[FailbanPlugin] Cleaned ${cleaned} expired bans from cache`);
+        console.log(`[Failban] Cleaned ${cleaned} expired bans from cache`);
       }
     }, 6e4);
   }
@@ -8094,29 +7550,27 @@ class FailbanPlugin extends Plugin {
    */
   async _initializeGeoIP() {
     if (!this.options.geo.databasePath) {
-      console.warn("[FailbanPlugin] GeoIP enabled but no databasePath provided");
+      console.warn("[Failban] GeoIP enabled but no databasePath provided");
       return;
     }
     try {
       const Reader = await requirePluginDependency(
         "@maxmind/geoip2-node",
-        "FailbanPlugin",
+        "ApiPlugin (Failban)",
         "GeoIP country blocking"
       );
       this.geoReader = await Reader.open(this.options.geo.databasePath);
       if (this.options.verbose) {
-        console.log(`[FailbanPlugin] GeoIP database loaded from ${this.options.geo.databasePath}`);
+        console.log(`[Failban] GeoIP database loaded from ${this.options.geo.databasePath}`);
       }
     } catch (err) {
-      console.error("[FailbanPlugin] Failed to initialize GeoIP:", err.message);
-      console.warn("[FailbanPlugin] GeoIP features will be disabled");
+      console.error("[Failban] Failed to initialize GeoIP:", err.message);
+      console.warn("[Failban] GeoIP features will be disabled");
       this.options.geo.enabled = false;
     }
   }
   /**
    * Get country code for IP address
-   * @param {string} ip - IP address
-   * @returns {string|null} ISO 3166-1 alpha-2 country code or null
    */
   getCountryCode(ip) {
     if (!this.options.geo.enabled || !this.geoReader) {
@@ -8138,15 +7592,13 @@ class FailbanPlugin extends Plugin {
       return countryCode;
     } catch (err) {
       if (this.options.verbose) {
-        console.log(`[FailbanPlugin] GeoIP lookup failed for ${ip}: ${err.message}`);
+        console.log(`[Failban] GeoIP lookup failed for ${ip}: ${err.message}`);
       }
       return null;
     }
   }
   /**
    * Check if country is blocked
-   * @param {string} countryCode - ISO 3166-1 alpha-2 country code
-   * @returns {boolean}
    */
   isCountryBlocked(countryCode) {
     if (!this.options.geo.enabled) {
@@ -8168,8 +7620,6 @@ class FailbanPlugin extends Plugin {
   }
   /**
    * Check if IP is blocked by country restrictions
-   * @param {string} ip - IP address
-   * @returns {Object|null} Block info or null if not blocked
    */
   checkCountryBlock(ip) {
     if (!this.options.geo.enabled) {
@@ -8196,7 +7646,7 @@ class FailbanPlugin extends Plugin {
     return this.options.whitelist.includes(ip);
   }
   /**
-   * Check if IP is in blacklist (permanently banned)
+   * Check if IP is in blacklist
    */
   isBlacklisted(ip) {
     return this.options.blacklist.includes(ip);
@@ -8266,7 +7716,7 @@ class FailbanPlugin extends Plugin {
           userAgent: metadata.userAgent
         });
       } catch (err) {
-        console.error("[FailbanPlugin] Failed to persist violation:", err.message);
+        console.error("[Failban] Failed to persist violation:", err.message);
       }
     }
     await this._checkAndBan(ip, type, metadata);
@@ -8287,7 +7737,7 @@ class FailbanPlugin extends Plugin {
         });
         violationCount = violations.length;
       } catch (err) {
-        console.error("[FailbanPlugin] Failed to count violations:", err.message);
+        console.error("[Failban] Failed to count violations:", err.message);
         return;
       }
     }
@@ -8301,7 +7751,7 @@ class FailbanPlugin extends Plugin {
   async ban(ip, reason, metadata = {}) {
     if (!this.options.enabled) return;
     if (this.isWhitelisted(ip)) {
-      console.warn(`[FailbanPlugin] Cannot ban whitelisted IP: ${ip}`);
+      console.warn(`[Failban] Cannot ban whitelisted IP: ${ip}`);
       return;
     }
     const now = /* @__PURE__ */ new Date();
@@ -8317,9 +7767,7 @@ class FailbanPlugin extends Plugin {
         userAgent: metadata.userAgent,
         path: metadata.path,
         lastViolation: now.toISOString()
-      },
-      createdBy: "FailbanPlugin"
-      // Mark as plugin storage
+      }
     };
     try {
       await this.bansResource.insert(banRecord);
@@ -8335,14 +7783,14 @@ class FailbanPlugin extends Plugin {
         duration: this.options.banDuration
       });
       if (this.options.verbose) {
-        console.log(`[FailbanPlugin] Banned ${ip} for ${reason} until ${expiresAt.toISOString()}`);
+        console.log(`[Failban] Banned ${ip} for ${reason} until ${expiresAt.toISOString()}`);
       }
     } catch (err) {
-      console.error("[FailbanPlugin] Failed to ban IP:", err.message);
+      console.error("[Failban] Failed to ban IP:", err.message);
     }
   }
   /**
-   * Unban an IP (manual unban)
+   * Unban an IP
    */
   async unban(ip) {
     if (!this.options.enabled) return;
@@ -8355,11 +7803,11 @@ class FailbanPlugin extends Plugin {
         unbannedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
       if (this.options.verbose) {
-        console.log(`[FailbanPlugin] Unbanned ${ip}`);
+        console.log(`[Failban] Unbanned ${ip}`);
       }
       return true;
     } catch (err) {
-      console.error("[FailbanPlugin] Failed to unban IP:", err.message);
+      console.error("[Failban] Failed to unban IP:", err.message);
       return false;
     }
   }
@@ -8373,7 +7821,7 @@ class FailbanPlugin extends Plugin {
       const now = Date.now();
       return bans.filter((ban) => new Date(ban.expiresAt).getTime() > now);
     } catch (err) {
-      console.error("[FailbanPlugin] Failed to list bans:", err.message);
+      console.error("[Failban] Failed to list bans:", err.message);
       return [];
     }
   }
@@ -8388,7 +7836,7 @@ class FailbanPlugin extends Plugin {
         const violations = await this.violationsResource.list({ limit: 1e4 });
         totalViolations = violations.length;
       } catch (err) {
-        console.error("[FailbanPlugin] Failed to count violations:", err.message);
+        console.error("[Failban] Failed to count violations:", err.message);
       }
     }
     return {
@@ -8398,6 +7846,12 @@ class FailbanPlugin extends Plugin {
       totalViolations,
       whitelistedIPs: this.options.whitelist.length,
       blacklistedIPs: this.options.blacklist.length,
+      geo: {
+        enabled: this.options.geo.enabled,
+        allowedCountries: this.options.geo.allowedCountries.length,
+        blockedCountries: this.options.geo.blockedCountries.length,
+        blockUnknown: this.options.geo.blockUnknown
+      },
       config: {
         maxViolations: this.options.maxViolations,
         violationWindow: this.options.violationWindow,
@@ -8406,7 +7860,7 @@ class FailbanPlugin extends Plugin {
     };
   }
   /**
-   * Cleanup on plugin removal
+   * Cleanup
    */
   async cleanup() {
     if (this.cleanupTimer) {
@@ -8419,7 +7873,7 @@ class FailbanPlugin extends Plugin {
       this.geoReader = null;
     }
     if (this.options.verbose) {
-      console.log("[FailbanPlugin] Cleaned up");
+      console.log("[Failban] Cleaned up");
     }
   }
 }
@@ -8848,7 +8302,8 @@ class ApiServer {
     }
     this.failban = null;
     if (this.options.failban?.enabled) {
-      this.failban = new FailbanPlugin({
+      this.failban = new FailbanManager({
+        database: this.options.database,
         enabled: true,
         maxViolations: this.options.failban.maxViolations || 3,
         violationWindow: this.options.failban.violationWindow || 36e5,
@@ -8856,11 +8311,9 @@ class ApiServer {
         whitelist: this.options.failban.whitelist || ["127.0.0.1", "::1"],
         blacklist: this.options.failban.blacklist || [],
         persistViolations: this.options.failban.persistViolations !== false,
-        verbose: this.options.failban.verbose || this.options.verbose
+        verbose: this.options.failban.verbose || this.options.verbose,
+        geo: this.options.failban.geo || {}
       });
-      if (this.options.database) {
-        this.options.database.use(this.failban);
-      }
     }
     this.relationsPlugin = this.options.database?.plugins?.relation || this.options.database?.plugins?.RelationPlugin || null;
   }
@@ -9825,6 +9278,9 @@ class ApiServer {
       this.swaggerUI = swaggerUI;
       this.cors = cors;
       this.app = new Hono();
+      if (this.failban) {
+        await this.failban.initialize();
+      }
       this._setupRoutes();
       this.initialized = true;
     }
@@ -37124,6 +36580,1687 @@ class AzureInventoryDriver extends BaseCloudDriver {
   }
 }
 
+class LinodeInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "linode" });
+    this._apiToken = null;
+    this._accountId = this.config?.accountId || "linode";
+    this._services = this.config?.services || [
+      "linodes",
+      "kubernetes",
+      "volumes",
+      "nodebalancers",
+      "firewalls",
+      "vlans",
+      "domains",
+      "images",
+      "objectstorage"
+    ];
+    this._regions = this.config?.regions || null;
+  }
+  /**
+   * Initialize Linode API client.
+   */
+  async _initializeClient() {
+    if (this._apiToken) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.token || credentials.apiToken || process.env.LINODE_TOKEN;
+    if (!this._apiToken) {
+      throw new Error("Linode API token is required. Provide via credentials.token or LINODE_TOKEN env var.");
+    }
+    const { setToken } = await import('@linode/api-v4');
+    setToken(this._apiToken);
+    this.logger("info", "Linode API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      linodes: () => this._collectLinodes(),
+      kubernetes: () => this._collectKubernetes(),
+      volumes: () => this._collectVolumes(),
+      nodebalancers: () => this._collectNodeBalancers(),
+      firewalls: () => this._collectFirewalls(),
+      vlans: () => this._collectVLANs(),
+      domains: () => this._collectDomains(),
+      images: () => this._collectImages(),
+      objectstorage: () => this._collectObjectStorage()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Linode service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Linode ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Linode service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Linodes (compute instances).
+   */
+  async *_collectLinodes() {
+    try {
+      const { getLinodes } = await import('@linode/api-v4/lib/linodes');
+      const response = await getLinodes();
+      const linodes = response.data || [];
+      for (const linode of linodes) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: linode.region,
+          service: "linodes",
+          resourceType: "linode.compute.instance",
+          resourceId: linode.id?.toString(),
+          name: linode.label,
+          tags: linode.tags || [],
+          configuration: this._sanitize(linode)
+        };
+      }
+      this.logger("info", `Collected ${linodes.length} Linode instances`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode instances", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Kubernetes (LKE) clusters.
+   */
+  async *_collectKubernetes() {
+    try {
+      const { getKubernetesClusters, getKubernetesClusterPools } = await import('@linode/api-v4/lib/kubernetes');
+      const response = await getKubernetesClusters();
+      const clusters = response.data || [];
+      for (const cluster of clusters) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: cluster.region,
+          service: "kubernetes",
+          resourceType: "linode.kubernetes.cluster",
+          resourceId: cluster.id?.toString(),
+          name: cluster.label,
+          tags: cluster.tags || [],
+          configuration: this._sanitize(cluster)
+        };
+        try {
+          const poolsResponse = await getKubernetesClusterPools(cluster.id);
+          const pools = poolsResponse.data || [];
+          for (const pool of pools) {
+            yield {
+              provider: "linode",
+              accountId: this._accountId,
+              region: cluster.region,
+              service: "kubernetes",
+              resourceType: "linode.kubernetes.nodepool",
+              resourceId: pool.id?.toString(),
+              name: `${cluster.label}-${pool.type}`,
+              tags: cluster.tags || [],
+              metadata: { clusterId: cluster.id, clusterLabel: cluster.label },
+              configuration: this._sanitize(pool)
+            };
+          }
+        } catch (poolErr) {
+          this.logger("warn", `Failed to collect node pools for cluster ${cluster.id}`, {
+            clusterId: cluster.id,
+            error: poolErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${clusters.length} Linode Kubernetes clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode Kubernetes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Block Storage volumes.
+   */
+  async *_collectVolumes() {
+    try {
+      const { getVolumes } = await import('@linode/api-v4/lib/volumes');
+      const response = await getVolumes();
+      const volumes = response.data || [];
+      for (const volume of volumes) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: volume.region,
+          service: "volumes",
+          resourceType: "linode.volume",
+          resourceId: volume.id?.toString(),
+          name: volume.label,
+          tags: volume.tags || [],
+          configuration: this._sanitize(volume)
+        };
+      }
+      this.logger("info", `Collected ${volumes.length} Linode volumes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode volumes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect NodeBalancers (load balancers).
+   */
+  async *_collectNodeBalancers() {
+    try {
+      const { getNodeBalancers } = await import('@linode/api-v4/lib/nodebalancers');
+      const response = await getNodeBalancers();
+      const nodebalancers = response.data || [];
+      for (const nb of nodebalancers) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: nb.region,
+          service: "nodebalancers",
+          resourceType: "linode.nodebalancer",
+          resourceId: nb.id?.toString(),
+          name: nb.label,
+          tags: nb.tags || [],
+          configuration: this._sanitize(nb)
+        };
+      }
+      this.logger("info", `Collected ${nodebalancers.length} Linode NodeBalancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode NodeBalancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Firewalls.
+   */
+  async *_collectFirewalls() {
+    try {
+      const { getFirewalls } = await import('@linode/api-v4/lib/firewalls');
+      const response = await getFirewalls();
+      const firewalls = response.data || [];
+      for (const firewall of firewalls) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: null,
+          // Firewalls are global
+          service: "firewalls",
+          resourceType: "linode.firewall",
+          resourceId: firewall.id?.toString(),
+          name: firewall.label,
+          tags: firewall.tags || [],
+          configuration: this._sanitize(firewall)
+        };
+      }
+      this.logger("info", `Collected ${firewalls.length} Linode firewalls`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode firewalls", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VLANs.
+   */
+  async *_collectVLANs() {
+    try {
+      const { getVLANs } = await import('@linode/api-v4/lib/vlans');
+      const response = await getVLANs();
+      const vlans = response.data || [];
+      for (const vlan of vlans) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: vlan.region,
+          service: "vlans",
+          resourceType: "linode.vlan",
+          resourceId: vlan.label,
+          // VLANs use label as ID
+          name: vlan.label,
+          tags: [],
+          configuration: this._sanitize(vlan)
+        };
+      }
+      this.logger("info", `Collected ${vlans.length} Linode VLANs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode VLANs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS domains and records.
+   */
+  async *_collectDomains() {
+    try {
+      const { getDomains, getDomainRecords } = await import('@linode/api-v4/lib/domains');
+      const response = await getDomains();
+      const domains = response.data || [];
+      for (const domain of domains) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "domains",
+          resourceType: "linode.dns.domain",
+          resourceId: domain.id?.toString(),
+          name: domain.domain,
+          tags: domain.tags || [],
+          configuration: this._sanitize(domain)
+        };
+        try {
+          const recordsResponse = await getDomainRecords(domain.id);
+          const records = recordsResponse.data || [];
+          for (const record of records) {
+            yield {
+              provider: "linode",
+              accountId: this._accountId,
+              region: null,
+              service: "domains",
+              resourceType: "linode.dns.record",
+              resourceId: `${domain.id}/${record.id}`,
+              name: `${record.name}.${domain.domain}`,
+              tags: [],
+              metadata: { domainId: domain.id, domain: domain.domain },
+              configuration: this._sanitize(record)
+            };
+          }
+        } catch (recordErr) {
+          this.logger("warn", `Failed to collect DNS records for domain ${domain.domain}`, {
+            domainId: domain.id,
+            error: recordErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${domains.length} Linode DNS domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode domains", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect custom Images.
+   */
+  async *_collectImages() {
+    try {
+      const { getImages } = await import('@linode/api-v4/lib/images');
+      const response = await getImages();
+      const images = response.data || [];
+      const customImages = images.filter((img) => img.is_public === false);
+      for (const image of customImages) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: image.region || null,
+          service: "images",
+          resourceType: "linode.image",
+          resourceId: image.id,
+          name: image.label,
+          tags: [],
+          configuration: this._sanitize(image)
+        };
+      }
+      this.logger("info", `Collected ${customImages.length} custom Linode images`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode images", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Object Storage buckets.
+   */
+  async *_collectObjectStorage() {
+    try {
+      const { getObjectStorageBuckets } = await import('@linode/api-v4/lib/object-storage');
+      const response = await getObjectStorageBuckets();
+      const buckets = response.data || [];
+      for (const bucket of buckets) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: bucket.region,
+          service: "objectstorage",
+          resourceType: "linode.objectstorage.bucket",
+          resourceId: `${bucket.cluster}/${bucket.label}`,
+          name: bucket.label,
+          tags: [],
+          metadata: { cluster: bucket.cluster },
+          configuration: this._sanitize(bucket)
+        };
+      }
+      this.logger("info", `Collected ${buckets.length} Linode object storage buckets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode object storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "root_pass",
+      "password",
+      "token",
+      "secret",
+      "api_key",
+      "private_key",
+      "public_key"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class HetznerInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "hetzner" });
+    this._apiToken = null;
+    this._client = null;
+    this._accountId = this.config?.accountId || "hetzner";
+    this._services = this.config?.services || [
+      "servers",
+      "volumes",
+      "networks",
+      "loadbalancers",
+      "firewalls",
+      "floatingips",
+      "sshkeys",
+      "images",
+      "certificates"
+    ];
+  }
+  /**
+   * Initialize Hetzner Cloud API client.
+   */
+  async _initializeClient() {
+    if (this._client) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.token || credentials.apiToken || process.env.HETZNER_TOKEN;
+    if (!this._apiToken) {
+      throw new Error("Hetzner API token is required. Provide via credentials.token or HETZNER_TOKEN env var.");
+    }
+    const hcloud = await import('hcloud-js');
+    this._client = new hcloud.Client(this._apiToken);
+    this.logger("info", "Hetzner Cloud API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      servers: () => this._collectServers(),
+      volumes: () => this._collectVolumes(),
+      networks: () => this._collectNetworks(),
+      loadbalancers: () => this._collectLoadBalancers(),
+      firewalls: () => this._collectFirewalls(),
+      floatingips: () => this._collectFloatingIPs(),
+      sshkeys: () => this._collectSSHKeys(),
+      images: () => this._collectImages(),
+      certificates: () => this._collectCertificates()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Hetzner service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Hetzner ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Hetzner service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Servers (VPS).
+   */
+  async *_collectServers() {
+    try {
+      const response = await this._client.servers.list();
+      const servers = response.servers || [];
+      for (const server of servers) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: server.datacenter?.location?.name || null,
+          service: "servers",
+          resourceType: "hetzner.server",
+          resourceId: server.id?.toString(),
+          name: server.name,
+          tags: this._extractLabels(server.labels),
+          configuration: this._sanitize(server)
+        };
+      }
+      this.logger("info", `Collected ${servers.length} Hetzner servers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner servers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Volumes (block storage).
+   */
+  async *_collectVolumes() {
+    try {
+      const response = await this._client.volumes.list();
+      const volumes = response.volumes || [];
+      for (const volume of volumes) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: volume.location?.name || null,
+          service: "volumes",
+          resourceType: "hetzner.volume",
+          resourceId: volume.id?.toString(),
+          name: volume.name,
+          tags: this._extractLabels(volume.labels),
+          configuration: this._sanitize(volume)
+        };
+      }
+      this.logger("info", `Collected ${volumes.length} Hetzner volumes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner volumes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Networks (private networks/VPC).
+   */
+  async *_collectNetworks() {
+    try {
+      const response = await this._client.networks.list();
+      const networks = response.networks || [];
+      for (const network of networks) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Networks span multiple locations
+          service: "networks",
+          resourceType: "hetzner.network",
+          resourceId: network.id?.toString(),
+          name: network.name,
+          tags: this._extractLabels(network.labels),
+          configuration: this._sanitize(network)
+        };
+        if (network.subnets && Array.isArray(network.subnets)) {
+          for (const subnet of network.subnets) {
+            yield {
+              provider: "hetzner",
+              accountId: this._accountId,
+              region: subnet.network_zone,
+              service: "networks",
+              resourceType: "hetzner.network.subnet",
+              resourceId: `${network.id}/subnet/${subnet.ip_range}`,
+              name: `${network.name}-${subnet.type}`,
+              tags: {},
+              metadata: { networkId: network.id, networkName: network.name },
+              configuration: this._sanitize(subnet)
+            };
+          }
+        }
+      }
+      this.logger("info", `Collected ${networks.length} Hetzner networks`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner networks", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const response = await this._client.loadBalancers.list();
+      const loadBalancers = response.load_balancers || [];
+      for (const lb of loadBalancers) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: lb.location?.name || null,
+          service: "loadbalancers",
+          resourceType: "hetzner.loadbalancer",
+          resourceId: lb.id?.toString(),
+          name: lb.name,
+          tags: this._extractLabels(lb.labels),
+          configuration: this._sanitize(lb)
+        };
+      }
+      this.logger("info", `Collected ${loadBalancers.length} Hetzner load balancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Firewalls.
+   */
+  async *_collectFirewalls() {
+    try {
+      const response = await this._client.firewalls.list();
+      const firewalls = response.firewalls || [];
+      for (const firewall of firewalls) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Firewalls are global
+          service: "firewalls",
+          resourceType: "hetzner.firewall",
+          resourceId: firewall.id?.toString(),
+          name: firewall.name,
+          tags: this._extractLabels(firewall.labels),
+          configuration: this._sanitize(firewall)
+        };
+      }
+      this.logger("info", `Collected ${firewalls.length} Hetzner firewalls`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner firewalls", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Floating IPs.
+   */
+  async *_collectFloatingIPs() {
+    try {
+      const response = await this._client.floatingIPs.list();
+      const floatingIPs = response.floating_ips || [];
+      for (const fip of floatingIPs) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: fip.home_location?.name || null,
+          service: "floatingips",
+          resourceType: "hetzner.floatingip",
+          resourceId: fip.id?.toString(),
+          name: fip.name || fip.ip,
+          tags: this._extractLabels(fip.labels),
+          configuration: this._sanitize(fip)
+        };
+      }
+      this.logger("info", `Collected ${floatingIPs.length} Hetzner floating IPs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner floating IPs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSH Keys.
+   */
+  async *_collectSSHKeys() {
+    try {
+      const response = await this._client.sshKeys.list();
+      const sshKeys = response.ssh_keys || [];
+      for (const key of sshKeys) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // SSH keys are global
+          service: "sshkeys",
+          resourceType: "hetzner.sshkey",
+          resourceId: key.id?.toString(),
+          name: key.name,
+          tags: this._extractLabels(key.labels),
+          configuration: this._sanitize(key)
+        };
+      }
+      this.logger("info", `Collected ${sshKeys.length} Hetzner SSH keys`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner SSH keys", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect custom Images.
+   */
+  async *_collectImages() {
+    try {
+      const response = await this._client.images.list();
+      const images = response.images || [];
+      const customImages = images.filter((img) => img.type === "snapshot" || img.type === "backup");
+      for (const image of customImages) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Images are global
+          service: "images",
+          resourceType: "hetzner.image",
+          resourceId: image.id?.toString(),
+          name: image.description || image.name || image.id?.toString(),
+          tags: this._extractLabels(image.labels),
+          configuration: this._sanitize(image)
+        };
+      }
+      this.logger("info", `Collected ${customImages.length} custom Hetzner images`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner images", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSL Certificates.
+   */
+  async *_collectCertificates() {
+    try {
+      const response = await this._client.certificates.list();
+      const certificates = response.certificates || [];
+      for (const cert of certificates) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Certificates are global
+          service: "certificates",
+          resourceType: "hetzner.certificate",
+          resourceId: cert.id?.toString(),
+          name: cert.name,
+          tags: this._extractLabels(cert.labels),
+          configuration: this._sanitize(cert)
+        };
+      }
+      this.logger("info", `Collected ${certificates.length} Hetzner certificates`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner certificates", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Extract labels from Hetzner labels object.
+   */
+  _extractLabels(labels) {
+    if (!labels || typeof labels !== "object") return {};
+    return { ...labels };
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "root_password",
+      "password",
+      "token",
+      "secret",
+      "api_key",
+      "private_key",
+      "public_key",
+      "certificate",
+      "private_key"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class AlibabaInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "alibaba" });
+    this._accessKeyId = null;
+    this._accessKeySecret = null;
+    this._accountId = this.config?.accountId || "alibaba";
+    this._services = this.config?.services || [
+      "ecs",
+      "ack",
+      "oss",
+      "rds",
+      "redis",
+      "vpc",
+      "slb",
+      "eip",
+      "cdn",
+      "dns"
+    ];
+    this._regions = this.config?.regions || ["cn-hangzhou", "cn-shanghai", "cn-beijing"];
+  }
+  /**
+   * Initialize Alibaba Cloud credentials.
+   */
+  async _initializeCredentials() {
+    if (this._accessKeyId) return;
+    const credentials = this.credentials || {};
+    this._accessKeyId = credentials.accessKeyId || process.env.ALIBABA_CLOUD_ACCESS_KEY_ID;
+    this._accessKeySecret = credentials.accessKeySecret || process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET;
+    if (!this._accessKeyId || !this._accessKeySecret) {
+      throw new Error("Alibaba Cloud AccessKeyId and AccessKeySecret are required. Provide via credentials or env vars.");
+    }
+    this.logger("info", "Alibaba Cloud credentials initialized", {
+      accountId: this._accountId,
+      services: this._services.length,
+      regions: this._regions.length
+    });
+  }
+  /**
+   * Create RPC client for a specific service.
+   */
+  async _createRPCClient(endpoint, apiVersion) {
+    const RPCClient = await import('@alicloud/pop-core');
+    return new RPCClient.default({
+      accessKeyId: this._accessKeyId,
+      accessKeySecret: this._accessKeySecret,
+      endpoint,
+      apiVersion
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeCredentials();
+    const serviceCollectors = {
+      ecs: () => this._collectECS(),
+      ack: () => this._collectACK(),
+      oss: () => this._collectOSS(),
+      rds: () => this._collectRDS(),
+      redis: () => this._collectRedis(),
+      vpc: () => this._collectVPC(),
+      slb: () => this._collectSLB(),
+      eip: () => this._collectEIP(),
+      cdn: () => this._collectCDN(),
+      dns: () => this._collectDNS()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Alibaba Cloud service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Alibaba Cloud ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Alibaba Cloud service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect ECS instances.
+   */
+  async *_collectECS() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://ecs.${region}.aliyuncs.com`, "2014-05-26");
+        const params = {
+          RegionId: region,
+          PageSize: 100
+        };
+        const response = await client.request("DescribeInstances", params, { method: "POST" });
+        const instances = response.Instances?.Instance || [];
+        for (const instance of instances) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "ecs",
+            resourceType: "alibaba.ecs.instance",
+            resourceId: instance.InstanceId,
+            name: instance.InstanceName,
+            tags: this._extractTags(instance.Tags?.Tag),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} ECS instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud ECS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect ACK (Container Service for Kubernetes) clusters.
+   */
+  async *_collectACK() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://cs.${region}.aliyuncs.com`, "2015-12-15");
+        try {
+          const response = await client.request("DescribeClustersV1", {}, { method: "GET" });
+          const clusters = response.clusters || [];
+          for (const cluster of clusters) {
+            yield {
+              provider: "alibaba",
+              accountId: this._accountId,
+              region,
+              service: "ack",
+              resourceType: "alibaba.ack.cluster",
+              resourceId: cluster.cluster_id,
+              name: cluster.name,
+              tags: this._extractTags(cluster.tags),
+              configuration: this._sanitize(cluster)
+            };
+          }
+          this.logger("info", `Collected ${clusters.length} ACK clusters in ${region}`);
+        } catch (regionErr) {
+          this.logger("debug", `ACK not available in ${region}`, { region, error: regionErr.message });
+        }
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud ACK", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect OSS buckets.
+   */
+  async *_collectOSS() {
+    try {
+      const OSS = await import('ali-oss');
+      const ossClient = new OSS.default({
+        accessKeyId: this._accessKeyId,
+        accessKeySecret: this._accessKeySecret,
+        region: this._regions[0]
+        // Use first region as default
+      });
+      const response = await ossClient.listBuckets();
+      const buckets = response.buckets || [];
+      for (const bucket of buckets) {
+        yield {
+          provider: "alibaba",
+          accountId: this._accountId,
+          region: bucket.region,
+          service: "oss",
+          resourceType: "alibaba.oss.bucket",
+          resourceId: bucket.name,
+          name: bucket.name,
+          tags: {},
+          configuration: this._sanitize(bucket)
+        };
+      }
+      this.logger("info", `Collected ${buckets.length} OSS buckets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud OSS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect RDS instances.
+   */
+  async *_collectRDS() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://rds.${region}.aliyuncs.com`, "2014-08-15");
+        const params = {
+          RegionId: region,
+          PageSize: 100
+        };
+        const response = await client.request("DescribeDBInstances", params, { method: "POST" });
+        const instances = response.Items?.DBInstance || [];
+        for (const instance of instances) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "rds",
+            resourceType: "alibaba.rds.instance",
+            resourceId: instance.DBInstanceId,
+            name: instance.DBInstanceDescription || instance.DBInstanceId,
+            tags: this._extractTags(instance.Tags?.Tag),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} RDS instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud RDS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Redis instances.
+   */
+  async *_collectRedis() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://r-kvstore.${region}.aliyuncs.com`, "2015-01-01");
+        const params = {
+          RegionId: region,
+          PageSize: 100
+        };
+        const response = await client.request("DescribeInstances", params, { method: "POST" });
+        const instances = response.Instances?.KVStoreInstance || [];
+        for (const instance of instances) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "redis",
+            resourceType: "alibaba.redis.instance",
+            resourceId: instance.InstanceId,
+            name: instance.InstanceName,
+            tags: this._extractTags(instance.Tags?.Tag),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} Redis instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud Redis", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VPC resources.
+   */
+  async *_collectVPC() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://vpc.${region}.aliyuncs.com`, "2016-04-28");
+        const vpcParams = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const vpcResponse = await client.request("DescribeVpcs", vpcParams, { method: "POST" });
+        const vpcs = vpcResponse.Vpcs?.Vpc || [];
+        for (const vpc of vpcs) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "alibaba.vpc.network",
+            resourceId: vpc.VpcId,
+            name: vpc.VpcName,
+            tags: this._extractTags(vpc.Tags?.Tag),
+            configuration: this._sanitize(vpc)
+          };
+          try {
+            const vswitchParams = {
+              VpcId: vpc.VpcId,
+              PageSize: 50
+            };
+            const vswitchResponse = await client.request("DescribeVSwitches", vswitchParams, { method: "POST" });
+            const vswitches = vswitchResponse.VSwitches?.VSwitch || [];
+            for (const vswitch of vswitches) {
+              yield {
+                provider: "alibaba",
+                accountId: this._accountId,
+                region,
+                service: "vpc",
+                resourceType: "alibaba.vpc.vswitch",
+                resourceId: vswitch.VSwitchId,
+                name: vswitch.VSwitchName,
+                tags: this._extractTags(vswitch.Tags?.Tag),
+                metadata: { vpcId: vpc.VpcId, vpcName: vpc.VpcName },
+                configuration: this._sanitize(vswitch)
+              };
+            }
+          } catch (vswitchErr) {
+            this.logger("warn", `Failed to collect vSwitches for VPC ${vpc.VpcId}`, {
+              vpcId: vpc.VpcId,
+              error: vswitchErr.message
+            });
+          }
+        }
+        this.logger("info", `Collected ${vpcs.length} VPCs in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud VPC", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SLB (Server Load Balancer) instances.
+   */
+  async *_collectSLB() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://slb.${region}.aliyuncs.com`, "2014-05-15");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeLoadBalancers", params, { method: "POST" });
+        const loadBalancers = response.LoadBalancers?.LoadBalancer || [];
+        for (const lb of loadBalancers) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "slb",
+            resourceType: "alibaba.slb.loadbalancer",
+            resourceId: lb.LoadBalancerId,
+            name: lb.LoadBalancerName,
+            tags: this._extractTags(lb.Tags?.Tag),
+            configuration: this._sanitize(lb)
+          };
+        }
+        this.logger("info", `Collected ${loadBalancers.length} SLB instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud SLB", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect EIP (Elastic IP) addresses.
+   */
+  async *_collectEIP() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://vpc.${region}.aliyuncs.com`, "2016-04-28");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeEipAddresses", params, { method: "POST" });
+        const eips = response.EipAddresses?.EipAddress || [];
+        for (const eip of eips) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "eip",
+            resourceType: "alibaba.eip",
+            resourceId: eip.AllocationId,
+            name: eip.Name || eip.IpAddress,
+            tags: this._extractTags(eip.Tags?.Tag),
+            configuration: this._sanitize(eip)
+          };
+        }
+        this.logger("info", `Collected ${eips.length} EIPs in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud EIP", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect CDN domains.
+   */
+  async *_collectCDN() {
+    try {
+      const client = await this._createRPCClient("https://cdn.aliyuncs.com", "2018-05-10");
+      const params = {
+        PageSize: 50
+      };
+      const response = await client.request("DescribeUserDomains", params, { method: "POST" });
+      const domains = response.Domains?.PageData || [];
+      for (const domain of domains) {
+        yield {
+          provider: "alibaba",
+          accountId: this._accountId,
+          region: null,
+          // CDN is global
+          service: "cdn",
+          resourceType: "alibaba.cdn.domain",
+          resourceId: domain.DomainName,
+          name: domain.DomainName,
+          tags: {},
+          configuration: this._sanitize(domain)
+        };
+      }
+      this.logger("info", `Collected ${domains.length} CDN domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud CDN", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS domains.
+   */
+  async *_collectDNS() {
+    try {
+      const client = await this._createRPCClient("https://alidns.aliyuncs.com", "2015-01-09");
+      const params = {
+        PageSize: 100
+      };
+      const response = await client.request("DescribeDomains", params, { method: "POST" });
+      const domains = response.Domains?.Domain || [];
+      for (const domain of domains) {
+        yield {
+          provider: "alibaba",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "dns",
+          resourceType: "alibaba.dns.domain",
+          resourceId: domain.DomainId,
+          name: domain.DomainName,
+          tags: this._extractTags(domain.Tags?.Tag),
+          configuration: this._sanitize(domain)
+        };
+      }
+      this.logger("info", `Collected ${domains.length} DNS domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud DNS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Extract tags from Alibaba Cloud tag format.
+   */
+  _extractTags(tags) {
+    if (!tags || !Array.isArray(tags)) return {};
+    const tagMap = {};
+    for (const tag of tags) {
+      if (tag.TagKey) {
+        tagMap[tag.TagKey] = tag.TagValue || "";
+      }
+    }
+    return tagMap;
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "Password",
+      "MasterUserPassword",
+      "AccessKeySecret",
+      "SecretAccessKey",
+      "PrivateKey",
+      "Certificate"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class CloudflareInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "cloudflare" });
+    this._apiToken = null;
+    this._accountId = null;
+    this._client = null;
+    this._services = this.config?.services || [
+      "workers",
+      "r2",
+      "pages",
+      "d1",
+      "kv",
+      "durable-objects",
+      "zones",
+      "loadbalancers"
+    ];
+  }
+  /**
+   * Initialize Cloudflare API client.
+   */
+  async _initializeClient() {
+    if (this._client) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.apiToken || credentials.token || process.env.CLOUDFLARE_API_TOKEN;
+    this._accountId = credentials.accountId || this.config?.accountId || process.env.CLOUDFLARE_ACCOUNT_ID;
+    if (!this._apiToken) {
+      throw new Error("Cloudflare API token is required. Provide via credentials.apiToken or CLOUDFLARE_API_TOKEN env var.");
+    }
+    const Cloudflare = await import('cloudflare');
+    this._client = new Cloudflare.default({
+      apiToken: this._apiToken
+    });
+    this.logger("info", "Cloudflare API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      workers: () => this._collectWorkers(),
+      r2: () => this._collectR2(),
+      pages: () => this._collectPages(),
+      "d1": () => this._collectD1(),
+      kv: () => this._collectKV(),
+      "durable-objects": () => this._collectDurableObjects(),
+      zones: () => this._collectZones(),
+      loadbalancers: () => this._collectLoadBalancers()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Cloudflare service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Cloudflare ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Cloudflare service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Workers scripts.
+   */
+  async *_collectWorkers() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Workers collection, skipping");
+        return;
+      }
+      const scripts = await this._client.workers.scripts.list({ account_id: this._accountId });
+      for (const script of scripts) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          // Workers are global/edge
+          service: "workers",
+          resourceType: "cloudflare.workers.script",
+          resourceId: script.id,
+          name: script.id,
+          tags: script.tags || [],
+          configuration: this._sanitize(script)
+        };
+      }
+      this.logger("info", `Collected ${scripts.length || 0} Cloudflare Workers scripts`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Workers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect R2 buckets.
+   */
+  async *_collectR2() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for R2 collection, skipping");
+        return;
+      }
+      const buckets = await this._client.r2.buckets.list({ account_id: this._accountId });
+      for (const bucket of buckets) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: bucket.location || "global",
+          service: "r2",
+          resourceType: "cloudflare.r2.bucket",
+          resourceId: bucket.name,
+          name: bucket.name,
+          tags: [],
+          configuration: this._sanitize(bucket)
+        };
+      }
+      this.logger("info", `Collected ${buckets.length || 0} Cloudflare R2 buckets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare R2", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Pages projects.
+   */
+  async *_collectPages() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Pages collection, skipping");
+        return;
+      }
+      const projects = await this._client.pages.projects.list({ account_id: this._accountId });
+      for (const project of projects) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "pages",
+          resourceType: "cloudflare.pages.project",
+          resourceId: project.id || project.name,
+          name: project.name,
+          tags: [],
+          configuration: this._sanitize(project)
+        };
+      }
+      this.logger("info", `Collected ${projects.length || 0} Cloudflare Pages projects`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Pages", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect D1 databases.
+   */
+  async *_collectD1() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for D1 collection, skipping");
+        return;
+      }
+      const databases = await this._client.d1.database.list({ account_id: this._accountId });
+      for (const database of databases) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "d1",
+          resourceType: "cloudflare.d1.database",
+          resourceId: database.uuid,
+          name: database.name,
+          tags: [],
+          configuration: this._sanitize(database)
+        };
+      }
+      this.logger("info", `Collected ${databases.length || 0} Cloudflare D1 databases`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare D1", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect KV namespaces.
+   */
+  async *_collectKV() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for KV collection, skipping");
+        return;
+      }
+      const namespaces = await this._client.kv.namespaces.list({ account_id: this._accountId });
+      for (const namespace of namespaces) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "kv",
+          resourceType: "cloudflare.kv.namespace",
+          resourceId: namespace.id,
+          name: namespace.title,
+          tags: [],
+          configuration: this._sanitize(namespace)
+        };
+      }
+      this.logger("info", `Collected ${namespaces.length || 0} Cloudflare KV namespaces`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare KV", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Durable Objects namespaces.
+   */
+  async *_collectDurableObjects() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Durable Objects collection, skipping");
+        return;
+      }
+      const namespaces = await this._client.durableObjects.namespaces.list({ account_id: this._accountId });
+      for (const namespace of namespaces) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "durable-objects",
+          resourceType: "cloudflare.durableobjects.namespace",
+          resourceId: namespace.id,
+          name: namespace.name,
+          tags: [],
+          configuration: this._sanitize(namespace)
+        };
+      }
+      this.logger("info", `Collected ${namespaces.length || 0} Cloudflare Durable Objects namespaces`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Durable Objects", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Zones (domains) and DNS records.
+   */
+  async *_collectZones() {
+    try {
+      const zones = await this._client.zones.list();
+      for (const zone of zones) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId || zone.account?.id,
+          region: "global",
+          service: "zones",
+          resourceType: "cloudflare.zone",
+          resourceId: zone.id,
+          name: zone.name,
+          tags: [],
+          configuration: this._sanitize(zone)
+        };
+        try {
+          const records = await this._client.dns.records.list({ zone_id: zone.id });
+          for (const record of records) {
+            yield {
+              provider: "cloudflare",
+              accountId: this._accountId || zone.account?.id,
+              region: "global",
+              service: "zones",
+              resourceType: "cloudflare.dns.record",
+              resourceId: record.id,
+              name: `${record.name} (${record.type})`,
+              tags: record.tags || [],
+              metadata: { zoneId: zone.id, zoneName: zone.name },
+              configuration: this._sanitize(record)
+            };
+          }
+        } catch (recordErr) {
+          this.logger("warn", `Failed to collect DNS records for zone ${zone.name}`, {
+            zoneId: zone.id,
+            error: recordErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${zones.length || 0} Cloudflare zones`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare zones", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const zones = await this._client.zones.list();
+      for (const zone of zones) {
+        try {
+          const loadBalancers = await this._client.loadBalancers.list({ zone_id: zone.id });
+          for (const lb of loadBalancers) {
+            yield {
+              provider: "cloudflare",
+              accountId: this._accountId || zone.account?.id,
+              region: "global",
+              service: "loadbalancers",
+              resourceType: "cloudflare.loadbalancer",
+              resourceId: lb.id,
+              name: lb.name,
+              tags: [],
+              metadata: { zoneId: zone.id, zoneName: zone.name },
+              configuration: this._sanitize(lb)
+            };
+          }
+        } catch (lbErr) {
+          this.logger("debug", `No load balancers in zone ${zone.name}`, {
+            zoneId: zone.id,
+            error: lbErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected Cloudflare load balancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "api_token",
+      "api_key",
+      "token",
+      "secret",
+      "password",
+      "private_key"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
 const DEFAULT_TAGS = { environment: "mock" };
 function cloneValue(value) {
   if (Array.isArray(value)) {
@@ -37369,6 +38506,125 @@ class VultrMockDriver extends MockCloudDriver {
     super(options, vultrDefaults);
   }
 }
+function linodeDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-linode-account";
+  const region = driver.config.region || driver.config.regions?.[0] || "us-east";
+  const resourceId = driver.config.resourceId || `linode-${accountId.slice(-6) || "mock"}-instance`;
+  return {
+    provider: "linode",
+    driver: "linode",
+    accountId,
+    region,
+    service: "linodes",
+    resourceType: "linode.compute.instance",
+    resourceId,
+    name: "mock-linode-instance",
+    tags: ["mock", "cloud-inventory"],
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      label: "mock-linode-instance",
+      type: "g6-nanode-1",
+      region,
+      status: "running",
+      tags: ["mock", "cloud-inventory"]
+    }
+  };
+}
+function hetznerDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-hetzner-account";
+  const region = driver.config.region || "fsn1";
+  const resourceId = driver.config.resourceId || `hetzner-${accountId.slice(-6) || "mock"}-server`;
+  return {
+    provider: "hetzner",
+    driver: "hetzner",
+    accountId,
+    region,
+    service: "servers",
+    resourceType: "hetzner.server",
+    resourceId,
+    name: "mock-hetzner-server",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      name: "mock-hetzner-server",
+      serverType: "cx11",
+      datacenter: { location: { name: region } },
+      status: "running",
+      labels: { environment: "mock", owner: "cloud-inventory" }
+    }
+  };
+}
+function alibabaDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-alibaba-account";
+  const region = driver.config.region || driver.config.regions?.[0] || "cn-hangzhou";
+  const resourceId = driver.config.resourceId || `i-${accountId.slice(-6) || "mock"}001`;
+  return {
+    provider: "alibaba",
+    driver: "alibaba",
+    accountId,
+    region,
+    service: "ecs",
+    resourceType: "alibaba.ecs.instance",
+    resourceId,
+    name: "mock-ecs-instance",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      InstanceId: resourceId,
+      InstanceName: "mock-ecs-instance",
+      InstanceType: "ecs.t5-lc1m1.small",
+      RegionId: region,
+      Status: "Running",
+      Tags: { Tag: [{ TagKey: "environment", TagValue: "mock" }] }
+    }
+  };
+}
+function cloudflareDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-cloudflare-account";
+  const resourceId = driver.config.resourceId || `cf-worker-${accountId.slice(-6) || "mock"}`;
+  return {
+    provider: "cloudflare",
+    driver: "cloudflare",
+    accountId,
+    region: "global",
+    service: "workers",
+    resourceType: "cloudflare.workers.script",
+    resourceId,
+    name: "mock-worker-script",
+    tags: ["mock", "cloud-inventory"],
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      script: "mock-worker-script",
+      etag: "mock-etag",
+      created_on: (/* @__PURE__ */ new Date()).toISOString(),
+      modified_on: (/* @__PURE__ */ new Date()).toISOString(),
+      tags: ["mock", "cloud-inventory"]
+    }
+  };
+}
+class LinodeMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, linodeDefaults);
+  }
+}
+class HetznerMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, hetznerDefaults);
+  }
+}
+class AlibabaMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, alibabaDefaults);
+  }
+}
+class CloudflareMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, cloudflareDefaults);
+  }
+}
 
 const CLOUD_DRIVERS = /* @__PURE__ */ new Map();
 function registerCloudDriver(name, factory) {
@@ -37435,12 +38691,22 @@ registerCloudDriver("oracle", (options = {}) => new OracleInventoryDriver(option
 registerCloudDriver("oci", (options = {}) => new OracleInventoryDriver(options));
 registerCloudDriver("azure", (options = {}) => new AzureInventoryDriver(options));
 registerCloudDriver("az", (options = {}) => new AzureInventoryDriver(options));
+registerCloudDriver("linode", (options = {}) => new LinodeInventoryDriver(options));
+registerCloudDriver("hetzner", (options = {}) => new HetznerInventoryDriver(options));
+registerCloudDriver("alibaba", (options = {}) => new AlibabaInventoryDriver(options));
+registerCloudDriver("aliyun", (options = {}) => new AlibabaInventoryDriver(options));
+registerCloudDriver("cloudflare", (options = {}) => new CloudflareInventoryDriver(options));
+registerCloudDriver("cf", (options = {}) => new CloudflareInventoryDriver(options));
 registerMockDriver("aws-mock", AwsMockDriver);
 registerMockDriver("gcp-mock", GcpMockDriver);
 registerMockDriver("vultr-mock", VultrMockDriver);
 registerMockDriver(["digitalocean-mock", "do-mock"], DigitalOceanMockDriver);
 registerMockDriver(["oracle-mock", "oci-mock"], OracleMockDriver);
 registerMockDriver(["azure-mock", "az-mock"], AzureMockDriver);
+registerMockDriver("linode-mock", LinodeMockDriver);
+registerMockDriver("hetzner-mock", HetznerMockDriver);
+registerMockDriver(["alibaba-mock", "aliyun-mock"], AlibabaMockDriver);
+registerMockDriver(["cloudflare-mock", "cf-mock"], CloudflareMockDriver);
 
 const DEFAULT_RESOURCES = {
   snapshots: "plg_cloud_inventory_snapshots",
@@ -50588,6 +51854,542 @@ class TfStatePlugin extends Plugin {
       partitionCacheHits: this.stats.partitionCacheHits,
       partitionQueriesOptimized: this.stats.partitionQueriesOptimized
     };
+  }
+}
+
+const ONE_HOUR_SEC = 3600;
+const ONE_DAY_SEC = 86400;
+const THIRTY_DAYS_SEC = 2592e3;
+const TEN_SECONDS_MS = 1e4;
+const ONE_MINUTE_MS = 6e4;
+const TEN_MINUTES_MS = 6e5;
+const ONE_HOUR_MS = 36e5;
+const ONE_DAY_MS = 864e5;
+const ONE_WEEK_MS = 6048e5;
+const SECONDS_TO_MS = 1e3;
+const GRANULARITIES = {
+  minute: {
+    threshold: ONE_HOUR_SEC,
+    // TTL < 1 hour
+    interval: TEN_SECONDS_MS,
+    // Check every 10 seconds
+    cohortsToCheck: 3,
+    // Check last 3 minutes
+    cohortFormat: (date) => date.toISOString().substring(0, 16)
+    // '2024-10-25T14:30'
+  },
+  hour: {
+    threshold: ONE_DAY_SEC,
+    // TTL < 24 hours
+    interval: TEN_MINUTES_MS,
+    // Check every 10 minutes
+    cohortsToCheck: 2,
+    // Check last 2 hours
+    cohortFormat: (date) => date.toISOString().substring(0, 13)
+    // '2024-10-25T14'
+  },
+  day: {
+    threshold: THIRTY_DAYS_SEC,
+    // TTL < 30 days
+    interval: ONE_HOUR_MS,
+    // Check every 1 hour
+    cohortsToCheck: 2,
+    // Check last 2 days
+    cohortFormat: (date) => date.toISOString().substring(0, 10)
+    // '2024-10-25'
+  },
+  week: {
+    threshold: Infinity,
+    // TTL >= 30 days
+    interval: ONE_DAY_MS,
+    // Check every 24 hours
+    cohortsToCheck: 2,
+    // Check last 2 weeks
+    cohortFormat: (date) => {
+      const year = date.getUTCFullYear();
+      const week = getWeekNumber(date);
+      return `${year}-W${String(week).padStart(2, "0")}`;
+    }
+  }
+};
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / ONE_DAY_MS + 1) / 7);
+}
+function detectGranularity(ttl) {
+  if (!ttl) return "day";
+  if (ttl < GRANULARITIES.minute.threshold) return "minute";
+  if (ttl < GRANULARITIES.hour.threshold) return "hour";
+  if (ttl < GRANULARITIES.day.threshold) return "day";
+  return "week";
+}
+function getExpiredCohorts(granularity, count) {
+  const config = GRANULARITIES[granularity];
+  const cohorts = [];
+  const now = /* @__PURE__ */ new Date();
+  for (let i = 0; i < count; i++) {
+    let checkDate;
+    switch (granularity) {
+      case "minute":
+        checkDate = new Date(now.getTime() - i * ONE_MINUTE_MS);
+        break;
+      case "hour":
+        checkDate = new Date(now.getTime() - i * ONE_HOUR_MS);
+        break;
+      case "day":
+        checkDate = new Date(now.getTime() - i * ONE_DAY_MS);
+        break;
+      case "week":
+        checkDate = new Date(now.getTime() - i * ONE_WEEK_MS);
+        break;
+    }
+    cohorts.push(config.cohortFormat(checkDate));
+  }
+  return cohorts;
+}
+class TTLPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+    this.verbose = config.verbose !== void 0 ? config.verbose : false;
+    this.resources = config.resources || {};
+    this.batchSize = config.batchSize || 100;
+    this.stats = {
+      totalScans: 0,
+      totalExpired: 0,
+      totalDeleted: 0,
+      totalArchived: 0,
+      totalSoftDeleted: 0,
+      totalCallbacks: 0,
+      totalErrors: 0,
+      lastScanAt: null,
+      lastScanDuration: 0
+    };
+    this.intervals = [];
+    this.isRunning = false;
+    this.expirationIndex = null;
+  }
+  /**
+   * Install the plugin
+   */
+  async install(database) {
+    await super.install(database);
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._validateResourceConfig(resourceName, config);
+    }
+    await this._createExpirationIndex();
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._setupResourceHooks(resourceName, config);
+    }
+    this._startIntervals();
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
+    }
+    this.emit("db:plugin:installed", {
+      plugin: "TTLPlugin",
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Validate resource configuration
+   */
+  _validateResourceConfig(resourceName, config) {
+    if (!config.ttl && !config.field) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" must have either "ttl" (seconds) or "field" (timestamp field name)`
+      );
+    }
+    const validStrategies = ["soft-delete", "hard-delete", "archive", "callback"];
+    if (!config.onExpire || !validStrategies.includes(config.onExpire)) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" must have an "onExpire" value. Valid options: ${validStrategies.join(", ")}`
+      );
+    }
+    if (config.onExpire === "soft-delete" && !config.deleteField) {
+      config.deleteField = "deletedat";
+    }
+    if (config.onExpire === "archive" && !config.archiveResource) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" with onExpire="archive" must have an "archiveResource" specified`
+      );
+    }
+    if (config.onExpire === "callback" && typeof config.callback !== "function") {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" with onExpire="callback" must have a "callback" function`
+      );
+    }
+    if (!config.field) {
+      config.field = "_createdAt";
+    }
+    if (config.field === "_createdAt" && this.database) {
+      const resource = this.database.resources[resourceName];
+      if (resource && resource.config && resource.config.timestamps === false) {
+        console.warn(
+          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
+        );
+      }
+    }
+    config.granularity = detectGranularity(config.ttl);
+  }
+  /**
+   * Create expiration index (plugin resource)
+   */
+  async _createExpirationIndex() {
+    this.expirationIndex = await this.database.createResource({
+      name: "plg_ttl_expiration_index",
+      attributes: {
+        resourceName: "string|required",
+        recordId: "string|required",
+        expiresAtCohort: "string|required",
+        expiresAtTimestamp: "number|required",
+        // Exact expiration timestamp for precise checking
+        granularity: "string|required",
+        createdAt: "number"
+      },
+      partitions: {
+        byExpiresAtCohort: {
+          fields: { expiresAtCohort: "string" }
+        }
+      },
+      asyncPartitions: false
+      // Sync partitions for deterministic behavior
+    });
+    if (this.verbose) {
+      console.log("[TTLPlugin] Created expiration index with partition");
+    }
+  }
+  /**
+   * Setup hooks for a resource
+   */
+  _setupResourceHooks(resourceName, config) {
+    if (!this.database.resources[resourceName]) {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
+      }
+      return;
+    }
+    const resource = this.database.resources[resourceName];
+    if (typeof resource.insert !== "function" || typeof resource.delete !== "function") {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
+      }
+      return;
+    }
+    this.addMiddleware(resource, "insert", async (next, data, options) => {
+      const result = await next(data, options);
+      await this._addToIndex(resourceName, result, config);
+      return result;
+    });
+    this.addMiddleware(resource, "delete", async (next, id, options) => {
+      const result = await next(id, options);
+      await this._removeFromIndex(resourceName, id);
+      return result;
+    });
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
+    }
+  }
+  /**
+   * Add record to expiration index
+   */
+  async _addToIndex(resourceName, record, config) {
+    try {
+      let baseTime = record[config.field];
+      if (!baseTime && config.field === "_createdAt") {
+        baseTime = Date.now();
+      }
+      if (!baseTime) {
+        if (this.verbose) {
+          console.warn(
+            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
+          );
+        }
+        return;
+      }
+      const baseTimestamp = typeof baseTime === "number" ? baseTime : new Date(baseTime).getTime();
+      const expiresAt = config.ttl ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS) : new Date(baseTimestamp);
+      const cohortConfig = GRANULARITIES[config.granularity];
+      const cohort = cohortConfig.cohortFormat(expiresAt);
+      const indexId = `${resourceName}:${record.id}`;
+      await this.expirationIndex.insert({
+        id: indexId,
+        resourceName,
+        recordId: record.id,
+        expiresAtCohort: cohort,
+        expiresAtTimestamp: expiresAt.getTime(),
+        // Store exact timestamp for precise checking
+        granularity: config.granularity,
+        createdAt: Date.now()
+      });
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
+        );
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error adding to index:`, error);
+      this.stats.totalErrors++;
+    }
+  }
+  /**
+   * Remove record from expiration index (O(1) using deterministic ID)
+   */
+  async _removeFromIndex(resourceName, recordId) {
+    try {
+      const indexId = `${resourceName}:${recordId}`;
+      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
+      if (this.verbose && ok) {
+        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
+      }
+      if (!ok && err?.code !== "NoSuchKey") {
+        throw err;
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error removing from index:`, error);
+    }
+  }
+  /**
+   * Start interval-based cleanup for each granularity
+   */
+  _startIntervals() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length === 0) continue;
+      const granularityConfig = GRANULARITIES[granularity];
+      const handle = setInterval(
+        () => this._cleanupGranularity(granularity, resources),
+        granularityConfig.interval
+      );
+      this.intervals.push(handle);
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) for ${resources.length} resources`
+        );
+      }
+    }
+    this.isRunning = true;
+  }
+  /**
+   * Stop all intervals
+   */
+  _stopIntervals() {
+    for (const handle of this.intervals) {
+      clearInterval(handle);
+    }
+    this.intervals = [];
+    this.isRunning = false;
+    if (this.verbose) {
+      console.log("[TTLPlugin] Stopped all intervals");
+    }
+  }
+  /**
+   * Cleanup expired records for a specific granularity
+   */
+  async _cleanupGranularity(granularity, resources) {
+    const startTime = Date.now();
+    this.stats.totalScans++;
+    try {
+      const granularityConfig = GRANULARITIES[granularity];
+      const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
+      if (this.verbose) {
+        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
+      }
+      for (const cohort of cohorts) {
+        const expired = await this.expirationIndex.listPartition({
+          partition: "byExpiresAtCohort",
+          partitionValues: { expiresAtCohort: cohort }
+        });
+        const resourceNames = new Set(resources.map((r) => r.name));
+        const filtered = expired.filter((e) => resourceNames.has(e.resourceName));
+        if (this.verbose && filtered.length > 0) {
+          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
+        }
+        for (let i = 0; i < filtered.length; i += this.batchSize) {
+          const batch = filtered.slice(i, i + this.batchSize);
+          for (const entry of batch) {
+            const config = this.resources[entry.resourceName];
+            await this._processExpiredEntry(entry, config);
+          }
+        }
+      }
+      this.stats.lastScanAt = (/* @__PURE__ */ new Date()).toISOString();
+      this.stats.lastScanDuration = Date.now() - startTime;
+      this.emit("plg:ttl:scan-completed", {
+        granularity,
+        duration: this.stats.lastScanDuration,
+        cohorts
+      });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
+      this.stats.totalErrors++;
+      this.emit("plg:ttl:cleanup-error", { granularity, error });
+    }
+  }
+  /**
+   * Process a single expired index entry
+   */
+  async _processExpiredEntry(entry, config) {
+    try {
+      if (!this.database.resources[entry.resourceName]) {
+        if (this.verbose) {
+          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
+        }
+        return;
+      }
+      const resource = this.database.resources[entry.resourceName];
+      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
+      if (!ok || !record) {
+        await this.expirationIndex.delete(entry.id);
+        return;
+      }
+      if (entry.expiresAtTimestamp && Date.now() < entry.expiresAtTimestamp) {
+        return;
+      }
+      switch (config.onExpire) {
+        case "soft-delete":
+          await this._softDelete(resource, record, config);
+          this.stats.totalSoftDeleted++;
+          break;
+        case "hard-delete":
+          await this._hardDelete(resource, record);
+          this.stats.totalDeleted++;
+          break;
+        case "archive":
+          await this._archive(resource, record, config);
+          this.stats.totalArchived++;
+          this.stats.totalDeleted++;
+          break;
+        case "callback":
+          const shouldDelete = await config.callback(record, resource);
+          this.stats.totalCallbacks++;
+          if (shouldDelete) {
+            await this._hardDelete(resource, record);
+            this.stats.totalDeleted++;
+          }
+          break;
+      }
+      await this.expirationIndex.delete(entry.id);
+      this.stats.totalExpired++;
+      this.emit("plg:ttl:record-expired", { resource: entry.resourceName, record });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error processing expired entry:`, error);
+      this.stats.totalErrors++;
+    }
+  }
+  /**
+   * Soft delete: Mark record as deleted
+   */
+  async _softDelete(resource, record, config) {
+    const deleteField = config.deleteField || "deletedat";
+    const updates = {
+      [deleteField]: (/* @__PURE__ */ new Date()).toISOString(),
+      isdeleted: "true"
+      // Add isdeleted field for partition compatibility
+    };
+    await resource.update(record.id, updates);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
+    }
+  }
+  /**
+   * Hard delete: Remove record from S3
+   */
+  async _hardDelete(resource, record) {
+    await resource.delete(record.id);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
+    }
+  }
+  /**
+   * Archive: Copy to another resource then delete
+   */
+  async _archive(resource, record, config) {
+    if (!this.database.resources[config.archiveResource]) {
+      throw new Error(`Archive resource "${config.archiveResource}" not found`);
+    }
+    const archiveResource = this.database.resources[config.archiveResource];
+    const archiveData = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (!key.startsWith("_")) {
+        archiveData[key] = value;
+      }
+    }
+    archiveData.archivedAt = (/* @__PURE__ */ new Date()).toISOString();
+    archiveData.archivedFrom = resource.name;
+    archiveData.originalId = record.id;
+    if (!config.keepOriginalId) {
+      delete archiveData.id;
+    }
+    await archiveResource.insert(archiveData);
+    await resource.delete(record.id);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
+    }
+  }
+  /**
+   * Manual cleanup of a specific resource
+   */
+  async cleanupResource(resourceName) {
+    const config = this.resources[resourceName];
+    if (!config) {
+      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
+    }
+    const granularity = config.granularity;
+    await this._cleanupGranularity(granularity, [{ name: resourceName, config }]);
+    return {
+      resource: resourceName,
+      granularity
+    };
+  }
+  /**
+   * Manual cleanup of all resources
+   */
+  async runCleanup() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length > 0) {
+        await this._cleanupGranularity(granularity, resources);
+      }
+    }
+  }
+  /**
+   * Get plugin statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      resources: Object.keys(this.resources).length,
+      isRunning: this.isRunning,
+      intervals: this.intervals.length
+    };
+  }
+  /**
+   * Uninstall the plugin
+   */
+  async uninstall() {
+    this._stopIntervals();
+    await super.uninstall();
+    if (this.verbose) {
+      console.log("[TTLPlugin] Uninstalled");
+    }
   }
 }
 
