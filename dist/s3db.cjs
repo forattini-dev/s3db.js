@@ -7183,6 +7183,29 @@ function createFailbanMiddleware(config = {}) {
         ip
       }, 403);
     }
+    const countryBlock = plugin.checkCountryBlock(ip);
+    if (countryBlock) {
+      c.header("X-Ban-Status", "country_blocked");
+      c.header("X-Ban-Reason", countryBlock.reason);
+      c.header("X-Country-Code", countryBlock.country);
+      if (events) {
+        events.emit("security:country_blocked", {
+          ip,
+          country: countryBlock.country,
+          reason: countryBlock.reason,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      if (handler) {
+        return handler(c, countryBlock);
+      }
+      return c.json({
+        error: "Forbidden",
+        message: "Access from your country is not allowed",
+        country: countryBlock.country,
+        ip
+      }, 403);
+    }
     if (plugin.isBanned(ip)) {
       const ban = await plugin.getBan(ip);
       if (ban) {
@@ -7891,11 +7914,25 @@ class FailbanPlugin extends Plugin {
       persistViolations: options.persistViolations !== false,
       // Track violations in DB
       verbose: options.verbose || false,
+      geo: {
+        enabled: options.geo?.enabled || false,
+        databasePath: options.geo?.databasePath || null,
+        allowedCountries: options.geo?.allowedCountries || [],
+        // ISO 3166-1 alpha-2
+        blockedCountries: options.geo?.blockedCountries || [],
+        // ISO 3166-1 alpha-2
+        blockUnknown: options.geo?.blockUnknown || false,
+        // Block unknown countries
+        cacheResults: options.geo?.cacheResults !== false
+        // Cache GeoIP lookups
+      },
       ...options
     };
     this.bansResource = null;
     this.violationsResource = null;
     this.memoryCache = /* @__PURE__ */ new Map();
+    this.geoCache = /* @__PURE__ */ new Map();
+    this.geoReader = null;
   }
   /**
    * Initialize plugin
@@ -7907,6 +7944,9 @@ class FailbanPlugin extends Plugin {
         console.log("[FailbanPlugin] Disabled, skipping initialization");
       }
       return;
+    }
+    if (this.options.geo.enabled) {
+      await this._initializeGeoIP();
     }
     this.bansResource = await this._createBansResource();
     if (this.options.persistViolations) {
@@ -7920,6 +7960,12 @@ class FailbanPlugin extends Plugin {
       console.log(`[FailbanPlugin] Violation window: ${this.options.violationWindow}ms`);
       console.log(`[FailbanPlugin] Ban duration: ${this.options.banDuration}ms`);
       console.log(`[FailbanPlugin] Whitelist: ${this.options.whitelist.join(", ")}`);
+      if (this.options.geo.enabled) {
+        console.log(`[FailbanPlugin] GeoIP enabled`);
+        console.log(`[FailbanPlugin] Allowed countries: ${this.options.geo.allowedCountries.join(", ") || "none"}`);
+        console.log(`[FailbanPlugin] Blocked countries: ${this.options.geo.blockedCountries.join(", ") || "none"}`);
+        console.log(`[FailbanPlugin] Block unknown: ${this.options.geo.blockUnknown}`);
+      }
     }
   }
   /**
@@ -8046,6 +8092,107 @@ class FailbanPlugin extends Plugin {
         console.log(`[FailbanPlugin] Cleaned ${cleaned} expired bans from cache`);
       }
     }, 6e4);
+  }
+  /**
+   * Initialize GeoIP reader
+   * @private
+   */
+  async _initializeGeoIP() {
+    if (!this.options.geo.databasePath) {
+      console.warn("[FailbanPlugin] GeoIP enabled but no databasePath provided");
+      return;
+    }
+    try {
+      const Reader = await requirePluginDependency(
+        "@maxmind/geoip2-node",
+        "FailbanPlugin",
+        "GeoIP country blocking"
+      );
+      this.geoReader = await Reader.open(this.options.geo.databasePath);
+      if (this.options.verbose) {
+        console.log(`[FailbanPlugin] GeoIP database loaded from ${this.options.geo.databasePath}`);
+      }
+    } catch (err) {
+      console.error("[FailbanPlugin] Failed to initialize GeoIP:", err.message);
+      console.warn("[FailbanPlugin] GeoIP features will be disabled");
+      this.options.geo.enabled = false;
+    }
+  }
+  /**
+   * Get country code for IP address
+   * @param {string} ip - IP address
+   * @returns {string|null} ISO 3166-1 alpha-2 country code or null
+   */
+  getCountryCode(ip) {
+    if (!this.options.geo.enabled || !this.geoReader) {
+      return null;
+    }
+    if (this.options.geo.cacheResults && this.geoCache.has(ip)) {
+      return this.geoCache.get(ip);
+    }
+    try {
+      const response = this.geoReader.country(ip);
+      const countryCode = response?.country?.isoCode || null;
+      if (this.options.geo.cacheResults) {
+        this.geoCache.set(ip, countryCode);
+        if (this.geoCache.size > 1e4) {
+          const firstKey = this.geoCache.keys().next().value;
+          this.geoCache.delete(firstKey);
+        }
+      }
+      return countryCode;
+    } catch (err) {
+      if (this.options.verbose) {
+        console.log(`[FailbanPlugin] GeoIP lookup failed for ${ip}: ${err.message}`);
+      }
+      return null;
+    }
+  }
+  /**
+   * Check if country is blocked
+   * @param {string} countryCode - ISO 3166-1 alpha-2 country code
+   * @returns {boolean}
+   */
+  isCountryBlocked(countryCode) {
+    if (!this.options.geo.enabled) {
+      return false;
+    }
+    if (!countryCode) {
+      return this.options.geo.blockUnknown;
+    }
+    const upperCode = countryCode.toUpperCase();
+    if (this.options.geo.blockedCountries.length > 0) {
+      if (this.options.geo.blockedCountries.includes(upperCode)) {
+        return true;
+      }
+    }
+    if (this.options.geo.allowedCountries.length > 0) {
+      return !this.options.geo.allowedCountries.includes(upperCode);
+    }
+    return false;
+  }
+  /**
+   * Check if IP is blocked by country restrictions
+   * @param {string} ip - IP address
+   * @returns {Object|null} Block info or null if not blocked
+   */
+  checkCountryBlock(ip) {
+    if (!this.options.geo.enabled) {
+      return null;
+    }
+    if (this.isWhitelisted(ip)) {
+      return null;
+    }
+    const countryCode = this.getCountryCode(ip);
+    if (this.isCountryBlocked(countryCode)) {
+      return {
+        blocked: true,
+        reason: "country_restricted",
+        country: countryCode || "unknown",
+        ip
+      };
+    }
+    return null;
   }
   /**
    * Check if IP is in whitelist
@@ -8272,6 +8419,10 @@ class FailbanPlugin extends Plugin {
       this.cleanupTimer = null;
     }
     this.memoryCache.clear();
+    this.geoCache.clear();
+    if (this.geoReader) {
+      this.geoReader = null;
+    }
     if (this.options.verbose) {
       console.log("[FailbanPlugin] Cleaned up");
     }

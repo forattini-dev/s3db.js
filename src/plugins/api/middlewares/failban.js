@@ -1,8 +1,8 @@
 /**
  * Failban Middleware
  *
- * Checks if IP is banned before processing request.
- * Integrates with FailbanPlugin for automatic banning.
+ * Checks if IP is banned or blocked by country restrictions before processing request.
+ * Integrates with FailbanPlugin for automatic banning and GeoIP filtering.
  *
  * @example
  * import { createFailbanMiddleware } from './middlewares/failban.js';
@@ -54,6 +54,35 @@ export function createFailbanMiddleware(config = {}) {
       return c.json({
         error: 'Forbidden',
         message: 'Your IP address has been permanently blocked',
+        ip
+      }, 403);
+    }
+
+    // Check country restrictions (GeoIP)
+    const countryBlock = plugin.checkCountryBlock(ip);
+    if (countryBlock) {
+      c.header('X-Ban-Status', 'country_blocked');
+      c.header('X-Ban-Reason', countryBlock.reason);
+      c.header('X-Country-Code', countryBlock.country);
+
+      // Emit country block event
+      if (events) {
+        events.emit('security:country_blocked', {
+          ip,
+          country: countryBlock.country,
+          reason: countryBlock.reason,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (handler) {
+        return handler(c, countryBlock);
+      }
+
+      return c.json({
+        error: 'Forbidden',
+        message: 'Access from your country is not allowed',
+        country: countryBlock.country,
         ip
       }, 403);
     }

@@ -43,7 +43,8 @@ GET     /docs            → Interactive Swagger UI
 - **🚨 Failban Plugin** - fail2ban-style automatic IP banning
   - Ban after N violations (rate limit, auth failures)
   - TTL-based auto-unban using S3DB partitions
-  - Whitelist/Blacklist support
+  - IP Whitelist/Blacklist support
+  - **🌍 GeoIP Country Blocking** - Block/allow by country (MaxMind GeoLite2)
   - Admin endpoints for ban management
 
 - **⏱️ Advanced Rate Limiting** - Per-driver rate limiting with sliding windows
@@ -770,7 +771,7 @@ apiPlugin.events.on('order:created', async ({ order, items }) => {
 
 ### 1. Failban Plugin (NEW!)
 
-Automatic IP banning for security violations:
+Automatic IP banning for security violations with GeoIP country blocking:
 
 ```javascript
 await db.use(new ApiPlugin({
@@ -779,26 +780,54 @@ await db.use(new ApiPlugin({
     maxViolations: 3,           // Ban after 3 violations
     violationWindow: 3600000,   // Within 1 hour
     banDuration: 86400000,      // Ban for 24 hours
-    whitelist: ['127.0.0.1'],   // Never ban
-    blacklist: [],              // Always ban
-    persistViolations: true     // Track in S3DB
+    whitelist: ['127.0.0.1'],   // Never ban (IPs)
+    blacklist: [],              // Always ban (IPs)
+    persistViolations: true,    // Track in S3DB
+
+    // GeoIP Country Blocking (NEW!)
+    geo: {
+      enabled: true,
+      databasePath: '/path/to/GeoLite2-Country.mmdb',  // MaxMind database
+      allowedCountries: ['BR', 'US', 'CA'],  // ISO 3166-1 alpha-2
+      blockedCountries: ['CN', 'RU'],        // Block these countries
+      blockUnknown: false,                   // Block IPs with unknown country
+      cacheResults: true                     // Cache GeoIP lookups (10k limit)
+    }
   }
 }));
 
 // Admin endpoints:
-// GET    /admin/security/bans       → List active bans
-// GET    /admin/security/bans/:ip   → Get ban details
-// POST   /admin/security/bans       → Manually ban IP
-// DELETE /admin/security/bans/:ip   → Unban IP
-// GET    /admin/security/stats      → Ban statistics
+// GET    /admin/security/bans         → List active bans
+// GET    /admin/security/bans/:ip     → Get ban details
+// POST   /admin/security/bans         → Manually ban IP
+// DELETE /admin/security/bans/:ip     → Unban IP
+// GET    /admin/security/stats        → Ban statistics
 ```
 
 **How it works:**
-1. Rate limit exceeded → Violation recorded
-2. Auth failure → Violation recorded
-3. After N violations → IP automatically banned
-4. TTLPlugin auto-unbans after duration
-5. Events emitted: `security:banned`, `security:unbanned`, `security:violation`
+1. Request arrives → GeoIP lookup (if enabled)
+2. Country blocked? → Return 403 with `X-Country-Code` header
+3. IP blacklisted? → Return 403 permanently
+4. Rate limit exceeded → Violation recorded
+5. Auth failure → Violation recorded
+6. After N violations → IP automatically banned
+7. TTLPlugin auto-unbans after duration
+8. Events emitted: `security:banned`, `security:unbanned`, `security:violation`, `security:country_blocked`
+
+**GeoIP Setup:**
+```bash
+# Download MaxMind GeoLite2 (free)
+wget https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb
+
+# Install peer dependency
+npm install @maxmind/geoip2-node
+```
+
+**Response headers:**
+- `X-Ban-Status`: `country_blocked` | `blacklisted` | `banned`
+- `X-Ban-Reason`: Reason for block
+- `X-Country-Code`: ISO 3166-1 alpha-2 country code
+- `Retry-After`: Seconds until unban (for temporary bans)
 
 ### 2. Rate Limiting per Driver
 
@@ -1133,7 +1162,17 @@ await db.use(new ApiPlugin({
     maxViolations: 3,
     violationWindow: 3600000,
     banDuration: 86400000,
-    whitelist: ['127.0.0.1']
+    whitelist: ['127.0.0.1'],
+    blacklist: [],
+    persistViolations: true,
+    geo: {
+      enabled: true,
+      databasePath: '/path/to/GeoLite2-Country.mmdb',
+      allowedCountries: ['BR', 'US', 'CA'],
+      blockedCountries: [],
+      blockUnknown: false,
+      cacheResults: true
+    }
   },
 
   // Authentication
@@ -1252,11 +1291,11 @@ GET     /metrics              # Metrics (if enabled)
 ### Admin Endpoints (if failban enabled)
 
 ```bash
-GET     /admin/security/bans        # List bans
-GET     /admin/security/bans/:ip    # Get ban
-POST    /admin/security/bans        # Ban IP
-DELETE  /admin/security/bans/:ip    # Unban IP
-GET     /admin/security/stats       # Statistics
+GET     /admin/security/bans         # List bans
+GET     /admin/security/bans/:ip     # Get ban
+POST    /admin/security/bans         # Ban IP
+DELETE  /admin/security/bans/:ip     # Unban IP
+GET     /admin/security/stats        # Statistics
 ```
 
 ---
