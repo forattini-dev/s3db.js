@@ -21,6 +21,14 @@ import { jwtAuth } from './auth/jwt-auth.js';
 import { apiKeyAuth } from './auth/api-key-auth.js';
 import { basicAuth } from './auth/basic-auth.js';
 import { createOAuth2Handler } from './auth/oauth2-auth.js';
+import { createRequestIdMiddleware } from './middlewares/request-id.js';
+import { createSecurityHeadersMiddleware } from './middlewares/security-headers.js';
+import { createSessionTrackingMiddleware } from './middlewares/session-tracking.js';
+import { createAuthDriverRateLimiter } from './middlewares/rate-limit.js';
+import { createFailbanMiddleware, setupFailbanViolationListener, createFailbanAdminRoutes } from './middlewares/failban.js';
+import { FailbanPlugin } from './security/failban-plugin.js';
+import { ApiEventEmitter } from './concerns/event-emitter.js';
+import { MetricsCollector } from './concerns/metrics-collector.js';
 
 /**
  * API Server class
@@ -45,6 +53,13 @@ export class ApiServer {
       routes: options.routes || {}, // Plugin-level custom routes
       templates: options.templates || { enabled: false, engine: 'jsx' }, // Template engine config
       middlewares: options.middlewares || [],
+      requestId: options.requestId || { enabled: false }, // Request ID tracking config
+      cors: options.cors || { enabled: false }, // CORS configuration
+      security: options.security || { enabled: false }, // Security headers config
+      sessionTracking: options.sessionTracking || { enabled: false }, // Session tracking config
+      events: options.events || { enabled: false }, // Event hooks config
+      metrics: options.metrics || { enabled: false }, // Metrics collection config
+      failban: options.failban || { enabled: false }, // Failban (fail2ban-style) config
       verbose: options.verbose || false,
       auth: options.auth || {},
       static: options.static || [], // Static file serving config
@@ -66,6 +81,50 @@ export class ApiServer {
     this.openAPISpec = null;
     this.initialized = false;
 
+    // Graceful shutdown tracking
+    this.inFlightRequests = new Set(); // Track in-flight requests
+    this.acceptingRequests = true; // Accept new requests flag
+
+    // Event emitter
+    this.events = new ApiEventEmitter({
+      enabled: this.options.events?.enabled !== false,
+      verbose: this.options.events?.verbose || this.options.verbose,
+      maxListeners: this.options.events?.maxListeners
+    });
+
+    // Metrics collector
+    this.metrics = new MetricsCollector({
+      enabled: this.options.metrics?.enabled !== false,
+      verbose: this.options.metrics?.verbose || this.options.verbose,
+      maxPathsTracked: this.options.metrics?.maxPathsTracked,
+      resetInterval: this.options.metrics?.resetInterval
+    });
+
+    // Wire up event listeners to metrics collector
+    if (this.options.metrics?.enabled && this.options.events?.enabled !== false) {
+      this._setupMetricsEventListeners();
+    }
+
+    // Failban plugin (fail2ban-style automatic banning)
+    this.failban = null;
+    if (this.options.failban?.enabled) {
+      this.failban = new FailbanPlugin({
+        enabled: true,
+        maxViolations: this.options.failban.maxViolations || 3,
+        violationWindow: this.options.failban.violationWindow || 3600000,
+        banDuration: this.options.failban.banDuration || 86400000,
+        whitelist: this.options.failban.whitelist || ['127.0.0.1', '::1'],
+        blacklist: this.options.failban.blacklist || [],
+        persistViolations: this.options.failban.persistViolations !== false,
+        verbose: this.options.failban.verbose || this.options.verbose
+      });
+
+      // Install plugin in database
+      if (this.options.database) {
+        this.options.database.use(this.failban);
+      }
+    }
+
     // Detect if RelationPlugin is installed
     this.relationsPlugin = this.options.database?.plugins?.relation ||
                           this.options.database?.plugins?.RelationPlugin ||
@@ -75,10 +134,294 @@ export class ApiServer {
   }
 
   /**
+   * Setup metrics event listeners
+   * @private
+   */
+  _setupMetricsEventListeners() {
+    // Request metrics
+    this.events.on('request:end', (data) => {
+      this.metrics.recordRequest({
+        method: data.method,
+        path: data.path,
+        status: data.status,
+        duration: data.duration
+      });
+    });
+
+    this.events.on('request:error', (data) => {
+      this.metrics.recordError({
+        error: data.error,
+        type: 'request'
+      });
+    });
+
+    // Auth metrics
+    this.events.on('auth:success', (data) => {
+      this.metrics.recordAuth({
+        success: true,
+        method: data.method
+      });
+    });
+
+    this.events.on('auth:failure', (data) => {
+      this.metrics.recordAuth({
+        success: false,
+        method: data.allowedMethods?.[0] || 'unknown'
+      });
+    });
+
+    // Resource metrics
+    this.events.on('resource:created', (data) => {
+      this.metrics.recordResourceOperation({
+        action: 'created',
+        resource: data.resource
+      });
+    });
+
+    this.events.on('resource:updated', (data) => {
+      this.metrics.recordResourceOperation({
+        action: 'updated',
+        resource: data.resource
+      });
+    });
+
+    this.events.on('resource:deleted', (data) => {
+      this.metrics.recordResourceOperation({
+        action: 'deleted',
+        resource: data.resource
+      });
+    });
+
+    // User metrics
+    this.events.on('user:created', (data) => {
+      this.metrics.recordUserEvent({
+        action: 'created'
+      });
+    });
+
+    this.events.on('user:login', (data) => {
+      this.metrics.recordUserEvent({
+        action: 'login'
+      });
+    });
+
+    if (this.options.verbose) {
+      console.log('[API Server] Metrics event listeners configured');
+    }
+  }
+
+  /**
+   * Setup request tracking middleware for graceful shutdown
+   * @private
+   */
+  _setupRequestTracking() {
+    this.app.use('*', async (c, next) => {
+      // Check if we're still accepting requests
+      if (!this.acceptingRequests) {
+        return c.json({ error: 'Server is shutting down' }, 503);
+      }
+
+      // Track this request
+      const requestId = Symbol('request');
+      this.inFlightRequests.add(requestId);
+
+      const startTime = Date.now();
+      const requestInfo = {
+        requestId: c.get('requestId') || requestId.toString(),
+        method: c.req.method,
+        path: c.req.path,
+        userAgent: c.req.header('user-agent'),
+        ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip')
+      };
+
+      // Emit request:start
+      this.events.emitRequestEvent('start', requestInfo);
+
+      try {
+        await next();
+
+        // Emit request:end
+        this.events.emitRequestEvent('end', {
+          ...requestInfo,
+          duration: Date.now() - startTime,
+          status: c.res.status
+        });
+      } catch (err) {
+        // Emit request:error
+        this.events.emitRequestEvent('error', {
+          ...requestInfo,
+          duration: Date.now() - startTime,
+          error: err.message,
+          stack: err.stack
+        });
+        throw err; // Re-throw for error handler
+      } finally {
+        // Remove from tracking when done
+        this.inFlightRequests.delete(requestId);
+      }
+    });
+  }
+
+  /**
+   * Stop accepting new requests
+   * @returns {void}
+   */
+  stopAcceptingRequests() {
+    this.acceptingRequests = false;
+    if (this.options.verbose) {
+      console.log('[API Server] Stopped accepting new requests');
+    }
+  }
+
+  /**
+   * Wait for all in-flight requests to finish
+   * @param {Object} options - Options
+   * @param {number} options.timeout - Max time to wait in ms (default: 30000)
+   * @returns {Promise<boolean>} True if all requests finished, false if timeout
+   */
+  async waitForRequestsToFinish({ timeout = 30000 } = {}) {
+    const startTime = Date.now();
+
+    while (this.inFlightRequests.size > 0) {
+      const elapsed = Date.now() - startTime;
+
+      if (elapsed >= timeout) {
+        if (this.options.verbose) {
+          console.warn(`[API Server] Timeout waiting for ${this.inFlightRequests.size} in-flight requests`);
+        }
+        return false;
+      }
+
+      if (this.options.verbose) {
+        console.log(`[API Server] Waiting for ${this.inFlightRequests.size} in-flight requests...`);
+      }
+
+      // Wait 100ms before checking again
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (this.options.verbose) {
+      console.log('[API Server] All requests finished');
+    }
+    return true;
+  }
+
+  /**
+   * Graceful shutdown
+   * @param {Object} options - Shutdown options
+   * @param {number} options.timeout - Max time to wait for requests (default: 30000)
+   * @returns {Promise<void>}
+   */
+  async shutdown({ timeout = 30000 } = {}) {
+    if (!this.isRunning) {
+      console.warn('[API Server] Server is not running');
+      return;
+    }
+
+    console.log('[API Server] Initiating graceful shutdown...');
+
+    // Stop accepting new requests
+    this.stopAcceptingRequests();
+
+    // Wait for in-flight requests to finish
+    const allFinished = await this.waitForRequestsToFinish({ timeout });
+
+    if (!allFinished) {
+      console.warn('[API Server] Some requests did not finish in time');
+    }
+
+    // Close HTTP server
+    if (this.server) {
+      await new Promise((resolve, reject) => {
+        this.server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
+
+    this.isRunning = false;
+    console.log('[API Server] Shutdown complete');
+  }
+
+  /**
    * Setup all routes
    * @private
    */
   _setupRoutes() {
+    // Request tracking for graceful shutdown (must be first!)
+    this._setupRequestTracking();
+
+    // Failban middleware (check banned IPs early)
+    if (this.failban) {
+      const failbanMiddleware = createFailbanMiddleware({
+        plugin: this.failban,
+        events: this.events
+      });
+      this.app.use('*', failbanMiddleware);
+
+      // Setup violation listeners (connects events to failban)
+      setupFailbanViolationListener({
+        plugin: this.failban,
+        events: this.events
+      });
+
+      if (this.options.verbose) {
+        console.log('[API Server] Failban protection enabled');
+      }
+    }
+
+    // Request ID middleware (before all other middlewares)
+    if (this.options.requestId?.enabled) {
+      const requestIdMiddleware = createRequestIdMiddleware(this.options.requestId);
+      this.app.use('*', requestIdMiddleware);
+
+      if (this.options.verbose) {
+        console.log(`[API Server] Request ID tracking enabled (header: ${this.options.requestId.headerName || 'X-Request-ID'})`);
+      }
+    }
+
+    // CORS middleware
+    if (this.options.cors?.enabled) {
+      const corsConfig = this.options.cors;
+      this.app.use('*', this.cors({
+        origin: corsConfig.origin || '*',
+        allowMethods: corsConfig.allowMethods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowHeaders: corsConfig.allowHeaders || ['Content-Type', 'Authorization', 'X-Request-ID'],
+        exposeHeaders: corsConfig.exposeHeaders || ['X-Request-ID'],
+        credentials: corsConfig.credentials || false,
+        maxAge: corsConfig.maxAge || 86400  // 24 hours cache by default
+      }));
+
+      if (this.options.verbose) {
+        console.log(`[API Server] CORS enabled (maxAge: ${corsConfig.maxAge || 86400}s, origin: ${corsConfig.origin || '*'})`);
+      }
+    }
+
+    // Security headers middleware
+    if (this.options.security?.enabled) {
+      const securityMiddleware = createSecurityHeadersMiddleware(this.options.security);
+      this.app.use('*', securityMiddleware);
+
+      if (this.options.verbose) {
+        console.log('[API Server] Security headers enabled');
+      }
+    }
+
+    // Session tracking middleware
+    if (this.options.sessionTracking?.enabled) {
+      const sessionMiddleware = createSessionTrackingMiddleware(
+        this.options.sessionTracking,
+        this.options.database
+      );
+      this.app.use('*', sessionMiddleware);
+
+      if (this.options.verbose) {
+        const resource = this.options.sessionTracking.resource ? ` (resource: ${this.options.sessionTracking.resource})` : ' (in-memory)';
+        console.log(`[API Server] Session tracking enabled${resource}`);
+      }
+    }
+
     // Apply global middlewares
     this.options.middlewares.forEach(middleware => {
       this.app.use('*', middleware);
@@ -128,35 +471,91 @@ export class ApiServer {
 
     // Kubernetes Readiness Probe - checks if app is ready to receive traffic
     // If this fails, k8s will remove pod from service endpoints
-    this.app.get('/health/ready', (c) => {
-      // Check if database is connected and resources are loaded
-      const isReady = this.options.database &&
-                      this.options.database.connected &&
-                      Object.keys(this.options.database.resources).length > 0;
+    this.app.get('/health/ready', async (c) => {
+      const checks = {};
+      let isHealthy = true;
 
-      if (!isReady) {
-        const response = formatter.error('Service not ready', {
-          status: 503,
-          code: 'NOT_READY',
-          details: {
-            database: {
-              connected: this.options.database?.connected || false,
-              resources: Object.keys(this.options.database?.resources || {}).length
-            }
-          }
-        });
-        return c.json(response, 503);
+      // Get custom checks configuration
+      const healthConfig = this.options.health || {};
+      const customChecks = healthConfig.readiness?.checks || [];
+
+      // Built-in: Database check
+      try {
+        const startTime = Date.now();
+        const isDbReady = this.options.database &&
+                         this.options.database.connected &&
+                         Object.keys(this.options.database.resources).length > 0;
+        const latency = Date.now() - startTime;
+
+        if (isDbReady) {
+          checks.s3db = {
+            status: 'healthy',
+            latency_ms: latency,
+            resources: Object.keys(this.options.database.resources).length
+          };
+        } else {
+          checks.s3db = {
+            status: 'unhealthy',
+            connected: this.options.database?.connected || false,
+            resources: Object.keys(this.options.database?.resources || {}).length
+          };
+          isHealthy = false;
+        }
+      } catch (err) {
+        checks.s3db = {
+          status: 'unhealthy',
+          error: err.message
+        };
+        isHealthy = false;
       }
 
-      const response = formatter.success({
-        status: 'ready',
-        database: {
-          connected: true,
-          resources: Object.keys(this.options.database.resources).length
-        },
-        timestamp: new Date().toISOString()
-      });
-      return c.json(response);
+      // Execute custom checks
+      for (const check of customChecks) {
+        try {
+          const startTime = Date.now();
+          const timeout = check.timeout || 5000;
+
+          // Run check with timeout
+          const result = await Promise.race([
+            check.check(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout')), timeout)
+            )
+          ]);
+
+          const latency = Date.now() - startTime;
+
+          checks[check.name] = {
+            status: result.healthy ? 'healthy' : 'unhealthy',
+            latency_ms: latency,
+            ...result
+          };
+
+          // Only mark as unhealthy if check is not optional
+          if (!result.healthy && !check.optional) {
+            isHealthy = false;
+          }
+        } catch (err) {
+          checks[check.name] = {
+            status: 'unhealthy',
+            error: err.message
+          };
+
+          // Only mark as unhealthy if check is not optional
+          if (!check.optional) {
+            isHealthy = false;
+          }
+        }
+      }
+
+      const status = isHealthy ? 200 : 503;
+
+      return c.json({
+        status: isHealthy ? 'healthy' : 'unhealthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        checks
+      }, status);
     });
 
     // Generic Health Check endpoint
@@ -172,6 +571,29 @@ export class ApiServer {
       });
       return c.json(response);
     });
+
+    // Metrics endpoint
+    if (this.options.metrics?.enabled) {
+      this.app.get('/metrics', (c) => {
+        const summary = this.metrics.getSummary();
+        const response = formatter.success(summary);
+        return c.json(response);
+      });
+
+      if (this.options.verbose) {
+        console.log('[API Server] Metrics endpoint enabled at /metrics');
+      }
+    }
+
+    // Failban admin endpoints
+    if (this.failban) {
+      const failbanAdminRoutes = createFailbanAdminRoutes(this.Hono, this.failban);
+      this.app.route('/admin/security', failbanAdminRoutes);
+
+      if (this.options.verbose) {
+        console.log('[API Server] Failban admin endpoints enabled at /admin/security');
+      }
+    }
 
     // Root endpoint - custom handler or redirect to docs
     this.app.get('/', (c) => {
@@ -228,8 +650,12 @@ export class ApiServer {
     // Setup resource routes
     this._setupResourceRoutes();
 
-    // Setup authentication routes if driver is configured
-    if (this.options.auth.driver) {
+    // Setup authentication routes if JWT driver is configured
+    const hasJwtDriver = Array.isArray(this.options.auth?.drivers)
+      ? this.options.auth.drivers.some(d => d.driver === 'jwt')
+      : false;
+
+    if (this.options.auth?.driver || hasJwtDriver) {
       this._setupAuthRoutes();
     }
 
@@ -271,7 +697,7 @@ export class ApiServer {
    * @private
    */
   _setupResourceRoutes() {
-    const { database } = this.options;
+    const { database, resources: resourceConfigs = {} } = this.options;
 
     // Get all resources from database
     const resources = database.resources;
@@ -280,8 +706,22 @@ export class ApiServer {
     const authMiddleware = this._createAuthMiddleware();
 
     for (const [name, resource] of Object.entries(resources)) {
-      // Skip plugin resources (they're internal)
-      if (name.startsWith('plg_')) {
+      const resourceConfig = resourceConfigs[name];
+      const isPluginResource = name.startsWith('plg_');
+
+      // Internal plugin resources require explicit opt-in
+      if (isPluginResource && !resourceConfig) {
+        if (this.options.verbose) {
+          console.log(`[API Plugin] Skipping internal resource '${name}' (not included in config.resources)`);
+        }
+        continue;
+      }
+
+      // Allow explicit disabling via config
+      if (resourceConfig?.enabled === false) {
+        if (this.options.verbose) {
+          console.log(`[API Plugin] Resource '${name}' disabled via config.resources`);
+        }
         continue;
       }
 
@@ -289,11 +729,16 @@ export class ApiServer {
       const version = resource.config?.currentVersion || resource.version || 'v1';
 
       // Determine version prefix (resource-level overrides global)
-      let versionPrefixConfig = resource.config?.versionPrefix !== undefined
-        ? resource.config?.versionPrefix
-        : this.options.versionPrefix !== undefined
-          ? this.options.versionPrefix
-          : false;
+      let versionPrefixConfig;
+      if (resourceConfig && resourceConfig.versionPrefix !== undefined) {
+        versionPrefixConfig = resourceConfig.versionPrefix;
+      } else if (resource.config && resource.config.versionPrefix !== undefined) {
+        versionPrefixConfig = resource.config.versionPrefix;
+      } else if (this.options.versionPrefix !== undefined) {
+        versionPrefixConfig = this.options.versionPrefix;
+      } else {
+        versionPrefixConfig = false;
+      }
 
       // Calculate the actual prefix to use
       let prefix = '';
@@ -311,17 +756,49 @@ export class ApiServer {
       // Prepare custom middleware
       const middlewares = [];
 
-      // Add global authentication middleware (always applied, guards control authorization)
-      if (authMiddleware) {
+      // Add global authentication middleware unless explicitly disabled
+      const authDisabled = resourceConfig?.auth === false;
+
+      if (authMiddleware && !authDisabled) {
         middlewares.push(authMiddleware);
       }
 
+      // Add resource-specific middleware from config (support single fn or array)
+      const extraMiddleware = resourceConfig?.customMiddleware;
+      if (extraMiddleware) {
+        const toRegister = Array.isArray(extraMiddleware) ? extraMiddleware : [extraMiddleware];
+
+        for (const middleware of toRegister) {
+          if (typeof middleware === 'function') {
+            middlewares.push(middleware);
+          } else if (this.options.verbose) {
+            console.warn(`[API Plugin] Ignoring non-function middleware for resource '${name}'`);
+          }
+        }
+      }
+
+      // Normalize HTTP methods (resource config > resource definition > defaults)
+      let methods = resourceConfig?.methods || resource.config?.methods;
+      if (!Array.isArray(methods) || methods.length === 0) {
+        methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+      } else {
+        methods = methods
+          .filter(Boolean)
+          .map(method => typeof method === 'string' ? method.toUpperCase() : method);
+      }
+
+      // Determine validation toggle
+      const enableValidation = resourceConfig?.validation !== undefined
+        ? resourceConfig.validation !== false
+        : resource.config?.validation !== false;
+
       // Create resource routes
       const resourceApp = createResourceRoutes(resource, version, {
-        methods: resource.config?.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+        methods,
         customMiddleware: middlewares,
-        enableValidation: resource.config?.validation !== false,
-        versionPrefix: prefix
+        enableValidation,
+        versionPrefix: prefix,
+        events: this.events
       }, this.Hono);
 
       // Mount resource routes (with or without prefix)
@@ -409,7 +886,7 @@ export class ApiServer {
     }
 
     // Create OIDC handler (which creates routes + middleware)
-    const oidcHandler = createOIDCHandler(config, this.app, authResource);
+    const oidcHandler = createOIDCHandler(config, this.app, authResource, this.events);
 
     // Store middleware for later use in _createAuthMiddleware
     this.oidcMiddleware = oidcHandler.middleware;
@@ -720,7 +1197,8 @@ export class ApiServer {
           error: 'Unauthorized',
           message
         }, 401);
-      }
+      },
+      events: this.events
     });
   }
 
@@ -933,11 +1411,13 @@ export class ApiServer {
       const { Hono } = await import('hono');
       const { serve } = await import('@hono/node-server');
       const { swaggerUI } = await import('@hono/swagger-ui');
+      const { cors } = await import('hono/cors');
 
       // Store for use in _setupRoutes
       this.Hono = Hono;
       this.serve = serve;
       this.swaggerUI = swaggerUI;
+      this.cors = cors;
 
       // Initialize app
       this.app = new Hono();
@@ -959,6 +1439,22 @@ export class ApiServer {
         }, (info) => {
           this.isRunning = true;
           console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+
+          // Setup graceful shutdown on SIGTERM/SIGINT
+          const shutdownHandler = async (signal) => {
+            console.log(`[API Server] Received ${signal}, initiating graceful shutdown...`);
+            try {
+              await this.shutdown({ timeout: 30000 });
+              process.exit(0);
+            } catch (err) {
+              console.error('[API Server] Error during shutdown:', err);
+              process.exit(1);
+            }
+          };
+
+          process.once('SIGTERM', () => shutdownHandler('SIGTERM'));
+          process.once('SIGINT', () => shutdownHandler('SIGINT'));
+
           resolve();
         });
       } catch (err) {
@@ -990,6 +1486,16 @@ export class ApiServer {
       this.isRunning = false;
       console.log('[API Plugin] Server stopped');
     }
+
+    // Cleanup metrics collector
+    if (this.metrics) {
+      this.metrics.stop();
+    }
+
+    // Cleanup failban plugin
+    if (this.failban) {
+      await this.failban.cleanup();
+    }
   }
 
   /**
@@ -1017,9 +1523,9 @@ export class ApiServer {
    * Generate OpenAPI specification
    * @private
    * @returns {Object} OpenAPI spec
-   */
+  */
   _generateOpenAPISpec() {
-    const { port, host, database, resources, auth, apiInfo } = this.options;
+    const { port, host, database, resources, auth, apiInfo, versionPrefix } = this.options;
 
     return generateOpenAPISpec(database, {
       title: apiInfo.title,
@@ -1027,7 +1533,8 @@ export class ApiServer {
       description: apiInfo.description,
       serverUrl: `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`,
       auth,
-      resources
+      resources,
+      versionPrefix
     });
   }
 }

@@ -49,6 +49,7 @@
 
 import { SignJWT, jwtVerify } from 'jose';
 import { unauthorized } from '../utils/response-formatter.js';
+import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
 
 /**
  * Validate OIDC configuration at startup
@@ -263,7 +264,7 @@ async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientS
 /**
  * Create OIDC authentication handler and routes
  */
-export function createOIDCHandler(config, app, usersResource) {
+export function createOIDCHandler(config, app, usersResource, events = null) {
   // Apply defaults
   const finalConfig = {
     scopes: ['openid', 'profile', 'email', 'offline_access'],
@@ -284,6 +285,12 @@ export function createOIDCHandler(config, app, usersResource) {
     cookieSameSite: 'Lax',
     defaultRole: 'user',
     defaultScopes: ['openid', 'profile', 'email'],
+    rateLimit: config.rateLimit !== undefined ? config.rateLimit : {
+      enabled: true,
+      windowMs: 900000, // 15 minutes
+      maxAttempts: 5,
+      skipSuccessfulRequests: true
+    },
     ...config
   };
 
@@ -385,6 +392,12 @@ export function createOIDCHandler(config, app, usersResource) {
 
   // ==================== ROUTES ====================
 
+  // Create rate limiter if enabled
+  let rateLimiter = null;
+  if (finalConfig.rateLimit?.enabled) {
+    rateLimiter = createAuthDriverRateLimiter('oidc', finalConfig.rateLimit);
+  }
+
   /**
    * LOGIN Route
    */
@@ -408,9 +421,9 @@ export function createOIDCHandler(config, app, usersResource) {
   });
 
   /**
-   * CALLBACK Route
+   * CALLBACK Route (with rate limiting)
    */
-  app.get(callbackPath, async (c) => {
+  const callbackHandler = async (c) => {
     const code = c.req.query('code');
     const state = c.req.query('state');
 
@@ -469,6 +482,24 @@ export function createOIDCHandler(config, app, usersResource) {
           const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
           user = result.user;
           userCreated = result.created;
+
+          // Emit user events
+          if (events) {
+            if (userCreated) {
+              events.emitUserEvent('created', {
+                user: { id: user.id, email: user.email, name: user.name },
+                source: 'oidc',
+                provider: finalConfig.issuer
+              });
+            }
+
+            events.emitUserEvent('login', {
+              user: { id: user.id, email: user.email, name: user.name },
+              source: 'oidc',
+              provider: finalConfig.issuer,
+              newUser: userCreated
+            });
+          }
 
           // Call onUserAuthenticated hook if configured
           if (finalConfig.onUserAuthenticated && typeof finalConfig.onUserAuthenticated === 'function') {
@@ -555,7 +586,14 @@ export function createOIDCHandler(config, app, usersResource) {
       console.error('[OIDC] Error during token exchange:', err);
       return c.json({ error: 'Authentication failed' }, 500);
     }
-  });
+  };
+
+  // Register callback route with optional rate limiting
+  if (rateLimiter) {
+    app.get(callbackPath, rateLimiter, callbackHandler);
+  } else {
+    app.get(callbackPath, callbackHandler);
+  }
 
   /**
    * LOGOUT Route

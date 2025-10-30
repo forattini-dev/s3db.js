@@ -60,7 +60,8 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
     methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
     customMiddleware = [],
     enableValidation = true,
-    versionPrefix = '' // Empty string by default (calculated in server.js)
+    versionPrefix = '', // Empty string by default (calculated in server.js)
+    events = null // Event emitter for lifecycle hooks
   } = config;
 
   const resourceName = resource.name;
@@ -222,6 +223,16 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       // Validation middleware will run if enabled
       const item = await resource.insert(data);
 
+      // Emit resource:created event
+      if (events) {
+        events.emitResourceEvent('created', {
+          resource: resourceName,
+          id: item.id,
+          data: item,
+          user: c.get('user')
+        });
+      }
+
       const location = `${basePath}/${item.id}`;
       const response = formatter.created(item, location);
 
@@ -246,6 +257,17 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       // Full update
       const updated = await resource.update(id, data);
 
+      // Emit resource:updated event
+      if (events) {
+        events.emitResourceEvent('updated', {
+          resource: resourceName,
+          id: updated.id,
+          data: updated,
+          previous: existing,
+          user: c.get('user')
+        });
+      }
+
       const response = formatter.success(updated);
       return c.json(response, response._status);
     }));
@@ -268,6 +290,18 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       const merged = { ...existing, ...data, id };
       const updated = await resource.update(id, merged);
 
+      // Emit resource:updated event
+      if (events) {
+        events.emitResourceEvent('updated', {
+          resource: resourceName,
+          id: updated.id,
+          data: updated,
+          previous: existing,
+          partial: true,
+          user: c.get('user')
+        });
+      }
+
       const response = formatter.success(updated);
       return c.json(response, response._status);
     }));
@@ -286,6 +320,16 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       }
 
       await resource.delete(id);
+
+      // Emit resource:deleted event
+      if (events) {
+        events.emitResourceEvent('deleted', {
+          resource: resourceName,
+          id,
+          previous: existing,
+          user: c.get('user')
+        });
+      }
 
       const response = formatter.noContent();
       return c.json(response, response._status);
