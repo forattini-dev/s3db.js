@@ -157,7 +157,7 @@ const apiPlugin = new ApiPlugin({
       const { resources } = ctx;
 
       const shortId = ctx.param('shortId');
-      const body = await ctx.json();  // Request helper
+      const body = await ctx.body();  // Request helper
 
       // Get URL
       const urlList = await resources.urls.query({ shortId });
@@ -207,7 +207,7 @@ const apiPlugin = new ApiPlugin({
     'POST /urls/batch': async (c, ctx) => {
       const { resources, validator } = ctx;
 
-      const body = await ctx.json();
+      const body = await ctx.body();
 
       if (!Array.isArray(body.urls)) {
         return ctx.error('Body must contain "urls" array', 400);

@@ -4023,7 +4023,7 @@ class RouteContext {
    * Parse JSON body
    * @returns {Promise<Object>} Parsed body
    */
-  async json() {
+  async body() {
     return await this.c.req.json();
   }
   /**
