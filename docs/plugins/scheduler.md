@@ -927,6 +927,8 @@ jobs: {
 ### Job Chains and Dependencies
 
 ```javascript
+import { SchedulerError } from 's3db.js';
+
 // Job manager with dependency support
 class JobChainManager {
   constructor(scheduler) {
@@ -967,7 +969,15 @@ class JobChainManager {
   // Run entire chain
   async runChain(chainName) {
     const chain = this.jobChains.get(chainName);
-    if (!chain) throw new Error(`Chain ${chainName} not found`);
+    if (!chain) {
+      throw new SchedulerError(`Chain ${chainName} not found`, {
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Define the chain via defineChain() before invoking runChain.',
+        operation: 'runChain',
+        metadata: { chainName, availableChains: Array.from(this.jobChains.keys()) }
+      });
+    }
     
     // Run first job, others will follow via dependencies
     await this.scheduler.runJob(chain[0].name);
@@ -1444,6 +1454,8 @@ schedulerPlugin.on('plg:scheduler:job-timeout', (data) => {
 
 Handle job errors without stopping scheduler:
 ```javascript
+import { SchedulerError } from 's3db.js';
+
 new SchedulerPlugin({
   jobs: {
     optional_task: {
@@ -1475,7 +1487,16 @@ new SchedulerPlugin({
       action: async () => {
         // External API call
         const response = await fetch('https://api.example.com/data');
-        if (!response.ok) throw new Error('API request failed');
+        if (!response.ok) {
+          throw new SchedulerError('External API returned non-2xx response', {
+            statusCode: response.status,
+            retriable: response.status >= 500,
+            suggestion: response.status >= 500
+              ? 'Allow the scheduler retry loop to continue after backoff.'
+              : 'Fix the request payload or credentials before retrying manually.',
+            metadata: { endpoint: response.url }
+          });
+        }
         return await response.json();
       }
     }

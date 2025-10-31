@@ -465,7 +465,10 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
           config: {
             jwtSecret: 'custom-secret',
             jwtExpiresIn: '1h',
-            allowRegistration: true
+            registration: {
+              enabled: true,
+              allowedFields: ['memberName']
+            }
           }
         },
         resources: {
@@ -499,8 +502,9 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
       expect(response.status).toBe(201);
       const data = await response.json();
       expect(data.success).toBe(true);
-      expect(data.data.memberEmail).toBe('custom@example.com');
-      expect(data.data.memberPassword).toBeUndefined(); // Should not return password
+      expect(data.data.user.memberEmail).toBe('custom@example.com');
+      expect(data.data.user.memberName).toBe('Custom User');
+      expect(data.data.user.memberPassword).toBeUndefined(); // Should not return password
     });
 
     it('should login with custom username/password fields', async () => {

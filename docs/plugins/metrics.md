@@ -604,6 +604,8 @@ const insertMetrics = await s3db.plugins.metrics.getOperationMetrics('inserted')
 ### Custom Performance Benchmarking
 
 ```javascript
+import { MetricsError } from 's3db.js';
+
 class PerformanceBenchmark {
   constructor(metricsPlugin) {
     this.metrics = metricsPlugin;
@@ -668,7 +670,13 @@ class PerformanceBenchmark {
     const bench2 = this.benchmarks.get(name2);
 
     if (!bench1 || !bench2) {
-      throw new Error('One or both benchmarks not found');
+      throw new MetricsError('Metrics benchmarks not found for comparison', {
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Run benchmark.runBenchmark() for both names before comparing.',
+        metadata: { missing: [!bench1 ? name1 : null, !bench2 ? name2 : null].filter(Boolean) },
+        operation: 'compareBenchmarks'
+      });
     }
 
     const comparison = {
