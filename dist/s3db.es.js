@@ -30836,7 +30836,7 @@ class PuppeteerPlugin extends Plugin {
         enabled: true,
         maxBrowsers: 5,
         maxTabsPerBrowser: 10,
-        reuseTab: true,
+        reuseTab: false,
         closeOnIdle: true,
         idleTimeout: 3e5,
         // 5 minutes
@@ -31010,11 +31010,20 @@ class PuppeteerPlugin extends Plugin {
     };
     this.browserPool = [];
     this.tabPool = /* @__PURE__ */ new Map();
+    this.browserIdleTimers = /* @__PURE__ */ new Map();
+    this.dedicatedBrowsers = /* @__PURE__ */ new Set();
     this.userAgentGenerator = null;
     this.ghostCursor = null;
     this.cookieManager = null;
     this.proxyManager = null;
+    this.performanceManager = null;
     this.initialized = false;
+    if (this.config.pool.reuseTab) {
+      this.emit("puppeteer.configWarning", {
+        setting: "pool.reuseTab",
+        message: "pool.reuseTab is not supported yet and will be ignored."
+      });
+    }
   }
   /**
    * Install plugin and validate dependencies
@@ -31042,6 +31051,7 @@ class PuppeteerPlugin extends Plugin {
     if (this.config.proxy.enabled) {
       await this._initializeProxyManager();
     }
+    await this._initializePerformanceManager();
     if (this.config.pool.enabled) {
       await this._warmupBrowserPool();
     }
@@ -31053,6 +31063,7 @@ class PuppeteerPlugin extends Plugin {
    */
   async onStop() {
     await this._closeBrowserPool();
+    await this._closeDedicatedBrowsers();
     this.initialized = false;
     this.emit("puppeteer.stopped");
   }
@@ -31136,6 +31147,15 @@ class PuppeteerPlugin extends Plugin {
     await this.cookieManager.initialize();
   }
   /**
+   * Initialize performance manager
+   * @private
+   */
+  async _initializePerformanceManager() {
+    const { PerformanceManager } = await Promise.resolve().then(function () { return performanceManager; });
+    this.performanceManager = new PerformanceManager(this);
+    this.emit("puppeteer.performanceManager.initialized");
+  }
+  /**
    * Warmup browser pool
    * @private
    */
@@ -31173,6 +31193,8 @@ class PuppeteerPlugin extends Plugin {
           this.browserPool.splice(index, 1);
         }
         this.tabPool.delete(browser);
+        this._clearIdleTimer(browser);
+        this.dedicatedBrowsers.delete(browser);
       });
     }
     return browser;
@@ -31217,6 +31239,7 @@ class PuppeteerPlugin extends Plugin {
    */
   async _closeBrowserPool() {
     for (const browser of this.browserPool) {
+      this._clearIdleTimer(browser);
       if (this.cookieManager) {
         const tabs = this.tabPool.get(browser);
         if (tabs) {
@@ -31249,6 +31272,74 @@ class PuppeteerPlugin extends Plugin {
     }
     this.browserPool = [];
     this.tabPool.clear();
+  }
+  /**
+   * Clear idle timer for pooled browser
+   * @private
+   */
+  _clearIdleTimer(browser) {
+    const timer = this.browserIdleTimers.get(browser);
+    if (timer) {
+      clearTimeout(timer);
+      this.browserIdleTimers.delete(browser);
+    }
+  }
+  /**
+   * Schedule pooled browser retirement when idle
+   * @private
+   */
+  _scheduleIdleCloseIfNeeded(browser) {
+    if (!this.config.pool.closeOnIdle) return;
+    const tabs = this.tabPool.get(browser);
+    if (!tabs || tabs.size > 0) return;
+    if (this.browserIdleTimers.has(browser)) return;
+    const timeout = this.config.pool.idleTimeout || 3e5;
+    const timer = setTimeout(async () => {
+      this.browserIdleTimers.delete(browser);
+      const currentTabs = this.tabPool.get(browser);
+      if (currentTabs && currentTabs.size === 0) {
+        await this._retireIdleBrowser(browser);
+      }
+    }, timeout);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+    this.browserIdleTimers.set(browser, timer);
+  }
+  /**
+   * Retire pooled browser if still idle
+   * @private
+   * @param {Browser} browser
+   */
+  async _retireIdleBrowser(browser) {
+    this.tabPool.delete(browser);
+    const index = this.browserPool.indexOf(browser);
+    if (index > -1) {
+      this.browserPool.splice(index, 1);
+    }
+    try {
+      await browser.close();
+      this.emit("puppeteer.browserRetired", { pooled: true });
+    } catch (err) {
+      this.emit("puppeteer.browserRetiredError", {
+        pooled: true,
+        error: err.message
+      });
+    }
+  }
+  /**
+   * Close dedicated (non-pooled) browsers
+   * @private
+   */
+  async _closeDedicatedBrowsers() {
+    for (const browser of Array.from(this.dedicatedBrowsers)) {
+      try {
+        await browser.close();
+      } catch (err) {
+      } finally {
+        this.dedicatedBrowsers.delete(browser);
+      }
+    }
   }
   /**
    * Generate random user agent
@@ -31329,7 +31420,13 @@ class PuppeteerPlugin extends Plugin {
       const tabs = this.tabPool.get(browser);
       if (tabs) {
         tabs.add(page);
+        this._clearIdleTimer(browser);
       }
+    } else {
+      this.dedicatedBrowsers.add(browser);
+      browser.once("disconnected", () => {
+        this.dedicatedBrowsers.delete(browser);
+      });
     }
     if (proxy && this.proxyManager) {
       await this.proxyManager.authenticateProxy(page, proxy);
@@ -31385,12 +31482,17 @@ class PuppeteerPlugin extends Plugin {
       this._attachHumanBehaviorMethods(page);
     }
     let hasSavedSession = false;
+    let browserClosed = false;
     const originalClose = page.close?.bind(page) || (async () => {
     });
+    const shouldAutoCloseBrowser = !isPooledBrowser;
     page.on("close", () => {
       if (isPooledBrowser) {
         const tabs = this.tabPool.get(browser);
         tabs?.delete(page);
+        this._scheduleIdleCloseIfNeeded(browser);
+      } else {
+        this.dedicatedBrowsers.delete(browser);
       }
     });
     page.close = async (...closeArgs) => {
@@ -31411,11 +31513,26 @@ class PuppeteerPlugin extends Plugin {
         }
       }
       try {
-        return await originalClose(...closeArgs);
+        const result = await originalClose(...closeArgs);
+        return result;
       } finally {
         if (isPooledBrowser) {
           const tabs = this.tabPool.get(browser);
           tabs?.delete(page);
+          this._scheduleIdleCloseIfNeeded(browser);
+        } else if (shouldAutoCloseBrowser && !browserClosed) {
+          try {
+            await browser.close();
+            this.emit("puppeteer.browserClosed", { pooled: false });
+          } catch (err) {
+            this.emit("puppeteer.browserCloseFailed", {
+              pooled: false,
+              error: err.message
+            });
+          } finally {
+            browserClosed = true;
+            this.dedicatedBrowsers.delete(browser);
+          }
         }
       }
     };
@@ -31427,6 +31544,53 @@ class PuppeteerPlugin extends Plugin {
       sessionId: useSession
     });
     return page;
+  }
+  /**
+   * Run handler with session-aware navigation helper
+   * @param {string} sessionId - Session identifier
+   * @param {Function} handler - Async function receiving the page instance
+   * @param {Object} options - Navigate options (requires url)
+   * @returns {Promise<*>}
+   */
+  async withSession(sessionId, handler, options = {}) {
+    if (!sessionId) {
+      throw new Error("withSession requires a sessionId");
+    }
+    if (typeof handler !== "function") {
+      throw new TypeError("withSession handler must be a function");
+    }
+    const { url, ...navigateOptions } = options;
+    if (!url) {
+      throw new Error("withSession requires an options.url value");
+    }
+    this.emit("puppeteer.withSession.start", { sessionId, url });
+    const page = await this.navigate(url, {
+      ...navigateOptions,
+      useSession: sessionId
+    });
+    let handlerError = null;
+    try {
+      const result = await handler(page, this);
+      return result;
+    } catch (err) {
+      handlerError = err;
+      throw err;
+    } finally {
+      try {
+        await page.close();
+      } catch (err) {
+        this.emit("puppeteer.withSession.cleanupFailed", {
+          sessionId,
+          url,
+          error: err.message
+        });
+      }
+      this.emit("puppeteer.withSession.finish", {
+        sessionId,
+        url,
+        error: handlerError ? handlerError.message : null
+      });
+    }
   }
   /**
    * Attach human behavior methods to page
@@ -49998,6 +50162,607 @@ var cookieManager = /*#__PURE__*/Object.freeze({
   CookieManager: CookieManager
 });
 
+class PerformanceManager {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.performance || {};
+    this.thresholds = {
+      lcp: { good: 2500, needsImprovement: 4e3 },
+      // Largest Contentful Paint (ms)
+      fid: { good: 100, needsImprovement: 300 },
+      // First Input Delay (ms)
+      cls: { good: 0.1, needsImprovement: 0.25 },
+      // Cumulative Layout Shift (score)
+      ttfb: { good: 800, needsImprovement: 1800 },
+      // Time to First Byte (ms)
+      fcp: { good: 1800, needsImprovement: 3e3 },
+      // First Contentful Paint (ms)
+      inp: { good: 200, needsImprovement: 500 },
+      // Interaction to Next Paint (ms)
+      si: { good: 3400, needsImprovement: 5800 },
+      // Speed Index (ms)
+      tbt: { good: 200, needsImprovement: 600 },
+      // Total Blocking Time (ms)
+      tti: { good: 3800, needsImprovement: 7300 }
+      // Time to Interactive (ms)
+    };
+    this.weights = {
+      lcp: 0.25,
+      fid: 0.1,
+      cls: 0.15,
+      ttfb: 0.1,
+      fcp: 0.1,
+      inp: 0.1,
+      tbt: 0.1,
+      tti: 0.1
+    };
+  }
+  /**
+   * Collect all performance metrics from page
+   * @param {Page} page - Puppeteer page
+   * @param {Object} options - Collection options
+   * @returns {Promise<Object>} Performance report
+   */
+  async collectMetrics(page, options = {}) {
+    const {
+      waitForLoad = true,
+      collectResources = true,
+      collectMemory = true,
+      collectScreenshots = false,
+      customMetrics = null
+    } = options;
+    const startTime = Date.now();
+    try {
+      if (waitForLoad) {
+        await page.waitForLoadState("load", { timeout: 3e4 }).catch(() => {
+        });
+      }
+      await this._injectWebVitalsScript(page);
+      await this._delay(1e3);
+      const [
+        coreWebVitals,
+        navigationTiming,
+        resourceTiming,
+        paintTiming,
+        memoryInfo
+      ] = await Promise.all([
+        this._collectCoreWebVitals(page),
+        this._collectNavigationTiming(page),
+        collectResources ? this._collectResourceTiming(page) : null,
+        this._collectPaintTiming(page),
+        collectMemory ? this._collectMemoryInfo(page) : null
+      ]);
+      let customMetricsData = null;
+      if (customMetrics && typeof customMetrics === "function") {
+        customMetricsData = await customMetrics(page);
+      }
+      const derivedMetrics = this._calculateDerivedMetrics(navigationTiming, resourceTiming);
+      const scores = this._calculateScores({
+        ...coreWebVitals,
+        ...derivedMetrics
+      });
+      let screenshots = null;
+      if (collectScreenshots) {
+        screenshots = await this._collectScreenshots(page);
+      }
+      const collectionTime = Date.now() - startTime;
+      const report = {
+        url: page.url(),
+        timestamp: Date.now(),
+        collectionTime,
+        // Overall score (0-100)
+        score: scores.overall,
+        // Individual scores
+        scores: scores.individual,
+        // Core Web Vitals
+        coreWebVitals,
+        // Timing APIs
+        navigationTiming,
+        paintTiming,
+        // Resource data
+        resources: resourceTiming ? {
+          summary: this._summarizeResources(resourceTiming),
+          details: resourceTiming
+        } : null,
+        // Memory usage
+        memory: memoryInfo,
+        // Derived metrics
+        derived: derivedMetrics,
+        // Custom metrics
+        custom: customMetricsData,
+        // Screenshots
+        screenshots,
+        // Recommendations
+        recommendations: this._generateRecommendations({
+          ...coreWebVitals,
+          ...derivedMetrics
+        }, resourceTiming)
+      };
+      this.plugin.emit("performance.metricsCollected", {
+        url: page.url(),
+        score: report.score,
+        collectionTime
+      });
+      return report;
+    } catch (err) {
+      this.plugin.emit("performance.collectionFailed", {
+        url: page.url(),
+        error: err.message
+      });
+      throw err;
+    }
+  }
+  /**
+   * Inject Web Vitals measurement script
+   * @private
+   */
+  async _injectWebVitalsScript(page) {
+    await page.evaluateOnNewDocument(() => {
+      window.__WEB_VITALS__ = {
+        lcp: null,
+        fid: null,
+        cls: null,
+        inp: null,
+        fcp: null,
+        ttfb: null
+      };
+      const lcpObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        const lastEntry = entries[entries.length - 1];
+        window.__WEB_VITALS__.lcp = lastEntry.renderTime || lastEntry.loadTime;
+      });
+      lcpObserver.observe({ type: "largest-contentful-paint", buffered: true });
+      const fidObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        entries.forEach((entry) => {
+          if (!window.__WEB_VITALS__.fid) {
+            window.__WEB_VITALS__.fid = entry.processingStart - entry.startTime;
+          }
+        });
+      });
+      fidObserver.observe({ type: "first-input", buffered: true });
+      let clsValue = 0;
+      const clsObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (!entry.hadRecentInput) {
+            clsValue += entry.value;
+          }
+        }
+        window.__WEB_VITALS__.cls = clsValue;
+      });
+      clsObserver.observe({ type: "layout-shift", buffered: true });
+      const inpObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        entries.forEach((entry) => {
+          const duration = entry.processingEnd - entry.startTime;
+          if (!window.__WEB_VITALS__.inp || duration > window.__WEB_VITALS__.inp) {
+            window.__WEB_VITALS__.inp = duration;
+          }
+        });
+      });
+      inpObserver.observe({ type: "event", buffered: true, durationThreshold: 16 });
+      window.addEventListener("load", () => {
+        const navTiming = performance.getEntriesByType("navigation")[0];
+        if (navTiming) {
+          window.__WEB_VITALS__.ttfb = navTiming.responseStart - navTiming.requestStart;
+        }
+        const fcpEntry = performance.getEntriesByName("first-contentful-paint")[0];
+        if (fcpEntry) {
+          window.__WEB_VITALS__.fcp = fcpEntry.startTime;
+        }
+      });
+    });
+  }
+  /**
+   * Collect Core Web Vitals
+   * @private
+   */
+  async _collectCoreWebVitals(page) {
+    const vitals = await page.evaluate(() => {
+      return window.__WEB_VITALS__ || {};
+    });
+    return {
+      lcp: vitals.lcp || null,
+      fid: vitals.fid || null,
+      cls: vitals.cls || null,
+      inp: vitals.inp || null,
+      fcp: vitals.fcp || null,
+      ttfb: vitals.ttfb || null
+    };
+  }
+  /**
+   * Collect Navigation Timing API metrics
+   * @private
+   */
+  async _collectNavigationTiming(page) {
+    return await page.evaluate(() => {
+      const nav = performance.getEntriesByType("navigation")[0];
+      if (!nav) return null;
+      return {
+        // DNS
+        dnsStart: nav.domainLookupStart,
+        dnsEnd: nav.domainLookupEnd,
+        dnsDuration: nav.domainLookupEnd - nav.domainLookupStart,
+        // TCP
+        tcpStart: nav.connectStart,
+        tcpEnd: nav.connectEnd,
+        tcpDuration: nav.connectEnd - nav.connectStart,
+        // TLS/SSL
+        tlsStart: nav.secureConnectionStart,
+        tlsDuration: nav.secureConnectionStart > 0 ? nav.connectEnd - nav.secureConnectionStart : 0,
+        // Request/Response
+        requestStart: nav.requestStart,
+        responseStart: nav.responseStart,
+        responseEnd: nav.responseEnd,
+        requestDuration: nav.responseStart - nav.requestStart,
+        responseDuration: nav.responseEnd - nav.responseStart,
+        // DOM Processing
+        domInteractive: nav.domInteractive,
+        domContentLoaded: nav.domContentLoadedEventEnd,
+        domComplete: nav.domComplete,
+        // Load Events
+        loadEventStart: nav.loadEventStart,
+        loadEventEnd: nav.loadEventEnd,
+        loadEventDuration: nav.loadEventEnd - nav.loadEventStart,
+        // Total times
+        redirectTime: nav.redirectEnd - nav.redirectStart,
+        fetchTime: nav.responseEnd - nav.fetchStart,
+        totalTime: nav.loadEventEnd - nav.fetchStart,
+        // Transfer size
+        transferSize: nav.transferSize,
+        encodedBodySize: nav.encodedBodySize,
+        decodedBodySize: nav.decodedBodySize
+      };
+    });
+  }
+  /**
+   * Collect Resource Timing API metrics
+   * @private
+   */
+  async _collectResourceTiming(page) {
+    return await page.evaluate(() => {
+      const resources = performance.getEntriesByType("resource");
+      return resources.map((resource) => ({
+        name: resource.name,
+        type: resource.initiatorType,
+        startTime: resource.startTime,
+        duration: resource.duration,
+        transferSize: resource.transferSize,
+        encodedBodySize: resource.encodedBodySize,
+        decodedBodySize: resource.decodedBodySize,
+        // Timing breakdown
+        dns: resource.domainLookupEnd - resource.domainLookupStart,
+        tcp: resource.connectEnd - resource.connectStart,
+        tls: resource.secureConnectionStart > 0 ? resource.connectEnd - resource.secureConnectionStart : 0,
+        request: resource.responseStart - resource.requestStart,
+        response: resource.responseEnd - resource.responseStart,
+        // Caching
+        cached: resource.transferSize === 0 && resource.decodedBodySize > 0
+      }));
+    });
+  }
+  /**
+   * Collect Paint Timing API metrics
+   * @private
+   */
+  async _collectPaintTiming(page) {
+    return await page.evaluate(() => {
+      const paintEntries = performance.getEntriesByType("paint");
+      const result = {};
+      paintEntries.forEach((entry) => {
+        result[entry.name] = entry.startTime;
+      });
+      return result;
+    });
+  }
+  /**
+   * Collect memory information
+   * @private
+   */
+  async _collectMemoryInfo(page) {
+    try {
+      const memoryInfo = await page.evaluate(() => {
+        if (performance.memory) {
+          return {
+            usedJSHeapSize: performance.memory.usedJSHeapSize,
+            totalJSHeapSize: performance.memory.totalJSHeapSize,
+            jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+            usedPercent: performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit * 100
+          };
+        }
+        return null;
+      });
+      return memoryInfo;
+    } catch (err) {
+      return null;
+    }
+  }
+  /**
+   * Calculate derived metrics
+   * @private
+   */
+  _calculateDerivedMetrics(navigationTiming, resourceTiming) {
+    if (!navigationTiming) return {};
+    const derived = {
+      // Time to Interactive (simplified calculation)
+      tti: navigationTiming.domInteractive,
+      // Total Blocking Time (simplified - would need long task API)
+      tbt: Math.max(0, navigationTiming.domContentLoaded - navigationTiming.domInteractive - 50),
+      // Speed Index (simplified approximation)
+      si: navigationTiming.domContentLoaded
+    };
+    if (resourceTiming && resourceTiming.length > 0) {
+      const totalSize = resourceTiming.reduce((sum, r) => sum + (r.transferSize || 0), 0);
+      const totalRequests = resourceTiming.length;
+      const cachedRequests = resourceTiming.filter((r) => r.cached).length;
+      const avgDuration = resourceTiming.reduce((sum, r) => sum + r.duration, 0) / totalRequests;
+      derived.resources = {
+        totalRequests,
+        totalSize,
+        cachedRequests,
+        cacheRate: cachedRequests / totalRequests,
+        avgDuration
+      };
+      const byType = {};
+      resourceTiming.forEach((r) => {
+        if (!byType[r.type]) {
+          byType[r.type] = { count: 0, size: 0, duration: 0 };
+        }
+        byType[r.type].count++;
+        byType[r.type].size += r.transferSize || 0;
+        byType[r.type].duration += r.duration;
+      });
+      derived.resourcesByType = Object.entries(byType).map(([type, data]) => ({
+        type,
+        count: data.count,
+        totalSize: data.size,
+        avgDuration: data.duration / data.count
+      }));
+    }
+    return derived;
+  }
+  /**
+   * Calculate performance scores
+   * @private
+   */
+  _calculateScores(metrics) {
+    const individual = {};
+    let weightedSum = 0;
+    let totalWeight = 0;
+    Object.keys(this.thresholds).forEach((metric) => {
+      const value = metrics[metric];
+      const threshold = this.thresholds[metric];
+      const weight = this.weights[metric] || 0;
+      if (value === null || value === void 0) {
+        individual[metric] = null;
+        return;
+      }
+      let score;
+      if (metric === "cls") {
+        if (value <= threshold.good) {
+          score = 100;
+        } else if (value <= threshold.needsImprovement) {
+          score = 50 + 50 * (threshold.needsImprovement - value) / (threshold.needsImprovement - threshold.good);
+        } else {
+          score = Math.max(0, 50 * (1 - (value - threshold.needsImprovement) / threshold.needsImprovement));
+        }
+      } else {
+        if (value <= threshold.good) {
+          score = 100;
+        } else if (value <= threshold.needsImprovement) {
+          score = 50 + 50 * (threshold.needsImprovement - value) / (threshold.needsImprovement - threshold.good);
+        } else {
+          score = Math.max(0, 50 * (1 - (value - threshold.needsImprovement) / threshold.needsImprovement));
+        }
+      }
+      individual[metric] = Math.round(score);
+      if (weight > 0) {
+        weightedSum += score * weight;
+        totalWeight += weight;
+      }
+    });
+    const overall = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null;
+    return {
+      overall,
+      individual
+    };
+  }
+  /**
+   * Summarize resource timing data
+   * @private
+   */
+  _summarizeResources(resources) {
+    const summary = {
+      total: resources.length,
+      byType: {},
+      totalSize: 0,
+      totalDuration: 0,
+      cached: 0,
+      slowest: []
+    };
+    resources.forEach((resource) => {
+      const type = resource.type || "other";
+      if (!summary.byType[type]) {
+        summary.byType[type] = { count: 0, size: 0, duration: 0 };
+      }
+      summary.byType[type].count++;
+      summary.byType[type].size += resource.transferSize || 0;
+      summary.byType[type].duration += resource.duration;
+      summary.totalSize += resource.transferSize || 0;
+      summary.totalDuration += resource.duration;
+      if (resource.cached) summary.cached++;
+    });
+    summary.slowest = resources.sort((a, b) => b.duration - a.duration).slice(0, 10).map((r) => ({
+      name: r.name,
+      type: r.type,
+      duration: Math.round(r.duration),
+      size: r.transferSize
+    }));
+    return summary;
+  }
+  /**
+   * Generate performance recommendations
+   * @private
+   */
+  _generateRecommendations(metrics, resources) {
+    const recommendations = [];
+    if (metrics.lcp && metrics.lcp > this.thresholds.lcp.needsImprovement) {
+      recommendations.push({
+        metric: "lcp",
+        severity: "high",
+        message: `LCP is ${Math.round(metrics.lcp)}ms (target: <${this.thresholds.lcp.good}ms)`,
+        suggestions: [
+          "Optimize largest image/element loading",
+          "Use lazy loading for below-the-fold content",
+          "Reduce server response times",
+          "Use CDN for static assets"
+        ]
+      });
+    }
+    if (metrics.fid && metrics.fid > this.thresholds.fid.needsImprovement) {
+      recommendations.push({
+        metric: "fid",
+        severity: "high",
+        message: `FID is ${Math.round(metrics.fid)}ms (target: <${this.thresholds.fid.good}ms)`,
+        suggestions: [
+          "Break up long JavaScript tasks",
+          "Use web workers for heavy computations",
+          "Defer non-critical JavaScript",
+          "Reduce JavaScript execution time"
+        ]
+      });
+    }
+    if (metrics.cls && metrics.cls > this.thresholds.cls.needsImprovement) {
+      recommendations.push({
+        metric: "cls",
+        severity: "high",
+        message: `CLS is ${metrics.cls.toFixed(3)} (target: <${this.thresholds.cls.good})`,
+        suggestions: [
+          "Set explicit width/height on images and videos",
+          "Reserve space for ads and embeds",
+          "Avoid inserting content above existing content",
+          "Use transform animations instead of layout-triggering properties"
+        ]
+      });
+    }
+    if (metrics.ttfb && metrics.ttfb > this.thresholds.ttfb.needsImprovement) {
+      recommendations.push({
+        metric: "ttfb",
+        severity: "medium",
+        message: `TTFB is ${Math.round(metrics.ttfb)}ms (target: <${this.thresholds.ttfb.good}ms)`,
+        suggestions: [
+          "Optimize server processing time",
+          "Use server-side caching",
+          "Use a CDN",
+          "Reduce server redirects"
+        ]
+      });
+    }
+    if (resources && resources.length > 0) {
+      const totalSize = resources.reduce((sum, r) => sum + (r.transferSize || 0), 0);
+      resources.filter((r) => !r.cached).reduce((sum, r) => sum + (r.transferSize || 0), 0);
+      if (totalSize > 5 * 1024 * 1024) {
+        recommendations.push({
+          metric: "resources",
+          severity: "medium",
+          message: `Total page size is ${(totalSize / 1024 / 1024).toFixed(2)}MB`,
+          suggestions: [
+            "Compress images and use modern formats (WebP, AVIF)",
+            "Minify CSS and JavaScript",
+            "Remove unused code",
+            "Use code splitting"
+          ]
+        });
+      }
+      const cacheRate = (resources.length - resources.filter((r) => !r.cached).length) / resources.length;
+      if (cacheRate < 0.5) {
+        recommendations.push({
+          metric: "caching",
+          severity: "low",
+          message: `Only ${(cacheRate * 100).toFixed(0)}% of resources are cached`,
+          suggestions: [
+            "Set appropriate cache headers",
+            "Use service workers for offline caching",
+            "Implement browser caching strategy"
+          ]
+        });
+      }
+    }
+    return recommendations;
+  }
+  /**
+   * Collect screenshots at key moments
+   * @private
+   */
+  async _collectScreenshots(page) {
+    try {
+      const screenshots = {
+        final: await page.screenshot({ encoding: "base64" })
+      };
+      return screenshots;
+    } catch (err) {
+      return null;
+    }
+  }
+  /**
+   * Compare two performance reports
+   * @param {Object} baseline - Baseline report
+   * @param {Object} current - Current report
+   * @returns {Object} Comparison result
+   */
+  compareReports(baseline, current) {
+    const comparison = {
+      timestamp: Date.now(),
+      baseline: {
+        url: baseline.url,
+        timestamp: baseline.timestamp,
+        score: baseline.score
+      },
+      current: {
+        url: current.url,
+        timestamp: current.timestamp,
+        score: current.score
+      },
+      scoreDelta: current.score - baseline.score,
+      improvements: [],
+      regressions: []
+    };
+    Object.keys(baseline.coreWebVitals).forEach((metric) => {
+      const baselineValue = baseline.coreWebVitals[metric];
+      const currentValue = current.coreWebVitals[metric];
+      if (baselineValue && currentValue) {
+        const delta = currentValue - baselineValue;
+        const percentChange = delta / baselineValue * 100;
+        const change = {
+          metric,
+          baseline: baselineValue,
+          current: currentValue,
+          delta,
+          percentChange: percentChange.toFixed(2)
+        };
+        if (delta < 0) {
+          comparison.improvements.push(change);
+        } else if (delta > 0) {
+          comparison.regressions.push(change);
+        }
+      }
+    });
+    return comparison;
+  }
+  /**
+   * Delay helper
+   * @private
+   */
+  async _delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+var performanceManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  PerformanceManager: PerformanceManager
+});
+
 function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
   const k = centroids.length;
   const n = vectors.length;
@@ -52597,13 +53362,15 @@ var __defProp$2 = Object.defineProperty;
 var __template$2 = (cooked, raw) => __freeze$2(__defProp$2(cooked, "raw", { value: __freeze$2(cooked.slice()) }));
 var _a$2;
 function MFAVerificationPage(props = {}) {
-  const { error = null, token, remember = "", config = {} } = props;
-  let userData = { email: "", password: "" };
-  try {
-    userData = JSON.parse(token);
-  } catch (err) {
-  }
-  const content = html(_a$2 || (_a$2 = __template$2(['\n    <section class="identity-login">\n      <!-- Left panel with branding -->\n      <aside class="identity-login__panel">\n        <div class="identity-login__panel-content">\n          <div class="identity-login__brand">\n            ', '\n            <span class="identity-login__badge">\n              Identity\n            </span>\n          </div>\n\n          <div class="identity-login__panel-main">\n            <h1 class="identity-login__panel-title">\u{1F510} Two-Factor Authentication</h1>\n            <p class="identity-login__panel-text">\n              An extra layer of security to keep your account safe.\n            </p>\n          </div>\n        </div>\n\n        <footer class="identity-login__panel-footer">\n          ', '\n        </footer>\n      </aside>\n\n      <!-- Right form area -->\n      <div class="identity-login__form">\n        <header class="identity-login__form-header">\n          <h2>Verify Your Identity</h2>\n          <p>Enter the 6-digit code from your authenticator app.</p>\n        </header>\n\n        ', '\n\n        <!-- TOTP Token Form -->\n        <form method="POST" action="/login" class="identity-login__form-body" id="mfa-form">\n          <input type="hidden" name="email" value="', '" />\n          <input type="hidden" name="password" value="', '" />\n          <input type="hidden" name="remember" value="', '" />\n\n          <div class="identity-login__group">\n            <label for="mfa_token">Verification Code</label>\n            <input\n              type="text"\n              class="identity-login__input text-center text-2xl tracking-widest"\n              id="mfa_token"\n              name="mfa_token"\n              pattern="[0-9]{6}"\n              maxlength="6"\n              inputmode="numeric"\n              autocomplete="one-time-code"\n              placeholder="000000"\n              required\n              autofocus\n            />\n            <p class="mt-2 text-sm text-slate-400">\n              The code refreshes every 30 seconds\n            </p>\n          </div>\n\n          <button type="submit" class="identity-login__submit">\n            Verify\n          </button>\n        </form>\n\n        <!-- Backup Code Link -->\n        <div class="identity-login__divider"><span>or</span></div>\n\n        <button\n          type="button"\n          onclick="showBackupCodeForm()"\n          class="w-full rounded-xl border border-slate-700/50 bg-slate-800/30 px-4 py-3 text-sm font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n        >\n          Lost your device? Use backup code\n        </button>\n\n        <!-- Backup Code Form (hidden by default) -->\n        <form method="POST" action="/login" class="identity-login__form-body mt-6 hidden" id="backup-code-form">\n          <input type="hidden" name="email" value="', '" />\n          <input type="hidden" name="password" value="', '" />\n          <input type="hidden" name="remember" value="', `" />
+  const {
+    error = null,
+    email = "",
+    remember = "0",
+    challenge,
+    config = {}
+  } = props;
+  const rememberValue = remember === "1" ? "1" : "0";
+  const content = html(_a$2 || (_a$2 = __template$2(['\n    <section class="identity-login">\n      <!-- Left panel with branding -->\n      <aside class="identity-login__panel">\n        <div class="identity-login__panel-content">\n          <div class="identity-login__brand">\n            ', '\n            <span class="identity-login__badge">\n              Identity\n            </span>\n          </div>\n\n          <div class="identity-login__panel-main">\n            <h1 class="identity-login__panel-title">\u{1F510} Two-Factor Authentication</h1>\n            <p class="identity-login__panel-text">\n              An extra layer of security to keep your account safe.\n            </p>\n          </div>\n        </div>\n\n        <footer class="identity-login__panel-footer">\n          ', '\n        </footer>\n      </aside>\n\n      <!-- Right form area -->\n      <div class="identity-login__form">\n        <header class="identity-login__form-header">\n          <h2>Verify Your Identity</h2>\n          <p>Enter the 6-digit code from your authenticator app.</p>\n          ', "\n        </header>\n\n        ", '\n\n        <!-- TOTP Token Form -->\n        <form method="POST" action="/login" class="identity-login__form-body" id="mfa-form">\n\n          <div class="identity-login__group">\n            <label for="mfa_token">Verification Code</label>\n            <input\n              type="text"\n              class="identity-login__input text-center text-2xl tracking-widest"\n              id="mfa_token"\n              name="mfa_token"\n              pattern="[0-9]{6}"\n              maxlength="6"\n              inputmode="numeric"\n              autocomplete="one-time-code"\n              placeholder="000000"\n              required\n              autofocus\n            />\n            <p class="mt-2 text-sm text-slate-400">\n              The code refreshes every 30 seconds\n            </p>\n          </div>\n          <input type="hidden" name="email" value="', '" />\n          <input type="hidden" name="remember" value="', '" />\n          <input type="hidden" name="mfa_challenge" value="', '" />\n\n          <button type="submit" class="identity-login__submit">\n            Verify\n          </button>\n        </form>\n\n        <!-- Backup Code Link -->\n        <div class="identity-login__divider"><span>or</span></div>\n\n        <button\n          type="button"\n          onclick="showBackupCodeForm()"\n          class="w-full rounded-xl border border-slate-700/50 bg-slate-800/30 px-4 py-3 text-sm font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n        >\n          Lost your device? Use backup code\n        </button>\n\n        <!-- Backup Code Form (hidden by default) -->\n        <form method="POST" action="/login" class="identity-login__form-body mt-6 hidden" id="backup-code-form">\n          <input type="hidden" name="email" value="', '" />\n          <input type="hidden" name="remember" value="', '" />\n          <input type="hidden" name="mfa_challenge" value="', `" />
 
           <div class="identity-login__group">
             <label for="backup_code">Backup Code</label>
@@ -52657,11 +53424,11 @@ function MFAVerificationPage(props = {}) {
     <\/script>
   `])), config.logoUrl ? html`
               <img src="${config.logoUrl}" alt="${config.title || "Identity Logo"}" class="identity-login__brand-logo" />
-            ` : "", config.footerText || `\xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ${config.legalName || config.companyName || "S3DB Corp"} \u2022 All rights reserved`, error ? html`
+            ` : "", config.footerText || `\xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ${config.legalName || config.companyName || "S3DB Corp"} \u2022 All rights reserved`, email ? html`<p class="identity-login__meta text-sm text-slate-400 mt-2">Signing in as <strong>${email}</strong></p>` : "", error ? html`
           <div class="identity-login__alert identity-login__alert--error">
             ${error}
           </div>
-        ` : "", userData.email, userData.password, remember, userData.email, userData.password, remember);
+        ` : "", email, rememberValue, challenge, email, rememberValue, challenge);
   return BaseLayout({
     title: "Two-Factor Authentication",
     content,
@@ -53082,6 +53849,34 @@ function registerUIRoutes(app, plugin) {
   const customPages = config.ui.customPages || {};
   const failbanConfig = config.failban || {};
   const accountLockoutConfig = config.accountLockout || {};
+  const userAttributes = plugin.config?.resources?.users?.mergedConfig?.attributes || {};
+  const supportsStatusField = Object.prototype.hasOwnProperty.call(userAttributes, "status");
+  const keyManager = plugin.oauth2Server?.keyManager || null;
+  const createMfaChallengeToken = (user, rememberFlag) => {
+    if (!keyManager) {
+      return null;
+    }
+    return keyManager.createToken({
+      type: "mfa_challenge",
+      userId: user.id,
+      email: user.email,
+      remember: rememberFlag === "1"
+    }, "5m");
+  };
+  const verifyMfaChallengeToken = async (token) => {
+    if (!keyManager || !token) {
+      return null;
+    }
+    try {
+      const verified = await keyManager.verifyToken(token);
+      if (!verified || verified.payload?.type !== "mfa_challenge") {
+        return null;
+      }
+      return verified.payload;
+    } catch {
+      return null;
+    }
+  };
   const uiConfig = {
     ...config.ui,
     registrationEnabled: config.registration.enabled
@@ -53123,176 +53918,243 @@ function registerUIRoutes(app, plugin) {
   app.post("/login", async (c) => {
     try {
       const body = await c.req.parseBody();
-      const { email, password, remember } = body;
+      const {
+        email,
+        password,
+        remember,
+        mfa_token,
+        backup_code,
+        mfa_challenge
+      } = body;
       const clientIp = c.get("clientIp") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
-      if (!email || !password) {
+      const userAgent = c.req.header("user-agent") || "unknown";
+      const usingChallenge = Boolean(mfa_challenge);
+      let normalizedEmail = email ? email.toLowerCase().trim() : "";
+      let rememberChoice = remember === "1" ? "1" : "0";
+      let challengePayload = null;
+      if (usingChallenge) {
+        challengePayload = await verifyMfaChallengeToken(mfa_challenge);
+        if (!challengePayload) {
+          return c.redirect(`/login?error=${encodeURIComponent("Your login session expired. Please sign in again.")}`);
+        }
+        normalizedEmail = (challengePayload.email || "").toLowerCase();
+        rememberChoice = challengePayload.remember ? "1" : "0";
+      }
+      if (!normalizedEmail) {
         if (failbanManager && failbanConfig.endpoints.login) {
           await failbanManager.recordViolation(clientIp, "invalid_login_request", {
             path: "/login",
-            userAgent: c.req.header("user-agent")
+            userAgent
           });
         }
-        return c.redirect(`/login?error=${encodeURIComponent("Email and password are required")}&email=${encodeURIComponent(email || "")}`);
+        return c.redirect(`/login?error=${encodeURIComponent("Email and password are required")}`);
       }
-      const [okQuery, errQuery, users] = await tryFn(
-        () => usersResource.query({ email: email.toLowerCase().trim() })
-      );
-      if (!okQuery || users.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        if (failbanManager && failbanConfig.endpoints.login) {
-          await failbanManager.recordViolation(clientIp, "failed_login", {
-            path: "/login",
-            userAgent: c.req.header("user-agent"),
-            email
-          });
+      let user = null;
+      if (usingChallenge) {
+        const [okUser, errUser, challengeUser] = await tryFn(
+          () => usersResource.get(challengePayload.userId)
+        );
+        if (!okUser || !challengeUser || challengeUser.email.toLowerCase() !== normalizedEmail) {
+          if (config.verbose) {
+            console.error("[Identity Plugin] MFA challenge verification failed:", errUser?.message || "challenge mismatch");
+          }
+          return c.redirect(`/login?error=${encodeURIComponent("Your login session expired. Please sign in again.")}`);
         }
-        await logAudit("login_failed", {
-          email,
-          reason: "user_not_found",
-          ipAddress: clientIp,
-          userAgent: c.req.header("user-agent")
-        });
-        return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email)}`);
+        user = challengeUser;
+      } else {
+        const [okQuery, errQuery, users] = await tryFn(
+          () => usersResource.query({ email: normalizedEmail })
+        );
+        if (!okQuery || users.length === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, "failed_login", {
+              path: "/login",
+              userAgent,
+              email
+            });
+          }
+          await logAudit("login_failed", {
+            email,
+            reason: "user_not_found",
+            ipAddress: clientIp,
+            userAgent
+          });
+          return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email || "")}`);
+        }
+        user = users[0];
       }
-      const user = users[0];
       if (accountLockoutConfig.enabled && user.lockedUntil) {
         const now = Date.now();
         const lockedUntilTime = new Date(user.lockedUntil).getTime();
         if (lockedUntilTime > now) {
           const remainingMinutes = Math.ceil((lockedUntilTime - now) / 6e4);
           const message = `Your account has been locked due to too many failed login attempts. Please try again in ${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""} or contact support.`;
-          if (config.verbose) {
-            console.log(`[Account Lockout] User ${user.email} attempted login while locked (expires in ${remainingMinutes}m)`);
+          return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
+        }
+        await usersResource.update(user.id, {
+          lockedUntil: null,
+          failedLoginAttempts: 0,
+          lastFailedLogin: null
+        });
+      }
+      if (!usingChallenge) {
+        if (!password) {
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, "invalid_login_request", {
+              path: "/login",
+              userAgent,
+              email
+            });
           }
-          return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
-        } else {
-          await usersResource.update(user.id, {
-            lockedUntil: null,
-            failedLoginAttempts: 0,
-            lastFailedLogin: null
-          });
+          return c.redirect(`/login?error=${encodeURIComponent("Email and password are required")}&email=${encodeURIComponent(email || "")}`);
+        }
+        const [okVerify, errVerify, isValid] = await tryFn(
+          () => verifyPassword(password, user.password)
+        );
+        if (!okVerify) {
           if (config.verbose) {
-            console.log(`[Account Lockout] Auto-unlocked user ${user.email} (lock expired)`);
+            console.error("[Identity Plugin] Password verification error:", errVerify?.message);
           }
         }
-      }
-      const [okVerify, errVerify, isValid] = await tryFn(
-        () => verifyPassword(password, user.password)
-      );
-      if (!okVerify || !isValid) {
-        if (accountLockoutConfig.enabled) {
-          const failedAttempts = (user.failedLoginAttempts || 0) + 1;
-          const now = (/* @__PURE__ */ new Date()).toISOString();
-          if (failedAttempts >= accountLockoutConfig.maxAttempts) {
-            const lockoutUntil = new Date(Date.now() + accountLockoutConfig.lockoutDuration).toISOString();
+        if (!okVerify || !isValid) {
+          if (accountLockoutConfig.enabled) {
+            const failedAttempts = (user.failedLoginAttempts || 0) + 1;
+            const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+            if (failedAttempts >= accountLockoutConfig.maxAttempts) {
+              const lockoutUntil = new Date(Date.now() + accountLockoutConfig.lockoutDuration).toISOString();
+              await usersResource.update(user.id, {
+                failedLoginAttempts: failedAttempts,
+                lockedUntil: lockoutUntil,
+                lastFailedLogin: nowIso
+              });
+              const lockoutMinutes = Math.ceil(accountLockoutConfig.lockoutDuration / 6e4);
+              const message = `Too many failed login attempts. Your account has been locked for ${lockoutMinutes} minutes. Please contact support if you need assistance.`;
+              return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
+            }
             await usersResource.update(user.id, {
               failedLoginAttempts: failedAttempts,
-              lockedUntil: lockoutUntil,
-              lastFailedLogin: now
+              lastFailedLogin: nowIso
             });
-            const lockoutMinutes = Math.ceil(accountLockoutConfig.lockoutDuration / 6e4);
-            const message = `Too many failed login attempts. Your account has been locked for ${lockoutMinutes} minutes. Please contact support if you need assistance.`;
-            if (config.verbose) {
-              console.log(`[Account Lockout] Locked user ${user.email} after ${failedAttempts} failed attempts (until ${lockoutUntil})`);
-            }
-            return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
-          } else {
+          }
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, "failed_login", {
+              path: "/login",
+              userAgent,
+              email: normalizedEmail,
+              userId: user.id
+            });
+          }
+          return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(normalizedEmail)}`);
+        }
+        if (accountLockoutConfig.enabled && accountLockoutConfig.resetOnSuccess) {
+          if (user.failedLoginAttempts > 0 || user.lockedUntil) {
             await usersResource.update(user.id, {
-              failedLoginAttempts: failedAttempts,
-              lastFailedLogin: now
+              failedLoginAttempts: 0,
+              lockedUntil: null,
+              lastFailedLogin: null
             });
-            if (config.verbose) {
-              console.log(`[Account Lockout] User ${user.email} failed login attempt ${failedAttempts}/${accountLockoutConfig.maxAttempts}`);
-            }
-          }
-        }
-        if (failbanManager && failbanConfig.endpoints.login) {
-          await failbanManager.recordViolation(clientIp, "failed_login", {
-            path: "/login",
-            userAgent: c.req.header("user-agent"),
-            email,
-            userId: user.id
-          });
-        }
-        return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email)}`);
-      }
-      if (accountLockoutConfig.enabled && accountLockoutConfig.resetOnSuccess) {
-        if (user.failedLoginAttempts > 0 || user.lockedUntil) {
-          await usersResource.update(user.id, {
-            failedLoginAttempts: 0,
-            lockedUntil: null,
-            lastFailedLogin: null
-          });
-          if (config.verbose) {
-            console.log(`[Account Lockout] Reset counters for user ${user.email} after successful login`);
           }
         }
       }
-      if (user.status !== "active") {
-        const message = user.status === "suspended" ? "Your account has been suspended. Please contact support." : "Your account is inactive. Please verify your email or contact support.";
-        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
+      if (supportsStatusField && user.status && user.status !== "active") {
+        const message = user.status === "suspended" ? "Your account has been suspended. Please contact support." : "Your account is inactive. Please contact support.";
+        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
       }
+      if (!supportsStatusField && user.active === false) {
+        return c.redirect(`/login?error=${encodeURIComponent("Your account is inactive. Please contact support.")}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+      if (config.registration.requireEmailVerification && !user.emailVerified) {
+        const message = "Please verify your email address before signing in.";
+        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+      let hasMFA = false;
+      let mfaDevices = [];
       if (config.mfa.enabled && plugin.mfaDevicesResource) {
-        const [okMFA, errMFA, mfaDevices] = await tryFn(
+        const [okMFA, errMFA, devices] = await tryFn(
           () => plugin.mfaDevicesResource.query({ userId: user.id, verified: true })
         );
-        const hasMFA = okMFA && mfaDevices.length > 0;
-        const mfaRequired = config.mfa.required;
-        if (hasMFA || mfaRequired) {
-          const { mfa_token, backup_code } = body;
-          if (!mfa_token && !backup_code) {
-            const tempToken = Buffer.from(JSON.stringify({
-              userId: user.id,
-              email: user.email,
-              password,
-              // Store to re-submit after MFA
-              timestamp: Date.now()
-            })).toString("base64");
-            return c.redirect(`/login/mfa?token=${tempToken}&remember=${remember || ""}`);
-          }
-          let mfaVerified = false;
-          if (mfa_token && hasMFA) {
-            mfaVerified = plugin.mfaManager.verifyTOTP(mfaDevices[0].secret, mfa_token);
-            if (mfaVerified) {
-              await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
-                lastUsedAt: (/* @__PURE__ */ new Date()).toISOString()
-              });
-              await logAudit("mfa_verified", { userId: user.id, method: "totp" });
-              if (config.verbose) {
-                console.log(`[MFA] User ${user.email} verified with TOTP token`);
-              }
-            }
-          } else if (backup_code && hasMFA) {
-            const matchIndex = await plugin.mfaManager.verifyBackupCode(
-              backup_code,
-              mfaDevices[0].backupCodes
-            );
-            if (matchIndex !== null && matchIndex >= 0) {
-              const updatedCodes = [...mfaDevices[0].backupCodes];
-              updatedCodes.splice(matchIndex, 1);
-              await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
-                backupCodes: updatedCodes,
-                lastUsedAt: (/* @__PURE__ */ new Date()).toISOString()
-              });
-              mfaVerified = true;
-              await logAudit("mfa_verified", { userId: user.id, method: "backup_code" });
-              if (config.verbose) {
-                console.log(`[MFA] User ${user.email} verified with backup code (${updatedCodes.length} codes remaining)`);
-              }
-            }
-          }
-          if (!mfaVerified) {
-            await logAudit("mfa_failed", { userId: user.id, reason: "invalid_token" });
-            if (config.verbose) {
-              console.log(`[MFA] User ${user.email} MFA verification failed`);
-            }
-            return c.redirect(`/login/mfa?error=${encodeURIComponent("Invalid MFA code. Please try again.")}&token=${Buffer.from(JSON.stringify({ userId: user.id, email: user.email, timestamp: Date.now() })).toString("base64")}`);
-          }
+        if (!okMFA && config.verbose) {
+          console.error("[Identity Plugin] Failed to load MFA devices:", errMFA);
+        }
+        if (okMFA && devices && devices.length > 0) {
+          hasMFA = true;
+          mfaDevices = devices;
         }
       }
-      const ipAddress = c.req.header("x-forwarded-for")?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
-      const userAgent = c.req.header("user-agent") || "unknown";
-      const sessionExpiry = remember === "1" ? "30d" : config.session.sessionExpiry;
+      if (config.mfa.required && !hasMFA) {
+        return c.redirect(`/login?error=${encodeURIComponent("Multi-factor authentication is required for your account. Please contact support to complete enrollment.")}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+      const needsMfa = hasMFA || config.mfa.required;
+      if (!usingChallenge && needsMfa) {
+        const challengeToken = createMfaChallengeToken(user, rememberChoice);
+        if (!challengeToken) {
+          return c.redirect(`/login?error=${encodeURIComponent("Unable to start MFA verification. Please contact support.")}`);
+        }
+        const params = new URLSearchParams({ challenge: challengeToken });
+        if (rememberChoice === "1") {
+          params.set("remember", "1");
+        }
+        return c.redirect(`/login/mfa?${params.toString()}`);
+      }
+      if (usingChallenge && needsMfa) {
+        if (!mfa_token && !backup_code) {
+          const retryChallenge = createMfaChallengeToken(user, rememberChoice) || mfa_challenge;
+          const params = new URLSearchParams({ challenge: retryChallenge });
+          params.set("error", "Multi-factor authentication is required.");
+          if (rememberChoice === "1") {
+            params.set("remember", "1");
+          }
+          return c.redirect(`/login/mfa?${params.toString()}`);
+        }
+        let mfaVerified = false;
+        if (mfa_token && hasMFA) {
+          mfaVerified = plugin.mfaManager.verifyTOTP(mfaDevices[0].secret, mfa_token);
+          if (mfaVerified) {
+            await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
+              lastUsedAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+            await logAudit("mfa_verified", { userId: user.id, method: "totp" });
+          }
+        }
+        if (!mfaVerified && backup_code && hasMFA) {
+          const matchIndex = await plugin.mfaManager.verifyBackupCode(
+            backup_code,
+            mfaDevices[0].backupCodes
+          );
+          if (matchIndex !== null && matchIndex >= 0) {
+            const updatedCodes = [...mfaDevices[0].backupCodes];
+            updatedCodes.splice(matchIndex, 1);
+            await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
+              backupCodes: updatedCodes,
+              lastUsedAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+            mfaVerified = true;
+            await logAudit("mfa_verified", { userId: user.id, method: "backup_code" });
+          }
+        }
+        if (!mfaVerified) {
+          await logAudit("mfa_failed", { userId: user.id, reason: "invalid_token" });
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, "failed_mfa", {
+              path: "/login",
+              userAgent,
+              email: normalizedEmail,
+              userId: user.id
+            });
+          }
+          const retryChallenge = createMfaChallengeToken(user, rememberChoice) || mfa_challenge;
+          const params = new URLSearchParams({
+            challenge: retryChallenge,
+            error: "Invalid MFA code. Please try again."
+          });
+          if (rememberChoice === "1") {
+            params.set("remember", "1");
+          }
+          return c.redirect(`/login/mfa?${params.toString()}`);
+        }
+      }
+      const sessionDuration = rememberChoice === "1" ? "30d" : config.session.sessionExpiry;
       const [okSession, errSession, session] = await tryFn(
         () => sessionManager.createSession({
           userId: user.id,
@@ -53301,22 +54163,22 @@ function registerUIRoutes(app, plugin) {
             name: user.name,
             isAdmin: user.isAdmin || false
           },
-          ipAddress,
+          ipAddress: clientIp,
           userAgent,
-          expiresIn: sessionExpiry
+          duration: sessionDuration
         })
       );
       if (!okSession) {
         if (config.verbose) {
           console.error("[Identity Plugin] Failed to create session:", errSession);
         }
-        return c.redirect(`/login?error=${encodeURIComponent("Failed to create session. Please try again.")}&email=${encodeURIComponent(email)}`);
+        return c.redirect(`/login?error=${encodeURIComponent("Failed to create session. Please try again.")}&email=${encodeURIComponent(normalizedEmail)}`);
       }
-      sessionManager.setSessionCookie(c, session.id, session.expiresAt);
+      sessionManager.setSessionCookie(c, session.sessionId, session.expiresAt);
       await tryFn(
         () => usersResource.patch(user.id, {
           lastLoginAt: (/* @__PURE__ */ new Date()).toISOString(),
-          lastLoginIp: ipAddress
+          lastLoginIp: clientIp
         })
       );
       const redirectTo = c.req.query("redirect") || "/profile";
@@ -53333,27 +54195,28 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/login?error=${encodeURIComponent("MFA is not enabled on this server")}`);
     }
     try {
-      const token = c.req.query("token");
+      const challenge = c.req.query("challenge");
       const remember = c.req.query("remember");
       const error = c.req.query("error");
-      if (!token) {
+      if (!challenge) {
         return c.redirect(`/login?error=${encodeURIComponent("Invalid MFA session")}`);
       }
-      let userData;
-      try {
-        userData = JSON.parse(Buffer.from(token, "base64").toString("utf-8"));
-      } catch (err) {
-        return c.redirect(`/login?error=${encodeURIComponent("Invalid MFA session")}`);
-      }
-      const tokenAge = Date.now() - userData.timestamp;
-      if (tokenAge > 3e5) {
+      const payload = await verifyMfaChallengeToken(challenge);
+      if (!payload) {
         return c.redirect(`/login?error=${encodeURIComponent("MFA session expired. Please login again.")}`);
       }
-      const mfaToken = JSON.stringify({ email: userData.email, password: userData.password });
+      const [okUser, , challengeUser] = await tryFn(
+        () => usersResource.get(payload.userId)
+      );
+      if (!okUser || !challengeUser) {
+        return c.redirect(`/login?error=${encodeURIComponent("Your account could not be found. Please login again.")}`);
+      }
+      const effectiveRemember = payload.remember || remember === "1";
       return c.html(MFAVerificationPage({
         error: error ? decodeURIComponent(error) : null,
-        token: mfaToken,
-        remember: remember || "",
+        email: challengeUser.email,
+        remember: effectiveRemember ? "1" : "0",
+        challenge,
         config: uiConfig
       }));
     } catch (error) {
@@ -53428,20 +54291,24 @@ function registerUIRoutes(app, plugin) {
         return c.redirect(`/register?error=${encodeURIComponent("An account with this email already exists")}&name=${encodeURIComponent(name)}`);
       }
       const ipAddress = c.req.header("x-forwarded-for")?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
+      const initialActive = !config.registration.requireEmailVerification;
+      const userRecord = {
+        email: normalizedEmail,
+        name: name.trim(),
+        password,
+        // Auto-encrypted with 'password' type
+        isAdmin: false,
+        emailVerified: config.registration.requireEmailVerification ? false : true,
+        active: initialActive,
+        registrationIp: ipAddress,
+        lastLoginAt: null,
+        lastLoginIp: null
+      };
+      if (supportsStatusField) {
+        userRecord.status = initialActive ? "active" : "pending_verification";
+      }
       const [okUser, errUser, user] = await tryFn(
-        () => usersResource.insert({
-          email: normalizedEmail,
-          name: name.trim(),
-          password,
-          // Auto-encrypted with 'secret' type
-          status: "pending_verification",
-          // Requires email verification
-          isAdmin: false,
-          emailVerified: false,
-          registrationIp: ipAddress,
-          lastLoginAt: null,
-          lastLoginIp: null
-        })
+        () => usersResource.insert(userRecord)
       );
       if (!okUser) {
         if (config.verbose) {
@@ -53449,26 +54316,30 @@ function registerUIRoutes(app, plugin) {
         }
         return c.redirect(`/register?error=${encodeURIComponent("Failed to create account. Please try again.")}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
       }
-      const verificationToken = generatePasswordResetToken();
-      const verificationExpiry = calculateExpiration(24);
-      await usersResource.update(user.id, {
-        emailVerificationToken: verificationToken,
-        emailVerificationExpiry: verificationExpiry
-      });
-      if (plugin.emailService) {
-        try {
-          await plugin.emailService.sendEmailVerificationEmail({
-            to: normalizedEmail,
-            name: name.trim(),
-            verificationToken
-          });
-        } catch (emailError) {
-          if (config.verbose) {
-            console.error("[Identity Plugin] Failed to send verification email:", emailError);
+      let successMessage = "Account created successfully! You can sign in now.";
+      if (config.registration.requireEmailVerification) {
+        const verificationToken = generatePasswordResetToken();
+        const verificationExpiry = calculateExpiration("24h");
+        await usersResource.update(user.id, {
+          emailVerificationToken: verificationToken,
+          emailVerificationExpiry: verificationExpiry
+        });
+        if (plugin.emailService) {
+          try {
+            await plugin.emailService.sendEmailVerificationEmail({
+              to: normalizedEmail,
+              name: name.trim(),
+              verificationToken
+            });
+          } catch (emailError) {
+            if (config.verbose) {
+              console.error("[Identity Plugin] Failed to send verification email:", emailError);
+            }
           }
         }
+        successMessage = "Account created successfully! Please check your email to verify your account.";
       }
-      return c.redirect(`/login?success=${encodeURIComponent("Account created successfully! Please check your email to verify your account.")}&email=${encodeURIComponent(normalizedEmail)}`);
+      return c.redirect(`/login?success=${encodeURIComponent(successMessage)}&email=${encodeURIComponent(normalizedEmail)}`);
     } catch (error) {
       if (config.verbose) {
         console.error("[Identity Plugin] Registration error:", error);
@@ -54035,8 +54906,8 @@ function registerUIRoutes(app, plugin) {
       const now = /* @__PURE__ */ new Date();
       const stats = {
         totalUsers: users.length,
-        activeUsers: users.filter((u) => u.status === "active").length,
-        pendingUsers: users.filter((u) => u.status === "pending_verification").length,
+        activeUsers: users.filter((u) => supportsStatusField ? u.status === "active" : u.active !== false).length,
+        pendingUsers: users.filter((u) => supportsStatusField ? u.status === "pending_verification" : u.active === false && !u.emailVerified).length,
         totalClients: clients.length,
         activeClients: clients.filter((c2) => c2.active !== false).length,
         activeSessions: sessions.filter((s) => new Date(s.expiresAt) > now).length,
@@ -54358,7 +55229,7 @@ function registerUIRoutes(app, plugin) {
         email: email.toLowerCase().trim()
       };
       if (!isSelfEdit) {
-        if (status) {
+        if (supportsStatusField && status) {
           updates.status = status;
         }
         if (role) {
@@ -54419,6 +55290,9 @@ function registerUIRoutes(app, plugin) {
     const body = await c.req.parseBody();
     const { status } = body;
     const currentUser = c.get("user");
+    if (!supportsStatusField) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent("Status management is not supported for this deployment")}`);
+    }
     if (userId === currentUser.id) {
       return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot change your own status")}`);
     }
@@ -54777,14 +55651,17 @@ function registerUIRoutes(app, plugin) {
           }));
         }
       }
+      const verificationUpdate = {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+        active: true
+      };
+      if (supportsStatusField) {
+        verificationUpdate.status = "active";
+      }
       const [okUpdate, errUpdate] = await tryFn(
-        () => usersResource.update(user.id, {
-          emailVerified: true,
-          emailVerificationToken: null,
-          emailVerificationExpiry: null,
-          status: "active"
-          // Activate account on email verification
-        })
+        () => usersResource.update(user.id, verificationUpdate)
       );
       if (!okUpdate) {
         console.error("[Identity Plugin] Email verification update error:", errUpdate);
@@ -54838,7 +55715,7 @@ function registerUIRoutes(app, plugin) {
         }));
       }
       const verificationToken = generatePasswordResetToken();
-      const verificationExpiry = calculateExpiration(24);
+      const verificationExpiry = calculateExpiration("24h");
       const [okUpdate, errUpdate] = await tryFn(
         () => usersResource.update(user.id, {
           emailVerificationToken: verificationToken,

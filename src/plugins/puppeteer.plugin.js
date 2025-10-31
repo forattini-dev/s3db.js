@@ -26,7 +26,7 @@ export class PuppeteerPlugin extends Plugin {
         enabled: true,
         maxBrowsers: 5,
         maxTabsPerBrowser: 10,
-        reuseTab: true,
+        reuseTab: false,
         closeOnIdle: true,
         idleTimeout: 300000, // 5 minutes
         ...options.pool
@@ -207,11 +207,21 @@ export class PuppeteerPlugin extends Plugin {
     // Internal state
     this.browserPool = [];
     this.tabPool = new Map(); // Browser instance -> Set<Page>
+    this.browserIdleTimers = new Map(); // Browser instance -> timeout id
+    this.dedicatedBrowsers = new Set(); // Non-pooled browsers for cleanup
     this.userAgentGenerator = null;
     this.ghostCursor = null;
     this.cookieManager = null;
     this.proxyManager = null;
+    this.performanceManager = null;
     this.initialized = false;
+
+    if (this.config.pool.reuseTab) {
+      this.emit('puppeteer.configWarning', {
+        setting: 'pool.reuseTab',
+        message: 'pool.reuseTab is not supported yet and will be ignored.'
+      });
+    }
   }
 
   /**
@@ -252,6 +262,9 @@ export class PuppeteerPlugin extends Plugin {
       await this._initializeProxyManager();
     }
 
+    // Initialize performance manager
+    await this._initializePerformanceManager();
+
     // Pre-warm browser pool if enabled
     if (this.config.pool.enabled) {
       await this._warmupBrowserPool();
@@ -266,6 +279,7 @@ export class PuppeteerPlugin extends Plugin {
    */
   async onStop() {
     await this._closeBrowserPool();
+    await this._closeDedicatedBrowsers();
     this.initialized = false;
     this.emit('puppeteer.stopped');
   }
@@ -363,6 +377,16 @@ export class PuppeteerPlugin extends Plugin {
   }
 
   /**
+   * Initialize performance manager
+   * @private
+   */
+  async _initializePerformanceManager() {
+    const { PerformanceManager } = await import('./puppeteer/performance-manager.js');
+    this.performanceManager = new PerformanceManager(this);
+    this.emit('puppeteer.performanceManager.initialized');
+  }
+
+  /**
    * Warmup browser pool
    * @private
    */
@@ -410,6 +434,8 @@ export class PuppeteerPlugin extends Plugin {
           this.browserPool.splice(index, 1);
         }
         this.tabPool.delete(browser);
+        this._clearIdleTimer(browser);
+        this.dedicatedBrowsers.delete(browser);
       });
     }
     return browser;
@@ -465,6 +491,7 @@ export class PuppeteerPlugin extends Plugin {
    */
   async _closeBrowserPool() {
     for (const browser of this.browserPool) {
+      this._clearIdleTimer(browser);
       if (this.cookieManager) {
         const tabs = this.tabPool.get(browser);
         if (tabs) {
@@ -502,6 +529,83 @@ export class PuppeteerPlugin extends Plugin {
     }
     this.browserPool = [];
     this.tabPool.clear();
+  }
+
+  /**
+   * Clear idle timer for pooled browser
+   * @private
+   */
+  _clearIdleTimer(browser) {
+    const timer = this.browserIdleTimers.get(browser);
+    if (timer) {
+      clearTimeout(timer);
+      this.browserIdleTimers.delete(browser);
+    }
+  }
+
+  /**
+   * Schedule pooled browser retirement when idle
+   * @private
+   */
+  _scheduleIdleCloseIfNeeded(browser) {
+    if (!this.config.pool.closeOnIdle) return;
+    const tabs = this.tabPool.get(browser);
+    if (!tabs || tabs.size > 0) return;
+    if (this.browserIdleTimers.has(browser)) return;
+
+    const timeout = this.config.pool.idleTimeout || 300000;
+    const timer = setTimeout(async () => {
+      this.browserIdleTimers.delete(browser);
+      const currentTabs = this.tabPool.get(browser);
+      if (currentTabs && currentTabs.size === 0) {
+        await this._retireIdleBrowser(browser);
+      }
+    }, timeout);
+
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+
+    this.browserIdleTimers.set(browser, timer);
+  }
+
+  /**
+   * Retire pooled browser if still idle
+   * @private
+   * @param {Browser} browser
+   */
+  async _retireIdleBrowser(browser) {
+    this.tabPool.delete(browser);
+    const index = this.browserPool.indexOf(browser);
+    if (index > -1) {
+      this.browserPool.splice(index, 1);
+    }
+
+    try {
+      await browser.close();
+      this.emit('puppeteer.browserRetired', { pooled: true });
+    } catch (err) {
+      this.emit('puppeteer.browserRetiredError', {
+        pooled: true,
+        error: err.message
+      });
+    }
+  }
+
+  /**
+   * Close dedicated (non-pooled) browsers
+   * @private
+   */
+  async _closeDedicatedBrowsers() {
+    for (const browser of Array.from(this.dedicatedBrowsers)) {
+      try {
+        await browser.close();
+      } catch (err) {
+        // Ignore errors during cleanup
+      } finally {
+        this.dedicatedBrowsers.delete(browser);
+      }
+    }
   }
 
   /**
@@ -599,7 +703,13 @@ export class PuppeteerPlugin extends Plugin {
       const tabs = this.tabPool.get(browser);
       if (tabs) {
         tabs.add(page);
+        this._clearIdleTimer(browser);
       }
+    } else {
+      this.dedicatedBrowsers.add(browser);
+      browser.once('disconnected', () => {
+        this.dedicatedBrowsers.delete(browser);
+      });
     }
 
     // Authenticate proxy if needed
@@ -679,12 +789,17 @@ export class PuppeteerPlugin extends Plugin {
     }
 
     let hasSavedSession = false;
+    let browserClosed = false;
     const originalClose = page.close?.bind(page) || (async () => {});
+    const shouldAutoCloseBrowser = !isPooledBrowser;
 
     page.on('close', () => {
       if (isPooledBrowser) {
         const tabs = this.tabPool.get(browser);
         tabs?.delete(page);
+        this._scheduleIdleCloseIfNeeded(browser);
+      } else {
+        this.dedicatedBrowsers.delete(browser);
       }
     });
 
@@ -707,11 +822,26 @@ export class PuppeteerPlugin extends Plugin {
       }
 
       try {
-        return await originalClose(...closeArgs);
+        const result = await originalClose(...closeArgs);
+        return result;
       } finally {
         if (isPooledBrowser) {
           const tabs = this.tabPool.get(browser);
           tabs?.delete(page);
+          this._scheduleIdleCloseIfNeeded(browser);
+        } else if (shouldAutoCloseBrowser && !browserClosed) {
+          try {
+            await browser.close();
+            this.emit('puppeteer.browserClosed', { pooled: false });
+          } catch (err) {
+            this.emit('puppeteer.browserCloseFailed', {
+              pooled: false,
+              error: err.message
+            });
+          } finally {
+            browserClosed = true;
+            this.dedicatedBrowsers.delete(browser);
+          }
         }
       }
     };
@@ -725,6 +855,60 @@ export class PuppeteerPlugin extends Plugin {
     });
 
     return page;
+  }
+
+  /**
+   * Run handler with session-aware navigation helper
+   * @param {string} sessionId - Session identifier
+   * @param {Function} handler - Async function receiving the page instance
+   * @param {Object} options - Navigate options (requires url)
+   * @returns {Promise<*>}
+   */
+  async withSession(sessionId, handler, options = {}) {
+    if (!sessionId) {
+      throw new Error('withSession requires a sessionId');
+    }
+    if (typeof handler !== 'function') {
+      throw new TypeError('withSession handler must be a function');
+    }
+
+    const { url, ...navigateOptions } = options;
+    if (!url) {
+      throw new Error('withSession requires an options.url value');
+    }
+
+    this.emit('puppeteer.withSession.start', { sessionId, url });
+
+    const page = await this.navigate(url, {
+      ...navigateOptions,
+      useSession: sessionId
+    });
+
+    let handlerError = null;
+
+    try {
+      const result = await handler(page, this);
+      return result;
+    } catch (err) {
+      handlerError = err;
+      throw err;
+    } finally {
+      try {
+        await page.close();
+      } catch (err) {
+        this.emit('puppeteer.withSession.cleanupFailed', {
+          sessionId,
+          url,
+          error: err.message
+        });
+      }
+
+      this.emit('puppeteer.withSession.finish', {
+        sessionId,
+        url,
+        error: handlerError ? handlerError.message : null
+      });
+    }
   }
 
   /**

@@ -47,6 +47,38 @@ export function registerUIRoutes(app, plugin) {
   const customPages = config.ui.customPages || {};
   const failbanConfig = config.failban || {};
   const accountLockoutConfig = config.accountLockout || {};
+  const userAttributes = plugin.config?.resources?.users?.mergedConfig?.attributes || {};
+  const supportsStatusField = Object.prototype.hasOwnProperty.call(userAttributes, 'status');
+  const keyManager = plugin.oauth2Server?.keyManager || null;
+
+  const createMfaChallengeToken = (user, rememberFlag) => {
+    if (!keyManager) {
+      return null;
+    }
+
+    return keyManager.createToken({
+      type: 'mfa_challenge',
+      userId: user.id,
+      email: user.email,
+      remember: rememberFlag === '1'
+    }, '5m');
+  };
+
+  const verifyMfaChallengeToken = async (token) => {
+    if (!keyManager || !token) {
+      return null;
+    }
+
+    try {
+      const verified = await keyManager.verifyToken(token);
+      if (!verified || verified.payload?.type !== 'mfa_challenge') {
+        return null;
+      }
+      return verified.payload;
+    } catch {
+      return null;
+    }
+  };
 
   // Create UI config object with registration settings
   const uiConfig = {
@@ -107,57 +139,88 @@ export function registerUIRoutes(app, plugin) {
   app.post('/login', async (c) => {
     try {
       const body = await c.req.parseBody();
-      const { email, password, remember } = body;
+      const {
+        email,
+        password,
+        remember,
+        mfa_token,
+        backup_code,
+        mfa_challenge
+      } = body;
 
-      // Get IP from context (set by failban middleware)
       const clientIp = c.get('clientIp') ||
                        c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
                        c.req.header('x-real-ip') ||
                        'unknown';
+      const userAgent = c.req.header('user-agent') || 'unknown';
 
-      // Validate input
-      if (!email || !password) {
-        // Record violation for missing credentials (possible attack)
+      const usingChallenge = Boolean(mfa_challenge);
+      let normalizedEmail = email ? email.toLowerCase().trim() : '';
+      let rememberChoice = remember === '1' ? '1' : '0';
+      let challengePayload = null;
+
+      if (usingChallenge) {
+        challengePayload = await verifyMfaChallengeToken(mfa_challenge);
+        if (!challengePayload) {
+          return c.redirect(`/login?error=${encodeURIComponent('Your login session expired. Please sign in again.')}`);
+        }
+        normalizedEmail = (challengePayload.email || '').toLowerCase();
+        rememberChoice = challengePayload.remember ? '1' : '0';
+      }
+
+      if (!normalizedEmail) {
         if (failbanManager && failbanConfig.endpoints.login) {
           await failbanManager.recordViolation(clientIp, 'invalid_login_request', {
             path: '/login',
-            userAgent: c.req.header('user-agent')
+            userAgent
           });
         }
-
-        return c.redirect(`/login?error=${encodeURIComponent('Email and password are required')}&email=${encodeURIComponent(email || '')}`);
+        return c.redirect(`/login?error=${encodeURIComponent('Email and password are required')}`);
       }
 
-      // Find user by email
-      const [okQuery, errQuery, users] = await tryFn(() =>
-        usersResource.query({ email: email.toLowerCase().trim() })
-      );
+      let user = null;
 
-      if (!okQuery || users.length === 0) {
-        // Don't reveal whether user exists (timing attack protection)
-        await new Promise(resolve => setTimeout(resolve, 100));
+      if (usingChallenge) {
+        const [okUser, errUser, challengeUser] = await tryFn(() =>
+          usersResource.get(challengePayload.userId)
+        );
 
-        // Record failed login attempt (user not found)
-        if (failbanManager && failbanConfig.endpoints.login) {
-          await failbanManager.recordViolation(clientIp, 'failed_login', {
-            path: '/login',
-            userAgent: c.req.header('user-agent'),
-            email
-          });
+        if (!okUser || !challengeUser || challengeUser.email.toLowerCase() !== normalizedEmail) {
+          if (config.verbose) {
+            console.error('[Identity Plugin] MFA challenge verification failed:', errUser?.message || 'challenge mismatch');
+          }
+          return c.redirect(`/login?error=${encodeURIComponent('Your login session expired. Please sign in again.')}`);
         }
 
-        // Audit log
-        await logAudit('login_failed', {
-          email,
-          reason: 'user_not_found',
-          ipAddress: clientIp,
-          userAgent: c.req.header('user-agent')
-        });
+        user = challengeUser;
+      } else {
+        const [okQuery, errQuery, users] = await tryFn(() =>
+          usersResource.query({ email: normalizedEmail })
+        );
 
-        return c.redirect(`/login?error=${encodeURIComponent('Invalid email or password')}&email=${encodeURIComponent(email)}`);
+        if (!okQuery || users.length === 0) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, 'failed_login', {
+              path: '/login',
+              userAgent,
+              email
+            });
+          }
+
+          await logAudit('login_failed', {
+            email,
+            reason: 'user_not_found',
+            ipAddress: clientIp,
+            userAgent
+          });
+
+          return c.redirect(`/login?error=${encodeURIComponent('Invalid email or password')}&email=${encodeURIComponent(email || '')}`);
+        }
+
+        user = users[0];
       }
-
-      const user = users[0];
 
       // 🔒 ACCOUNT LOCKOUT CHECK
       if (accountLockoutConfig.enabled && user.lockedUntil) {
@@ -165,204 +228,211 @@ export function registerUIRoutes(app, plugin) {
         const lockedUntilTime = new Date(user.lockedUntil).getTime();
 
         if (lockedUntilTime > now) {
-          // Account is still locked
           const remainingMinutes = Math.ceil((lockedUntilTime - now) / 60000);
           const message = `Your account has been locked due to too many failed login attempts. Please try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} or contact support.`;
-
-          if (config.verbose) {
-            console.log(`[Account Lockout] User ${user.email} attempted login while locked (expires in ${remainingMinutes}m)`);
-          }
-
-          return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
-        } else {
-          // Lock expired - auto-unlock the account
-          await usersResource.update(user.id, {
-            lockedUntil: null,
-            failedLoginAttempts: 0,
-            lastFailedLogin: null
-          });
-
-          if (config.verbose) {
-            console.log(`[Account Lockout] Auto-unlocked user ${user.email} (lock expired)`);
-          }
+          return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
         }
+
+        // Auto-unlock expired locks
+        await usersResource.update(user.id, {
+          lockedUntil: null,
+          failedLoginAttempts: 0,
+          lastFailedLogin: null
+        });
       }
 
-      // Verify password (auto-decrypted by S3DB)
-      const [okVerify, errVerify, isValid] = await tryFn(() =>
-        verifyPassword(password, user.password)
-      );
-
-      if (!okVerify || !isValid) {
-        // 🔒 FAILED LOGIN - Update account lockout counters
-        if (accountLockoutConfig.enabled) {
-          const failedAttempts = (user.failedLoginAttempts || 0) + 1;
-          const now = new Date().toISOString();
-
-          if (failedAttempts >= accountLockoutConfig.maxAttempts) {
-            // Lock the account
-            const lockoutUntil = new Date(Date.now() + accountLockoutConfig.lockoutDuration).toISOString();
-
-            await usersResource.update(user.id, {
-              failedLoginAttempts: failedAttempts,
-              lockedUntil: lockoutUntil,
-              lastFailedLogin: now
+      // Verify password (initial step only)
+      if (!usingChallenge) {
+        if (!password) {
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, 'invalid_login_request', {
+              path: '/login',
+              userAgent,
+              email
             });
-
-            const lockoutMinutes = Math.ceil(accountLockoutConfig.lockoutDuration / 60000);
-            const message = `Too many failed login attempts. Your account has been locked for ${lockoutMinutes} minutes. Please contact support if you need assistance.`;
-
-            if (config.verbose) {
-              console.log(`[Account Lockout] Locked user ${user.email} after ${failedAttempts} failed attempts (until ${lockoutUntil})`);
-            }
-
-            return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
-          } else {
-            // Increment failed attempts counter
-            await usersResource.update(user.id, {
-              failedLoginAttempts: failedAttempts,
-              lastFailedLogin: now
-            });
-
-            if (config.verbose) {
-              console.log(`[Account Lockout] User ${user.email} failed login attempt ${failedAttempts}/${accountLockoutConfig.maxAttempts}`);
-            }
           }
+          return c.redirect(`/login?error=${encodeURIComponent('Email and password are required')}&email=${encodeURIComponent(email || '')}`);
         }
 
-        // Record failed login attempt in failban (IP-based)
-        if (failbanManager && failbanConfig.endpoints.login) {
-          await failbanManager.recordViolation(clientIp, 'failed_login', {
-            path: '/login',
-            userAgent: c.req.header('user-agent'),
-            email,
-            userId: user.id
-          });
-        }
-
-        return c.redirect(`/login?error=${encodeURIComponent('Invalid email or password')}&email=${encodeURIComponent(email)}`);
-      }
-
-      // ✅ SUCCESS: Reset account lockout counters
-      if (accountLockoutConfig.enabled && accountLockoutConfig.resetOnSuccess) {
-        if (user.failedLoginAttempts > 0 || user.lockedUntil) {
-          await usersResource.update(user.id, {
-            failedLoginAttempts: 0,
-            lockedUntil: null,
-            lastFailedLogin: null
-          });
-
-          if (config.verbose) {
-            console.log(`[Account Lockout] Reset counters for user ${user.email} after successful login`);
-          }
-        }
-      }
-
-      // Check if user is active
-      if (user.status !== 'active') {
-        const message = user.status === 'suspended'
-          ? 'Your account has been suspended. Please contact support.'
-          : 'Your account is inactive. Please verify your email or contact support.';
-        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
-      }
-
-      // 🔐 MFA VERIFICATION (if enabled)
-      if (config.mfa.enabled && plugin.mfaDevicesResource) {
-        // Check if user has MFA enabled
-        const [okMFA, errMFA, mfaDevices] = await tryFn(() =>
-          plugin.mfaDevicesResource.query({ userId: user.id, verified: true })
+        const [okVerify, errVerify, isValid] = await tryFn(() =>
+          verifyPassword(password, user.password)
         );
 
-        const hasMFA = okMFA && mfaDevices.length > 0;
-        const mfaRequired = config.mfa.required;
-
-        if (hasMFA || mfaRequired) {
-          // User has MFA enabled or MFA is mandatory
-          const { mfa_token, backup_code } = body;
-
-          if (!mfa_token && !backup_code) {
-            // Redirect to MFA verification page
-            // Create a temporary token to verify the user has passed password auth
-            // Store the password for re-submission (it's already verified at this point)
-            const tempToken = Buffer.from(JSON.stringify({
-              userId: user.id,
-              email: user.email,
-              password: password, // Store to re-submit after MFA
-              timestamp: Date.now()
-            })).toString('base64');
-
-            return c.redirect(`/login/mfa?token=${tempToken}&remember=${remember || ''}`);
+        if (!okVerify) {
+          if (config.verbose) {
+            console.error('[Identity Plugin] Password verification error:', errVerify?.message);
           }
+        }
 
-          // Verify MFA token or backup code
-          let mfaVerified = false;
+        if (!okVerify || !isValid) {
+          if (accountLockoutConfig.enabled) {
+            const failedAttempts = (user.failedLoginAttempts || 0) + 1;
+            const nowIso = new Date().toISOString();
 
-          if (mfa_token && hasMFA) {
-            // Verify TOTP token
-            mfaVerified = plugin.mfaManager.verifyTOTP(mfaDevices[0].secret, mfa_token);
+            if (failedAttempts >= accountLockoutConfig.maxAttempts) {
+              const lockoutUntil = new Date(Date.now() + accountLockoutConfig.lockoutDuration).toISOString();
 
-            if (mfaVerified) {
-              // Update last used timestamp
-              await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
-                lastUsedAt: new Date().toISOString()
+              await usersResource.update(user.id, {
+                failedLoginAttempts: failedAttempts,
+                lockedUntil: lockoutUntil,
+                lastFailedLogin: nowIso
               });
 
-              // Audit log
-              await logAudit('mfa_verified', { userId: user.id, method: 'totp' });
-
-              if (config.verbose) {
-                console.log(`[MFA] User ${user.email} verified with TOTP token`);
-              }
+              const lockoutMinutes = Math.ceil(accountLockoutConfig.lockoutDuration / 60000);
+              const message = `Too many failed login attempts. Your account has been locked for ${lockoutMinutes} minutes. Please contact support if you need assistance.`;
+              return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
             }
-          } else if (backup_code && hasMFA) {
-            // Verify backup code
-            const matchIndex = await plugin.mfaManager.verifyBackupCode(
-              backup_code,
-              mfaDevices[0].backupCodes
-            );
 
-            if (matchIndex !== null && matchIndex >= 0) {
-              // Remove used backup code
-              const updatedCodes = [...mfaDevices[0].backupCodes];
-              updatedCodes.splice(matchIndex, 1);
-
-              await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
-                backupCodes: updatedCodes,
-                lastUsedAt: new Date().toISOString()
-              });
-
-              mfaVerified = true;
-
-              // Audit log
-              await logAudit('mfa_verified', { userId: user.id, method: 'backup_code' });
-
-              if (config.verbose) {
-                console.log(`[MFA] User ${user.email} verified with backup code (${updatedCodes.length} codes remaining)`);
-              }
-            }
+            await usersResource.update(user.id, {
+              failedLoginAttempts: failedAttempts,
+              lastFailedLogin: nowIso
+            });
           }
 
-          if (!mfaVerified) {
-            // MFA verification failed
-            await logAudit('mfa_failed', { userId: user.id, reason: 'invalid_token' });
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, 'failed_login', {
+              path: '/login',
+              userAgent,
+              email: normalizedEmail,
+              userId: user.id
+            });
+          }
 
-            if (config.verbose) {
-              console.log(`[MFA] User ${user.email} MFA verification failed`);
-            }
+          return c.redirect(`/login?error=${encodeURIComponent('Invalid email or password')}&email=${encodeURIComponent(normalizedEmail)}`);
+        }
 
-            return c.redirect(`/login/mfa?error=${encodeURIComponent('Invalid MFA code. Please try again.')}&token=${Buffer.from(JSON.stringify({ userId: user.id, email: user.email, timestamp: Date.now() })).toString('base64')}`);
+        if (accountLockoutConfig.enabled && accountLockoutConfig.resetOnSuccess) {
+          if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+            await usersResource.update(user.id, {
+              failedLoginAttempts: 0,
+              lockedUntil: null,
+              lastFailedLogin: null
+            });
           }
         }
       }
 
-      // Get request metadata
-      const ipAddress = c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
-                        c.req.header('x-real-ip') ||
-                        'unknown';
-      const userAgent = c.req.header('user-agent') || 'unknown';
+      // Account active status
+      if (supportsStatusField && user.status && user.status !== 'active') {
+        const message = user.status === 'suspended'
+          ? 'Your account has been suspended. Please contact support.'
+          : 'Your account is inactive. Please contact support.';
+        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+
+      if (!supportsStatusField && user.active === false) {
+        return c.redirect(`/login?error=${encodeURIComponent('Your account is inactive. Please contact support.')}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+
+      if (config.registration.requireEmailVerification && !user.emailVerified) {
+        const message = 'Please verify your email address before signing in.';
+        return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+
+      // 🔐 MFA logic
+      let hasMFA = false;
+      let mfaDevices = [];
+      if (config.mfa.enabled && plugin.mfaDevicesResource) {
+        const [okMFA, errMFA, devices] = await tryFn(() =>
+          plugin.mfaDevicesResource.query({ userId: user.id, verified: true })
+        );
+        if (!okMFA && config.verbose) {
+          console.error('[Identity Plugin] Failed to load MFA devices:', errMFA);
+        }
+        if (okMFA && devices && devices.length > 0) {
+          hasMFA = true;
+          mfaDevices = devices;
+        }
+      }
+
+      if (config.mfa.required && !hasMFA) {
+        return c.redirect(`/login?error=${encodeURIComponent('Multi-factor authentication is required for your account. Please contact support to complete enrollment.')}&email=${encodeURIComponent(normalizedEmail)}`);
+      }
+
+      const needsMfa = hasMFA || config.mfa.required;
+
+      if (!usingChallenge && needsMfa) {
+        const challengeToken = createMfaChallengeToken(user, rememberChoice);
+        if (!challengeToken) {
+          return c.redirect(`/login?error=${encodeURIComponent('Unable to start MFA verification. Please contact support.')}`);
+        }
+
+        const params = new URLSearchParams({ challenge: challengeToken });
+        if (rememberChoice === '1') {
+          params.set('remember', '1');
+        }
+        return c.redirect(`/login/mfa?${params.toString()}`);
+      }
+
+      if (usingChallenge && needsMfa) {
+        if (!mfa_token && !backup_code) {
+          const retryChallenge = createMfaChallengeToken(user, rememberChoice) || mfa_challenge;
+          const params = new URLSearchParams({ challenge: retryChallenge });
+          params.set('error', 'Multi-factor authentication is required.');
+          if (rememberChoice === '1') {
+            params.set('remember', '1');
+          }
+          return c.redirect(`/login/mfa?${params.toString()}`);
+        }
+
+        let mfaVerified = false;
+
+        if (mfa_token && hasMFA) {
+          mfaVerified = plugin.mfaManager.verifyTOTP(mfaDevices[0].secret, mfa_token);
+          if (mfaVerified) {
+            await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
+              lastUsedAt: new Date().toISOString()
+            });
+            await logAudit('mfa_verified', { userId: user.id, method: 'totp' });
+          }
+        }
+
+        if (!mfaVerified && backup_code && hasMFA) {
+          const matchIndex = await plugin.mfaManager.verifyBackupCode(
+            backup_code,
+            mfaDevices[0].backupCodes
+          );
+
+          if (matchIndex !== null && matchIndex >= 0) {
+            const updatedCodes = [...mfaDevices[0].backupCodes];
+            updatedCodes.splice(matchIndex, 1);
+
+            await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
+              backupCodes: updatedCodes,
+              lastUsedAt: new Date().toISOString()
+            });
+
+            mfaVerified = true;
+            await logAudit('mfa_verified', { userId: user.id, method: 'backup_code' });
+          }
+        }
+
+        if (!mfaVerified) {
+          await logAudit('mfa_failed', { userId: user.id, reason: 'invalid_token' });
+
+          if (failbanManager && failbanConfig.endpoints.login) {
+            await failbanManager.recordViolation(clientIp, 'failed_mfa', {
+              path: '/login',
+              userAgent,
+              email: normalizedEmail,
+              userId: user.id
+            });
+          }
+
+          const retryChallenge = createMfaChallengeToken(user, rememberChoice) || mfa_challenge;
+          const params = new URLSearchParams({
+            challenge: retryChallenge,
+            error: 'Invalid MFA code. Please try again.'
+          });
+          if (rememberChoice === '1') {
+            params.set('remember', '1');
+          }
+          return c.redirect(`/login/mfa?${params.toString()}`);
+        }
+      }
 
       // Create session
-      const sessionExpiry = remember === '1' ? '30d' : config.session.sessionExpiry;
+      const sessionDuration = rememberChoice === '1' ? '30d' : config.session.sessionExpiry;
       const [okSession, errSession, session] = await tryFn(() =>
         sessionManager.createSession({
           userId: user.id,
@@ -371,9 +441,9 @@ export function registerUIRoutes(app, plugin) {
             name: user.name,
             isAdmin: user.isAdmin || false
           },
-          ipAddress,
+          ipAddress: clientIp,
           userAgent,
-          expiresIn: sessionExpiry
+          duration: sessionDuration
         })
       );
 
@@ -381,21 +451,18 @@ export function registerUIRoutes(app, plugin) {
         if (config.verbose) {
           console.error('[Identity Plugin] Failed to create session:', errSession);
         }
-        return c.redirect(`/login?error=${encodeURIComponent('Failed to create session. Please try again.')}&email=${encodeURIComponent(email)}`);
+        return c.redirect(`/login?error=${encodeURIComponent('Failed to create session. Please try again.')}&email=${encodeURIComponent(normalizedEmail)}`);
       }
 
-      // Set session cookie
-      sessionManager.setSessionCookie(c, session.id, session.expiresAt);
+      sessionManager.setSessionCookie(c, session.sessionId, session.expiresAt);
 
-      // Update last login timestamp
       await tryFn(() =>
         usersResource.patch(user.id, {
           lastLoginAt: new Date().toISOString(),
-          lastLoginIp: ipAddress
+          lastLoginIp: clientIp
         })
       );
 
-      // Redirect to original destination or profile
       const redirectTo = c.req.query('redirect') || '/profile';
       return c.redirect(redirectTo);
 
@@ -416,35 +483,34 @@ export function registerUIRoutes(app, plugin) {
     }
 
     try {
-      const token = c.req.query('token');
+      const challenge = c.req.query('challenge');
       const remember = c.req.query('remember');
       const error = c.req.query('error');
 
-      if (!token) {
+      if (!challenge) {
         return c.redirect(`/login?error=${encodeURIComponent('Invalid MFA session')}`);
       }
 
-      // Decode temporary token
-      let userData;
-      try {
-        userData = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'));
-      } catch (err) {
-        return c.redirect(`/login?error=${encodeURIComponent('Invalid MFA session')}`);
-      }
-
-      // Check if token is still valid (5 minutes)
-      const tokenAge = Date.now() - userData.timestamp;
-      if (tokenAge > 300000) {
+      const payload = await verifyMfaChallengeToken(challenge);
+      if (!payload) {
         return c.redirect(`/login?error=${encodeURIComponent('MFA session expired. Please login again.')}`);
       }
 
-      // Store email/password in hidden fields for form submission
-      const mfaToken = JSON.stringify({ email: userData.email, password: userData.password });
+      const [okUser, , challengeUser] = await tryFn(() =>
+        usersResource.get(payload.userId)
+      );
+
+      if (!okUser || !challengeUser) {
+        return c.redirect(`/login?error=${encodeURIComponent('Your account could not be found. Please login again.')}`);
+      }
+
+      const effectiveRemember = payload.remember || remember === '1';
 
       return c.html(MFAVerificationPage({
         error: error ? decodeURIComponent(error) : null,
-        token: mfaToken,
-        remember: remember || '',
+        email: challengeUser.email,
+        remember: effectiveRemember ? '1' : '0',
+        challenge,
         config: uiConfig
       }));
 
@@ -558,19 +624,26 @@ export function registerUIRoutes(app, plugin) {
                         c.req.header('x-real-ip') ||
                         'unknown';
 
+      const initialActive = !config.registration.requireEmailVerification;
+      const userRecord = {
+        email: normalizedEmail,
+        name: name.trim(),
+        password,  // Auto-encrypted with 'password' type
+        isAdmin: false,
+        emailVerified: config.registration.requireEmailVerification ? false : true,
+        active: initialActive,
+        registrationIp: ipAddress,
+        lastLoginAt: null,
+        lastLoginIp: null
+      };
+
+      if (supportsStatusField) {
+        userRecord.status = initialActive ? 'active' : 'pending_verification';
+      }
+
       // Create user (password will be auto-encrypted by S3DB)
       const [okUser, errUser, user] = await tryFn(() =>
-        usersResource.insert({
-          email: normalizedEmail,
-          name: name.trim(),
-          password: password,  // Auto-encrypted with 'secret' type
-          status: 'pending_verification', // Requires email verification
-          isAdmin: false,
-          emailVerified: false,
-          registrationIp: ipAddress,
-          lastLoginAt: null,
-          lastLoginIp: null
-        })
+        usersResource.insert(userRecord)
       );
 
       if (!okUser) {
@@ -580,34 +653,35 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/register?error=${encodeURIComponent('Failed to create account. Please try again.')}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
       }
 
-      // Generate verification token
-      const verificationToken = generatePasswordResetToken();
-      const verificationExpiry = calculateExpiration(24); // 24 hours
+      let successMessage = 'Account created successfully! You can sign in now.';
 
-      // Update user with verification token
-      await usersResource.update(user.id, {
-        emailVerificationToken: verificationToken,
-        emailVerificationExpiry: verificationExpiry
-      });
+      if (config.registration.requireEmailVerification) {
+        const verificationToken = generatePasswordResetToken();
+        const verificationExpiry = calculateExpiration('24h'); // 24 hours
 
-      // Send verification email
-      if (plugin.emailService) {
-        try {
-          await plugin.emailService.sendEmailVerificationEmail({
-            to: normalizedEmail,
-            name: name.trim(),
-            verificationToken
-          });
-        } catch (emailError) {
-          if (config.verbose) {
-            console.error('[Identity Plugin] Failed to send verification email:', emailError);
+        await usersResource.update(user.id, {
+          emailVerificationToken: verificationToken,
+          emailVerificationExpiry: verificationExpiry
+        });
+
+        if (plugin.emailService) {
+          try {
+            await plugin.emailService.sendEmailVerificationEmail({
+              to: normalizedEmail,
+              name: name.trim(),
+              verificationToken
+            });
+          } catch (emailError) {
+            if (config.verbose) {
+              console.error('[Identity Plugin] Failed to send verification email:', emailError);
+            }
           }
-          // Don't fail registration if email fails - user can resend later
         }
+
+        successMessage = 'Account created successfully! Please check your email to verify your account.';
       }
 
-      // Redirect to login with success message
-      return c.redirect(`/login?success=${encodeURIComponent('Account created successfully! Please check your email to verify your account.')}&email=${encodeURIComponent(normalizedEmail)}`);
+      return c.redirect(`/login?success=${encodeURIComponent(successMessage)}&email=${encodeURIComponent(normalizedEmail)}`);
 
     } catch (error) {
       if (config.verbose) {
@@ -1425,8 +1499,8 @@ export function registerUIRoutes(app, plugin) {
       const now = new Date();
       const stats = {
         totalUsers: users.length,
-        activeUsers: users.filter(u => u.status === 'active').length,
-        pendingUsers: users.filter(u => u.status === 'pending_verification').length,
+        activeUsers: users.filter(u => supportsStatusField ? u.status === 'active' : u.active !== false).length,
+        pendingUsers: users.filter(u => supportsStatusField ? u.status === 'pending_verification' : (u.active === false && !u.emailVerified)).length,
         totalClients: clients.length,
         activeClients: clients.filter(c => c.active !== false).length,
         activeSessions: sessions.filter(s => new Date(s.expiresAt) > now).length,
@@ -1840,7 +1914,7 @@ export function registerUIRoutes(app, plugin) {
 
       // Only allow status/role changes if not self-editing
       if (!isSelfEdit) {
-        if (status) {
+        if (supportsStatusField && status) {
           updates.status = status;
         }
         if (role) {
@@ -1920,6 +1994,10 @@ export function registerUIRoutes(app, plugin) {
     const body = await c.req.parseBody();
     const { status } = body;
     const currentUser = c.get('user');
+
+    if (!supportsStatusField) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent('Status management is not supported for this deployment')}`);
+    }
 
     // Prevent self-status change
     if (userId === currentUser.id) {
@@ -2404,13 +2482,19 @@ export function registerUIRoutes(app, plugin) {
       }
 
       // Verify the email
+      const verificationUpdate = {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+        active: true
+      };
+
+      if (supportsStatusField) {
+        verificationUpdate.status = 'active';
+      }
+
       const [okUpdate, errUpdate] = await tryFn(() =>
-        usersResource.update(user.id, {
-          emailVerified: true,
-          emailVerificationToken: null,
-          emailVerificationExpiry: null,
-          status: 'active' // Activate account on email verification
-        })
+        usersResource.update(user.id, verificationUpdate)
       );
 
       if (!okUpdate) {
@@ -2479,7 +2563,7 @@ export function registerUIRoutes(app, plugin) {
 
       // Generate new verification token
       const verificationToken = generatePasswordResetToken(); // Reuse token generator
-      const verificationExpiry = calculateExpiration(24); // 24 hours
+      const verificationExpiry = calculateExpiration('24h'); // 24 hours
 
       // Update user with new token
       const [okUpdate, errUpdate] = await tryFn(() =>

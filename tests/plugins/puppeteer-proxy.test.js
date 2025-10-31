@@ -1,18 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import { Database } from '../../src/database.class.js';
+import { createMockDatabase } from './helpers/mock-database.js';
+import * as dependencyModule from '../../src/plugins/concerns/plugin-dependencies.js';
 import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
 import { ProxyManager } from '../../src/plugins/puppeteer/proxy-manager.js';
+
+jest.spyOn(dependencyModule, 'requirePluginDependency').mockImplementation(() => {});
 
 describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   let db;
   let puppeteerPlugin;
 
   beforeAll(async () => {
-    db = new Database({
-      connectionString: 'http://test:test@localhost:4566/bucket',
-      paranoid: false
-    });
-
+    db = createMockDatabase();
     await db.connect();
   });
 
