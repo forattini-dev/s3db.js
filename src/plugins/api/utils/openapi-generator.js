@@ -98,12 +98,13 @@ function generateResourceSchema(resource) {
   const properties = {};
   const required = [];
 
-  const allAttributes = resource.config?.attributes || resource.attributes || {};
+  // Use $schema for reliable access to resource definition
+  const allAttributes = resource.$schema.attributes || {};
 
   // Filter out plugin attributes - they are internal implementation details
   // and should not be exposed in public API documentation
-  const pluginAttrNames = resource.schema?._pluginAttributes
-    ? Object.values(resource.schema._pluginAttributes).flat()
+  const pluginAttrNames = resource.$schema._pluginAttributes
+    ? Object.values(resource.$schema._pluginAttributes).flat()
     : [];
 
   const attributes = Object.fromEntries(
@@ -111,7 +112,7 @@ function generateResourceSchema(resource) {
   );
 
   // Extract resource description (supports both string and object format)
-  const resourceDescription = resource.config?.description;
+  const resourceDescription = resource.$schema.description;
   const attributeDescriptions = typeof resourceDescription === 'object'
     ? (resourceDescription.attributes || {})
     : {};
@@ -215,8 +216,8 @@ function generateResourcePaths(resource, version, config = {}) {
   }
 
   // Extract partition information for documentation
-  // Partitions are stored in resource.config.options.partitions
-  const partitions = resource.config?.options?.partitions || resource.config?.partitions || resource.partitions || {};
+  // Use $schema for reliable access to partition definitions
+  const partitions = resource.$schema.partitions || {};
   const partitionNames = Object.keys(partitions);
   const hasPartitions = partitionNames.length > 0;
 

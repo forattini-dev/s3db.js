@@ -120,7 +120,9 @@ export class S3Cache extends Cache {
     super();
     this.client = client;
     this.keyPrefix = keyPrefix;
-    this.config.ttl = ttl;
+    this.ttlMs = typeof ttl === 'number' && ttl > 0 ? ttl : 0;
+    this.ttlSeconds = this.ttlMs > 0 ? Math.ceil(this.ttlMs / 1000) : 0;
+    this.config.ttl = this.ttlMs;
     this.config.client = client;
     this.config.prefix = prefix !== undefined ? prefix : keyPrefix + (keyPrefix.endsWith('/') ? '' : '/');
     this.config.enableCompression = enableCompression;
@@ -182,7 +184,7 @@ export class S3Cache extends Cache {
       this.storage.getPluginKey(null, this.keyPrefix, key),
       compressed,
       {
-        ttl: this.config.ttl,
+        ttl: this.ttlSeconds,
         behavior: 'body-only', // Compressed data is already optimized, skip metadata encoding
         contentType: compressed.compressed ? 'application/gzip' : 'application/json'
       }
@@ -207,15 +209,22 @@ export class S3Cache extends Cache {
     return true;
   }
 
-  async _clear() {
-    // Get all keys with the cache plugin prefix
-    const pluginPrefix = `plugin=cache/${this.keyPrefix}`;
-    const allKeys = await this.client.getAllKeys({ prefix: pluginPrefix });
+  async _clear(prefix) {
+    const basePrefix = `plugin=cache/${this.keyPrefix}`;
+    const listPrefix = prefix
+      ? `${basePrefix}/${prefix}`
+      : basePrefix;
 
-    // Delete all cache keys
+    const allKeys = await this.client.getAllKeys({ prefix: listPrefix });
+
     for (const key of allKeys) {
-      await this.storage.delete(key);
+      // When listing without prefix, filter manually if prefix supplied (defensive)
+      if (!prefix || key.startsWith(`${basePrefix}/${prefix}`)) {
+        await this.storage.delete(key);
+      }
     }
+
+    return true;
   }
 
   async size() {

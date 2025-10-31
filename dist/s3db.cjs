@@ -898,7 +898,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata
   }
 }
 
-function tryFn(fnOrPromise) {
+function tryFn$1(fnOrPromise) {
   if (fnOrPromise == null) {
     const err = new Error("fnOrPromise cannot be null or undefined");
     err.stack = new Error().stack;
@@ -974,26 +974,26 @@ async function dynamicCrypto() {
   return lib;
 }
 async function sha256(message) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn$1(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encoder = new TextEncoder();
   const data = encoder.encode(message);
-  const [ok, err, hashBuffer] = await tryFn(() => cryptoLib.subtle.digest("SHA-256", data));
+  const [ok, err, hashBuffer] = await tryFn$1(() => cryptoLib.subtle.digest("SHA-256", data));
   if (!ok) throw new CryptoError("SHA-256 digest failed", { original: err, input: message });
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   return hashHex;
 }
 async function encrypt(content, passphrase) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn$1(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const salt = cryptoLib.getRandomValues(new Uint8Array(16));
-  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  const [okKey, errKey, key] = await tryFn$1(() => getKeyMaterial(passphrase, salt));
   if (!okKey) throw new CryptoError("Key derivation failed", { original: errKey, passphrase, salt });
   const iv = cryptoLib.getRandomValues(new Uint8Array(12));
   const encoder = new TextEncoder();
   const encodedContent = encoder.encode(content);
-  const [okEnc, errEnc, encryptedContent] = await tryFn(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
+  const [okEnc, errEnc, encryptedContent] = await tryFn$1(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
   if (!okEnc) throw new CryptoError("Encryption failed", { original: errEnc, content });
   const encryptedData = new Uint8Array(salt.length + iv.length + encryptedContent.byteLength);
   encryptedData.set(salt);
@@ -1002,15 +1002,15 @@ async function encrypt(content, passphrase) {
   return arrayBufferToBase64(encryptedData);
 }
 async function decrypt(encryptedBase64, passphrase) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn$1(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encryptedData = base64ToArrayBuffer(encryptedBase64);
   const salt = encryptedData.slice(0, 16);
   const iv = encryptedData.slice(16, 28);
   const encryptedContent = encryptedData.slice(28);
-  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  const [okKey, errKey, key] = await tryFn$1(() => getKeyMaterial(passphrase, salt));
   if (!okKey) throw new CryptoError("Key derivation failed (decrypt)", { original: errKey, passphrase, salt });
-  const [okDec, errDec, decryptedContent] = await tryFn(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
+  const [okDec, errDec, decryptedContent] = await tryFn$1(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
   if (!okDec) throw new CryptoError("Decryption failed", { original: errDec, encryptedBase64 });
   const decoder = new TextDecoder();
   return decoder.decode(decryptedContent);
@@ -1019,7 +1019,7 @@ async function md5(data) {
   if (typeof process === "undefined") {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
-  const [ok, err, result] = await tryFn(async () => {
+  const [ok, err, result] = await tryFn$1(async () => {
     return crypto.createHash("md5").update(data).digest("base64");
   });
   if (!ok) {
@@ -1028,11 +1028,11 @@ async function md5(data) {
   return result;
 }
 async function getKeyMaterial(passphrase, salt) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn$1(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encoder = new TextEncoder();
   const keyMaterial = encoder.encode(passphrase);
-  const [okImport, errImport, baseKey] = await tryFn(() => cryptoLib.subtle.importKey(
+  const [okImport, errImport, baseKey] = await tryFn$1(() => cryptoLib.subtle.importKey(
     "raw",
     keyMaterial,
     { name: "PBKDF2" },
@@ -1040,7 +1040,7 @@ async function getKeyMaterial(passphrase, salt) {
     ["deriveKey"]
   ));
   if (!okImport) throw new CryptoError("importKey failed", { original: errImport, passphrase });
-  const [okDerive, errDerive, derivedKey] = await tryFn(() => cryptoLib.subtle.deriveKey(
+  const [okDerive, errDerive, derivedKey] = await tryFn$1(() => cryptoLib.subtle.deriveKey(
     {
       name: "PBKDF2",
       salt,
@@ -1820,7 +1820,7 @@ class PluginStorage {
     if (body !== null) {
       putParams.body = JSON.stringify(body);
     }
-    const [ok, err] = await tryFn(() => this.client.putObject(putParams));
+    const [ok, err] = await tryFn$1(() => this.client.putObject(putParams));
     if (!ok) {
       throw new PluginStorageError(`Failed to save plugin data`, {
         pluginSlug: this.pluginSlug,
@@ -1858,7 +1858,7 @@ class PluginStorage {
    * @returns {Promise<Object|null>} Data or null if not found/expired
    */
   async get(key) {
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, response] = await tryFn$1(() => this.client.getObject(key));
     if (!ok) {
       if (err.name === "NoSuchKey" || err.Code === "NoSuchKey") {
         return null;
@@ -1875,7 +1875,7 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      const [ok2, parseErr, result] = await tryFn(async () => {
+      const [ok2, parseErr, result] = await tryFn$1(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
@@ -1914,7 +1914,7 @@ class PluginStorage {
     for (const [key, value] of Object.entries(metadata)) {
       if (typeof value === "string") {
         if (value.startsWith("{") && value.endsWith("}") || value.startsWith("[") && value.endsWith("]")) {
-          const [ok, err, result] = tryFn(() => JSON.parse(value));
+          const [ok, err, result] = tryFn$1(() => JSON.parse(value));
           if (ok) {
             parsed[key] = result;
             continue;
@@ -1948,7 +1948,7 @@ class PluginStorage {
   async list(prefix = "", options = {}) {
     const { limit } = options;
     const fullPrefix = prefix ? `plugin=${this.pluginSlug}/${prefix}` : `plugin=${this.pluginSlug}/`;
-    const [ok, err, result] = await tryFn(
+    const [ok, err, result] = await tryFn$1(
       () => this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
     );
     if (!ok) {
@@ -1976,7 +1976,7 @@ class PluginStorage {
   async listForResource(resourceName, subPrefix = "", options = {}) {
     const { limit } = options;
     const fullPrefix = subPrefix ? `resource=${resourceName}/plugin=${this.pluginSlug}/${subPrefix}` : `resource=${resourceName}/plugin=${this.pluginSlug}/`;
-    const [ok, err, result] = await tryFn(
+    const [ok, err, result] = await tryFn$1(
       () => this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
     );
     if (!ok) {
@@ -2020,7 +2020,7 @@ class PluginStorage {
    * @returns {Promise<boolean>} True if expired or not found
    */
   async isExpired(key) {
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, response] = await tryFn$1(() => this.client.getObject(key));
     if (!ok) {
       return true;
     }
@@ -2028,7 +2028,7 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      const [ok2, err2, result] = await tryFn(async () => {
+      const [ok2, err2, result] = await tryFn$1(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
@@ -2054,7 +2054,7 @@ class PluginStorage {
    * @returns {Promise<number|null>} Remaining seconds or null if no TTL/not found
    */
   async getTTL(key) {
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, response] = await tryFn$1(() => this.client.getObject(key));
     if (!ok) {
       return null;
     }
@@ -2062,7 +2062,7 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      const [ok2, err2, result] = await tryFn(async () => {
+      const [ok2, err2, result] = await tryFn$1(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
@@ -2090,7 +2090,7 @@ class PluginStorage {
    * @returns {Promise<boolean>} True if extended, false if not found or no TTL
    */
   async touch(key, additionalSeconds) {
-    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+    const [ok, err, response] = await tryFn$1(() => this.client.headObject(key));
     if (!ok) {
       return false;
     }
@@ -2107,7 +2107,7 @@ class PluginStorage {
       const { encoded } = metadataEncode(metaValue);
       encodedMetadata[metaKey] = encoded;
     }
-    const [copyOk] = await tryFn(() => this.client.copyObject({
+    const [copyOk] = await tryFn$1(() => this.client.copyObject({
       from: key,
       to: key,
       metadata: encodedMetadata,
@@ -2123,7 +2123,7 @@ class PluginStorage {
    * @returns {Promise<void>}
    */
   async delete(key) {
-    const [ok, err] = await tryFn(() => this.client.deleteObject(key));
+    const [ok, err] = await tryFn$1(() => this.client.deleteObject(key));
     if (!ok) {
       throw new PluginStorageError(`Failed to delete plugin data`, {
         pluginSlug: this.pluginSlug,
@@ -2169,7 +2169,7 @@ class PluginStorage {
   async batchPut(items) {
     const results = [];
     for (const item of items) {
-      const [ok, err] = await tryFn(
+      const [ok, err] = await tryFn$1(
         () => this.put(item.key, item.data, item.options)
       );
       results.push({
@@ -2189,7 +2189,7 @@ class PluginStorage {
   async batchGet(keys) {
     const results = [];
     for (const key of keys) {
-      const [ok, err, data] = await tryFn(() => this.get(key));
+      const [ok, err, data] = await tryFn$1(() => this.get(key));
       results.push({
         key,
         ok,
@@ -2258,7 +2258,7 @@ class PluginStorage {
    * @returns {Promise<number>} New value
    */
   async increment(key, amount = 1, options = {}) {
-    const [headOk, headErr, headResponse] = await tryFn(() => this.client.headObject(key));
+    const [headOk, headErr, headResponse] = await tryFn$1(() => this.client.headObject(key));
     if (headOk && headResponse.Metadata) {
       const metadata = headResponse.Metadata || {};
       const parsedMetadata = this._parseMetadataValues(metadata);
@@ -2273,7 +2273,7 @@ class PluginStorage {
         const { encoded } = metadataEncode(metaValue);
         encodedMetadata[metaKey] = encoded;
       }
-      const [copyOk] = await tryFn(() => this.client.copyObject({
+      const [copyOk] = await tryFn$1(() => this.client.copyObject({
         from: key,
         to: key,
         metadata: encodedMetadata,
@@ -4562,12 +4562,12 @@ function extractValidationRules(fieldDef) {
 function generateResourceSchema(resource) {
   const properties = {};
   const required = [];
-  const allAttributes = resource.config?.attributes || resource.attributes || {};
-  const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+  const allAttributes = resource.$schema.attributes || {};
+  const pluginAttrNames = resource.$schema._pluginAttributes ? Object.values(resource.$schema._pluginAttributes).flat() : [];
   const attributes = Object.fromEntries(
     Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
   );
-  const resourceDescription = resource.config?.description;
+  const resourceDescription = resource.$schema.description;
   const attributeDescriptions = typeof resourceDescription === "object" ? resourceDescription.attributes || {} : {};
   properties.id = {
     type: "string",
@@ -4638,7 +4638,7 @@ function generateResourcePaths(resource, version, config = {}) {
     if (authMethods.includes("apiKey")) security.push({ apiKeyAuth: [] });
     if (authMethods.includes("basic")) security.push({ basicAuth: [] });
   }
-  const partitions = resource.config?.options?.partitions || resource.config?.partitions || resource.partitions || {};
+  const partitions = resource.$schema.partitions || {};
   const partitionNames = Object.keys(partitions);
   const hasPartitions = partitionNames.length > 0;
   let partitionDescription = "Partition name for filtering";
@@ -8014,7 +8014,7 @@ class FailbanManager {
       return await this.database.getResource(resourceName);
     } catch (err) {
     }
-    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+    const [created, createErr, resource] = await tryFn$1(() => this.database.createResource({
       name: resourceName,
       attributes: {
         ip: "string|required",
@@ -8068,7 +8068,7 @@ class FailbanManager {
       return await this.database.getResource(resourceName);
     } catch (err) {
     }
-    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+    const [created, createErr, resource] = await tryFn$1(() => this.database.createResource({
       name: resourceName,
       attributes: {
         ip: "string|required",
@@ -10330,7 +10330,7 @@ class ApiPlugin extends Plugin {
       }
       return;
     }
-    const [ok, err, resource] = await tryFn(
+    const [ok, err, resource] = await tryFn$1(
       () => this.database.createResource({
         name: this.usersResourceName,
         attributes: {
@@ -10750,7 +10750,7 @@ class ApiPlugin extends Plugin {
     const { purgeData = false } = options;
     await this.onStop();
     if (purgeData && this.usersResource) {
-      const [ok] = await tryFn(() => this.database.deleteResource(this.usersResourceName));
+      const [ok] = await tryFn$1(() => this.database.deleteResource(this.usersResourceName));
       if (ok && this.config.verbose) {
         console.log(`[API Plugin] Deleted ${this.usersResourceName} resource`);
       }
@@ -11886,7 +11886,7 @@ class OAuth2Server {
         });
       }
       const user = users[0];
-      const [okVerify, errVerify, isValid] = await tryFn(
+      const [okVerify, errVerify, isValid] = await tryFn$1(
         () => verifyPassword(password, user.password)
       );
       if (!okVerify) {
@@ -12817,7 +12817,7 @@ class IdentityPlugin extends Plugin {
    */
   async _createOAuth2Resources() {
     const names = this.internalResourceNames;
-    const [okKeys, errKeys, keysResource] = await tryFn(
+    const [okKeys, errKeys, keysResource] = await tryFn$1(
       () => this.database.createResource({
         name: names.oauthKeys,
         attributes: {
@@ -12847,7 +12847,7 @@ class IdentityPlugin extends Plugin {
     } else {
       throw errKeys;
     }
-    const [okCodes, errCodes, codesResource] = await tryFn(
+    const [okCodes, errCodes, codesResource] = await tryFn$1(
       () => this.database.createResource({
         name: names.authCodes,
         attributes: {
@@ -12882,7 +12882,7 @@ class IdentityPlugin extends Plugin {
     } else {
       throw errCodes;
     }
-    const [okSessions, errSessions, sessionsResource] = await tryFn(
+    const [okSessions, errSessions, sessionsResource] = await tryFn$1(
       () => this.database.createResource({
         name: names.sessions,
         attributes: {
@@ -12911,7 +12911,7 @@ class IdentityPlugin extends Plugin {
     } else {
       throw errSessions;
     }
-    const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn(
+    const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn$1(
       () => this.database.createResource({
         name: names.passwordResetTokens,
         attributes: {
@@ -12940,7 +12940,7 @@ class IdentityPlugin extends Plugin {
       throw errResetTokens;
     }
     if (this.config.mfa.enabled) {
-      const [okMFA, errMFA, mfaResource] = await tryFn(
+      const [okMFA, errMFA, mfaResource] = await tryFn$1(
         () => this.database.createResource({
           name: names.mfaDevices,
           attributes: {
@@ -13000,7 +13000,7 @@ class IdentityPlugin extends Plugin {
       "users"
     );
     usersConfig.mergedConfig = usersMergedConfig;
-    const [okUsers, errUsers, usersResource] = await tryFn(
+    const [okUsers, errUsers, usersResource] = await tryFn$1(
       () => this.database.createResource(usersMergedConfig)
     );
     if (okUsers) {
@@ -13028,7 +13028,7 @@ class IdentityPlugin extends Plugin {
       "tenants"
     );
     tenantsConfig.mergedConfig = tenantsMergedConfig;
-    const [okTenants, errTenants, tenantsResource] = await tryFn(
+    const [okTenants, errTenants, tenantsResource] = await tryFn$1(
       () => this.database.createResource(tenantsMergedConfig)
     );
     if (okTenants) {
@@ -13056,7 +13056,7 @@ class IdentityPlugin extends Plugin {
       "clients"
     );
     clientsConfig.mergedConfig = clientsMergedConfig;
-    const [okClients, errClients, clientsResource] = await tryFn(
+    const [okClients, errClients, clientsResource] = await tryFn$1(
       () => this.database.createResource(clientsMergedConfig)
     );
     if (okClients) {
@@ -13325,7 +13325,7 @@ class IdentityPlugin extends Plugin {
         "plg_oauth_clients"
       ]);
       for (const resourceName of resourcesToDelete) {
-        const [ok] = await tryFn(() => this.database.deleteResource(resourceName));
+        const [ok] = await tryFn$1(() => this.database.deleteResource(resourceName));
         if (ok && this.config.verbose) {
           console.log(`[Identity Plugin] Deleted ${resourceName} resource`);
         }
@@ -13368,7 +13368,7 @@ class AuditPlugin extends Plugin {
     };
   }
   async onInstall() {
-    const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
+    const [ok, err, auditResource] = await tryFn$1(() => this.database.createResource({
       name: this.auditResourceName,
       attributes: {
         id: "string|required",
@@ -13424,7 +13424,7 @@ class AuditPlugin extends Plugin {
     resource.on("updated", async (data) => {
       let oldData = data.$before;
       if (this.config.includeData && !oldData) {
-        const [ok, err, fetched] = await tryFn(() => resource.get(data.id));
+        const [ok, err, fetched] = await tryFn$1(() => resource.get(data.id));
         if (ok) oldData = fetched;
       }
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
@@ -13441,7 +13441,7 @@ class AuditPlugin extends Plugin {
     resource.on("deleted", async (data) => {
       let oldData = data;
       if (this.config.includeData && !oldData) {
-        const [ok, err, fetched] = await tryFn(() => resource.get(data.id));
+        const [ok, err, fetched] = await tryFn$1(() => resource.get(data.id));
         if (ok) oldData = fetched;
       }
       const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
@@ -13460,7 +13460,7 @@ class AuditPlugin extends Plugin {
     resource.deleteMany = async function(ids) {
       const objectsToDelete = [];
       for (const id of ids) {
-        const [ok, err, fetched] = await tryFn(() => resource.get(id));
+        const [ok, err, fetched] = await tryFn$1(() => resource.get(id));
         if (ok) {
           objectsToDelete.push(fetched);
         } else {
@@ -13524,7 +13524,7 @@ class AuditPlugin extends Plugin {
   }
   getPartitionValues(data, resource) {
     if (!this.config.includePartitions) return null;
-    const partitions = resource.config?.partitions || resource.partitions;
+    const partitions = resource.$schema.partitions;
     if (!partitions) {
       return null;
     }
@@ -13575,7 +13575,7 @@ class AuditPlugin extends Plugin {
     const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100, offset = 0 } = options;
     let items = [];
     if (resourceName && !operation && !recordId && !partition && !startDate && !endDate) {
-      const [ok, err, result] = await tryFn(
+      const [ok, err, result] = await tryFn$1(
         () => this.auditResource.query({ resourceName }, { limit: limit + offset })
       );
       items = ok && result ? result : [];
@@ -13583,7 +13583,7 @@ class AuditPlugin extends Plugin {
     } else if (startDate && !resourceName && !operation && !recordId && !partition) {
       const dates = this._generateDateRange(startDate, endDate);
       for (const date of dates) {
-        const [ok, err, result] = await tryFn(
+        const [ok, err, result] = await tryFn$1(
           () => this.auditResource.query({ createdAt: date })
         );
         if (ok && result) {
@@ -13679,12 +13679,12 @@ class AuditPlugin extends Plugin {
     }
     let deletedCount = 0;
     for (const dateStr of datesToDelete) {
-      const [ok, err, oldAudits] = await tryFn(
+      const [ok, err, oldAudits] = await tryFn$1(
         () => this.auditResource.query({ createdAt: dateStr })
       );
       if (ok && oldAudits) {
         for (const audit of oldAudits) {
-          const [delOk] = await tryFn(() => this.auditResource.delete(audit.id));
+          const [delOk] = await tryFn$1(() => this.auditResource.delete(audit.id));
           if (delOk) {
             deletedCount++;
           }
@@ -13896,7 +13896,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     const targetDir = this.resolvePath(backupId, manifest);
     const targetPath = path.join(targetDir, `${backupId}.backup`);
     const manifestPath = path.join(targetDir, `${backupId}.manifest.json`);
-    const [createDirOk, createDirErr] = await tryFn(
+    const [createDirOk, createDirErr] = await tryFn$1(
       () => fs.mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
     );
     if (!createDirOk) {
@@ -13909,7 +13909,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check directory permissions and disk space"
       });
     }
-    const [copyOk, copyErr] = await tryFn(() => fs.copyFile(filePath, targetPath));
+    const [copyOk, copyErr] = await tryFn$1(() => fs.copyFile(filePath, targetPath));
     if (!copyOk) {
       throw new BackupError("Failed to copy backup file", {
         operation: "upload",
@@ -13921,7 +13921,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check file permissions and disk space"
       });
     }
-    const [manifestOk, manifestErr] = await tryFn(
+    const [manifestOk, manifestErr] = await tryFn$1(
       () => import('fs/promises').then((fs) => fs.writeFile(
         manifestPath,
         JSON.stringify(manifest, null, 2),
@@ -13929,7 +13929,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       ))
     );
     if (!manifestOk) {
-      await tryFn(() => fs.unlink(targetPath));
+      await tryFn$1(() => fs.unlink(targetPath));
       throw new BackupError("Failed to write manifest file", {
         operation: "upload",
         driver: "filesystem",
@@ -13939,7 +13939,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check directory permissions and disk space"
       });
     }
-    const [statOk, , stats] = await tryFn(() => fs.stat(targetPath));
+    const [statOk, , stats] = await tryFn$1(() => fs.stat(targetPath));
     const size = statOk ? stats.size : 0;
     this.log(`Uploaded backup ${backupId} to ${targetPath} (${size} bytes)`);
     return {
@@ -13954,7 +13954,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
-    const [existsOk] = await tryFn(() => fs.access(sourcePath));
+    const [existsOk] = await tryFn$1(() => fs.access(sourcePath));
     if (!existsOk) {
       throw new BackupError("Backup file not found", {
         operation: "download",
@@ -13965,8 +13965,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       });
     }
     const targetDir = path.dirname(targetPath);
-    await tryFn(() => fs.mkdir(targetDir, { recursive: true }));
-    const [copyOk, copyErr] = await tryFn(() => fs.copyFile(sourcePath, targetPath));
+    await tryFn$1(() => fs.mkdir(targetDir, { recursive: true }));
+    const [copyOk, copyErr] = await tryFn$1(() => fs.copyFile(sourcePath, targetPath));
     if (!copyOk) {
       throw new BackupError("Failed to download backup", {
         operation: "download",
@@ -13990,8 +13990,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.manifest.json`
     );
-    const [deleteBackupOk] = await tryFn(() => fs.unlink(backupPath));
-    const [deleteManifestOk] = await tryFn(() => fs.unlink(manifestPath));
+    const [deleteBackupOk] = await tryFn$1(() => fs.unlink(backupPath));
+    const [deleteManifestOk] = await tryFn$1(() => fs.unlink(manifestPath));
     if (!deleteBackupOk && !deleteManifestOk) {
       throw new BackupError("Failed to delete backup files", {
         operation: "delete",
@@ -14019,17 +14019,17 @@ class FilesystemBackupDriver extends BaseBackupDriver {
   }
   async _scanDirectory(dirPath, prefix, results, limit) {
     if (results.length >= limit) return;
-    const [readDirOk, , files] = await tryFn(() => fs.readdir(dirPath));
+    const [readDirOk, , files] = await tryFn$1(() => fs.readdir(dirPath));
     if (!readDirOk) return;
     for (const file of files) {
       if (results.length >= limit) break;
       const fullPath = path.join(dirPath, file);
-      const [statOk, , stats] = await tryFn(() => fs.stat(fullPath));
+      const [statOk, , stats] = await tryFn$1(() => fs.stat(fullPath));
       if (!statOk) continue;
       if (stats.isDirectory()) {
         await this._scanDirectory(fullPath, prefix, results, limit);
       } else if (file.endsWith(".manifest.json")) {
-        const [readOk, , content] = await tryFn(
+        const [readOk, , content] = await tryFn$1(
           () => import('fs/promises').then((fs) => fs.readFile(fullPath, "utf8"))
         );
         if (readOk) {
@@ -14058,7 +14058,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
-    const [readOk, readErr] = await tryFn(async () => {
+    const [readOk, readErr] = await tryFn$1(async () => {
       const hash = crypto.createHash("sha256");
       const stream = fs$1.createReadStream(backupPath);
       await promises.pipeline(stream, hash);
@@ -14139,9 +14139,9 @@ class S3BackupDriver extends BaseBackupDriver {
   async upload(filePath, backupId, manifest) {
     const backupKey = this.resolveKey(backupId, manifest);
     const manifestKey = this.resolveManifestKey(backupId, manifest);
-    const [statOk, , stats] = await tryFn(() => fs.stat(filePath));
+    const [statOk, , stats] = await tryFn$1(() => fs.stat(filePath));
     const fileSize = statOk ? stats.size : 0;
-    const [uploadOk, uploadErr] = await tryFn(async () => {
+    const [uploadOk, uploadErr] = await tryFn$1(async () => {
       const fileStream = fs$1.createReadStream(filePath);
       return await this.config.client.uploadObject({
         bucket: this.config.bucket,
@@ -14168,7 +14168,7 @@ class S3BackupDriver extends BaseBackupDriver {
         suggestion: "Check S3 permissions and bucket configuration"
       });
     }
-    const [manifestOk, manifestErr] = await tryFn(
+    const [manifestOk, manifestErr] = await tryFn$1(
       () => this.config.client.uploadObject({
         bucket: this.config.bucket,
         key: manifestKey,
@@ -14183,7 +14183,7 @@ class S3BackupDriver extends BaseBackupDriver {
       })
     );
     if (!manifestOk) {
-      await tryFn(() => this.config.client.deleteObject({
+      await tryFn$1(() => this.config.client.deleteObject({
         bucket: this.config.bucket,
         key: backupKey
       }));
@@ -14210,7 +14210,7 @@ class S3BackupDriver extends BaseBackupDriver {
   }
   async download(backupId, targetPath, metadata) {
     const backupKey = metadata.key || this.resolveKey(backupId, metadata);
-    const [downloadOk, downloadErr] = await tryFn(
+    const [downloadOk, downloadErr] = await tryFn$1(
       () => this.config.client.downloadObject({
         bucket: this.config.bucket,
         key: backupKey,
@@ -14235,13 +14235,13 @@ class S3BackupDriver extends BaseBackupDriver {
   async delete(backupId, metadata) {
     const backupKey = metadata.key || this.resolveKey(backupId, metadata);
     const manifestKey = metadata.manifestKey || this.resolveManifestKey(backupId, metadata);
-    const [deleteBackupOk] = await tryFn(
+    const [deleteBackupOk] = await tryFn$1(
       () => this.config.client.deleteObject({
         bucket: this.config.bucket,
         key: backupKey
       })
     );
-    const [deleteManifestOk] = await tryFn(
+    const [deleteManifestOk] = await tryFn$1(
       () => this.config.client.deleteObject({
         bucket: this.config.bucket,
         key: manifestKey
@@ -14263,7 +14263,7 @@ class S3BackupDriver extends BaseBackupDriver {
   async list(options = {}) {
     const { limit = 50, prefix = "" } = options;
     const searchPrefix = this.config.path.replace(/\{[^}]+\}/g, "");
-    const [listOk, listErr, response] = await tryFn(
+    const [listOk, listErr, response] = await tryFn$1(
       () => this.config.client.listObjects({
         bucket: this.config.bucket,
         prefix: searchPrefix,
@@ -14278,7 +14278,7 @@ class S3BackupDriver extends BaseBackupDriver {
     const manifestObjects = (response.Contents || []).filter((obj) => obj.Key.endsWith(".manifest.json")).filter((obj) => !prefix || obj.Key.includes(prefix));
     const results = [];
     for (const obj of manifestObjects.slice(0, limit)) {
-      const [manifestOk, , manifestContent] = await tryFn(
+      const [manifestOk, , manifestContent] = await tryFn$1(
         () => this.config.client.getObject({
           bucket: this.config.bucket,
           key: obj.Key
@@ -14309,7 +14309,7 @@ class S3BackupDriver extends BaseBackupDriver {
   }
   async verify(backupId, expectedChecksum, metadata) {
     const backupKey = metadata.key || this.resolveKey(backupId, metadata);
-    const [verifyOk, verifyErr] = await tryFn(async () => {
+    const [verifyOk, verifyErr] = await tryFn$1(async () => {
       const headResponse = await this.config.client.headObject({
         bucket: this.config.bucket,
         key: backupKey
@@ -14319,7 +14319,7 @@ class S3BackupDriver extends BaseBackupDriver {
         const expectedMd5 = crypto.createHash("md5").update(expectedChecksum).digest("hex");
         return etag === expectedMd5;
       } else {
-        const [streamOk, , stream] = await tryFn(
+        const [streamOk, , stream] = await tryFn$1(
           () => this.config.client.getObjectStream({
             bucket: this.config.bucket,
             key: backupKey
@@ -14415,7 +14415,7 @@ class MultiBackupDriver extends BaseBackupDriver {
     const errors = [];
     if (strategy === "priority") {
       for (const { driver, config, index } of this.drivers) {
-        const [ok, err, result] = await tryFn(
+        const [ok, err, result] = await tryFn$1(
           () => driver.upload(filePath, backupId, manifest)
         );
         if (ok) {
@@ -14442,7 +14442,7 @@ class MultiBackupDriver extends BaseBackupDriver {
       });
     }
     const uploadPromises = this.drivers.map(async ({ driver, config, index }) => {
-      const [ok, err, result] = await tryFn(
+      const [ok, err, result] = await tryFn$1(
         () => driver.upload(filePath, backupId, manifest)
       );
       if (ok) {
@@ -14500,7 +14500,7 @@ class MultiBackupDriver extends BaseBackupDriver {
       if (destMetadata.status !== "success") continue;
       const driverInstance = this.drivers.find((d) => d.index === destMetadata.destination);
       if (!driverInstance) continue;
-      const [ok, err, result] = await tryFn(
+      const [ok, err, result] = await tryFn$1(
         () => driverInstance.driver.download(backupId, targetPath, destMetadata)
       );
       if (ok) {
@@ -14527,7 +14527,7 @@ class MultiBackupDriver extends BaseBackupDriver {
       if (destMetadata.status !== "success") continue;
       const driverInstance = this.drivers.find((d) => d.index === destMetadata.destination);
       if (!driverInstance) continue;
-      const [ok, err] = await tryFn(
+      const [ok, err] = await tryFn$1(
         () => driverInstance.driver.delete(backupId, destMetadata)
       );
       if (ok) {
@@ -14584,7 +14584,7 @@ class MultiBackupDriver extends BaseBackupDriver {
       if (destMetadata.status !== "success") continue;
       const driverInstance = this.drivers.find((d) => d.index === destMetadata.destination);
       if (!driverInstance) continue;
-      const [ok, , isValid] = await tryFn(
+      const [ok, , isValid] = await tryFn$1(
         () => driverInstance.driver.verify(backupId, expectedChecksum, destMetadata)
       );
       if (ok && isValid) {
@@ -14597,7 +14597,7 @@ class MultiBackupDriver extends BaseBackupDriver {
   async cleanup() {
     await Promise.all(
       this.drivers.map(
-        ({ driver }) => tryFn(() => driver.cleanup()).catch(() => {
+        ({ driver }) => tryFn$1(() => driver.cleanup()).catch(() => {
         })
       )
     );
@@ -14862,7 +14862,7 @@ class BackupPlugin extends Plugin {
     });
   }
   async _createBackupMetadataResource() {
-    const [ok] = await tryFn(() => this.database.createResource({
+    const [ok] = await tryFn$1(() => this.database.createResource({
       name: this.config.backupMetadataResource,
       attributes: {
         id: "string|required",
@@ -14993,13 +14993,13 @@ class BackupPlugin extends Plugin {
       duration: 0,
       createdAt: now.toISOString().slice(0, 10)
     };
-    const [ok] = await tryFn(
+    const [ok] = await tryFn$1(
       () => this.database.resources[this.config.backupMetadataResource].insert(metadata)
     );
     return metadata;
   }
   async _updateBackupMetadata(backupId, updates) {
-    const [ok] = await tryFn(
+    const [ok] = await tryFn$1(
       () => this.database.resources[this.config.backupMetadataResource].update(backupId, updates)
     );
   }
@@ -15034,7 +15034,7 @@ class BackupPlugin extends Plugin {
     });
     let sinceTimestamp = null;
     if (type === "incremental") {
-      const [lastBackupOk, , lastBackups] = await tryFn(
+      const [lastBackupOk, , lastBackups] = await tryFn$1(
         () => this.database.resources[this.config.backupMetadataResource].list({
           filter: {
             status: "completed",
@@ -15126,7 +15126,7 @@ class BackupPlugin extends Plugin {
     };
     let totalSize = 0;
     for (const filePath of files) {
-      const [readOk, readErr, content] = await tryFn(() => fs.readFile(filePath, "utf8"));
+      const [readOk, readErr, content] = await tryFn$1(() => fs.readFile(filePath, "utf8"));
       if (!readOk) {
         if (this.config.verbose) {
           console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
@@ -15155,11 +15155,11 @@ class BackupPlugin extends Plugin {
         output
       );
     }
-    const [statOk, , stats] = await tryFn(() => fs.stat(targetPath));
+    const [statOk, , stats] = await tryFn$1(() => fs.stat(targetPath));
     return statOk ? stats.size : totalSize;
   }
   async _generateChecksum(filePath) {
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       const hash = crypto.createHash("sha256");
       const stream = fs$1.createReadStream(filePath);
       await promises.pipeline(stream, hash);
@@ -15171,7 +15171,7 @@ class BackupPlugin extends Plugin {
     return result;
   }
   async _cleanupTempFiles(tempDir) {
-    const [ok] = await tryFn(
+    const [ok] = await tryFn$1(
       () => import('fs/promises').then((fs) => fs.rm(tempDir, { recursive: true, force: true }))
     );
   }
@@ -15276,7 +15276,7 @@ class BackupPlugin extends Plugin {
             if (this.config.verbose) {
               console.log(`[BackupPlugin] Creating resource '${resourceName}'`);
             }
-            const [createOk, createErr] = await tryFn(
+            const [createOk, createErr] = await tryFn$1(
               () => this.database.createResource(resourceData.definition)
             );
             if (!createOk) {
@@ -15297,7 +15297,7 @@ class BackupPlugin extends Plugin {
             }
             let insertedCount = 0;
             for (const record of resourceData.records) {
-              const [insertOk] = await tryFn(async () => {
+              const [insertOk] = await tryFn$1(async () => {
                 if (mode === "skip") {
                   const existing = await resource.get(record.id);
                   if (existing) {
@@ -15342,7 +15342,7 @@ class BackupPlugin extends Plugin {
   async listBackups(options = {}) {
     try {
       const driverBackups = await this.driver.list(options);
-      const [metaOk, , metadataRecords] = await tryFn(
+      const [metaOk, , metadataRecords] = await tryFn$1(
         () => this.database.resources[this.config.backupMetadataResource].list({
           limit: options.limit || 50,
           sort: { timestamp: -1 }
@@ -15370,14 +15370,14 @@ class BackupPlugin extends Plugin {
    * @returns {Object|null} Backup status
    */
   async getBackupStatus(backupId) {
-    const [ok, , backup] = await tryFn(
+    const [ok, , backup] = await tryFn$1(
       () => this.database.resources[this.config.backupMetadataResource].get(backupId)
     );
     return ok ? backup : null;
   }
   async _cleanupOldBackups() {
     try {
-      const [listOk, , allBackups] = await tryFn(
+      const [listOk, , allBackups] = await tryFn$1(
         () => this.database.resources[this.config.backupMetadataResource].list({
           filter: { status: "completed" },
           sort: { timestamp: -1 }
@@ -15542,19 +15542,19 @@ class Cache extends EventEmitter {
   async set(key, data) {
     this.validateKey(key);
     await this._set(key, data);
-    this.emit("set", data);
+    this.emit("set", { key, value: data });
     return data;
   }
   async get(key) {
     this.validateKey(key);
     const data = await this._get(key);
-    this.emit("fetched", data);
+    this.emit("fetched", { key, value: data });
     return data;
   }
   async del(key) {
     this.validateKey(key);
     const data = await this._del(key);
-    this.emit("deleted", data);
+    this.emit("deleted", { key, value: data });
     return data;
   }
   async delete(key) {
@@ -15562,7 +15562,7 @@ class Cache extends EventEmitter {
   }
   async clear(prefix) {
     const data = await this._clear(prefix);
-    this.emit("clear", data);
+    this.emit("clear", { prefix, value: data });
     return data;
   }
 }
@@ -15579,7 +15579,9 @@ class S3Cache extends Cache {
     super();
     this.client = client;
     this.keyPrefix = keyPrefix;
-    this.config.ttl = ttl;
+    this.ttlMs = typeof ttl === "number" && ttl > 0 ? ttl : 0;
+    this.ttlSeconds = this.ttlMs > 0 ? Math.ceil(this.ttlMs / 1e3) : 0;
+    this.config.ttl = this.ttlMs;
     this.config.client = client;
     this.config.prefix = prefix !== void 0 ? prefix : keyPrefix + (keyPrefix.endsWith("/") ? "" : "/");
     this.config.enableCompression = enableCompression;
@@ -15626,7 +15628,7 @@ class S3Cache extends Cache {
       this.storage.getPluginKey(null, this.keyPrefix, key),
       compressed,
       {
-        ttl: this.config.ttl,
+        ttl: this.ttlSeconds,
         behavior: "body-only",
         // Compressed data is already optimized, skip metadata encoding
         contentType: compressed.compressed ? "application/gzip" : "application/json"
@@ -15646,12 +15648,16 @@ class S3Cache extends Cache {
     );
     return true;
   }
-  async _clear() {
-    const pluginPrefix = `plugin=cache/${this.keyPrefix}`;
-    const allKeys = await this.client.getAllKeys({ prefix: pluginPrefix });
+  async _clear(prefix) {
+    const basePrefix = `plugin=cache/${this.keyPrefix}`;
+    const listPrefix = prefix ? `${basePrefix}/${prefix}` : basePrefix;
+    const allKeys = await this.client.getAllKeys({ prefix: listPrefix });
     for (const key of allKeys) {
-      await this.storage.delete(key);
+      if (!prefix || key.startsWith(`${basePrefix}/${prefix}`)) {
+        await this.storage.delete(key);
+      }
     }
+    return true;
   }
   async size() {
     const keys = await this.keys();
@@ -15668,6 +15674,14 @@ class S3Cache extends Cache {
 class MemoryCache extends Cache {
   constructor(config = {}) {
     super(config);
+    this.caseSensitive = config.caseSensitive !== void 0 ? config.caseSensitive : true;
+    this.serializer = typeof config.serializer === "function" ? config.serializer : JSON.stringify;
+    this.deserializer = typeof config.deserializer === "function" ? config.deserializer : JSON.parse;
+    this.enableStats = config.enableStats === true;
+    this.evictionPolicy = (config.evictionPolicy || "fifo").toLowerCase();
+    if (!["lru", "fifo"].includes(this.evictionPolicy)) {
+      this.evictionPolicy = "fifo";
+    }
     this.cache = {};
     this.meta = {};
     this.maxSize = config.maxSize !== void 0 ? config.maxSize : 1e3;
@@ -15700,13 +15714,50 @@ class MemoryCache extends Cache {
     };
     this.currentMemoryBytes = 0;
     this.evictedDueToMemory = 0;
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      sets: 0,
+      deletes: 0,
+      evictions: 0
+    };
+  }
+  _normalizeKey(key) {
+    return this.caseSensitive ? key : key.toLowerCase();
+  }
+  _recordStat(type) {
+    if (!this.enableStats) return;
+    if (Object.prototype.hasOwnProperty.call(this.stats, type)) {
+      this.stats[type] += 1;
+    }
+  }
+  _selectEvictionCandidate() {
+    const entries = Object.entries(this.meta);
+    if (entries.length === 0) {
+      return null;
+    }
+    if (this.evictionPolicy === "lru") {
+      entries.sort((a, b) => (a[1].lastAccess ?? a[1].ts) - (b[1].lastAccess ?? b[1].ts));
+    } else {
+      entries.sort((a, b) => (a[1].createdAt ?? a[1].ts) - (b[1].createdAt ?? b[1].ts));
+    }
+    return entries[0]?.[0] || null;
   }
   async _set(key, data) {
-    let finalData = data;
+    const normalizedKey = this._normalizeKey(key);
+    let finalData = serialized;
     let compressed = false;
     let originalSize = 0;
     let compressedSize = 0;
-    const serialized = JSON.stringify(data);
+    let serialized;
+    try {
+      serialized = this.serializer(data);
+    } catch (error) {
+      throw new Error(`[MemoryCache] Failed to serialize data for key '${key}': ${error.message}`);
+    }
+    if (typeof serialized !== "string") {
+      throw new Error("[MemoryCache] Serializer must return a string");
+    }
     originalSize = Buffer.byteLength(serialized, "utf8");
     if (this.enableCompression) {
       try {
@@ -15729,78 +15780,108 @@ class MemoryCache extends Cache {
       }
     }
     const itemSize = compressed ? compressedSize : originalSize;
-    if (Object.prototype.hasOwnProperty.call(this.cache, key)) {
-      const oldSize = this.meta[key]?.compressedSize || 0;
+    if (Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
+      const oldSize = this.meta[normalizedKey]?.compressedSize || 0;
       this.currentMemoryBytes -= oldSize;
     }
     if (this.maxMemoryBytes > 0) {
       while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
-        const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-        if (oldestKey) {
-          const evictedSize = this.meta[oldestKey]?.compressedSize || 0;
-          delete this.cache[oldestKey];
-          delete this.meta[oldestKey];
-          this.currentMemoryBytes -= evictedSize;
-          this.evictedDueToMemory++;
-        } else {
-          break;
-        }
+        const candidate = this._selectEvictionCandidate();
+        if (!candidate) break;
+        const evictedSize = this.meta[candidate]?.compressedSize || 0;
+        delete this.cache[candidate];
+        delete this.meta[candidate];
+        this.currentMemoryBytes -= evictedSize;
+        this.evictedDueToMemory++;
+        this._recordStat("evictions");
       }
     }
     if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
-      const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-      if (oldestKey) {
-        const evictedSize = this.meta[oldestKey]?.compressedSize || 0;
-        delete this.cache[oldestKey];
-        delete this.meta[oldestKey];
+      const candidate = this._selectEvictionCandidate();
+      if (candidate) {
+        const evictedSize = this.meta[candidate]?.compressedSize || 0;
+        delete this.cache[candidate];
+        delete this.meta[candidate];
         this.currentMemoryBytes -= evictedSize;
+        this._recordStat("evictions");
       }
     }
-    this.cache[key] = finalData;
-    this.meta[key] = {
-      ts: Date.now(),
+    this.cache[normalizedKey] = finalData;
+    const timestamp = Date.now();
+    this.meta[normalizedKey] = {
+      ts: timestamp,
+      createdAt: timestamp,
+      lastAccess: timestamp,
       compressed,
       originalSize,
-      compressedSize: itemSize
+      compressedSize: itemSize,
+      originalKey: key
     };
     this.currentMemoryBytes += itemSize;
+    this._recordStat("sets");
     return data;
   }
   async _get(key) {
-    if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
+    const normalizedKey = this._normalizeKey(key);
+    if (!Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
+      this._recordStat("misses");
+      return null;
+    }
     if (this.ttl > 0) {
       const now = Date.now();
-      const meta = this.meta[key];
-      if (meta && now - meta.ts > this.ttl) {
+      const meta = this.meta[normalizedKey];
+      if (meta && now - (meta.createdAt ?? meta.ts) > this.ttl) {
         const itemSize = meta.compressedSize || 0;
         this.currentMemoryBytes -= itemSize;
-        delete this.cache[key];
-        delete this.meta[key];
+        delete this.cache[normalizedKey];
+        delete this.meta[normalizedKey];
+        this._recordStat("misses");
         return null;
       }
     }
-    const rawData = this.cache[key];
+    const rawData = this.cache[normalizedKey];
     if (rawData && typeof rawData === "object" && rawData.__compressed) {
       try {
         const compressedBuffer = Buffer.from(rawData.__data, "base64");
         const decompressed = zlib.gunzipSync(compressedBuffer).toString("utf8");
-        return JSON.parse(decompressed);
+        const value = this.deserializer(decompressed);
+        this._recordStat("hits");
+        if (this.evictionPolicy === "lru" && this.meta[normalizedKey]) {
+          this.meta[normalizedKey].lastAccess = Date.now();
+        }
+        return value;
       } catch (error) {
         console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
-        delete this.cache[key];
-        delete this.meta[key];
+        delete this.cache[normalizedKey];
+        delete this.meta[normalizedKey];
+        this._recordStat("misses");
         return null;
       }
     }
-    return rawData;
+    try {
+      const value = typeof rawData === "string" ? this.deserializer(rawData) : rawData;
+      this._recordStat("hits");
+      if (this.evictionPolicy === "lru" && this.meta[normalizedKey]) {
+        this.meta[normalizedKey].lastAccess = Date.now();
+      }
+      return value;
+    } catch (error) {
+      console.warn(`[MemoryCache] Deserialization failed for key '${key}':`, error.message);
+      delete this.cache[normalizedKey];
+      delete this.meta[normalizedKey];
+      this._recordStat("misses");
+      return null;
+    }
   }
   async _del(key) {
-    if (Object.prototype.hasOwnProperty.call(this.cache, key)) {
-      const itemSize = this.meta[key]?.compressedSize || 0;
+    const normalizedKey = this._normalizeKey(key);
+    if (Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
+      const itemSize = this.meta[normalizedKey]?.compressedSize || 0;
       this.currentMemoryBytes -= itemSize;
     }
-    delete this.cache[key];
-    delete this.meta[key];
+    delete this.cache[normalizedKey];
+    delete this.meta[normalizedKey];
+    this._recordStat("deletes");
     return true;
   }
   async _clear(prefix) {
@@ -15808,10 +15889,15 @@ class MemoryCache extends Cache {
       this.cache = {};
       this.meta = {};
       this.currentMemoryBytes = 0;
+      this.evictedDueToMemory = 0;
+      if (this.enableStats) {
+        this.stats = { hits: 0, misses: 0, sets: 0, deletes: 0, evictions: 0 };
+      }
       return true;
     }
+    const normalizedPrefix = this._normalizeKey(prefix);
     for (const key of Object.keys(this.cache)) {
-      if (key.startsWith(prefix)) {
+      if (key.startsWith(normalizedPrefix)) {
         const itemSize = this.meta[key]?.compressedSize || 0;
         this.currentMemoryBytes -= itemSize;
         delete this.cache[key];
@@ -15824,7 +15910,7 @@ class MemoryCache extends Cache {
     return Object.keys(this.cache).length;
   }
   async keys() {
-    return Object.keys(this.cache);
+    return Object.keys(this.cache).map((key) => this.meta[key]?.originalKey || key);
   }
   /**
    * Get compression statistics
@@ -15975,7 +16061,7 @@ class FilesystemCache extends Cache {
     }
   }
   async _ensureDirectory(dir) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await fs.mkdir(dir, { recursive: true });
     });
     if (!ok && err.code !== "EEXIST") {
@@ -16064,7 +16150,7 @@ class FilesystemCache extends Cache {
       if (this.enableMetadata) {
         const metadataPath = this._getMetadataPath(filePath);
         if (await this._fileExists(metadataPath)) {
-          const [ok, err, metadata] = await tryFn(async () => {
+          const [ok, err, metadata] = await tryFn$1(async () => {
             const metaContent = await fs.readFile(metadataPath, this.encoding);
             return JSON.parse(metaContent);
           });
@@ -16094,7 +16180,7 @@ class FilesystemCache extends Cache {
         if (this.enableMetadata) {
           const metadataPath = this._getMetadataPath(filePath);
           if (await this._fileExists(metadataPath)) {
-            const [ok, err, metadata] = await tryFn(async () => {
+            const [ok, err, metadata] = await tryFn$1(async () => {
               const metaContent = await fs.readFile(metadataPath, this.encoding);
               return JSON.parse(metaContent);
             });
@@ -16258,13 +16344,13 @@ class FilesystemCache extends Cache {
   }
   // Helper methods
   async _fileExists(filePath) {
-    const [ok] = await tryFn(async () => {
+    const [ok] = await tryFn$1(async () => {
       await fs.stat(filePath);
     });
     return ok;
   }
   async _copyFile(src, dest) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const content = await fs.readFile(src);
       await fs.writeFile(dest, content);
     });
@@ -16286,7 +16372,7 @@ class FilesystemCache extends Cache {
         if (this.enableMetadata) {
           const metadataPath = this._getMetadataPath(filePath);
           if (await this._fileExists(metadataPath)) {
-            const [ok, err, metadata] = await tryFn(async () => {
+            const [ok, err, metadata] = await tryFn$1(async () => {
               const metaContent = await fs.readFile(metadataPath, this.encoding);
               return JSON.parse(metaContent);
             });
@@ -16296,7 +16382,7 @@ class FilesystemCache extends Cache {
             }
           }
         } else {
-          const [ok, err, stats] = await tryFn(async () => {
+          const [ok, err, stats] = await tryFn$1(async () => {
             return await fs.stat(filePath);
           });
           if (ok) {
@@ -16337,7 +16423,7 @@ class FilesystemCache extends Cache {
       key,
       metadata
     };
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const line = JSON.stringify(entry) + "\n";
       await fs$1.promises.appendFile(this.journalFile, line, this.encoding);
     });
@@ -16392,37 +16478,48 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
    * Generate partition-aware cache key
    */
   _getPartitionCacheKey(resource, action, partition, partitionValues = {}, params = {}) {
-    const keyParts = [`resource=${resource}`, `action=${action}`];
-    if (partition && Object.keys(partitionValues).length > 0) {
-      keyParts.push(`partition=${partition}`);
-      const sortedFields = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b));
+    const segments = [];
+    if (resource) {
+      segments.push(`resource=${this._sanitizePathValue(resource)}`);
+    }
+    if (partition) {
+      segments.push(`partition=${this._sanitizePathValue(partition)}`);
+      const sortedFields = Object.entries(partitionValues).filter(([, value]) => value !== null && value !== void 0).sort(([a], [b]) => a.localeCompare(b));
       for (const [field, value] of sortedFields) {
-        if (value !== null && value !== void 0) {
-          keyParts.push(`${field}=${value}`);
-        }
+        segments.push(`${field}=${this._sanitizePathValue(value)}`);
       }
+    }
+    if (action) {
+      segments.push(`action=${this._sanitizePathValue(action)}`);
     }
     if (Object.keys(params).length > 0) {
       const paramsStr = Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("|");
-      keyParts.push(`params=${Buffer.from(paramsStr).toString("base64")}`);
+      segments.push(`params=${this._sanitizePathValue(Buffer.from(paramsStr).toString("base64url"))}`);
     }
-    return keyParts.join("/") + this.fileExtension;
+    return segments.join("/");
   }
   /**
    * Get directory path for partition cache
    */
   _getPartitionDirectory(resource, partition, partitionValues = {}) {
-    const basePath = path.join(this.directory, `resource=${resource}`);
+    const baseSegments = [];
+    if (resource) {
+      baseSegments.push(`resource=${this._sanitizePathValue(resource)}`);
+    }
     if (!partition) {
-      return basePath;
+      return path.join(this.directory, ...baseSegments);
     }
     if (this.partitionStrategy === "flat") {
-      return path.join(basePath, "partitions");
+      return path.join(this.directory, ...baseSegments, "partitions");
     }
     if (this.partitionStrategy === "temporal" && this._isTemporalPartition(partition, partitionValues)) {
-      return this._getTemporalDirectory(basePath, partition, partitionValues);
+      return this._getTemporalDirectory(path.join(this.directory, ...baseSegments), partition, partitionValues);
     }
-    const pathParts = [basePath, `partition=${partition}`];
+    const pathParts = [
+      this.directory,
+      ...baseSegments,
+      `partition=${this._sanitizePathValue(partition)}`
+    ];
     const sortedFields = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b));
     for (const [field, value] of sortedFields) {
       if (value !== null && value !== void 0) {
@@ -16438,13 +16535,11 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const { resource, action, partition, partitionValues, params } = options;
     if (resource && partition) {
       const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
-      const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
-      await this._ensureDirectory(partitionDir);
-      const filePath = path.join(partitionDir, this._sanitizeFileName(partitionKey));
+      await this._ensurePartitionDirectoryForKey(partitionKey);
       if (this.trackUsage) {
         await this._trackPartitionUsage(resource, partition, partitionValues);
       }
-      const partitionData = {
+      const payload = {
         data,
         metadata: {
           resource,
@@ -16454,7 +16549,8 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
           ttl: this.ttl
         }
       };
-      return this._writeFileWithMetadata(filePath, partitionData);
+      await super._set(partitionKey, payload);
+      return data;
     }
     return super._set(key, data);
   }
@@ -16485,19 +16581,17 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const { resource, action, partition, partitionValues, params } = options;
     if (resource && partition) {
       const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
-      const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
-      const filePath = path.join(partitionDir, this._sanitizeFileName(partitionKey));
-      if (!await this._fileExists(filePath)) {
+      const payload = await super._get(partitionKey);
+      if (!payload) {
         if (this.preloadRelated) {
           await this._preloadRelatedPartitions(resource, partition, partitionValues);
         }
         return null;
       }
-      const result = await this._readFileWithMetadata(filePath);
-      if (result && this.trackUsage) {
+      if (this.trackUsage) {
         await this._trackPartitionUsage(resource, partition, partitionValues);
       }
-      return result?.data || null;
+      return payload?.data ?? null;
     }
     return super._get(key);
   }
@@ -16506,7 +16600,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
    */
   async clearPartition(resource, partition, partitionValues = {}) {
     const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (await this._fileExists(partitionDir)) {
         await fs.rm(partitionDir, { recursive: true });
       }
@@ -16524,7 +16618,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
    */
   async clearResourcePartitions(resource) {
     const resourceDir = path.join(this.directory, `resource=${resource}`);
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (await this._fileExists(resourceDir)) {
         await fs.rm(resourceDir, { recursive: true });
       }
@@ -16536,6 +16630,45 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     }
     await this._saveUsageStats();
     return ok;
+  }
+  async _clear(prefix) {
+    await super._clear(prefix);
+    if (!prefix) {
+      const [entriesOk, , entries] = await tryFn$1(() => fs.readdir(this.directory));
+      if (entriesOk && entries) {
+        for (const entry of entries) {
+          const entryPath = path.join(this.directory, entry);
+          const [statOk, , entryStat] = await tryFn$1(() => fs.stat(entryPath));
+          if (statOk && entryStat.isDirectory() && entry.startsWith("resource=")) {
+            await fs.rm(entryPath, { recursive: true }).catch(() => {
+            });
+          }
+        }
+      }
+      this.partitionUsage.clear();
+      await this._saveUsageStats();
+      return true;
+    }
+    const segments = this._splitKeySegments(prefix).map((segment) => this._sanitizeFileName(segment));
+    if (segments.length > 0) {
+      const dirPath = path.join(this.directory, ...segments);
+      if (await this._fileExists(dirPath)) {
+        await fs.rm(dirPath, { recursive: true }).catch(() => {
+        });
+      }
+      const resourceSeg = segments.find((seg) => seg.startsWith("resource="));
+      const partitionSeg = segments.find((seg) => seg.startsWith("partition="));
+      const resourceVal = resourceSeg ? resourceSeg.split("=").slice(1).join("=") : "";
+      const partitionVal = partitionSeg ? partitionSeg.split("=").slice(1).join("=") : "";
+      const usagePrefix = `${resourceVal}/${partitionVal}`;
+      for (const key of Array.from(this.partitionUsage.keys())) {
+        if (key.startsWith(usagePrefix)) {
+          this.partitionUsage.delete(key);
+        }
+      }
+      await this._saveUsageStats();
+    }
+    return true;
   }
   /**
    * Get partition cache statistics
@@ -16630,8 +16763,10 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     }
   }
   _getUsageKey(resource, partition, partitionValues) {
-    const valuePart = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("|");
-    return `${resource}/${partition}/${valuePart}`;
+    const sanitizedResource = this._sanitizePathValue(resource || "");
+    const sanitizedPartition = this._sanitizePathValue(partition || "");
+    const valuePart = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${this._sanitizePathValue(v)}`).join("|");
+    return `${sanitizedResource}/${sanitizedPartition}/${valuePart}`;
   }
   async _preloadRelatedPartitions(resource, partition, partitionValues) {
     console.log(`\u{1F3AF} Preloading related partitions for ${resource}/${partition}`);
@@ -16657,12 +16792,32 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   _sanitizeFileName(filename) {
     return filename.replace(/[<>:"/\\|?*]/g, "_");
   }
+  _splitKeySegments(key) {
+    return key.split("/").filter(Boolean);
+  }
+  async _ensurePartitionDirectoryForKey(key) {
+    const segments = this._splitKeySegments(key);
+    if (segments.length <= 1) {
+      return;
+    }
+    const dirPath = path.join(
+      this.directory,
+      ...segments.slice(0, -1).map((segment) => this._sanitizeFileName(segment))
+    );
+    await this._ensureDirectory(dirPath);
+  }
+  _getFilePath(key) {
+    const segments = this._splitKeySegments(key).map((segment) => this._sanitizeFileName(segment));
+    const fileName = segments.pop() || this._sanitizeFileName(key);
+    const dirPath = segments.length > 0 ? path.join(this.directory, ...segments) : this.directory;
+    return path.join(dirPath, `${this.prefix}_${fileName}${this.fileExtension}`);
+  }
   async _calculateDirectoryStats(dir, stats) {
-    const [ok, err, files] = await tryFn(() => fs.readdir(dir));
+    const [ok, err, files] = await tryFn$1(() => fs.readdir(dir));
     if (!ok) return;
     for (const file of files) {
       const filePath = path.join(dir, file);
-      const [statOk, statErr, fileStat] = await tryFn(() => fs.stat(filePath));
+      const [statOk, statErr, fileStat] = await tryFn$1(() => fs.stat(filePath));
       if (statOk) {
         if (fileStat.isDirectory()) {
           await this._calculateDirectoryStats(filePath, stats);
@@ -16674,7 +16829,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     }
   }
   async loadUsageStats() {
-    const [ok, err, content] = await tryFn(async () => {
+    const [ok, err, content] = await tryFn$1(async () => {
       const data = await fs.readFile(this.usageStatsFile, "utf8");
       return JSON.parse(data);
     });
@@ -16684,7 +16839,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
   async _saveUsageStats() {
     const statsObject = Object.fromEntries(this.partitionUsage);
-    await tryFn(async () => {
+    await tryFn$1(async () => {
       await fs.writeFile(
         this.usageStatsFile,
         JSON.stringify(statsObject, null, 2),
@@ -16694,7 +16849,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
   async _writeFileWithMetadata(filePath, data) {
     const content = JSON.stringify(data);
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await fs.writeFile(filePath, content, {
         encoding: this.encoding,
         mode: this.fileMode
@@ -16706,7 +16861,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     return true;
   }
   async _readFileWithMetadata(filePath) {
-    const [ok, err, content] = await tryFn(async () => {
+    const [ok, err, content] = await tryFn$1(async () => {
       return await fs.readFile(filePath, this.encoding);
     });
     if (!ok || !content) return null;
@@ -16808,8 +16963,8 @@ class CachePlugin extends Plugin {
     }
   }
   shouldCacheResource(resourceName) {
-    const resourceMetadata = this.database.savedMetadata?.resources?.[resourceName];
-    if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== "user" && !this.config.include) {
+    const resource = this.database.resources[resourceName];
+    if (resource?.$schema?.createdBy && resource.$schema.createdBy !== "user" && !this.config.include) {
       return false;
     }
     if (resourceName.startsWith("plg_") && !this.config.include) {
@@ -16919,7 +17074,7 @@ class CachePlugin extends Plugin {
             partition = partitionName;
             partitionValues = pValues;
           }
-          const [ok, err, result] = await tryFn(() => resource.cache._get(key, {
+          const [ok, err, result] = await tryFn$1(() => resource.cache._get(key, {
             resource: resource.name,
             action: method,
             partition,
@@ -16944,7 +17099,7 @@ class CachePlugin extends Plugin {
           });
           return freshResult;
         } else {
-          const [ok, err, result] = await tryFn(() => resource.cache.get(key));
+          const [ok, err, result] = await tryFn$1(() => resource.cache.get(key));
           if (ok && result !== null && result !== void 0) {
             this.stats.hits++;
             return result;
@@ -16972,7 +17127,7 @@ class CachePlugin extends Plugin {
         } else if (method === "delete") {
           let data = { id: ctx.args[0] };
           if (typeof resource.get === "function") {
-            const [ok, err, full] = await tryFn(() => resource.get(ctx.args[0]));
+            const [ok, err, full] = await tryFn$1(() => resource.get(ctx.args[0]));
             if (ok && full) data = full;
           }
           await this.clearCacheForResource(resource, data);
@@ -17009,7 +17164,7 @@ class CachePlugin extends Plugin {
           }
         }
       }
-      if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
+      if (this.config.includePartitions === true && resource.$schema.partitions && Object.keys(resource.$schema.partitions).length > 0) {
         const partitionValues = this.getPartitionValues(data, resource);
         for (const [partitionName, values] of Object.entries(partitionValues)) {
           if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
@@ -17049,7 +17204,7 @@ class CachePlugin extends Plugin {
   async clearCacheWithRetry(cache, key) {
     let lastError;
     for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
-      const [ok, err] = await tryFn(() => cache.clear(key));
+      const [ok, err] = await tryFn$1(() => cache.clear(key));
       if (ok) {
         this.stats.deletes++;
         return [true, null];
@@ -17119,14 +17274,14 @@ class CachePlugin extends Plugin {
     }
     const { includePartitions = true, sampleSize = 100 } = options;
     if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
-      const partitionNames = resource.config.partitions ? Object.keys(resource.config.partitions) : [];
+      const partitionNames = resource.$schema.partitions ? Object.keys(resource.$schema.partitions) : [];
       return await resource.warmPartitionCache(partitionNames, options);
     }
     let offset = 0;
     const pageSize = 100;
     const sampledRecords = [];
     while (sampledRecords.length < sampleSize) {
-      const [ok, err, pageResult] = await tryFn(() => resource.page({ offset, size: pageSize }));
+      const [ok, err, pageResult] = await tryFn$1(() => resource.page({ offset, size: pageSize }));
       if (!ok || !pageResult) {
         break;
       }
@@ -17137,8 +17292,8 @@ class CachePlugin extends Plugin {
       sampledRecords.push(...pageItems);
       offset += pageSize;
     }
-    if (includePartitions && resource.config.partitions && sampledRecords.length > 0) {
-      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
+    if (includePartitions && resource.$schema.partitions && sampledRecords.length > 0) {
+      for (const [partitionName, partitionDef] of Object.entries(resource.$schema.partitions)) {
         if (partitionDef.fields) {
           const partitionValuesSet = /* @__PURE__ */ new Set();
           for (const record of sampledRecords) {
@@ -17149,7 +17304,7 @@ class CachePlugin extends Plugin {
           }
           for (const partitionValueStr of partitionValuesSet) {
             const partitionValues = JSON.parse(partitionValueStr);
-            await tryFn(() => resource.list({ partition: partitionName, partitionValues }));
+            await tryFn$1(() => resource.list({ partition: partitionName, partitionValues }));
           }
         }
       }
@@ -17157,7 +17312,7 @@ class CachePlugin extends Plugin {
     return {
       resourceName,
       recordsSampled: sampledRecords.length,
-      partitionsWarmed: includePartitions && resource.config.partitions ? Object.keys(resource.config.partitions).length : 0
+      partitionsWarmed: includePartitions && resource.$schema.partitions ? Object.keys(resource.$schema.partitions).length : 0
     };
   }
   async analyzeCacheUsage() {
@@ -18648,7 +18803,7 @@ async function runConsolidation(transactionResource, consolidateRecordFn, emitFn
     }
     const transactionsByHour = await Promise.all(
       cohortHours.map(async (cohortHour) => {
-        const [ok, err, txns] = await tryFn(
+        const [ok, err, txns] = await tryFn$1(
           () => transactionResource.query({
             cohortHour,
             applied: false
@@ -18720,20 +18875,20 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     if (config.verbose) {
       console.log(`[EventualConsistency] Lock for ${originalId} already held, skipping`);
     }
-    const [recordOk, recordErr, record] = await tryFn(
+    const [recordOk, recordErr, record] = await tryFn$1(
       () => targetResource.get(originalId)
     );
     return recordOk && record ? record[config.field] || 0 : 0;
   }
   try {
-    const [ok, err, transactions] = await tryFn(
+    const [ok, err, transactions] = await tryFn$1(
       () => transactionResource.query({
         originalId,
         applied: false
       })
     );
     if (!ok || !transactions || transactions.length === 0) {
-      const [recordOk2, recordErr2, record2] = await tryFn(
+      const [recordOk2, recordErr2, record2] = await tryFn$1(
         () => targetResource.get(originalId)
       );
       const currentValue2 = recordOk2 && record2 ? record2[config.field] || 0 : 0;
@@ -18744,7 +18899,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       }
       return currentValue2;
     }
-    const [appliedOk, appliedErr, appliedTransactions] = await tryFn(
+    const [appliedOk, appliedErr, appliedTransactions] = await tryFn$1(
       () => transactionResource.query({
         originalId,
         applied: true
@@ -18752,7 +18907,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     );
     let currentValue = 0;
     if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
-      const [recordExistsOk, recordExistsErr, recordExists] = await tryFn(
+      const [recordExistsOk, recordExistsErr, recordExists] = await tryFn$1(
         () => targetResource.get(originalId)
       );
       if (!recordExistsOk || !recordExists) {
@@ -18762,7 +18917,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
           );
         }
         const { results, errors } = await promisePool.PromisePool.for(appliedTransactions).withConcurrency(10).process(async (txn) => {
-          const [deleted] = await tryFn(() => transactionResource.delete(txn.id));
+          const [deleted] = await tryFn$1(() => transactionResource.delete(txn.id));
           return deleted;
         });
         if (config.verbose && errors && errors.length > 0) {
@@ -18814,7 +18969,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         currentValue = config.reducer(appliedTransactions);
       }
     } else {
-      const [recordOk2, recordErr2, record2] = await tryFn(
+      const [recordOk2, recordErr2, record2] = await tryFn$1(
         () => targetResource.get(originalId)
       );
       currentValue = recordOk2 && record2 ? record2[config.field] || 0 : 0;
@@ -18878,7 +19033,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     }
     const consolidatedValues = {};
     const lodash = await import('lodash-es');
-    const [currentRecordOk, currentRecordErr, currentRecord] = await tryFn(
+    const [currentRecordOk, currentRecordErr, currentRecord] = await tryFn$1(
       () => targetResource.get(originalId)
     );
     for (const [fieldPath, pathTransactions] of Object.entries(transactionsByPath)) {
@@ -18915,7 +19070,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
 }`
       );
     }
-    const [recordOk, recordErr, record] = await tryFn(
+    const [recordOk, recordErr, record] = await tryFn$1(
       () => targetResource.get(originalId)
     );
     let updateOk, updateErr, updateResult;
@@ -18929,7 +19084,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
         lodash.set(minimalRecord, fieldPath, value);
       }
-      const result = await tryFn(
+      const result = await tryFn$1(
         () => targetResource.update(originalId, minimalRecord)
       );
       updateOk = result[0];
@@ -18939,7 +19094,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
         lodash.set(record, fieldPath, value);
       }
-      const result = await tryFn(
+      const result = await tryFn$1(
         () => targetResource.update(originalId, record)
       );
       updateOk = result[0];
@@ -18957,7 +19112,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       );
     }
     if (updateOk && config.verbose) {
-      const [verifyOk, verifyErr, verifiedRecord] = await tryFn(
+      const [verifyOk, verifyErr, verifiedRecord] = await tryFn$1(
         () => targetResource.get(originalId, { skipCache: true })
       );
       for (const [fieldPath, expectedValue] of Object.entries(consolidatedValues)) {
@@ -19016,7 +19171,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         if (txnWithCohorts.cohortMonth && !txn.cohortMonth) {
           updateData.cohortMonth = txnWithCohorts.cohortMonth;
         }
-        const [ok2, err2] = await tryFn(
+        const [ok2, err2] = await tryFn$1(
           () => transactionResource.update(txn.id, updateData)
         );
         if (!ok2 && config.verbose) {
@@ -19033,7 +19188,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         console.warn(`[EventualConsistency] ${errors.length} transactions failed to mark as applied`);
       }
       if (config.enableAnalytics && transactionsToUpdate.length > 0 && updateAnalyticsFn) {
-        const [analyticsOk, analyticsErr] = await tryFn(
+        const [analyticsOk, analyticsErr] = await tryFn$1(
           () => updateAnalyticsFn(transactionsToUpdate)
         );
         if (!analyticsOk) {
@@ -19068,7 +19223,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     }
     return consolidatedValue;
   } finally {
-    const [lockReleased, lockReleaseErr] = await tryFn(
+    const [lockReleased, lockReleaseErr] = await tryFn$1(
       () => storage.releaseLock(lockKey)
     );
     if (!lockReleased && config.verbose) {
@@ -19084,11 +19239,11 @@ async function getConsolidatedValue(originalId, options, transactionResource, ta
   if (!includeApplied) {
     query.applied = false;
   }
-  const [ok, err, transactions] = await tryFn(
+  const [ok, err, transactions] = await tryFn$1(
     () => transactionResource.query(query)
   );
   if (!ok || !transactions || transactions.length === 0) {
-    const [recordOk2, recordErr2, record2] = await tryFn(
+    const [recordOk2, recordErr2, record2] = await tryFn$1(
       () => targetResource.get(originalId)
     );
     if (recordOk2 && record2) {
@@ -19105,7 +19260,7 @@ async function getConsolidatedValue(originalId, options, transactionResource, ta
       return true;
     });
   }
-  const [recordOk, recordErr, record] = await tryFn(
+  const [recordOk, recordErr, record] = await tryFn$1(
     () => targetResource.get(originalId)
   );
   const currentValue = recordOk && record ? record[config.field] || 0 : 0;
@@ -19119,7 +19274,7 @@ async function getConsolidatedValue(originalId, options, transactionResource, ta
   return config.reducer(filtered);
 }
 async function getCohortStats(cohortDate, transactionResource) {
-  const [ok, err, transactions] = await tryFn(
+  const [ok, err, transactions] = await tryFn$1(
     () => transactionResource.query({
       cohortDate
     })
@@ -19166,7 +19321,7 @@ async function recalculateRecord(originalId, transactionResource, targetResource
         `[EventualConsistency] ${config.resource}.${config.field} - Starting recalculation for ${originalId} (resetting all transactions to pending)`
       );
     }
-    const [allOk, allErr, allTransactions] = await tryFn(
+    const [allOk, allErr, allTransactions] = await tryFn$1(
       () => transactionResource.query({
         originalId
       })
@@ -19219,7 +19374,7 @@ async function recalculateRecord(originalId, transactionResource, targetResource
     const transactionsToReset = allTransactions.filter((txn) => txn.source !== "anchor");
     const recalculateConcurrency = config.recalculateConcurrency || 50;
     const { results, errors } = await promisePool.PromisePool.for(transactionsToReset).withConcurrency(recalculateConcurrency).process(async (txn) => {
-      const [ok, err] = await tryFn(
+      const [ok, err] = await tryFn$1(
         () => transactionResource.update(txn.id, { applied: false })
       );
       if (!ok && config.verbose) {
@@ -19237,7 +19392,7 @@ async function recalculateRecord(originalId, transactionResource, targetResource
         `[EventualConsistency] ${config.resource}.${config.field} - Reset ${results.length} transactions to pending, now resetting record value and running consolidation...`
       );
     }
-    const [resetOk, resetErr] = await tryFn(
+    const [resetOk, resetErr] = await tryFn$1(
       () => targetResource.update(originalId, {
         [config.field]: 0
       })
@@ -19255,7 +19410,7 @@ async function recalculateRecord(originalId, transactionResource, targetResource
     }
     return consolidatedValue;
   } finally {
-    const [lockReleased, lockReleaseErr] = await tryFn(
+    const [lockReleased, lockReleaseErr] = await tryFn$1(
       () => storage.releaseLock(lockKey)
     );
     if (!lockReleased && config.verbose) {
@@ -19294,7 +19449,7 @@ async function runGarbageCollection(transactionResource, storage, config, emitFn
     if (config.verbose) {
       console.log(`[EventualConsistency] Running GC for transactions older than ${cutoffIso} (${config.transactionRetention} days)`);
     }
-    const [ok, err, oldTransactions] = await tryFn(
+    const [ok, err, oldTransactions] = await tryFn$1(
       () => transactionResource.query({
         applied: true,
         timestamp: { "<": cutoffIso }
@@ -19316,7 +19471,7 @@ async function runGarbageCollection(transactionResource, storage, config, emitFn
       console.log(`[EventualConsistency] Deleting ${oldTransactions.length} old transactions`);
     }
     const { results, errors } = await promisePool.PromisePool.for(oldTransactions).withConcurrency(10).process(async (txn) => {
-      const [deleted] = await tryFn(() => transactionResource.delete(txn.id));
+      const [deleted] = await tryFn$1(() => transactionResource.delete(txn.id));
       return deleted;
     });
     if (config.verbose) {
@@ -19338,7 +19493,7 @@ async function runGarbageCollection(transactionResource, storage, config, emitFn
       emitFn("plg:eventual-consistency:gc-error", error);
     }
   } finally {
-    await tryFn(() => storage.releaseLock(lockKey));
+    await tryFn$1(() => storage.releaseLock(lockKey));
   }
 }
 
@@ -19419,7 +19574,7 @@ async function upsertAnalytics(period, cohort, transactions, analyticsResource, 
   const operations = calculateOperationBreakdown(transactions);
   const recordCount = new Set(transactions.map((t) => t.originalId)).size;
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const [existingOk, existingErr, existing] = await tryFn(
+  const [existingOk, existingErr, existing] = await tryFn$1(
     () => analyticsResource.get(id)
   );
   if (existingOk && existing) {
@@ -19437,7 +19592,7 @@ async function upsertAnalytics(period, cohort, transactions, analyticsResource, 
       newOperations[op].sum += stats.sum;
     }
     const newRecordCount = Math.max(existing.recordCount, recordCount);
-    await tryFn(
+    await tryFn$1(
       () => analyticsResource.update(id, {
         transactionCount: newTransactionCount,
         totalValue: newTotalValue,
@@ -19450,7 +19605,7 @@ async function upsertAnalytics(period, cohort, transactions, analyticsResource, 
       })
     );
   } else {
-    await tryFn(
+    await tryFn$1(
       () => analyticsResource.insert({
         id,
         field: config.field,
@@ -19515,7 +19670,7 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
   } else {
     sourcePeriod = "day";
   }
-  const [ok, err, allAnalytics] = await tryFn(
+  const [ok, err, allAnalytics] = await tryFn$1(
     () => analyticsResource.list()
   );
   if (!ok || !allAnalytics) return;
@@ -19551,11 +19706,11 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
   const recordCount = Math.max(...sourceAnalytics.map((a) => a.recordCount));
   const id = `${period}-${cohort}`;
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const [existingOk, existingErr, existing] = await tryFn(
+  const [existingOk, existingErr, existing] = await tryFn$1(
     () => analyticsResource.get(id)
   );
   if (existingOk && existing) {
-    await tryFn(
+    await tryFn$1(
       () => analyticsResource.update(id, {
         transactionCount,
         totalValue,
@@ -19568,7 +19723,7 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
       })
     );
   } else {
-    await tryFn(
+    await tryFn$1(
       () => analyticsResource.insert({
         id,
         field: config.field,
@@ -19650,7 +19805,7 @@ async function getAnalytics(resourceName, field, options, fieldHandlers) {
   if (recordId) {
     return await getAnalyticsForRecord(resourceName, field, recordId, options, handler);
   }
-  const [ok, err, allAnalytics] = await tryFn(
+  const [ok, err, allAnalytics] = await tryFn$1(
     () => handler.analyticsResource.list()
   );
   if (!ok || !allAnalytics) {
@@ -19690,13 +19845,13 @@ async function getAnalytics(resourceName, field, options, fieldHandlers) {
 }
 async function getAnalyticsForRecord(resourceName, field, recordId, options, handler) {
   const { period = "day", date, startDate, endDate, month, year } = options;
-  const [okTrue, errTrue, appliedTransactions] = await tryFn(
+  const [okTrue, errTrue, appliedTransactions] = await tryFn$1(
     () => handler.transactionResource.query({
       originalId: recordId,
       applied: true
     })
   );
-  const [okFalse, errFalse, pendingTransactions] = await tryFn(
+  const [okFalse, errFalse, pendingTransactions] = await tryFn$1(
     () => handler.transactionResource.query({
       originalId: recordId,
       applied: false
@@ -19908,7 +20063,7 @@ async function getTopRecords(resourceName, field, options, fieldHandlers) {
     throw new Error("Transaction resource not initialized");
   }
   const { period = "day", date, metric = "transactionCount", limit = 10 } = options;
-  const [ok, err, transactions] = await tryFn(
+  const [ok, err, transactions] = await tryFn$1(
     () => handler.transactionResource.list()
   );
   if (!ok || !transactions) {
@@ -20116,7 +20271,7 @@ async function getRawEvents(resourceName, field, options, fieldHandlers) {
   if (applied !== void 0) {
     query.applied = applied;
   }
-  const [ok, err, allTransactions] = await tryFn(
+  const [ok, err, allTransactions] = await tryFn$1(
     () => handler.transactionResource.query(query)
   );
   if (!ok || !allTransactions) {
@@ -20210,7 +20365,7 @@ function addHelperMethods(resource, plugin, config) {
     if (config.mode === "sync") {
       return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
-    const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
+    const [ok, err, record] = await tryFn$1(() => handler.targetResource.get(id));
     if (!ok || !record) return amount;
     const lodash = await import('lodash-es');
     const currentValue = lodash.get(record, fieldPath, 0);
@@ -20239,7 +20394,7 @@ function addHelperMethods(resource, plugin, config) {
     if (config.mode === "sync") {
       return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
-    const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
+    const [ok, err, record] = await tryFn$1(() => handler.targetResource.get(id));
     if (!ok || !record) return -amount;
     const lodash = await import('lodash-es');
     const currentValue = lodash.get(record, fieldPath, 0);
@@ -20327,7 +20482,7 @@ async function completeFieldSetup(handler, database, config, plugin) {
   const fieldName = handler.field;
   const transactionResourceName = `plg_${resourceName}_tx_${fieldName}`;
   const partitionConfig = createPartitionConfig();
-  const [ok, err, transactionResource] = await tryFn(
+  const [ok, err, transactionResource] = await tryFn$1(
     () => database.createResource({
       name: transactionResourceName,
       attributes: {
@@ -20369,7 +20524,7 @@ async function completeFieldSetup(handler, database, config, plugin) {
 }
 async function createAnalyticsResource(handler, database, resourceName, fieldName) {
   const analyticsResourceName = `plg_${resourceName}_an_${fieldName}`;
-  const [ok, err, analyticsResource] = await tryFn(
+  const [ok, err, analyticsResource] = await tryFn$1(
     () => database.createResource({
       name: analyticsResourceName,
       attributes: {
@@ -21150,7 +21305,7 @@ class FullTextPlugin extends Plugin {
     this.deletedIndexes = /* @__PURE__ */ new Set();
   }
   async onInstall() {
-    const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
+    const [ok, err, indexResource] = await tryFn$1(() => this.database.createResource({
       name: this.indexResourceName,
       attributes: {
         id: "string|required",
@@ -21189,7 +21344,7 @@ class FullTextPlugin extends Plugin {
   }
   async loadIndexes() {
     if (!this.indexResource) return;
-    const [ok, err, allIndexes] = await tryFn(() => this.indexResource.getAll());
+    const [ok, err, allIndexes] = await tryFn$1(() => this.indexResource.getAll());
     if (ok) {
       for (const indexRecord of allIndexes) {
         const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
@@ -21202,10 +21357,10 @@ class FullTextPlugin extends Plugin {
   }
   async saveIndexes() {
     if (!this.indexResource) return;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       for (const key of this.deletedIndexes) {
         const [resourceName] = key.split(":");
-        const [queryOk, queryErr, results] = await tryFn(
+        const [queryOk, queryErr, results] = await tryFn$1(
           () => this.indexResource.query({ resourceName })
         );
         if (queryOk && results) {
@@ -21221,7 +21376,7 @@ class FullTextPlugin extends Plugin {
         const [resourceName, fieldName, word] = key.split(":");
         const data = this.indexes.get(key);
         if (!data) continue;
-        const [queryOk, queryErr, results] = await tryFn(
+        const [queryOk, queryErr, results] = await tryFn$1(
           () => this.indexResource.query({ resourceName })
         );
         let existingRecord = null;
@@ -21491,7 +21646,7 @@ class FullTextPlugin extends Plugin {
     for (let i = 0; i < allRecords.length; i += batchSize) {
       const batch = allRecords.slice(i, i + batchSize);
       for (const record of batch) {
-        const [ok, err] = await tryFn(() => this.indexRecord(resourceName, record.id, record));
+        const [ok, err] = await tryFn$1(() => this.indexRecord(resourceName, record.id, record));
       }
     }
     await this.saveIndexes();
@@ -21542,7 +21697,7 @@ class FullTextPlugin extends Plugin {
   async _rebuildAllIndexesInternal() {
     const resourceNames = Object.keys(this.database.resources).filter((name) => !this.isInternalResource(name));
     for (const resourceName of resourceNames) {
-      const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
+      const [ok, err] = await tryFn$1(() => this.rebuildIndex(resourceName));
     }
   }
   async clearIndex(resourceName) {
@@ -21764,7 +21919,7 @@ class GeoPlugin extends Plugin {
           const geohashesToSearch = [centerGeohash, ...neighbors];
           const partitionResults = await Promise.all(
             geohashesToSearch.map(async (geohash) => {
-              const [ok, err, records] = await tryFn(async () => {
+              const [ok, err, records] = await tryFn$1(async () => {
                 return await this.listPartition({
                   partition: partitionName,
                   partitionValues: { [fieldName]: geohash },
@@ -21835,7 +21990,7 @@ class GeoPlugin extends Plugin {
           });
           const partitionResults = await Promise.all(
             geohashesToSearch.map(async (geohash) => {
-              const [ok, err, records] = await tryFn(async () => {
+              const [ok, err, records] = await tryFn$1(async () => {
                 const fieldName = config.zoomLevels ? `_geohash_zoom${precision}` : "_geohash";
                 return await this.listPartition({
                   partition: partitionName,
@@ -22216,8 +22371,8 @@ class MetricsPlugin extends Plugin {
   }
   async onInstall() {
     if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
-    const [ok, err] = await tryFn(async () => {
-      const [ok1, err1, metricsResource] = await tryFn(() => this.database.createResource({
+    const [ok, err] = await tryFn$1(async () => {
+      const [ok1, err1, metricsResource] = await tryFn$1(() => this.database.createResource({
         name: this.resourceNames.metrics,
         attributes: {
           id: "string|required",
@@ -22240,7 +22395,7 @@ class MetricsPlugin extends Plugin {
         behavior: "body-overflow"
       }));
       this.metricsResource = ok1 ? metricsResource : this.database.resources[this.resourceNames.metrics];
-      const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
+      const [ok2, err2, errorsResource] = await tryFn$1(() => this.database.createResource({
         name: this.resourceNames.errors,
         attributes: {
           id: "string|required",
@@ -22258,7 +22413,7 @@ class MetricsPlugin extends Plugin {
         behavior: "body-overflow"
       }));
       this.errorsResource = ok2 ? errorsResource : this.database.resources[this.resourceNames.errors];
-      const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
+      const [ok3, err3, performanceResource] = await tryFn$1(() => this.database.createResource({
         name: this.resourceNames.performance,
         attributes: {
           id: "string|required",
@@ -22350,7 +22505,7 @@ class MetricsPlugin extends Plugin {
     resource._page = resource.page;
     resource.insert = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._insert(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._insert(...args));
       this.recordOperation(resource.name, "insert", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "insert", err);
       if (!ok) throw err;
@@ -22358,7 +22513,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.update = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._update(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._update(...args));
       this.recordOperation(resource.name, "update", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "update", err);
       if (!ok) throw err;
@@ -22366,7 +22521,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.delete = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._delete(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._delete(...args));
       this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "delete", err);
       if (!ok) throw err;
@@ -22374,7 +22529,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.deleteMany = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._deleteMany(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._deleteMany(...args));
       this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "delete", err);
       if (!ok) throw err;
@@ -22382,7 +22537,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.get = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._get(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._get(...args));
       this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "get", err);
       if (!ok) throw err;
@@ -22390,7 +22545,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.getMany = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._getMany(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._getMany(...args));
       this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "get", err);
       if (!ok) throw err;
@@ -22398,7 +22553,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.getAll = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._getAll(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._getAll(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -22406,7 +22561,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.list = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._list(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._list(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -22414,7 +22569,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.listIds = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._listIds(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._listIds(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -22422,7 +22577,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.count = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._count(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._count(...args));
       this.recordOperation(resource.name, "count", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "count", err);
       if (!ok) throw err;
@@ -22430,7 +22585,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.page = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._page(...args));
+      const [ok, err, result] = await tryFn$1(() => resource._page(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -22494,7 +22649,7 @@ class MetricsPlugin extends Plugin {
   }
   async flushMetrics() {
     if (!this.metricsResource) return;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       let metadata, perfMetadata, errorMetadata, resourceMetadata;
       if (typeof process !== "undefined" && process.env.NODE_ENV === "test") {
         metadata = {};
@@ -22710,36 +22865,36 @@ class MetricsPlugin extends Plugin {
     }
     if (this.metricsResource) {
       for (const dateStr of datesToDelete) {
-        const [ok, err, oldMetrics] = await tryFn(
+        const [ok, err, oldMetrics] = await tryFn$1(
           () => this.metricsResource.query({ createdAt: dateStr })
         );
         if (ok && oldMetrics) {
           for (const metric of oldMetrics) {
-            await tryFn(() => this.metricsResource.delete(metric.id));
+            await tryFn$1(() => this.metricsResource.delete(metric.id));
           }
         }
       }
     }
     if (this.errorsResource) {
       for (const dateStr of datesToDelete) {
-        const [ok, err, oldErrors] = await tryFn(
+        const [ok, err, oldErrors] = await tryFn$1(
           () => this.errorsResource.query({ createdAt: dateStr })
         );
         if (ok && oldErrors) {
           for (const error of oldErrors) {
-            await tryFn(() => this.errorsResource.delete(error.id));
+            await tryFn$1(() => this.errorsResource.delete(error.id));
           }
         }
       }
     }
     if (this.performanceResource) {
       for (const dateStr of datesToDelete) {
-        const [ok, err, oldPerformance] = await tryFn(
+        const [ok, err, oldPerformance] = await tryFn$1(
           () => this.performanceResource.query({ createdAt: dateStr })
         );
         if (ok && oldPerformance) {
           for (const perf of oldPerformance) {
-            await tryFn(() => this.performanceResource.delete(perf.id));
+            await tryFn$1(() => this.performanceResource.delete(perf.id));
           }
         }
       }
@@ -23046,7 +23201,7 @@ function decodeIPv4(encoded) {
   if (typeof encoded !== "string") {
     throw new Error("Encoded IPv4 must be a string");
   }
-  const [ok, err, result] = tryFn(() => {
+  const [ok, err, result] = tryFn$1(() => {
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length !== 4) {
       throw new Error(`Invalid encoded IPv4 length: ${buffer.length} (expected 4)`);
@@ -23141,7 +23296,7 @@ function decodeIPv6(encoded, compress = true) {
   if (encoded.length !== 24 && isValidIPv6(encoded)) {
     return compress ? encoded : expandIPv6(encoded);
   }
-  const [ok, err, result] = tryFn(() => {
+  const [ok, err, result] = tryFn$1(() => {
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length !== 16) {
       throw new Error(`Invalid encoded IPv6 length: ${buffer.length} (expected 16)`);
@@ -23258,12 +23413,12 @@ const SchemaActions = {
   trim: (value) => value == null ? value : value.trim(),
   encrypt: async (value, { passphrase }) => {
     if (value === null || value === void 0) return value;
-    const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
+    const [ok, err, res] = await tryFn$1(() => encrypt(value, passphrase));
     return ok ? res : value;
   },
   decrypt: async (value, { passphrase }) => {
     if (value === null || value === void 0) return value;
-    const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
+    const [ok, err, raw] = await tryFn$1(() => decrypt(value, passphrase));
     if (!ok) return value;
     if (raw === "null") return null;
     if (raw === "undefined") return void 0;
@@ -23271,7 +23426,7 @@ const SchemaActions = {
   },
   hashPassword: async (value, { bcryptRounds = 10 }) => {
     if (value === null || value === void 0) return value;
-    const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(value), bcryptRounds));
+    const [okHash, errHash, hash] = await tryFn$1(() => hashPassword(String(value), bcryptRounds));
     if (!okHash) return value;
     const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
     return okCompact ? compacted : hash;
@@ -24421,7 +24576,7 @@ class ResourceReader extends EventEmitter {
     return this;
   }
   async _transform(chunk, encoding, callback) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
         this.emit("error", error, content);
       }).process(async (id) => {
@@ -24479,11 +24634,11 @@ class ResourceWriter extends EventEmitter {
     this.writing = true;
     while (this.buffer.length > 0) {
       const batch = this.buffer.splice(0, this.batchSize);
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await tryFn$1(async () => {
         await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
           this.emit("error", error, content);
         }).process(async (item) => {
-          const [ok2, err2, result] = await tryFn(async () => {
+          const [ok2, err2, result] = await tryFn$1(async () => {
             const res = await this.resource.insert(item);
             return res;
           });
@@ -24677,7 +24832,7 @@ async function handleUpsert$3({ resource, id, data, mappedData, originalData }) 
 }
 async function handleGet$3({ resource, metadata, body }) {
   if (body && body.trim() !== "") {
-    const [ok, error, result] = tryFn(() => {
+    const [ok, error, result] = tryFn$1(() => {
       const bodyData = JSON.parse(body);
       return {
         metadata: {
@@ -25874,13 +26029,13 @@ ${errorDetails}`,
     const key = this.getResourceKey(finalId);
     let contentType = void 0;
     if (body && body !== "") {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      const [okParse, errParse] = await tryFn$1(() => Promise.resolve(JSON.parse(body)));
       if (okParse) contentType = "application/json";
     }
     if (this.behavior === "body-only" && (!body || body === "")) {
       throw new Error(`[Resource.insert] Attempt to save object without body! Data: id=${finalId}, resource=${this.name}`);
     }
-    const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
+    const [okPut, errPut, putResult] = await tryFn$1(() => this.client.putObject({
       key,
       body,
       contentType,
@@ -25923,7 +26078,7 @@ ${errorDetails}`,
           });
         });
       } else {
-        const [ok, err] = await tryFn(() => this.createPartitionReferences(insertedObject));
+        const [ok, err] = await tryFn$1(() => this.createPartitionReferences(insertedObject));
         if (!ok) {
           this.emit("partitionIndexError", {
             operation: "insert",
@@ -25960,7 +26115,7 @@ ${errorDetails}`,
     if (lodashEs.isEmpty(id)) throw new Error("id cannot be empty");
     await this.executeHooks("beforeGet", { id });
     const key = this.getResourceKey(id);
-    const [ok, err, request] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, request] = await tryFn$1(() => this.client.getObject(key));
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.client.config.bucket,
@@ -25977,7 +26132,7 @@ ${errorDetails}`,
     const behaviorImpl = getBehavior(this.behavior);
     let body = "";
     if (request.ContentLength > 0) {
-      const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
+      const [okBody, errBody, fullObject] = await tryFn$1(() => this.client.getObject(key));
       if (okBody) {
         body = await streamToString(fullObject.Body);
       } else {
@@ -26025,7 +26180,7 @@ ${errorDetails}`,
    * }
    */
   async getOrNull(id) {
-    const [ok, err, data] = await tryFn(() => this.get(id));
+    const [ok, err, data] = await tryFn$1(() => this.get(id));
     if (!ok && err && (err.name === "NoSuchKey" || err.message?.includes("NoSuchKey"))) {
       return null;
     }
@@ -26045,7 +26200,7 @@ ${errorDetails}`,
    * console.log('User name:', user.name); // Safe to access
    */
   async getOrThrow(id) {
-    const [ok, err, data] = await tryFn(() => this.get(id));
+    const [ok, err, data] = await tryFn$1(() => this.get(id));
     if (!ok && err && (err.name === "NoSuchKey" || err.message?.includes("NoSuchKey"))) {
       throw new ResourceError(`Resource '${this.name}' with id '${id}' not found`, {
         resourceName: this.name,
@@ -26066,7 +26221,7 @@ ${errorDetails}`,
   async exists(id) {
     await this.executeHooks("beforeExists", { id });
     const key = this.getResourceKey(id);
-    const [ok, err] = await tryFn(() => this.client.headObject(key));
+    const [ok, err] = await tryFn$1(() => this.client.headObject(key));
     await this.executeHooks("afterExists", { id, exists: ok });
     return ok;
   }
@@ -26163,11 +26318,11 @@ ${errorDetails}`,
     let existingContentType = void 0;
     let finalBody = body;
     if (body === "" && this.behavior !== "body-overflow") {
-      const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
+      const [ok2, err2, existingObject] = await tryFn$1(() => this.client.getObject(key));
       if (ok2 && existingObject.ContentLength > 0) {
         const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
         const existingBodyString = existingBodyBuffer.toString();
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        const [okParse, errParse] = await tryFn$1(() => Promise.resolve(JSON.parse(existingBodyString)));
         if (!okParse) {
           finalBody = existingBodyBuffer;
           existingContentType = existingObject.ContentType;
@@ -26176,13 +26331,13 @@ ${errorDetails}`,
     }
     let finalContentType = existingContentType;
     if (finalBody && finalBody !== "" && !finalContentType) {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      const [okParse, errParse] = await tryFn$1(() => Promise.resolve(JSON.parse(finalBody)));
       if (okParse) finalContentType = "application/json";
     }
     if (this.versioningEnabled && originalData._v !== this.version) {
       await this.createHistoricalVersion(id, originalData);
     }
-    const [ok, err] = await tryFn(() => this.client.putObject({
+    const [ok, err] = await tryFn$1(() => this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
@@ -26242,7 +26397,7 @@ ${errorDetails}`,
           });
         });
       } else {
-        const [ok2, err2] = await tryFn(() => this.handlePartitionReferenceUpdates(originalData, updatedData));
+        const [ok2, err2] = await tryFn$1(() => this.handlePartitionReferenceUpdates(originalData, updatedData));
         if (!ok2) {
           this.emit("partitionIndexError", {
             operation: "update",
@@ -26461,13 +26616,13 @@ ${errorDetails}`,
     const key = this.getResourceKey(id);
     let contentType = void 0;
     if (body && body !== "") {
-      const [okParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      const [okParse] = await tryFn$1(() => Promise.resolve(JSON.parse(body)));
       if (okParse) contentType = "application/json";
     }
     if (this.behavior === "body-only" && (!body || body === "")) {
       throw new Error(`[Resource.replace] Attempt to save object without body! Data: id=${id}, resource=${this.name}`);
     }
-    const [okPut, errPut] = await tryFn(() => this.client.putObject({
+    const [okPut, errPut] = await tryFn$1(() => this.client.putObject({
       key,
       body,
       contentType,
@@ -26594,11 +26749,11 @@ ${errorDetails}`,
     let existingContentType = void 0;
     let finalBody = body;
     if (body === "" && this.behavior !== "body-overflow") {
-      const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
+      const [ok2, err2, existingObject] = await tryFn$1(() => this.client.getObject(key));
       if (ok2 && existingObject.ContentLength > 0) {
         const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
         const existingBodyString = existingBodyBuffer.toString();
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        const [okParse, errParse] = await tryFn$1(() => Promise.resolve(JSON.parse(existingBodyString)));
         if (!okParse) {
           finalBody = existingBodyBuffer;
           existingContentType = existingObject.ContentType;
@@ -26607,10 +26762,10 @@ ${errorDetails}`,
     }
     let finalContentType = existingContentType;
     if (finalBody && finalBody !== "" && !finalContentType) {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      const [okParse, errParse] = await tryFn$1(() => Promise.resolve(JSON.parse(finalBody)));
       if (okParse) finalContentType = "application/json";
     }
-    const [ok, err, response] = await tryFn(() => this.client.putObject({
+    const [ok, err, response] = await tryFn$1(() => this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
@@ -26653,7 +26808,7 @@ ${errorDetails}`,
           });
         });
       } else {
-        const [ok2, err2] = await tryFn(() => this.handlePartitionReferenceUpdates(oldData, newData));
+        const [ok2, err2] = await tryFn$1(() => this.handlePartitionReferenceUpdates(oldData, newData));
         if (!ok2) {
           this.emit("partitionIndexError", {
             operation: "updateConditional",
@@ -26708,7 +26863,7 @@ ${errorDetails}`,
     }
     let objectData;
     let deleteError = null;
-    const [ok, err, data] = await tryFn(() => this.get(id));
+    const [ok, err, data] = await tryFn$1(() => this.get(id));
     if (ok) {
       objectData = data;
     } else {
@@ -26717,7 +26872,7 @@ ${errorDetails}`,
     }
     await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
-    const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
+    const [ok2, err2, response] = await tryFn$1(() => this.client.deleteObject(key));
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
       if (this.config.strictPartitions) {
         await this.deletePartitionReferences(objectData);
@@ -26733,7 +26888,7 @@ ${errorDetails}`,
           });
         });
       } else {
-        const [ok3, err3] = await tryFn(() => this.deletePartitionReferences(objectData));
+        const [ok3, err3] = await tryFn$1(() => this.deletePartitionReferences(objectData));
         if (!ok3) {
           this.emit("partitionIndexError", {
             operation: "delete",
@@ -27025,7 +27180,7 @@ ${errorDetails}`,
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     await this.executeHooks("beforeList", { partition, partitionValues, limit, offset });
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       if (!partition) {
         return await this.listMain({ limit, offset });
       }
@@ -27038,7 +27193,7 @@ ${errorDetails}`,
     return finalResult;
   }
   async listMain({ limit, offset = 0 }) {
-    const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
+    const [ok, err, ids] = await tryFn$1(() => this.listIds({ limit, offset }));
     if (!ok) throw err;
     const results = await this.processListResults(ids, "main");
     this._emitStandardized("list", { count: results.length, errors: 0 });
@@ -27051,7 +27206,7 @@ ${errorDetails}`,
     }
     const partitionDef = this.config.partitions[partition];
     const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-    const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+    const [ok, err, keys] = await tryFn$1(() => this.client.getAllKeys({ prefix }));
     if (!ok) throw err;
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
@@ -27095,7 +27250,7 @@ ${errorDetails}`,
       this.emit("error", error, content);
       this.observers.map((x) => x.emit("error", this.name, error, content));
     }).process(async (id) => {
-      const [ok, err, result] = await tryFn(() => this.get(id));
+      const [ok, err, result] = await tryFn$1(() => this.get(id));
       if (ok) {
         return result;
       }
@@ -27113,7 +27268,7 @@ ${errorDetails}`,
       this.emit("error", error, content);
       this.observers.map((x) => x.emit("error", this.name, error, content));
     }).process(async (id) => {
-      const [ok, err, result] = await tryFn(async () => {
+      const [ok, err, result] = await tryFn$1(async () => {
         const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
         return await this.getFromPartition({
           id,
@@ -27188,7 +27343,7 @@ ${errorDetails}`,
         _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
       };
     }).process(async (id) => {
-      const [ok, err, data] = await tryFn(() => this.get(id));
+      const [ok, err, data] = await tryFn$1(() => this.get(id));
       if (ok) return data;
       if (err.message.includes("Cipher job failed") || err.message.includes("OperationError")) {
         return {
@@ -27210,11 +27365,11 @@ ${errorDetails}`,
    * const allUsers = await resource.getAll();
       */
   async getAll() {
-    const [ok, err, ids] = await tryFn(() => this.listIds());
+    const [ok, err, ids] = await tryFn$1(() => this.listIds());
     if (!ok) throw err;
     const results = [];
     for (const id of ids) {
-      const [ok2, err2, item] = await tryFn(() => this.get(id));
+      const [ok2, err2, item] = await tryFn$1(() => this.get(id));
       if (ok2) {
         results.push(item);
       }
@@ -27250,11 +27405,11 @@ ${errorDetails}`,
    * });
       */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       let totalItems = null;
       let totalPages = null;
       if (!skipCount) {
-        const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
+        const [okCount, errCount, count] = await tryFn$1(() => this.count({ partition, partitionValues }));
         if (okCount) {
           totalItems = count;
           totalPages = Math.ceil(totalItems / size);
@@ -27268,7 +27423,7 @@ ${errorDetails}`,
       if (size <= 0) {
         items = [];
       } else {
-        const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
+        const [okList, errList, listResult] = await tryFn$1(() => this.list({ partition, partitionValues, limit: size, offset }));
         items = okList ? listResult : [];
       }
       const result2 = {
@@ -27338,7 +27493,7 @@ ${errorDetails}`,
    * });
    */
   async setContent({ id, buffer, contentType = "application/octet-stream" }) {
-    const [ok, err, currentData] = await tryFn(() => this.get(id));
+    const [ok, err, currentData] = await tryFn$1(() => this.get(id));
     if (!ok || !currentData) {
       throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: "setContent" });
     }
@@ -27349,7 +27504,7 @@ ${errorDetails}`,
       _mimeType: contentType
     };
     const mappedMetadata = await this.schema.mapper(updatedData);
-    const [ok2, err2] = await tryFn(() => this.client.putObject({
+    const [ok2, err2] = await tryFn$1(() => this.client.putObject({
       key: this.getResourceKey(id),
       metadata: mappedMetadata,
       body: buffer,
@@ -27373,7 +27528,7 @@ ${errorDetails}`,
    */
   async content(id) {
     const key = this.getResourceKey(id);
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, response] = await tryFn$1(() => this.client.getObject(key));
     if (!ok) {
       if (err.name === "NoSuchKey") {
         return {
@@ -27398,7 +27553,7 @@ ${errorDetails}`,
    */
   async hasContent(id) {
     const key = this.getResourceKey(id);
-    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+    const [ok, err, response] = await tryFn$1(() => this.client.headObject(key));
     if (!ok) return false;
     return response.ContentLength > 0;
   }
@@ -27408,10 +27563,10 @@ ${errorDetails}`,
    */
   async deleteContent(id) {
     const key = this.getResourceKey(id);
-    const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
+    const [ok, err, existingObject] = await tryFn$1(() => this.client.headObject(key));
     if (!ok) throw err;
     const existingMetadata = existingObject.Metadata || {};
-    const [ok2, err2, response] = await tryFn(() => this.client.putObject({
+    const [ok2, err2, response] = await tryFn$1(() => this.client.putObject({
       key,
       body: "",
       metadata: existingMetadata
@@ -27501,7 +27656,7 @@ ${errorDetails}`,
       }
     }
     if (keysToDelete.length > 0) {
-      const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
+      const [ok, err] = await tryFn$1(() => this.client.deleteObjects(keysToDelete));
     }
   }
   /**
@@ -27585,7 +27740,7 @@ ${errorDetails}`,
       return;
     }
     const updatePromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
-      const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
+      const [ok, err] = await tryFn$1(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
       if (!ok) {
         return { partitionName, error: err };
       }
@@ -27595,14 +27750,14 @@ ${errorDetails}`,
     const id = newData.id || oldData.id;
     const cleanupPromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const prefix = `resource=${this.name}/partition=${partitionName}`;
-      const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+      const [okKeys, errKeys, keys] = await tryFn$1(() => this.client.getAllKeys({ prefix }));
       if (!okKeys) {
         return;
       }
       const validKey = this.getPartitionKey({ partitionName, id, data: newData });
       const staleKeys = keys.filter((key) => key.endsWith(`/id=${id}`) && key !== validKey);
       if (staleKeys.length > 0) {
-        const [okDel, errDel] = await tryFn(() => this.client.deleteObjects(staleKeys));
+        const [okDel, errDel] = await tryFn$1(() => this.client.deleteObjects(staleKeys));
       }
     });
     await Promise.allSettled(cleanupPromises);
@@ -27620,12 +27775,12 @@ ${errorDetails}`,
     const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
     if (oldPartitionKey !== newPartitionKey) {
       if (oldPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
+        const [ok, err] = await tryFn$1(async () => {
           await this.client.deleteObject(oldPartitionKey);
         });
       }
       if (newPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
+        const [ok, err] = await tryFn$1(async () => {
           const partitionMetadata = {
             _v: String(this.version)
           };
@@ -27638,7 +27793,7 @@ ${errorDetails}`,
         });
       }
     } else if (newPartitionKey) {
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await tryFn$1(async () => {
         const partitionMetadata = {
           _v: String(this.version)
         };
@@ -27669,7 +27824,7 @@ ${errorDetails}`,
         const partitionMetadata = {
           _v: String(this.version)
         };
-        const [ok, err] = await tryFn(async () => {
+        const [ok, err] = await tryFn$1(async () => {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
@@ -27720,7 +27875,7 @@ ${errorDetails}`,
       throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
     }
     const partitionKey = path.join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await this.client.headObject(partitionKey);
     });
     if (!ok) {
@@ -27758,7 +27913,7 @@ ${errorDetails}`,
     };
     let contentType = void 0;
     if (body && body !== "") {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      const [okParse, errParse] = await tryFn$1(() => Promise.resolve(JSON.parse(body)));
       if (okParse) contentType = "application/json";
     }
     await this.client.putObject({
@@ -27800,7 +27955,7 @@ ${errorDetails}`,
       behaviorFlags.$overflow = "true";
     }
     let unmappedMetadata = {};
-    const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
+    const [ok, err, unmapped] = await tryFn$1(() => this.schema.unmapper(metadata));
     unmappedMetadata = ok ? unmapped : metadata;
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
@@ -27831,16 +27986,16 @@ ${errorDetails}`,
       const hasOverflow = metadata && metadata["$overflow"] === "true";
       let bodyData = {};
       if (hasOverflow && body) {
-        const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+        const [okBody, errBody, parsedBody] = await tryFn$1(() => Promise.resolve(JSON.parse(body)));
         if (okBody) {
           let pluginMapFromMeta = null;
           if (metadata && metadata._pluginmap) {
-            const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(
+            const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn$1(
               () => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap)
             );
             pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
           }
-          const [okUnmap, errUnmap, unmappedBody] = await tryFn(
+          const [okUnmap, errUnmap, unmappedBody] = await tryFn$1(
             () => this.schema.unmapper(parsedBody, void 0, pluginMapFromMeta)
           );
           bodyData = okUnmap ? unmappedBody : {};
@@ -27857,18 +28012,18 @@ ${errorDetails}`,
       return result2;
     }
     if (behavior === "body-only") {
-      const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
+      const [okBody, errBody, parsedBody] = await tryFn$1(() => Promise.resolve(body ? JSON.parse(body) : {}));
       let mapFromMeta = this.schema.map;
       let pluginMapFromMeta = null;
       if (metadata && metadata._map) {
-        const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
+        const [okMap, errMap, parsedMap] = await tryFn$1(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
         mapFromMeta = okMap ? parsedMap : this.schema.map;
       }
       if (metadata && metadata._pluginmap) {
-        const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(() => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap));
+        const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn$1(() => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap));
         pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
       }
-      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta, pluginMapFromMeta));
+      const [okUnmap, errUnmap, unmappedBody] = await tryFn$1(() => this.schema.unmapper(parsedBody, mapFromMeta, pluginMapFromMeta));
       const result2 = okUnmap ? { ...unmappedBody, id } : { id };
       Object.keys(result2).forEach((k) => {
         result2[k] = fixValue(result2[k]);
@@ -27876,16 +28031,16 @@ ${errorDetails}`,
       return result2;
     }
     if (behavior === "user-managed" && body && body.trim() !== "") {
-      const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      const [okBody, errBody, parsedBody] = await tryFn$1(() => Promise.resolve(JSON.parse(body)));
       if (okBody) {
         let pluginMapFromMeta = null;
         if (metadata && metadata._pluginmap) {
-          const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(
+          const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn$1(
             () => Promise.resolve(typeof metadata._pluginmap === "string" ? JSON.parse(metadata._pluginmap) : metadata._pluginmap)
           );
           pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
         }
-        const [okUnmap, errUnmap, unmappedBody] = await tryFn(
+        const [okUnmap, errUnmap, unmappedBody] = await tryFn$1(
           () => this.schema.unmapper(parsedBody, void 0, pluginMapFromMeta)
         );
         const bodyData = okUnmap ? unmappedBody : {};
@@ -30045,7 +30200,7 @@ class MLPlugin extends Plugin {
         console.log(`[MLPlugin] Auto-selected features: ${features.join(", ")}`);
       }
     }
-    const [samplesOk, samplesErr, sampleData] = await tryFn(() => resource.list());
+    const [samplesOk, samplesErr, sampleData] = await tryFn$1(() => resource.list());
     const sampleCount = samplesOk && sampleData ? sampleData.length : 0;
     let defaultModelConfig = this._getDefaultModelConfig(modelType);
     const userProvidedBatchSize = options.modelConfig && options.modelConfig.batchSize !== void 0;
@@ -30100,7 +30255,7 @@ class MLPlugin extends Plugin {
    */
   async _autoDetectType(resourceName, target) {
     const resource = this.database.resources[resourceName];
-    const [ok, err, samples] = await tryFn(() => resource.list({ limit: 100 }));
+    const [ok, err, samples] = await tryFn$1(() => resource.list({ limit: 100 }));
     if (!ok || !samples || samples.length === 0) {
       return "regression";
     }
@@ -30143,7 +30298,7 @@ class MLPlugin extends Plugin {
       }
     }
     if (numericFields.length === 0) {
-      const [ok, err, samples] = await tryFn(() => resource.list({ limit: 10 }));
+      const [ok, err, samples] = await tryFn$1(() => resource.list({ limit: 10 }));
       if (ok && samples && samples.length > 0) {
         const firstSample = samples[0];
         for (const [key, value] of Object.entries(firstSample)) {
@@ -30437,7 +30592,7 @@ class MLPlugin extends Plugin {
         if (this.config.verbose) {
           console.log(`[MLPlugin] Using partition "${partition.name}" with values:`, partition.values);
         }
-        const [ok, err, partitionData] = await tryFn(
+        const [ok, err, partitionData] = await tryFn$1(
           () => resource.listPartition({
             partition: partition.name,
             partitionValues: partition.values
@@ -30451,7 +30606,7 @@ class MLPlugin extends Plugin {
         }
         data = partitionData;
       } else {
-        const [ok, err, allData] = await tryFn(() => resource.list());
+        const [ok, err, allData] = await tryFn$1(() => resource.list());
         if (!ok) {
           throw new TrainingError(
             `Failed to fetch training data: ${err.message}`,
@@ -30651,7 +30806,7 @@ class MLPlugin extends Plugin {
       const storage = this.getStorage();
       const modelConfig = this.config.models[modelName];
       const resourceName = modelConfig.resource;
-      const [ok, err, versionInfo] = await tryFn(
+      const [ok, err, versionInfo] = await tryFn$1(
         () => storage.get(storage.getPluginKey(resourceName, "metadata", modelName, "versions"))
       );
       if (ok && versionInfo) {
@@ -30839,7 +30994,7 @@ class MLPlugin extends Plugin {
       });
       if (enableVersioning) {
         const version = this._getNextVersion(modelName);
-        const [ok, err, existing] = await tryFn(
+        const [ok, err, existing] = await tryFn$1(
           () => storage.get(storage.getPluginKey(resourceName, "training", "history", modelName))
         );
         let history = [];
@@ -30939,12 +31094,12 @@ class MLPlugin extends Plugin {
       const resourceName = modelConfig.resource;
       const enableVersioning = this.config.enableVersioning;
       if (enableVersioning) {
-        const [okRef, errRef, activeRef] = await tryFn(
+        const [okRef, errRef, activeRef] = await tryFn$1(
           () => storage.get(storage.getPluginKey(resourceName, "metadata", modelName, "active"))
         );
         if (okRef && activeRef && activeRef.version) {
           const version = activeRef.version;
-          const [ok, err, versionData] = await tryFn(
+          const [ok, err, versionData] = await tryFn$1(
             () => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version}`))
           );
           if (ok && versionData && versionData.modelData) {
@@ -30958,7 +31113,7 @@ class MLPlugin extends Plugin {
         const versionInfo = this.modelVersions.get(modelName);
         if (versionInfo && versionInfo.latestVersion > 0) {
           const version = versionInfo.latestVersion;
-          const [ok, err, versionData] = await tryFn(
+          const [ok, err, versionData] = await tryFn$1(
             () => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version}`))
           );
           if (ok && versionData && versionData.modelData) {
@@ -30973,7 +31128,7 @@ class MLPlugin extends Plugin {
           console.log(`[MLPlugin] No saved model versions found for "${modelName}"`);
         }
       } else {
-        const [ok, err, record] = await tryFn(
+        const [ok, err, record] = await tryFn$1(
           () => storage.get(storage.getPluginKey(resourceName, "models", modelName, "latest"))
         );
         if (!ok || !record || !record.modelData) {
@@ -31004,7 +31159,7 @@ class MLPlugin extends Plugin {
       const resourceName = modelConfig.resource;
       const enableVersioning = this.config.enableVersioning;
       if (!enableVersioning) {
-        const [ok, err, record] = await tryFn(
+        const [ok, err, record] = await tryFn$1(
           () => storage.get(storage.getPluginKey(resourceName, "training", "data", modelName, "latest"))
         );
         if (!ok || !record) {
@@ -31023,7 +31178,7 @@ class MLPlugin extends Plugin {
           savedAt: record.savedAt
         };
       }
-      const [okHistory, errHistory, historyData] = await tryFn(
+      const [okHistory, errHistory, historyData] = await tryFn$1(
         () => storage.get(storage.getPluginKey(resourceName, "training", "history", modelName))
       );
       if (!okHistory || !historyData || !historyData.history) {
@@ -31038,7 +31193,7 @@ class MLPlugin extends Plugin {
       for (const entry of historyEntries) {
         if (entry.version > targetVersion) break;
         if (entry.storageKey && entry.newSamples > 0) {
-          const [ok, err, versionData] = await tryFn(
+          const [ok, err, versionData] = await tryFn$1(
             () => storage.get(storage.getPluginKey(resourceName, "training", "data", modelName, `v${entry.version}`))
           );
           if (ok && versionData && versionData.samples) {
@@ -31105,7 +31260,7 @@ class MLPlugin extends Plugin {
       const resourceName = modelConfig.resource;
       const enableVersioning = this.config.enableVersioning;
       if (enableVersioning) {
-        const [ok, err, historyData] = await tryFn(
+        const [ok, err, historyData] = await tryFn$1(
           () => storage.get(storage.getPluginKey(resourceName, "training", "history", modelName))
         );
         if (ok && historyData && historyData.history) {
@@ -31144,7 +31299,7 @@ class MLPlugin extends Plugin {
       const versionInfo = this.modelVersions.get(modelName) || { latestVersion: 0 };
       const versions = [];
       for (let v = 1; v <= versionInfo.latestVersion; v++) {
-        const [ok, err, versionData] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${v}`)));
+        const [ok, err, versionData] = await tryFn$1(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${v}`)));
         if (ok && versionData) {
           versions.push({
             version: v,
@@ -31176,7 +31331,7 @@ class MLPlugin extends Plugin {
       const storage = this.getStorage();
       const modelConfig = this.config.models[modelName];
       const resourceName = modelConfig.resource;
-      const [ok, err, versionData] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version}`)));
+      const [ok, err, versionData] = await tryFn$1(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version}`)));
       if (!ok || !versionData) {
         throw new MLError(`Version ${version} not found for model "${modelName}"`, { modelName, version });
       }
@@ -31240,7 +31395,7 @@ class MLPlugin extends Plugin {
       const storage = this.getStorage();
       const modelConfig = this.config.models[modelName];
       const resourceName = modelConfig.resource;
-      const [ok, err, historyData] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, "training", "history", modelName)));
+      const [ok, err, historyData] = await tryFn$1(() => storage.get(storage.getPluginKey(resourceName, "training", "history", modelName)));
       if (!ok || !historyData) {
         return null;
       }
@@ -31272,8 +31427,8 @@ class MLPlugin extends Plugin {
       const storage = this.getStorage();
       const modelConfig = this.config.models[modelName];
       const resourceName = modelConfig.resource;
-      const [ok1, err1, v1Data] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version1}`)));
-      const [ok2, err2, v2Data] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version2}`)));
+      const [ok1, err1, v1Data] = await tryFn$1(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version1}`)));
+      const [ok2, err2, v2Data] = await tryFn$1(() => storage.get(storage.getPluginKey(resourceName, "models", modelName, `v${version2}`)));
       if (!ok1 || !v1Data) {
         throw new MLError(`Version ${version1} not found`, { modelName, version: version1 });
       }
@@ -31427,7 +31582,7 @@ class PuppeteerPlugin extends Plugin {
       cookies: {
         enabled: true,
         storage: {
-          resource: "puppeteer_cookies",
+          resource: "plg_puppeteer_cookies",
           autoSave: true,
           autoLoad: true,
           encrypt: true,
@@ -31567,10 +31722,38 @@ class PuppeteerPlugin extends Plugin {
         ...options.debug
       }
     };
-    this.config.cookies.storage.resource = resolveResourceName("puppeteer", {
-      defaultName: "plg_puppeteer_cookies",
-      override: resourceNamesOption.cookies
+    const resourceNamesOption = options.resourceNames || {};
+    this.resourceNames = resolveResourceNames("puppeteer", {
+      cookies: {
+        defaultName: "plg_puppeteer_cookies",
+        override: resourceNamesOption.cookies
+      },
+      consoleSessions: {
+        defaultName: "plg_puppeteer_console_sessions",
+        override: resourceNamesOption.consoleSessions
+      },
+      consoleMessages: {
+        defaultName: "plg_puppeteer_console_messages",
+        override: resourceNamesOption.consoleMessages
+      },
+      consoleErrors: {
+        defaultName: "plg_puppeteer_console_errors",
+        override: resourceNamesOption.consoleErrors
+      },
+      networkSessions: {
+        defaultName: "plg_puppeteer_network_sessions",
+        override: resourceNamesOption.networkSessions
+      },
+      networkRequests: {
+        defaultName: "plg_puppeteer_network_requests",
+        override: resourceNamesOption.networkRequests
+      },
+      networkErrors: {
+        defaultName: "plg_puppeteer_network_errors",
+        override: resourceNamesOption.networkErrors
+      }
     });
+    this.config.cookies.storage.resource = this.resourceNames.cookies;
     this.browserPool = [];
     this.tabPool = /* @__PURE__ */ new Map();
     this.browserIdleTimers = /* @__PURE__ */ new Map();
@@ -31674,7 +31857,7 @@ class PuppeteerPlugin extends Plugin {
       return;
     } catch (err) {
     }
-    await this.database.createResource({
+    const [created, createErr] = await tryFn(() => this.database.createResource({
       name: resourceName,
       attributes: {
         sessionId: "string|required",
@@ -31682,11 +31865,8 @@ class PuppeteerPlugin extends Plugin {
         userAgent: "string",
         viewport: "object",
         proxyId: "string|optional",
-        // IMMUTABLE: Proxy binding
         domain: "string",
-        // Main domain for cookies
         date: "string",
-        // YYYY-MM-DD for temporal partitioning
         reputation: {
           successCount: "number",
           failCount: "number",
@@ -31704,13 +31884,16 @@ class PuppeteerPlugin extends Plugin {
       behavior: "body-only",
       partitions: {
         byProxy: { fields: { proxyId: "string" } },
-        // Query cookies for a proxy
         byDate: { fields: { date: "string" } },
-        // Query by date (for rotation)
         byDomain: { fields: { domain: "string" } }
-        // Query cookies for a domain
       }
-    });
+    }));
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (!existing) {
+        throw createErr;
+      }
+    }
   }
   /**
    * Initialize proxy manager
@@ -32375,7 +32558,7 @@ class SqsConsumer {
   }
   async start() {
     await requirePluginDependency("sqs-consumer");
-    const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
+    const [ok, err, sdk] = await tryFn$1(() => import('@aws-sdk/client-sqs'));
     if (!ok) throw new Error("SqsConsumer: @aws-sdk/client-sqs is not installed. Please install it to use the SQS consumer.");
     const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } = sdk;
     this._SQSClient = SQSClient;
@@ -32403,7 +32586,7 @@ class SqsConsumer {
       if (this._pollResolve) this._pollResolve();
       return;
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       const cmd = new this._ReceiveMessageCommand({
         QueueUrl: this.queueUrl,
         MaxNumberOfMessages: this.maxMessages,
@@ -32413,7 +32596,7 @@ class SqsConsumer {
       const { Messages } = await this.sqs.send(cmd);
       if (Messages && Messages.length > 0) {
         for (const msg of Messages) {
-          const [okMsg, errMsg] = await tryFn(async () => {
+          const [okMsg, errMsg] = await tryFn$1(async () => {
             const parsedMsg = this._parseMessage(msg);
             await this.onMessage(parsedMsg, msg);
             await this.sqs.send(new this._DeleteMessageCommand({
@@ -32434,7 +32617,7 @@ class SqsConsumer {
   }
   _parseMessage(msg) {
     let body;
-    const [ok, err, parsed] = tryFn(() => JSON.parse(msg.Body));
+    const [ok, err, parsed] = tryFn$1(() => JSON.parse(msg.Body));
     body = ok ? parsed : msg.Body;
     const attributes = {};
     if (msg.MessageAttributes) {
@@ -32470,7 +32653,7 @@ class RabbitMqConsumer {
     if (this.connection) await this.connection.close();
   }
   async _connect() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const amqp = (await import('amqplib')).default;
       this.connection = await amqp.connect(this.amqpUrl);
       this.channel = await this.connection.createChannel();
@@ -32478,7 +32661,7 @@ class RabbitMqConsumer {
       this.channel.prefetch(this.prefetch);
       this.channel.consume(this.queue, async (msg) => {
         if (msg !== null) {
-          const [okMsg, errMsg] = await tryFn(async () => {
+          const [okMsg, errMsg] = await tryFn$1(async () => {
             const content = JSON.parse(msg.content.toString());
             await this.onMessage({ $body: content, $raw: msg });
             this.channel.ack(msg);
@@ -32613,7 +32796,7 @@ class QueueConsumerPlugin extends Plugin {
       });
     }
     let result;
-    const [ok, err, res] = await tryFn(async () => {
+    const [ok, err, res] = await tryFn$1(async () => {
       if (action === "insert") {
         result = await resourceObj.insert(data);
       } else if (action === "update") {
@@ -33059,7 +33242,7 @@ class RelationPlugin extends Plugin {
       records.forEach((r) => r[relationName] = null);
       return records;
     }
-    const [ok, err, parentRecords] = await tryFn(async () => {
+    const [ok, err, parentRecords] = await tryFn$1(async () => {
       const partitionName = config.partitionHint || this._findPartitionByField(relatedResource, config.localKey);
       if (partitionName) {
         return await this._batchLoadWithPartitions(
@@ -33809,7 +33992,7 @@ function generateMySQLCreateTable(tableName, attributes) {
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
 }
 async function getPostgresTableSchema(client, tableName) {
-  const [ok, err, result] = await tryFn(async () => {
+  const [ok, err, result] = await tryFn$1(async () => {
     return await client.query(`
       SELECT column_name, data_type, is_nullable, character_maximum_length
       FROM information_schema.columns
@@ -33829,7 +34012,7 @@ async function getPostgresTableSchema(client, tableName) {
   return schema;
 }
 async function getMySQLTableSchema(connection, tableName) {
-  const [ok, err, [rows]] = await tryFn(async () => {
+  const [ok, err, [rows]] = await tryFn$1(async () => {
     return await connection.query(`
       SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
       FROM INFORMATION_SCHEMA.COLUMNS
@@ -33909,7 +34092,7 @@ function generateBigQuerySchema(attributes, mutability = "append-only") {
   return fields;
 }
 async function getBigQueryTableSchema(bigqueryClient, datasetId, tableId) {
-  const [ok, err, table] = await tryFn(async () => {
+  const [ok, err, table] = await tryFn$1(async () => {
     const dataset = bigqueryClient.dataset(datasetId);
     const table2 = dataset.table(tableId);
     const [metadata] = await table2.getMetadata();
@@ -34122,7 +34305,7 @@ class BigqueryReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
     await requirePluginDependency("bigquery-replicator");
-    const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
+    const [ok, err, sdk] = await tryFn$1(() => import('@google-cloud/bigquery'));
     if (!ok) {
       if (this.config.verbose) {
         console.warn(`[BigqueryReplicator] Failed to import BigQuery SDK: ${err.message}`);
@@ -34151,7 +34334,7 @@ class BigqueryReplicator extends BaseReplicator {
    */
   async syncSchemas(database) {
     for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
-      const [okRes, errRes, resource] = await tryFn(async () => {
+      const [okRes, errRes, resource] = await tryFn$1(async () => {
         return await database.getResource(resourceName);
       });
       if (!okRes) {
@@ -34160,15 +34343,15 @@ class BigqueryReplicator extends BaseReplicator {
         }
         continue;
       }
-      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
-      const pluginAttrNames = resource.schema?._pluginAttributes ? Object.values(resource.schema._pluginAttributes).flat() : [];
+      const allAttributes = resource.$schema.attributes || {};
+      const pluginAttrNames = resource.$schema._pluginAttributes ? Object.values(resource.$schema._pluginAttributes).flat() : [];
       const attributes = Object.fromEntries(
         Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
       );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const mutability = tableConfig.mutability;
-        const [okSync, errSync] = await tryFn(async () => {
+        const [okSync, errSync] = await tryFn$1(async () => {
           await this.syncTableSchema(tableName, attributes, mutability);
         });
         if (!okSync) {
@@ -34326,10 +34509,10 @@ class BigqueryReplicator extends BaseReplicator {
     }
     const results = [];
     const errors = [];
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       for (const tableConfig of tableConfigs) {
-        const [okTable, errTable] = await tryFn(async () => {
+        const [okTable, errTable] = await tryFn$1(async () => {
           const table = dataset.table(tableConfig.table);
           const mutability = tableConfig.mutability;
           let job;
@@ -34359,7 +34542,7 @@ class BigqueryReplicator extends BaseReplicator {
             const maxRetries = 2;
             let lastError = null;
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              const [ok2, error] = await tryFn(async () => {
+              const [ok2, error] = await tryFn$1(async () => {
                 const [updateJob] = await this.bigqueryClient.createQueryJob({
                   query,
                   params,
@@ -34428,7 +34611,7 @@ class BigqueryReplicator extends BaseReplicator {
         }
       }
       if (this.logTable) {
-        const [okLog, errLog] = await tryFn(async () => {
+        const [okLog, errLog] = await tryFn$1(async () => {
           const logTable = dataset.table(this.logTable);
           await logTable.insert([{
             resource_name: resourceName,
@@ -34480,7 +34663,7 @@ class BigqueryReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
+      const [ok, err, res] = await tryFn$1(() => this.replicate(
         resourceName,
         record.operation,
         record.data,
@@ -34506,7 +34689,7 @@ class BigqueryReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.bigqueryClient) await this.initialize();
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       await dataset.getMetadata();
@@ -34607,7 +34790,7 @@ class DynamoDBReplicator extends BaseReplicator {
     this.PutCommand = PutCommand;
     this.UpdateCommand = UpdateCommand;
     this.DeleteCommand = DeleteCommand;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const clientConfig = {
         region: this.region
       };
@@ -34661,7 +34844,7 @@ class DynamoDBReplicator extends BaseReplicator {
       if (!tableConfig.actions.includes(operation)) {
         continue;
       }
-      const [ok, error, result] = await tryFn(async () => {
+      const [ok, error, result] = await tryFn$1(async () => {
         switch (operation) {
           case "insert":
             return await this._putItem(tableConfig.table, data);
@@ -34758,7 +34941,7 @@ class DynamoDBReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, result] = await tryFn(
+      const [ok, err, result] = await tryFn$1(
         () => this.replicate(resourceName, record.operation, record.data, record.id)
       );
       if (ok) {
@@ -34775,7 +34958,7 @@ class DynamoDBReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.client) {
         throw new Error("Client not initialized");
       }
@@ -34874,7 +35057,7 @@ class MongoDBReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
     const { MongoClient } = requirePluginDependency("mongodb", "MongoDBReplicator");
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       let uri;
       if (this.connectionString) {
         uri = this.connectionString;
@@ -34912,7 +35095,7 @@ class MongoDBReplicator extends BaseReplicator {
     });
   }
   async _createLogCollection() {
-    const [ok] = await tryFn(async () => {
+    const [ok] = await tryFn$1(async () => {
       const collections = await this.db.listCollections({ name: this.logCollection }).toArray();
       if (collections.length === 0) {
         await this.db.createCollection(this.logCollection);
@@ -34941,7 +35124,7 @@ class MongoDBReplicator extends BaseReplicator {
       if (!collectionConfig.actions.includes(operation)) {
         continue;
       }
-      const [ok, error, result] = await tryFn(async () => {
+      const [ok, error, result] = await tryFn$1(async () => {
         switch (operation) {
           case "insert":
             return await this._insertDocument(collectionConfig.collection, data);
@@ -34999,7 +35182,7 @@ class MongoDBReplicator extends BaseReplicator {
     return result;
   }
   async _logOperation(resourceName, operation, id, data) {
-    const [ok] = await tryFn(async () => {
+    const [ok] = await tryFn$1(async () => {
       const collection = this.db.collection(this.logCollection);
       await collection.insertOne({
         resource_name: resourceName,
@@ -35033,7 +35216,7 @@ class MongoDBReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, result] = await tryFn(
+      const [ok, err, result] = await tryFn$1(
         () => this.replicate(resourceName, record.operation, record.data, record.id)
       );
       if (ok) {
@@ -35050,7 +35233,7 @@ class MongoDBReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.client) {
         throw new Error("Client not initialized");
       }
@@ -35162,7 +35345,7 @@ class MySQLReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
     const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const poolConfig = {
         host: this.host,
         port: this.port,
@@ -35209,7 +35392,7 @@ class MySQLReplicator extends BaseReplicator {
    */
   async syncSchemas(database) {
     for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
-      const [okRes, errRes, resource] = await tryFn(async () => {
+      const [okRes, errRes, resource] = await tryFn$1(async () => {
         return await database.getResource(resourceName);
       });
       if (!okRes) {
@@ -35225,7 +35408,7 @@ class MySQLReplicator extends BaseReplicator {
       );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
-        const [okSync, errSync] = await tryFn(async () => {
+        const [okSync, errSync] = await tryFn$1(async () => {
           await this.syncTableSchema(tableName, attributes);
         });
         if (!okSync) {
@@ -35315,7 +35498,7 @@ ${createSQL}`);
   }
   async _createLogTable() {
     const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
-    const [ok] = await tryFn(async () => {
+    const [ok] = await tryFn$1(async () => {
       await this.pool.promise().query(`
         CREATE TABLE IF NOT EXISTS ${mysql.escapeId(this.logTable)} (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -35348,7 +35531,7 @@ ${createSQL}`);
       if (!tableConfig.actions.includes(operation)) {
         continue;
       }
-      const [ok, error, result] = await tryFn(async () => {
+      const [ok, error, result] = await tryFn$1(async () => {
         switch (operation) {
           case "insert":
             return await this._insertRecord(tableConfig.table, data);
@@ -35411,7 +35594,7 @@ ${createSQL}`);
   }
   async _logOperation(resourceName, operation, id, data) {
     const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
-    const [ok] = await tryFn(async () => {
+    const [ok] = await tryFn$1(async () => {
       const query = `INSERT INTO ${mysql.escapeId(this.logTable)} (resource_name, operation, record_id, data) VALUES (?, ?, ?, ?)`;
       await this.pool.promise().query(query, [resourceName, operation, id, JSON.stringify(data)]);
     });
@@ -35433,7 +35616,7 @@ ${createSQL}`);
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, result] = await tryFn(
+      const [ok, err, result] = await tryFn$1(
         () => this.replicate(resourceName, record.operation, record.data, record.id)
       );
       if (ok) {
@@ -35450,7 +35633,7 @@ ${createSQL}`);
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.pool) {
         throw new Error("Pool not initialized");
       }
@@ -35552,7 +35735,7 @@ class PlanetScaleReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
     await requirePluginDependency("planetscale-replicator");
-    const [ok, err, sdk] = await tryFn(() => import('@planetscale/database'));
+    const [ok, err, sdk] = await tryFn$1(() => import('@planetscale/database'));
     if (!ok) {
       throw new ReplicationError("Failed to import PlanetScale SDK", {
         operation: "initialize",
@@ -35567,7 +35750,7 @@ class PlanetScaleReplicator extends BaseReplicator {
       username: this.username,
       password: this.password
     });
-    const [okTest, errTest] = await tryFn(async () => {
+    const [okTest, errTest] = await tryFn$1(async () => {
       await this.connection.execute("SELECT 1");
     });
     if (!okTest) {
@@ -35592,7 +35775,7 @@ class PlanetScaleReplicator extends BaseReplicator {
    */
   async syncSchemas(database) {
     for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
-      const [okRes, errRes, resource] = await tryFn(async () => {
+      const [okRes, errRes, resource] = await tryFn$1(async () => {
         return await database.getResource(resourceName);
       });
       if (!okRes) {
@@ -35608,7 +35791,7 @@ class PlanetScaleReplicator extends BaseReplicator {
       );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
-        const [okSync, errSync] = await tryFn(async () => {
+        const [okSync, errSync] = await tryFn$1(async () => {
           await this.syncTableSchema(tableName, attributes);
         });
         if (!okSync) {
@@ -35715,7 +35898,7 @@ ${createSQL}`);
     const results = [];
     const errors = [];
     for (const table of tables) {
-      const [okTable, errTable] = await tryFn(async () => {
+      const [okTable, errTable] = await tryFn$1(async () => {
         if (operation === "insert") {
           const cleanData = this._cleanInternalFields(data);
           const keys = Object.keys(cleanData);
@@ -35856,7 +36039,7 @@ class PostgresReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
     await requirePluginDependency("postgresql-replicator");
-    const [ok, err, sdk] = await tryFn(() => import('pg'));
+    const [ok, err, sdk] = await tryFn$1(() => import('pg'));
     if (!ok) {
       if (this.config.verbose) {
         console.warn(`[PostgresReplicator] Failed to import pg SDK: ${err.message}`);
@@ -35917,7 +36100,7 @@ class PostgresReplicator extends BaseReplicator {
    */
   async syncSchemas(database) {
     for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
-      const [okRes, errRes, resource] = await tryFn(async () => {
+      const [okRes, errRes, resource] = await tryFn$1(async () => {
         return await database.getResource(resourceName);
       });
       if (!okRes) {
@@ -35933,7 +36116,7 @@ class PostgresReplicator extends BaseReplicator {
       );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
-        const [okSync, errSync] = await tryFn(async () => {
+        const [okSync, errSync] = await tryFn$1(async () => {
           await this.syncTableSchema(tableName, attributes);
         });
         if (!okSync) {
@@ -36039,9 +36222,9 @@ ${createSQL}`);
     }
     const results = [];
     const errors = [];
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       for (const table of tables) {
-        const [okTable, errTable] = await tryFn(async () => {
+        const [okTable, errTable] = await tryFn$1(async () => {
           let result2;
           if (operation === "insert") {
             const cleanData = this._cleanInternalFields(data);
@@ -36080,7 +36263,7 @@ ${createSQL}`);
         }
       }
       if (this.logTable) {
-        const [okLog, errLog] = await tryFn(async () => {
+        const [okLog, errLog] = await tryFn$1(async () => {
           await this.client.query(
             `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
             [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
@@ -36127,7 +36310,7 @@ ${createSQL}`);
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
+      const [ok, err, res] = await tryFn$1(() => this.replicate(
         resourceName,
         record.operation,
         record.data,
@@ -36153,7 +36336,7 @@ ${createSQL}`);
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.client) await this.initialize();
       await this.client.query("SELECT 1");
       return true;
@@ -36194,7 +36377,7 @@ const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
 class ConnectionString {
   constructor(connectionString) {
     let uri;
-    const [ok, err, parsed] = tryFn(() => new URL(connectionString));
+    const [ok, err, parsed] = tryFn$1(() => new URL(connectionString));
     if (!ok) {
       throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
     }
@@ -36320,7 +36503,7 @@ class S3Client extends EventEmitter {
   }
   async sendCommand(command) {
     this.emit("cl:request", command.constructor.name, command.input);
-    const [ok, err, response] = await tryFn(() => this.client.send(command));
+    const [ok, err, response] = await tryFn$1(() => this.client.send(command));
     if (!ok) {
       const bucket = this.config.bucket;
       const key = command.input && command.input.Key;
@@ -36355,7 +36538,7 @@ class S3Client extends EventEmitter {
     if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
     if (contentLength !== void 0) options.ContentLength = contentLength;
     if (ifMatch !== void 0) options.IfMatch = ifMatch;
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.PutObjectCommand(options)));
+    const [ok, err, response] = await tryFn$1(() => this.sendCommand(new clientS3.PutObjectCommand(options)));
     this.emit("cl:PutObject", err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
     if (!ok) {
       throw mapAwsError(err, {
@@ -36373,7 +36556,7 @@ class S3Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
-    const [ok, err, response] = await tryFn(async () => {
+    const [ok, err, response] = await tryFn$1(async () => {
       const res = await this.sendCommand(new clientS3.GetObjectCommand(options));
       if (res.Metadata) {
         const decodedMetadata = {};
@@ -36401,7 +36584,7 @@ class S3Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
-    const [ok, err, response] = await tryFn(async () => {
+    const [ok, err, response] = await tryFn$1(async () => {
       const res = await this.sendCommand(new clientS3.HeadObjectCommand(options));
       if (res.Metadata) {
         const decodedMetadata = {};
@@ -36444,7 +36627,7 @@ class S3Client extends EventEmitter {
     if (contentType) {
       options.ContentType = contentType;
     }
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.CopyObjectCommand(options)));
+    const [ok, err, response] = await tryFn$1(() => this.sendCommand(new clientS3.CopyObjectCommand(options)));
     this.emit("cl:CopyObject", err || response, { from, to, metadataDirective });
     if (!ok) {
       throw mapAwsError(err, {
@@ -36457,7 +36640,7 @@ class S3Client extends EventEmitter {
     return response;
   }
   async exists(key) {
-    const [ok, err] = await tryFn(() => this.headObject(key));
+    const [ok, err] = await tryFn$1(() => this.headObject(key));
     if (ok) return true;
     if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
     throw err;
@@ -36469,7 +36652,7 @@ class S3Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.DeleteObjectCommand(options)));
+    const [ok, err, response] = await tryFn$1(() => this.sendCommand(new clientS3.DeleteObjectCommand(options)));
     this.emit("cl:DeleteObject", err || response, { key });
     if (!ok) {
       throw mapAwsError(err, {
@@ -36499,7 +36682,7 @@ class S3Client extends EventEmitter {
         }
       };
       let response;
-      const [ok, err, res] = await tryFn(() => this.sendCommand(new clientS3.DeleteObjectsCommand(options)));
+      const [ok, err, res] = await tryFn$1(() => this.sendCommand(new clientS3.DeleteObjectsCommand(options)));
       if (!ok) throw err;
       response = res;
       if (response && response.Errors && response.Errors.length > 0) ;
@@ -36555,7 +36738,7 @@ class S3Client extends EventEmitter {
     return totalDeleted;
   }
   async moveObject({ from, to }) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await this.copyObject({ from, to });
       await this.deleteObject(from);
     });
@@ -36575,7 +36758,7 @@ class S3Client extends EventEmitter {
       ContinuationToken: continuationToken,
       Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
     };
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.ListObjectsV2Command(options)));
+    const [ok, err, response] = await tryFn$1(() => this.sendCommand(new clientS3.ListObjectsV2Command(options)));
     if (!ok) {
       throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
     }
@@ -36695,7 +36878,7 @@ class S3Client extends EventEmitter {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
     const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
       const to = key.replace(prefixFrom, prefixTo);
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await tryFn$1(async () => {
         await this.moveObject({
           from: key,
           to
@@ -36728,12 +36911,12 @@ class Database extends EventEmitter {
   constructor(options) {
     super();
     this.id = (() => {
-      const [ok, err, id] = tryFn(() => idGenerator(7));
+      const [ok, err, id] = tryFn$1(() => idGenerator(7));
       return ok && id ? id : `db-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     })();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "13.6.1" : "latest");
+      const [ok, err, version] = tryFn$1(() => true ? "13.6.1" : "latest");
       return ok ? version : "latest";
     })();
     this._resourcesMap = {};
@@ -36810,7 +36993,7 @@ class Database extends EventEmitter {
       this._exitListenerRegistered = true;
       this._exitListener = async () => {
         if (this.isConnected()) {
-          await tryFn(() => this.disconnect());
+          await tryFn$1(() => this.disconnect());
         }
       };
       process.on("exit", this._exitListener);
@@ -36823,10 +37006,10 @@ class Database extends EventEmitter {
     let needsHealing = false;
     let healingLog = [];
     if (await this.client.exists(`s3db.json`)) {
-      const [ok, error] = await tryFn(async () => {
+      const [ok, error] = await tryFn$1(async () => {
         const request = await this.client.getObject(`s3db.json`);
         const rawContent = await streamToString(request?.Body);
-        const [parseOk, parseError, parsedData] = tryFn(() => JSON.parse(rawContent));
+        const [parseOk, parseError, parsedData] = tryFn$1(() => JSON.parse(rawContent));
         if (!parseOk) {
           healingLog.push("JSON parsing failed - attempting recovery");
           needsHealing = true;
@@ -37004,7 +37187,7 @@ class Database extends EventEmitter {
       if (Array.isArray(hookArray)) {
         serialized[event] = hookArray.map((hook) => {
           if (typeof hook === "function") {
-            const [ok, err, data] = tryFn(() => ({
+            const [ok, err, data] = tryFn$1(() => ({
               __s3db_serialized_function: true,
               code: hook.toString(),
               name: hook.name || "anonymous"
@@ -37038,7 +37221,7 @@ class Database extends EventEmitter {
       if (Array.isArray(hookArray)) {
         deserialized[event] = hookArray.map((hook) => {
           if (hook && typeof hook === "object" && hook.__s3db_serialized_function) {
-            const [ok, err, fn] = tryFn(() => {
+            const [ok, err, fn] = tryFn$1(() => {
               const func = new Function("return " + hook.code)();
               return typeof func === "function" ? func : null;
             });
@@ -37246,7 +37429,7 @@ class Database extends EventEmitter {
       }
     ];
     for (const [index, fix] of fixes.entries()) {
-      const [ok, err, parsed] = tryFn(() => {
+      const [ok, err, parsed] = tryFn$1(() => {
         const fixedContent = fix();
         return JSON.parse(fixedContent);
       });
@@ -37402,11 +37585,11 @@ class Database extends EventEmitter {
    * Create backup of corrupted file
    */
   async _createCorruptedBackup(content = null) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
       const backupKey = `s3db.json.corrupted.${timestamp}.backup`;
       if (!content) {
-        const [readOk, readErr, readData] = await tryFn(async () => {
+        const [readOk, readErr, readData] = await tryFn$1(async () => {
           const request = await this.client.getObject(`s3db.json`);
           return await streamToString(request?.Body);
         });
@@ -37429,7 +37612,7 @@ class Database extends EventEmitter {
    * Upload healed metadata with logging
    */
   async _uploadHealedMetadata(metadata, healingLog) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (this.verbose && healingLog.length > 0) {
         console.warn("S3DB Self-Healing Operations:");
         healingLog.forEach((log) => console.warn(`  - ${log}`));
@@ -37746,7 +37929,7 @@ class Database extends EventEmitter {
   }
   async disconnect() {
     await this.emit("disconnected", /* @__PURE__ */ new Date());
-    await tryFn(async () => {
+    await tryFn$1(async () => {
       if (this.pluginList && this.pluginList.length > 0) {
         for (const plugin of this.pluginList) {
           if (plugin && typeof plugin.removeAllListeners === "function") {
@@ -37754,7 +37937,7 @@ class Database extends EventEmitter {
           }
         }
         const stopProms = this.pluginList.map(async (plugin) => {
-          await tryFn(async () => {
+          await tryFn$1(async () => {
             if (plugin && typeof plugin.stop === "function") {
               await plugin.stop();
             }
@@ -37764,7 +37947,7 @@ class Database extends EventEmitter {
       }
       if (this.resources && Object.keys(this.resources).length > 0) {
         for (const [name, resource] of Object.entries(this.resources)) {
-          await tryFn(() => {
+          await tryFn$1(() => {
             if (resource && typeof resource.removeAllListeners === "function") {
               resource.removeAllListeners();
             }
@@ -37894,7 +38077,7 @@ class Database extends EventEmitter {
     if (!this._hooks || !this._hooks.has(event)) return;
     const hooks = this._hooks.get(event);
     for (const hook of hooks) {
-      const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
+      const [ok, error] = await tryFn$1(() => hook({ database: this, ...context }));
       if (!ok) {
         this.emit("hookError", { event, error, context });
         if (this.strictHooks) {
@@ -38011,7 +38194,7 @@ class S3dbReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (this.client) {
         this.targetDatabase = this.client;
       } else if (this.connectionString) {
@@ -38070,7 +38253,7 @@ class S3dbReplicator extends BaseReplicator {
     if (Array.isArray(entry)) {
       const results = [];
       for (const destConfig of entry) {
-        const [ok, error, result] = await tryFn(async () => {
+        const [ok, error, result] = await tryFn$1(async () => {
           return await this._replicateToSingleDestination(destConfig, normResource, op, payload, id);
         });
         if (!ok) {
@@ -38083,7 +38266,7 @@ class S3dbReplicator extends BaseReplicator {
       }
       return results;
     } else {
-      const [ok, error, result] = await tryFn(async () => {
+      const [ok, error, result] = await tryFn$1(async () => {
         return await this._replicateToSingleDestination(entry, normResource, op, payload, id);
       });
       if (!ok) {
@@ -38218,7 +38401,7 @@ class S3dbReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, result] = await tryFn(() => this.replicate({
+      const [ok, err, result] = await tryFn$1(() => this.replicate({
         resource: resourceName,
         operation: record.operation,
         id: record.id,
@@ -38252,7 +38435,7 @@ class S3dbReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.targetDatabase) {
         throw new ReplicationError("No target database configured for connection test", {
           operation: "testConnection",
@@ -38439,7 +38622,7 @@ class SqsReplicator extends BaseReplicator {
     await super.initialize(database);
     await requirePluginDependency("sqs-replicator");
     if (!this.sqsClient) {
-      const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
+      const [ok, err, sdk] = await tryFn$1(() => import('@aws-sdk/client-sqs'));
       if (!ok) {
         if (this.config.verbose) {
           console.warn(`[SqsReplicator] Failed to import SQS SDK: ${err.message}`);
@@ -38470,7 +38653,7 @@ class SqsReplicator extends BaseReplicator {
     if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
       const queueUrls = this.getQueueUrlsForResource(resource);
       const transformedData = this._applyTransformer(resource, data);
@@ -38517,7 +38700,7 @@ class SqsReplicator extends BaseReplicator {
     if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
       const queueUrls = this.getQueueUrlsForResource(resource);
       const batchSize = 10;
@@ -38528,7 +38711,7 @@ class SqsReplicator extends BaseReplicator {
       const results = [];
       const errors = [];
       for (const batch of batches) {
-        const [okBatch, errBatch] = await tryFn(async () => {
+        const [okBatch, errBatch] = await tryFn$1(async () => {
           const entries = batch.map((record, index) => ({
             Id: `${record.id}-${index}`,
             MessageBody: JSON.stringify(this.createMessage(
@@ -38590,7 +38773,7 @@ class SqsReplicator extends BaseReplicator {
     return { success: false, error: errorMessage };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       if (!this.sqsClient) {
         await this.initialize(this.database);
       }
@@ -38700,7 +38883,7 @@ class TursoReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
     await requirePluginDependency("turso-replicator");
-    const [ok, err, sdk] = await tryFn(() => import('@libsql/client'));
+    const [ok, err, sdk] = await tryFn$1(() => import('@libsql/client'));
     if (!ok) {
       throw new ReplicationError("Failed to import Turso SDK", {
         operation: "initialize",
@@ -38714,7 +38897,7 @@ class TursoReplicator extends BaseReplicator {
       url: this.url,
       authToken: this.authToken
     });
-    const [okTest, errTest] = await tryFn(async () => {
+    const [okTest, errTest] = await tryFn$1(async () => {
       await this.client.execute("SELECT 1");
     });
     if (!okTest) {
@@ -38739,7 +38922,7 @@ class TursoReplicator extends BaseReplicator {
    */
   async syncSchemas(database) {
     for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
-      const [okRes, errRes, resource] = await tryFn(async () => {
+      const [okRes, errRes, resource] = await tryFn$1(async () => {
         return await database.getResource(resourceName);
       });
       if (!okRes) {
@@ -38755,7 +38938,7 @@ class TursoReplicator extends BaseReplicator {
       );
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
-        const [okSync, errSync] = await tryFn(async () => {
+        const [okSync, errSync] = await tryFn$1(async () => {
           await this.syncTableSchema(tableName, attributes);
         });
         if (!okSync) {
@@ -38777,7 +38960,7 @@ class TursoReplicator extends BaseReplicator {
    * Sync a single table schema
    */
   async syncTableSchema(tableName, attributes) {
-    const [okCheck, errCheck, result] = await tryFn(async () => {
+    const [okCheck, errCheck, result] = await tryFn$1(async () => {
       return await this.client.execute({
         sql: "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         args: [tableName]
@@ -38819,7 +39002,7 @@ ${createSQL}`);
       return;
     }
     if (this.schemaSync.strategy === "alter" && this.schemaSync.autoCreateColumns) {
-      const [okPragma, errPragma, pragmaResult] = await tryFn(async () => {
+      const [okPragma, errPragma, pragmaResult] = await tryFn$1(async () => {
         return await this.client.execute(`PRAGMA table_info(${tableName})`);
       });
       if (okPragma) {
@@ -38871,7 +39054,7 @@ ${createSQL}`);
     const results = [];
     const errors = [];
     for (const table of tables) {
-      const [okTable, errTable] = await tryFn(async () => {
+      const [okTable, errTable] = await tryFn$1(async () => {
         if (operation === "insert") {
           const cleanData = this._cleanInternalFields(data);
           const keys = Object.keys(cleanData);
@@ -39199,7 +39382,7 @@ class WebhookReplicator extends BaseReplicator {
     if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       const transformedData = this._applyTransformer(resource, data);
       const payload = this.createPayload(resource, operation, transformedData, id, beforeData);
       const response = await this._makeRequest(payload);
@@ -39237,7 +39420,7 @@ class WebhookReplicator extends BaseReplicator {
     if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       if (this.batch) {
         const payloads = records.map(
           (record) => this.createPayload(
@@ -39304,7 +39487,7 @@ class WebhookReplicator extends BaseReplicator {
     return { success: false, error: err.message };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       const testPayload = {
         test: true,
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -39458,7 +39641,7 @@ class ReplicatorPlugin extends Plugin {
     return filtered;
   }
   async getCompleteData(resource, data) {
-    const [ok, err, completeRecord] = await tryFn(() => resource.get(data.id));
+    const [ok, err, completeRecord] = await tryFn$1(() => resource.get(data.id));
     return ok ? completeRecord : data;
   }
   installEventListeners(resource, database, plugin) {
@@ -39466,7 +39649,7 @@ class ReplicatorPlugin extends Plugin {
       return;
     }
     const insertHandler = async (data) => {
-      const [ok, error] = await tryFn(async () => {
+      const [ok, error] = await tryFn$1(async () => {
         const completeData = { ...data, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
         await plugin.processReplicatorEvent("insert", resource.name, completeData.id, completeData);
       });
@@ -39478,7 +39661,7 @@ class ReplicatorPlugin extends Plugin {
       }
     };
     const updateHandler = async (data, beforeData) => {
-      const [ok, error] = await tryFn(async () => {
+      const [ok, error] = await tryFn$1(async () => {
         const completeData = await plugin.getCompleteData(resource, data);
         const dataWithTimestamp = { ...completeData, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
         await plugin.processReplicatorEvent("update", resource.name, completeData.id, dataWithTimestamp, beforeData);
@@ -39491,7 +39674,7 @@ class ReplicatorPlugin extends Plugin {
       }
     };
     const deleteHandler = async (data) => {
-      const [ok, error] = await tryFn(async () => {
+      const [ok, error] = await tryFn$1(async () => {
         await plugin.processReplicatorEvent("delete", resource.name, data.id, data);
       });
       if (!ok) {
@@ -39514,7 +39697,7 @@ class ReplicatorPlugin extends Plugin {
   async onInstall() {
     if (this.config.persistReplicatorLog) {
       const logResourceName = this.logResourceName;
-      const [ok, err, logResource] = await tryFn(() => this.database.createResource({
+      const [ok, err, logResource] = await tryFn$1(() => this.database.createResource({
         name: logResourceName,
         attributes: {
           id: "string|required",
@@ -39584,7 +39767,7 @@ class ReplicatorPlugin extends Plugin {
   async retryWithBackoff(operation, maxRetries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const [ok, error, result] = await tryFn(operation);
+      const [ok, error, result] = await tryFn$1(operation);
       if (ok) {
         return result;
       } else {
@@ -39605,7 +39788,7 @@ class ReplicatorPlugin extends Plugin {
     throw lastError;
   }
   async logError(replicator, resourceName, operation, recordId, data, error) {
-    const [ok, logError] = await tryFn(async () => {
+    const [ok, logError] = await tryFn$1(async () => {
       if (this.replicatorLog) {
         await this.replicatorLog.insert({
           replicator: replicator.name || replicator.id,
@@ -39643,7 +39826,7 @@ class ReplicatorPlugin extends Plugin {
       return;
     }
     const promises = applicableReplicators.map(async (replicator) => {
-      const [ok, error, result] = await tryFn(async () => {
+      const [ok, error, result] = await tryFn$1(async () => {
         const result2 = await this.retryWithBackoff(
           () => replicator.replicate(resourceName, operation, data, recordId, beforeData),
           this.config.maxRetries
@@ -39688,8 +39871,8 @@ class ReplicatorPlugin extends Plugin {
       return;
     }
     const promises = applicableReplicators.map(async (replicator) => {
-      const [wrapperOk, wrapperError] = await tryFn(async () => {
-        const [ok, err, result] = await tryFn(
+      const [wrapperOk, wrapperError] = await tryFn$1(async () => {
+        const [ok, err, result] = await tryFn$1(
           () => replicator.replicate(item.resourceName, item.operation, item.data, item.recordId, item.beforeData)
         );
         if (!ok) {
@@ -39753,7 +39936,7 @@ class ReplicatorPlugin extends Plugin {
       timestamp: typeof item.timestamp === "number" ? item.timestamp : Date.now(),
       createdAt: item.createdAt || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
     };
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await logRes.insert(logItem);
     });
     if (!ok) {
@@ -39765,7 +39948,7 @@ class ReplicatorPlugin extends Plugin {
   }
   async updateReplicatorLog(logId, updates) {
     if (!this.replicatorLog) return;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await tryFn$1(async () => {
       await this.replicatorLog.patch(logId, {
         ...updates,
         lastAttempt: (/* @__PURE__ */ new Date()).toISOString()
@@ -39827,7 +40010,7 @@ class ReplicatorPlugin extends Plugin {
     });
     let retried = 0;
     for (const log of failedLogs || []) {
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await tryFn$1(async () => {
         await this.processReplicatorEvent(
           log.operation,
           log.resourceName,
@@ -39861,7 +40044,7 @@ class ReplicatorPlugin extends Plugin {
         let offset = 0;
         const pageSize = this.config.batchSize || 100;
         while (true) {
-          const [ok, err, page] = await tryFn(() => resource.page({ offset, size: pageSize }));
+          const [ok, err, page] = await tryFn$1(() => resource.page({ offset, size: pageSize }));
           if (!ok || !page) break;
           const records = Array.isArray(page) ? page : page.items || [];
           if (records.length === 0) break;
@@ -39875,10 +40058,10 @@ class ReplicatorPlugin extends Plugin {
     this.emit("plg:replicator:sync-completed", { replicatorId, stats: this.stats });
   }
   async stop() {
-    const [ok, error] = await tryFn(async () => {
+    const [ok, error] = await tryFn$1(async () => {
       if (this.replicators && this.replicators.length > 0) {
         const cleanupPromises = this.replicators.map(async (replicator) => {
-          const [replicatorOk, replicatorError] = await tryFn(async () => {
+          const [replicatorOk, replicatorError] = await tryFn$1(async () => {
             if (replicator && typeof replicator.stop === "function") {
               await replicator.stop();
             }
@@ -39974,7 +40157,7 @@ class S3QueuePlugin extends Plugin {
       throw new Error(`S3QueuePlugin: resource '${this.config.resource}' not found`);
     }
     const queueName = this.queueResourceName;
-    const [ok, err] = await tryFn(
+    const [ok, err] = await tryFn$1(
       () => this.database.createResource({
         name: queueName,
         attributes: {
@@ -40129,7 +40312,7 @@ class S3QueuePlugin extends Plugin {
   }
   async claimMessage() {
     const now = Date.now();
-    const [ok, err, messages] = await tryFn(
+    const [ok, err, messages] = await tryFn$1(
       () => this.queueResource.query({
         status: "pending"
       })
@@ -40208,7 +40391,7 @@ class S3QueuePlugin extends Plugin {
     }
     this.processedCache.set(msg.id, Date.now());
     await this.releaseLock(msg.id);
-    const [okGet, errGet, msgWithETag] = await tryFn(
+    const [okGet, errGet, msgWithETag] = await tryFn$1(
       () => this.queueResource.get(msg.id)
     );
     if (!okGet || !msgWithETag) {
@@ -40228,7 +40411,7 @@ class S3QueuePlugin extends Plugin {
     if (this.config.verbose) {
       console.log(`[attemptClaim] Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`);
     }
-    const [ok, err, result] = await tryFn(
+    const [ok, err, result] = await tryFn$1(
       () => this.queueResource.updateConditional(msgWithETag.id, {
         status: "processing",
         claimedBy: this.workerId,
@@ -40250,7 +40433,7 @@ class S3QueuePlugin extends Plugin {
     if (this.config.verbose) {
       console.log(`[attemptClaim] Successfully claimed ${msg.id}`);
     }
-    const [okRecord, errRecord, record] = await tryFn(
+    const [okRecord, errRecord, record] = await tryFn$1(
       () => this.targetResource.get(msgWithETag.originalId)
     );
     if (!okRecord) {
@@ -40347,7 +40530,7 @@ class S3QueuePlugin extends Plugin {
     });
   }
   async getStats() {
-    const [ok, err, allMessages] = await tryFn(
+    const [ok, err, allMessages] = await tryFn$1(
       () => this.queueResource.list()
     );
     if (!ok) {
@@ -40374,7 +40557,7 @@ class S3QueuePlugin extends Plugin {
   async createDeadLetterResource() {
     if (!this.config.deadLetterResource) return;
     const resourceName = this.config.deadLetterResource;
-    const [ok, err] = await tryFn(
+    const [ok, err] = await tryFn$1(
       () => this.database.createResource({
         name: resourceName,
         attributes: {
@@ -40538,7 +40721,7 @@ class SchedulerPlugin extends Plugin {
     this.emit("db:plugin:initialized", { jobs: this.jobs.size });
   }
   async _createJobHistoryResource() {
-    const [ok] = await tryFn(() => this.database.createResource({
+    const [ok] = await tryFn$1(() => this.database.createResource({
       name: this.config.jobHistoryResource,
       attributes: {
         id: "string|required",
@@ -40757,11 +40940,11 @@ class SchedulerPlugin extends Plugin {
         throw lastError;
       }
     } finally {
-      await tryFn(() => storage.releaseLock(lockKey));
+      await tryFn$1(() => storage.releaseLock(lockKey));
     }
   }
   async _persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, error, retryCount) {
-    const [ok, err] = await tryFn(
+    const [ok, err] = await tryFn$1(
       () => this.database.resources[this.config.jobHistoryResource].insert({
         id: executionId,
         jobName,
@@ -40781,7 +40964,7 @@ class SchedulerPlugin extends Plugin {
   }
   async _executeHook(hook, ...args) {
     if (typeof hook === "function") {
-      const [ok, err] = await tryFn(() => hook(...args));
+      const [ok, err] = await tryFn$1(() => hook(...args));
       if (!ok && this.config.verbose) {
         console.warn("[SchedulerPlugin] Hook execution failed:", err.message);
       }
@@ -40902,7 +41085,7 @@ class SchedulerPlugin extends Plugin {
     if (status) {
       queryParams.status = status;
     }
-    const [ok, err, history] = await tryFn(
+    const [ok, err, history] = await tryFn$1(
       () => this.database.resources[this.config.jobHistoryResource].query(queryParams)
     );
     if (!ok) {
@@ -41363,7 +41546,7 @@ class StateMachinePlugin extends Plugin {
     this.emit("db:plugin:initialized", { machines: Array.from(this.machines.keys()) });
   }
   async _createStateResources() {
-    const [logOk] = await tryFn(() => this.database.createResource({
+    const [logOk] = await tryFn$1(() => this.database.createResource({
       name: this.config.transitionLogResource,
       attributes: {
         id: "string|required",
@@ -41382,7 +41565,7 @@ class StateMachinePlugin extends Plugin {
         byDate: { fields: { createdAt: "string|maxlength:10" } }
       }
     }));
-    const [stateOk] = await tryFn(() => this.database.createResource({
+    const [stateOk] = await tryFn$1(() => this.database.createResource({
       name: this.config.stateResource,
       attributes: {
         id: "string|required",
@@ -41431,7 +41614,7 @@ class StateMachinePlugin extends Plugin {
         const guardName = stateConfig.guards[event];
         const guard = this.config.guards[guardName];
         if (guard) {
-          const [guardOk, guardErr, guardResult] = await tryFn(
+          const [guardOk, guardErr, guardResult] = await tryFn$1(
             () => guard(context, event, { database: this.database, machineId, entityId })
           );
           if (!guardOk || !guardResult) {
@@ -41585,7 +41768,7 @@ class StateMachinePlugin extends Plugin {
       let logOk = false;
       let lastLogErr;
       for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
-        const [ok, err] = await tryFn(
+        const [ok, err] = await tryFn$1(
           () => this.database.resources[this.config.transitionLogResource].insert({
             id: transitionId,
             machineId,
@@ -41621,11 +41804,11 @@ class StateMachinePlugin extends Plugin {
         lastTransition: transitionId,
         updatedAt: now
       };
-      const [updateOk] = await tryFn(
+      const [updateOk] = await tryFn$1(
         () => this.database.resources[this.config.stateResource].update(stateId, stateData)
       );
       if (!updateOk) {
-        const [insertOk, insertErr] = await tryFn(
+        const [insertOk, insertErr] = await tryFn$1(
           () => this.database.resources[this.config.stateResource].insert({ id: stateId, ...stateData })
         );
         if (!insertOk && this.config.verbose) {
@@ -41665,7 +41848,7 @@ class StateMachinePlugin extends Plugin {
    */
   async _releaseTransitionLock(lockName) {
     const storage = this.getStorage();
-    const [ok, err] = await tryFn(() => storage.releaseLock(lockName));
+    const [ok, err] = await tryFn$1(() => storage.releaseLock(lockName));
     if (!ok && this.config.verbose) {
       console.warn(`[StateMachinePlugin] Failed to release lock '${lockName}':`, err.message);
     }
@@ -41709,7 +41892,7 @@ class StateMachinePlugin extends Plugin {
     }
     if (this.config.persistTransitions) {
       const stateId = `${machineId}_${entityId}`;
-      const [ok, err, stateRecord] = await tryFn(
+      const [ok, err, stateRecord] = await tryFn$1(
         () => this.database.resources[this.config.stateResource].get(stateId)
       );
       if (ok && stateRecord) {
@@ -41752,7 +41935,7 @@ class StateMachinePlugin extends Plugin {
       return [];
     }
     const { limit = 50, offset = 0 } = options;
-    const [ok, err, transitions] = await tryFn(
+    const [ok, err, transitions] = await tryFn$1(
       () => this.database.resources[this.config.transitionLogResource].query({
         machineId,
         entityId
@@ -41794,7 +41977,7 @@ class StateMachinePlugin extends Plugin {
     if (this.config.persistTransitions) {
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const stateId = `${machineId}_${entityId}`;
-      const [ok, err] = await tryFn(
+      const [ok, err] = await tryFn$1(
         () => this.database.resources[this.config.stateResource].insert({
           id: stateId,
           machineId,
@@ -41893,7 +42076,7 @@ class StateMachinePlugin extends Plugin {
       }
       return entities;
     }
-    const [ok, err, records] = await tryFn(
+    const [ok, err, records] = await tryFn$1(
       () => this.database.resources[this.config.stateResource].query({
         machineId,
         currentState: stateName
@@ -41916,13 +42099,13 @@ class StateMachinePlugin extends Plugin {
       return;
     }
     const stateId = `${machineId}_${entityId}`;
-    const [ok, err, stateRecord] = await tryFn(
+    const [ok, err, stateRecord] = await tryFn$1(
       () => this.database.resources[this.config.stateResource].get(stateId)
     );
     if (ok && stateRecord) {
       const triggerCounts = stateRecord.triggerCounts || {};
       triggerCounts[triggerName] = (triggerCounts[triggerName] || 0) + 1;
-      await tryFn(
+      await tryFn$1(
         () => this.database.resources[this.config.stateResource].patch(stateId, { triggerCounts })
       );
     }
@@ -42026,7 +42209,7 @@ class StateMachinePlugin extends Plugin {
             });
           } catch (error) {
             if (trigger.event) {
-              await tryFn(() => this.send(machineId, entity.entityId, trigger.event, {
+              await tryFn$1(() => this.send(machineId, entity.entityId, trigger.event, {
                 ...entity.context,
                 triggerError: error.message
               }));
@@ -42198,7 +42381,7 @@ class StateMachinePlugin extends Plugin {
                 resource = resourceConfig.resource;
               }
               if (resource) {
-                const [ok] = await tryFn(
+                const [ok] = await tryFn$1(
                   () => resource.patch(entity.entityId, { [resourceConfig.stateField]: trigger.targetState })
                 );
                 if (!ok && this.config.verbose) {
@@ -42553,7 +42736,7 @@ class S3TfStateDriver extends TfStateDriver {
    */
   async listStateFiles() {
     const { bucket, prefix } = this.connectionConfig;
-    const [ok, err, data] = await tryFn(async () => {
+    const [ok, err, data] = await tryFn$1(async () => {
       return await this.client.listObjectsV2({
         Bucket: bucket,
         Prefix: prefix
@@ -42579,7 +42762,7 @@ class S3TfStateDriver extends TfStateDriver {
    */
   async readStateFile(path) {
     const { bucket } = this.connectionConfig;
-    const [ok, err, data] = await tryFn(async () => {
+    const [ok, err, data] = await tryFn$1(async () => {
       return await this.client.getObject({
         Bucket: bucket,
         Key: path
@@ -42600,7 +42783,7 @@ class S3TfStateDriver extends TfStateDriver {
    */
   async getStateFileMetadata(path) {
     const { bucket } = this.connectionConfig;
-    const [ok, err, data] = await tryFn(async () => {
+    const [ok, err, data] = await tryFn$1(async () => {
       return await this.client.headObject({
         Bucket: bucket,
         Key: path
@@ -42814,7 +42997,7 @@ class TfStatePlugin extends Plugin {
       }
     }
     {
-      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+      const [created, createErr, resource] = await tryFn$1(() => this.database.createResource({
         name: this.lineagesName,
         attributes: {
           id: "string|required",
@@ -42840,7 +43023,7 @@ class TfStatePlugin extends Plugin {
       }
     }
     {
-      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+      const [created, createErr, resource] = await tryFn$1(() => this.database.createResource({
         name: this.stateFilesName,
         attributes: {
           id: "string|required",
@@ -42875,7 +43058,7 @@ class TfStatePlugin extends Plugin {
       }
     }
     {
-      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+      const [created, createErr, resource] = await tryFn$1(() => this.database.createResource({
         name: this.resourceName,
         attributes: {
           id: "string|required",
@@ -42916,7 +43099,7 @@ class TfStatePlugin extends Plugin {
       }
     }
     if (this.trackDiffs) {
-      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+      const [created, createErr, resource] = await tryFn$1(() => this.database.createResource({
         name: this.diffsName,
         attributes: {
           id: "string|required",
@@ -43160,7 +43343,7 @@ class TfStatePlugin extends Plugin {
     }
     try {
       const client = options.client || this.database.client;
-      const [ok, err, data] = await tryFn(async () => {
+      const [ok, err, data] = await tryFn$1(async () => {
         return await client.getObject(key);
       });
       if (!ok) {
@@ -43218,7 +43401,7 @@ class TfStatePlugin extends Plugin {
         sha256Hash,
         importedAt: currentTime
       };
-      const [insertOk, insertErr, stateFileResult] = await tryFn(async () => {
+      const [insertOk, insertErr, stateFileResult] = await tryFn$1(async () => {
         return await this.stateFilesResource.insert(stateFileRecord);
       });
       if (!insertOk) {
@@ -43289,7 +43472,7 @@ class TfStatePlugin extends Plugin {
       console.log(`[TfStatePlugin] Listing S3 objects: s3://${bucket}/${pattern}`);
     }
     try {
-      const [ok, err, data] = await tryFn(async () => {
+      const [ok, err, data] = await tryFn$1(async () => {
         const params = {};
         const prefixMatch = pattern.match(/^([^*?[\]]+)/);
         if (prefixMatch) {
@@ -43394,7 +43577,7 @@ class TfStatePlugin extends Plugin {
     if (!lineageUuid) {
       throw new TfStateError("Lineage UUID is required for state tracking");
     }
-    const [getOk, getErr, existingLineage] = await tryFn(async () => {
+    const [getOk, getErr, existingLineage] = await tryFn$1(async () => {
       return await this.lineagesResource.get(lineageUuid);
     });
     const currentTime = Date.now();
@@ -43482,7 +43665,7 @@ class TfStatePlugin extends Plugin {
       sha256Hash,
       importedAt: currentTime
     };
-    const [insertOk, insertErr, stateFileResult] = await tryFn(async () => {
+    const [insertOk, insertErr, stateFileResult] = await tryFn$1(async () => {
       return await this.stateFilesResource.insert(stateFileRecord);
     });
     if (!insertOk) {
@@ -43541,13 +43724,13 @@ class TfStatePlugin extends Plugin {
     if (!fs$1.existsSync(filePath)) {
       throw new StateFileNotFoundError(filePath);
     }
-    const [ok, err, content] = await tryFn(async () => {
+    const [ok, err, content] = await tryFn$1(async () => {
       return await fs.readFile(filePath, "utf-8");
     });
     if (!ok) {
       throw new InvalidStateFileError(filePath, `Failed to read file: ${err.message}`);
     }
-    const [parseOk, parseErr, state] = await tryFn(async () => {
+    const [parseOk, parseErr, state] = await tryFn$1(async () => {
       return JSON.parse(content);
     });
     if (!parseOk) {
@@ -43770,7 +43953,7 @@ class TfStatePlugin extends Plugin {
         `[TfStatePlugin] Using previous state: serial ${previousSerial} (id: ${previousStateFileId})`
       );
     }
-    const [ok, err, diff] = await tryFn(async () => {
+    const [ok, err, diff] = await tryFn$1(async () => {
       return await this._computeDiff(previousSerial, currentSerial, lineageId);
     });
     if (!ok) {
@@ -43900,7 +44083,7 @@ class TfStatePlugin extends Plugin {
         deleted: diff.deleted
       }
     };
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await tryFn$1(async () => {
       return await this.diffsResource.insert(diffRecord);
     });
     if (!ok) {
@@ -43932,7 +44115,7 @@ class TfStatePlugin extends Plugin {
     for (let i = 0; i < resources.length; i += parallelism) {
       const batch = resources.slice(i, i + parallelism);
       const batchPromises = batch.map(async (resource) => {
-        const [ok, err, result] = await tryFn(async () => {
+        const [ok, err, result] = await tryFn$1(async () => {
           return await this.resource.insert(resource);
         });
         if (ok) {
@@ -43969,7 +44152,7 @@ class TfStatePlugin extends Plugin {
       console.log(`[TfStatePlugin] Setting up cron monitoring: ${this.monitorCron}`);
     }
     await requirePluginDependency("tfstate-plugin");
-    const [ok, err, cronModule] = await tryFn(() => import('node-cron'));
+    const [ok, err, cronModule] = await tryFn$1(() => import('node-cron'));
     if (!ok) {
       throw new TfStateError(`Failed to import node-cron: ${err.message}`);
     }
@@ -44055,7 +44238,7 @@ class TfStatePlugin extends Plugin {
               sha256Hash,
               importedAt: currentTime
             };
-            const [insertOk, insertErr, stateFileResult] = await tryFn(async () => {
+            const [insertOk, insertErr, stateFileResult] = await tryFn$1(async () => {
               return await this.stateFilesResource.insert(stateFileRecord);
             });
             if (!insertOk) {
@@ -44450,7 +44633,7 @@ class TfStatePlugin extends Plugin {
       newSerial
     }, { limit: 1 });
     if (diffs.length === 0) {
-      const [ok, err, result] = await tryFn(async () => {
+      const [ok, err, result] = await tryFn$1(async () => {
         return await this._computeDiff(oldSerial, newSerial);
       });
       if (!ok) {
@@ -44811,7 +44994,7 @@ class TTLPlugin extends Plugin {
     }
     if (config.field === "_createdAt" && this.database) {
       const resource = this.database.resources[resourceName];
-      if (resource && resource.config && resource.config.timestamps === false) {
+      if (resource && resource.$schema.timestamps === false) {
         console.warn(
           `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
         );
@@ -44925,7 +45108,7 @@ class TTLPlugin extends Plugin {
   async _removeFromIndex(resourceName, recordId) {
     try {
       const indexId = `${resourceName}:${recordId}`;
-      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
+      const [ok, err] = await tryFn$1(() => this.expirationIndex.delete(indexId));
       if (this.verbose && ok) {
         console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
       }
@@ -45033,7 +45216,7 @@ class TTLPlugin extends Plugin {
         return;
       }
       const resource = this.database.resources[entry.resourceName];
-      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
+      const [ok, err, record] = await tryFn$1(() => resource.get(entry.recordId));
       if (!ok || !record) {
         await this.expirationIndex.delete(entry.id);
         return;
@@ -46648,7 +46831,7 @@ class MemoryStorage {
     }
     const snapshot = this.snapshot();
     const json = JSON.stringify(snapshot, null, 2);
-    const [ok, err] = await tryFn(() => fs.writeFile(path, json, "utf-8"));
+    const [ok, err] = await tryFn$1(() => fs.writeFile(path, json, "utf-8"));
     if (!ok) {
       throw new Error(`Failed to save to disk: ${err.message}`);
     }
@@ -46665,7 +46848,7 @@ class MemoryStorage {
     if (!path) {
       throw new Error("No persist path configured");
     }
-    const [ok, err, json] = await tryFn(() => fs.readFile(path, "utf-8"));
+    const [ok, err, json] = await tryFn$1(() => fs.readFile(path, "utf-8"));
     if (!ok) {
       throw new Error(`Failed to load from disk: ${err.message}`);
     }
@@ -48145,7 +48328,7 @@ class SessionManager {
       metadata,
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     };
-    const [ok, err, session] = await tryFn(
+    const [ok, err, session] = await tryFn$1(
       () => this.sessionResource.insert(sessionData)
     );
     if (!ok) {
@@ -48167,7 +48350,7 @@ class SessionManager {
     if (!sessionId) {
       return { valid: false, session: null, reason: "No session ID provided" };
     }
-    const [ok, err, session] = await tryFn(
+    const [ok, err, session] = await tryFn$1(
       () => this.sessionResource.get(sessionId)
     );
     if (!ok || !session) {
@@ -48188,7 +48371,7 @@ class SessionManager {
     if (!sessionId) {
       return null;
     }
-    const [ok, , session] = await tryFn(
+    const [ok, , session] = await tryFn$1(
       () => this.sessionResource.get(sessionId)
     );
     return ok ? session : null;
@@ -48208,7 +48391,7 @@ class SessionManager {
       throw new Error("Session not found");
     }
     const updatedMetadata = { ...session.metadata, ...metadata };
-    const [ok, err, updated] = await tryFn(
+    const [ok, err, updated] = await tryFn$1(
       () => this.sessionResource.update(sessionId, {
         metadata: updatedMetadata
       })
@@ -48227,7 +48410,7 @@ class SessionManager {
     if (!sessionId) {
       return false;
     }
-    const [ok] = await tryFn(
+    const [ok] = await tryFn$1(
       () => this.sessionResource.delete(sessionId)
     );
     return ok;
@@ -48241,7 +48424,7 @@ class SessionManager {
     if (!userId) {
       return 0;
     }
-    const [ok, , sessions] = await tryFn(
+    const [ok, , sessions] = await tryFn$1(
       () => this.sessionResource.query({ userId })
     );
     if (!ok || !sessions || sessions.length === 0) {
@@ -48263,7 +48446,7 @@ class SessionManager {
     if (!userId) {
       return [];
     }
-    const [ok, , sessions] = await tryFn(
+    const [ok, , sessions] = await tryFn$1(
       () => this.sessionResource.query({ userId })
     );
     if (!ok || !sessions) {
@@ -48360,7 +48543,7 @@ class SessionManager {
    * @returns {Promise<number>} Number of sessions cleaned up
    */
   async cleanupExpiredSessions() {
-    const [ok, , sessions] = await tryFn(
+    const [ok, , sessions] = await tryFn$1(
       () => this.sessionResource.list({ limit: 1e3 })
     );
     if (!ok || !sessions) {
@@ -48408,7 +48591,7 @@ class SessionManager {
    * @returns {Promise<Object>} Session statistics
    */
   async getStatistics() {
-    const [ok, , sessions] = await tryFn(
+    const [ok, , sessions] = await tryFn$1(
       () => this.sessionResource.list({ limit: 1e4 })
     );
     if (!ok || !sessions) {
@@ -51509,8 +51692,12 @@ class NetworkMonitor {
     if (!this.config.persist) {
       return;
     }
-    this.sessionsResource = await this.plugin.database.createResource({
-      name: "network_sessions",
+    const resourceNames = this.plugin.resourceNames || {};
+    const sessionsName = resourceNames.networkSessions || "plg_puppeteer_network_sessions";
+    const requestsName = resourceNames.networkRequests || "plg_puppeteer_network_requests";
+    const errorsName = resourceNames.networkErrors || "plg_puppeteer_network_errors";
+    const [sessionsCreated, sessionsErr, sessionsResource] = await tryFn$1(() => this.plugin.database.createResource({
+      name: sessionsName,
       attributes: {
         sessionId: "string|required",
         url: "string|required",
@@ -51543,14 +51730,16 @@ class NetworkMonitor {
         byDate: { fields: { date: "string" } },
         byDomain: { fields: { domain: "string" } }
       }
-    }).catch(async (err) => {
-      if (err.name === "ResourceAlreadyExistsError") {
-        return await this.plugin.database.getResource("network_sessions");
-      }
-      throw err;
-    });
-    this.requestsResource = await this.plugin.database.createResource({
-      name: "network_requests",
+    }));
+    if (sessionsCreated) {
+      this.sessionsResource = sessionsResource;
+    } else if (this.plugin.database.resources?.[sessionsName]) {
+      this.sessionsResource = this.plugin.database.resources[sessionsName];
+    } else {
+      throw sessionsErr;
+    }
+    const [requestsCreated, requestsErr, requestsResource] = await tryFn$1(() => this.plugin.database.createResource({
+      name: requestsName,
       attributes: {
         requestId: "string|required",
         sessionId: "string|required",
@@ -51613,14 +51802,16 @@ class NetworkMonitor {
         bySize: { fields: { size: "number" } },
         byDomain: { fields: { domain: "string" } }
       }
-    }).catch(async (err) => {
-      if (err.name === "ResourceAlreadyExistsError") {
-        return await this.plugin.database.getResource("network_requests");
-      }
-      throw err;
-    });
-    this.errorsResource = await this.plugin.database.createResource({
-      name: "network_errors",
+    }));
+    if (requestsCreated) {
+      this.requestsResource = requestsResource;
+    } else if (this.plugin.database.resources?.[requestsName]) {
+      this.requestsResource = this.plugin.database.resources[requestsName];
+    } else {
+      throw requestsErr;
+    }
+    const [errorsCreated, errorsErr, errorsResource] = await tryFn$1(() => this.plugin.database.createResource({
+      name: errorsName,
       attributes: {
         errorId: "string|required",
         sessionId: "string|required",
@@ -51652,12 +51843,14 @@ class NetworkMonitor {
         byDate: { fields: { date: "string" } },
         byDomain: { fields: { domain: "string" } }
       }
-    }).catch(async (err) => {
-      if (err.name === "ResourceAlreadyExistsError") {
-        return await this.plugin.database.getResource("network_errors");
-      }
-      throw err;
-    });
+    }));
+    if (errorsCreated) {
+      this.errorsResource = errorsResource;
+    } else if (this.plugin.database.resources?.[errorsName]) {
+      this.errorsResource = this.plugin.database.resources[errorsName];
+    } else {
+      throw errorsErr;
+    }
     this.plugin.emit("networkMonitor.initialized", {
       persist: this.config.persist
     });
@@ -52171,8 +52364,12 @@ class ConsoleMonitor {
     if (!this.config.persist) {
       return;
     }
-    this.sessionsResource = await this.plugin.database.createResource({
-      name: "console_sessions",
+    const resourceNames = this.plugin.resourceNames || {};
+    const sessionsName = resourceNames.consoleSessions || "plg_puppeteer_console_sessions";
+    const messagesName = resourceNames.consoleMessages || "plg_puppeteer_console_messages";
+    const errorsName = resourceNames.consoleErrors || "plg_puppeteer_console_errors";
+    const [sessionsCreated, sessionsErr, sessionsResource] = await tryFn$1(() => this.plugin.database.createResource({
+      name: sessionsName,
       attributes: {
         sessionId: "string|required",
         url: "string|required",
@@ -52202,14 +52399,16 @@ class ConsoleMonitor {
         byDate: { fields: { date: "string" } },
         byDomain: { fields: { domain: "string" } }
       }
-    }).catch(async (err) => {
-      if (err.name === "ResourceAlreadyExistsError") {
-        return await this.plugin.database.getResource("console_sessions");
-      }
-      throw err;
-    });
-    this.messagesResource = await this.plugin.database.createResource({
-      name: "console_messages",
+    }));
+    if (sessionsCreated) {
+      this.sessionsResource = sessionsResource;
+    } else if (this.plugin.database.resources?.[sessionsName]) {
+      this.sessionsResource = this.plugin.database.resources[sessionsName];
+    } else {
+      throw sessionsErr;
+    }
+    const [messagesCreated, messagesErr, messagesResource] = await tryFn$1(() => this.plugin.database.createResource({
+      name: messagesName,
       attributes: {
         messageId: "string|required",
         sessionId: "string|required",
@@ -52239,14 +52438,16 @@ class ConsoleMonitor {
         byDate: { fields: { date: "string" } },
         byDomain: { fields: { domain: "string" } }
       }
-    }).catch(async (err) => {
-      if (err.name === "ResourceAlreadyExistsError") {
-        return await this.plugin.database.getResource("console_messages");
-      }
-      throw err;
-    });
-    this.errorsResource = await this.plugin.database.createResource({
-      name: "console_errors",
+    }));
+    if (messagesCreated) {
+      this.messagesResource = messagesResource;
+    } else if (this.plugin.database.resources?.[messagesName]) {
+      this.messagesResource = this.plugin.database.resources[messagesName];
+    } else {
+      throw messagesErr;
+    }
+    const [errorsCreated, errorsErr, errorsResource] = await tryFn$1(() => this.plugin.database.createResource({
+      name: errorsName,
       attributes: {
         errorId: "string|required",
         sessionId: "string|required",
@@ -52281,12 +52482,14 @@ class ConsoleMonitor {
         byDate: { fields: { date: "string" } },
         byDomain: { fields: { domain: "string" } }
       }
-    }).catch(async (err) => {
-      if (err.name === "ResourceAlreadyExistsError") {
-        return await this.plugin.database.getResource("console_errors");
-      }
-      throw err;
-    });
+    }));
+    if (errorsCreated) {
+      this.errorsResource = errorsResource;
+    } else if (this.plugin.database.resources?.[errorsName]) {
+      this.errorsResource = this.plugin.database.resources[errorsName];
+    } else {
+      throw errorsErr;
+    }
     this.plugin.emit("consoleMonitor.initialized", {
       persist: this.config.persist
     });
@@ -55897,7 +56100,7 @@ function registerUIRoutes(app, plugin) {
       }
       let user = null;
       if (usingChallenge) {
-        const [okUser, errUser, challengeUser] = await tryFn(
+        const [okUser, errUser, challengeUser] = await tryFn$1(
           () => usersResource.get(challengePayload.userId)
         );
         if (!okUser || !challengeUser || challengeUser.email.toLowerCase() !== normalizedEmail) {
@@ -55908,7 +56111,7 @@ function registerUIRoutes(app, plugin) {
         }
         user = challengeUser;
       } else {
-        const [okQuery, errQuery, users] = await tryFn(
+        const [okQuery, errQuery, users] = await tryFn$1(
           () => usersResource.query({ email: normalizedEmail })
         );
         if (!okQuery || users.length === 0) {
@@ -55955,7 +56158,7 @@ function registerUIRoutes(app, plugin) {
           }
           return c.redirect(`/login?error=${encodeURIComponent("Email and password are required")}&email=${encodeURIComponent(email || "")}`);
         }
-        const [okVerify, errVerify, isValid] = await tryFn(
+        const [okVerify, errVerify, isValid] = await tryFn$1(
           () => verifyPassword(password, user.password)
         );
         if (!okVerify) {
@@ -56017,7 +56220,7 @@ function registerUIRoutes(app, plugin) {
       let hasMFA = false;
       let mfaDevices = [];
       if (config.mfa.enabled && plugin.mfaDevicesResource) {
-        const [okMFA, errMFA, devices] = await tryFn(
+        const [okMFA, errMFA, devices] = await tryFn$1(
           () => plugin.mfaDevicesResource.query({ userId: user.id, verified: true })
         );
         if (!okMFA && config.verbose) {
@@ -56101,7 +56304,7 @@ function registerUIRoutes(app, plugin) {
         }
       }
       const sessionDuration = rememberChoice === "1" ? "30d" : config.session.sessionExpiry;
-      const [okSession, errSession, session] = await tryFn(
+      const [okSession, errSession, session] = await tryFn$1(
         () => sessionManager.createSession({
           userId: user.id,
           metadata: {
@@ -56121,7 +56324,7 @@ function registerUIRoutes(app, plugin) {
         return c.redirect(`/login?error=${encodeURIComponent("Failed to create session. Please try again.")}&email=${encodeURIComponent(normalizedEmail)}`);
       }
       sessionManager.setSessionCookie(c, session.sessionId, session.expiresAt);
-      await tryFn(
+      await tryFn$1(
         () => usersResource.patch(user.id, {
           lastLoginAt: (/* @__PURE__ */ new Date()).toISOString(),
           lastLoginIp: clientIp
@@ -56162,7 +56365,7 @@ function registerUIRoutes(app, plugin) {
       if (!payload) {
         return c.redirect(`/login?error=${encodeURIComponent("MFA session expired. Please login again.")}`);
       }
-      const [okUser, , challengeUser] = await tryFn(
+      const [okUser, , challengeUser] = await tryFn$1(
         () => usersResource.get(payload.userId)
       );
       if (!okUser || !challengeUser) {
@@ -56241,7 +56444,7 @@ function registerUIRoutes(app, plugin) {
           return c.redirect(`/register?error=${encodeURIComponent("Registration is restricted to specific email domains")}&name=${encodeURIComponent(name)}`);
         }
       }
-      const [okCheck, errCheck, existingUsers] = await tryFn(
+      const [okCheck, errCheck, existingUsers] = await tryFn$1(
         () => usersResource.query({ email: normalizedEmail })
       );
       if (okCheck && existingUsers && existingUsers.length > 0) {
@@ -56264,7 +56467,7 @@ function registerUIRoutes(app, plugin) {
       if (supportsStatusField) {
         userRecord.status = initialActive ? "active" : "pending_verification";
       }
-      const [okUser, errUser, user] = await tryFn(
+      const [okUser, errUser, user] = await tryFn$1(
         () => usersResource.insert(userRecord)
       );
       if (!okUser) {
@@ -56348,7 +56551,7 @@ function registerUIRoutes(app, plugin) {
         return c.redirect(`/forgot-password?error=${encodeURIComponent("Email is required")}`);
       }
       const normalizedEmail = email.toLowerCase().trim();
-      const [okQuery, errQuery, users] = await tryFn(
+      const [okQuery, errQuery, users] = await tryFn$1(
         () => usersResource.query({ email: normalizedEmail })
       );
       const successMessage = "If an account exists with this email, you will receive password reset instructions.";
@@ -56359,7 +56562,7 @@ function registerUIRoutes(app, plugin) {
       const user = users[0];
       const resetToken = generatePasswordResetToken();
       const expiresAt = calculateExpiration("1h");
-      const [okToken, errToken] = await tryFn(
+      const [okToken, errToken] = await tryFn$1(
         () => plugin.passwordResetTokensResource.insert({
           userId: user.id,
           token: resetToken,
@@ -56399,7 +56602,7 @@ function registerUIRoutes(app, plugin) {
     if (!token) {
       return c.redirect(`/forgot-password?error=${encodeURIComponent("Invalid or missing reset token")}`);
     }
-    const [okQuery, errQuery, tokens] = await tryFn(
+    const [okQuery, errQuery, tokens] = await tryFn$1(
       () => plugin.passwordResetTokensResource.query({ token })
     );
     if (!okQuery || tokens.length === 0) {
@@ -56435,7 +56638,7 @@ function registerUIRoutes(app, plugin) {
         const errorMsg = passwordValidation.errors.join(", ");
         return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent(errorMsg)}`);
       }
-      const [okQuery, errQuery, tokens] = await tryFn(
+      const [okQuery, errQuery, tokens] = await tryFn$1(
         () => plugin.passwordResetTokensResource.query({ token })
       );
       if (!okQuery || tokens.length === 0) {
@@ -56448,7 +56651,7 @@ function registerUIRoutes(app, plugin) {
       if (resetToken.used) {
         return c.redirect(`/forgot-password?error=${encodeURIComponent("Reset link has already been used.")}`);
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.patch(resetToken.userId, {
           password
           // Auto-encrypted with 'secret' type
@@ -56460,7 +56663,7 @@ function registerUIRoutes(app, plugin) {
         }
         return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent("Failed to reset password. Please try again.")}`);
       }
-      await tryFn(
+      await tryFn$1(
         () => plugin.passwordResetTokensResource.patch(resetToken.id, { used: true })
       );
       await sessionManager.destroyUserSessions(resetToken.userId);
@@ -56476,7 +56679,7 @@ function registerUIRoutes(app, plugin) {
     try {
       const user = c.get("user");
       const currentSessionId = sessionManager.getSessionIdFromRequest(c.req);
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
@@ -56485,7 +56688,7 @@ function registerUIRoutes(app, plugin) {
         }
         return c.redirect(`/login?error=${encodeURIComponent("Failed to load profile. Please try again.")}`);
       }
-      const [okSessions, errSessions, allSessions] = await tryFn(
+      const [okSessions, errSessions, allSessions] = await tryFn$1(
         () => sessionManager.getUserSessions(userData.id)
       );
       const sessions = okSessions ? allSessions.map((session) => ({
@@ -56519,20 +56722,20 @@ function registerUIRoutes(app, plugin) {
         return c.redirect(`/profile?error=${encodeURIComponent("Name and email are required")}`);
       }
       const normalizedEmail = email.toLowerCase().trim();
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
         return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
       }
       if (normalizedEmail !== userData.email) {
-        const [okCheck, errCheck, existingUsers] = await tryFn(
+        const [okCheck, errCheck, existingUsers] = await tryFn$1(
           () => usersResource.query({ email: normalizedEmail })
         );
         if (okCheck && existingUsers.length > 0) {
           return c.redirect(`/profile?error=${encodeURIComponent("Email address is already in use")}`);
         }
-        const [okUpdate, errUpdate] = await tryFn(
+        const [okUpdate, errUpdate] = await tryFn$1(
           () => usersResource.patch(userData.id, {
             name: name.trim(),
             email: normalizedEmail,
@@ -56547,7 +56750,7 @@ function registerUIRoutes(app, plugin) {
         }
         return c.redirect(`/profile?success=${encodeURIComponent("Profile updated successfully. Please verify your new email address.")}`);
       } else {
-        const [okUpdate, errUpdate] = await tryFn(
+        const [okUpdate, errUpdate] = await tryFn$1(
           () => usersResource.patch(userData.id, {
             name: name.trim()
           })
@@ -56578,13 +56781,13 @@ function registerUIRoutes(app, plugin) {
       if (new_password !== confirm_new_password) {
         return c.redirect(`/profile?error=${encodeURIComponent("New passwords do not match")}`);
       }
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
         return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
       }
-      const [okVerify, errVerify, isValid] = await tryFn(
+      const [okVerify, errVerify, isValid] = await tryFn$1(
         () => verifyPassword(current_password, userData.password)
       );
       if (!okVerify || !isValid) {
@@ -56595,7 +56798,7 @@ function registerUIRoutes(app, plugin) {
         const errorMsg = passwordValidation.errors.join(", ");
         return c.redirect(`/profile?error=${encodeURIComponent(errorMsg)}`);
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.patch(userData.id, {
           password: new_password
           // Auto-encrypted with 'secret' type
@@ -56608,7 +56811,7 @@ function registerUIRoutes(app, plugin) {
         return c.redirect(`/profile?error=${encodeURIComponent("Failed to change password. Please try again.")}`);
       }
       const currentSessionId = sessionManager.getSessionIdFromRequest(c.req);
-      const [okSessions, errSessions, allSessions] = await tryFn(
+      const [okSessions, errSessions, allSessions] = await tryFn$1(
         () => sessionManager.getUserSessions(userData.id)
       );
       if (okSessions) {
@@ -56638,7 +56841,7 @@ function registerUIRoutes(app, plugin) {
       if (session_id === currentSessionId) {
         return c.redirect(`/profile?error=${encodeURIComponent("Cannot logout current session. Use logout button instead.")}`);
       }
-      const [okSession, errSession, session] = await tryFn(
+      const [okSession, errSession, session] = await tryFn$1(
         () => sessionManager.getSession(session_id)
       );
       if (!okSession || !session) {
@@ -56660,7 +56863,7 @@ function registerUIRoutes(app, plugin) {
     try {
       const user = c.get("user");
       const currentSessionId = sessionManager.getSessionIdFromRequest(c.req);
-      const [okSessions, errSessions, allSessions] = await tryFn(
+      const [okSessions, errSessions, allSessions] = await tryFn$1(
         () => sessionManager.getUserSessions(user.userId || user.id)
       );
       if (!okSessions) {
@@ -56690,13 +56893,13 @@ function registerUIRoutes(app, plugin) {
     }
     try {
       const user = c.get("user");
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
         return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
       }
-      const [okDevices, errDevices, devices] = await tryFn(
+      const [okDevices, errDevices, devices] = await tryFn$1(
         () => plugin.mfaDevicesResource.query({ userId: userData.id, verified: true })
       );
       if (okDevices && devices.length > 0) {
@@ -56729,7 +56932,7 @@ function registerUIRoutes(app, plugin) {
       if (!token || !enrollment_secret || !enrollment_backup_codes) {
         return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent("Invalid enrollment data")}`);
       }
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
@@ -56741,7 +56944,7 @@ function registerUIRoutes(app, plugin) {
       }
       const backupCodes = JSON.parse(enrollment_backup_codes);
       const hashedCodes = await plugin.mfaManager.hashBackupCodes(backupCodes);
-      const [okDevice, errDevice] = await tryFn(
+      const [okDevice, errDevice] = await tryFn$1(
         () => plugin.mfaDevicesResource.insert({
           userId: userData.id,
           type: "totp",
@@ -56778,7 +56981,7 @@ function registerUIRoutes(app, plugin) {
       if (!password) {
         return c.redirect(`/profile?error=${encodeURIComponent("Password is required to disable MFA")}`);
       }
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
@@ -56788,7 +56991,7 @@ function registerUIRoutes(app, plugin) {
       if (!isValidPassword) {
         return c.redirect(`/profile?error=${encodeURIComponent("Invalid password")}`);
       }
-      const [okDevices, errDevices, devices] = await tryFn(
+      const [okDevices, errDevices, devices] = await tryFn$1(
         () => plugin.mfaDevicesResource.query({ userId: userData.id })
       );
       if (okDevices && devices.length > 0) {
@@ -56813,13 +57016,13 @@ function registerUIRoutes(app, plugin) {
     }
     try {
       const user = c.get("user");
-      const [okUser, errUser, userData] = await tryFn(
+      const [okUser, errUser, userData] = await tryFn$1(
         () => usersResource.get(user.userId || user.id)
       );
       if (!okUser) {
         return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
       }
-      const [okDevices, errDevices, devices] = await tryFn(
+      const [okDevices, errDevices, devices] = await tryFn$1(
         () => plugin.mfaDevicesResource.query({ userId: userData.id, verified: true })
       );
       if (!okDevices || devices.length === 0) {
@@ -56827,7 +57030,7 @@ function registerUIRoutes(app, plugin) {
       }
       const backupCodes = plugin.mfaManager.generateBackupCodes(config.mfa.backupCodesCount);
       const hashedCodes = await plugin.mfaManager.hashBackupCodes(backupCodes);
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => plugin.mfaDevicesResource.patch(devices[0].id, {
           backupCodes: hashedCodes
         })
@@ -56852,10 +57055,10 @@ function registerUIRoutes(app, plugin) {
   app.get("/admin", adminOnly(sessionManager), async (c) => {
     try {
       const user = c.get("user");
-      const [okUsers, errUsers, allUsers] = await tryFn(() => usersResource.list({ limit: 1e3 }));
-      const [okClients, errClients, allClients] = await tryFn(() => plugin.oauth2ClientsResource.list({ limit: 100 }));
-      const [okSessions, errSessions, allSessions] = await tryFn(() => plugin.sessionsResource.list({ limit: 1e3 }));
-      const [okCodes, errCodes, allCodes] = await tryFn(() => plugin.oauth2AuthCodesResource.list({ limit: 1e3 }));
+      const [okUsers, errUsers, allUsers] = await tryFn$1(() => usersResource.list({ limit: 1e3 }));
+      const [okClients, errClients, allClients] = await tryFn$1(() => plugin.oauth2ClientsResource.list({ limit: 100 }));
+      const [okSessions, errSessions, allSessions] = await tryFn$1(() => plugin.sessionsResource.list({ limit: 1e3 }));
+      const [okCodes, errCodes, allCodes] = await tryFn$1(() => plugin.oauth2AuthCodesResource.list({ limit: 1e3 }));
       const users = okUsers ? allUsers : [];
       const clients = okClients ? allClients : [];
       const sessions = okSessions ? allSessions : [];
@@ -56891,7 +57094,7 @@ function registerUIRoutes(app, plugin) {
       const user = c.get("user");
       const error = c.req.query("error");
       const success = c.req.query("success");
-      const [okClients, errClients, clients] = await tryFn(
+      const [okClients, errClients, clients] = await tryFn$1(
         () => plugin.oauth2ClientsResource.list({ limit: 100 })
       );
       if (!okClients) {
@@ -56940,7 +57143,7 @@ function registerUIRoutes(app, plugin) {
       }
       const clientId = idGenerator();
       const clientSecret = idGenerator() + idGenerator();
-      const [okClient, errClient, client] = await tryFn(
+      const [okClient, errClient, client] = await tryFn$1(
         () => plugin.oauth2ClientsResource.insert({
           clientId,
           clientSecret,
@@ -56970,7 +57173,7 @@ function registerUIRoutes(app, plugin) {
       const user = c.get("user");
       const clientId = c.req.param("id");
       const error = c.req.query("error");
-      const [okClient, errClient, client] = await tryFn(
+      const [okClient, errClient, client] = await tryFn$1(
         () => plugin.oauth2ClientsResource.get(clientId)
       );
       if (!okClient) {
@@ -57005,7 +57208,7 @@ function registerUIRoutes(app, plugin) {
       if (redirectUrisArray.length === 0 || redirectUrisArray[0] === "") {
         return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent("At least one redirect URI is required")}`);
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => plugin.oauth2ClientsResource.patch(clientId, {
           name: name.trim(),
           redirectUris: redirectUrisArray.filter((uri) => uri && uri.trim() !== ""),
@@ -57031,7 +57234,7 @@ function registerUIRoutes(app, plugin) {
   app.post("/admin/clients/:id/delete", adminOnly(sessionManager), async (c) => {
     try {
       const clientId = c.req.param("id");
-      const [okDelete, errDelete] = await tryFn(
+      const [okDelete, errDelete] = await tryFn$1(
         () => plugin.oauth2ClientsResource.delete(clientId)
       );
       if (!okDelete) {
@@ -57052,7 +57255,7 @@ function registerUIRoutes(app, plugin) {
     try {
       const clientId = c.req.param("id");
       const newSecret = idGenerator() + idGenerator();
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => plugin.oauth2ClientsResource.patch(clientId, {
           clientSecret: newSecret
         })
@@ -57074,13 +57277,13 @@ function registerUIRoutes(app, plugin) {
   app.post("/admin/clients/:id/toggle-active", adminOnly(sessionManager), async (c) => {
     try {
       const clientId = c.req.param("id");
-      const [okClient, errClient, client] = await tryFn(
+      const [okClient, errClient, client] = await tryFn$1(
         () => plugin.oauth2ClientsResource.get(clientId)
       );
       if (!okClient) {
         return c.redirect(`/admin/clients?error=${encodeURIComponent("Client not found")}`);
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => plugin.oauth2ClientsResource.patch(clientId, {
           active: !client.active
         })
@@ -57103,7 +57306,7 @@ function registerUIRoutes(app, plugin) {
     const error = c.req.query("error");
     const success = c.req.query("success");
     try {
-      const [okUsers, errUsers, allUsers] = await tryFn(
+      const [okUsers, errUsers, allUsers] = await tryFn$1(
         () => usersResource.list({ limit: 1e3 })
       );
       if (!okUsers) {
@@ -57138,7 +57341,7 @@ function registerUIRoutes(app, plugin) {
     const userId = c.req.param("id");
     const error = c.req.query("error");
     try {
-      const [okUser, errUser, editUser] = await tryFn(
+      const [okUser, errUser, editUser] = await tryFn$1(
         () => usersResource.get(userId)
       );
       if (!okUser || !editUser) {
@@ -57161,7 +57364,7 @@ function registerUIRoutes(app, plugin) {
     const { name, email, status, role, emailVerified } = body;
     const currentUser = c.get("user");
     try {
-      const [okUser, errUser, editUser] = await tryFn(
+      const [okUser, errUser, editUser] = await tryFn$1(
         () => usersResource.get(userId)
       );
       if (!okUser || !editUser) {
@@ -57169,7 +57372,7 @@ function registerUIRoutes(app, plugin) {
       }
       const isSelfEdit = userId === currentUser.id;
       if (email !== editUser.email) {
-        const [okExists, errExists, existingUsers] = await tryFn(
+        const [okExists, errExists, existingUsers] = await tryFn$1(
           () => usersResource.query({ email: email.toLowerCase().trim() })
         );
         if (okExists && existingUsers && existingUsers.length > 0) {
@@ -57197,7 +57400,7 @@ function registerUIRoutes(app, plugin) {
       if (email !== editUser.email) {
         updates.emailVerified = false;
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.update(userId, updates)
       );
       if (!okUpdate) {
@@ -57222,14 +57425,14 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot delete your own account")}`);
     }
     try {
-      const [okUser, errUser, user] = await tryFn(
+      const [okUser, errUser, user] = await tryFn$1(
         () => usersResource.get(userId)
       );
       if (!okUser || !user) {
         return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
       }
       const userName = user.name;
-      const [okDelete, errDelete] = await tryFn(
+      const [okDelete, errDelete] = await tryFn$1(
         () => usersResource.delete(userId)
       );
       if (!okDelete) {
@@ -57254,7 +57457,7 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot change your own status")}`);
     }
     try {
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.patch(userId, { status })
       );
       if (!okUpdate) {
@@ -57270,7 +57473,7 @@ function registerUIRoutes(app, plugin) {
   app.post("/admin/users/:id/verify-email", adminOnly(sessionManager), async (c) => {
     const userId = c.req.param("id");
     try {
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.patch(userId, { emailVerified: true })
       );
       if (!okUpdate) {
@@ -57290,7 +57493,7 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/users?error=${encodeURIComponent("Use the profile page to change your own password")}`);
     }
     try {
-      const [okUser, errUser, user] = await tryFn(
+      const [okUser, errUser, user] = await tryFn$1(
         () => usersResource.get(userId)
       );
       if (!okUser || !user) {
@@ -57298,7 +57501,7 @@ function registerUIRoutes(app, plugin) {
       }
       const resetToken = generatePasswordResetToken();
       const resetExpiry = calculateExpiration(1);
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.patch(userId, {
           passwordResetToken: resetToken,
           passwordResetExpiry: resetExpiry
@@ -57325,7 +57528,7 @@ function registerUIRoutes(app, plugin) {
     const userId = c.req.param("id");
     const currentUser = c.get("user");
     try {
-      const [okGet, errGet, user] = await tryFn(() => usersResource.get(userId));
+      const [okGet, errGet, user] = await tryFn$1(() => usersResource.get(userId));
       if (!okGet || !user) {
         console.error("[Identity Plugin] User not found:", userId);
         return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
@@ -57333,7 +57536,7 @@ function registerUIRoutes(app, plugin) {
       if (!user.lockedUntil && !user.failedLoginAttempts) {
         return c.redirect(`/admin/users?error=${encodeURIComponent("User account is not locked")}`);
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.update(userId, {
           failedLoginAttempts: 0,
           lockedUntil: null,
@@ -57360,12 +57563,12 @@ function registerUIRoutes(app, plugin) {
     const userId = c.req.param("id");
     const currentUser = c.get("user");
     try {
-      const [okGet, errGet, user] = await tryFn(() => usersResource.get(userId));
+      const [okGet, errGet, user] = await tryFn$1(() => usersResource.get(userId));
       if (!okGet || !user) {
         console.error("[Identity Plugin] User not found:", userId);
         return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
       }
-      const [okDevices, errDevices, devices] = await tryFn(
+      const [okDevices, errDevices, devices] = await tryFn$1(
         () => plugin.mfaDevicesResource.query({ userId: user.id })
       );
       if (!okDevices || devices.length === 0) {
@@ -57395,14 +57598,14 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/users?error=${encodeURIComponent("You cannot change your own role")}`);
     }
     try {
-      const [okUser, errUser, user] = await tryFn(
+      const [okUser, errUser, user] = await tryFn$1(
         () => usersResource.get(userId)
       );
       if (!okUser || !user) {
         return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
       }
       const newRole = user.role === "admin" ? "user" : "admin";
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.patch(userId, { role: newRole })
       );
       if (!okUpdate) {
@@ -57440,7 +57643,7 @@ function registerUIRoutes(app, plugin) {
         const returnUrl = `/oauth/authorize?${new URLSearchParams(query).toString()}`;
         return c.redirect(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
       }
-      const [okClient, errClient, clients] = await tryFn(
+      const [okClient, errClient, clients] = await tryFn$1(
         () => plugin.oauth2ClientsResource.query({ clientId: client_id })
       );
       if (!okClient || !clients || clients.length === 0) {
@@ -57527,7 +57730,7 @@ function registerUIRoutes(app, plugin) {
       const authCode = generateAuthCode();
       const requestedScopes = scope ? scope.split(" ") : [];
       const expiresAt = new Date(Date.now() + 10 * 60 * 1e3).toISOString();
-      const [okCode, errCode] = await tryFn(
+      const [okCode, errCode] = await tryFn$1(
         () => plugin.oauth2AuthCodesResource.insert({
           code: authCode,
           clientId: client_id,
@@ -57580,7 +57783,7 @@ function registerUIRoutes(app, plugin) {
       }));
     }
     try {
-      const [okUsers, errUsers, users] = await tryFn(
+      const [okUsers, errUsers, users] = await tryFn$1(
         () => usersResource.query({ emailVerificationToken: token })
       );
       if (!okUsers || !users || users.length === 0) {
@@ -57617,7 +57820,7 @@ function registerUIRoutes(app, plugin) {
       if (supportsStatusField) {
         verificationUpdate.status = "active";
       }
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.update(user.id, verificationUpdate)
       );
       if (!okUpdate) {
@@ -57653,7 +57856,7 @@ function registerUIRoutes(app, plugin) {
       }));
     }
     try {
-      const [okUsers, errUsers, users] = await tryFn(
+      const [okUsers, errUsers, users] = await tryFn$1(
         () => usersResource.query({ email: email.toLowerCase().trim() })
       );
       if (!okUsers || !users || users.length === 0) {
@@ -57673,7 +57876,7 @@ function registerUIRoutes(app, plugin) {
       }
       const verificationToken = generatePasswordResetToken();
       const verificationExpiry = calculateExpiration("24h");
-      const [okUpdate, errUpdate] = await tryFn(
+      const [okUpdate, errUpdate] = await tryFn$1(
         () => usersResource.update(user.id, {
           emailVerificationToken: verificationToken,
           emailVerificationExpiry: verificationExpiry
@@ -57862,7 +58065,7 @@ exports.printTypes = printTypes;
 exports.sha256 = sha256;
 exports.streamToString = streamToString;
 exports.transformValue = transformValue;
-exports.tryFn = tryFn;
+exports.tryFn = tryFn$1;
 exports.tryFnSync = tryFnSync;
 exports.validateBackupConfig = validateBackupConfig;
 exports.validateReplicatorConfig = validateReplicatorConfig;

@@ -141,6 +141,11 @@ import { Cache } from "./cache.class.js"
 export class MemoryCache extends Cache {
   constructor(config = {}) {
     super(config);
+    this.caseSensitive = config.caseSensitive !== undefined ? config.caseSensitive : true;
+    this.serializer = typeof config.serializer === 'function' ? config.serializer : JSON.stringify;
+    this.deserializer = typeof config.deserializer === 'function' ? config.deserializer : JSON.parse;
+    this.enableStats = config.enableStats === true;
+    this.evictionPolicy = (config.evictionPolicy || 'fifo').toLowerCase();
     this.cache = {};
     this.meta = {};
     this.maxSize = config.maxSize !== undefined ? config.maxSize : 1000;
@@ -188,17 +193,64 @@ export class MemoryCache extends Cache {
     // Memory tracking
     this.currentMemoryBytes = 0;
     this.evictedDueToMemory = 0;
+
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      sets: 0,
+      deletes: 0,
+      evictions: 0
+    };
+  }
+
+  _normalizeKey(key) {
+    return this.caseSensitive ? key : key.toLowerCase();
+  }
+
+  _recordStat(type) {
+    if (!this.enableStats) return;
+    if (Object.prototype.hasOwnProperty.call(this.stats, type)) {
+      this.stats[type] += 1;
+    }
+  }
+
+  _selectEvictionCandidate() {
+    const entries = Object.entries(this.meta);
+    if (entries.length === 0) {
+      return null;
+    }
+
+    if (this.evictionPolicy === 'lru') {
+      entries.sort((a, b) => (a[1].lastAccess ?? a[1].ts) - (b[1].lastAccess ?? b[1].ts));
+    } else {
+      // Default to FIFO (order of insertion)
+      entries.sort((a, b) => (a[1].createdAt ?? a[1].ts) - (b[1].createdAt ?? b[1].ts));
+    }
+
+    return entries[0]?.[0] || null;
   }
 
   async _set(key, data) {
+    const normalizedKey = this._normalizeKey(key);
+
     // Prepare data for storage
-    let finalData = data;
+    let finalData = serialized;
     let compressed = false;
     let originalSize = 0;
     let compressedSize = 0;
 
-    // Calculate size first (needed for both compression and memory limit checks)
-    const serialized = JSON.stringify(data);
+    // Serialize first (needed for both compression and memory limit checks)
+    let serialized;
+    try {
+      serialized = this.serializer(data);
+    } catch (error) {
+      throw new Error(`[MemoryCache] Failed to serialize data for key '${key}': ${error.message}`);
+    }
+
+    if (typeof serialized !== 'string') {
+      throw new Error('[MemoryCache] Serializer must return a string');
+    }
+
     originalSize = Buffer.byteLength(serialized, 'utf8');
 
     // Apply compression if enabled
@@ -232,46 +284,44 @@ export class MemoryCache extends Cache {
     const itemSize = compressed ? compressedSize : originalSize;
 
     // If replacing existing key, subtract its old size from current memory
-    if (Object.prototype.hasOwnProperty.call(this.cache, key)) {
-      const oldSize = this.meta[key]?.compressedSize || 0;
+    if (Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
+      const oldSize = this.meta[normalizedKey]?.compressedSize || 0;
       this.currentMemoryBytes -= oldSize;
     }
 
     // Memory-aware eviction: Remove items until we have space
     if (this.maxMemoryBytes > 0) {
       while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
-        // Remove the oldest item
-        const oldestKey = Object.entries(this.meta)
-          .sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-        if (oldestKey) {
-          const evictedSize = this.meta[oldestKey]?.compressedSize || 0;
-          delete this.cache[oldestKey];
-          delete this.meta[oldestKey];
-          this.currentMemoryBytes -= evictedSize;
-          this.evictedDueToMemory++;
-        } else {
-          break; // No more items to evict
-        }
+        const candidate = this._selectEvictionCandidate();
+        if (!candidate) break;
+        const evictedSize = this.meta[candidate]?.compressedSize || 0;
+        delete this.cache[candidate];
+        delete this.meta[candidate];
+        this.currentMemoryBytes -= evictedSize;
+        this.evictedDueToMemory++;
+        this._recordStat('evictions');
       }
     }
 
     // Item count eviction (original logic)
     if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
-      // Remove o item mais antigo
-      const oldestKey = Object.entries(this.meta)
-        .sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-      if (oldestKey) {
-        const evictedSize = this.meta[oldestKey]?.compressedSize || 0;
-        delete this.cache[oldestKey];
-        delete this.meta[oldestKey];
+      const candidate = this._selectEvictionCandidate();
+      if (candidate) {
+        const evictedSize = this.meta[candidate]?.compressedSize || 0;
+        delete this.cache[candidate];
+        delete this.meta[candidate];
         this.currentMemoryBytes -= evictedSize;
+        this._recordStat('evictions');
       }
     }
 
     // Store the item
-    this.cache[key] = finalData;
-    this.meta[key] = {
-      ts: Date.now(),
+    this.cache[normalizedKey] = finalData;
+    const timestamp = Date.now();
+    this.meta[normalizedKey] = {
+      ts: timestamp,
+      createdAt: timestamp,
+      lastAccess: timestamp,
       compressed,
       originalSize,
       compressedSize: itemSize
@@ -280,57 +330,85 @@ export class MemoryCache extends Cache {
     // Update current memory usage
     this.currentMemoryBytes += itemSize;
 
+    this._recordStat('sets');
+
     return data;
   }
 
   async _get(key) {
-    if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
+    const normalizedKey = this._normalizeKey(key);
+
+    if (!Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
+      this._recordStat('misses');
+      return null;
+    }
 
     // Check TTL expiration
     if (this.ttl > 0) {
       const now = Date.now();
-      const meta = this.meta[key];
-      if (meta && now - meta.ts > this.ttl) {
+      const meta = this.meta[normalizedKey];
+      if (meta && now - (meta.createdAt ?? meta.ts) > this.ttl) {
         // Expired - decrement memory before deleting
         const itemSize = meta.compressedSize || 0;
         this.currentMemoryBytes -= itemSize;
-        delete this.cache[key];
-        delete this.meta[key];
+        delete this.cache[normalizedKey];
+        delete this.meta[normalizedKey];
+        this._recordStat('misses');
         return null;
       }
     }
 
-    const rawData = this.cache[key];
-    
+    const rawData = this.cache[normalizedKey];
+
     // Check if data is compressed
     if (rawData && typeof rawData === 'object' && rawData.__compressed) {
       try {
         // Decompress data
         const compressedBuffer = Buffer.from(rawData.__data, 'base64');
         const decompressed = zlib.gunzipSync(compressedBuffer).toString('utf8');
-        return JSON.parse(decompressed);
+        const value = this.deserializer(decompressed);
+        this._recordStat('hits');
+        if (this.evictionPolicy === 'lru' && this.meta[normalizedKey]) {
+          this.meta[normalizedKey].lastAccess = Date.now();
+        }
+        return value;
       } catch (error) {
         console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
         // If decompression fails, remove corrupted entry
-        delete this.cache[key];
-        delete this.meta[key];
+        delete this.cache[normalizedKey];
+        delete this.meta[normalizedKey];
+        this._recordStat('misses');
         return null;
       }
     }
     
-    // Return uncompressed data
-    return rawData;
+    try {
+      const value = typeof rawData === 'string' ? this.deserializer(rawData) : rawData;
+      this._recordStat('hits');
+      if (this.evictionPolicy === 'lru' && this.meta[normalizedKey]) {
+        this.meta[normalizedKey].lastAccess = Date.now();
+      }
+      return value;
+    } catch (error) {
+      console.warn(`[MemoryCache] Deserialization failed for key '${key}':`, error.message);
+      delete this.cache[normalizedKey];
+      delete this.meta[normalizedKey];
+      this._recordStat('misses');
+      return null;
+    }
   }
 
   async _del(key) {
-    // Decrement memory usage
-    if (Object.prototype.hasOwnProperty.call(this.cache, key)) {
-      const itemSize = this.meta[key]?.compressedSize || 0;
+    const normalizedKey = this._normalizeKey(key);
+
+    if (Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
+      const itemSize = this.meta[normalizedKey]?.compressedSize || 0;
       this.currentMemoryBytes -= itemSize;
     }
 
-    delete this.cache[key];
-    delete this.meta[key];
+    delete this.cache[normalizedKey];
+    delete this.meta[normalizedKey];
+    this._recordStat('deletes');
     return true;
   }
 
@@ -339,12 +417,16 @@ export class MemoryCache extends Cache {
       this.cache = {};
       this.meta = {};
       this.currentMemoryBytes = 0; // Reset memory counter
+      if (this.enableStats) {
+        this.stats = { hits: 0, misses: 0, sets: 0, deletes: 0, evictions: 0 };
+      }
       return true;
     }
     // Remove only keys that start with the prefix
     const removed = [];
+    const normalizedPrefix = this._normalizeKey(prefix);
     for (const key of Object.keys(this.cache)) {
-      if (key.startsWith(prefix)) {
+      if (key.startsWith(normalizedPrefix)) {
         removed.push(key);
         // Decrement memory usage
         const itemSize = this.meta[key]?.compressedSize || 0;

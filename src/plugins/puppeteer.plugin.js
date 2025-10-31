@@ -1,6 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
-import { resolveResourceName } from './concerns/resource-names.js';
+import { resolveResourceNames } from './concerns/resource-names.js';
 
 /**
  * PuppeteerPlugin - Headless browser automation with anti-bot detection
@@ -112,7 +112,7 @@ export class PuppeteerPlugin extends Plugin {
       cookies: {
         enabled: true,
         storage: {
-          resource: 'puppeteer_cookies',
+          resource: 'plg_puppeteer_cookies',
           autoSave: true,
           autoLoad: true,
           encrypt: true,
@@ -241,10 +241,39 @@ export class PuppeteerPlugin extends Plugin {
       }
     };
 
-    this.config.cookies.storage.resource = resolveResourceName('puppeteer', {
-      defaultName: 'plg_puppeteer_cookies',
-      override: resourceNamesOption.cookies
+    const resourceNamesOption = options.resourceNames || {};
+    this.resourceNames = resolveResourceNames('puppeteer', {
+      cookies: {
+        defaultName: 'plg_puppeteer_cookies',
+        override: resourceNamesOption.cookies
+      },
+      consoleSessions: {
+        defaultName: 'plg_puppeteer_console_sessions',
+        override: resourceNamesOption.consoleSessions
+      },
+      consoleMessages: {
+        defaultName: 'plg_puppeteer_console_messages',
+        override: resourceNamesOption.consoleMessages
+      },
+      consoleErrors: {
+        defaultName: 'plg_puppeteer_console_errors',
+        override: resourceNamesOption.consoleErrors
+      },
+      networkSessions: {
+        defaultName: 'plg_puppeteer_network_sessions',
+        override: resourceNamesOption.networkSessions
+      },
+      networkRequests: {
+        defaultName: 'plg_puppeteer_network_requests',
+        override: resourceNamesOption.networkRequests
+      },
+      networkErrors: {
+        defaultName: 'plg_puppeteer_network_errors',
+        override: resourceNamesOption.networkErrors
+      }
     });
+
+    this.config.cookies.storage.resource = this.resourceNames.cookies;
 
     // Internal state
     this.browserPool = [];
@@ -386,16 +415,16 @@ export class PuppeteerPlugin extends Plugin {
       // Resource missing, will create below
     }
 
-    await this.database.createResource({
+    const [created, createErr] = await tryFn(() => this.database.createResource({
       name: resourceName,
       attributes: {
         sessionId: 'string|required',
         cookies: 'array|required',
         userAgent: 'string',
         viewport: 'object',
-        proxyId: 'string|optional', // IMMUTABLE: Proxy binding
-        domain: 'string',            // Main domain for cookies
-        date: 'string',              // YYYY-MM-DD for temporal partitioning
+        proxyId: 'string|optional',
+        domain: 'string',
+        date: 'string',
         reputation: {
           successCount: 'number',
           failCount: 'number',
@@ -412,11 +441,18 @@ export class PuppeteerPlugin extends Plugin {
       timestamps: true,
       behavior: 'body-only',
       partitions: {
-        byProxy: { fields: { proxyId: 'string' } },   // Query cookies for a proxy
-        byDate: { fields: { date: 'string' } },       // Query by date (for rotation)
-        byDomain: { fields: { domain: 'string' } }    // Query cookies for a domain
+        byProxy: { fields: { proxyId: 'string' } },
+        byDate: { fields: { date: 'string' } },
+        byDomain: { fields: { domain: 'string' } }
       }
-    });
+    }));
+
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (!existing) {
+        throw createErr;
+      }
+    }
   }
 
   /**

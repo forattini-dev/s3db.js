@@ -254,7 +254,7 @@ export class TTLPlugin extends Plugin {
     // Validate timestamp field availability
     if (config.field === '_createdAt' && this.database) {
       const resource = this.database.resources[resourceName];
-      if (resource && resource.config && resource.config.timestamps === false) {
+      if (resource && resource.$schema.timestamps === false) {
         console.warn(
           `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" ` +
           `but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`

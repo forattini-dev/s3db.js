@@ -56,55 +56,66 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
    * Generate partition-aware cache key
    */
   _getPartitionCacheKey(resource, action, partition, partitionValues = {}, params = {}) {
-    const keyParts = [`resource=${resource}`, `action=${action}`];
+    const segments = [];
 
-    if (partition && Object.keys(partitionValues).length > 0) {
-      keyParts.push(`partition=${partition}`);
-      
-      // Sort fields for consistent keys
-      const sortedFields = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b));
+    if (resource) {
+      segments.push(`resource=${this._sanitizePathValue(resource)}`);
+    }
+
+    if (partition) {
+      segments.push(`partition=${this._sanitizePathValue(partition)}`);
+
+      const sortedFields = Object.entries(partitionValues)
+        .filter(([, value]) => value !== null && value !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b));
+
       for (const [field, value] of sortedFields) {
-        if (value !== null && value !== undefined) {
-          keyParts.push(`${field}=${value}`);
-        }
+        segments.push(`${field}=${this._sanitizePathValue(value)}`);
       }
     }
 
-    // Add params hash if exists
+    if (action) {
+      segments.push(`action=${this._sanitizePathValue(action)}`);
+    }
+
     if (Object.keys(params).length > 0) {
       const paramsStr = Object.entries(params)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([k, v]) => `${k}=${v}`)
         .join('|');
-      keyParts.push(`params=${Buffer.from(paramsStr).toString('base64')}`);
+      segments.push(`params=${this._sanitizePathValue(Buffer.from(paramsStr).toString('base64url'))}`);
     }
 
-    return keyParts.join('/') + this.fileExtension;
+    return segments.join('/');
   }
 
   /**
    * Get directory path for partition cache
    */
   _getPartitionDirectory(resource, partition, partitionValues = {}) {
-    const basePath = path.join(this.directory, `resource=${resource}`);
+    const baseSegments = [];
+    if (resource) {
+      baseSegments.push(`resource=${this._sanitizePathValue(resource)}`);
+    }
 
     if (!partition) {
-      return basePath;
+      return path.join(this.directory, ...baseSegments);
     }
 
     if (this.partitionStrategy === 'flat') {
-      // Flat structure: all partitions in same level
-      return path.join(basePath, 'partitions');
+      return path.join(this.directory, ...baseSegments, 'partitions');
     }
 
     if (this.partitionStrategy === 'temporal' && this._isTemporalPartition(partition, partitionValues)) {
-      // Temporal structure: organize by time hierarchy
-      return this._getTemporalDirectory(basePath, partition, partitionValues);
+      return this._getTemporalDirectory(path.join(this.directory, ...baseSegments), partition, partitionValues);
     }
 
-    // Hierarchical structure (default)
-    const pathParts = [basePath, `partition=${partition}`];
-    
+    const pathParts = [
+      this.directory,
+      ...baseSegments,
+      `partition=${this._sanitizePathValue(partition)}`
+    ];
+
     const sortedFields = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b));
     for (const [field, value] of sortedFields) {
       if (value !== null && value !== undefined) {
@@ -122,21 +133,15 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
     const { resource, action, partition, partitionValues, params } = options;
 
     if (resource && partition) {
-      // Use partition-aware storage
       const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
-      const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
-      
-      await this._ensureDirectory(partitionDir);
-      
-      const filePath = path.join(partitionDir, this._sanitizeFileName(partitionKey));
-      
-      // Track usage if enabled
+
+      await this._ensurePartitionDirectoryForKey(partitionKey);
+
       if (this.trackUsage) {
         await this._trackPartitionUsage(resource, partition, partitionValues);
       }
-      
-      // Store with partition metadata
-      const partitionData = {
+
+      const payload = {
         data,
         metadata: {
           resource,
@@ -146,8 +151,9 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
           ttl: this.ttl
         }
       };
-      
-      return this._writeFileWithMetadata(filePath, partitionData);
+
+      await super._set(partitionKey, payload);
+      return data;
     }
 
     // Fallback to standard set
@@ -190,24 +196,20 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
 
     if (resource && partition) {
       const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
-      const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
-      const filePath = path.join(partitionDir, this._sanitizeFileName(partitionKey));
+      const payload = await super._get(partitionKey);
 
-      if (!await this._fileExists(filePath)) {
-        // Try preloading related partitions
+      if (!payload) {
         if (this.preloadRelated) {
           await this._preloadRelatedPartitions(resource, partition, partitionValues);
         }
         return null;
       }
 
-      const result = await this._readFileWithMetadata(filePath);
-      
-      if (result && this.trackUsage) {
+      if (this.trackUsage) {
         await this._trackPartitionUsage(resource, partition, partitionValues);
       }
 
-      return result?.data || null;
+      return payload?.data ?? null;
     }
 
     // Fallback to standard get
@@ -259,6 +261,46 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
     await this._saveUsageStats();
 
     return ok;
+  }
+
+  async _clear(prefix) {
+    await super._clear(prefix);
+
+    if (!prefix) {
+      const [entriesOk, , entries] = await tryFn(() => readdir(this.directory, { withFileTypes: true }));
+      if (entriesOk && entries) {
+        for (const entry of entries) {
+          if (entry.isDirectory() && entry.name.startsWith('resource=')) {
+            await rmdir(path.join(this.directory, entry.name), { recursive: true }).catch(() => {});
+          }
+        }
+      }
+      this.partitionUsage.clear();
+      await this._saveUsageStats();
+      return true;
+    }
+
+    const segments = this._splitKeySegments(prefix).map(segment => this._sanitizeFileName(segment));
+    if (segments.length > 0) {
+      const dirPath = path.join(this.directory, ...segments);
+      if (await this._fileExists(dirPath)) {
+        await rmdir(dirPath, { recursive: true }).catch(() => {});
+      }
+
+      const resourceSeg = segments.find(seg => seg.startsWith('resource='));
+      const partitionSeg = segments.find(seg => seg.startsWith('partition='));
+      const resourceVal = resourceSeg ? resourceSeg.split('=').slice(1).join('=') : '';
+      const partitionVal = partitionSeg ? partitionSeg.split('=').slice(1).join('=') : '';
+      const usagePrefix = `${resourceVal}/${partitionVal}`;
+      for (const key of Array.from(this.partitionUsage.keys())) {
+        if (key.startsWith(usagePrefix)) {
+          this.partitionUsage.delete(key);
+        }
+      }
+      await this._saveUsageStats();
+    }
+
+    return true;
   }
 
   /**
@@ -378,12 +420,14 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
   }
 
   _getUsageKey(resource, partition, partitionValues) {
+    const sanitizedResource = this._sanitizePathValue(resource || '');
+    const sanitizedPartition = this._sanitizePathValue(partition || '');
     const valuePart = Object.entries(partitionValues)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${k}=${v}`)
+      .map(([k, v]) => `${k}=${this._sanitizePathValue(v)}`)
       .join('|');
     
-    return `${resource}/${partition}/${valuePart}`;
+    return `${sanitizedResource}/${sanitizedPartition}/${valuePart}`;
   }
 
   async _preloadRelatedPartitions(resource, partition, partitionValues) {
@@ -424,6 +468,34 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
 
   _sanitizeFileName(filename) {
     return filename.replace(/[<>:"/\\|?*]/g, '_');
+  }
+
+  _splitKeySegments(key) {
+    return key.split('/').filter(Boolean);
+  }
+
+  async _ensurePartitionDirectoryForKey(key) {
+    const segments = this._splitKeySegments(key);
+    if (segments.length <= 1) {
+      return;
+    }
+
+    const dirPath = path.join(
+      this.directory,
+      ...segments.slice(0, -1).map(segment => this._sanitizeFileName(segment))
+    );
+
+    await this._ensureDirectory(dirPath);
+  }
+
+  _getFilePath(key) {
+    const segments = this._splitKeySegments(key).map(segment => this._sanitizeFileName(segment));
+    const fileName = segments.pop() || this._sanitizeFileName(key);
+    const dirPath = segments.length > 0
+      ? path.join(this.directory, ...segments)
+      : this.directory;
+
+    return path.join(dirPath, `${this.prefix}_${fileName}${this.fileExtension}`);
   }
 
   async _calculateDirectoryStats(dir, stats) {

@@ -213,11 +213,12 @@ class BigqueryReplicator extends BaseReplicator {
         continue;
       }
 
-      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      // Use $schema for reliable access to resource definition
+      const allAttributes = resource.$schema.attributes || {};
 
       // Filter out plugin attributes - they are internal and should not be replicated
-      const pluginAttrNames = resource.schema?._pluginAttributes
-        ? Object.values(resource.schema._pluginAttributes).flat()
+      const pluginAttrNames = resource.$schema._pluginAttributes
+        ? Object.values(resource.$schema._pluginAttributes).flat()
         : [];
       const attributes = Object.fromEntries(
         Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
