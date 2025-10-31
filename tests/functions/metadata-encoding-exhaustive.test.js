@@ -11,7 +11,7 @@ describe('Smart Encoding - Exhaustive Tests', () => {
     resource = await db.createResource({
       name: 'exhaustive_test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         data: 'string|optional'
       }
     });

@@ -21,7 +21,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     wallets = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         balance: 'number|default:0'
       }

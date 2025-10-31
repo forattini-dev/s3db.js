@@ -6,7 +6,7 @@
  */
 
 import { BaseModel } from './base-model.class.js';
-import { ModelConfigError, DataValidationError, InsufficientDataError } from '../ml.errors.js';
+import { ModelConfigError, DataValidationError, InsufficientDataError, ModelNotTrainedError } from '../ml.errors.js';
 
 export class TimeSeriesModel extends BaseModel {
   constructor(config = {}) {
@@ -21,6 +21,8 @@ export class TimeSeriesModel extends BaseModel {
       dropout: config.modelConfig?.dropout || 0.2,
       recurrentDropout: config.modelConfig?.recurrentDropout || 0.2
     };
+
+    this.config.modelConfig.shuffle = config.modelConfig?.shuffle ?? false;
 
     // Validate lookback
     if (this.config.modelConfig.lookback < 2) {

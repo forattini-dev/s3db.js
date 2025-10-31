@@ -46,7 +46,7 @@ describe('BackupPlugin (New Driver API)', () => {
     await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required'
       }
@@ -55,7 +55,7 @@ describe('BackupPlugin (New Driver API)', () => {
     await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         content: 'string'
       }

@@ -31,7 +31,7 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0',
         views: 'number|default:0',
@@ -201,7 +201,7 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
     const metrics = await database.createResource({
       name: 'metrics',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         impressions: 'number|default:0',
         clicks: 'number|default:0',
         views: 'number|default:0',

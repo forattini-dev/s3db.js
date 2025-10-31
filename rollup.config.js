@@ -4,7 +4,7 @@ import resolve from '@rollup/plugin-node-resolve';
 import esbuild, { minify } from 'rollup-plugin-esbuild';
 import nodePolyfills from 'rollup-plugin-polyfill-node';
 import terser from '@rollup/plugin-terser';
-import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { dirname } from 'path';
 
 // Read package.json to get version
@@ -17,7 +17,7 @@ export default {
     // CommonJS for Node.js (require)
     {
       format: 'cjs',
-      file: 'dist/s3db.cjs.js',
+      file: 'dist/s3db.cjs',
       inlineDynamicImports: true,
       exports: 'named', // Only named exports for CJS
       sourcemap: true,
@@ -90,23 +90,77 @@ export default {
       define: {
         __PACKAGE_VERSION__: `"${packageJson.version}"`
       }
-    })
+    }),
+
+    // Clean up legacy CommonJS artifacts from previous builds
+    {
+      name: 'cleanup-legacy-cjs-artifact',
+      writeBundle() {
+        const legacyArtifacts = ['dist/s3db.cjs.js', 'dist/s3db.cjs.js.map'];
+        for (const file of legacyArtifacts) {
+          if (existsSync(file)) {
+            unlinkSync(file);
+          }
+        }
+      }
+    }
   ],
 
   external: [
     // Core dependencies (bundled with package)
     '@aws-sdk/client-s3',
+    '@aws-sdk/credential-providers',
+    '@aws-sdk/s3-request-presigner',
+    '@modelcontextprotocol/sdk',
     '@smithy/node-http-handler',
     '@supercharge/promise-pool',
+    'dotenv',
     'fastest-validator',
-    'json-stable-stringify',
     'flat',
+    'glob',
+    'json-stable-stringify',
     'lodash-es',
     'nanoid',
-    'dotenv',
-    // Peer dependencies (user installs - optional)
+
+    // Peer dependencies - AWS SDK Cloud Inventory (user installs - optional)
+    '@aws-sdk/client-acm',
+    '@aws-sdk/client-api-gateway',
+    '@aws-sdk/client-apigatewayv2',
+    '@aws-sdk/client-backup',
+    '@aws-sdk/client-cloudfront',
+    '@aws-sdk/client-cloudtrail',
+    '@aws-sdk/client-cloudwatch',
+    '@aws-sdk/client-cloudwatch-logs',
+    '@aws-sdk/client-cognito-identity-provider',
+    '@aws-sdk/client-config-service',
+    '@aws-sdk/client-dynamodb',
+    '@aws-sdk/client-ec2',
+    '@aws-sdk/client-ecr',
+    '@aws-sdk/client-ecs',
+    '@aws-sdk/client-efs',
+    '@aws-sdk/client-eks',
+    '@aws-sdk/client-elasticache',
+    '@aws-sdk/client-elastic-load-balancing',
+    '@aws-sdk/client-elastic-load-balancing-v2',
+    '@aws-sdk/client-eventbridge',
+    '@aws-sdk/client-iam',
+    '@aws-sdk/client-kinesis',
+    '@aws-sdk/client-kms',
+    '@aws-sdk/client-lambda',
+    '@aws-sdk/client-rds',
+    '@aws-sdk/client-route-53',
+    '@aws-sdk/client-secrets-manager',
+    '@aws-sdk/client-sfn',
+    '@aws-sdk/client-sns',
     '@aws-sdk/client-sqs',
+    '@aws-sdk/client-ssm',
+    '@aws-sdk/client-sts',
+    '@aws-sdk/client-waf',
+    '@aws-sdk/client-wafv2',
+
+    // Peer dependencies - Other plugins (user installs - optional)
     '@google-cloud/bigquery',
+    'google-auth-library',
     '@hono/node-server',
     '@hono/swagger-ui',
     '@libsql/client',
@@ -116,10 +170,15 @@ export default {
     '@tensorflow/tfjs-layers',
     '@xenova/transformers',
     'amqplib',
+    'bcrypt',
+    'express',
     'hono',
+    'jose',
     'node-cron',
+    'nodemailer',
     'pg',
     'uuid',
+
     // Node.js built-ins
     'crypto',
     'fs/promises',

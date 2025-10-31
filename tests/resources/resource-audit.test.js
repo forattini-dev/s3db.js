@@ -10,7 +10,7 @@ describe('Resource Audit - Minimal Insert/Get', () => {
     audits = await database.createResource({
       name: 'audits',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         resourceName: 'string|required',
         operation: 'string|required',
         recordId: 'string|required',
@@ -56,7 +56,7 @@ describe('Resource Middleware - Chaining and Short-circuit', () => {
     database = createDatabaseForTest('suite=resources/middleware');
     resource = await database.createResource({
       name: 'mw-test',
-      attributes: { id: 'string|required', name: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required' }
     });
     plugin = new Plugin();
   });

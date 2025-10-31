@@ -28,7 +28,7 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
     walletsResource = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         balance: 'number|default:0'
       }
@@ -38,7 +38,7 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
     transactionsResource = await database.createResource({
       name: 'transactions',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         walletId: 'string|required',
         amount: 'number|required',
         type: 'string|required', // 'credit' or 'debit'

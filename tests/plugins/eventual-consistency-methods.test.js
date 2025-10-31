@@ -16,7 +16,7 @@ describe("EventualConsistencyPlugin Methods", () => {
     walletsResource = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         balance: 'number|default:0'
       }
@@ -161,7 +161,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       const accountsResource = await database.createResource({
         name: 'accounts',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           credits: 'number|default:0'
         }
       });
@@ -311,7 +311,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       const brazilResource = await database.createResource({
         name: 'brazil_accounts',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           balance: 'number|default:0'
         }
       });
@@ -402,7 +402,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       const pointsResource = await database.createResource({
         name: 'points',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           score: 'number|default:0'
         }
       });
@@ -500,7 +500,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       const countersResource = await database.createResource({
         name: 'counters',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           count: 'number|default:0'
         }
       });

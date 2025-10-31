@@ -35,7 +35,7 @@ describe('CLI Backup & Restore API Tests', () => {
     const users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required'
       }
@@ -44,7 +44,7 @@ describe('CLI Backup & Restore API Tests', () => {
     const posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         content: 'string'
       }

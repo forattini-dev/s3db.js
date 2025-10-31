@@ -1196,6 +1196,7 @@ export async function getLastNMonths(resourceName, field, months = 12, options, 
     const dataMap = new Map(data.map(d => [d.cohort, d]));
 
     const current = new Date(monthsAgo);
+    current.setDate(1); // Set to 1st of month to avoid day overflow bugs
     for (let i = 0; i < months; i++) {
       const cohort = current.toISOString().substring(0, 7);
       result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });

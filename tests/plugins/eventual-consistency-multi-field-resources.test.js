@@ -30,7 +30,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0',
         views: 'number|default:0',
@@ -78,7 +78,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0',
         views: 'number|default:0',
@@ -127,7 +127,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0',
         views: 'number|default:0',
@@ -174,7 +174,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0',
         views: 'number|default:0',

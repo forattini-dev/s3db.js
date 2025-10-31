@@ -33,7 +33,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
     await database.connect();
     users = await database.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     plugin = new QueueConsumerPlugin({
       enabled: true,
@@ -201,7 +201,7 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
     database = await createDatabaseForTest('suite=plugins/queue-consumer-real');
     users = await database.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     plugin = new QueueConsumerPlugin({
       enabled: true,
@@ -261,11 +261,11 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
     database = await createDatabaseForTest('suite=plugins/queue-consumer-multi');
     users = await database.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     orders = await database.createResource({
       name: 'orders',
-      attributes: { id: 'string|required', userId: 'string|required', amount: 'number|required|convert:true' }
+      attributes: { id: 'string|optional', userId: 'string|required', amount: 'number|required|convert:true' }
     });
     plugin = new QueueConsumerPlugin({
       enabled: true,
@@ -342,7 +342,7 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
     await database.connect();
     users = await database.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     plugin = new QueueConsumerPlugin({
       enabled: true,
@@ -409,11 +409,11 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
     await database.connect();
     users = await database.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     orders = await database.createResource({
       name: 'orders',
-      attributes: { id: 'string|required', userId: 'string|required', amount: 'number|required' }
+      attributes: { id: 'string|optional', userId: 'string|required', amount: 'number|required' }
     });
     plugin = new QueueConsumerPlugin({
       enabled: true,
@@ -501,14 +501,14 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
     await dbSource.connect();
     usersSource = await dbSource.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     // Banco de destino
     dbTarget = await createDatabaseForTest('suite=plugins/replicator-target');
     await dbTarget.connect();
     usersTarget = await dbTarget.createResource({
       name: 'users',
-      attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
+      attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     // Replicator envia para fila SQS
     replicator = createReplicator('sqs', {

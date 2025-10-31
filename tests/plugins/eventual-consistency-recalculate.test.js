@@ -16,7 +16,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
     urlsResource = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         shortUrl: 'string|required',
         clicks: 'number|default:0'
       }
@@ -433,7 +433,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       const statsResource = await database.createResource({
         name: 'stats',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           views: 'number|default:0',
           likes: 'number|default:0'
         }

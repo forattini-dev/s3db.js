@@ -20,7 +20,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -48,7 +48,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -82,7 +82,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -118,7 +118,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -140,7 +140,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -184,7 +184,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -228,7 +228,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -255,7 +255,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -303,7 +303,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -344,7 +344,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -374,7 +374,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -405,7 +405,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const resource = await database.createResource({
         name: 'tasks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });

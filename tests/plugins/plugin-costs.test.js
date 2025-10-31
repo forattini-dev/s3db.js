@@ -390,7 +390,7 @@ describe('Costs Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required'
         }
@@ -403,7 +403,7 @@ describe('Costs Plugin', () => {
       await database.createResource({
         name: 'test-resource',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });

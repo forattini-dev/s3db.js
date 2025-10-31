@@ -13,7 +13,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'documents',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         content: 'string|required',
         author: 'string|required'
@@ -56,7 +56,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'articles',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         body: 'string|required',
         tags: 'array|items:string',
@@ -106,7 +106,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'profiles',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         settings: 'object|optional',
@@ -167,7 +167,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         details: 'object|optional',
         specifications: 'object|optional'
@@ -216,7 +216,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'projects',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         description: 'string|required',
         tags: 'array|items:string',
@@ -269,7 +269,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderId: 'string|required',
         status: 'string|required',
         amount: 'number|required',
@@ -328,7 +328,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         age: 'number|min:18|max:100',
@@ -381,7 +381,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'events',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         description: 'string|required',
         startDate: 'string|required',
@@ -425,7 +425,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'documents',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         content: 'string|required',
         metadata: 'object|optional'
@@ -491,7 +491,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'performance',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         value: 'number|required',
         metadata: 'object|optional'
@@ -536,7 +536,7 @@ describe('Resource Versions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'concurrent',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         counter: 'number|required',
         lastUpdate: 'string|required'
       },

@@ -1,7 +1,6 @@
 import { join } from "path";
 import { createHash } from "crypto";
 import AsyncEventEmitter from "./concerns/async-event-emitter.js";
-import { customAlphabet, urlAlphabet } from 'nanoid';
 import jsonStableStringify from "json-stable-stringify";
 import { PromisePool } from "@supercharge/promise-pool";
 import { chunk, cloneDeep, merge, isEmpty, isObject } from "lodash-es";
@@ -12,7 +11,7 @@ import { streamToString } from "./stream/index.js";
 import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
-import { idGenerator as defaultIdGenerator } from "./concerns/id.js";
+import { idGenerator as defaultIdGenerator, createCustomGenerator, getUrlAlphabet } from "./concerns/id.js";
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
 import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError, ValidationError } from "./errors.js";
 
@@ -311,11 +310,11 @@ export class Resource extends AsyncEventEmitter {
     }
     // If customIdGenerator is a number (size), create a generator with that size
     if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
-      return customAlphabet(urlAlphabet, customIdGenerator);
+      return createCustomGenerator(getUrlAlphabet(), customIdGenerator);
     }
     // If idSize is provided, create a generator with that size
     if (typeof idSize === 'number' && idSize > 0 && idSize !== 22) {
-      return customAlphabet(urlAlphabet, idSize);
+      return createCustomGenerator(getUrlAlphabet(), idSize);
     }
     // Default to the standard idGenerator (22 chars)
     return defaultIdGenerator;
@@ -1069,9 +1068,7 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async insert({ id, ...attributes }) {
-    const exists = await this.exists(id);
-    if (exists) throw new Error(`Resource with id '${id}' already exists`);
-    const keyDebug = this.getResourceKey(id || '(auto)');
+    const providedId = id !== undefined && id !== null && String(id).trim() !== '';
     if (this.config.timestamps) {
       attributes.createdAt = new Date().toISOString();
       attributes.updatedAt = new Date().toISOString();
@@ -1095,11 +1092,12 @@ export class Resource extends AsyncEventEmitter {
     const extraData = {};
     for (const k of extraProps) extraData[k] = preProcessedData[k];
 
+    const shouldValidateId = preProcessedData.id !== undefined && preProcessedData.id !== null;
     const {
       errors,
       isValid,
       data: validated,
-    } = await this.validate(preProcessedData, { includeId: true });
+    } = await this.validate(preProcessedData, { includeId: shouldValidateId });
 
     if (!isValid) {
       const errorMsg = (errors && errors.length && errors[0].message) ? errors[0].message : 'Insert failed';
@@ -1118,7 +1116,7 @@ export class Resource extends AsyncEventEmitter {
     Object.assign(validatedAttributes, extraData);
     
     // Generate ID with fallback for empty generators
-    let finalId = validatedId || id;
+    let finalId = validatedId || preProcessedData.id || id;
     if (!finalId) {
       finalId = this.idGenerator();
       // Fallback to default generator if custom generator returns empty
@@ -1142,6 +1140,31 @@ export class Resource extends AsyncEventEmitter {
 
     // Add version metadata (required for all objects)
     const finalMetadata = processedMetadata;
+
+    if (!finalId || String(finalId).trim() === '') {
+      throw new InvalidResourceItem({
+        bucket: this.client.config.bucket,
+        resourceName: this.name,
+        attributes: preProcessedData,
+        validation: [{ message: 'Generated ID is invalid', field: 'id' }],
+        message: 'Generated ID is invalid'
+      });
+    }
+
+    const shouldCheckExists = providedId || shouldValidateId || validatedId !== undefined;
+    if (shouldCheckExists) {
+      const alreadyExists = await this.exists(finalId);
+      if (alreadyExists) {
+        throw new InvalidResourceItem({
+          bucket: this.client.config.bucket,
+          resourceName: this.name,
+          attributes: preProcessedData,
+          validation: [{ message: `Resource with id '${finalId}' already exists`, field: 'id' }],
+          message: `Resource with id '${finalId}' already exists`
+        });
+      }
+    }
+
     const key = this.getResourceKey(finalId);
     // Determine content type based on body content
     let contentType = undefined;

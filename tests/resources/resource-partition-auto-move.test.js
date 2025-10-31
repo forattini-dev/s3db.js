@@ -15,7 +15,7 @@ describe('Resource Partition Auto-Move on Update', () => {
       name: 'orders',
       asyncPartitions: false, // Use sync mode for immediate verification
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderId: 'string|required', 
         status: 'string|required',
         amount: 'number|required',
@@ -110,7 +110,7 @@ describe('Resource Partition Auto-Move on Update', () => {
       name: 'products',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         region: 'string|required',
@@ -194,7 +194,7 @@ describe('Resource Partition Auto-Move on Update', () => {
       name: 'users',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         department: 'string|required',
         email: 'string',
@@ -242,7 +242,7 @@ describe('Resource Partition Auto-Move on Update', () => {
       name: 'tasks',
       asyncPartitions: true, // Test with async mode
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         priority: 'string|required'
       },

@@ -14,7 +14,7 @@ describe('Resource patch() and replace() Methods', () => {
       database.createResource({
         name: 'users_enforce',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|optional',
           status: 'string|default:active',
@@ -27,7 +27,7 @@ describe('Resource patch() and replace() Methods', () => {
       database.createResource({
         name: 'users_overflow',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|optional',
           bio: 'string|optional',
@@ -40,7 +40,7 @@ describe('Resource patch() and replace() Methods', () => {
       database.createResource({
         name: 'users_bodyonly',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|optional',
           status: 'string|default:active'
@@ -52,7 +52,7 @@ describe('Resource patch() and replace() Methods', () => {
       database.createResource({
         name: 'users_truncate',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|optional',
           status: 'string|default:active'
@@ -283,7 +283,7 @@ describe('Resource patch() and replace() Methods', () => {
       const partitionedResource = await database.createResource({
         name: 'orders_patch',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           customerId: 'string|required',
           region: 'string|required',
           status: 'string|default:pending',
@@ -324,7 +324,7 @@ describe('Resource patch() and replace() Methods', () => {
       const partitionedResource = await database.createResource({
         name: 'users_region_patch',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           region: 'string|required',
           status: 'string|default:active'
@@ -544,7 +544,7 @@ describe('Resource patch() and replace() Methods', () => {
       const partitionedResource = await database.createResource({
         name: 'products_replace',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           category: 'string|required',
           price: 'number|default:0'

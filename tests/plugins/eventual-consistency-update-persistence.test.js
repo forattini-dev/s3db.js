@@ -29,7 +29,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         shortUrl: 'string|required',
         clicks: 'number|default:0'
       }
@@ -109,7 +109,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         clicks: 'number|default:0'
       }
     });
@@ -164,7 +164,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         clicks: 'number|default:0'
       }
     });
@@ -234,7 +234,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         clicks: 'number|default:0'
       }
     });

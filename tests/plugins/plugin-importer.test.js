@@ -28,7 +28,7 @@ describe('ImporterPlugin', () => {
     resource = await database.createResource({
       name: 'test_users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|optional',
         age: 'number|optional',

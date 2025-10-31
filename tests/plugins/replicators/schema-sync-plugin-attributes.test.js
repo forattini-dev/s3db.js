@@ -13,7 +13,7 @@ import {
 
 describe('Schema Sync - Plugin Attributes Filtering', () => {
   const userAttributes = {
-    id: 'string|required',
+    id: 'string|optional',
     name: 'string|required',
     email: 'string|required|email',
     age: 'number|optional'
@@ -86,7 +86,7 @@ describe('Schema Sync - Plugin Attributes Filtering', () => {
   describe('Edge Cases', () => {
     it('should handle resources with no plugin attributes', () => {
       const sql = generatePostgresCreateTable('posts', {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         content: 'string|required'
       });

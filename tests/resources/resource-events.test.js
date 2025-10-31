@@ -15,7 +15,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'user_managed_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -47,7 +47,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'user_managed_update_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -87,7 +87,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'user_managed_delete_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string'
         },
@@ -120,7 +120,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'body_overflow_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -153,7 +153,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'body_overflow_update_test_unique',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -204,7 +204,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'body_only_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -236,7 +236,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'body_only_update_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -278,7 +278,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'data_truncate_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required|max:10',
           content: 'string|max:50',
           meta: 'object'
@@ -310,7 +310,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'data_truncate_update_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required|max:10',
           content: 'string|max:50'
         },
@@ -348,7 +348,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'enforce_limits_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string',
           meta: 'object'
@@ -380,7 +380,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'enforce_limits_exceed_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string'
         },
@@ -412,7 +412,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'nested_objects_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           user: 'object',
           settings: 'object',
           metadata: 'object'
@@ -464,7 +464,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'arrays_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           tags: 'array|items:string',
           scores: 'array|items:number',
           metadata: 'object'
@@ -500,7 +500,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'data_types_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           stringField: 'string',
           numberField: 'number',
           booleanField: 'boolean',
@@ -545,7 +545,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'single_event_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'user-managed',
@@ -578,7 +578,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'multiple_events_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'user-managed',
@@ -621,7 +621,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'different_events_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'user-managed',
@@ -667,7 +667,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'before_after_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required'
         },
@@ -715,7 +715,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'bulk_operations_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'user-managed',
@@ -749,7 +749,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'behavior_overflow_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string'
         },
@@ -782,7 +782,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
        const resource = await database.createResource({
          name: 'error_handling_test',
          attributes: {
-           id: 'string|required',
+           id: 'string|optional',
            name: 'string|required'
          },
          behavior: 'user-managed',
@@ -815,7 +815,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'context_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'user-managed',
@@ -840,7 +840,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       await expect(database.createResource({
         name: 'invalid_events_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         events: {
@@ -852,7 +852,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       await expect(database.createResource({
         name: 'invalid_array_events_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         events: {
@@ -868,7 +868,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       const resource = await database.createResource({
         name: 'manual_listeners_test',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'user-managed',

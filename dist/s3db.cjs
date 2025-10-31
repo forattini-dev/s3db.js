@@ -11645,6 +11645,27 @@ class IdentityPlugin extends Plugin {
           customFooter: options.email?.templates?.customFooter || null
         }
       },
+      // MFA Configuration (Multi-Factor Authentication)
+      mfa: {
+        enabled: options.mfa?.enabled || false,
+        // Enable MFA/TOTP
+        required: options.mfa?.required || false,
+        // Require MFA for all users
+        issuer: options.mfa?.issuer || options.ui?.title || "S3DB Identity",
+        // TOTP issuer name
+        algorithm: options.mfa?.algorithm || "SHA1",
+        // SHA1, SHA256, SHA512
+        digits: options.mfa?.digits || 6,
+        // 6 or 8 digits
+        period: options.mfa?.period || 30,
+        // 30 seconds
+        window: options.mfa?.window || 1,
+        // Time window tolerance
+        backupCodesCount: options.mfa?.backupCodesCount || 10,
+        // Number of backup codes
+        backupCodeLength: options.mfa?.backupCodeLength || 8
+        // Backup code length
+      },
       // Audit Configuration (Compliance & Security Logging)
       audit: {
         enabled: options.audit?.enabled !== false,
@@ -11670,7 +11691,11 @@ class IdentityPlugin extends Plugin {
           "password_changed",
           "email_verified",
           "user_created",
-          "user_deleted"
+          "user_deleted",
+          "mfa_enrolled",
+          "mfa_disabled",
+          "mfa_verified",
+          "mfa_failed"
         ]
       },
       // Account Lockout Configuration (Per-User Brute Force Protection)
@@ -11776,10 +11801,12 @@ class IdentityPlugin extends Plugin {
     this.emailService = null;
     this.failbanManager = null;
     this.auditPlugin = null;
+    this.mfaManager = null;
     this.oauth2KeysResource = null;
     this.oauth2AuthCodesResource = null;
     this.sessionsResource = null;
     this.passwordResetTokensResource = null;
+    this.mfaDevicesResource = null;
     this.usersResource = null;
     this.tenantsResource = null;
     this.clientsResource = null;
@@ -11814,6 +11841,7 @@ class IdentityPlugin extends Plugin {
     await this._initializeEmailService();
     await this._initializeFailbanManager();
     await this._initializeAuditPlugin();
+    await this._initializeMFAManager();
     if (this.config.verbose) {
       console.log("[Identity Plugin] Installed successfully");
     }
@@ -11944,6 +11972,49 @@ class IdentityPlugin extends Plugin {
       }
     } else {
       throw errResetTokens;
+    }
+    if (this.config.mfa.enabled) {
+      const [okMFA, errMFA, mfaResource] = await tryFn(
+        () => this.database.createResource({
+          name: "plg_mfa_devices",
+          attributes: {
+            userId: "string|required",
+            type: "string|required",
+            // 'totp', 'sms', 'email'
+            secret: "secret|required",
+            // TOTP secret (encrypted by S3DB)
+            verified: "boolean|default:false",
+            backupCodes: "array|items:string",
+            // Hashed backup codes
+            enrolledAt: "string",
+            lastUsedAt: "string|optional",
+            deviceName: "string|optional",
+            // User-friendly name
+            metadata: "object|optional"
+          },
+          behavior: "body-overflow",
+          timestamps: true,
+          partitions: {
+            byUser: {
+              fields: { userId: "string" }
+            }
+          },
+          createdBy: "IdentityPlugin"
+        })
+      );
+      if (okMFA) {
+        this.mfaDevicesResource = mfaResource;
+        if (this.config.verbose) {
+          console.log("[Identity Plugin] Created plg_mfa_devices resource");
+        }
+      } else if (this.database.resources.plg_mfa_devices) {
+        this.mfaDevicesResource = this.database.resources.plg_mfa_devices;
+        if (this.config.verbose) {
+          console.log("[Identity Plugin] Using existing plg_mfa_devices resource");
+        }
+      } else {
+        console.warn("[Identity Plugin] MFA enabled but failed to create plg_mfa_devices resource:", errMFA?.message);
+      }
     }
   }
   /**
@@ -12186,6 +12257,37 @@ class IdentityPlugin extends Plugin {
       }
     } catch (error) {
       console.error(`[Audit] Failed to log event ${event}:`, error.message);
+    }
+  }
+  /**
+   * Initialize MFA Manager (Multi-Factor Authentication)
+   * @private
+   */
+  async _initializeMFAManager() {
+    if (!this.config.mfa.enabled) {
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] MFA disabled");
+      }
+      return;
+    }
+    const { MFAManager } = await Promise.resolve().then(function () { return mfaManager; });
+    this.mfaManager = new MFAManager({
+      issuer: this.config.mfa.issuer,
+      algorithm: this.config.mfa.algorithm,
+      digits: this.config.mfa.digits,
+      period: this.config.mfa.period,
+      window: this.config.mfa.window,
+      backupCodesCount: this.config.mfa.backupCodesCount,
+      backupCodeLength: this.config.mfa.backupCodeLength
+    });
+    await this.mfaManager.initialize();
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] MFA Manager initialized");
+      console.log(`[Identity Plugin] Issuer: ${this.config.mfa.issuer}`);
+      console.log(`[Identity Plugin] Algorithm: ${this.config.mfa.algorithm}`);
+      console.log(`[Identity Plugin] Digits: ${this.config.mfa.digits}`);
+      console.log(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
+      console.log(`[Identity Plugin] Required: ${this.config.mfa.required}`);
     }
   }
   /**
@@ -18356,6 +18458,7 @@ async function getLastNMonths(resourceName, field, months = 12, options, fieldHa
     const emptyRecord = { count: 0, sum: 0, avg: 0, min: 0, max: 0, recordCount: 0 };
     const dataMap = new Map(data.map((d) => [d.cohort, d]));
     const current = new Date(monthsAgo);
+    current.setDate(1);
     for (let i = 0; i < months; i++) {
       const cohort = current.toISOString().substring(0, 7);
       result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
@@ -45986,6 +46089,153 @@ var emailService = /*#__PURE__*/Object.freeze({
   EmailService: EmailService
 });
 
+class MFAManager {
+  constructor(options = {}) {
+    this.options = {
+      issuer: options.issuer || "S3DB Identity",
+      algorithm: options.algorithm || "SHA1",
+      // SHA1, SHA256, SHA512
+      digits: options.digits || 6,
+      // 6 or 8 digits
+      period: options.period || 30,
+      // 30 seconds
+      window: options.window || 1,
+      // Allow ±1 time step (90s total)
+      backupCodesCount: options.backupCodesCount || 10,
+      backupCodeLength: options.backupCodeLength || 8
+    };
+    this.OTPAuth = null;
+  }
+  /**
+   * Initialize MFA Manager (load otpauth library)
+   */
+  async initialize() {
+    this.OTPAuth = await requirePluginDependency(
+      "otpauth",
+      "IdentityPlugin (MFA)");
+  }
+  /**
+   * Generate MFA enrollment data for a user
+   * @param {string} accountName - User email or username
+   * @returns {Object} Enrollment data with secret, QR code URL, and backup codes
+   */
+  generateEnrollment(accountName) {
+    if (!this.OTPAuth) {
+      throw new Error("[MFA] OTPAuth library not initialized");
+    }
+    const totp = new this.OTPAuth.TOTP({
+      issuer: this.options.issuer,
+      label: accountName,
+      algorithm: this.options.algorithm,
+      digits: this.options.digits,
+      period: this.options.period,
+      secret: this.OTPAuth.Secret.fromBase32(
+        this.OTPAuth.Secret.generate().base32
+      )
+    });
+    const qrCodeUrl = totp.toString();
+    const backupCodes = this.generateBackupCodes(this.options.backupCodesCount);
+    return {
+      secret: totp.secret.base32,
+      // For manual entry
+      qrCodeUrl,
+      // For QR code scanning
+      backupCodes,
+      // Emergency access codes
+      algorithm: this.options.algorithm,
+      digits: this.options.digits,
+      period: this.options.period
+    };
+  }
+  /**
+   * Verify a TOTP token
+   * @param {string} secret - Base32 encoded secret
+   * @param {string} token - 6-digit token from authenticator app
+   * @returns {boolean} True if valid
+   */
+  verifyTOTP(secret, token) {
+    if (!this.OTPAuth) {
+      throw new Error("[MFA] OTPAuth library not initialized");
+    }
+    try {
+      const totp = new this.OTPAuth.TOTP({
+        issuer: this.options.issuer,
+        algorithm: this.options.algorithm,
+        digits: this.options.digits,
+        period: this.options.period,
+        secret: this.OTPAuth.Secret.fromBase32(secret)
+      });
+      const delta = totp.validate({
+        token,
+        window: this.options.window
+      });
+      return delta !== null;
+    } catch (error) {
+      console.error("[MFA] TOTP verification error:", error.message);
+      return false;
+    }
+  }
+  /**
+   * Generate backup codes for emergency access
+   * @param {number} count - Number of codes to generate
+   * @returns {Array<string>} Array of backup codes
+   */
+  generateBackupCodes(count = 10) {
+    const codes = [];
+    const length = this.options.backupCodeLength;
+    for (let i = 0; i < count; i++) {
+      const code = idGenerator().replace(/[^a-zA-Z0-9]/g, "").substring(0, length).toUpperCase();
+      codes.push(code);
+    }
+    return codes;
+  }
+  /**
+   * Hash backup codes for storage
+   * @param {Array<string>} codes - Backup codes
+   * @returns {Array<string>} Hashed codes
+   */
+  async hashBackupCodes(codes) {
+    const crypto = await import('crypto');
+    return codes.map((code) => {
+      return crypto.createHash("sha256").update(code).digest("hex");
+    });
+  }
+  /**
+   * Verify a backup code
+   * @param {string} code - Backup code to verify
+   * @param {Array<string>} hashedCodes - Array of hashed backup codes
+   * @returns {number|null} Index of matched code, or null if not found
+   */
+  async verifyBackupCode(code, hashedCodes) {
+    const crypto = await import('crypto');
+    const hashedInput = crypto.createHash("sha256").update(code.toUpperCase()).digest("hex");
+    return hashedCodes.findIndex((hash) => hash === hashedInput);
+  }
+  /**
+   * Generate QR code data URL for display
+   * @param {string} qrCodeUrl - OTP auth URL
+   * @returns {Promise<string>} Data URL for QR code image
+   */
+  async generateQRCodeDataURL(qrCodeUrl) {
+    try {
+      const QRCode = await requirePluginDependency(
+        "qrcode",
+        "IdentityPlugin (MFA)",
+        "QR code generation for MFA enrollment"
+      );
+      return await QRCode.toDataURL(qrCodeUrl);
+    } catch (error) {
+      console.error("[MFA] QR code generation error:", error.message);
+      return null;
+    }
+  }
+}
+
+var mfaManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  MFAManager: MFAManager
+});
+
 function createCorsMiddleware(config = {}) {
   const {
     origin = "*",
@@ -49519,6 +49769,64 @@ function registerUIRoutes(app, plugin) {
         const message = user.status === "suspended" ? "Your account has been suspended. Please contact support." : "Your account is inactive. Please verify your email or contact support.";
         return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
       }
+      if (config.mfa.enabled && plugin.mfaDevicesResource) {
+        const [okMFA, errMFA, mfaDevices] = await tryFn(
+          () => plugin.mfaDevicesResource.query({ userId: user.id, verified: true })
+        );
+        const hasMFA = okMFA && mfaDevices.length > 0;
+        const mfaRequired = config.mfa.required;
+        if (hasMFA || mfaRequired) {
+          const { mfa_token, backup_code } = body;
+          if (!mfa_token && !backup_code) {
+            const tempToken = Buffer.from(JSON.stringify({
+              userId: user.id,
+              email: user.email,
+              password,
+              // Store to re-submit after MFA
+              timestamp: Date.now()
+            })).toString("base64");
+            return c.redirect(`/login/mfa?token=${tempToken}&remember=${remember || ""}`);
+          }
+          let mfaVerified = false;
+          if (mfa_token && hasMFA) {
+            mfaVerified = plugin.mfaManager.verifyTOTP(mfaDevices[0].secret, mfa_token);
+            if (mfaVerified) {
+              await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
+                lastUsedAt: (/* @__PURE__ */ new Date()).toISOString()
+              });
+              await logAudit("mfa_verified", { userId: user.id, method: "totp" });
+              if (config.verbose) {
+                console.log(`[MFA] User ${user.email} verified with TOTP token`);
+              }
+            }
+          } else if (backup_code && hasMFA) {
+            const matchIndex = await plugin.mfaManager.verifyBackupCode(
+              backup_code,
+              mfaDevices[0].backupCodes
+            );
+            if (matchIndex !== null && matchIndex >= 0) {
+              const updatedCodes = [...mfaDevices[0].backupCodes];
+              updatedCodes.splice(matchIndex, 1);
+              await plugin.mfaDevicesResource.patch(mfaDevices[0].id, {
+                backupCodes: updatedCodes,
+                lastUsedAt: (/* @__PURE__ */ new Date()).toISOString()
+              });
+              mfaVerified = true;
+              await logAudit("mfa_verified", { userId: user.id, method: "backup_code" });
+              if (config.verbose) {
+                console.log(`[MFA] User ${user.email} verified with backup code (${updatedCodes.length} codes remaining)`);
+              }
+            }
+          }
+          if (!mfaVerified) {
+            await logAudit("mfa_failed", { userId: user.id, reason: "invalid_token" });
+            if (config.verbose) {
+              console.log(`[MFA] User ${user.email} MFA verification failed`);
+            }
+            return c.redirect(`/login/mfa?error=${encodeURIComponent("Invalid MFA code. Please try again.")}&token=${Buffer.from(JSON.stringify({ userId: user.id, email: user.email, timestamp: Date.now() })).toString("base64")}`);
+          }
+        }
+      }
       const ipAddress = c.req.header("x-forwarded-for")?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
       const userAgent = c.req.header("user-agent") || "unknown";
       const sessionExpiry = remember === "1" ? "30d" : config.session.sessionExpiry;
@@ -49553,6 +49861,121 @@ function registerUIRoutes(app, plugin) {
     } catch (error) {
       if (config.verbose) {
         console.error("[Identity Plugin] Login error:", error);
+      }
+      return c.redirect(`/login?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/login/mfa", async (c) => {
+    if (!config.mfa.enabled) {
+      return c.redirect(`/login?error=${encodeURIComponent("MFA is not enabled on this server")}`);
+    }
+    try {
+      const token = c.req.query("token");
+      const remember = c.req.query("remember");
+      const error = c.req.query("error");
+      if (!token) {
+        return c.redirect(`/login?error=${encodeURIComponent("Invalid MFA session")}`);
+      }
+      let userData;
+      try {
+        userData = JSON.parse(Buffer.from(token, "base64").toString("utf-8"));
+      } catch (err) {
+        return c.redirect(`/login?error=${encodeURIComponent("Invalid MFA session")}`);
+      }
+      const tokenAge = Date.now() - userData.timestamp;
+      if (tokenAge > 3e5) {
+        return c.redirect(`/login?error=${encodeURIComponent("MFA session expired. Please login again.")}`);
+      }
+      return c.html(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Two-Factor Authentication - ${config.ui.title}</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 400px; margin: 0 auto; background: ${config.ui.backgroundLight}; }
+            .container { background: white; padding: 2rem; border-radius: ${config.ui.borderRadius}; box-shadow: ${config.ui.boxShadow}; }
+            h1 { color: ${config.ui.primaryColor}; text-align: center; margin-bottom: 1.5rem; }
+            .error { background: #f8d7da; color: #721c24; padding: 0.75rem; border-radius: ${config.ui.borderRadius}; margin-bottom: 1rem; }
+            label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+            input { padding: 0.75rem; border: 1px solid ${config.ui.borderColor}; border-radius: ${config.ui.borderRadius}; width: 100%; box-sizing: border-box; font-size: 1.2rem; letter-spacing: 0.2em; text-align: center; }
+            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; width: 100%; margin-top: 1rem; font-size: 1rem; }
+            button:hover { opacity: 0.9; }
+            .backup-link { text-align: center; margin-top: 1rem; }
+            .backup-link a { color: ${config.ui.primaryColor}; text-decoration: none; }
+            .backup-link a:hover { text-decoration: underline; }
+            .back-link { text-align: center; margin-top: 1rem; color: ${config.ui.textMuted}; }
+            .back-link a { color: ${config.ui.secondaryColor}; text-decoration: none; }
+            #backup-code-form { display: none; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>\u{1F510} Two-Factor Authentication</h1>
+
+            ${error ? `<div class="error">${decodeURIComponent(error)}</div>` : ""}
+
+            <p style="text-align: center; color: ${config.ui.textMuted}; margin-bottom: 1.5rem;">
+              Enter the 6-digit code from your authenticator app to continue.
+            </p>
+
+            <form method="POST" action="/login" id="mfa-form">
+              <input type="hidden" name="email" value="${userData.email}" />
+              <input type="hidden" name="password" value="${userData.password}" />
+              <input type="hidden" name="remember" value="${remember || ""}" />
+
+              <label for="mfa_token">Verification Code:</label>
+              <input type="text" id="mfa_token" name="mfa_token" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="off" />
+
+              <button type="submit">\u2713 Verify</button>
+            </form>
+
+            <div class="backup-link">
+              <a href="#" onclick="showBackupCodeForm(); return false;">Lost your device? Use backup code</a>
+            </div>
+
+            <form method="POST" action="/login" id="backup-code-form">
+              <input type="hidden" name="email" value="${userData.email}" />
+              <input type="hidden" name="password" value="${userData.password}" />
+              <input type="hidden" name="remember" value="${remember || ""}" />
+
+              <label for="backup_code">Backup Code:</label>
+              <input type="text" id="backup_code" name="backup_code" maxlength="16" required autocomplete="off" style="text-transform: uppercase;" />
+
+              <button type="submit">\u2713 Verify with Backup Code</button>
+
+              <div style="text-align: center; margin-top: 1rem;">
+                <a href="#" onclick="showMFAForm(); return false;" style="color: ${config.ui.secondaryColor};">\u2190 Back to authenticator</a>
+              </div>
+            </form>
+
+            <div class="back-link">
+              <a href="/login">\u2190 Back to login</a>
+            </div>
+          </div>
+
+          <script>
+            function showBackupCodeForm() {
+              document.getElementById('mfa-form').style.display = 'none';
+              document.getElementById('backup-code-form').style.display = 'block';
+              document.getElementById('backup_code').focus();
+              document.querySelector('.backup-link').style.display = 'none';
+            }
+
+            function showMFAForm() {
+              document.getElementById('mfa-form').style.display = 'block';
+              document.getElementById('backup-code-form').style.display = 'none';
+              document.getElementById('mfa_token').focus();
+              document.querySelector('.backup-link').style.display = 'block';
+            }
+          <\/script>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] MFA verification page error:", error);
       }
       return c.redirect(`/login?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
@@ -50046,6 +50469,282 @@ function registerUIRoutes(app, plugin) {
     } catch (error) {
       if (config.verbose) {
         console.error("[Identity Plugin] Logout all sessions error:", error);
+      }
+      return c.redirect(`/profile?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/profile/mfa/enroll", sessionAuth(sessionManager, { required: true }), async (c) => {
+    if (!config.mfa.enabled) {
+      return c.redirect(`/profile?error=${encodeURIComponent("MFA is not enabled on this server")}`);
+    }
+    try {
+      const user = c.get("user");
+      const [okUser, errUser, userData] = await tryFn(
+        () => usersResource.get(user.userId || user.id)
+      );
+      if (!okUser) {
+        return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
+      }
+      const [okDevices, errDevices, devices] = await tryFn(
+        () => plugin.mfaDevicesResource.query({ userId: userData.id, verified: true })
+      );
+      if (okDevices && devices.length > 0) {
+        return c.redirect(`/profile?error=${encodeURIComponent("MFA is already enabled for your account")}`);
+      }
+      const enrollment = plugin.mfaManager.generateEnrollment(userData.email);
+      const qrCodeDataUrl = await plugin.mfaManager.generateQRCodeDataURL(enrollment.qrCodeUrl);
+      c.set("mfaEnrollment", enrollment);
+      return c.html(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Enable MFA - ${config.ui.title}</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 600px; margin: 0 auto; }
+            h1 { color: ${config.ui.primaryColor}; }
+            .qr-code { text-align: center; margin: 2rem 0; }
+            .qr-code img { border: 2px solid ${config.ui.borderColor}; padding: 1rem; }
+            .secret { background: ${config.ui.backgroundLight}; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 1rem 0; }
+            .backup-codes { background: #fff3cd; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 2rem 0; }
+            .backup-codes-list { font-family: monospace; columns: 2; }
+            input { padding: 0.5rem; border: 1px solid ${config.ui.borderColor}; border-radius: ${config.ui.borderRadius}; width: 100%; margin: 0.5rem 0; }
+            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; }
+            button:hover { opacity: 0.9; }
+            .cancel-btn { background: ${config.ui.secondaryColor}; margin-left: 0.5rem; }
+          </style>
+        </head>
+        <body>
+          <h1>Enable Two-Factor Authentication</h1>
+
+          <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, 1Password, etc.):</p>
+
+          <div class="qr-code">
+            <img src="${qrCodeDataUrl}" alt="QR Code" />
+          </div>
+
+          <div class="secret">
+            <strong>Manual Entry Key:</strong><br/>
+            <code>${enrollment.secret}</code><br/>
+            <small>Use this if you can't scan the QR code</small>
+          </div>
+
+          <div class="backup-codes">
+            <strong>\u26A0\uFE0F Save these backup codes!</strong>
+            <p>You can use these codes to access your account if you lose your authenticator device. Each code can only be used once.</p>
+            <div class="backup-codes-list">
+              ${enrollment.backupCodes.map((code) => `<div>${code}</div>`).join("")}
+            </div>
+            <button onclick="downloadBackupCodes()">\u{1F4BE} Download Backup Codes</button>
+          </div>
+
+          <form method="POST" action="/profile/mfa/enroll">
+            <label>Enter the 6-digit code from your authenticator app to verify:</label>
+            <input type="text" name="token" pattern="[0-9]{6}" maxlength="6" required autofocus />
+
+            <input type="hidden" name="enrollment_secret" value="${enrollment.secret}" />
+            <input type="hidden" name="enrollment_backup_codes" value="${JSON.stringify(enrollment.backupCodes)}" />
+
+            <div style="margin-top: 1rem;">
+              <button type="submit">\u2713 Verify and Enable MFA</button>
+              <a href="/profile"><button type="button" class="cancel-btn">Cancel</button></a>
+            </div>
+          </form>
+
+          <script>
+            function downloadBackupCodes() {
+              const codes = ${JSON.stringify(enrollment.backupCodes)};
+              const text = 'MFA Backup Codes - ${config.ui.title}\\n\\n' + codes.join('\\n') + '\\n\\nKeep these codes safe!';
+              const blob = new Blob([text], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'mfa-backup-codes.txt';
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+          <\/script>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] MFA enrollment page error:", error);
+      }
+      return c.redirect(`/profile?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/profile/mfa/enroll", sessionAuth(sessionManager, { required: true }), async (c) => {
+    if (!config.mfa.enabled) {
+      return c.redirect(`/profile?error=${encodeURIComponent("MFA is not enabled on this server")}`);
+    }
+    try {
+      const user = c.get("user");
+      const body = await c.req.parseBody();
+      const { token, enrollment_secret, enrollment_backup_codes } = body;
+      if (!token || !enrollment_secret || !enrollment_backup_codes) {
+        return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent("Invalid enrollment data")}`);
+      }
+      const [okUser, errUser, userData] = await tryFn(
+        () => usersResource.get(user.userId || user.id)
+      );
+      if (!okUser) {
+        return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
+      }
+      const isValid = plugin.mfaManager.verifyTOTP(enrollment_secret, token);
+      if (!isValid) {
+        return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent("Invalid verification code. Please try again.")}`);
+      }
+      const backupCodes = JSON.parse(enrollment_backup_codes);
+      const hashedCodes = await plugin.mfaManager.hashBackupCodes(backupCodes);
+      const [okDevice, errDevice] = await tryFn(
+        () => plugin.mfaDevicesResource.insert({
+          userId: userData.id,
+          type: "totp",
+          secret: enrollment_secret,
+          verified: true,
+          backupCodes: hashedCodes,
+          enrolledAt: (/* @__PURE__ */ new Date()).toISOString(),
+          deviceName: "Authenticator App"
+        })
+      );
+      if (!okDevice) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to save MFA device:", errDevice);
+        }
+        return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent("Failed to enable MFA. Please try again.")}`);
+      }
+      await logAudit("mfa_enrolled", { userId: userData.id, type: "totp" });
+      return c.redirect(`/profile?success=${encodeURIComponent("Two-factor authentication enabled successfully!")}`);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] MFA enrollment error:", error);
+      }
+      return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/profile/mfa/disable", sessionAuth(sessionManager, { required: true }), async (c) => {
+    if (!config.mfa.enabled) {
+      return c.redirect(`/profile?error=${encodeURIComponent("MFA is not enabled on this server")}`);
+    }
+    try {
+      const user = c.get("user");
+      const body = await c.req.parseBody();
+      const { password } = body;
+      if (!password) {
+        return c.redirect(`/profile?error=${encodeURIComponent("Password is required to disable MFA")}`);
+      }
+      const [okUser, errUser, userData] = await tryFn(
+        () => usersResource.get(user.userId || user.id)
+      );
+      if (!okUser) {
+        return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
+      }
+      const isValidPassword = await verifyPassword(password, userData.password);
+      if (!isValidPassword) {
+        return c.redirect(`/profile?error=${encodeURIComponent("Invalid password")}`);
+      }
+      const [okDevices, errDevices, devices] = await tryFn(
+        () => plugin.mfaDevicesResource.query({ userId: userData.id })
+      );
+      if (okDevices && devices.length > 0) {
+        for (const device of devices) {
+          await plugin.mfaDevicesResource.remove(device.id);
+        }
+        await logAudit("mfa_disabled", { userId: userData.id, by: "user" });
+        return c.redirect(`/profile?success=${encodeURIComponent("Two-factor authentication disabled successfully")}`);
+      } else {
+        return c.redirect(`/profile?error=${encodeURIComponent("MFA is not enabled for your account")}`);
+      }
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] MFA disable error:", error);
+      }
+      return c.redirect(`/profile?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.get("/profile/mfa/backup-codes", sessionAuth(sessionManager, { required: true }), async (c) => {
+    if (!config.mfa.enabled) {
+      return c.redirect(`/profile?error=${encodeURIComponent("MFA is not enabled on this server")}`);
+    }
+    try {
+      const user = c.get("user");
+      const [okUser, errUser, userData] = await tryFn(
+        () => usersResource.get(user.userId || user.id)
+      );
+      if (!okUser) {
+        return c.redirect(`/profile?error=${encodeURIComponent("Failed to load profile")}`);
+      }
+      const [okDevices, errDevices, devices] = await tryFn(
+        () => plugin.mfaDevicesResource.query({ userId: userData.id, verified: true })
+      );
+      if (!okDevices || devices.length === 0) {
+        return c.redirect(`/profile?error=${encodeURIComponent("MFA is not enabled for your account")}`);
+      }
+      const backupCodes = plugin.mfaManager.generateBackupCodes(config.mfa.backupCodesCount);
+      const hashedCodes = await plugin.mfaManager.hashBackupCodes(backupCodes);
+      const [okUpdate, errUpdate] = await tryFn(
+        () => plugin.mfaDevicesResource.patch(devices[0].id, {
+          backupCodes: hashedCodes
+        })
+      );
+      if (!okUpdate) {
+        if (config.verbose) {
+          console.error("[Identity Plugin] Failed to regenerate backup codes:", errUpdate);
+        }
+        return c.redirect(`/profile?error=${encodeURIComponent("Failed to regenerate backup codes. Please try again.")}`);
+      }
+      return c.html(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>New Backup Codes - ${config.ui.title}</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 600px; margin: 0 auto; }
+            h1 { color: ${config.ui.primaryColor}; }
+            .backup-codes { background: #fff3cd; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 2rem 0; }
+            .backup-codes-list { font-family: monospace; columns: 2; }
+            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; margin-right: 0.5rem; }
+            button:hover { opacity: 0.9; }
+            .back-btn { background: ${config.ui.secondaryColor}; }
+          </style>
+        </head>
+        <body>
+          <h1>New Backup Codes Generated</h1>
+
+          <div class="backup-codes">
+            <strong>\u26A0\uFE0F Save these new backup codes!</strong>
+            <p>Your old backup codes have been invalidated. Save these new codes in a safe place.</p>
+            <div class="backup-codes-list">
+              ${backupCodes.map((code) => `<div>${code}</div>`).join("")}
+            </div>
+          </div>
+
+          <button onclick="downloadBackupCodes()">\u{1F4BE} Download Backup Codes</button>
+          <a href="/profile"><button class="back-btn">Back to Profile</button></a>
+
+          <script>
+            function downloadBackupCodes() {
+              const codes = ${JSON.stringify(backupCodes)};
+              const text = 'MFA Backup Codes - ${config.ui.title}\\n\\n' + codes.join('\\n') + '\\n\\nKeep these codes safe!';
+              const blob = new Blob([text], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'mfa-backup-codes.txt';
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+          <\/script>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      if (config.verbose) {
+        console.error("[Identity Plugin] MFA backup codes error:", error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
@@ -50548,6 +51247,41 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/users?success=${encodeURIComponent(`Account unlocked for ${user.email}`)}`);
     } catch (error) {
       console.error("[Identity Plugin] Unlock account error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/disable-mfa", adminOnly(sessionManager), async (c) => {
+    if (!config.mfa.enabled) {
+      return c.redirect(`/admin/users?error=${encodeURIComponent("MFA is not enabled on this server")}`);
+    }
+    const userId = c.req.param("id");
+    const currentUser = c.get("user");
+    try {
+      const [okGet, errGet, user] = await tryFn(() => usersResource.get(userId));
+      if (!okGet || !user) {
+        console.error("[Identity Plugin] User not found:", userId);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      const [okDevices, errDevices, devices] = await tryFn(
+        () => plugin.mfaDevicesResource.query({ userId: user.id })
+      );
+      if (!okDevices || devices.length === 0) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("MFA is not enabled for this user")}`);
+      }
+      for (const device of devices) {
+        await plugin.mfaDevicesResource.remove(device.id);
+      }
+      await logAudit("mfa_disabled", {
+        userId: user.id,
+        by: "admin",
+        adminEmail: currentUser.email
+      });
+      if (config.verbose) {
+        console.log(`[MFA] Admin ${currentUser.email} disabled MFA for user ${user.email}`);
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`MFA disabled for ${user.email}`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Admin disable MFA error:", error);
       return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
   });

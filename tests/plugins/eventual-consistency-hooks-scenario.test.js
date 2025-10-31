@@ -31,7 +31,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0',
         views: 'number|default:0',
@@ -44,7 +44,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     clicks = await database.createResource({
       name: 'clicks',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         urlId: 'string|required',
         userId: 'string|optional',
         timestamp: 'string|required'
@@ -55,7 +55,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     views = await database.createResource({
       name: 'views',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         urlId: 'string|required',
         timestamp: 'string|required'
       }
@@ -65,7 +65,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     shares = await database.createResource({
       name: 'shares',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         urlId: 'string|required',
         timestamp: 'string|required'
       }
@@ -75,7 +75,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     scans = await database.createResource({
       name: 'scans',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         urlId: 'string|required',
         timestamp: 'string|required'
       }

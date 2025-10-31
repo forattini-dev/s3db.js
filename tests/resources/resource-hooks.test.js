@@ -13,7 +13,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required'
       }
@@ -83,7 +83,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         price: 'number|required',
         category: 'string|optional'
@@ -120,7 +120,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'events',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         status: 'string|required'
       }
@@ -177,7 +177,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -201,7 +201,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required'
       }
@@ -225,7 +225,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         region: 'string|required',
         category: 'string|required'
@@ -268,7 +268,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderId: 'string|required',
         amount: 'number|required'
       }
@@ -314,7 +314,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         age: 'number|optional'
@@ -382,7 +382,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'events',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         type: 'string|required'
       },
@@ -478,7 +478,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'performance',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         data: 'string|optional'
       }
@@ -525,7 +525,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'complex',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         user: 'object',
         settings: 'object',
         metadata: 'object'

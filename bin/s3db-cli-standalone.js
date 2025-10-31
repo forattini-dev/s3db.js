@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { Command } = require('commander');
-const { S3db } = require('../dist/s3db.cjs.js');
+const { S3db } = require('../dist/s3db.cjs');
 const chalk = require('chalk');
 const ora = require('ora');
 const Table = require('cli-table3');

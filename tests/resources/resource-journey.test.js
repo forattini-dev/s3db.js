@@ -20,7 +20,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         age: 'number|optional',
@@ -139,7 +139,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         price: 'number|required'
       }
@@ -152,7 +152,7 @@ describe('Resource Journey - Real Integration Tests', () => {
 
     // 2. Update attributes
     const newAttributes = {
-      id: 'string|required',
+      id: 'string|optional',
       name: 'string|required',
       price: 'number|required',
       category: 'string|optional',
@@ -164,7 +164,7 @@ describe('Resource Journey - Real Integration Tests', () => {
 
     // 3. Verify old and new attributes
     expect(updateResult.oldAttributes).toEqual({
-      id: 'string|required',
+      id: 'string|optional',
       name: 'string|required',
       price: 'number|required'
     });
@@ -201,7 +201,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'events',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         description: 'string|optional'
       },
@@ -255,7 +255,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderId: 'string|required',
         amount: 'number|required'
       }
@@ -313,7 +313,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required'
       }
@@ -336,7 +336,7 @@ describe('Resource Journey - Real Integration Tests', () => {
       await database.createResource({
         name: 'invalid',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         partitions: {
@@ -367,7 +367,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const nonParanoidResource = await database.createResource({
       name: 'non-paranoid-test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       },
       paranoid: false
@@ -387,7 +387,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const defaultResource = await database.createResource({
       name: 'default',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -402,7 +402,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const customResource = await database.createResource({
       name: 'custom',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       },
       cache: true,
@@ -442,7 +442,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'complex',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         age: 'number|optional',
@@ -511,7 +511,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const def = {
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         age: 'number|optional'
@@ -543,7 +543,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'lifecycle',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         status: 'string|required',
         metadata: 'object|optional'
@@ -614,7 +614,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'documents',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         content: 'string|required',
         embedding: 'embedding:1536',  // OpenAI text-embedding-3-small/3-large dimension

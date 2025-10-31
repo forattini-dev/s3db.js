@@ -949,14 +949,22 @@ export function generateOpenAPISpec(database, config = {}) {
     description = 'Auto-generated REST API documentation for s3db.js resources',
     serverUrl = 'http://localhost:3000',
     auth = {},
-    resources: resourceConfigs = {}
+    resources: resourceConfigs = {},
+    versionPrefix: globalVersionPrefix
   } = config;
 
   // Build resources table for description
   const resourcesTableRows = [];
   for (const [name, resource] of Object.entries(database.resources)) {
+    const rawConfig = resourceConfigs[name];
+
+    // Skip resources explicitly disabled
+    if (rawConfig?.enabled === false) {
+      continue;
+    }
+
     // Skip plugin resources unless explicitly configured
-    if (name.startsWith('plg_') && !resourceConfigs[name]) {
+    if (name.startsWith('plg_') && !rawConfig) {
       continue;
     }
 
@@ -967,10 +975,17 @@ export function generateOpenAPISpec(database, config = {}) {
       : resourceDescription || 'No description';
 
     // Check version prefix for this resource (same logic as server.js)
-    const config = resourceConfigs[name] || {};
-    let versionPrefixConfig = config.versionPrefix !== undefined
-      ? config.versionPrefix
-      : false; // Default to false (no prefix)
+    const resourceConfig = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+    let versionPrefixConfig;
+    if (resourceConfig.versionPrefix !== undefined) {
+      versionPrefixConfig = resourceConfig.versionPrefix;
+    } else if (resource.config && resource.config.versionPrefix !== undefined) {
+      versionPrefixConfig = resource.config.versionPrefix;
+    } else if (globalVersionPrefix !== undefined) {
+      versionPrefixConfig = globalVersionPrefix;
+    } else {
+      versionPrefixConfig = false; // Default to no prefix
+    }
 
     let prefix = '';
     if (versionPrefixConfig === true) {
@@ -1103,13 +1118,19 @@ For detailed information about each endpoint, see the sections below.`;
   const relationsPlugin = database.plugins?.relation || database.plugins?.RelationPlugin || null;
 
   for (const [name, resource] of Object.entries(resources)) {
+    const rawConfig = resourceConfigs[name];
+
+    if (rawConfig?.enabled === false) {
+      continue;
+    }
+
     // Skip plugin resources unless explicitly configured
-    if (name.startsWith('plg_') && !resourceConfigs[name]) {
+    if (name.startsWith('plg_') && !rawConfig) {
       continue;
     }
 
     // Get resource configuration
-    const config = resourceConfigs[name] || {
+    const resourceConfig = rawConfig && typeof rawConfig === 'object' ? { ...rawConfig } : {
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       auth: false
     };
@@ -1118,7 +1139,16 @@ For detailed information about each endpoint, see the sections below.`;
     const version = resource.config?.currentVersion || resource.version || 'v1';
 
     // Determine version prefix (same logic as server.js)
-    let versionPrefixConfig = config.versionPrefix !== undefined ? config.versionPrefix : false;
+    let versionPrefixConfig;
+    if (resourceConfig.versionPrefix !== undefined) {
+      versionPrefixConfig = resourceConfig.versionPrefix;
+    } else if (resource.config && resource.config.versionPrefix !== undefined) {
+      versionPrefixConfig = resource.config.versionPrefix;
+    } else if (globalVersionPrefix !== undefined) {
+      versionPrefixConfig = globalVersionPrefix;
+    } else {
+      versionPrefixConfig = false;
+    }
 
     let prefix = '';
     if (versionPrefixConfig === true) {
@@ -1130,7 +1160,10 @@ For detailed information about each endpoint, see the sections below.`;
     }
 
     // Generate paths
-    const paths = generateResourcePaths(resource, version, config);
+    const paths = generateResourcePaths(resource, version, {
+      ...resourceConfig,
+      versionPrefix: versionPrefixConfig
+    });
 
     // Merge paths
     Object.assign(spec.paths, paths);
@@ -1160,7 +1193,7 @@ For detailed information about each endpoint, see the sections below.`;
         }
 
         // Check if relation should be exposed (default: yes)
-        const exposeRelation = config?.relations?.[relationName]?.expose !== false;
+        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
         if (!exposeRelation) {
           continue;
         }

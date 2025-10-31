@@ -6,7 +6,7 @@
  */
 
 import { BaseModel } from './base-model.class.js';
-import { ModelConfigError, DataValidationError } from '../ml.errors.js';
+import { ModelConfigError, DataValidationError, ModelNotTrainedError } from '../ml.errors.js';
 
 export class ClassificationModel extends BaseModel {
   constructor(config = {}) {

@@ -12,7 +12,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     resource = await database.createResource({
       name: 'tasks',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         data: 'string|required'
       }
@@ -321,7 +321,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const testResource = await database.createResource({
       name: 'etag_test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         status: 'string|required',
         value: 'number|required'
       }

@@ -203,6 +203,51 @@ export function payloadTooLarge(size, limit) {
   });
 }
 
+/**
+ * Create custom formatters with override support
+ *
+ * Allows customization of response formats while maintaining fallbacks.
+ * Useful for adapting to existing API contracts or organizational standards.
+ *
+ * @param {Object} customFormatters - Custom formatter functions
+ * @param {Function} customFormatters.success - Custom success formatter
+ * @param {Function} customFormatters.error - Custom error formatter
+ * @param {Function} customFormatters.list - Custom list formatter
+ * @param {Function} customFormatters.created - Custom created formatter
+ * @returns {Object} Formatters object with custom overrides
+ *
+ * @example
+ * const formatters = createCustomFormatters({
+ *   success: (data, meta) => ({ ok: true, result: data, ...meta }),
+ *   error: (err, status) => ({ ok: false, message: err.message, code: status })
+ * });
+ *
+ * // Use in API routes:
+ * return c.json(formatters.success(user));
+ */
+export function createCustomFormatters(customFormatters = {}) {
+  // Default formatters
+  const defaults = {
+    success: (data, meta = {}) => success(data, { meta }),
+    error: (err, status, code) => error(err, { status, code }),
+    list: (items, pagination) => list(items, pagination),
+    created: (data, location) => created(data, location),
+    noContent: () => noContent(),
+    validationError: (errors) => validationError(errors),
+    notFound: (resource, id) => notFound(resource, id),
+    unauthorized: (message) => unauthorized(message),
+    forbidden: (message) => forbidden(message),
+    rateLimitExceeded: (retryAfter) => rateLimitExceeded(retryAfter),
+    payloadTooLarge: (size, limit) => payloadTooLarge(size, limit)
+  };
+
+  // Merge custom formatters with defaults
+  return {
+    ...defaults,
+    ...customFormatters
+  };
+}
+
 export default {
   success,
   error,
@@ -214,5 +259,6 @@ export default {
   unauthorized,
   forbidden,
   rateLimitExceeded,
-  payloadTooLarge
+  payloadTooLarge,
+  createCustomFormatters
 };

@@ -124,8 +124,8 @@ build_with_new_version() {
     
     # Verify version was embedded
     local embedded_version=""
-    if [ -f "dist/s3db.cjs.js" ]; then
-        embedded_version=$(grep -o '"[0-9]\+\.[0-9]\+\.[0-9]\+"' dist/s3db.cjs.js | head -1 | tr -d '"' || echo "")
+    if [ -f "dist/s3db.cjs" ]; then
+        embedded_version=$(grep -o '"[0-9]\+\.[0-9]\+\.[0-9]\+"' dist/s3db.cjs | head -1 | tr -d '"' || echo "")
     fi
     
     local expected_version=${1#v}  # Remove 'v' prefix

@@ -39,7 +39,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -60,7 +60,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -101,7 +101,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -155,7 +155,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -189,7 +189,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -223,7 +223,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -255,7 +255,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -306,7 +306,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -345,7 +345,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -381,7 +381,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -416,7 +416,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -455,7 +455,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -513,7 +513,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -538,7 +538,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -559,7 +559,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -580,7 +580,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -603,7 +603,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -623,7 +623,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -658,7 +658,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -685,7 +685,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -711,7 +711,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -744,7 +744,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -773,7 +773,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -813,7 +813,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -840,7 +840,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -871,7 +871,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -902,7 +902,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -930,7 +930,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -959,7 +959,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -990,7 +990,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1024,7 +1024,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1048,7 +1048,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1072,7 +1072,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1099,7 +1099,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1119,7 +1119,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1141,7 +1141,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1171,7 +1171,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1204,7 +1204,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1237,7 +1237,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1270,7 +1270,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1312,7 +1312,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1363,7 +1363,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });
@@ -1402,7 +1402,7 @@ describe('EventualConsistencyPlugin - Coverage Tests', () => {
       urls = await database.createResource({
         name: 'urls',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           clicks: 'number|default:0'
         }
       });

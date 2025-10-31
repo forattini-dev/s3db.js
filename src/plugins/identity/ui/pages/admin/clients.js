@@ -18,146 +18,152 @@ import { BaseLayout } from '../../layouts/base.js';
 export function AdminClientsPage(props = {}) {
   const { clients = [], user = {}, error = null, success = null, config = {} } = props;
 
+  const primaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl bg-gradient-to-r',
+    'from-primary via-primary to-secondary px-4 py-2.5 text-sm font-semibold text-white',
+    'transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/30'
+  ].join(' ');
+
+  const secondaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06]',
+    'px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/[0.12]',
+    'focus:outline-none focus:ring-2 focus:ring-white/20'
+  ].join(' ');
+
+  const dangerButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-red-400/40 bg-red-500/10',
+    'px-4 py-2.5 text-sm font-semibold text-red-100 transition hover:bg-red-500/15 focus:outline-none focus:ring-2 focus:ring-red-400/40'
+  ].join(' ');
+
+  const successButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10',
+    'px-4 py-2.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/15 focus:outline-none focus:ring-2 focus:ring-emerald-400/40'
+  ].join(' ');
+
+  const codeChipClass = 'rounded-xl border border-white/10 bg-white/[0.08] px-3 py-1 text-xs text-slate-200';
+  const badgeClass = 'rounded-full bg-primary/20 px-3 py-1 text-xs font-semibold text-primary';
+
   const content = html`
-    <div class="container">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-        <h1>OAuth2 Clients</h1>
-        <a href="/admin/clients/new" class="btn btn-primary">
+    <section class="mx-auto w-full max-w-6xl space-y-8 text-slate-100">
+      <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 class="text-3xl font-semibold text-white md:text-4xl">OAuth2 Clients</h1>
+          <p class="mt-1 text-sm text-slate-300">
+            Manage client credentials, redirect URIs, and allowed scopes.
+          </p>
+        </div>
+        <a href="/admin/clients/new" class="${primaryButtonClass}">
           + New Client
         </a>
-      </div>
+      </header>
 
       ${clients.length === 0 ? html`
-        <div class="card">
-          <div class="p-3 text-center">
-            <p class="text-muted">No OAuth2 clients registered yet.</p>
-            <a href="/admin/clients/new" class="btn btn-primary mt-3">
-              Create Your First Client
-            </a>
-          </div>
+        <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-10 text-center shadow-xl shadow-black/30 backdrop-blur">
+          <p class="text-sm text-slate-300">
+            No OAuth2 clients registered yet. Create your first client to start integrating applications.
+          </p>
+          <a href="/admin/clients/new" class="${primaryButtonClass} mt-6 inline-flex" style="box-shadow: 0 18px 45px var(--color-primary-glow);">
+            Create Your First Client
+          </a>
         </div>
       ` : html`
-        <div style="display: grid; gap: 1.5rem;">
+        <div class="grid gap-6">
           ${clients.map(client => {
             const grantTypes = Array.isArray(client.grantTypes) ? client.grantTypes : [];
             const allowedScopes = Array.isArray(client.allowedScopes) ? client.allowedScopes : [];
             const redirectUris = Array.isArray(client.redirectUris) ? client.redirectUris : [];
 
             return html`
-              <div class="card">
-                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                  <div>
-                    <strong>${client.name}</strong>
-                    ${!client.active ? html`
-                      <span class="badge" style="background-color: var(--color-danger); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem; margin-left: 0.5rem;">
+              <article class="rounded-3xl border border-white/10 bg-white/[0.05] p-6 shadow-xl shadow-black/30 backdrop-blur">
+                <div class="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex flex-wrap items-center gap-3">
+                    <h2 class="text-lg font-semibold text-white">${client.name}</h2>
+                    ${client.active ? '' : html`
+                      <span class="rounded-full bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-200">
                         Inactive
                       </span>
-                    ` : ''}
+                    `}
                   </div>
-                  <div style="display: flex; gap: 0.5rem;">
-                    <a href="/admin/clients/${client.id}/edit" class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <a href="/admin/clients/${client.id}/edit" class="${secondaryButtonClass}">
                       Edit
                     </a>
-                    <form method="POST" action="/admin/clients/${client.id}/delete" style="margin: 0; display: inline;">
-                      <button
-                        type="submit"
-                        class="btn btn-danger"
-                        style="font-size: 0.875rem; padding: 0.5rem 1rem;"
-                        onclick="return confirm('Are you sure you want to delete this client? This action cannot be undone.')"
-                      >
+                    <form method="POST" action="/admin/clients/${client.id}/delete" class="inline-flex" onsubmit="return confirm('Are you sure you want to delete this client? This action cannot be undone.')">
+                      <button type="submit" class="${dangerButtonClass}">
                         Delete
                       </button>
                     </form>
                   </div>
                 </div>
-                <div class="p-3">
-                  <div style="display: grid; gap: 1rem;">
-                    <!-- Client ID -->
+
+                <div class="mt-4 space-y-6 text-sm text-slate-200">
+                  <div>
+                    <div class="text-xs uppercase tracking-wide text-slate-400">Client ID</div>
+                    <code class="${codeChipClass} mt-2 block">${client.clientId}</code>
+                  </div>
+
+                  ${redirectUris.length > 0 ? html`
                     <div>
-                      <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
-                        Client ID
+                      <div class="text-xs uppercase tracking-wide text-slate-400">
+                        Redirect URIs (${redirectUris.length})
                       </div>
-                      <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem; word-break: break-all;">
-                        ${client.clientId}
-                      </code>
+                      <div class="mt-2 flex flex-wrap gap-2">
+                        ${redirectUris.map(uri => html`<code class="${codeChipClass}">${uri}</code>`)}
+                      </div>
                     </div>
+                  ` : ''}
 
-                    <!-- Redirect URIs -->
-                    ${redirectUris.length > 0 ? html`
-                      <div>
-                        <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
-                          Redirect URIs (${redirectUris.length})
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                          ${redirectUris.map(uri => html`
-                            <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem;">
-                              ${uri}
-                            </code>
-                          `)}
-                        </div>
+                  ${grantTypes.length > 0 ? html`
+                    <div>
+                      <div class="text-xs uppercase tracking-wide text-slate-400">Grant Types</div>
+                      <div class="mt-2 flex flex-wrap gap-2">
+                        ${grantTypes.map(type => html`
+                          <span class="${badgeClass}">
+                            ${type}
+                          </span>
+                        `)}
                       </div>
-                    ` : ''}
+                    </div>
+                  ` : ''}
 
-                    <!-- Grant Types -->
-                    ${grantTypes.length > 0 ? html`
-                      <div>
-                        <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
-                          Grant Types
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                          ${grantTypes.map(type => html`
-                            <span class="badge" style="background-color: var(--color-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
-                              ${type}
-                            </span>
-                          `)}
-                        </div>
+                  ${allowedScopes.length > 0 ? html`
+                    <div>
+                      <div class="text-xs uppercase tracking-wide text-slate-400">Allowed Scopes</div>
+                      <div class="mt-2 flex flex-wrap gap-2">
+                        ${allowedScopes.map(scope => html`
+                          <span class="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-200">
+                            ${scope}
+                          </span>
+                        `)}
                       </div>
-                    ` : ''}
+                    </div>
+                  ` : ''}
 
-                    <!-- Allowed Scopes -->
-                    ${allowedScopes.length > 0 ? html`
-                      <div>
-                        <div style="font-weight: 500; color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.25rem;">
-                          Allowed Scopes
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                          ${allowedScopes.map(scope => html`
-                            <span class="badge" style="background-color: var(--color-success); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
-                              ${scope}
-                            </span>
-                          `)}
-                        </div>
-                      </div>
-                    ` : ''}
-
-                    <!-- Created Date -->
-                    ${client.createdAt ? html`
-                      <div style="color: var(--color-text-muted); font-size: 0.875rem;">
-                        Created: ${new Date(client.createdAt).toLocaleString()}
-                      </div>
-                    ` : ''}
-                  </div>
-
-                  <!-- Actions -->
-                  <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--color-border); display: flex; gap: 1rem;">
-                    <form method="POST" action="/admin/clients/${client.id}/rotate-secret" style="margin: 0;">
-                      <button type="submit" class="btn btn-secondary" style="font-size: 0.875rem;">
-                        🔄 Rotate Secret
-                      </button>
-                    </form>
-                    <form method="POST" action="/admin/clients/${client.id}/toggle-active" style="margin: 0;">
-                      <button type="submit" class="btn ${client.active ? 'btn-danger' : 'btn-success'}" style="font-size: 0.875rem;">
-                        ${client.active ? '🔴 Deactivate' : '🟢 Activate'}
-                      </button>
-                    </form>
-                  </div>
+                  ${client.createdAt ? html`
+                    <div class="text-xs text-slate-400">
+                      Created ${new Date(client.createdAt).toLocaleString()}
+                    </div>
+                  ` : ''}
                 </div>
-              </div>
+
+                <div class="mt-6 flex flex-wrap gap-3 border-t border-white/10 pt-4">
+                  <form method="POST" action="/admin/clients/${client.id}/rotate-secret" class="inline-flex">
+                    <button type="submit" class="${secondaryButtonClass}">
+                      🔄 Rotate Secret
+                    </button>
+                  </form>
+                  <form method="POST" action="/admin/clients/${client.id}/toggle-active" class="inline-flex">
+                    <button type="submit" class="${client.active ? dangerButtonClass : successButtonClass}">
+                      ${client.active ? '🔴 Deactivate' : '🟢 Activate'}
+                    </button>
+                  </form>
+                </div>
+              </article>
             `;
           })}
         </div>
       `}
-    </div>
+    </section>
   `;
 
   return BaseLayout({

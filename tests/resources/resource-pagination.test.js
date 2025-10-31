@@ -13,7 +13,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         age: 'number|optional'
@@ -65,7 +65,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         price: 'number|required'
       }
@@ -100,7 +100,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderId: 'string|required',
         amount: 'number|required',
         status: 'string|required'
@@ -137,7 +137,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'events',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         date: 'string|required',
         priority: 'number|required'
@@ -179,7 +179,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
       name: 'products',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         price: 'number|required'
@@ -246,7 +246,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -280,7 +280,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'employees',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         department: 'string|required',
         salary: 'number|required',
@@ -325,7 +325,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'performance',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         value: 'number|required'
       }
@@ -368,7 +368,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'consistency',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         timestamp: 'string|required'
       }
@@ -407,7 +407,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'deletion',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         status: 'string|required'
       }
@@ -441,7 +441,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'updates',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         version: 'number|required'
       }

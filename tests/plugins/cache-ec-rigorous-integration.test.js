@@ -35,7 +35,7 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
     const products = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         price: 'number|required',
         sold: 'number|default:0',
@@ -267,7 +267,7 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
     const counters = await database.createResource({
       name: 'counters',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         value: 'number|default:0'
       }
     });
@@ -324,7 +324,7 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
     const wallets = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         balance: 'number|default:0',
         transactions: 'number|default:0'
       }

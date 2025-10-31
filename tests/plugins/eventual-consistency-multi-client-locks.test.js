@@ -31,7 +31,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     accounts = await database.createResource({
       name: 'accounts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         email: 'string|required',
         balance: 'number|default:0',
         transactions: 'number|default:0'
@@ -214,7 +214,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     const counters = await database.createResource({
       name: 'counters',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         value: 'number|default:0'
       }
     });
@@ -281,7 +281,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     const votes = await database.createResource({
       name: 'votes',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         upvotes: 'number|default:0',
         downvotes: 'number|default:0'
       }
@@ -370,7 +370,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     const wallets = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         balance: 'number|default:0'
       }
     });

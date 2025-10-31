@@ -34,7 +34,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         utmResults: 'json'  // JSON type allows 1 level nesting
       }
@@ -64,7 +64,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         utmResults: {
           $$type: 'object',
@@ -102,7 +102,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         utmResults: 'json'  // JSON type allows 1 level nesting only
       }
@@ -128,7 +128,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         utmResults: {
           $$type: 'object',
@@ -164,7 +164,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         utmResults: 'json'
       }
@@ -205,7 +205,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         utmResults: 'json'
       }

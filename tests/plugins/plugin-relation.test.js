@@ -106,7 +106,7 @@ describe('RelationPlugin - hasOne Relations', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required'
       }
@@ -116,7 +116,7 @@ describe('RelationPlugin - hasOne Relations', () => {
     profiles = await database.createResource({
       name: 'profiles',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         bio: 'string',
         avatar: 'string|optional'
@@ -196,7 +196,7 @@ describe('RelationPlugin - hasMany Relations', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -204,7 +204,7 @@ describe('RelationPlugin - hasMany Relations', () => {
     posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         title: 'string|required',
         content: 'string'
@@ -301,7 +301,7 @@ describe('RelationPlugin - belongsTo Relations', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -309,7 +309,7 @@ describe('RelationPlugin - belongsTo Relations', () => {
     posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         title: 'string|required'
       }
@@ -394,7 +394,7 @@ describe('RelationPlugin - belongsToMany Relations', () => {
     posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required'
       }
     });
@@ -402,7 +402,7 @@ describe('RelationPlugin - belongsToMany Relations', () => {
     tags = await database.createResource({
       name: 'tags',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -410,7 +410,7 @@ describe('RelationPlugin - belongsToMany Relations', () => {
     postTags = await database.createResource({
       name: 'post_tags',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         postId: 'string|required',
         tagId: 'string|required'
       }
@@ -508,7 +508,7 @@ describe('RelationPlugin - Nested Includes', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -516,7 +516,7 @@ describe('RelationPlugin - Nested Includes', () => {
     posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         title: 'string|required'
       }
@@ -525,7 +525,7 @@ describe('RelationPlugin - Nested Includes', () => {
     comments = await database.createResource({
       name: 'comments',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         postId: 'string|required',
         authorId: 'string|required',
         content: 'string|required'
@@ -628,7 +628,7 @@ describe('RelationPlugin - Cascade Delete', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });
@@ -636,7 +636,7 @@ describe('RelationPlugin - Cascade Delete', () => {
     posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         title: 'string|required'
       }

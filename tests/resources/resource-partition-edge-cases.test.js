@@ -14,7 +14,7 @@ describe('Resource Partition Auto-Move - Edge Cases', () => {
       name: 'products',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         status: 'string|required',
@@ -109,7 +109,7 @@ describe('Resource Partition Auto-Move - Edge Cases', () => {
       name: 'tasks',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         assignee: 'string', // Optional
         priority: 'string'  // Optional
@@ -177,7 +177,7 @@ describe('Resource Partition Auto-Move - Edge Cases', () => {
       name: 'documents',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         status: 'string|required'
       },
@@ -226,7 +226,7 @@ describe('Resource Partition Auto-Move - Edge Cases', () => {
       name: 'items',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         tag: 'string|required'
       },
@@ -281,7 +281,7 @@ describe('Resource Partition Auto-Move - Edge Cases', () => {
       name: 'events',
       asyncPartitions: false,
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         date: 'string|required',
         location: 'string|required'
@@ -349,7 +349,7 @@ describe('Resource Partition Auto-Move - Edge Cases', () => {
       name: 'async-items',
       asyncPartitions: true, // Testing async mode
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required'
       },

@@ -25,11 +25,13 @@ export class BaseModel {
       resource: config.resource,
       features: config.features || [],
       target: config.target,
+      minSamples: Math.max(1, config.minSamples ?? 10),
       modelConfig: {
         epochs: 50,
         batchSize: 32,
         learningRate: 0.01,
         validationSplit: 0.2,
+        shuffle: true,
         ...config.modelConfig
       },
       verbose: config.verbose || false
@@ -112,7 +114,9 @@ export class BaseModel {
       }
 
       // Validate minimum samples
-      const minSamples = this.config.modelConfig.batchSize || 10;
+      const configuredMin = this.config.minSamples ?? 10;
+      const batchSize = this.config.modelConfig.batchSize || configuredMin;
+      const minSamples = Math.max(1, Math.min(configuredMin, batchSize));
       if (data.length < minSamples) {
         throw new InsufficientDataError(
           `Insufficient training data: ${data.length} samples (minimum: ${minSamples})`,
@@ -133,6 +137,7 @@ export class BaseModel {
         epochs: this.config.modelConfig.epochs,
         batchSize: this.config.modelConfig.batchSize,
         validationSplit: this.config.modelConfig.validationSplit,
+        shuffle: this.config.modelConfig.shuffle,
         verbose: this.config.verbose ? 1 : 0,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
@@ -445,14 +450,34 @@ export class BaseModel {
    * @param {Object} data - Serialized model data
    */
   async import(data) {
-    this.config = data.config;
-    this.normalizer = data.normalizer;
-    this.stats = data.stats;
-    this.isTrained = data.isTrained;
+    if (!this._tfValidated) {
+      await this._validateTensorFlow();
+    }
+
+    this.config = {
+      ...this.config,
+      ...data.config,
+      modelConfig: {
+        ...this.config.modelConfig,
+        ...(data.config?.modelConfig || {})
+      }
+    };
+
+    if (data.config?.minSamples) {
+      this.config.minSamples = Math.max(1, data.config.minSamples);
+    }
+
+    this.normalizer = data.normalizer || this.normalizer;
+    this.stats = data.stats || this.stats;
+    this.isTrained = data.isTrained ?? false;
+
+    if (this.model && typeof this.model.dispose === 'function') {
+      this.model.dispose();
+    }
 
     if (data.model) {
-      // Note: Actual model reconstruction depends on the model type
-      // This is a placeholder and should be overridden by subclasses
+      this.model = await this.tf.models.modelFromJSON(data.model);
+    } else {
       this.buildModel();
     }
   }

@@ -98,7 +98,7 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|required',
         clicks: 'number|default:0'
       }

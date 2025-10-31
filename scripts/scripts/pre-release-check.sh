@@ -135,7 +135,7 @@ run_build() {
 check_build_outputs() {
     log_info "Checking build outputs..."
     
-    local required_files=("dist/s3db.cjs.js" "dist/s3db.es.js" "dist/s3db.d.ts")
+    local required_files=("dist/s3db.cjs" "dist/s3db.es.js" "dist/s3db.d.ts")
     
     for file in "${required_files[@]}"; do
         if [ ! -f "$file" ]; then

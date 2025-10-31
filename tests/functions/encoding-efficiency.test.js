@@ -11,7 +11,7 @@ describe('Smart Encoding Efficiency Test', () => {
     resource = await db.createResource({
       name: 'efficiency_test',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         content: 'string|required'
       }
     });
