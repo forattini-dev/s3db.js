@@ -19,6 +19,8 @@
  * const users = await UserFactory.createMany(10);
  */
 
+import { ValidationError } from '../errors.js';
+
 export class Factory {
   /**
    * Global sequence counter
@@ -161,7 +163,13 @@ export class Factory {
     for (const traitName of traits) {
       const trait = this.traits.get(traitName);
       if (!trait) {
-        throw new Error(`Trait '${traitName}' not found in factory '${this.resourceName}'`);
+        throw new ValidationError(`Trait '${traitName}' not found in factory '${this.resourceName}'`, {
+          field: 'trait',
+          value: traitName,
+          resourceName: this.resourceName,
+          retriable: false,
+          suggestion: `Define the trait with Factory.define('${this.resourceName}').trait('${traitName}', ...) before using it.`
+        });
       }
 
       const traitAttrs = typeof trait === 'function'
@@ -194,7 +202,11 @@ export class Factory {
     const { database = Factory._database } = options;
 
     if (!database) {
-      throw new Error('Database not set. Use Factory.setDatabase(db) or pass database option');
+      throw new ValidationError('Database not set for factory', {
+        field: 'database',
+        retriable: false,
+        suggestion: 'Call Factory.setDatabase(db) globally or pass { database } when invoking create().'
+      });
     }
 
     // Build attributes
@@ -208,7 +220,12 @@ export class Factory {
     // Get resource
     const resource = database.resources[this.resourceName];
     if (!resource) {
-      throw new Error(`Resource '${this.resourceName}' not found in database`);
+      throw new ValidationError(`Resource '${this.resourceName}' not found in database`, {
+        field: 'resourceName',
+        value: this.resourceName,
+        retriable: false,
+        suggestion: `Ensure the resource is created in the database before using Factory '${this.resourceName}'.`
+      });
     }
 
     // Create in database

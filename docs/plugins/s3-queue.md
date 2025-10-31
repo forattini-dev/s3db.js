@@ -11,6 +11,8 @@ await db.usePlugin(queue);
 await tasks.enqueue({ type: 'send-email', data: {...} });
 ```
 
+> 🧩 **Namespaces**: Provide `namespace: 'emails'` (or pass an alias via `db.usePlugin`) to run multiple S3QueuePlugin instances. Queue/dead-letter resources will be emitted as `plg_emails_…`.
+
 **Key features:**
 - ✅ Zero duplication (distributed locks + ETag + cache)
 - ✅ Visibility timeout (like AWS SQS)

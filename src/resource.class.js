@@ -1184,7 +1184,14 @@ export class Resource extends AsyncEventEmitter {
     // LOG: body e contentType antes do putObject
     // Only throw if behavior is 'body-only' and body is empty
     if (this.behavior === 'body-only' && (!body || body === "")) {
-      throw new Error(`[Resource.insert] Attempt to save object without body! Data: id=${finalId}, resource=${this.name}`);
+      throw new ResourceError('Body required for body-only behavior', {
+        resourceName: this.name,
+        operation: 'insert',
+        id: finalId,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Include a request body when using behavior "body-only" or switch to "body-overflow".'
+      });
     }
     // For other behaviors, allow empty body (all data in metadata)
 
@@ -1281,8 +1288,22 @@ export class Resource extends AsyncEventEmitter {
    * const user = await resource.get('user-123');
    */
   async get(id) {
-    if (isObject(id)) throw new Error(`id cannot be an object`);
-    if (isEmpty(id)) throw new Error('id cannot be empty');
+    if (isObject(id)) {
+      throw new ValidationError('Resource id must be a string', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass the resource id as a string value (e.g. "user-123").'
+      });
+    }
+    if (isEmpty(id)) {
+      throw new ValidationError('Resource id cannot be empty', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide a non-empty id when calling resource methods.'
+      });
+    }
 
     // Execute beforeGet hooks
     await this.executeHooks('beforeGet', { id });
@@ -1463,12 +1484,23 @@ export class Resource extends AsyncEventEmitter {
       */
   async update(id, attributes) {
     if (isEmpty(id)) {
-      throw new Error('id cannot be empty');
+      throw new ValidationError('Resource id cannot be empty', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target id when calling update().'
+      });
     }
     // Garante que o recurso existe antes de atualizar
     const exists = await this.exists(id);
     if (!exists) {
-      throw new Error(`Resource with id '${id}' does not exist`);
+      throw new ResourceError(`Resource with id '${id}' does not exist`, {
+        resourceName: this.name,
+        id,
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Ensure the record exists or create it before attempting an update.'
+      });
     }
     const originalData = await this.get(id);
     const attributesClone = cloneDeep(attributes);
@@ -1694,11 +1726,21 @@ export class Resource extends AsyncEventEmitter {
    */
   async patch(id, fields, options = {}) {
     if (isEmpty(id)) {
-      throw new Error('id cannot be empty');
+      throw new ValidationError('Resource id cannot be empty', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target id when calling patch().'
+      });
     }
 
     if (!fields || typeof fields !== 'object') {
-      throw new Error('fields must be a non-empty object');
+      throw new ValidationError('fields must be a non-empty object', {
+        field: 'fields',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass a plain object with the fields to update (e.g. { status: "active" }).'
+      });
     }
 
     // Execute beforePatch hooks
@@ -1852,11 +1894,21 @@ export class Resource extends AsyncEventEmitter {
    */
   async replace(id, fullData, options = {}) {
     if (isEmpty(id)) {
-      throw new Error('id cannot be empty');
+      throw new ValidationError('Resource id cannot be empty', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target id when calling replace().'
+      });
     }
 
     if (!fullData || typeof fullData !== 'object') {
-      throw new Error('fullData must be a non-empty object');
+      throw new ValidationError('fullData must be a non-empty object', {
+        field: 'fullData',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass a plain object containing the full resource payload to replace().'
+      });
     }
 
     // Execute beforeReplace hooks
@@ -1930,7 +1982,14 @@ export class Resource extends AsyncEventEmitter {
 
     // Only throw if behavior is 'body-only' and body is empty
     if (this.behavior === 'body-only' && (!body || body === "")) {
-      throw new Error(`[Resource.replace] Attempt to save object without body! Data: id=${id}, resource=${this.name}`);
+      throw new ResourceError('Body required for body-only behavior', {
+        resourceName: this.name,
+        operation: 'replace',
+        id,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Include a request body when using behavior "body-only" or switch to "body-overflow".'
+      });
     }
 
     // Store to S3 (overwrites if exists, creates if not - true replace/upsert)
@@ -2009,12 +2068,22 @@ export class Resource extends AsyncEventEmitter {
    */
   async updateConditional(id, attributes, options = {}) {
     if (isEmpty(id)) {
-      throw new Error('id cannot be empty');
+      throw new ValidationError('Resource id cannot be empty', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target id when calling updateConditional().'
+      });
     }
 
     const { ifMatch } = options;
     if (!ifMatch) {
-      throw new Error('updateConditional requires ifMatch option with ETag value');
+      throw new ValidationError('updateConditional requires ifMatch option with ETag value', {
+        field: 'ifMatch',
+        statusCode: 428,
+        retriable: false,
+        suggestion: 'Pass the current object ETag in options.ifMatch to enable conditional updates.'
+      });
     }
 
     // Check if resource exists
@@ -2223,7 +2292,12 @@ export class Resource extends AsyncEventEmitter {
    */
   async delete(id) {
     if (isEmpty(id)) {
-      throw new Error('id cannot be empty');
+      throw new ValidationError('Resource id cannot be empty', {
+        field: 'id',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target id when calling delete().'
+      });
     }
     
     let objectData;
@@ -3810,7 +3884,15 @@ export class Resource extends AsyncEventEmitter {
           let idx = -1;
           const stack = this._middlewares.get(method);
           const dispatch = async (i) => {
-            if (i <= idx) throw new Error('next() called multiple times');
+            if (i <= idx) {
+              throw new ResourceError('Resource middleware next() called multiple times', {
+                resourceName: this.name,
+                operation: method,
+                statusCode: 500,
+                retriable: false,
+                suggestion: 'Ensure each middleware awaits next() at most once.'
+              });
+            }
             idx = i;
             if (i < stack.length) {
               return await stack[i](ctx, () => dispatch(i + 1));
@@ -3875,10 +3957,14 @@ export class Resource extends AsyncEventEmitter {
 
     const throwIfNoStateMachine = () => {
       if (!resource._stateMachine) {
-        throw new Error(
-          `No state machine configured for resource '${resource.name}'. ` +
-          `Ensure StateMachinePlugin is installed and configured for this resource.`
-        );
+        throw new ResourceError(`State machine not configured for resource '${resource.name}'`, {
+          resourceName: resource.name,
+          operation: 'stateMachine',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Install and configure the StateMachinePlugin before calling resource.state.* methods.',
+          docs: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/state-machine.md'
+        });
       }
     };
 

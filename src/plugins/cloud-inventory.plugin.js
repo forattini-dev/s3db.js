@@ -4,6 +4,7 @@ import { flatten } from 'flat';
 import isEqual from 'lodash-es/isEqual.js';
 
 import { Plugin } from './plugin.class.js';
+import { PluginError } from '../errors.js';
 import tryFn from '../concerns/try-fn.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 
@@ -156,7 +157,14 @@ export class CloudInventoryPlugin extends Plugin {
   async syncCloud(cloudId, options = {}) {
     const driverEntry = this.cloudDrivers.get(cloudId);
     if (!driverEntry) {
-      throw new Error(`Cloud "${cloudId}" is not registered. Available clouds: ${[...this.cloudDrivers.keys()].join(', ') || 'none'}`);
+      throw new PluginError(`Cloud "${cloudId}" is not registered`, {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'syncCloud',
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Register the cloud definition in CloudInventoryPlugin configuration. Available: ${[...this.cloudDrivers.keys()].join(', ') || 'none'}.`,
+        cloudId
+      });
     }
 
     const { driver, definition } = driverEntry;
@@ -228,136 +236,144 @@ export class CloudInventoryPlugin extends Plugin {
       }
     };
 
-    let items;
     try {
-      items = await driver.listResources({
-        discovery: this.config.discovery,
-        checkpoint: runtimeContext.checkpoint,
-        state: runtimeContext.state,
-        runtime: runtimeContext,
-        ...options
-      });
-    } catch (err) {
-      await storage.releaseLock(lockKey).catch(() => {});
-      await this._updateCloudSummary(cloudId, {
-        status: 'error',
-        lastErrorAt: new Date().toISOString(),
-        lastError: err.message || 'Driver failure during listResources'
-      });
-      throw err;
-    }
-
-    let countCreated = 0;
-    let countUpdated = 0;
-    let countUnchanged = 0;
-    let processed = 0;
-    let errorDuringRun = null;
-    const startMs = Date.now();
-
-    const processItem = async (rawItem) => {
-      const normalized = this._normalizeResource(definition, rawItem);
-      if (!normalized) return;
-
-      const persisted = await this._persistSnapshot(normalized, rawItem);
-      processed += 1;
-      if (persisted?.status === 'created') countCreated += 1;
-      else if (persisted?.status === 'updated') countUpdated += 1;
-      else countUnchanged += 1;
-    };
-
-    try {
-      if (isAsyncIterable(items)) {
-        for await (const item of items) {
-          await processItem(item);
-        }
-      } else if (Array.isArray(items)) {
-        for (const item of items) {
-          await processItem(item);
-        }
-      } else if (items) {
-        await processItem(items);
+      let items;
+      try {
+        items = await driver.listResources({
+          discovery: this.config.discovery,
+          checkpoint: runtimeContext.checkpoint,
+          state: runtimeContext.state,
+          runtime: runtimeContext,
+          ...options
+        });
+      } catch (err) {
+        await this._updateCloudSummary(cloudId, {
+          status: 'error',
+          lastErrorAt: new Date().toISOString(),
+          lastError: err.message || 'Driver failure during listResources'
+        });
+        throw err;
       }
-    } catch (err) {
-      errorDuringRun = err;
-    }
 
-    const finishedAt = new Date().toISOString();
-    const durationMs = Date.now() - startMs;
+      let countCreated = 0;
+      let countUpdated = 0;
+      let countUnchanged = 0;
+      let processed = 0;
+      let errorDuringRun = null;
+      const startMs = Date.now();
 
-    const summaryPatch = {
-      status: errorDuringRun ? 'error' : 'idle',
-      lastRunAt: startedAt,
-      lastRunId: runId,
-      lastResult: {
-        runId,
-        startedAt,
-        finishedAt,
-        durationMs,
-        counts: {
-          created: countCreated,
-          updated: countUpdated,
-          unchanged: countUnchanged
+      const processItem = async (rawItem) => {
+        const normalized = this._normalizeResource(definition, rawItem);
+        if (!normalized) return;
+
+        const persisted = await this._persistSnapshot(normalized, rawItem);
+        processed += 1;
+        if (persisted?.status === 'created') countCreated += 1;
+        else if (persisted?.status === 'updated') countUpdated += 1;
+        else countUnchanged += 1;
+      };
+
+      try {
+        if (isAsyncIterable(items)) {
+          for await (const item of items) {
+            await processItem(item);
+          }
+        } else if (Array.isArray(items)) {
+          for (const item of items) {
+            await processItem(item);
+          }
+        } else if (items) {
+          await processItem(items);
+        }
+      } catch (err) {
+        errorDuringRun = err;
+      }
+
+      const finishedAt = new Date().toISOString();
+      const durationMs = Date.now() - startMs;
+
+      const summaryPatch = {
+        status: errorDuringRun ? 'error' : 'idle',
+        lastRunAt: startedAt,
+        lastRunId: runId,
+        lastResult: {
+          runId,
+          startedAt,
+          finishedAt,
+          durationMs,
+          counts: {
+            created: countCreated,
+            updated: countUpdated,
+            unchanged: countUnchanged
+          },
+          processed,
+          checkpoint: pendingCheckpoint
         },
+        totalResources: Math.max(0, (summaryBefore?.totalResources ?? 0) + countCreated),
+        totalVersions: Math.max(0, (summaryBefore?.totalVersions ?? 0) + countCreated + countUpdated),
+        checkpoint: pendingCheckpoint,
+        checkpointUpdatedAt: pendingCheckpoint !== summaryBefore?.checkpoint ? finishedAt : summaryBefore?.checkpointUpdatedAt,
+        rateLimit: pendingRateLimit,
+        rateLimitUpdatedAt: pendingRateLimit !== summaryBefore?.rateLimit ? finishedAt : summaryBefore?.rateLimitUpdatedAt,
+        state: pendingState,
+        stateUpdatedAt: pendingState !== summaryBefore?.state ? finishedAt : summaryBefore?.stateUpdatedAt,
+        progress: null
+      };
+
+      if (errorDuringRun) {
+        summaryPatch.lastError = errorDuringRun.message;
+        summaryPatch.lastErrorAt = finishedAt;
+      } else {
+        summaryPatch.lastError = null;
+        summaryPatch.lastSuccessAt = finishedAt;
+      }
+
+      await this._updateCloudSummary(cloudId, summaryPatch);
+
+      if (errorDuringRun) {
+        throw errorDuringRun;
+      }
+
+      const summary = {
+        cloudId,
+        driver: definition.driver,
+        created: countCreated,
+        updated: countUpdated,
+        unchanged: countUnchanged,
         processed,
-        checkpoint: pendingCheckpoint
-      },
-      totalResources: Math.max(0, (summaryBefore?.totalResources ?? 0) + countCreated),
-      totalVersions: Math.max(0, (summaryBefore?.totalVersions ?? 0) + countCreated + countUpdated),
-      checkpoint: pendingCheckpoint,
-      checkpointUpdatedAt: pendingCheckpoint !== summaryBefore?.checkpoint ? finishedAt : summaryBefore?.checkpointUpdatedAt,
-      rateLimit: pendingRateLimit,
-      rateLimitUpdatedAt: pendingRateLimit !== summaryBefore?.rateLimit ? finishedAt : summaryBefore?.rateLimitUpdatedAt,
-      state: pendingState,
-      stateUpdatedAt: pendingState !== summaryBefore?.state ? finishedAt : summaryBefore?.stateUpdatedAt,
-      progress: null
-    };
+        durationMs
+      };
 
-    if (errorDuringRun) {
-      summaryPatch.lastError = errorDuringRun.message;
-      summaryPatch.lastErrorAt = finishedAt;
-    } else {
-      summaryPatch.lastError = null;
-      summaryPatch.lastSuccessAt = finishedAt;
+      this._log('info', 'Cloud sync finished', summary);
+
+      // Auto-export to Terraform if configured
+      if (this.config.terraform.enabled && this.config.terraform.autoExport) {
+        await this._autoExportTerraform(cloudId);
+      }
+
+      return summary;
+    } finally {
+      try {
+        await storage.releaseLock(lock);
+      } catch (releaseErr) {
+        this._log('warn', 'Failed to release sync lock', {
+          cloudId,
+          lockName: lock?.name ?? lockKey,
+          error: releaseErr.message
+        });
+      }
     }
-
-    await this._updateCloudSummary(cloudId, summaryPatch);
-
-    try {
-      await storage.releaseLock(lockKey);
-    } catch (releaseErr) {
-      this._log('warn', 'Failed to release sync lock', { cloudId, error: releaseErr.message });
-    }
-
-    if (errorDuringRun) {
-      throw errorDuringRun;
-    }
-
-    const summary = {
-      cloudId,
-      driver: definition.driver,
-      created: countCreated,
-      updated: countUpdated,
-      unchanged: countUnchanged,
-      processed,
-      durationMs
-    };
-
-    this._log('info', 'Cloud sync finished', summary);
-
-    // Auto-export to Terraform if configured
-    if (this.config.terraform.enabled && this.config.terraform.autoExport) {
-      await this._autoExportTerraform(cloudId);
-    }
-
-    return summary;
   }
 
   _validateConfiguration() {
     if (!Array.isArray(this.config.clouds) || this.config.clouds.length === 0) {
-      throw new Error(
-        'CloudInventoryPlugin requires a "clouds" array in the configuration. ' +
-        `Registered drivers: ${listCloudDrivers().join(', ') || 'none'}`
-      );
+      throw new PluginError('CloudInventoryPlugin requires a "clouds" array in the configuration', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'validateConfiguration',
+        statusCode: 400,
+        retriable: false,
+        suggestion: `Provide at least one cloud definition. Registered drivers: ${listCloudDrivers().join(', ') || 'none'}.`
+      });
     }
 
     for (const cloud of this.config.clouds) {
@@ -366,7 +382,15 @@ export class CloudInventoryPlugin extends Plugin {
       try {
         normalizeSchedule(cloud.scheduled);
       } catch (err) {
-        throw new Error(`Cloud "${cloud.id}" has an invalid scheduled configuration: ${err.message}`);
+        throw new PluginError(`Cloud "${cloud.id}" has an invalid scheduled configuration`, {
+          pluginName: 'CloudInventoryPlugin',
+          operation: 'validateConfiguration',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Provide a valid cron expression and timezone when enabling scheduled discovery.',
+          cloudId: cloud.id,
+          original: err
+        });
       }
     }
   }
@@ -410,7 +434,13 @@ export class CloudInventoryPlugin extends Plugin {
     // Get snapshots resource
     const snapshotsResource = this._resourceHandles.snapshots;
     if (!snapshotsResource) {
-      throw new Error('Snapshots resource not initialized. Ensure plugin is installed.');
+      throw new PluginError('Snapshots resource not initialized', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'exportToTerraformState',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Call database.usePlugin(new CloudInventoryPlugin(...)) and ensure onInstall completed before exporting.'
+      });
     }
 
     // Build query filter
@@ -497,7 +527,13 @@ export class CloudInventoryPlugin extends Plugin {
     // Get S3 client from database
     const s3Client = this.database.client;
     if (!s3Client || typeof s3Client.putObject !== 'function') {
-      throw new Error('S3 client not available. Database must use S3-compatible storage.');
+      throw new PluginError('S3 client not available. Database must use S3-compatible storage.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'exportToTerraformStateToS3',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Initialize the database with an S3-compatible client before exporting Terraform state to S3.'
+      });
     }
 
     // Upload to S3
@@ -548,14 +584,27 @@ export class CloudInventoryPlugin extends Plugin {
         // Parse S3 URL: s3://bucket/path/to/file.tfstate
         const s3Match = terraform.output?.match(/^s3:\/\/([^/]+)\/(.+)$/);
         if (!s3Match) {
-          throw new Error(`Invalid S3 URL format: ${terraform.output}. Expected: s3://bucket/path/file.tfstate`);
+          throw new PluginError(`Invalid S3 URL format: ${terraform.output}`, {
+            pluginName: 'CloudInventoryPlugin',
+            operation: '_autoExportTerraform',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Provide a Terraform export destination using s3://bucket/path/file.tfstate.',
+            output: terraform.output
+          });
         }
         const [, bucket, key] = s3Match;
         result = await this.exportToTerraformStateToS3(bucket, key, exportOptions);
       } else if (terraform.outputType === 'file') {
         // File path
         if (!terraform.output) {
-          throw new Error('Terraform output path not configured');
+          throw new PluginError('Terraform output path not configured', {
+            pluginName: 'CloudInventoryPlugin',
+            operation: '_autoExportTerraform',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Set terraform.output to a file path (e.g., ./terraform/state.tfstate) when using outputType "file".'
+          });
         }
         result = await this.exportToTerraformStateFile(terraform.output, exportOptions);
       } else {
@@ -564,7 +613,14 @@ export class CloudInventoryPlugin extends Plugin {
           const stateData = await this.exportToTerraformState(exportOptions);
           result = await terraform.output(stateData);
         } else {
-          throw new Error(`Unknown terraform.outputType: ${terraform.outputType}`);
+          throw new PluginError(`Unknown terraform.outputType: ${terraform.outputType}`, {
+            pluginName: 'CloudInventoryPlugin',
+            operation: '_autoExportTerraform',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Use one of the supported output types: "file", "s3", or provide a custom function.',
+            outputType: terraform.outputType
+          });
         }
       }
 
@@ -1173,7 +1229,13 @@ function normalizeSchedule(input) {
   schedule.runOnStart = Boolean(schedule.runOnStart);
 
   if (schedule.enabled && !schedule.cron) {
-    throw new Error('Scheduled configuration requires a valid cron expression when enabled is true');
+    throw new PluginError('Scheduled configuration requires a valid cron expression when enabled is true', {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'normalizeSchedule',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Set scheduled.cron to a valid cron expression (e.g., "0 * * * *") when enabling scheduled discovery.'
+    });
   }
 
   return schedule;
@@ -1207,7 +1269,13 @@ function resolveDriverReference(driverInput, logFn) {
     return candidate;
   }
 
-  throw new Error('Cloud driver must be a string identifier or a class/factory that produces a BaseCloudDriver instance');
+  throw new PluginError('Cloud driver must be a string identifier or a factory/class that produces a BaseCloudDriver instance', {
+    pluginName: 'CloudInventoryPlugin',
+    operation: 'resolveDriverReference',
+    statusCode: 400,
+    retriable: false,
+    suggestion: 'Register the driver name via registerCloudDriver() or supply a factory/class returning BaseCloudDriver.'
+  });
 }
 
 function instantiateInlineDriver(driverInput, options) {
@@ -1224,7 +1292,13 @@ function instantiateInlineDriver(driverInput, options) {
     return result;
   }
 
-  throw new Error('Inline driver factory must return an instance of BaseCloudDriver');
+  throw new PluginError('Inline driver factory must return an instance of BaseCloudDriver', {
+    pluginName: 'CloudInventoryPlugin',
+    operation: 'instantiateInlineDriver',
+    statusCode: 500,
+    retriable: false,
+    suggestion: 'Ensure the inline driver function returns a BaseCloudDriver instance or class.'
+  });
 }
 
 function isSubclassOfBase(fn) {

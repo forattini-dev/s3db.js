@@ -9,6 +9,7 @@ import { addHelperMethods } from "./helpers.js";
 import { flushPendingTransactions } from "./transactions.js";
 import { startConsolidationTimer } from "./consolidation.js";
 import { startGarbageCollectionTimer } from "./garbage-collection.js";
+import { PluginError } from '../../errors.js';
 
 /**
  * Install plugin for all configured resources
@@ -115,7 +116,16 @@ export async function completeFieldSetup(handler, database, config, plugin) {
   );
 
   if (!ok && !database.resources[transactionResourceName]) {
-    throw new Error(`Failed to create transaction resource for ${resourceName}.${fieldName}: ${err?.message}`);
+    throw new PluginError(`Failed to create transaction resource for ${resourceName}.${fieldName}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'createTransactionResource',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Verify database permissions and configuration for creating plugin resources.',
+      resourceName,
+      fieldName,
+      original: err
+    });
   }
 
   handler.transactionResource = ok ? transactionResource : database.resources[transactionResourceName];
@@ -200,7 +210,16 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
   );
 
   if (!ok && !database.resources[analyticsResourceName]) {
-    throw new Error(`Failed to create analytics resource for ${resourceName}.${fieldName}: ${err?.message}`);
+    throw new PluginError(`Failed to create analytics resource for ${resourceName}.${fieldName}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'createAnalyticsResource',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Verify database permissions and configuration for creating analytics resources.',
+      resourceName,
+      fieldName,
+      original: err
+    });
   }
 
   handler.analyticsResource = ok ? analyticsResource : database.resources[analyticsResourceName];

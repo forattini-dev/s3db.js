@@ -27,6 +27,7 @@ import fs from 'fs';
 import { mkdir, rm as rmdir, readdir, stat, writeFile, readFile } from 'fs/promises';
 import { FilesystemCache } from './filesystem-cache.class.js';
 import tryFn from '../../concerns/try-fn.js';
+import { CacheError } from '../cache.errors.js';
 
 export class PartitionAwareFilesystemCache extends FilesystemCache {
   constructor({
@@ -553,7 +554,15 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
     });
 
     if (!ok) {
-      throw new Error(`Failed to write cache file: ${err.message}`);
+      throw new CacheError(`Failed to write cache file: ${err.message}`, {
+        driver: 'filesystem-partitioned',
+        operation: 'writeFileWithMetadata',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Check filesystem permissions and disk space for the partition-aware cache directory.',
+        filePath,
+        original: err
+      });
     }
 
     return true;

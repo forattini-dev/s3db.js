@@ -233,17 +233,57 @@ export class CachePlugin extends Plugin {
   installResourceHooksForResource(resource) {
     if (!this.driver) return;
 
-    // Add cache methods to resource
-    Object.defineProperty(resource, 'cache', {
-      value: this.driver,
-      writable: true,
-      configurable: true,
-      enumerable: false
-    });
-    resource.cacheKeyFor = async (options = {}) => {
+    const driver = this.driver;
+    const instanceKey = this.instanceName || this.slug;
+
+    resource.cacheInstances = resource.cacheInstances || {};
+    resource.cacheInstances[instanceKey] = driver;
+
+    if (!Object.prototype.hasOwnProperty.call(resource, 'cache')) {
+      Object.defineProperty(resource, 'cache', {
+        value: driver,
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
+
+    if (typeof resource.getCacheDriver !== 'function') {
+      Object.defineProperty(resource, 'getCacheDriver', {
+        value: (name = null) => {
+          if (!name) {
+            return resource.cache;
+          }
+          return resource.cacheInstances?.[name] || null;
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
+    const computeCacheKey = async (options = {}) => {
       const { action, params = {}, partition, partitionValues } = options;
       return this.generateCacheKey(resource, action, params, partition, partitionValues);
     };
+
+    resource.cacheKeyResolvers = resource.cacheKeyResolvers || {};
+    resource.cacheKeyResolvers[instanceKey] = computeCacheKey;
+
+    if (!resource.cacheKeyFor) {
+      resource.cacheKeyFor = computeCacheKey;
+    }
+
+    if (typeof resource.getCacheKeyResolver !== 'function') {
+      Object.defineProperty(resource, 'getCacheKeyResolver', {
+        value: (name = null) => {
+          if (!name) return resource.cacheKeyFor;
+          return resource.cacheKeyResolvers?.[name] || null;
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
 
     // Add partition-aware methods if using PartitionAwareFilesystemCache
     if (this.driver instanceof PartitionAwareFilesystemCache) {
@@ -272,6 +312,7 @@ export class CachePlugin extends Plugin {
     
     for (const method of cacheMethods) {
       resource.useMiddleware(method, async (ctx, next) => {
+        const resolveCacheKey = resource.cacheKeyResolvers?.[instanceKey] || computeCacheKey;
         // Check for skipCache option in the last argument
         let skipCache = false;
         const lastArg = ctx.args[ctx.args.length - 1];
@@ -287,17 +328,17 @@ export class CachePlugin extends Plugin {
         // Build cache key
         let key;
         if (method === 'getMany') {
-          key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
+          key = await resolveCacheKey({ action: method, params: { ids: ctx.args[0] } });
         } else if (method === 'page') {
           const { offset, size, partition, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ action: method, params: { offset, size }, partition, partitionValues });
+          key = await resolveCacheKey({ action: method, params: { offset, size }, partition, partitionValues });
         } else if (method === 'list' || method === 'listIds' || method === 'count') {
           const { partition, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+          key = await resolveCacheKey({ action: method, partition, partitionValues });
         } else if (method === 'query') {
           const filter = ctx.args[0] || {};
           const options = ctx.args[1] || {};
-          key = await resource.cacheKeyFor({
+          key = await resolveCacheKey({
             action: method,
             params: { filter, options: { limit: options.limit, offset: options.offset } },
             partition: options.partition,
@@ -305,16 +346,16 @@ export class CachePlugin extends Plugin {
           });
         } else if (method === 'getFromPartition') {
           const { id, partitionName, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({
+          key = await resolveCacheKey({
             action: method,
             params: { id, partitionName },
             partition: partitionName,
             partitionValues
           });
         } else if (method === 'getAll') {
-          key = await resource.cacheKeyFor({ action: method });
+          key = await resolveCacheKey({ action: method });
         } else if (['get', 'exists', 'content', 'hasContent'].includes(method)) {
-          key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
+          key = await resolveCacheKey({ action: method, params: { id: ctx.args[0] } });
         }
         
         // Try cache with partition awareness
@@ -336,7 +377,7 @@ export class CachePlugin extends Plugin {
             partitionValues = pValues;
           }
           
-          const [ok, err, result] = await tryFn(() => resource.cache._get(key, {
+          const [ok, err, result] = await tryFn(() => driver._get(key, {
             resource: resource.name,
             action: method,
             partition,
@@ -358,7 +399,7 @@ export class CachePlugin extends Plugin {
 
           // Store with partition context
           this.stats.writes++;
-          await resource.cache._set(key, freshResult, {
+          await driver._set(key, freshResult, {
             resource: resource.name,
             action: method,
             partition,
@@ -368,7 +409,7 @@ export class CachePlugin extends Plugin {
           return freshResult;
         } else {
           // Standard cache behavior
-          const [ok, err, result] = await tryFn(() => resource.cache.get(key));
+          const [ok, err, result] = await tryFn(() => driver.get(key));
           if (ok && result !== null && result !== undefined) {
             this.stats.hits++;
             return result;
@@ -382,7 +423,7 @@ export class CachePlugin extends Plugin {
           this.stats.misses++;
           const freshResult = await next();
           this.stats.writes++;
-          await resource.cache.set(key, freshResult);
+          await driver.set(key, freshResult);
           return freshResult;
         }
       });
@@ -421,7 +462,8 @@ export class CachePlugin extends Plugin {
   }
 
   async clearCacheForResource(resource, data) {
-    if (!resource.cache) return; // Skip if no cache is available
+    const driver = this._getDriverForResource(resource);
+    if (!driver) return; // Skip if no cache is available
 
     const keyPrefix = `resource=${resource.name}`;
 
@@ -431,7 +473,7 @@ export class CachePlugin extends Plugin {
       const itemSpecificMethods = ['get', 'exists', 'content', 'hasContent'];
       for (const method of itemSpecificMethods) {
         const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
-        const [ok, err] = await this.clearCacheWithRetry(resource.cache, specificKey);
+        const [ok, err] = await this.clearCacheWithRetry(driver, specificKey);
 
         if (!ok) {
           this.emit('plg:cache:clear-error', {
@@ -453,7 +495,7 @@ export class CachePlugin extends Plugin {
         for (const [partitionName, values] of Object.entries(partitionValues)) {
           if (values && Object.keys(values).length > 0 && Object.values(values).some(v => v !== null && v !== undefined)) {
             const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-            const [ok, err] = await this.clearCacheWithRetry(resource.cache, partitionKeyPrefix);
+          const [ok, err] = await this.clearCacheWithRetry(driver, partitionKeyPrefix);
 
             if (!ok) {
               this.emit('plg:cache:clear-error', {
@@ -472,7 +514,7 @@ export class CachePlugin extends Plugin {
     }
 
     // Clear aggregate caches more broadly to ensure all variants are cleared
-    const [ok, err] = await this.clearCacheWithRetry(resource.cache, keyPrefix);
+    const [ok, err] = await this.clearCacheWithRetry(driver, keyPrefix);
 
     if (!ok) {
       this.emit('plg:cache:clear-error', {
@@ -489,8 +531,8 @@ export class CachePlugin extends Plugin {
       const aggregateMethods = ['count', 'list', 'listIds', 'getAll', 'page', 'query'];
       for (const method of aggregateMethods) {
         // Try multiple key patterns to ensure we catch all variations
-        await this.clearCacheWithRetry(resource.cache, `${keyPrefix}/action=${method}`);
-        await this.clearCacheWithRetry(resource.cache, `resource=${resource.name}/action=${method}`);
+        await this.clearCacheWithRetry(driver, `${keyPrefix}/action=${method}`);
+        await this.clearCacheWithRetry(driver, `resource=${resource.name}/action=${method}`);
       }
     }
   }
@@ -521,6 +563,14 @@ export class CachePlugin extends Plugin {
     }
 
     return [false, lastError];
+  }
+
+  _getDriverForResource(resource) {
+    const instanceKey = this.instanceName || this.slug;
+    if (resource?.cacheInstances && instanceKey && resource.cacheInstances[instanceKey]) {
+      return resource.cacheInstances[instanceKey];
+    }
+    return this.driver;
   }
 
   async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
@@ -578,10 +628,11 @@ export class CachePlugin extends Plugin {
     if (!this.driver) return;
     
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.cache) {
-        const keyPrefix = `resource=${resource.name}`;
-        await resource.cache.clear(keyPrefix);
-      }
+      const driver = this._getDriverForResource(resource);
+      if (!driver) continue;
+
+      const keyPrefix = `resource=${resource.name}`;
+      await driver.clear(keyPrefix);
     }
   }
 

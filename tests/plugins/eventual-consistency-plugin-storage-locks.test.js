@@ -67,7 +67,7 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       // If consolidation is fast, lock may already be released
       // So we just verify the mechanism works by releasing if we got it
       if (canAcquire) {
-        await storage.releaseLock(lockKey);
+        await storage.releaseLock(canAcquire);
       }
 
       // The important part: verify the URL was consolidated correctly
@@ -117,7 +117,7 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       expect(isLocked).toBe(true);
 
       // Release lock
-      await storage.releaseLock(testLockKey);
+      await storage.releaseLock(lock);
 
       // Verify lock is released
       const isStillLocked = await storage.isLocked(testLockKey);
@@ -143,9 +143,9 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       const storage = plugin.getStorage();
 
       // Create multiple locks
-      await storage.acquireLock('lock-1', { ttl: 60 });
-      await storage.acquireLock('lock-2', { ttl: 60 });
-      await storage.acquireLock('lock-3', { ttl: 60 });
+      const lock1 = await storage.acquireLock('lock-1', { ttl: 60 });
+      const lock2 = await storage.acquireLock('lock-2', { ttl: 60 });
+      const lock3 = await storage.acquireLock('lock-3', { ttl: 60 });
 
       // List all keys in S3 under PluginStorage path
       const allKeys = await storage.list();
@@ -154,9 +154,9 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       expect(allKeys.length).toBeGreaterThanOrEqual(3);
 
       // Clean up
-      await storage.releaseLock('lock-1');
-      await storage.releaseLock('lock-2');
-      await storage.releaseLock('lock-3');
+      if (lock1) await storage.releaseLock(lock1);
+      if (lock2) await storage.releaseLock(lock2);
+      if (lock3) await storage.releaseLock(lock3);
     });
   });
 
@@ -209,7 +209,9 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       expect(newLock.workerId).toBe('test-worker-2');
 
       // Clean up
-      await storage.releaseLock(lockKey);
+      if (newLock) {
+        await storage.releaseLock(newLock);
+      }
     });
 
     it('should handle concurrent lock acquisition with TTL', async () => {
@@ -262,7 +264,11 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       expect(lock3.workerId).toBe('worker-2');
 
       // Clean up
-      await storage.releaseLock(lockKey);
+      if (lock3) {
+        await storage.releaseLock(lock3);
+      } else if (lock1) {
+        await storage.releaseLock(lock1);
+      }
     });
   });
 
@@ -310,7 +316,11 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       expect(elapsed).toBeGreaterThan(900); // Should have waited at least 900ms (relaxed from 1000ms for timing variations)
 
       // Clean up
-      await storage.releaseLock(lockKey);
+      if (lock2) {
+        await storage.releaseLock(lock2);
+      } else if (lock1) {
+        await storage.releaseLock(lock1);
+      }
     });
   });
 
@@ -354,7 +364,7 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       // If GC isn't running, we should get the lock
       if (gcLock) {
         expect(gcLock.workerId).toBe('test-gc');
-        await storage.releaseLock(gcLockKey);
+        await storage.releaseLock(gcLock);
       }
 
       // The important thing: GC should work
@@ -494,8 +504,8 @@ describe.skip('EventualConsistencyPlugin - PluginStorage Locks', () => {
       expect(await storage.isLocked('consolidation-urls-views-url1')).toBe(true);
 
       // Clean up
-      await storage.releaseLock('consolidation-urls-clicks-url1');
-      await storage.releaseLock('consolidation-urls-views-url1');
+      await storage.releaseLock(clicksLock);
+      await storage.releaseLock(viewsLock);
     });
   });
 });

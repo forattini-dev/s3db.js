@@ -489,13 +489,14 @@ import { resolveResourceName } from "./concerns/resource-names.js";
 
 export class FullTextPlugin extends Plugin {
   constructor(options = {}) {
-    super();
+    super(options);
     this.indexResource = null;
     const resourceNamesOption = options.resourceNames || {};
-    this.indexResourceName = resolveResourceName('fulltext', {
+    this._indexResourceDescriptor = {
       defaultName: 'plg_fulltext_indexes',
       override: resourceNamesOption.index || options.indexResource
-    });
+    };
+    this.indexResourceName = this._resolveIndexResourceName();
     this.config = {
       minWordLength: options.minWordLength || 3,
       maxResults: options.maxResults || 100,
@@ -504,6 +505,16 @@ export class FullTextPlugin extends Plugin {
     this.indexes = new Map(); // In-memory index for simplicity
     this.dirtyIndexes = new Set(); // Track changed index keys for incremental saves
     this.deletedIndexes = new Set(); // Track deleted index keys
+  }
+
+  _resolveIndexResourceName() {
+    return resolveResourceName('fulltext', this._indexResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.indexResourceName = this._resolveIndexResourceName();
   }
 
   async onInstall() {

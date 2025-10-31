@@ -10,6 +10,7 @@
 
 import { generateSessionId, calculateExpiration, isExpired } from './concerns/token-generator.js';
 import tryFn from '../../concerns/try-fn.js';
+import { PluginError } from '../../errors.js';
 
 /**
  * Default session configuration
@@ -43,7 +44,13 @@ export class SessionManager {
     this.cleanupTimer = null;
 
     if (!this.sessionResource) {
-      throw new Error('SessionManager requires a sessionResource');
+      throw new PluginError('SessionManager requires a sessionResource', {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass { sessionResource } when initializing IdentityPlugin or SessionManager.'
+      });
     }
 
     // Start automatic cleanup
@@ -66,7 +73,13 @@ export class SessionManager {
     const { userId, metadata = {}, ipAddress, userAgent, duration } = data;
 
     if (!userId) {
-      throw new Error('userId is required to create a session');
+      throw new PluginError('userId is required to create a session', {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.createSession',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide data.userId when calling createSession().'
+      });
     }
 
     // Generate session ID
@@ -91,7 +104,14 @@ export class SessionManager {
     );
 
     if (!ok) {
-      throw new Error(`Failed to create session: ${err.message}`);
+      throw new PluginError(`Failed to create session: ${err.message}`, {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.createSession',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Check session resource permissions and database connectivity.',
+        original: err
+      });
     }
 
     return {
@@ -155,13 +175,26 @@ export class SessionManager {
    */
   async updateSession(sessionId, metadata) {
     if (!sessionId) {
-      throw new Error('sessionId is required');
+      throw new PluginError('sessionId is required', {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.updateSession',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide a sessionId when calling updateSession().'
+      });
     }
 
     const session = await this.getSession(sessionId);
 
     if (!session) {
-      throw new Error('Session not found');
+      throw new PluginError('Session not found', {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.updateSession',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Ensure the session exists before updating metadata.',
+        sessionId
+      });
     }
 
     const updatedMetadata = { ...session.metadata, ...metadata };
@@ -173,7 +206,14 @@ export class SessionManager {
     );
 
     if (!ok) {
-      throw new Error(`Failed to update session: ${err.message}`);
+      throw new PluginError(`Failed to update session: ${err.message}`, {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.updateSession',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Check session resource permissions and database connectivity.',
+        original: err
+      });
     }
 
     return updated;

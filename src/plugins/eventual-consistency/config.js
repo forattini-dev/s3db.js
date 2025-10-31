@@ -2,6 +2,7 @@
  * Configuration handling for EventualConsistencyPlugin
  * @module eventual-consistency/config
  */
+import { PluginError } from '../../errors.js';
 
 /**
  * Create default configuration with options
@@ -96,17 +97,24 @@ export function createConfig(options, detectedTimezone) {
  */
 export function validateResourcesConfig(resources) {
   if (!resources || typeof resources !== 'object') {
-    throw new Error(
-      "EventualConsistencyPlugin requires 'resources' option.\n" +
-      "Example: { resources: { urls: ['clicks', 'views'], posts: ['likes'] } }"
-    );
+    throw new PluginError("EventualConsistencyPlugin requires a 'resources' option", {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'validateResourcesConfig',
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide resources configuration, e.g., { resources: { urls: ['clicks', 'views'] } }"
+    });
   }
 
   for (const [resourceName, fields] of Object.entries(resources)) {
     if (!Array.isArray(fields)) {
-      throw new Error(
-        `EventualConsistencyPlugin resources.${resourceName} must be an array of field names`
-      );
+      throw new PluginError(`EventualConsistencyPlugin resources.${resourceName} must be an array of field names`, {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'validateResourcesConfig',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Ensure each resource entry maps to an array of field names (e.g., resources.users = ["logins", "visits"]).'
+      });
     }
   }
 }

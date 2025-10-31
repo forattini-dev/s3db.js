@@ -576,6 +576,7 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { resolveResourceNames } from "./concerns/resource-names.js";
+import { PluginError } from '../errors.js';
 
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
@@ -587,7 +588,7 @@ export class MetricsPlugin extends Plugin {
       errors: resourceNamesOption.errors ?? legacyResourceOption.errors,
       performance: resourceNamesOption.performance ?? legacyResourceOption.performance
     };
-    this.resourceNames = resolveResourceNames('metrics', {
+    this._resourceDescriptors = {
       metrics: {
         defaultName: 'plg_metrics',
         override: resourceOverrides.metrics
@@ -600,7 +601,8 @@ export class MetricsPlugin extends Plugin {
         defaultName: 'plg_metrics_performance',
         override: resourceOverrides.performance
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
     this.config = {
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
@@ -637,6 +639,16 @@ export class MetricsPlugin extends Plugin {
 
     this.flushTimer = null;
     this.metricsServer = null; // Standalone HTTP server (if needed)
+  }
+
+  _resolveResourceNames() {
+    return resolveResourceNames('metrics', this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.resourceNames = this._resolveResourceNames();
   }
 
   async onInstall() {
@@ -1337,9 +1349,13 @@ export class MetricsPlugin extends Plugin {
     // INTEGRATED mode: requires API Plugin
     else if (mode === 'integrated') {
       if (!apiPlugin || !apiPlugin.server) {
-        throw new Error(
-          '[Metrics Plugin] prometheus.mode=integrated requires API Plugin to be active'
-        );
+        throw new PluginError('[Metrics Plugin] prometheus.mode=integrated requires API Plugin to be active', {
+          pluginName: 'MetricsPlugin',
+          operation: '_setupPrometheusExporter',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Install and start the API plugin or switch prometheus.mode to "standalone" or "auto".'
+        });
       }
       await this._setupIntegratedMetrics(apiPlugin);
     }

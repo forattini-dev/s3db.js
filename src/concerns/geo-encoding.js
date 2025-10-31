@@ -19,6 +19,7 @@
  */
 
 import { encode, decode } from './base62.js';
+import { ValidationError } from '../errors.js';
 
 /**
  * Encode latitude with normalized range
@@ -41,7 +42,15 @@ export function encodeGeoLat(lat, precision = 6) {
 
   // Validate range
   if (lat < -90 || lat > 90) {
-    throw new Error(`Latitude out of range [-90, 90]: ${lat}`);
+    throw new ValidationError('Latitude out of range', {
+      field: 'lat',
+      value: lat,
+      min: -90,
+      max: 90,
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide a latitude between -90 and +90 degrees.'
+    });
   }
 
   // Normalize: -90 to +90 → 0 to 180
@@ -100,7 +109,15 @@ export function encodeGeoLon(lon, precision = 6) {
 
   // Validate range
   if (lon < -180 || lon > 180) {
-    throw new Error(`Longitude out of range [-180, 180]: ${lon}`);
+    throw new ValidationError('Longitude out of range', {
+      field: 'lon',
+      value: lon,
+      min: -180,
+      max: 180,
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide a longitude between -180 and +180 degrees.'
+    });
   }
 
   // Normalize: -180 to +180 → 0 to 360

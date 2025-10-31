@@ -119,6 +119,8 @@ export async function runGarbageCollection(transactionResource, storage, config,
     }
   } finally {
     // Always release GC lock
-    await tryFn(() => storage.releaseLock(lockKey));
+    if (lock) {
+      await tryFn(() => storage.releaseLock(lock));
+    }
   }
 }

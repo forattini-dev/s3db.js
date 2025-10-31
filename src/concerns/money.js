@@ -16,6 +16,7 @@
  */
 
 import { encode, decode } from './base62.js';
+import { ValidationError } from '../errors.js';
 
 /**
  * Currency decimal places (number of decimals in smallest unit)
@@ -100,7 +101,13 @@ export function encodeMoney(value, currency = 'USD') {
 
   // Money cannot be negative (validation should happen at schema level)
   if (value < 0) {
-    throw new Error(`Money value cannot be negative: ${value}`);
+    throw new ValidationError('Money value cannot be negative', {
+      field: 'value',
+      value,
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide a non-negative monetary value or store debts in a separate field.'
+    });
   }
 
   const decimals = getCurrencyDecimals(currency);

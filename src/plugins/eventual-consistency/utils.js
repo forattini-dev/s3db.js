@@ -1,3 +1,5 @@
+import { PluginError } from '../../errors.js';
+
 /**
  * Utility functions for EventualConsistencyPlugin
  * @module eventual-consistency/utils
@@ -291,7 +293,13 @@ export function validateNestedPath(resource, fieldPath) {
  */
 export function resolveFieldAndPlugin(resource, field, value) {
   if (!resource._eventualConsistencyPlugins) {
-    throw new Error(`No eventual consistency plugins configured for this resource`);
+    throw new PluginError('No eventual consistency plugins configured for this resource', {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'resolveFieldAndPlugin',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Configure EventualConsistencyPlugin resources before using helper methods.'
+    });
   }
 
   // Check if field contains dot notation (nested path)
@@ -299,7 +307,13 @@ export function resolveFieldAndPlugin(resource, field, value) {
     const validation = validateNestedPath(resource, field);
 
     if (!validation.valid) {
-      throw new Error(validation.error);
+      throw new PluginError(validation.error, {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resolveFieldAndPlugin',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Ensure nested field paths exist on the resource before using dot notation.'
+      });
     }
 
     // Get plugin for root field
@@ -308,10 +322,14 @@ export function resolveFieldAndPlugin(resource, field, value) {
 
     if (!fieldPlugin) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
-      throw new Error(
-        `No eventual consistency plugin found for root field "${rootField}". ` +
-        `Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for root field "${rootField}"`, {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resolveFieldAndPlugin',
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field: rootField
+      });
     }
 
     return {
@@ -327,10 +345,14 @@ export function resolveFieldAndPlugin(resource, field, value) {
 
   if (!fieldPlugin) {
     const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
-    throw new Error(
-      `No eventual consistency plugin found for field "${field}". ` +
-      `Available fields: ${availableFields}`
-    );
+    throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'resolveFieldAndPlugin',
+      statusCode: 404,
+      retriable: false,
+      suggestion: `Available fields: ${availableFields}`,
+      field
+    });
   }
 
   return { field, fieldPath: field, value, plugin: fieldPlugin };

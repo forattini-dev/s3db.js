@@ -84,6 +84,7 @@ import path from 'path';
 import zlib from 'node:zlib';
 import { Cache } from './cache.class.js';
 import tryFn from '../../concerns/try-fn.js';
+import { CacheError } from '../cache.errors.js';
 
 export class FilesystemCache extends Cache {
   constructor({
@@ -112,7 +113,13 @@ export class FilesystemCache extends Cache {
     super(config);
     
     if (!directory) {
-      throw new Error('FilesystemCache: directory parameter is required');
+      throw new CacheError('FilesystemCache requires a directory', {
+        driver: 'filesystem',
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass { directory: "./cache" } or configure a valid cache directory before enabling FilesystemCache.'
+      });
     }
     
     this.directory = path.resolve(directory);
@@ -173,7 +180,15 @@ export class FilesystemCache extends Cache {
     });
     
     if (!ok && err.code !== 'EEXIST') {
-      throw new Error(`Failed to create cache directory: ${err.message}`);
+      throw new CacheError(`Failed to create cache directory: ${err.message}`, {
+        driver: 'filesystem',
+        operation: 'ensureDirectory',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Check filesystem permissions and ensure the process can create directories.',
+        directory: dir,
+        original: err
+      });
     }
   }
 
@@ -198,7 +213,16 @@ export class FilesystemCache extends Cache {
 
       // Check size limit
       if (originalSize > this.maxFileSize) {
-        throw new Error(`Cache data exceeds maximum file size: ${originalSize} > ${this.maxFileSize}`);
+        throw new CacheError('Cache data exceeds maximum file size', {
+          driver: 'filesystem',
+          operation: 'set',
+          statusCode: 413,
+          retriable: false,
+          suggestion: 'Increase maxFileSize or reduce the cached payload size.',
+          key,
+          size: originalSize,
+          maxFileSize: this.maxFileSize
+        });
       }
 
       let compressed = false;
@@ -274,7 +298,15 @@ export class FilesystemCache extends Cache {
       if (this.enableStats) {
         this.stats.errors++;
       }
-      throw new Error(`Failed to set cache key '${key}': ${error.message}`);
+      throw new CacheError(`Failed to set cache key '${key}': ${error.message}`, {
+        driver: 'filesystem',
+        operation: 'set',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Verify filesystem permissions and available disk space.',
+        key,
+        original: error
+      });
     }
   }
 
@@ -426,7 +458,15 @@ export class FilesystemCache extends Cache {
       if (this.enableStats) {
         this.stats.errors++;
       }
-      throw new Error(`Failed to delete cache key '${key}': ${error.message}`);
+      throw new CacheError(`Failed to delete cache key '${key}': ${error.message}`, {
+        driver: 'filesystem',
+        operation: 'delete',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure cache files are writable and not locked by another process.',
+        key,
+        original: error
+      });
     }
   }
 
@@ -526,7 +566,14 @@ export class FilesystemCache extends Cache {
       if (this.enableStats) {
         this.stats.errors++;
       }
-      throw new Error(`Failed to clear cache: ${error.message}`);
+      throw new CacheError(`Failed to clear cache: ${error.message}`, {
+        driver: 'filesystem',
+        operation: 'clear',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Verify the cache directory is accessible and not in use by another process.',
+        original: error
+      });
     }
   }
 
@@ -637,7 +684,14 @@ export class FilesystemCache extends Cache {
     
     while (this.locks.has(lockKey)) {
       if (Date.now() - startTime > this.lockTimeout) {
-        throw new Error(`Lock timeout for file: ${filePath}`);
+        throw new CacheError(`Lock timeout for file: ${filePath}`, {
+          driver: 'filesystem',
+          operation: 'acquireLock',
+          statusCode: 408,
+          retriable: true,
+          suggestion: 'Increase lockTimeout or investigate long-running cache writes holding the lock.',
+          key: lockKey
+        });
       }
       await new Promise(resolve => setTimeout(resolve, 10));
     }

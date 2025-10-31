@@ -137,6 +137,7 @@
 import zlib from 'node:zlib';
 import os from 'node:os';
 import { Cache } from "./cache.class.js"
+import { CacheError } from '../cache.errors.js';
 
 export class MemoryCache extends Cache {
   constructor(config = {}) {
@@ -156,19 +157,26 @@ export class MemoryCache extends Cache {
     // Validate that only one memory limit option is used
     if (config.maxMemoryBytes && config.maxMemoryBytes > 0 &&
         config.maxMemoryPercent && config.maxMemoryPercent > 0) {
-      throw new Error(
-        '[MemoryCache] Cannot use both maxMemoryBytes and maxMemoryPercent. ' +
-        'Choose one: maxMemoryBytes (absolute) or maxMemoryPercent (0...1 fraction).'
-      );
+      throw new CacheError('MemoryCache cannot use both maxMemoryBytes and maxMemoryPercent', {
+        driver: 'memory',
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Choose either maxMemoryBytes or maxMemoryPercent to limit memory usage.'
+      });
     }
 
     // Calculate maxMemoryBytes from percentage if provided
     if (config.maxMemoryPercent && config.maxMemoryPercent > 0) {
       if (config.maxMemoryPercent > 1) {
-        throw new Error(
-          '[MemoryCache] maxMemoryPercent must be between 0 and 1 (e.g., 0.1 for 10%). ' +
-          `Received: ${config.maxMemoryPercent}`
-        );
+        throw new CacheError('MemoryCache maxMemoryPercent must be between 0 and 1', {
+          driver: 'memory',
+          operation: 'constructor',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Provide a fraction between 0 and 1 (e.g., 0.1 for 10%).',
+          maxMemoryPercent: config.maxMemoryPercent
+        });
       }
 
       const totalMemory = os.totalmem();
@@ -241,7 +249,15 @@ export class MemoryCache extends Cache {
     try {
       serialized = this.serializer(data);
     } catch (error) {
-      throw new Error(`[MemoryCache] Failed to serialize data for key '${key}': ${error.message}`);
+      throw new CacheError(`Failed to serialize data for key '${key}'`, {
+        driver: 'memory',
+        operation: 'set',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure the custom serializer handles the provided data type.',
+        key,
+        original: error
+      });
     }
 
     // Prepare data for storage
@@ -251,7 +267,13 @@ export class MemoryCache extends Cache {
     let compressedSize = 0;
 
     if (typeof serialized !== 'string') {
-      throw new Error('[MemoryCache] Serializer must return a string');
+      throw new CacheError('MemoryCache serializer must return a string', {
+        driver: 'memory',
+        operation: 'set',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Update the custom serializer to return a string output.'
+      });
     }
 
     originalSize = Buffer.byteLength(serialized, 'utf8');

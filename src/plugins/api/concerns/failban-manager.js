@@ -37,8 +37,9 @@ import { resolveResourceNames } from '../../concerns/resource-names.js';
 
 export class FailbanManager {
   constructor(options = {}) {
+    this.namespace = options.namespace || null;
     const resourceOverrides = options.resourceNames || options.resources || {};
-    this.resourceNames = resolveResourceNames('api_failban', {
+    this._resourceDescriptors = {
       bans: {
         defaultName: 'plg_api_failban_bans',
         override: resourceOverrides.bans
@@ -47,7 +48,8 @@ export class FailbanManager {
         defaultName: 'plg_api_failban_violations',
         override: resourceOverrides.violations
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
 
     this.options = {
       enabled: options.enabled !== false,
@@ -77,6 +79,18 @@ export class FailbanManager {
     this.geoCache = new Map();
     this.geoReader = null;
     this.cleanupTimer = null;
+  }
+
+  _resolveResourceNames() {
+    return resolveResourceNames('api_failban', this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+
+  setNamespace(namespace) {
+    this.namespace = namespace;
+    this.resourceNames = this._resolveResourceNames();
+    this.options.resources = this.resourceNames;
   }
 
   /**

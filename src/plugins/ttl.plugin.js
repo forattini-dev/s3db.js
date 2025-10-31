@@ -2,6 +2,7 @@ import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
+import { PluginError } from "../errors.js";
 
 // Time constants (in seconds)
 const ONE_MINUTE_SEC = 60;
@@ -174,10 +175,11 @@ export class TTLPlugin extends Plugin {
     // Expiration index (plugin storage)
     const resourceNamesOption = config.resourceNames || {};
     this.expirationIndex = null;
-    this.indexResourceName = resolveResourceName('ttl', {
+    this._indexResourceDescriptor = {
       defaultName: 'plg_ttl_expiration_index',
       override: resourceNamesOption.index || config.indexResourceName
-    });
+    };
+    this.indexResourceName = this._resolveIndexResourceName();
   }
 
   /**
@@ -212,23 +214,43 @@ export class TTLPlugin extends Plugin {
     });
   }
 
+  _resolveIndexResourceName() {
+    return resolveResourceName('ttl', this._indexResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.indexResourceName = this._resolveIndexResourceName();
+  }
+
   /**
    * Validate resource configuration
    */
   _validateResourceConfig(resourceName, config) {
     // Must have either ttl or field
     if (!config.ttl && !config.field) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" must have either "ttl" (seconds) or "field" (timestamp field name)`
-      );
+      throw new PluginError('[TTLPlugin] Missing TTL configuration', {
+        pluginName: 'TTLPlugin',
+        operation: 'validateResourceConfig',
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide either ttl (in seconds) or field (absolute expiration timestamp) for each resource.'
+      });
     }
 
     const validStrategies = ['soft-delete', 'hard-delete', 'archive', 'callback'];
     if (!config.onExpire || !validStrategies.includes(config.onExpire)) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" must have an "onExpire" value. ` +
-        `Valid options: ${validStrategies.join(', ')}`
-      );
+      throw new PluginError('[TTLPlugin] Invalid onExpire strategy', {
+        pluginName: 'TTLPlugin',
+        operation: 'validateResourceConfig',
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: `Set onExpire to one of: ${validStrategies.join(', ')}`,
+        onExpire: config.onExpire
+      });
     }
 
     if (config.onExpire === 'soft-delete' && !config.deleteField) {
@@ -236,15 +258,27 @@ export class TTLPlugin extends Plugin {
     }
 
     if (config.onExpire === 'archive' && !config.archiveResource) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" with onExpire="archive" must have an "archiveResource" specified`
-      );
+      throw new PluginError('[TTLPlugin] Archive resource required', {
+        pluginName: 'TTLPlugin',
+        operation: 'validateResourceConfig',
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide archiveResource pointing to the resource that stores archived records.',
+        onExpire: config.onExpire
+      });
     }
 
     if (config.onExpire === 'callback' && typeof config.callback !== 'function') {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" with onExpire="callback" must have a "callback" function`
-      );
+      throw new PluginError('[TTLPlugin] Callback handler required', {
+        pluginName: 'TTLPlugin',
+        operation: 'validateResourceConfig',
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide a callback function: { onExpire: "callback", callback: async (ctx) => {...} }',
+        onExpire: config.onExpire
+      });
     }
 
     // Set default field if not specified
@@ -632,7 +666,14 @@ export class TTLPlugin extends Plugin {
   async _archive(resource, record, config) {
     // Check if archive resource exists
     if (!this.database.resources[config.archiveResource]) {
-      throw new Error(`Archive resource "${config.archiveResource}" not found`);
+      throw new PluginError(`Archive resource "${config.archiveResource}" not found`, {
+        pluginName: 'TTLPlugin',
+        operation: '_archive',
+        resourceName: config.archiveResource,
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Create the archive resource before using onExpire: "archive" or update archiveResource config.'
+      });
     }
 
     const archiveResource = this.database.resources[config.archiveResource];
@@ -672,7 +713,14 @@ export class TTLPlugin extends Plugin {
   async cleanupResource(resourceName) {
     const config = this.resources[resourceName];
     if (!config) {
-      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
+      throw new PluginError(`Resource "${resourceName}" not configured in TTLPlugin`, {
+        pluginName: 'TTLPlugin',
+        operation: 'cleanupResource',
+        resourceName,
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Add the resource under TTLPlugin configuration before invoking cleanupResource.'
+      });
     }
 
     const granularity = config.granularity;

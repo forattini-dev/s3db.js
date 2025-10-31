@@ -9,6 +9,7 @@ import { createHash } from 'crypto';
 import { writeFile, readFile } from 'fs/promises';
 import { Readable } from 'stream';
 import tryFn from '../concerns/try-fn.js';
+import { MetadataLimitError, ResourceError, ValidationError } from '../errors.js';
 
 export class MemoryStorage {
   constructor(config = {}) {
@@ -60,17 +61,28 @@ export class MemoryStorage {
     // Check metadata size
     const metadataSize = this._calculateMetadataSize(metadata);
     if (metadataSize > this.metadataLimit) {
-      throw new Error(
-        `Metadata size (${metadataSize} bytes) exceeds limit of ${this.metadataLimit} bytes`
-      );
+      throw new MetadataLimitError('Metadata limit exceeded in memory storage', {
+        bucket: this.bucket,
+        totalSize: metadataSize,
+        effectiveLimit: this.metadataLimit,
+        operation: 'put',
+        retriable: false,
+        suggestion: 'Reduce metadata size or disable enforceLimits in MemoryClient configuration.'
+      });
     }
 
     // Check object size
     const bodySize = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body || '', 'utf8');
     if (bodySize > this.maxObjectSize) {
-      throw new Error(
-        `Object size (${bodySize} bytes) exceeds limit of ${this.maxObjectSize} bytes`
-      );
+      throw new ResourceError('Object size exceeds in-memory limit', {
+        bucket: this.bucket,
+        operation: 'put',
+        size: bodySize,
+        maxObjectSize: this.maxObjectSize,
+        statusCode: 413,
+        retriable: false,
+        suggestion: 'Store smaller objects or increase maxObjectSize when instantiating MemoryClient.'
+      });
     }
   }
 
@@ -85,17 +97,14 @@ export class MemoryStorage {
     const existing = this.objects.get(key);
     if (ifMatch !== undefined) {
       if (!existing || existing.etag !== ifMatch) {
-        const error = new Error(`Precondition failed: ETag mismatch for key "${key}"`);
-        error.name = 'PreconditionFailed';
-        error.code = 'PreconditionFailed';
-        error.statusCode = 412;
-        error.$metadata = {
-          httpStatusCode: 412,
-          requestId: 'memory-' + Date.now(),
-          attempts: 1,
-          totalRetryDelay: 0
-        };
-        throw error;
+        throw new ResourceError(`Precondition failed: ETag mismatch for key "${key}"`, {
+          bucket: this.bucket,
+          key,
+          code: 'PreconditionFailed',
+          statusCode: 412,
+          retriable: false,
+          suggestion: 'Fetch the latest object and retry with the current ETag in options.ifMatch.'
+        });
       }
     }
 
@@ -106,17 +115,14 @@ export class MemoryStorage {
         (ifNoneMatch !== '*' && existing && targetValue === ifNoneMatch);
 
       if (shouldFail) {
-        const error = new Error(`Precondition failed: object already exists for key "${key}"`);
-        error.name = 'PreconditionFailed';
-        error.code = 'PreconditionFailed';
-        error.statusCode = 412;
-        error.$metadata = {
-          httpStatusCode: 412,
-          requestId: 'memory-' + Date.now(),
-          attempts: 1,
-          totalRetryDelay: 0
-        };
-        throw error;
+        throw new ResourceError(`Precondition failed: object already exists for key "${key}"`, {
+          bucket: this.bucket,
+          key,
+          code: 'PreconditionFailed',
+          statusCode: 412,
+          retriable: false,
+          suggestion: 'Use ifNoneMatch: "*" only when the object should not exist or remove the conditional header.'
+        });
       }
     }
 
@@ -162,15 +168,14 @@ export class MemoryStorage {
     const obj = this.objects.get(key);
 
     if (!obj) {
-      const error = new Error(`Object not found: ${key}`);
-      error.name = 'NoSuchKey';
-      error.$metadata = {
-        httpStatusCode: 404,
-        requestId: 'memory-' + Date.now(),
-        attempts: 1,
-        totalRetryDelay: 0
-      };
-      throw error;
+      throw new ResourceError(`Object not found: ${key}`, {
+        bucket: this.bucket,
+        key,
+        code: 'NoSuchKey',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Ensure the key exists before attempting to read it.'
+      });
     }
 
     if (this.verbose) {
@@ -198,15 +203,14 @@ export class MemoryStorage {
     const obj = this.objects.get(key);
 
     if (!obj) {
-      const error = new Error(`Object not found: ${key}`);
-      error.name = 'NoSuchKey';
-      error.$metadata = {
-        httpStatusCode: 404,
-        requestId: 'memory-' + Date.now(),
-        attempts: 1,
-        totalRetryDelay: 0
-      };
-      throw error;
+      throw new ResourceError(`Object not found: ${key}`, {
+        bucket: this.bucket,
+        key,
+        code: 'NoSuchKey',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Ensure the key exists before attempting to read it.'
+      });
     }
 
     if (this.verbose) {
@@ -230,9 +234,14 @@ export class MemoryStorage {
     const source = this.objects.get(from);
 
     if (!source) {
-      const error = new Error(`Source object not found: ${from}`);
-      error.name = 'NoSuchKey';
-      throw error;
+      throw new ResourceError(`Source object not found: ${from}`, {
+        bucket: this.bucket,
+        key: from,
+        code: 'NoSuchKey',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Copy requires an existing source object. Verify the source key before retrying.'
+      });
     }
 
     // Determine final metadata based on directive
@@ -416,7 +425,11 @@ export class MemoryStorage {
    */
   restore(snapshot) {
     if (!snapshot || !snapshot.objects) {
-      throw new Error('Invalid snapshot format');
+      throw new ValidationError('Invalid snapshot format', {
+        field: 'snapshot',
+        retriable: false,
+        suggestion: 'Provide the snapshot returned by MemoryStorage.snapshot() before calling restore().'
+      });
     }
 
     this.objects.clear();
@@ -445,7 +458,11 @@ export class MemoryStorage {
   async saveToDisk(customPath) {
     const path = customPath || this.persistPath;
     if (!path) {
-      throw new Error('No persist path configured');
+      throw new ValidationError('No persist path configured', {
+        field: 'persistPath',
+        retriable: false,
+        suggestion: 'Provide a persistPath when creating MemoryClient or pass a custom path to saveToDisk().'
+      });
     }
 
     const snapshot = this.snapshot();
@@ -454,7 +471,14 @@ export class MemoryStorage {
     const [ok, err] = await tryFn(() => writeFile(path, json, 'utf-8'));
 
     if (!ok) {
-      throw new Error(`Failed to save to disk: ${err.message}`);
+      throw new ResourceError(`Failed to save to disk: ${err.message}`, {
+        bucket: this.bucket,
+        operation: 'saveToDisk',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Check filesystem permissions and available disk space, then retry.',
+        original: err
+      });
     }
 
     if (this.verbose) {
@@ -470,13 +494,24 @@ export class MemoryStorage {
   async loadFromDisk(customPath) {
     const path = customPath || this.persistPath;
     if (!path) {
-      throw new Error('No persist path configured');
+      throw new ValidationError('No persist path configured', {
+        field: 'persistPath',
+        retriable: false,
+        suggestion: 'Provide a persistPath when creating MemoryClient or pass a custom path to loadFromDisk().'
+      });
     }
 
     const [ok, err, json] = await tryFn(() => readFile(path, 'utf-8'));
 
     if (!ok) {
-      throw new Error(`Failed to load from disk: ${err.message}`);
+      throw new ResourceError(`Failed to load from disk: ${err.message}`, {
+        bucket: this.bucket,
+        operation: 'loadFromDisk',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Verify the file exists and is readable, then retry.',
+        original: err
+      });
     }
 
     const snapshot = JSON.parse(json);

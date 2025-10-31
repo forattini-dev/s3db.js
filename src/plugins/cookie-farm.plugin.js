@@ -1,7 +1,9 @@
 import { Plugin } from './plugin.class.js';
+import { PuppeteerPlugin } from './puppeteer.plugin.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import tryFn from '../concerns/try-fn.js';
 import { resolveResourceName } from './concerns/resource-names.js';
+import { CookieFarmError, PersonaNotFoundError } from './cookie-farm.errors.js';
 
 /**
  * CookieFarmPlugin - Persona Factory for Professional Web Scraping
@@ -113,10 +115,11 @@ export class CookieFarmPlugin extends Plugin {
       }
     };
 
-    this.config.storage.resource = resolveResourceName('cookiefarm', {
+    this._storageResourceDescriptor = {
       defaultName: 'plg_cookie_farm_personas',
       override: resourceNamesOption.personas || options.storage?.resource
-    });
+    };
+    this.config.storage.resource = this._resolveStorageResourceName();
 
     // Internal state
     this.puppeteerPlugin = null;
@@ -125,19 +128,33 @@ export class CookieFarmPlugin extends Plugin {
     this.initialized = false;
   }
 
+  _resolveStorageResourceName() {
+    return resolveResourceName('cookiefarm', this._storageResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    if (this.config?.storage) {
+      this.config.storage.resource = this._resolveStorageResourceName();
+    }
+  }
+
   /**
    * Install plugin and validate dependencies
    */
   async onInstall() {
-    // Validate PuppeteerPlugin is installed
-    const puppeteerPlugin = this.database.plugins.find(
-      p => p.name === 'PuppeteerPlugin'
-    );
+    // Validate PuppeteerPlugin is installed (namespaced aware)
+    const puppeteerPlugin = this._findPuppeteerDependency();
 
     if (!puppeteerPlugin) {
-      throw new Error(
-        'CookieFarmPlugin requires PuppeteerPlugin to be installed first'
-      );
+      throw new CookieFarmError('PuppeteerPlugin is required before installing CookieFarmPlugin', {
+        pluginName: 'CookieFarmPlugin',
+        operation: 'onInstall',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Install PuppeteerPlugin in db configuration before adding CookieFarmPlugin.'
+      });
     }
 
     this.puppeteerPlugin = puppeteerPlugin;
@@ -146,6 +163,39 @@ export class CookieFarmPlugin extends Plugin {
     await this._setupPersonaStorage();
 
     this.emit('cookieFarm.installed');
+  }
+
+  /**
+   * Locate PuppeteerPlugin dependency respecting namespaces
+   * @private
+   */
+  _findPuppeteerDependency() {
+    const registries = [
+      this.database?.plugins,
+      this.database?.pluginRegistry,
+      Array.isArray(this.database?.pluginList) ? this.database.pluginList : null
+    ].filter(Boolean);
+
+    const candidates = [];
+    for (const registry of registries) {
+      if (Array.isArray(registry)) {
+        candidates.push(...registry);
+      } else {
+        candidates.push(...Object.values(registry));
+      }
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const sameNamespace = candidates.find(
+      plugin => plugin instanceof PuppeteerPlugin &&
+        (plugin.namespace === this.namespace || !this.namespace)
+    );
+    if (sameNamespace) return sameNamespace;
+
+    return candidates.find(plugin => plugin instanceof PuppeteerPlugin) || null;
   }
 
   /**
@@ -441,7 +491,7 @@ export class CookieFarmPlugin extends Plugin {
   async warmupPersona(personaId) {
     const persona = this.personaPool.get(personaId);
     if (!persona) {
-      throw new Error(`Persona ${personaId} not found`);
+      throw new PersonaNotFoundError(personaId);
     }
 
     if (persona.metadata.warmupCompleted) {
@@ -648,7 +698,7 @@ export class CookieFarmPlugin extends Plugin {
 
     const persona = this.personaPool.get(personaId);
     if (!persona) {
-      throw new Error(`Persona ${personaId} not found`);
+      throw new PersonaNotFoundError(personaId);
     }
 
     persona.reputation.totalRequests++;
@@ -718,7 +768,7 @@ export class CookieFarmPlugin extends Plugin {
   async retirePersona(personaId) {
     const persona = this.personaPool.get(personaId);
     if (!persona) {
-      throw new Error(`Persona ${personaId} not found`);
+      throw new PersonaNotFoundError(personaId);
     }
 
     persona.metadata.retired = true;

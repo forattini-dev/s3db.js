@@ -9,6 +9,8 @@
 await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resources: ['users'], config: { connectionString: 's3://...' }}] }));
 ```
 
+> 🧩 **Namespaces**: Supply `namespace: 'etl'` (or pass an alias via `db.usePlugin`) when running multiple ReplicatorPlugin instances. The replication log resource becomes `plg_etl_replicator_logs`.
+
 **Key features:**
 - ✅ **Real-Time CDC**: Each insert/update/delete replicated individually (<10ms latency)
 - ✅ Multi-target: S3DB, BigQuery, PostgreSQL, MySQL, MariaDB, PlanetScale, Turso, DynamoDB, MongoDB, SQS, Webhooks

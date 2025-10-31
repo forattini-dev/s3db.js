@@ -16,6 +16,7 @@
  */
 
 import { Factory } from './factory.class.js';
+import { ValidationError } from '../errors.js';
 
 export class Seeder {
   /**
@@ -59,7 +60,12 @@ export class Seeder {
 
       const factory = Factory.get(resourceName);
       if (!factory) {
-        throw new Error(`Factory for '${resourceName}' not found. Define it with Factory.define()`);
+        throw new ValidationError(`Factory for '${resourceName}' not found`, {
+          field: 'resourceName',
+          value: resourceName,
+          retriable: false,
+          suggestion: `Register a factory with Factory.define('${resourceName}', ...) before seeding.`
+        });
       }
 
       created[resourceName] = await factory.createMany(count, {}, { database: this.database });

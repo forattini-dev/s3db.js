@@ -6,6 +6,8 @@
  * 2. Reputation Tracking - Monitor success rates and retire bad cookies
  * 3. Age-Based Rotation - Older cookies are more trustworthy
  */
+import { CookieManagerError } from '../puppeteer.errors.js';
+
 export class CookieManager {
   constructor(plugin) {
     this.plugin = plugin;
@@ -172,7 +174,11 @@ export class CookieManager {
    */
   async farmCookies(sessionId) {
     if (!this.config.farming.enabled || !this.config.farming.warmup.enabled) {
-      throw new Error('Cookie farming is not enabled');
+      throw new CookieManagerError('Cookie farming is not enabled', {
+        operation: 'farmCookies',
+        retriable: false,
+        suggestion: 'Enable config.farming.enabled and config.farming.warmup.enabled to farm cookies.'
+      });
     }
 
     const warmupConfig = this.config.farming.warmup;
@@ -242,7 +248,11 @@ export class CookieManager {
    */
   async getBestCookie(options = {}) {
     if (!this.config.farming.enabled || !this.config.farming.reputation.enabled) {
-      throw new Error('Cookie farming and reputation must be enabled');
+      throw new CookieManagerError('Cookie farming reputation must be enabled to select best cookies', {
+        operation: 'getBestCookie',
+        retriable: false,
+        suggestion: 'Enable config.farming.reputation.enabled before calling getBestCookie().' 
+      });
     }
 
     const candidates = Array.from(this.cookiePool.values())

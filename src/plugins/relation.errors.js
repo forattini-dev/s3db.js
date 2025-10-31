@@ -1,3 +1,5 @@
+import { PluginError } from '../errors.js';
+
 /**
  * RelationPlugin Error Classes
  * Custom errors for relation operations
@@ -6,12 +8,18 @@
 /**
  * Base error for all relation operations
  */
-export class RelationError extends Error {
+export class RelationError extends PluginError {
   constructor(message, context = {}) {
-    super(message);
+    const merged = {
+      pluginName: context.pluginName || 'RelationPlugin',
+      operation: context.operation || 'unknown',
+      statusCode: context.statusCode ?? 500,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? 'Inspect relation configuration (type, resource, foreign keys) before retrying.',
+      ...context
+    };
+    super(message, merged);
     this.name = 'RelationError';
-    this.context = context;
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 
@@ -20,7 +28,12 @@ export class RelationError extends Error {
  */
 export class RelationConfigError extends RelationError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: context.statusCode ?? 400,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? 'Review relation configuration fields (type, resource, localKey, foreignKey).',
+      ...context
+    });
     this.name = 'RelationConfigError';
   }
 }
@@ -30,7 +43,13 @@ export class RelationConfigError extends RelationError {
  */
 export class UnsupportedRelationTypeError extends RelationError {
   constructor(type, context = {}) {
-    super(`Unsupported relation type: ${type}. Supported types: hasOne, hasMany, belongsTo, belongsToMany`, context);
+    super(`Unsupported relation type: ${type}. Supported types: hasOne, hasMany, belongsTo, belongsToMany`, {
+      statusCode: context.statusCode ?? 400,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Use one of the supported relation types or implement a custom handler.',
+      relationType: type,
+      ...context
+    });
     this.name = 'UnsupportedRelationTypeError';
     this.relationType = type;
   }
@@ -41,7 +60,13 @@ export class UnsupportedRelationTypeError extends RelationError {
  */
 export class RelatedResourceNotFoundError extends RelationError {
   constructor(resourceName, context = {}) {
-    super(`Related resource "${resourceName}" not found`, context);
+    super(`Related resource "${resourceName}" not found`, {
+      statusCode: context.statusCode ?? 404,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Ensure the related resource is created and registered before defining the relation.',
+      resourceName,
+      ...context
+    });
     this.name = 'RelatedResourceNotFoundError';
     this.resourceName = resourceName;
   }
@@ -52,7 +77,13 @@ export class RelatedResourceNotFoundError extends RelationError {
  */
 export class JunctionTableNotFoundError extends RelationError {
   constructor(junctionTable, context = {}) {
-    super(`Junction table "${junctionTable}" not found for belongsToMany relation`, context);
+    super(`Junction table "${junctionTable}" not found for belongsToMany relation`, {
+      statusCode: context.statusCode ?? 404,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Create the junction resource or update belongsToMany configuration to reference an existing one.',
+      junctionTable,
+      ...context
+    });
     this.name = 'JunctionTableNotFoundError';
     this.junctionTable = junctionTable;
   }
@@ -65,7 +96,15 @@ export class CascadeError extends RelationError {
   constructor(operation, resourceName, recordId, originalError, context = {}) {
     super(
       `Cascade ${operation} failed for resource "${resourceName}" record "${recordId}": ${originalError.message}`,
-      context
+      {
+        retriable: context.retriable ?? false,
+        suggestion: context.suggestion ?? 'Check cascade configuration and ensure dependent records allow deletion/update.',
+        operation,
+        resourceName,
+        recordId,
+        originalError,
+        ...context
+      }
     );
     this.name = 'CascadeError';
     this.operation = operation;
@@ -80,7 +119,14 @@ export class CascadeError extends RelationError {
  */
 export class MissingForeignKeyError extends RelationError {
   constructor(foreignKey, resourceName, context = {}) {
-    super(`Foreign key "${foreignKey}" not found in resource "${resourceName}"`, context);
+    super(`Foreign key "${foreignKey}" not found in resource "${resourceName}"`, {
+      statusCode: context.statusCode ?? 422,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Add the foreign key field to the resource schema or adjust relation configuration.',
+      foreignKey,
+      resourceName,
+      ...context
+    });
     this.name = 'MissingForeignKeyError';
     this.foreignKey = foreignKey;
     this.resourceName = resourceName;
@@ -92,7 +138,14 @@ export class MissingForeignKeyError extends RelationError {
  */
 export class RecordNotFoundError extends RelationError {
   constructor(recordId, resourceName, context = {}) {
-    super(`Record "${recordId}" not found in resource "${resourceName}"`, context);
+    super(`Record "${recordId}" not found in resource "${resourceName}"`, {
+      statusCode: context.statusCode ?? 404,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Ensure the primary record exists before loading relations.',
+      recordId,
+      resourceName,
+      ...context
+    });
     this.name = 'RecordNotFoundError';
     this.recordId = recordId;
     this.resourceName = resourceName;
@@ -104,7 +157,13 @@ export class RecordNotFoundError extends RelationError {
  */
 export class CircularRelationError extends RelationError {
   constructor(path, context = {}) {
-    super(`Circular relation detected in path: ${path.join(' -> ')}`, context);
+    super(`Circular relation detected in path: ${path.join(' -> ')}`, {
+      statusCode: context.statusCode ?? 400,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Adjust include paths to avoid circular references or limit recursion depth.',
+      relationPath: path,
+      ...context
+    });
     this.name = 'CircularRelationError';
     this.relationPath = path;
   }
@@ -115,7 +174,14 @@ export class CircularRelationError extends RelationError {
  */
 export class InvalidIncludePathError extends RelationError {
   constructor(path, reason, context = {}) {
-    super(`Invalid include path "${path}": ${reason}`, context);
+    super(`Invalid include path "${path}": ${reason}`, {
+      statusCode: context.statusCode ?? 400,
+      retriable: false,
+      suggestion: context.suggestion ?? 'Verify include syntax (users.posts.comments) and ensure each relation exists.',
+      includePath: path,
+      reason,
+      ...context
+    });
     this.name = 'InvalidIncludePathError';
     this.includePath = path;
     this.reason = reason;
@@ -129,7 +195,14 @@ export class BatchLoadError extends RelationError {
   constructor(relation, batchSize, failedCount, context = {}) {
     super(
       `Batch loading failed for relation "${relation}". Failed ${failedCount} out of ${batchSize} records`,
-      context
+      {
+        retriable: context.retriable ?? true,
+        suggestion: context.suggestion ?? 'Check batch size configuration and review individual errors to retry failed records.',
+        relation,
+        batchSize,
+        failedCount,
+        ...context
+      }
     );
     this.name = 'BatchLoadError';
     this.relation = relation;

@@ -65,6 +65,8 @@ await db.use(new IdentityPlugin({
 console.log('✅ SSO Server running at http://localhost:4000');
 ```
 
+> 💡 **Multi-instance**: pass `namespace: 'tenant-a'` (or supply a custom alias to `db.usePlugin`) when you need multiple IdentityPlugin instances. All internal resources (`plg_identity_*`) and PluginStorage keys will be namespaced automatically (e.g., `plg_tenant-a_identity_sessions`).
+
 ### Create Users & Clients
 
 ```javascript

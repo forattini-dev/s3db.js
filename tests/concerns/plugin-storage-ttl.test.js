@@ -76,7 +76,7 @@ describe('PluginStorage - TTL Features', () => {
       expect(lock).toBeTruthy();
       expect(lock.workerId).toBe('unknown');
 
-      await storage.releaseLock('task1');
+      await storage.releaseLock(lock);
 
       expect(await storage.isLocked('task1')).toBe(false);
     });
@@ -88,7 +88,9 @@ describe('PluginStorage - TTL Features', () => {
       const lock2 = await storage.acquireLock('task1', { ttl: 30, timeout: 0 });
       expect(lock2).toBe(null);
 
-      await storage.releaseLock('task1');
+      if (lock1) {
+        await storage.releaseLock(lock1);
+      }
     });
 
     test('should auto-release locks after TTL', async () => {
@@ -109,7 +111,9 @@ describe('PluginStorage - TTL Features', () => {
 
       expect(lock.workerId).toBe('worker-123');
 
-      await storage.releaseLock('task1');
+      if (lock) {
+        await storage.releaseLock(lock);
+      }
     });
 
     test('should retry with timeout', async () => {
@@ -120,7 +124,11 @@ describe('PluginStorage - TTL Features', () => {
       const lock2 = await storage.acquireLock('task1', { ttl: 30, timeout: 2000 });
       expect(lock2).toBeTruthy();
 
-      await storage.releaseLock('task1');
+      if (lock2) {
+        await storage.releaseLock(lock2);
+      } else if (lock1) {
+        await storage.releaseLock(lock1);
+      }
     });
   });
 

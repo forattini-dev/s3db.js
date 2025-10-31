@@ -10,6 +10,8 @@ await db.usePlugin(new FullTextPlugin({ fields: ['title', 'description', 'conten
 const results = await db.plugins.fulltext.searchRecords('articles', 'machine learning');
 ```
 
+> 🧩 **Namespaces**: Provide `namespace: 'catalog-search'` (or an alias via `db.usePlugin`) to run multiple FullTextPlugin instances—index storage becomes `plg_catalog-search_fulltext_indexes`.
+
 **Key features:**
 - ✅ Automatic indexing on insert/update
 - ✅ Relevance scoring with field weights

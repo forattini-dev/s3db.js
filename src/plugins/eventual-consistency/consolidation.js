@@ -7,6 +7,7 @@ import tryFn from "../../concerns/try-fn.js";
 import { PromisePool } from "@supercharge/promise-pool";
 import { idGenerator } from "../../concerns/id.js";
 import { getCohortInfo, createSyntheticSetTransaction, ensureCohortHour } from "./utils.js";
+import { PluginError } from '../../errors.js';
 
 /**
  * Start consolidation timer for a handler
@@ -696,12 +697,17 @@ export async function consolidateRecord(
     return consolidatedValue;
   } finally {
     // Always release the lock
-    const [lockReleased, lockReleaseErr] = await tryFn(() =>
-      storage.releaseLock(lockKey)
-    );
+    if (lock) {
+      const [lockReleased, lockReleaseErr] = await tryFn(() =>
+        storage.releaseLock(lock)
+      );
 
-    if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release lock ${lockKey}:`, lockReleaseErr?.message);
+      if (!lockReleased && config.verbose) {
+        console.warn(
+          `[EventualConsistency] Failed to release lock ${lock?.name || lockKey}:`,
+          lockReleaseErr?.message
+        );
+      }
     }
   }
 }
@@ -853,7 +859,14 @@ export async function recalculateRecord(
     if (config.verbose) {
       console.log(`[EventualConsistency] Recalculate lock for ${originalId} already held, skipping`);
     }
-    throw new Error(`Cannot recalculate ${originalId}: lock already held by another worker`);
+    throw new PluginError(`Cannot recalculate ${originalId}: lock already held by another worker`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'recalculateRecord',
+      statusCode: 409,
+      retriable: true,
+      suggestion: 'Retry after the other worker releases the lock or increase lock TTL if necessary.',
+      recordId: originalId
+    });
   }
 
   try {
@@ -997,12 +1010,17 @@ export async function recalculateRecord(
     return consolidatedValue;
   } finally {
     // Always release the lock
-    const [lockReleased, lockReleaseErr] = await tryFn(() =>
-      storage.releaseLock(lockKey)
-    );
+    if (lock) {
+      const [lockReleased, lockReleaseErr] = await tryFn(() =>
+        storage.releaseLock(lock)
+      );
 
-    if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockKey}:`, lockReleaseErr?.message);
+      if (!lockReleased && config.verbose) {
+        console.warn(
+          `[EventualConsistency] Failed to release recalculate lock ${lock?.name || lockKey}:`,
+          lockReleaseErr?.message
+        );
+      }
     }
   }
 }
