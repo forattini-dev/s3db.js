@@ -1,405 +1,88 @@
-# 🔐 Identity Provider Plugin
+# 🔐 Identity Plugin
 
-> **Quick Jump:** [⚡ Quick Start](#-quickstart) | [📖 Usage Journey](#-usage-journey) | [📊 Config](./identity/configuration.md) | [🏗️ Architecture](./identity/architecture.md) | [🔧 API](./identity/api-reference.md) | [🔗 Integration](./identity/integration.md) | [❓ FAQ](#-faq)
+**Transform s3db.js into a production-ready OAuth2/OIDC Authorization Server.**
 
-**OAuth2/OIDC Authorization Server** - Enterprise-grade Single Sign-On (SSO) for microservices with Azure AD/Keycloak feature parity.
+---
 
-## ⚡ TLDR
-
-The IdentityPlugin transforms s3db.js into a **centralized OAuth2/OIDC Authorization Server** that manages users and authentication for your microservices ecosystem.
+## ⚡ TL;DR
 
 ```javascript
-import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js';
+import { Database, IdentityPlugin } from 's3db.js';
 
-const db = new Database({
-  connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-server',
-  encryptionKey: 'sso-encryption-key-32-chars!!'
-});
-
+const db = new Database({ connectionString: 's3://...' });
 await db.connect();
 
-const identityPlugin = new IdentityPlugin({
+await db.use(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
-  supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
-  supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
-  accessTokenExpiry: '15m',
-  idTokenExpiry: '15m',
-  refreshTokenExpiry: '7d'
-});
+  supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api']
+}));
 
-await db.usePlugin(identityPlugin);
-
-// 🎉 You now have a full OAuth2/OIDC server with:
-// - Discovery endpoint (/.well-known/openid-configuration)
-// - JWKS endpoint (/.well-known/jwks.json)
-// - Token endpoint (/oauth/token)
-// - Authorization endpoint (/oauth/authorize + login UI)
-// - UserInfo endpoint (/oauth/userinfo)
-// - Introspection endpoint (/oauth/introspect)
-// - Token revocation (/oauth/revoke)
-// - Dynamic client registration (/oauth/register)
+// 🎉 Full OAuth2/OIDC server ready!
 ```
 
-**Key Features:**
-- ✅ **Minimal external dependencies** - Uses Node.js native crypto for JWT signing (requires hono for HTTP server)
-- ✅ **RS256 signing** - Asymmetric RSA keys for JWT tokens
-- ✅ **OIDC Discovery** - Auto-configurable by Resource Servers
-- ✅ **JWKS endpoint** - Public key distribution
-- ✅ **4 grant types** - authorization_code, client_credentials, refresh_token, PKCE
-- ✅ **Token revocation** - RFC 7009 compliant
-- ✅ **Dynamic client registration** - RFC 7591 compliant
-- ✅ **Built-in login UI** - HTML form for authorization_code flow
-- ✅ **Enterprise features** - Azure AD/Keycloak feature parity
-- ✅ **Customizable resource schemas** - Extend users, tenants, and clients with your own fields
+**You get instantly:**
+- ✅ **9 OAuth2/OIDC endpoints** (discovery, JWKS, token, authorize, userinfo, etc.)
+- ✅ **4 grant types** (authorization_code, client_credentials, refresh_token, PKCE)
+- ✅ **RS256 JWT signing** (asymmetric RSA keys)
+- ✅ **Built-in login UI** (HTML form for authorization_code flow)
+- ✅ **Enterprise features** (token revocation, dynamic client registration)
+- ✅ **Azure AD/Keycloak parity** (OIDC-compliant, works with any client)
+
+**Works as:** Authorization Server (SSO) for your microservices ecosystem. Clients can be web apps, mobile apps, or other APIs.
 
 ---
 
-## 🎨 Resource Configuration & Customization
-
-The Identity Plugin creates three core resources: **users**, **tenants**, and **clients**. Each has **base attributes** required by the plugin, but you can extend them with your own fields using deep merge.
-
-### Base Schemas
-
-The plugin provides **protected base attributes** that cannot be overridden:
-
-**Users** (authentication & authorization):
-```javascript
-{
-  email: 'string|required|email',
-  password: 'password|required',        // Auto-hashed with bcrypt
-  emailVerified: 'boolean|default:false',
-  name: 'string|optional',
-  givenName: 'string|optional',
-  familyName: 'string|optional',
-  nickname: 'string|optional',
-  picture: 'string|optional',
-  locale: 'string|optional',
-  scopes: 'array|items:string|optional',
-  roles: 'array|items:string|optional',
-  tenantId: 'string|optional',
-  active: 'boolean|default:true',
-  metadata: 'object|optional'
-}
-```
-
-**Tenants** (multi-tenancy):
-```javascript
-{
-  name: 'string|required',
-  slug: 'string|required',
-  settings: 'object|optional',
-  active: 'boolean|default:true',
-  metadata: 'object|optional'
-}
-```
-
-**Clients** (OAuth2/OIDC apps):
-```javascript
-{
-  clientId: 'string|required',
-  clientSecret: 'secret|required',
-  name: 'string|required',
-  description: 'string|optional',
-  redirectUris: 'array|items:string|required',
-  allowedScopes: 'array|items:string|optional',
-  grantTypes: 'array|items:string|default:[\"authorization_code\",\"refresh_token\"]',
-  responseTypes: 'array|items:string|optional',
-  tenantId: 'string|optional',
-  tokenEndpointAuthMethod: 'string|default:client_secret_post',
-  requirePkce: 'boolean|default:false',
-  active: 'boolean|default:true',
-  metadata: 'object|optional'
-}
-```
-
-### Extending Resources with Custom Fields
-
-You can add **extra attributes**, **hooks**, **partitions**, and configure **behavior** for each resource:
-
-```javascript
-const identityPlugin = new IdentityPlugin({
-  port: 4000,
-  issuer: 'http://localhost:4000',
-
-  resources: {
-    users: {
-      name: 'app_users',
-      attributes: {
-        // Custom fields (cannot override base attributes!)
-        companyId: 'string|default:default-company',
-        department: 'string|default:engineering',
-        employeeId: 'string|optional'
-      },
-      // Partitions for performance
-      partitions: {
-        byCompany: { fields: { companyId: 'string' } },
-        byDepartment: { fields: { department: 'string' } }
-      },
-      // Lifecycle hooks
-      hooks: {
-        beforeInsert: async (data) => {
-          data.department = data.department?.toUpperCase();
-          return data;
-        },
-        afterUpdate: async (data) => {
-          console.log('User updated:', data.email);
-        }
-      },
-      // Storage behavior
-      behavior: 'body-overflow',  // or 'body-only', 'enforce-limits', etc.
-      timestamps: true
-    },
-
-    tenants: {
-      name: 'organizations',
-      attributes: {
-        plan: 'string|default:free',
-        maxUsers: 'number|default:10',
-        billingEmail: 'string|email|optional'
-      },
-      partitions: {
-        byPlan: { fields: { plan: 'string' } }
-      }
-    },
-
-    clients: {
-      name: 'oauth_apps',
-      attributes: {
-        logoUrl: 'string|default:https://placeholder.com/logo.png',
-        brandColor: 'string|default:#007bff',
-        webhookUrl: 'string|url|optional'
-      }
-    }
-  }
-});
-```
-
-### Validation Rules
-
-**Required**:
-- All three resources (`users`, `tenants`, `clients`) must be configured
-- Each resource must have a `name` property
-- Extra attributes cannot override base attributes
-
-**Optional Fields**:
-- Optional custom fields **must** have a default value:
-  ```javascript
-  ✅ companyId: 'string|default:default-company'
-  ❌ companyId: 'string|optional'  // ERROR: missing default
-  ```
-
-### Full Configuration Control
-
-Beyond attributes, you have full control over resource creation:
-
-```javascript
-resources: {
-  users: {
-    name: 'users_v1',
-    attributes: { /* custom fields */ },
-    partitions: { /* O(1) lookups */ },
-    hooks: {
-      beforeInsert: async (data) => { /* validate */ },
-      afterInsert: async (data) => { /* notify */ },
-      beforeUpdate: async (data) => { /* audit */ }
-    },
-    behavior: 'body-overflow',  // metadata overflow strategy
-    timestamps: true,           // add createdAt/updatedAt
-    asyncPartitions: true       // 70-100% faster writes
-  }
-}
-```
-
-**See also**: [Configuration Reference](./identity/configuration.md) for complete options.
-
----
-
-## 📑 Table of Contents
-
-1. [⚡ TLDR](#-tldr)
-2. [⚡ Quickstart](#-quickstart)
-3. [📖 Usage Journey](#-usage-journey)
-   - [Level 1: Basic SSO Setup](#level-1-basic-sso-setup)
-   - [Level 2: Add Clients & Users](#level-2-add-clients--users)
-   - [Level 3: Authorization Code Flow](#level-3-authorization-code-flow)
-4. [📖 Detailed Documentation](#-detailed-documentation)
-5. [🎯 Common Scenarios](#-common-scenarios)
-6. [❓ FAQ](#-faq)
-7. [🎯 Summary](#-summary)
-8. [🔗 See Also](#-see-also)
-
----
-
-## ⚡ Quickstart
+## 🚀 Quick Start
 
 ### Installation
 
 ```bash
-# Install required dependencies
 pnpm add hono @hono/node-server
 ```
 
-### Basic SSO Server
+### Minimal SSO Server
 
 ```javascript
-import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js';
+import { Database, IdentityPlugin } from 's3db.js';
 
-const SSO_PORT = 4000;
-const SSO_URL = `http://localhost:${SSO_PORT}`;
-
-async function createSSOServer() {
-  // 1. Create database
-  const db = new Database({
-    connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-server',
-    encryptionKey: 'sso-encryption-key-32-chars!!'
-  });
-
-  await db.connect();
-
-  // 2. Configure IdentityPlugin
-  const identityPlugin = new IdentityPlugin({
-    port: SSO_PORT,
-    issuer: SSO_URL,
-    verbose: true,
-
-    // OAuth2/OIDC configuration
-    supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api', 'offline_access'],
-    supportedGrantTypes: ['authorization_code', 'client_credentials', 'refresh_token'],
-    supportedResponseTypes: ['code', 'token', 'id_token'],
-
-    // Token expiration
-    accessTokenExpiry: '15m',
-    idTokenExpiry: '15m',
-    refreshTokenExpiry: '7d',
-    authCodeExpiry: '10m',
-
-    // User resource (auto-created if not exists)
-    userResource: 'users',
-
-    // CORS for other applications
-    cors: {
-      enabled: true,
-      origin: '*',
-      credentials: true
-    },
-
-    // Security headers
-    security: {
-      enabled: true
-    },
-
-    // Logging
-    logging: {
-      enabled: true,
-      format: ':method :path :status :response-time ms'
-    }
-  });
-
-  await db.usePlugin(identityPlugin);
-
-  return { db, identityPlugin };
-}
-
-async function seedData(db) {
-  const usersResource = db.resources.users;
-  const clientsResource = db.resources.plg_oauth_clients;
-
-  // Create test user
-  const user = await usersResource.insert({
-    email: 'admin@sso.local',
-    password: 'Admin123!',
-    name: 'Admin User',
-    scopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
-    active: true
-  });
-
-  console.log('✅ User created:', user.email);
-
-  // Create OAuth2 client
-  const client = await clientsResource.insert({
-    clientId: 'app-client-123',
-    clientSecret: 'super-secret-key-456',
-    name: 'My Application',
-    redirectUris: [
-      'http://localhost:3000/callback',
-      'http://localhost:3001/callback'
-    ],
-    allowedScopes: ['openid', 'profile', 'email', 'read:api'],
-    grantTypes: ['authorization_code', 'refresh_token'],
-    active: true
-  });
-
-  console.log('✅ OAuth2 Client created:', client.clientId);
-}
-
-// Start SSO server
-const { db, identityPlugin } = await createSSOServer();
-await seedData(db);
-
-console.log(`🚀 SSO Server running on: ${SSO_URL}`);
-console.log('📋 Available endpoints:');
-console.log(`  GET  ${SSO_URL}/.well-known/openid-configuration`);
-console.log(`  GET  ${SSO_URL}/.well-known/jwks.json`);
-console.log(`  POST ${SSO_URL}/oauth/token`);
-console.log(`  GET  ${SSO_URL}/oauth/authorize`);
-console.log(`  POST ${SSO_URL}/oauth/authorize`);
-console.log(`  GET  ${SSO_URL}/oauth/userinfo`);
-console.log(`  POST ${SSO_URL}/oauth/introspect`);
-console.log(`  POST ${SSO_URL}/oauth/revoke`);
-console.log(`  POST ${SSO_URL}/oauth/register`);
-```
-
----
-
-## 📖 Usage Journey
-
-### Level 1: Basic SSO Setup
-
-Start here for immediate SSO functionality:
-
-```javascript
-// Minimal SSO server
-const identityPlugin = new IdentityPlugin({
-  port: 4000,
-  issuer: 'http://localhost:4000',
-  supportedScopes: ['openid', 'profile', 'email']
+const db = new Database({
+  connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-server',
+  encryptionKey: 'your-32-char-encryption-key!!'
 });
 
-await db.usePlugin(identityPlugin);
+await db.connect();
 
-// That's it! You now have:
-// - Discovery endpoint for auto-configuration
-// - JWKS endpoint for public keys
-// - Token endpoint for all grant types
-// - Built-in login UI for authorization_code flow
+await db.use(new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+  supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
+  accessTokenExpiry: '15m',
+  refreshTokenExpiry: '7d'
+}));
+
+console.log('✅ SSO Server running at http://localhost:4000');
 ```
 
-**What you get:** Fully functional OAuth2/OIDC Authorization Server with 9 endpoints.
-
-### Level 2: Add Clients & Users
-
-Create OAuth2 clients and users:
+### Create Users & Clients
 
 ```javascript
-const usersResource = db.resources.users;
-const clientsResource = db.resources.plg_oauth_clients;
+const users = db.resources.users;
+const clients = db.resources.plg_oauth_clients;
 
 // Create user
-const user = await usersResource.insert({
-  email: 'john@example.com',
+await users.insert({
+  email: 'admin@example.com',
   password: 'SecurePassword123!',
-  name: 'John Doe',
-  scopes: ['openid', 'profile', 'email', 'read:api'],
+  name: 'Admin User',
+  scopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
   active: true
 });
 
 // Create OAuth2 client
-const client = await clientsResource.insert({
+await clients.insert({
   clientId: 'my-app-123',
-  clientSecret: 'my-super-secret-key',
+  clientSecret: 'super-secret-key-456',
   name: 'My Application',
   redirectUris: ['http://localhost:3000/callback'],
   allowedScopes: ['openid', 'profile', 'email', 'read:api'],
@@ -408,133 +91,241 @@ const client = await clientsResource.insert({
 });
 ```
 
-**What you get:** Users and clients ready for authentication flows.
+**Your endpoints:**
+```bash
+GET  http://localhost:4000/.well-known/openid-configuration  # Discovery
+GET  http://localhost:4000/.well-known/jwks.json             # Public keys
+POST http://localhost:4000/oauth/token                       # Get tokens
+GET  http://localhost:4000/oauth/authorize                   # Login UI
+GET  http://localhost:4000/oauth/userinfo                    # User profile
+POST http://localhost:4000/oauth/introspect                  # Validate tokens
+POST http://localhost:4000/oauth/revoke                      # Revoke tokens
+POST http://localhost:4000/oauth/register                    # Dynamic client registration
+```
 
-### Level 3: Authorization Code Flow
+---
 
-Implement user login for web apps:
+## 📑 Table of Contents
+
+- [TL;DR](#-tldr)
+- [Quick Start](#-quick-start)
+- [Documentation Hub](#-documentation-hub)
+- [Usage Journey](#-usage-journey)
+- [Resource Customization](#-resource-customization)
+- [Common Scenarios](#-common-scenarios)
+- [FAQ](#-faq)
+- [What's Next?](#-whats-next)
+- [Need Help?](#-need-help)
+
+---
+
+## 📚 Documentation Hub
+
+**Core Guides** - Essential features and setup:
+
+| Guide | What's Inside | When to Read |
+|-------|---------------|--------------|
+| **[⚙️ Configuration](./identity/configuration.md)** | All config options, token settings, security | Setting up your SSO server |
+| **[🏗️ Architecture](./identity/architecture.md)** | System design, token flows, grant types | Understanding how it works |
+| **[🔌 API Reference](./identity/api-reference.md)** | All 9 endpoints with examples | Integrating with clients |
+| **[🔗 Integration](./identity/integration.md)** | Connect apps, Azure AD, Keycloak | Building OAuth2 clients |
+| **[🐛 Troubleshooting](./identity/troubleshooting.md)** | Common errors, debugging tips | When things go wrong |
+| **[🎨 Whitelabel UI](./identity/WHITELABEL.md)** | Customize login page branding | Custom branding |
+
+---
+
+## 🎯 Usage Journey
+
+### Level 1: Basic SSO Server (1 minute)
+
+Get a working OAuth2/OIDC server instantly:
 
 ```javascript
-// Step 1: Redirect user to authorization page
+await db.use(new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+  supportedScopes: ['openid', 'profile', 'email']
+}));
+
+// ✨ Done! You have 9 endpoints ready
+```
+
+**What you get:** Full OAuth2/OIDC Authorization Server with discovery, JWKS, token endpoints, and built-in login UI.
+
+---
+
+### Level 2: Add Users & Clients (2 minutes)
+
+```javascript
+// Create user
+await db.resources.users.insert({
+  email: 'john@example.com',
+  password: 'SecurePassword123!',
+  scopes: ['openid', 'profile', 'email', 'read:api'],
+  active: true
+});
+
+// Create OAuth2 client
+await db.resources.plg_oauth_clients.insert({
+  clientId: 'my-app',
+  clientSecret: 'secret-key',
+  name: 'My App',
+  redirectUris: ['http://localhost:3000/callback'],
+  allowedScopes: ['openid', 'profile', 'email'],
+  grantTypes: ['authorization_code', 'refresh_token']
+});
+```
+
+**What you get:** Users and clients ready for authentication flows.
+
+---
+
+### Level 3: Authorization Code Flow (Web Apps)
+
+Implement user login:
+
+```javascript
+// Step 1: Redirect to SSO
 const authUrl = new URL('http://localhost:4000/oauth/authorize');
 authUrl.searchParams.set('response_type', 'code');
-authUrl.searchParams.set('client_id', 'my-app-123');
+authUrl.searchParams.set('client_id', 'my-app');
 authUrl.searchParams.set('redirect_uri', 'http://localhost:3000/callback');
 authUrl.searchParams.set('scope', 'openid profile email');
 authUrl.searchParams.set('state', generateRandomState());
 
 window.location = authUrl.toString();
 
-// Step 2: User logs in (SSO handles this with built-in UI)
+// Step 2: User logs in (SSO handles this)
 
-// Step 3: Handle callback (backend)
-app.get('/callback', async (req, res) => {
-  const { code, state } = req.query;
-
-  // Verify state (CSRF protection)
-  if (state !== req.session.state) {
-    return res.status(400).send('Invalid state');
-  }
-
-  // Exchange code for tokens
-  const response = await fetch('http://localhost:4000/oauth/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': 'Basic ' + Buffer.from('my-app-123:my-super-secret-key').toString('base64')
-    },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code: code,
-      redirect_uri: 'http://localhost:3000/callback'
-    })
-  });
-
-  const tokens = await response.json();
-  // { access_token, id_token, refresh_token, expires_in }
-
-  req.session.accessToken = tokens.access_token;
-  req.session.refreshToken = tokens.refresh_token;
-
-  res.redirect('/dashboard');
+// Step 3: Exchange code for tokens
+const response = await fetch('http://localhost:4000/oauth/token', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Authorization': 'Basic ' + btoa('my-app:secret-key')
+  },
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: req.query.code,
+    redirect_uri: 'http://localhost:3000/callback'
+  })
 });
+
+const tokens = await response.json();
+// { access_token, id_token, refresh_token, expires_in }
 ```
 
-**What you get:** User login flow with ID tokens containing user profile.
+**What you get:** Complete user login flow with JWT tokens.
 
-**See complete journey:** [Configuration →](./identity/configuration.md) includes Levels 4-7 (PKCE, Token Refresh, Multi-Audience, Production)
-
----
-
-## 📖 Detailed Documentation
-
-Comprehensive guides for all Identity Plugin features:
-
-- **[Configuration Reference](./identity/configuration.md)** - Complete configuration options
-  - Core Options (port, issuer, scopes)
-  - Token Expiration Settings
-  - Security & CORS
-  - Rate Limiting & Compression
-  - Feature Flags
-  - Configuration Examples
-
-- **[Architecture & Token Flow](./identity/architecture.md)** - System design
-  - System Architecture Diagrams
-  - Complete SSO Flow (sequence diagrams)
-  - Grant Types Explained (4 types)
-  - Token Structure & Scopes
-  - RS256 vs HS256 Security Model
-
-- **[API Reference](./identity/api-reference.md)** - All 9 endpoints
-  - Discovery Endpoint
-  - JWKS Endpoint
-  - Token Endpoint (all grant types)
-  - Authorization Endpoints (GET/POST)
-  - UserInfo Endpoint
-  - Introspection Endpoint
-  - Token Revocation
-  - Dynamic Client Registration
-  - Client & User Management
-
-- **[Integration Guide](./identity/integration.md)** - Connect your apps
-  - Resource Server Integration
-  - Client Integration Examples
-  - Azure AD Integration
-  - Keycloak Integration
-  - Multi-Audience Tokens
-
-- **[Troubleshooting](./identity/troubleshooting.md)** - Solve common issues
-  - Error Handling (IdentityError, OAuth2Error)
-  - Common Errors & Recovery
-  - Performance Optimization
-  - Debugging Tips
+**[→ See Levels 4-7 in Configuration Guide](./identity/configuration.md)** (PKCE, Token Refresh, Multi-Tenant, Production)
 
 ---
 
-## 🎯 Common Scenarios
+## 🎨 Resource Customization
 
-**Quick-win patterns for typical use cases** - copy-paste and customize!
+The plugin creates three resources: **users**, **tenants**, **clients**. You can extend them with custom fields:
 
-### 1. Minimal SSO Server (Development)
+### Base Schemas (Cannot Override)
+
+**Users:**
+```javascript
+{
+  email: 'string|required|email',
+  password: 'password|required',  // Auto-hashed
+  emailVerified: 'boolean',
+  name: 'string',
+  scopes: 'array|items:string',
+  roles: 'array|items:string',
+  tenantId: 'string',
+  active: 'boolean|default:true'
+}
+```
+
+**Clients:**
+```javascript
+{
+  clientId: 'string|required',
+  clientSecret: 'secret|required',
+  name: 'string|required',
+  redirectUris: 'array|items:string|required',
+  allowedScopes: 'array|items:string',
+  grantTypes: 'array|items:string',
+  active: 'boolean|default:true'
+}
+```
+
+### Extend with Custom Fields
 
 ```javascript
-const identityPlugin = new IdentityPlugin({
+await db.use(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
-  supportedScopes: ['openid', 'profile', 'email']
-});
+
+  resources: {
+    users: {
+      name: 'app_users',
+      attributes: {
+        // Custom fields (deep merged with base)
+        companyId: 'string|default:default-company',
+        department: 'string|default:engineering',
+        employeeId: 'string|optional'
+      },
+      partitions: {
+        byCompany: { fields: { companyId: 'string' } }
+      },
+      hooks: {
+        beforeInsert: async (data) => {
+          data.department = data.department?.toUpperCase();
+          return data;
+        }
+      }
+    },
+
+    clients: {
+      name: 'oauth_apps',
+      attributes: {
+        logoUrl: 'string|default:https://placeholder.com/logo.png',
+        brandColor: 'string|default:#007bff'
+      }
+    }
+  }
+}));
 ```
+
+**Rules:**
+- ✅ Can add custom fields
+- ✅ Can configure partitions, hooks, behavior
+- ❌ Cannot override base attributes (email, password, clientId, etc.)
+- ⚠️ Optional fields need defaults: `field: 'string|default:value'`
+
+**[→ See complete customization guide](./identity/configuration.md#resource-customization)**
+
+---
+
+## 🔥 Common Scenarios
+
+### 1. Development SSO Server
+
+```javascript
+await db.use(new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+  supportedScopes: ['openid', 'profile', 'email'],
+  verbose: true  // Debug logs
+}));
+```
+
+---
 
 ### 2. Production SSO with All Features
 
 ```javascript
-const identityPlugin = new IdentityPlugin({
+await db.use(new IdentityPlugin({
   port: 443,
   issuer: 'https://sso.example.com',
 
   supportedScopes: [
-    'openid', 'profile', 'email',
-    'offline_access',
+    'openid', 'profile', 'email', 'offline_access',
     'read:api', 'write:api', 'admin:all'
   ],
   supportedGrantTypes: [
@@ -568,11 +359,6 @@ const identityPlugin = new IdentityPlugin({
     max: 100
   },
 
-  compression: {
-    enabled: true,
-    preferBrotli: true
-  },
-
   features: {
     tokenRevocation: true,
     dynamicClientRegistration: true,
@@ -580,13 +366,15 @@ const identityPlugin = new IdentityPlugin({
     refreshTokenRotation: true,
     multiAudience: true
   }
-});
+}));
 ```
 
-### 3. PKCE-Only (Mobile Apps)
+---
+
+### 3. Mobile Apps (PKCE Required)
 
 ```javascript
-const identityPlugin = new IdentityPlugin({
+await db.use(new IdentityPlugin({
   port: 4000,
   issuer: 'https://api.example.com',
 
@@ -594,7 +382,7 @@ const identityPlugin = new IdentityPlugin({
   supportedGrantTypes: ['authorization_code', 'refresh_token'],
 
   features: {
-    pkce: true,  // Require PKCE for all authorization_code requests
+    pkce: true,  // Require code_challenge for all auth requests
     refreshTokenRotation: true
   },
 
@@ -602,139 +390,248 @@ const identityPlugin = new IdentityPlugin({
     enabled: true,
     origin: ['myapp://', 'https://app.example.com']
   }
+}));
+```
+
+---
+
+### 4. Service-to-Service (Client Credentials Only)
+
+```javascript
+await db.use(new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+
+  supportedScopes: ['read:api', 'write:api', 'admin:all'],
+  supportedGrantTypes: ['client_credentials'],  // No user login
+
+  accessTokenExpiry: '1h'
+}));
+
+// Usage: Machine-to-machine authentication
+const response = await fetch('http://localhost:4000/oauth/token', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Authorization': 'Basic ' + btoa('client:secret')
+  },
+  body: new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: 'read:api write:api'
+  })
 });
 ```
 
-### 4. Integration with Azure AD/Keycloak
+---
+
+### 5. Multi-Tenant SaaS
 
 ```javascript
-// Resource Server (not using IdentityPlugin, just validating tokens)
-import { OIDCClient } from 's3db.js';
+await db.use(new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
 
-// Azure AD
-const azureOIDC = new OIDCClient({
-  issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
-  audience: 'api://YOUR_API_CLIENT_ID',
-  discoveryUri: `https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration`
-});
+  resources: {
+    users: {
+      attributes: {
+        tenantId: 'string|required',
+        companyName: 'string|default:Default Company'
+      },
+      partitions: {
+        byTenant: { fields: { tenantId: 'string' } }
+      },
+      hooks: {
+        beforeInsert: async (data) => {
+          // Auto-assign tenant from context
+          data.tenantId = context.tenantId;
+          return data;
+        }
+      }
+    },
 
-// OR Keycloak
-const keycloakOIDC = new OIDCClient({
-  issuer: `http://localhost:8080/realms/production`,
-  audience: 'orders-api',
-  discoveryUri: `http://localhost:8080/realms/production/.well-known/openid-configuration`
-});
-
-await azureOIDC.initialize();
-
-// Add to API
-api.addAuthDriver('azure', azureOIDC.middleware.bind(azureOIDC));
+    clients: {
+      attributes: {
+        tenantId: 'string|required'
+      },
+      partitions: {
+        byTenant: { fields: { tenantId: 'string' } }
+      }
+    }
+  }
+}));
 ```
 
 ---
 
 ## ❓ FAQ
 
-### Basics
+### Getting Started
 
-**Q: What is OIDC and how does it differ from OAuth2?**
+<details>
+<summary><strong>What is OIDC and how does it differ from OAuth2?</strong></summary>
 
-A: OAuth2 is an **authorization** framework (what you can do). OIDC is an **authentication** layer on top of OAuth2 (who you are). OIDC adds:
-- ID tokens with user identity
-- UserInfo endpoint for profile data
-- Standard claims (name, email, picture)
-- Discovery endpoint for auto-configuration
+**OAuth2** = Authorization (what you can do)
+**OIDC** = Authentication (who you are) built on OAuth2
 
-**Q: When should I use IdentityPlugin vs external providers (Azure AD, Keycloak)?**
+**OIDC adds:**
+- ✅ ID tokens with user identity
+- ✅ UserInfo endpoint for profile data
+- ✅ Standard claims (name, email, picture)
+- ✅ Discovery endpoint for auto-configuration
 
-A:
+**Token comparison:**
+
+| Token | Purpose | Contains |
+|-------|---------|----------|
+| **access_token** | API authorization | Scopes, permissions |
+| **id_token** | User authentication | Name, email, profile |
+| **refresh_token** | Get new tokens | Opaque string |
+
+**[→ Learn more: Architecture Guide](./identity/architecture.md)**
+</details>
+
+<details>
+<summary><strong>When should I use IdentityPlugin vs Azure AD/Keycloak?</strong></summary>
 
 **Use IdentityPlugin when:**
 - ✅ Need full control over authentication
-- ✅ Want to use S3 as backend
+- ✅ Want S3 as backend (simple, serverless)
 - ✅ Self-hosted infrastructure
 - ✅ Budget constraints (free)
 - ✅ Simple microservices architecture
+- ✅ Custom authentication flows
 
 **Use Azure AD/Keycloak when:**
-- ✅ Need social login (Google, Facebook)
+- ✅ Need social login (Google, Facebook, GitHub)
 - ✅ Need SAML/LDAP integration
 - ✅ Enterprise compliance (SOC2, ISO 27001)
-- ✅ Advanced features (adaptive auth, MFA)
+- ✅ Advanced features (adaptive auth, risk-based MFA)
+- ✅ Already invested in ecosystem
 
-**Q: Can Resource Servers validate tokens from any OAuth2 provider?**
+**💡 Pro tip:** IdentityPlugin tokens work with Azure AD clients! Your Resource Servers can validate tokens from multiple providers.
 
-A: Yes! Resource Servers using `OIDCClient` can validate tokens from:
-- IdentityPlugin
-- Azure AD
-- Keycloak
-- Auth0
-- Any OAuth2/OIDC-compliant provider
+**[→ Learn more: Integration Guide](./identity/integration.md)**
+</details>
 
-Just configure the issuer URL and audience.
+<details>
+<summary><strong>Is this production-ready?</strong></summary>
 
-### Configuration
+**Yes!** Includes:
 
-**Q: How do I test my SSO server?**
+**Security:**
+- ✅ RS256 JWT signing (asymmetric keys)
+- ✅ PKCE support for public clients
+- ✅ Refresh token rotation
+- ✅ Token revocation (RFC 7009)
+- ✅ Rate limiting
+- ✅ CORS with credentials
+- ✅ Security headers (HSTS, CSP)
 
-A:
+**Standards:**
+- ✅ OAuth2 RFC 6749 compliant
+- ✅ OIDC Core 1.0 compliant
+- ✅ JWKS (RFC 7517)
+- ✅ Token introspection (RFC 7662)
+- ✅ Dynamic client registration (RFC 7591)
+
+**Reliability:**
+- ✅ S3 as persistent storage
+- ✅ Graceful shutdown
+- ✅ Error recovery
+- ✅ Health checks
+
+**[→ See deployment guide](./identity/configuration.md#production-configuration)**
+</details>
+
+<details>
+<summary><strong>How do I test my SSO server?</strong></summary>
+
+**1. Check discovery endpoint:**
 ```bash
-# 1. Check discovery endpoint
-curl http://localhost:4000/.well-known/openid-configuration
-
-# 2. Check JWKS endpoint
-curl http://localhost:4000/.well-known/jwks.json
-
-# 3. Get token
-curl -X POST http://localhost:4000/oauth/token \
-  -d "grant_type=client_credentials" \
-  -d "client_id=test" \
-  -d "client_secret=secret" \
-  -d "scope=openid"
-
-# 4. Decode token
-echo $TOKEN | cut -d. -f2 | base64 -d | jq
+curl http://localhost:4000/.well-known/openid-configuration | jq
 ```
 
-**Q: How do I enable PKCE?**
+**2. Check JWKS (public keys):**
+```bash
+curl http://localhost:4000/.well-known/jwks.json | jq
+```
 
-A: PKCE is enabled by default. Just use `code_challenge` and `code_challenge_method` in authorization requests:
+**3. Get token (client_credentials):**
+```bash
+curl -X POST http://localhost:4000/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "Authorization: Basic $(echo -n 'client:secret' | base64)" \
+  -d "grant_type=client_credentials" \
+  -d "scope=openid profile"
+```
+
+**4. Decode token:**
+```bash
+# Get payload (second part of JWT)
+echo $TOKEN | cut -d. -f2 | base64 -d | jq
+
+# Expected claims:
+{
+  "iss": "http://localhost:4000",  // Your issuer
+  "sub": "client-id",               // Subject (user/client)
+  "aud": "http://localhost:3001",   // Audience (API)
+  "exp": 1234567890,                // Expiration (unix timestamp)
+  "scope": "openid profile"
+}
+```
+
+**5. Test authorization code flow:**
+```
+http://localhost:4000/oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http://localhost:3000/callback&scope=openid&state=abc123
+```
+
+**[→ Complete testing guide](./identity/troubleshooting.md#testing)**
+</details>
+
+### Tokens & Security
+
+<details>
+<summary><strong>What's the difference between access_token, id_token, and refresh_token?</strong></summary>
+
+| Token | Purpose | Audience | Lifetime | Contains | Use Case |
+|-------|---------|----------|----------|----------|----------|
+| **access_token** | Authorization | Resource Server (API) | Short (15m) | Scopes, permissions | API requests |
+| **id_token** | Authentication | Client app | Short (15m) | User profile, email | User identity |
+| **refresh_token** | Token renewal | Authorization Server | Long (7d-90d) | Opaque (nothing) | Get new access_token |
+
+**Example usage:**
+
 ```javascript
-const identityPlugin = new IdentityPlugin({
-  features: {
-    pkce: true  // Enabled by default
-  }
+// User logs in → receive all 3 tokens
+const { access_token, id_token, refresh_token } = await login();
+
+// Use access_token for API calls
+fetch('https://api.example.com/orders', {
+  headers: { 'Authorization': `Bearer ${access_token}` }
+});
+
+// Use id_token for user profile
+const profile = JSON.parse(atob(id_token.split('.')[1]));
+console.log(profile.email, profile.name);
+
+// When access_token expires, use refresh_token
+const newTokens = await fetch('http://localhost:4000/oauth/token', {
+  method: 'POST',
+  body: new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refresh_token
+  })
 });
 ```
 
-**Q: How do I rotate keys?**
+**[→ Learn more: Architecture Guide](./identity/architecture.md#token-types)**
+</details>
 
-A:
-```javascript
-// Manual rotation
-await identityPlugin.oauth2.rotateKeys();
+<details>
+<summary><strong>How do I validate tokens in my API (Resource Server)?</strong></summary>
 
-// Automatic rotation (every 90 days)
-setInterval(async () => {
-  await identityPlugin.oauth2.rotateKeys();
-}, 90 * 24 * 60 * 60 * 1000);
-```
+**Use OIDC auto-discovery:**
 
-### Tokens
-
-**Q: What's the difference between access_token, id_token, and refresh_token?**
-
-A:
-
-| Token | Purpose | Audience | Lifetime | Contains |
-|-------|---------|----------|----------|----------|
-| **access_token** | Authorization (what you can do) | Resource Servers | Short (15m) | Scopes, permissions |
-| **id_token** | Authentication (who you are) | Client app | Short (15m) | User profile, email |
-| **refresh_token** | Get new tokens | Authorization Server | Long (7d) | Nothing (opaque) |
-
-**Q: How do I validate tokens in my API?**
-
-A: Use `OIDCClient`:
 ```javascript
 import { OIDCClient } from 's3db.js';
 
@@ -743,153 +640,549 @@ const oidcClient = new OIDCClient({
   audience: 'http://localhost:3001'
 });
 
-await oidcClient.initialize();
+await oidcClient.initialize();  // Auto-fetches JWKS from discovery
 
+// With API Plugin
 api.addAuthDriver('oidc', oidcClient.middleware.bind(oidcClient));
 
-api.addRoute({
-  path: '/orders',
-  method: 'GET',
-  handler: async (req, res) => {
-    // req.user contains validated token payload
-    const userId = req.user.sub;
-    const scopes = req.user.scope.split(' ');
-    // ...
-  },
-  auth: 'oidc'
+// With Express
+app.use('/api', oidcClient.middleware.bind(oidcClient));
+
+// Handler
+app.get('/api/orders', (req, res) => {
+  // req.user contains validated token
+  const userId = req.user.sub;
+  const scopes = req.user.scope.split(' ');
+
+  if (!scopes.includes('read:orders')) {
+    return res.status(403).json({ error: 'Insufficient scopes' });
+  }
+
+  // ... fetch orders
 });
 ```
 
-**Q: How do I revoke tokens?**
+**What it does:**
+1. Fetches `/.well-known/openid-configuration` (issuer, JWKS URL)
+2. Fetches JWKS public keys for signature verification
+3. Validates every incoming JWT token:
+   - Signature (RS256 with public key)
+   - Issuer matches
+   - Audience matches
+   - Not expired
+   - Not revoked (if introspection enabled)
 
-A: Use the revocation endpoint:
+**[→ Complete integration guide](./identity/integration.md#resource-server)**
+</details>
+
+<details>
+<summary><strong>How do I revoke tokens?</strong></summary>
+
+**Revoke access_token or refresh_token:**
+
 ```bash
 curl -X POST http://localhost:4000/oauth/revoke \
   -H "Authorization: Basic $(echo -n 'client:secret' | base64)" \
-  -d "token=ACCESS_TOKEN" \
+  -d "token=eyJhbGciOiJSUzI1..." \
   -d "token_type_hint=access_token"
 ```
 
-### Grant Types
+**In your app:**
 
-**Q: Which grant type should I use?**
-
-A:
-
-| Use Case | Grant Type | Client Type |
-|----------|-----------|-------------|
-| Web app with backend | authorization_code | Confidential (has client_secret) |
-| Mobile app | authorization_code + PKCE | Public (no client_secret) |
-| SPA (React/Vue) | authorization_code + PKCE | Public |
-| Service-to-service | client_credentials | Confidential |
-| Desktop app | authorization_code + PKCE | Public |
-
-**Q: Do I need PKCE for web apps with backend?**
-
-A: Not required, but **highly recommended** as an additional security layer.
-
-**Q: Can I disable specific grant types?**
-
-A: Yes, configure `supportedGrantTypes`:
 ```javascript
-const identityPlugin = new IdentityPlugin({
-  supportedGrantTypes: ['authorization_code', 'refresh_token']  // No client_credentials
+// Logout user (revoke refresh token)
+async function logout(refreshToken) {
+  await fetch('http://localhost:4000/oauth/revoke', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': 'Basic ' + btoa('client:secret')
+    },
+    body: new URLSearchParams({
+      token: refreshToken,
+      token_type_hint: 'refresh_token'
+    })
+  });
+
+  // Clear local tokens
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+}
+```
+
+**How it works:**
+- Tokens are added to revocation list (s3db resource)
+- Introspection endpoint checks revocation status
+- Resource Servers can optionally introspect tokens
+- Expired tokens are auto-cleaned up
+
+**[→ Learn more: Token Revocation](./identity/api-reference.md#token-revocation)**
+</details>
+
+<details>
+<summary><strong>How do I rotate JWT signing keys?</strong></summary>
+
+**Manual rotation:**
+
+```javascript
+await identityPlugin.oauth2.rotateKeys();
+```
+
+**Automatic rotation (every 90 days):**
+
+```javascript
+setInterval(async () => {
+  await identityPlugin.oauth2.rotateKeys();
+  console.log('✅ Keys rotated');
+}, 90 * 24 * 60 * 60 * 1000);
+```
+
+**What happens:**
+1. New RSA key pair generated
+2. Old key kept in JWKS for grace period (24h)
+3. New tokens signed with new key
+4. Old tokens still valid (JWKS has both keys)
+5. Old key removed after grace period
+
+**Best practices:**
+- Rotate every 90 days
+- Keep old keys for 24h minimum
+- Monitor token validation errors
+
+**[→ Learn more: Key Management](./identity/configuration.md#key-rotation)**
+</details>
+
+### Grant Types & Flows
+
+<details>
+<summary><strong>Which grant type should I use?</strong></summary>
+
+| Use Case | Grant Type | Client Type | Security |
+|----------|-----------|-------------|----------|
+| **Web app with backend** | authorization_code | Confidential (has secret) | ⭐⭐⭐⭐⭐ |
+| **Mobile app** | authorization_code + PKCE | Public (no secret) | ⭐⭐⭐⭐⭐ |
+| **SPA (React/Vue/Angular)** | authorization_code + PKCE | Public | ⭐⭐⭐⭐ |
+| **Service-to-service** | client_credentials | Confidential | ⭐⭐⭐⭐⭐ |
+| **Desktop app** | authorization_code + PKCE | Public | ⭐⭐⭐⭐ |
+| **CLI tool** | device_code* | Public | ⭐⭐⭐⭐ |
+
+*device_code not yet implemented
+
+**Quick decision tree:**
+
+```
+Has user login?
+├─ Yes → authorization_code
+│  └─ Has backend?
+│     ├─ No (SPA/Mobile) → + PKCE
+│     └─ Yes → Optional PKCE (recommended)
+└─ No → client_credentials (service-to-service)
+```
+
+**[→ Learn more: Grant Types](./identity/architecture.md#grant-types)**
+</details>
+
+<details>
+<summary><strong>What is PKCE and do I need it?</strong></summary>
+
+**PKCE (Proof Key for Code Exchange)** = Extra security layer for public clients (SPAs, mobile apps).
+
+**How it works:**
+1. Client generates random `code_verifier`
+2. Client creates `code_challenge` = SHA256(code_verifier)
+3. Authorization request includes `code_challenge`
+4. Token request includes original `code_verifier`
+5. Server verifies: SHA256(code_verifier) === code_challenge
+
+**When to use:**
+
+| Client Type | PKCE Required? |
+|-------------|----------------|
+| Mobile app | ✅ **Required** |
+| SPA (React/Vue) | ✅ **Required** |
+| Web app with backend | ⚠️ **Recommended** |
+| Service-to-service | ❌ Not applicable |
+
+**Example:**
+
+```javascript
+// Step 1: Generate code_verifier
+const codeVerifier = generateRandomString(43);
+
+// Step 2: Generate code_challenge
+const encoder = new TextEncoder();
+const data = encoder.encode(codeVerifier);
+const hash = await crypto.subtle.digest('SHA-256', data);
+const codeChallenge = base64UrlEncode(hash);
+
+// Step 3: Authorization request
+const authUrl = new URL('http://localhost:4000/oauth/authorize');
+authUrl.searchParams.set('code_challenge', codeChallenge);
+authUrl.searchParams.set('code_challenge_method', 'S256');
+// ... other params
+
+// Step 4: Token request (include original verifier)
+const response = await fetch('http://localhost:4000/oauth/token', {
+  method: 'POST',
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: authCode,
+    code_verifier: codeVerifier  // Original!
+  })
 });
 ```
 
-### Troubleshooting
+**[→ Learn more: PKCE Flow](./identity/architecture.md#pkce)**
+</details>
 
-**Q: Token validation fails with "Invalid signature"?**
+<details>
+<summary><strong>Can I disable specific grant types?</strong></summary>
 
-A: Resource Server has cached old JWKS. Force refresh:
+**Yes!** Configure `supportedGrantTypes`:
+
 ```javascript
-await oidcClient.fetchJWKS(true);
+// Only authorization_code (no client_credentials, no refresh_token)
+await db.use(new IdentityPlugin({
+  supportedGrantTypes: ['authorization_code']
+}));
+
+// Only service-to-service (no user login)
+await db.use(new IdentityPlugin({
+  supportedGrantTypes: ['client_credentials']
+}));
+
+// Full suite
+await db.use(new IdentityPlugin({
+  supportedGrantTypes: [
+    'authorization_code',
+    'client_credentials',
+    'refresh_token'
+  ]
+}));
 ```
 
-**Q: Getting CORS errors?**
+**Per-client restrictions:**
 
-A: Add your Resource Server to CORS allowed origins:
+```javascript
+// Client configuration
+await clients.insert({
+  clientId: 'mobile-app',
+  grantTypes: ['authorization_code', 'refresh_token'],  // No client_credentials
+  requirePkce: true  // Force PKCE for this client
+});
+```
+
+**[→ Learn more: Grant Type Configuration](./identity/configuration.md#grant-types)**
+</details>
+
+### Integration & Deployment
+
+<details>
+<summary><strong>Can Resource Servers validate tokens from multiple providers?</strong></summary>
+
+**Yes!** OIDCClient supports multiple issuers:
+
+```javascript
+import { OIDCClient } from 's3db.js';
+
+// IdentityPlugin SSO
+const internalSSO = new OIDCClient({
+  issuer: 'http://localhost:4000',
+  audience: 'http://localhost:3001'
+});
+
+// Azure AD
+const azureAD = new OIDCClient({
+  issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+  audience: 'api://YOUR_API_CLIENT_ID'
+});
+
+// Keycloak
+const keycloak = new OIDCClient({
+  issuer: 'http://localhost:8080/realms/production',
+  audience: 'orders-api'
+});
+
+await internalSSO.initialize();
+await azureAD.initialize();
+await keycloak.initialize();
+
+// Use all three
+api.addAuthDriver('internal', internalSSO.middleware.bind(internalSSO));
+api.addAuthDriver('azure', azureAD.middleware.bind(azureAD));
+api.addAuthDriver('keycloak', keycloak.middleware.bind(keycloak));
+
+// Path-based routing
+api.setAuthRules([
+  { path: '/api/internal/**', drivers: ['internal'] },
+  { path: '/api/azure/**', drivers: ['azure'] },
+  { path: '/api/**', drivers: ['internal', 'azure', 'keycloak'] }  // Any
+]);
+```
+
+**[→ Learn more: Multi-Provider Setup](./identity/integration.md#multiple-providers)**
+</details>
+
+<details>
+<summary><strong>How do I deploy to production?</strong></summary>
+
+**Production checklist:**
+
+**1. HTTPS Required:**
+```javascript
+await db.use(new IdentityPlugin({
+  port: 443,
+  issuer: 'https://sso.example.com',  // Must be HTTPS!
+
+  security: {
+    enabled: true,
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    }
+  }
+}));
+```
+
+**2. Environment Variables:**
+```bash
+ISSUER=https://sso.example.com
+PORT=443
+S3_CONNECTION_STRING=s3://...
+ENCRYPTION_KEY=your-32-char-key
+ACCESS_TOKEN_EXPIRY=15m
+REFRESH_TOKEN_EXPIRY=7d
+```
+
+**3. Load Balancer Health Check:**
+```javascript
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+```
+
+**4. Key Rotation:**
+```javascript
+// Auto-rotate every 90 days
+setInterval(async () => {
+  await identityPlugin.oauth2.rotateKeys();
+}, 90 * 24 * 60 * 60 * 1000);
+```
+
+**5. Monitoring:**
+```javascript
+// Log all token requests
+identityPlugin.on('token:issued', (event) => {
+  console.log('Token issued:', event.clientId, event.grantType);
+});
+
+identityPlugin.on('auth:failed', (event) => {
+  console.error('Auth failed:', event.error);
+});
+```
+
+**[→ Complete deployment guide](./identity/configuration.md#production)**
+</details>
+
+<details>
+<summary><strong>How do I customize the login page?</strong></summary>
+
+**Full whitelabel customization:**
+
+```javascript
+await db.use(new IdentityPlugin({
+  port: 4000,
+  issuer: 'http://localhost:4000',
+
+  ui: {
+    branding: {
+      companyName: 'Acme Corporation',
+      logo: 'https://example.com/logo.png',
+      primaryColor: '#007bff',
+      backgroundColor: '#f8f9fa'
+    },
+
+    customCss: `
+      .login-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+      .login-form {
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      }
+    `,
+
+    strings: {
+      loginTitle: 'Sign in to your account',
+      emailPlaceholder: 'Enter your email',
+      passwordPlaceholder: 'Enter your password',
+      loginButton: 'Sign In'
+    }
+  }
+}));
+```
+
+**[→ Complete UI customization guide](./identity/WHITELABEL.md)**
+</details>
+
+### Troubleshooting
+
+<details>
+<summary><strong>Token validation fails with "Invalid signature"?</strong></summary>
+
+**Cause:** Resource Server has cached old JWKS (public keys).
+
+**Solution 1: Force JWKS refresh**
+```javascript
+await oidcClient.fetchJWKS(true);  // Force refresh
+```
+
+**Solution 2: Reduce JWKS cache TTL**
+```javascript
+const oidcClient = new OIDCClient({
+  issuer: 'http://localhost:4000',
+  audience: 'http://localhost:3001',
+  jwksCacheTTL: 60000  // 1 minute (default: 1 hour)
+});
+```
+
+**Solution 3: Check key rotation timing**
+```javascript
+// Check if keys were just rotated
+const jwks = await fetch('http://localhost:4000/.well-known/jwks.json').then(r => r.json());
+console.log('Available keys:', jwks.keys.length);
+```
+
+**[→ Learn more: Key Rotation](./identity/troubleshooting.md#key-rotation-issues)**
+</details>
+
+<details>
+<summary><strong>Getting CORS errors?</strong></summary>
+
+**Add your Resource Server origins:**
+
+```javascript
+await db.use(new IdentityPlugin({
+  cors: {
+    enabled: true,
+    origin: [
+      'http://localhost:3001',  // API
+      'http://localhost:3000',  // Frontend
+      'https://app.example.com'
+    ],
+    credentials: true,  // Allow cookies
+    methods: ['GET', 'POST', 'OPTIONS']
+  }
+}));
+```
+
+**Wildcard (development only!):**
 ```javascript
 cors: {
   enabled: true,
-  origin: ['http://localhost:3001', 'http://localhost:3002']
+  origin: '*'  // ⚠️ Not for production!
 }
 ```
 
-**Q: Users can't log in?**
+**[→ Learn more: CORS Configuration](./identity/troubleshooting.md#cors-issues)**
+</details>
 
-A: Check:
-1. User exists: `await usersResource.query({ email: 'user@example.com' })`
-2. User active: `user.active === true`
-3. Client exists and active: `await clientsResource.get(clientId)`
-4. Redirect URI matches: `client.redirectUris.includes(redirect_uri)`
+<details>
+<summary><strong>Users can't log in?</strong></summary>
 
-**Q: How do I debug token issues?**
+**Debugging checklist:**
 
-A: Decode tokens manually:
-```bash
-# Decode header
-echo $TOKEN | cut -d. -f1 | base64 -d | jq
-
-# Decode payload
-echo $TOKEN | cut -d. -f2 | base64 -d | jq
-
-# Check claims
-{
-  "iss": "http://localhost:4000",  // Must match OIDC issuer
-  "sub": "user-123",
-  "aud": "http://localhost:3001",  // Must match API audience
-  "exp": 1234567890,               // Must be in future
-  "scope": "openid profile"
-}
+**1. Check user exists and is active:**
+```javascript
+const user = await db.resources.users.query({ email: 'john@example.com' });
+console.log('User found:', user);
+console.log('User active:', user.active);
 ```
 
+**2. Check password (manually test bcrypt):**
+```javascript
+import bcrypt from 'bcrypt';
+const match = await bcrypt.compare('password123', user.password);
+console.log('Password match:', match);
+```
+
+**3. Check client configuration:**
+```javascript
+const client = await db.resources.plg_oauth_clients.get('my-app');
+console.log('Client active:', client.active);
+console.log('Redirect URIs:', client.redirectUris);
+console.log('Allowed scopes:', client.allowedScopes);
+```
+
+**4. Check redirect URI exact match:**
+```javascript
+const requestedUri = 'http://localhost:3000/callback';
+const allowed = client.redirectUris.includes(requestedUri);
+console.log('Redirect URI allowed:', allowed);
+```
+
+**5. Enable verbose logging:**
+```javascript
+await db.use(new IdentityPlugin({
+  verbose: true  // Detailed logs
+}));
+```
+
+**[→ Complete troubleshooting guide](./identity/troubleshooting.md)**
+</details>
+
 ---
 
-## 🎯 Summary
+## 🎓 What's Next?
 
-The **IdentityPlugin** transforms s3db.js into a production-ready OAuth2/OIDC Authorization Server with:
+**Choose your path:**
 
-✅ **9 endpoints** - Discovery, JWKS, Token, Authorize, UserInfo, Introspect, Revoke, Register
-✅ **4 grant types** - authorization_code, client_credentials, refresh_token, PKCE
-✅ **RS256 signing** - Asymmetric RSA keys for secure JWT tokens
-✅ **Uses Node.js native crypto** - for JWT signing and key generation
-✅ **Enterprise features** - Azure AD/Keycloak parity
-✅ **5-minute setup** - Simple configuration, automatic resource creation
+| If you want to... | Start here |
+|-------------------|------------|
+| 🚀 Build SSO server | [Quick Start](#-quick-start) |
+| ⚙️ Configure options | [Configuration Guide](./identity/configuration.md) |
+| 🏗️ Understand architecture | [Architecture Guide](./identity/architecture.md) |
+| 🔌 Connect an app | [Integration Guide](./identity/integration.md) |
+| 🎨 Customize login UI | [Whitelabel Guide](./identity/WHITELABEL.md) |
+| 🐛 Fix issues | [Troubleshooting Guide](./identity/troubleshooting.md) |
+| 📖 See all endpoints | [API Reference](./identity/api-reference.md) |
 
-**Next Steps:**
-1. Read [Quickstart](#-quickstart)
-2. Run example: `node docs/examples/e80-sso-oauth2-server.js`
-3. Create Resource Server: `docs/examples/e81-oauth2-resource-server.js`
-4. Build web app: `docs/examples/e82-oidc-web-app.js`
-5. Read complete guide: `docs/oauth2-guide.md`
-
----
-
-## 🔗 See Also
-
-**Related API Plugin Documentation:**
-- **[API Plugin](./api.md)** - Resource Server documentation (uses IdentityPlugin tokens)
-- **[API Authentication](./api/authentication.md)** - OIDC driver for Resource Servers
-- **[API Guards](./api/guards.md)** - Row-level security with OIDC tokens
-- **[API Deployment](./api/deployment.md)** - Deploy SSO + Resource Servers
-
-**Guides:**
-- **[OAuth2/OIDC Guide](../oauth2-guide.md)** - Complete OAuth2 guide (architecture, testing, troubleshooting)
+**Learning path:**
+1. **Beginner:** [Quick Start](#-quick-start) → [Usage Journey](#-usage-journey) → [Common Scenarios](#-common-scenarios)
+2. **Intermediate:** [Configuration](./identity/configuration.md) → [Integration](./identity/integration.md) → [Whitelabel](./identity/WHITELABEL.md)
+3. **Advanced:** [Architecture](./identity/architecture.md) → [API Reference](./identity/api-reference.md) → [Troubleshooting](./identity/troubleshooting.md)
 
 **Examples:**
-- [e80-sso-oauth2-server.js](../examples/e80-sso-oauth2-server.js) - SSO Server with IdentityPlugin
-- [e81-oauth2-resource-server.js](../examples/e81-oauth2-resource-server.js) - Resource Server (API) validating tokens
-- [e82-oidc-web-app.js](../examples/e82-oidc-web-app.js) - Web app with "Login with SSO"
-- [e60-oauth2-microservices.js](../examples/e60-oauth2-microservices.js) - Complete microservices setup
-- [e62-azure-ad-integration.js](../examples/e62-azure-ad-integration.js) - Azure AD integration
-- [e63-keycloak-integration.js](../examples/e63-keycloak-integration.js) - Keycloak integration
+- [e80-sso-oauth2-server.js](../examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e81-oauth2-resource-server.js](../examples/e81-oauth2-resource-server.js) - API validating tokens
+- [e82-oidc-web-app.js](../examples/e82-oidc-web-app.js) - Web app with login
+- [e60-oauth2-microservices.js](../examples/e60-oauth2-microservices.js) - Full microservices setup
 
 ---
 
-> **📖 For detailed documentation, see:**
-> - [Configuration Reference](./identity/configuration.md)
-> - [Architecture & Token Flow](./identity/architecture.md)
-> - [API Reference](./identity/api-reference.md)
-> - [Integration Guide](./identity/integration.md)
-> - [Troubleshooting](./identity/troubleshooting.md)
+## 💬 Need Help?
+
+- **📖 Check the [FAQ](#-faq)** - Most questions answered with examples
+- **🔍 Explore [Documentation Hub](#-documentation-hub)** - All guides in one place
+- **🎯 Try [Common Scenarios](#-common-scenarios)** - Copy-paste solutions
+- **🐛 Found a bug?** - Open an issue on GitHub
+- **💡 Have a question?** - Check detailed guides or ask the community
+
+---
+
+## 🔗 Related Documentation
+
+**API Plugin Integration:**
+- **[API Plugin](./api.md)** - Build Resource Servers that validate IdentityPlugin tokens
+- **[API Authentication](./api/authentication.md)** - OIDC driver for Resource Servers
+- **[API Guards](./api/guards.md)** - Row-level security with OIDC tokens
+- **[API Deployment](./api/deployment.md)** - Deploy SSO + Resource Servers together
+
+**Complete Guides:**
+- **[OAuth2/OIDC Guide](../oauth2-guide.md)** - Complete OAuth2 architecture, testing, troubleshooting
+
+---
+
+> **🎉 Ready to build your SSO?** This plugin gives you enterprise-grade OAuth2/OIDC with zero complexity. Start with one line of code, add features as you grow. Everything is opt-in!
+>
+> **⭐ Star us on GitHub** if this saved you time!
