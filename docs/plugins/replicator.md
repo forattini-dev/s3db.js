@@ -1,5 +1,11 @@
 # 🔄 Replicator Plugin
 
+> **Real-time change data capture to PostgreSQL, BigQuery, SQS, webhooks, and more.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Real-time CDC** (Change Data Capture) replication to multiple destinations - **each operation is replicated individually** in near real-time.

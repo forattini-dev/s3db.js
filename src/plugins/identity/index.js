@@ -30,15 +30,9 @@ import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
 import { OAuth2Server } from './oauth2-server.js';
-import {
-  BASE_USER_ATTRIBUTES,
-  BASE_TENANT_ATTRIBUTES,
-  BASE_CLIENT_ATTRIBUTES,
-  validateResourcesConfig,
-  mergeResourceConfig
-} from './concerns/resource-schemas.js';
 import { RateLimiter } from './concerns/rate-limit.js';
 import { resolveResourceNames } from '../concerns/resource-names.js';
+import { prepareResourceConfigs } from './concerns/config.js';
 
 /**
  * Identity Provider Plugin class
@@ -104,6 +98,8 @@ export class IdentityPlugin extends Plugin {
       'clients'
     );
 
+    const normalizedResources = prepareResourceConfigs(options.resources);
+
     this.config = {
       // Server configuration
       port: options.port || 4000,
@@ -123,21 +119,7 @@ export class IdentityPlugin extends Plugin {
       authCodeExpiry: options.authCodeExpiry || '10m',
 
       // Resource configuration (REQUIRED)
-      // User must declare: users, tenants, clients with full resource config
-      resources: {
-        users: {
-          userConfig: options.resources.users,      // Store user's full config
-          mergedConfig: null                         // Will be populated in _createResources()
-        },
-        tenants: {
-          userConfig: options.resources.tenants,
-          mergedConfig: null
-        },
-        clients: {
-          userConfig: options.resources.clients,
-          mergedConfig: null
-        }
-      },
+      resources: normalizedResources,
 
       resourceNames: this.internalResourceNames,
 

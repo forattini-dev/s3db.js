@@ -13026,177 +13026,6 @@ class OAuth2Server {
   }
 }
 
-const BASE_USER_ATTRIBUTES = {
-  // Authentication
-  email: "string|required|email",
-  password: "password|required",
-  emailVerified: "boolean|default:false",
-  // Profile
-  name: "string|optional",
-  givenName: "string|optional",
-  familyName: "string|optional",
-  nickname: "string|optional",
-  picture: "string|optional",
-  locale: "string|optional",
-  // Authorization
-  scopes: "array|items:string|optional",
-  roles: "array|items:string|optional",
-  // Multi-tenancy
-  tenantId: "string|optional",
-  // Tenant the user belongs to
-  // Status
-  active: "boolean|default:true",
-  // Account Lockout (Brute Force Protection)
-  failedLoginAttempts: "number|default:0",
-  // Count of failed login attempts
-  lockedUntil: "string|optional",
-  // ISO timestamp when account unlocks
-  lastFailedLogin: "string|optional",
-  // ISO timestamp of last failed attempt
-  // Metadata
-  metadata: "object|optional"
-};
-const BASE_TENANT_ATTRIBUTES = {
-  // Identity
-  name: "string|required",
-  slug: "string|required",
-  // URL-friendly identifier
-  // Settings
-  settings: "object|optional",
-  // Status
-  active: "boolean|default:true",
-  // Metadata
-  metadata: "object|optional"
-};
-const BASE_CLIENT_ATTRIBUTES = {
-  // OAuth2 Identity
-  clientId: "string|required",
-  clientSecret: "secret|required",
-  // Client Info
-  name: "string|required",
-  description: "string|optional",
-  // OAuth2 Configuration
-  redirectUris: "array|items:string|required",
-  allowedScopes: "array|items:string|optional",
-  grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
-  responseTypes: "array|items:string|optional",
-  // Multi-tenancy
-  tenantId: "string|optional",
-  // Tenant the client belongs to
-  // Security
-  tokenEndpointAuthMethod: "string|default:client_secret_post",
-  requirePkce: "boolean|default:false",
-  // Status
-  active: "boolean|default:true",
-  // Metadata
-  metadata: "object|optional"
-};
-function deepMerge(target, source) {
-  const output = { ...target };
-  for (const key in source) {
-    if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
-      if (target[key] && typeof target[key] === "object" && !Array.isArray(target[key])) {
-        output[key] = deepMerge(target[key], source[key]);
-      } else {
-        output[key] = source[key];
-      }
-    } else {
-      output[key] = source[key];
-    }
-  }
-  return output;
-}
-function validateExtraAttributes(baseAttributes, userAttributes, resourceType) {
-  const errors = [];
-  if (!userAttributes || typeof userAttributes !== "object") {
-    return { valid: true, errors: [] };
-  }
-  for (const fieldName of Object.keys(userAttributes)) {
-    if (baseAttributes[fieldName]) {
-      errors.push(
-        `Cannot override base attribute '${fieldName}' in ${resourceType} resource. Base attributes are managed by IdentityPlugin.`
-      );
-    }
-  }
-  for (const [fieldName, fieldSchema] of Object.entries(userAttributes)) {
-    const isOptional = typeof fieldSchema === "string" && fieldSchema.includes("optional");
-    const hasDefault = typeof fieldSchema === "string" && fieldSchema.includes("default:");
-    if (isOptional && !hasDefault) {
-      errors.push(
-        `Extra attribute '${fieldName}' in ${resourceType} resource is optional but has no default value. Add "|default:value" to the schema or make it required.`
-      );
-    }
-  }
-  return {
-    valid: errors.length === 0,
-    errors
-  };
-}
-function mergeResourceConfig(baseConfig, userConfig = {}, resourceType) {
-  if (userConfig.attributes) {
-    const validation = validateExtraAttributes(
-      baseConfig.attributes,
-      userConfig.attributes,
-      resourceType
-    );
-    if (!validation.valid) {
-      const errorMsg = [
-        `Invalid extra attributes for ${resourceType} resource:`,
-        ...validation.errors.map((err) => `  - ${err}`)
-      ].join("\n");
-      throw new Error(errorMsg);
-    }
-  }
-  const merged = deepMerge(userConfig, baseConfig);
-  if (userConfig.attributes || baseConfig.attributes) {
-    merged.attributes = {
-      ...userConfig.attributes || {},
-      // User extras first
-      ...baseConfig.attributes || {}
-      // Base overrides (protection)
-    };
-  }
-  return merged;
-}
-function validateResourcesConfig$1(resourcesConfig) {
-  const errors = [];
-  if (!resourcesConfig || typeof resourcesConfig !== "object") {
-    errors.push('IdentityPlugin requires "resources" configuration object');
-    return { valid: false, errors };
-  }
-  if (!resourcesConfig.users) {
-    errors.push(
-      'IdentityPlugin requires "resources.users" configuration.\nExample: resources: { users: { name: "users", attributes: {...}, hooks: {...} } }'
-    );
-  } else {
-    if (!resourcesConfig.users.name || typeof resourcesConfig.users.name !== "string") {
-      errors.push("resources.users.name is required and must be a string");
-    }
-  }
-  if (!resourcesConfig.tenants) {
-    errors.push(
-      'IdentityPlugin requires "resources.tenants" configuration.\nExample: resources: { tenants: { name: "tenants", attributes: {...}, partitions: {...} } }'
-    );
-  } else {
-    if (!resourcesConfig.tenants.name || typeof resourcesConfig.tenants.name !== "string") {
-      errors.push("resources.tenants.name is required and must be a string");
-    }
-  }
-  if (!resourcesConfig.clients) {
-    errors.push(
-      'IdentityPlugin requires "resources.clients" configuration.\nExample: resources: { clients: { name: "oauth_clients", attributes: {...}, behavior: "..." } }'
-    );
-  } else {
-    if (!resourcesConfig.clients.name || typeof resourcesConfig.clients.name !== "string") {
-      errors.push("resources.clients.name is required and must be a string");
-    }
-  }
-  return {
-    valid: errors.length === 0,
-    errors
-  };
-}
-
 class RateLimiter {
   /**
    * @param {Object} options
@@ -13292,6 +13121,215 @@ function createRedirectRateLimitMiddleware(limiter, getKey, buildRedirectUrl) {
   };
 }
 
+const BASE_USER_ATTRIBUTES$1 = {
+  // Authentication
+  email: "string|required|email",
+  password: "password|required",
+  emailVerified: "boolean|default:false",
+  // Profile
+  name: "string|optional",
+  givenName: "string|optional",
+  familyName: "string|optional",
+  nickname: "string|optional",
+  picture: "string|optional",
+  locale: "string|optional",
+  // Authorization
+  scopes: "array|items:string|optional",
+  roles: "array|items:string|optional",
+  // Multi-tenancy
+  tenantId: "string|optional",
+  // Tenant the user belongs to
+  // Status
+  active: "boolean|default:true",
+  // Account Lockout (Brute Force Protection)
+  failedLoginAttempts: "number|default:0",
+  // Count of failed login attempts
+  lockedUntil: "string|optional",
+  // ISO timestamp when account unlocks
+  lastFailedLogin: "string|optional",
+  // ISO timestamp of last failed attempt
+  // Metadata
+  metadata: "object|optional"
+};
+const BASE_TENANT_ATTRIBUTES$1 = {
+  // Identity
+  name: "string|required",
+  slug: "string|required",
+  // URL-friendly identifier
+  // Settings
+  settings: "object|optional",
+  // Status
+  active: "boolean|default:true",
+  // Metadata
+  metadata: "object|optional"
+};
+const BASE_CLIENT_ATTRIBUTES$1 = {
+  // OAuth2 Identity
+  clientId: "string|required",
+  clientSecret: "secret|required",
+  // Client Info
+  name: "string|required",
+  description: "string|optional",
+  // OAuth2 Configuration
+  redirectUris: "array|items:string|required",
+  allowedScopes: "array|items:string|optional",
+  grantTypes: 'array|items:string|default:["authorization_code","refresh_token"]',
+  responseTypes: "array|items:string|optional",
+  // Multi-tenancy
+  tenantId: "string|optional",
+  // Tenant the client belongs to
+  // Security
+  tokenEndpointAuthMethod: "string|default:client_secret_post",
+  requirePkce: "boolean|default:false",
+  // Status
+  active: "boolean|default:true",
+  // Metadata
+  metadata: "object|optional"
+};
+function deepMerge(target, source) {
+  const output = { ...target };
+  for (const key in source) {
+    if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
+      if (target[key] && typeof target[key] === "object" && !Array.isArray(target[key])) {
+        output[key] = deepMerge(target[key], source[key]);
+      } else {
+        output[key] = source[key];
+      }
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
+}
+function validateExtraAttributes(baseAttributes, userAttributes, resourceType) {
+  const errors = [];
+  if (!userAttributes || typeof userAttributes !== "object") {
+    return { valid: true, errors: [] };
+  }
+  for (const fieldName of Object.keys(userAttributes)) {
+    if (baseAttributes[fieldName]) {
+      errors.push(
+        `Cannot override base attribute '${fieldName}' in ${resourceType} resource. Base attributes are managed by IdentityPlugin.`
+      );
+    }
+  }
+  for (const [fieldName, fieldSchema] of Object.entries(userAttributes)) {
+    const isOptional = typeof fieldSchema === "string" && fieldSchema.includes("optional");
+    const hasDefault = typeof fieldSchema === "string" && fieldSchema.includes("default:");
+    if (isOptional && !hasDefault) {
+      errors.push(
+        `Extra attribute '${fieldName}' in ${resourceType} resource is optional but has no default value. Add "|default:value" to the schema or make it required.`
+      );
+    }
+  }
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+function mergeResourceConfig$1(baseConfig, userConfig = {}, resourceType) {
+  if (userConfig.attributes) {
+    const validation = validateExtraAttributes(
+      baseConfig.attributes,
+      userConfig.attributes,
+      resourceType
+    );
+    if (!validation.valid) {
+      const errorMsg = [
+        `Invalid extra attributes for ${resourceType} resource:`,
+        ...validation.errors.map((err) => `  - ${err}`)
+      ].join("\n");
+      throw new Error(errorMsg);
+    }
+  }
+  const merged = deepMerge(userConfig, baseConfig);
+  if (userConfig.attributes || baseConfig.attributes) {
+    merged.attributes = {
+      ...userConfig.attributes || {},
+      // User extras first
+      ...baseConfig.attributes || {}
+      // Base overrides (protection)
+    };
+  }
+  return merged;
+}
+function validateResourcesConfig$2(resourcesConfig) {
+  const errors = [];
+  if (!resourcesConfig || typeof resourcesConfig !== "object") {
+    errors.push('IdentityPlugin requires "resources" configuration object');
+    return { valid: false, errors };
+  }
+  if (!resourcesConfig.users) {
+    errors.push(
+      'IdentityPlugin requires "resources.users" configuration.\nExample: resources: { users: { name: "users", attributes: {...}, hooks: {...} } }'
+    );
+  } else {
+    if (!resourcesConfig.users.name || typeof resourcesConfig.users.name !== "string") {
+      errors.push("resources.users.name is required and must be a string");
+    }
+  }
+  if (!resourcesConfig.tenants) {
+    errors.push(
+      'IdentityPlugin requires "resources.tenants" configuration.\nExample: resources: { tenants: { name: "tenants", attributes: {...}, partitions: {...} } }'
+    );
+  } else {
+    if (!resourcesConfig.tenants.name || typeof resourcesConfig.tenants.name !== "string") {
+      errors.push("resources.tenants.name is required and must be a string");
+    }
+  }
+  if (!resourcesConfig.clients) {
+    errors.push(
+      'IdentityPlugin requires "resources.clients" configuration.\nExample: resources: { clients: { name: "oauth_clients", attributes: {...}, behavior: "..." } }'
+    );
+  } else {
+    if (!resourcesConfig.clients.name || typeof resourcesConfig.clients.name !== "string") {
+      errors.push("resources.clients.name is required and must be a string");
+    }
+  }
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+function prepareResourceConfigs(resourcesOptions = {}) {
+  const resourcesValidation = validateResourcesConfig$2(resourcesOptions);
+  if (!resourcesValidation.valid) {
+    throw new Error(
+      "IdentityPlugin configuration error:\n" + resourcesValidation.errors.join("\n")
+    );
+  }
+  mergeResourceConfig$1(
+    { attributes: BASE_USER_ATTRIBUTES$1 },
+    resourcesOptions.users,
+    "users"
+  );
+  mergeResourceConfig$1(
+    { attributes: BASE_TENANT_ATTRIBUTES$1 },
+    resourcesOptions.tenants,
+    "tenants"
+  );
+  mergeResourceConfig$1(
+    { attributes: BASE_CLIENT_ATTRIBUTES$1 },
+    resourcesOptions.clients,
+    "clients"
+  );
+  return {
+    users: {
+      userConfig: resourcesOptions.users,
+      mergedConfig: null
+    },
+    tenants: {
+      userConfig: resourcesOptions.tenants,
+      mergedConfig: null
+    },
+    clients: {
+      userConfig: resourcesOptions.clients,
+      mergedConfig: null
+    }
+  };
+}
+
 class IdentityPlugin extends Plugin {
   /**
    * Create Identity Provider Plugin instance
@@ -13323,7 +13361,7 @@ class IdentityPlugin extends Plugin {
       }
     };
     this.internalResourceNames = this._resolveInternalResourceNames();
-    const resourcesValidation = validateResourcesConfig$1(options.resources);
+    const resourcesValidation = validateResourcesConfig(options.resources);
     if (!resourcesValidation.valid) {
       throw new Error(
         "IdentityPlugin configuration error:\n" + resourcesValidation.errors.join("\n")
@@ -13344,6 +13382,7 @@ class IdentityPlugin extends Plugin {
       options.resources.clients,
       "clients"
     );
+    const normalizedResources = prepareResourceConfigs(options.resources);
     this.config = {
       // Server configuration
       port: options.port || 4e3,
@@ -13360,23 +13399,7 @@ class IdentityPlugin extends Plugin {
       refreshTokenExpiry: options.refreshTokenExpiry || "7d",
       authCodeExpiry: options.authCodeExpiry || "10m",
       // Resource configuration (REQUIRED)
-      // User must declare: users, tenants, clients with full resource config
-      resources: {
-        users: {
-          userConfig: options.resources.users,
-          // Store user's full config
-          mergedConfig: null
-          // Will be populated in _createResources()
-        },
-        tenants: {
-          userConfig: options.resources.tenants,
-          mergedConfig: null
-        },
-        clients: {
-          userConfig: options.resources.clients,
-          mergedConfig: null
-        }
-      },
+      resources: normalizedResources,
       resourceNames: this.internalResourceNames,
       // CORS configuration
       cors: {
@@ -22946,7 +22969,7 @@ function createConfig(options, detectedTimezone) {
     verbose: options.verbose || false
   };
 }
-function validateResourcesConfig(resources) {
+function validateResourcesConfig$1(resources) {
   if (!resources || typeof resources !== "object") {
     throw new PluginError("EventualConsistencyPlugin requires a 'resources' option", {
       pluginName: "EventualConsistencyPlugin",
@@ -25389,7 +25412,7 @@ async function onStop(fieldHandlers, emitFn) {
 class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    validateResourcesConfig(options.resources);
+    validateResourcesConfig$1(options.resources);
     const detectedTimezone = detectTimezone();
     const timezoneAutoDetected = !options.cohort?.timezone;
     this.config = createConfig(options, detectedTimezone);

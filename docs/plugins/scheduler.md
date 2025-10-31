@@ -1,5 +1,11 @@
 # ⏰ Scheduler Plugin
 
+> **Cron-based job orchestration with retries, distributed locks, and job history.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Scheduled** jobs with cron expressions, automatic retry, and distributed locking for multi-instance deployments.

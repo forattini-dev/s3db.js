@@ -1,5 +1,11 @@
 # 📥 Importer Plugin
 
+> **High-throughput CSV/JSON/Parquet imports with streaming transforms and batching.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 High-performance data import from **multiple file formats** with **streaming processing**, **automatic schema mapping**, and **batch parallelism**.

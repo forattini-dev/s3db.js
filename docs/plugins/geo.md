@@ -1,5 +1,11 @@
 # 🌍 Geo Plugin
 
+> **Geospatial indexing with geohash partitions, proximity search, and distance helpers.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration Options ↓](#configuration-options) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Location-based queries** with automatic geohash indexing, proximity search, and distance calculations.

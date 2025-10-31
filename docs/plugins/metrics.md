@@ -1,5 +1,11 @@
 # 📊 Metrics Plugin
 
+> **Operational telemetry, latency insights, and error analytics for every resource.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Complete** performance monitoring: timing, usage patterns, errors, and cache hit rates.

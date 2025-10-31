@@ -1,5 +1,11 @@
 # 🔗 Relation Plugin
 
+> **ORM-style relations, cascade operations, and partition-aware joins for S3DB.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **ORM-like relationships for S3DB** with automatic partition optimization for 10-100x faster queries.
@@ -962,6 +968,19 @@ const order = await orders.get('order-456', {
   }
 });
 ```
+
+---
+
+## ❓ FAQ
+
+### Do I need to recreate resources to use relations?
+No. Define relations against your existing resources. Adding partitions matching foreign keys dramatically improves performance but is optional.
+
+### Can relations coexist with custom business logic?
+Yes. Relations simply add helpers and hooks; your existing resource methods continue working. You can mix manual queries with relation-powered helpers.
+
+### How do I prevent cascades from removing data?
+Leave `cascade` unset (default) or specify only the operations you need (e.g., `cascade: ['deleted']`). Nothing cascades unless explicitly configured.
 
 ---
 

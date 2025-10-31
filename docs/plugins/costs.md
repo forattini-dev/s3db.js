@@ -1,5 +1,11 @@
 # 💰 Costs Plugin
 
+> **Real-time S3 request, storage, and transfer cost tracking for every workload.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Real-time** AWS S3 cost tracking with comprehensive request, storage, and data transfer monitoring.
