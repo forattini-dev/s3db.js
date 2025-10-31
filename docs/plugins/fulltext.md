@@ -1,5 +1,11 @@
 # 🔍 FullText Plugin
 
+> **Automatic full-text indexing with relevance scoring, fuzzy matching, and highlights.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Full-text** search engine with automatic indexing, relevance scoring, and highlighting.

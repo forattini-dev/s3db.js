@@ -1,5 +1,11 @@
 # 📬 Queue Consumer Plugin
 
+> **Bridge SQS and RabbitMQ messages into S3DB insert/update/delete operations.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 Consumes messages from **SQS/RabbitMQ** and automatically processes them as insert/update/delete operations.

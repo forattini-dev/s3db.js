@@ -1,10 +1,16 @@
 # 🕷️ Spider Suite Plugin
 
+> **Crawler toolkit bundling Puppeteer, S3Queue, and TTL under one namespace.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
+
+---
+
 Bundle that wires **Puppeteer**, **S3 Queue**, and optional **TTL** under a single namespace for crawling workloads.
 
 ---
 
-## ⚡ TL;DR
+## ⚡ TLDR
 
 ```javascript
 import { SpiderSuitePlugin } from 's3db.js/plugins';
@@ -29,6 +35,39 @@ await spiderSuite.startProcessing();
 - ✅ Dedicated resources for crawl targets (`<namespace>_targets`)
 - ✅ S3Queue with helpers (`enqueue`, `startProcessing`, `queueStats`)
 - ✅ Optional TTL wiring for queue housekeeping (`ttl.queue` configuration)
+
+---
+
+## 🚀 Quick Start
+
+```javascript
+import { Database, SpiderSuitePlugin } from 's3db.js';
+
+const db = new Database({ connectionString: 's3://...' });
+await db.connect();
+
+const spider = new SpiderSuitePlugin({ namespace: 'crawler', queue: { autoStart: true } });
+await db.usePlugin(spider);
+
+spider.setProcessor(async (task, ctx, helpers) => {
+  const page = await helpers.puppeteer.open(task.url);
+  await page.close();
+  return { visited: task.url };
+});
+```
+
+---
+
+## 📋 Table of Contents
+
+- [⚡ TLDR](#-tldr)
+- [🚀 Quick Start](#-quick-start)
+- [🔧 Configuration](#-configuration)
+- [🧩 Usage Patterns](#-usage-patterns)
+- [🔄 Lifecycle Helpers](#-lifecycle-helpers)
+- [🚨 Error Handling](#-error-handling)
+- [📚 Related Plugins](#-related-plugins)
+- [❓ FAQ](#-faq)
 
 ---
 

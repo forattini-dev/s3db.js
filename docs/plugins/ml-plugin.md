@@ -1,4 +1,10 @@
-# MLPlugin Documentation
+# 🤖 ML Plugin
+
+> **Train, deploy, and manage TensorFlow.js models directly on your S3DB resources.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
+
+---
 
 > **Machine Learning Plugin for s3db.js**
 > Train and deploy ML models directly on your s3db.js resources using TensorFlow.js
@@ -8,7 +14,7 @@
 
 ---
 
-## TL;DR
+## ⚡ TLDR
 
 **Machine Learning directly on S3 data with TensorFlow.js**
 
@@ -2735,7 +2741,7 @@ modelConfig: {
 
 ---
 
-## FAQ
+## ❓ FAQ
 
 ### General
 
