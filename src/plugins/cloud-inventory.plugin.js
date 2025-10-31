@@ -337,6 +337,152 @@ export class CloudInventoryPlugin extends Plugin {
     }
   }
 
+  /**
+   * Export discovered cloud resources to Terraform/OpenTofu state format
+   * @param {Object} options - Export options
+   * @param {Array<string>} options.resourceTypes - Filter by cloud resource types (e.g., ['aws.ec2.instance'])
+   * @param {Array<string>} options.providers - Filter by provider (e.g., ['aws', 'gcp'])
+   * @param {string} options.cloudId - Filter by specific cloud ID
+   * @param {string} options.terraformVersion - Terraform version (default: '1.5.0')
+   * @param {string} options.lineage - State lineage UUID (default: auto-generated)
+   * @param {number} options.serial - State serial number (default: 1)
+   * @param {Object} options.outputs - Terraform outputs (default: {})
+   * @returns {Promise<Object>} - { state, stats }
+   *
+   * @example
+   * // Export all resources
+   * const result = await plugin.exportToTerraformState();
+   * console.log(result.state); // Terraform state object
+   * console.log(result.stats); // { total, converted, skipped }
+   *
+   * // Export specific provider
+   * const awsOnly = await plugin.exportToTerraformState({ providers: ['aws'] });
+   *
+   * // Export specific resource types
+   * const ec2Only = await plugin.exportToTerraformState({
+   *   resourceTypes: ['aws.ec2.instance', 'aws.rds.instance']
+   * });
+   */
+  async exportToTerraformState(options = {}) {
+    const { exportToTerraformState: exportFn } = await import('./cloud-inventory/terraform-exporter.js');
+
+    const {
+      resourceTypes = [],
+      providers = [],
+      cloudId = null,
+      ...exportOptions
+    } = options;
+
+    // Get snapshots resource
+    const snapshotsResource = this._resourceHandles.snapshots;
+    if (!snapshotsResource) {
+      throw new Error('Snapshots resource not initialized. Ensure plugin is installed.');
+    }
+
+    // Build query filter
+    const queryOptions = {};
+
+    if (cloudId) {
+      queryOptions.cloudId = cloudId;
+    }
+
+    // Fetch all snapshots (or filtered)
+    const snapshots = await snapshotsResource.query(queryOptions);
+
+    this._log('info', 'Exporting cloud inventory to Terraform state', {
+      totalSnapshots: snapshots.length,
+      resourceTypes: resourceTypes.length > 0 ? resourceTypes : 'all',
+      providers: providers.length > 0 ? providers : 'all'
+    });
+
+    // Export to Terraform format
+    const result = exportFn(snapshots, {
+      ...exportOptions,
+      resourceTypes,
+      providers
+    });
+
+    this._log('info', 'Export complete', result.stats);
+
+    return result;
+  }
+
+  /**
+   * Export cloud inventory to Terraform state file
+   * @param {string} filePath - Output file path
+   * @param {Object} options - Export options (see exportToTerraformState)
+   * @returns {Promise<Object>} - { filePath, stats }
+   *
+   * @example
+   * // Export to file
+   * await plugin.exportToTerraformStateFile('./terraform.tfstate');
+   *
+   * // Export AWS resources only
+   * await plugin.exportToTerraformStateFile('./aws-resources.tfstate', {
+   *   providers: ['aws']
+   * });
+   */
+  async exportToTerraformStateFile(filePath, options = {}) {
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+
+    const result = await this.exportToTerraformState(options);
+
+    // Write to file
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(result.state, null, 2), 'utf8');
+
+    this._log('info', `Terraform state exported to: ${filePath}`, result.stats);
+
+    return {
+      filePath,
+      ...result
+    };
+  }
+
+  /**
+   * Export cloud inventory to Terraform state in S3
+   * @param {string} bucket - S3 bucket name
+   * @param {string} key - S3 object key
+   * @param {Object} options - Export options (see exportToTerraformState)
+   * @returns {Promise<Object>} - { bucket, key, stats }
+   *
+   * @example
+   * // Export to S3
+   * await plugin.exportToTerraformStateToS3('my-bucket', 'terraform/state.tfstate');
+   *
+   * // Export GCP resources to S3
+   * await plugin.exportToTerraformStateToS3('my-bucket', 'terraform/gcp.tfstate', {
+   *   providers: ['gcp']
+   * });
+   */
+  async exportToTerraformStateToS3(bucket, key, options = {}) {
+    const result = await this.exportToTerraformState(options);
+
+    // Get S3 client from database
+    const s3Client = this.database.client;
+    if (!s3Client || typeof s3Client.putObject !== 'function') {
+      throw new Error('S3 client not available. Database must use S3-compatible storage.');
+    }
+
+    // Upload to S3
+    await s3Client.putObject({
+      Bucket: bucket,
+      Key: key,
+      Body: JSON.stringify(result.state, null, 2),
+      ContentType: 'application/json'
+    });
+
+    this._log('info', `Terraform state exported to S3: s3://${bucket}/${key}`, result.stats);
+
+    return {
+      bucket,
+      key,
+      ...result
+    };
+  }
+
   async _ensureResources() {
     const {
       snapshots,
