@@ -21,7 +21,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     wallets = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string|required',
         balance: 'number|default:0'
       },
@@ -126,7 +126,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     const accounts = await database.createResource({
       name: 'accounts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         balance: 'number|default:0'
       },
       cache: false,
@@ -163,7 +163,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     wallets = await database.createResource({
       name: 'wallets',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         balance: 'number|default:0'
       }
     });

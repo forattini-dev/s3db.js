@@ -3,5 +3,6 @@ ignoredBuiltDependencies:
   - core-js
 
 onlyBuiltDependencies:
+  - '@tensorflow/tfjs-node'
   - protobufjs
   - sharp

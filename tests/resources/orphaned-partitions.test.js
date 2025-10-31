@@ -21,7 +21,7 @@ describe('Orphaned Partitions', () => {
     resource = await database.createResource({
       name: 'users_orphaned',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         region: 'string|required',
         department: 'string|required'
@@ -43,7 +43,7 @@ describe('Orphaned Partitions', () => {
 
     // Remove a field that a partition depends on
     resource.updateAttributes({
-      id: 'string|required',
+      id: 'string|optional',
       name: 'string|required',
       department: 'string|required'
       // region removed - byRegion partition becomes orphaned
@@ -62,7 +62,7 @@ describe('Orphaned Partitions', () => {
     const res = await database.createResource({
       name: 'products_orphaned',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         region: 'string|required',
@@ -84,7 +84,7 @@ describe('Orphaned Partitions', () => {
 
     // Remove multiple fields
     res.updateAttributes({
-      id: 'string|required',
+      id: 'string|optional',
       name: 'string|required',
       status: 'string|required'
       // category and region removed
@@ -102,7 +102,7 @@ describe('Orphaned Partitions', () => {
     const res = await database.createResource({
       name: 'orders_orphaned_dryrun',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         amount: 'number|required',
         region: 'string|required'
       },
@@ -116,7 +116,7 @@ describe('Orphaned Partitions', () => {
 
     // Remove field
     res.updateAttributes({
-      id: 'string|required',
+      id: 'string|optional',
       amount: 'number|required'
     });
 
@@ -134,7 +134,7 @@ describe('Orphaned Partitions', () => {
     const res = await database.createResource({
       name: 'inventory_orphaned',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         quantity: 'number|required',
         warehouse: 'string|required'
       },
@@ -148,7 +148,7 @@ describe('Orphaned Partitions', () => {
 
     // Remove field
     res.updateAttributes({
-      id: 'string|required',
+      id: 'string|optional',
       quantity: 'number|required'
     });
 
@@ -179,7 +179,7 @@ describe('Orphaned Partitions', () => {
     const res = await database.createResource({
       name: 'clean_resource',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         status: 'string|required'
       },
@@ -202,7 +202,7 @@ describe('Orphaned Partitions', () => {
         database,
         version: 'v1',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         partitions: {
@@ -223,7 +223,7 @@ describe('Orphaned Partitions', () => {
         database,
         version: 'v1',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         partitions: {

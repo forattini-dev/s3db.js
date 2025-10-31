@@ -27,7 +27,7 @@ describe('Full-Text Plugin', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required',
         description: 'string',
@@ -37,7 +37,7 @@ describe('Full-Text Plugin', () => {
     products = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         description: 'string',
         content: 'string',
@@ -72,7 +72,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -87,7 +87,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -105,7 +105,7 @@ describe('Full-Text Plugin', () => {
       const newResource = await database.createResource({
         name: 'new-resource',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -123,7 +123,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -138,7 +138,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -265,7 +265,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -280,7 +280,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -402,7 +402,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -417,7 +417,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -486,7 +486,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -501,7 +501,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -574,7 +574,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -589,7 +589,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -632,7 +632,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -647,7 +647,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -695,7 +695,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -710,7 +710,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',
@@ -765,7 +765,7 @@ describe('Full-Text Plugin', () => {
       users = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           description: 'string',
@@ -780,7 +780,7 @@ describe('Full-Text Plugin', () => {
       products = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string',
           content: 'string',

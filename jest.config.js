@@ -57,6 +57,15 @@ export default {
     '/examples/',
   ],
 
+  coverageThreshold: {
+    'src/plugins/': {
+      statements: 90,
+      branches: 90,
+      functions: 90,
+      lines: 90,
+    }
+  },
+
   // Ignore slow tests in normal coverage runs
   testPathIgnorePatterns: [
     '/node_modules/',

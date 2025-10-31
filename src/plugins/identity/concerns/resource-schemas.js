@@ -34,6 +34,11 @@ export const BASE_USER_ATTRIBUTES = {
   // Status
   active: 'boolean|default:true',
 
+  // Account Lockout (Brute Force Protection)
+  failedLoginAttempts: 'number|default:0',      // Count of failed login attempts
+  lockedUntil: 'string|optional',               // ISO timestamp when account unlocks
+  lastFailedLogin: 'string|optional',           // ISO timestamp of last failed attempt
+
   // Metadata
   metadata: 'object|optional'
 };

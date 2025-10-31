@@ -2,11 +2,11 @@ import { merge, isString } from "lodash-es";
 import FastestValidator from "fastest-validator";
 
 import { encrypt } from "./concerns/crypto.js";
-import { hashPassword, compactHash } from "./concerns/password-hashing.js";
+import { hashPassword, hashPasswordSync, compactHash } from "./concerns/password-hashing.js";
 import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ValidationError } from "./errors.js";
 
-async function secretHandler (actual, errors, schema) {
+function secretHandler (actual, errors, schema) {
   if (!this.passphrase) {
     errors.push(new ValidationError("Missing configuration for secrets encryption.", {
       actual,
@@ -16,7 +16,7 @@ async function secretHandler (actual, errors, schema) {
     return actual;
   }
 
-  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
+  const [ok, err, res] = tryFnSync(() => encrypt(String(actual), this.passphrase));
   if (ok) return res;
   errors.push(new ValidationError("Problem encrypting secret.", {
     actual,
@@ -27,7 +27,7 @@ async function secretHandler (actual, errors, schema) {
   return actual;
 }
 
-async function passwordHandler (actual, errors, schema) {
+function passwordHandler (actual, errors, schema) {
   if (!this.bcryptRounds) {
     errors.push(new ValidationError("Missing bcrypt rounds configuration.", {
       actual,
@@ -37,8 +37,8 @@ async function passwordHandler (actual, errors, schema) {
     return actual;
   }
 
-  // Hash password with bcrypt
-  const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(actual), this.bcryptRounds));
+  // Hash password with bcrypt (synchronous)
+  const [okHash, errHash, hash] = tryFnSync(() => hashPasswordSync(String(actual), this.bcryptRounds));
   if (!okHash) {
     errors.push(new ValidationError("Problem hashing password.", {
       actual,
@@ -64,7 +64,7 @@ async function passwordHandler (actual, errors, schema) {
   return compacted;
 }
 
-async function jsonHandler (actual, errors, schema) {
+function jsonHandler (actual, errors, schema) {
   if (isString(actual)) return actual;
   const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
   if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
@@ -72,7 +72,7 @@ async function jsonHandler (actual, errors, schema) {
 }
 
 export class Validator extends FastestValidator {
-  constructor({ options, passphrase, bcryptRounds = 10, autoEncrypt = true } = {}) {
+  constructor({ options, passphrase, bcryptRounds = 10, autoEncrypt = true, autoHash = true } = {}) {
     super(merge({}, {
       useNewCustomCheckerFunction: true,
 
@@ -98,7 +98,8 @@ export class Validator extends FastestValidator {
 
     this.passphrase = passphrase;
     this.bcryptRounds = bcryptRounds;
-    this.autoEncrypt = autoEncrypt;
+    this.autoEncrypt = autoEncrypt; // Controls automatic encryption of 'secret' type fields
+    this.autoHash = autoHash; // Controls automatic hashing of 'password' type fields
 
     this.alias('secret', {
       type: "string",
@@ -121,7 +122,7 @@ export class Validator extends FastestValidator {
 
     this.alias('password', {
       type: "string",
-      custom: this.autoEncrypt ? passwordHandler : undefined,
+      custom: this.autoHash ? passwordHandler : undefined,
       messages: {
         string: "The '{field}' field must be a string.",
         stringMin: "This password '{field}' field length must be at least {expected} long.",

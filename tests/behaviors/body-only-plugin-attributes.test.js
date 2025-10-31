@@ -20,7 +20,7 @@ describe('Body-Only Behavior - Plugin Attributes', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required',
         age: 'number|optional'

@@ -8,7 +8,18 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Database, MLPlugin } from '../../src/index.js';
 import { createDatabaseForTest } from '../config.js';
 
-describe('MLPlugin', () => {
+// Check if TensorFlow is available
+let tfAvailable = false;
+try {
+  await import('@tensorflow/tfjs-node');
+  tfAvailable = true;
+} catch (e) {
+  console.warn('[MLPlugin Tests] TensorFlow not available, skipping ML plugin tests');
+}
+
+const describeIfTf = tfAvailable ? describe : describe.skip;
+
+describeIfTf('MLPlugin', () => {
   let db;
   let mlPlugin;
 

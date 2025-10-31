@@ -38,6 +38,85 @@ import tryFn from '../../concerns/try-fn.js';
 import { ApiServer } from './server.js';
 import { idGenerator } from '../../concerns/id.js';
 
+const AUTH_DRIVER_KEYS = ['jwt', 'apiKey', 'basic', 'oidc', 'oauth2'];
+
+function normalizeAuthConfig(authOptions = {}) {
+  if (!authOptions) {
+    return {
+      drivers: [],
+      pathRules: [],
+      pathAuth: undefined,
+      strategy: 'any',
+      priorities: {},
+      resource: 'users',
+      usernameField: 'email',
+      passwordField: 'password',
+      driver: null
+    };
+  }
+
+  const normalized = {
+    drivers: [],
+    pathRules: Array.isArray(authOptions.pathRules) ? authOptions.pathRules : [],
+    pathAuth: authOptions.pathAuth,
+    strategy: authOptions.strategy || 'any',
+    priorities: authOptions.priorities || {},
+    resource: authOptions.resource || 'users',
+    usernameField: authOptions.usernameField || 'email',
+    passwordField: authOptions.passwordField || 'password'
+  };
+
+  const seen = new Set();
+
+  const addDriver = (name, driverConfig = {}) => {
+    if (!name) return;
+    const driverName = String(name).trim();
+    if (!driverName || seen.has(driverName)) return;
+    seen.add(driverName);
+    normalized.drivers.push({
+      driver: driverName,
+      config: driverConfig || {}
+    });
+  };
+
+  // Drivers provided as array
+  if (Array.isArray(authOptions.drivers)) {
+    for (const entry of authOptions.drivers) {
+      if (typeof entry === 'string') {
+        addDriver(entry, {});
+      } else if (entry && typeof entry === 'object') {
+        addDriver(entry.driver, entry.config || {});
+      }
+    }
+  }
+
+  // Single driver shortcut
+  if (authOptions.driver) {
+    if (typeof authOptions.driver === 'string') {
+      addDriver(authOptions.driver, authOptions.config || {});
+    } else if (typeof authOptions.driver === 'object') {
+      addDriver(authOptions.driver.driver, authOptions.driver.config || authOptions.config || {});
+    }
+  }
+
+  // Support legacy per-driver objects (jwt: {...}, apiKey: {...})
+  for (const driverName of AUTH_DRIVER_KEYS) {
+    if (authOptions[driverName] === undefined) continue;
+
+    const value = authOptions[driverName];
+    if (!value || value.enabled === false) continue;
+
+    const config = typeof value === 'object' ? { ...value } : {};
+    if (config.enabled !== undefined) {
+      delete config.enabled;
+    }
+    addDriver(driverName, config);
+  }
+
+  normalized.driver = normalized.drivers.length > 0 ? normalized.drivers[0].driver : null;
+  return normalized;
+}
+
 /**
  * API Plugin class
  * @class
@@ -50,6 +129,8 @@ export class ApiPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
+
+    const normalizedAuth = normalizeAuthConfig(options.auth);
 
     this.config = {
       // Server configuration
@@ -70,30 +151,7 @@ export class ApiPlugin extends Plugin {
       },
 
       // Authentication configuration (multiple drivers)
-      auth: options.auth ? {
-        // Array of authentication drivers (OR logic - any driver can authenticate)
-        drivers: options.auth.drivers || [],
-
-        // Path-based authentication rules (more specific paths win)
-        pathRules: options.auth.pathRules || [],
-
-        // Global fallback strategy (used when no pathRules match)
-        strategy: options.auth.strategy || 'any', // 'any' or 'priority'
-        priorities: options.auth.priorities || {},
-
-        // Global settings
-        resource: options.auth.resource || 'users',
-        usernameField: options.auth.usernameField || 'email',
-        passwordField: options.auth.passwordField || 'password'
-      } : {
-        drivers: [],
-        pathRules: [],
-        strategy: 'any',
-        priorities: {},
-        resource: 'users',
-        usernameField: 'email',
-        passwordField: 'password'
-      },
+      auth: normalizedAuth,
 
       // Custom routes (plugin-level)
       routes: options.routes || {},
@@ -233,8 +291,76 @@ export class ApiPlugin extends Plugin {
       middlewares: options.middlewares || []
     };
 
+    this.config.resources = this._normalizeResourcesConfig(options.resources);
+
     this.server = null;
     this.usersResource = null;
+  }
+
+  /**
+   * Normalize resources config so array/string inputs become object map
+   * @private
+   * @param {Object|Array<string|Object>} resources
+   * @returns {Object<string, Object>}
+   */
+  _normalizeResourcesConfig(resources) {
+    if (!resources) {
+      return {};
+    }
+
+    const normalized = {};
+    const verbose = this.options?.verbose;
+
+    const addResourceConfig = (name, config = {}) => {
+      if (typeof name !== 'string' || !name.trim()) {
+        if (verbose) {
+          console.warn('[API Plugin] Ignoring resource config with invalid name:', name);
+        }
+        return;
+      }
+
+      normalized[name] = { ...config };
+    };
+
+    if (Array.isArray(resources)) {
+      for (const entry of resources) {
+        if (typeof entry === 'string') {
+          addResourceConfig(entry);
+        } else if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
+          const { name, ...config } = entry;
+          addResourceConfig(name, config);
+        } else {
+          if (verbose) {
+            console.warn('[API Plugin] Ignoring invalid resource config entry (expected string or object with name):', entry);
+          }
+        }
+      }
+      return normalized;
+    }
+
+    if (typeof resources === 'object') {
+      for (const [name, config] of Object.entries(resources)) {
+        if (config === false) {
+          addResourceConfig(name, { enabled: false });
+        } else if (config === true || config === undefined || config === null) {
+          addResourceConfig(name);
+        } else if (typeof config === 'object') {
+          addResourceConfig(name, config);
+        } else {
+          if (verbose) {
+            console.warn('[API Plugin] Coercing resource config to empty object for', name);
+          }
+          addResourceConfig(name);
+        }
+      }
+      return normalized;
+    }
+
+    if (verbose) {
+      console.warn('[API Plugin] Invalid resources configuration. Expected object or array, received:', typeof resources);
+    }
+
+    return {};
   }
 
   /**
@@ -783,6 +909,7 @@ export class ApiPlugin extends Plugin {
       port: this.config.port,
       host: this.config.host,
       database: this.database,
+      versionPrefix: this.config.versionPrefix,
       resources: this.config.resources,
       routes: this.config.routes,
       templates: this.config.templates,

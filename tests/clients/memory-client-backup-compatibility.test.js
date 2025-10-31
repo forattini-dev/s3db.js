@@ -23,7 +23,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
     const users = await db.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required'
       }
@@ -86,7 +86,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
     const products = await db.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         price: 'number|required'
       }
@@ -136,7 +136,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
         accounts: {
           schema: {
             attributes: {
-              id: 'string|required',
+              id: 'string|optional',
               username: 'string|required',
               balance: 'number|required'
             }
@@ -208,7 +208,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
     const orders = await originalDb.createResource({
       name: 'orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         total: 'number|required',
         shipped: 'boolean'
       }

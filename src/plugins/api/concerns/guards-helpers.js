@@ -212,3 +212,191 @@ export async function applyGuardsToDelete(resource, context, record) {
 
   return true;
 }
+
+/**
+ * Check if user has required scopes
+ *
+ * @param {Array<string>} requiredScopes - Required scopes
+ * @param {string} mode - 'any' or 'all' (default: 'any')
+ * @returns {Function} Guard function
+ *
+ * @example
+ * // Require admin scope
+ * guard: {
+ *   delete: requireScopes(['admin'])
+ * }
+ *
+ * @example
+ * // Require ANY of multiple scopes
+ * guard: {
+ *   update: requireScopes(['admin', 'moderator'], 'any')
+ * }
+ *
+ * @example
+ * // Require ALL scopes
+ * guard: {
+ *   create: requireScopes(['write:urls', 'verified'], 'all')
+ * }
+ */
+export function requireScopes(requiredScopes, mode = 'any') {
+  if (!Array.isArray(requiredScopes)) {
+    requiredScopes = [requiredScopes];
+  }
+
+  return (ctx) => {
+    const userScopes = ctx.user?.scopes || [];
+
+    if (mode === 'all') {
+      // User must have ALL required scopes
+      return requiredScopes.every(scope => userScopes.includes(scope));
+    }
+
+    // mode === 'any': User must have AT LEAST ONE required scope
+    return requiredScopes.some(scope => userScopes.includes(scope));
+  };
+}
+
+/**
+ * Check if user has required role
+ *
+ * @param {string|Array<string>} role - Required role(s)
+ * @returns {Function} Guard function
+ *
+ * @example
+ * guard: {
+ *   delete: requireRole('admin')
+ * }
+ *
+ * @example
+ * // Multiple roles (any)
+ * guard: {
+ *   update: requireRole(['admin', 'moderator'])
+ * }
+ */
+export function requireRole(role) {
+  const roles = Array.isArray(role) ? role : [role];
+
+  return (ctx) => {
+    const userRole = ctx.user?.role;
+    const userRoles = ctx.user?.roles || [];
+
+    // Check single role field
+    if (userRole && roles.includes(userRole)) {
+      return true;
+    }
+
+    // Check roles array
+    return roles.some(r => userRoles.includes(r));
+  };
+}
+
+/**
+ * Require admin scope (shorthand for requireScopes(['admin']))
+ *
+ * @returns {Function} Guard function
+ *
+ * @example
+ * guard: {
+ *   delete: requireAdmin()
+ * }
+ */
+export function requireAdmin() {
+  return requireScopes(['admin']);
+}
+
+/**
+ * Check ownership (record.userId === ctx.user.sub)
+ *
+ * @param {string} field - Field to check (default: 'userId')
+ * @returns {Function} Guard function
+ *
+ * @example
+ * guard: {
+ *   update: requireOwnership(),
+ *   delete: requireOwnership('createdBy')
+ * }
+ */
+export function requireOwnership(field = 'userId') {
+  return (ctx, resource) => {
+    if (!resource) return false;
+
+    const userId = ctx.user?.sub || ctx.user?.id;
+    if (!userId) return false;
+
+    return resource[field] === userId;
+  };
+}
+
+/**
+ * Combine guards with OR logic (any guard passes = allowed)
+ *
+ * @param {...Function} guards - Guard functions
+ * @returns {Function} Combined guard function
+ *
+ * @example
+ * guard: {
+ *   delete: anyOf(
+ *     requireAdmin(),
+ *     requireOwnership()
+ *   )
+ * }
+ */
+export function anyOf(...guards) {
+  return async (ctx, resource) => {
+    for (const guard of guards) {
+      const result = await guard(ctx, resource);
+      if (result) return true;
+    }
+    return false;
+  };
+}
+
+/**
+ * Combine guards with AND logic (all guards must pass)
+ *
+ * @param {...Function} guards - Guard functions
+ * @returns {Function} Combined guard function
+ *
+ * @example
+ * guard: {
+ *   create: allOf(
+ *     requireScopes(['write:urls']),
+ *     (ctx) => ctx.user.verified === true
+ *   )
+ * }
+ */
+export function allOf(...guards) {
+  return async (ctx, resource) => {
+    for (const guard of guards) {
+      const result = await guard(ctx, resource);
+      if (!result) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * Check if user belongs to specific tenant
+ *
+ * @param {string} tenantField - Field name in resource (default: 'tenantId')
+ * @returns {Function} Guard function
+ *
+ * @example
+ * guard: {
+ *   '*': (ctx) => {
+ *     ctx.tenantId = ctx.user.tenantId || ctx.user.tid;
+ *     return !!ctx.tenantId;
+ *   },
+ *   update: requireTenant()
+ * }
+ */
+export function requireTenant(tenantField = 'tenantId') {
+  return (ctx, resource) => {
+    if (!resource) return true; // Let wildcard/insert guards handle
+
+    const userTenantId = ctx.tenantId || ctx.user?.tenantId || ctx.user?.tid;
+    if (!userTenantId) return false;
+
+    return resource[tenantField] === userTenantId;
+  };
+}

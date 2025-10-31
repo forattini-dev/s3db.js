@@ -34,7 +34,7 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     const users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required'
       }
@@ -96,7 +96,7 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     const products = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         price: 'number|required',
         stock: 'number|default:0'
@@ -176,7 +176,7 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     const posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         views: 'number|default:0'
       }
@@ -238,7 +238,7 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     const users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         balance: 'number|default:0'
       }
     });

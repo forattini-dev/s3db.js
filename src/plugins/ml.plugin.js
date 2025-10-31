@@ -87,6 +87,8 @@ export class MLPlugin extends Plugin {
     // Training state
     this.training = new Map(); // Track ongoing training
     this.insertCounters = new Map(); // Track inserts per resource
+    this._pendingAutoTrainingHandlers = new Map();
+    this._autoTrainingInitialized = new Set();
 
     // Interval handles for auto-training
     this.intervals = [];
@@ -110,26 +112,34 @@ export class MLPlugin extends Plugin {
 
     // Validate plugin dependencies (lazy validation)
     if (!this._dependenciesValidated) {
-      const result = await requirePluginDependency('ml-plugin', {
-        throwOnError: false,
-        checkVersions: true
-      });
+      // Try direct import first (works better with Jest ESM)
+      let tfAvailable = false;
+      try {
+        await import('@tensorflow/tfjs-node');
+        tfAvailable = true;
+        if (this.config.verbose) {
+          console.log('[MLPlugin] TensorFlow.js loaded successfully');
+        }
+      } catch (directImportErr) {
+        // Fallback to plugin dependency check
+        const result = await requirePluginDependency('ml-plugin', {
+          throwOnError: false,
+          checkVersions: true
+        });
 
-      if (!result.valid) {
-        // In test environments with Jest VM modules, dynamic imports may fail
-        // even when packages are installed. Try direct import as fallback.
-        try {
-          await import('@tensorflow/tfjs-node');
-          if (this.config.verbose) {
-            console.log('[MLPlugin] TensorFlow.js loaded successfully (fallback import)');
-          }
-        } catch (err) {
-          // If both methods fail, throw the original error
+        if (!result.valid) {
           throw new TensorFlowDependencyError(
             'TensorFlow.js dependency not found. Install with: pnpm add @tensorflow/tfjs-node\n' +
             result.messages.join('\n')
           );
         }
+        tfAvailable = result.valid;
+      }
+
+      if (!tfAvailable) {
+        throw new TensorFlowDependencyError(
+          'TensorFlow.js dependency not found. Install with: pnpm add @tensorflow/tfjs-node'
+        );
       }
 
       this._dependenciesValidated = true;
@@ -207,6 +217,13 @@ export class MLPlugin extends Plugin {
         model.dispose();
       }
     }
+
+    // Remove pending auto-training handlers
+    for (const handler of this._pendingAutoTrainingHandlers.values()) {
+      this.database.off('db:resource-created', handler);
+    }
+    this._pendingAutoTrainingHandlers.clear();
+    this._autoTrainingInitialized.clear();
 
     if (this.config.verbose) {
       console.log('[MLPlugin] Stopped');
@@ -867,6 +884,7 @@ export class MLPlugin extends Plugin {
       resource: config.resource,
       features: config.features,
       target: config.target,
+      minSamples: config.minSamples ?? this.config.minTrainingSamples,
       modelConfig: config.modelConfig || {},
       verbose: this.config.verbose
     };
@@ -908,17 +926,39 @@ export class MLPlugin extends Plugin {
   /**
    * Setup auto-training for a model
    * @private
-   */
+  */
   _setupAutoTraining(modelName, config) {
+    if (!this.insertCounters.has(modelName)) {
+      this.insertCounters.set(modelName, 0);
+    }
+
     const resource = this.database.resources[config.resource];
 
     if (!resource) {
-      console.warn(`[MLPlugin] Resource "${config.resource}" not found for model "${modelName}"`);
+      if (this.config.verbose) {
+        console.warn(`[MLPlugin] Resource "${config.resource}" not found for model "${modelName}". Auto-training will attach when resource is created.`);
+      }
+
+      if (!this._pendingAutoTrainingHandlers.has(modelName)) {
+        const handler = (createdName) => {
+          if (createdName !== config.resource) {
+            return;
+          }
+
+          this.database.off('db:resource-created', handler);
+          this._pendingAutoTrainingHandlers.delete(modelName);
+          this._setupAutoTraining(modelName, config);
+        };
+
+        this._pendingAutoTrainingHandlers.set(modelName, handler);
+        this.database.on('db:resource-created', handler);
+      }
       return;
     }
 
-    // Initialize insert counter
-    this.insertCounters.set(modelName, 0);
+    if (this._autoTrainingInitialized.has(modelName)) {
+      return;
+    }
 
     // Hook: Track inserts
     if (config.trainAfterInserts && config.trainAfterInserts > 0) {
@@ -968,6 +1008,8 @@ export class MLPlugin extends Plugin {
         console.log(`[MLPlugin] Setup interval training for "${modelName}" (every ${config.trainInterval}ms)`);
       }
     }
+
+    this._autoTrainingInitialized.add(modelName);
   }
 
   /**
@@ -1024,7 +1066,10 @@ export class MLPlugin extends Plugin {
         }
 
         const [ok, err, partitionData] = await tryFn(() =>
-          resource.listPartition(partition.name, partition.values)
+          resource.listPartition({
+            partition: partition.name,
+            partitionValues: partition.values
+          })
         );
 
         if (!ok) {
@@ -1384,12 +1429,13 @@ export class MLPlugin extends Plugin {
         return;
       }
 
+      const modelStats = this.models[modelName].getStats();
+      const timestamp = new Date().toISOString();
       const enableVersioning = this.config.enableVersioning;
 
       if (enableVersioning) {
         // Save with version
         const version = this._getNextVersion(modelName);
-        const modelStats = this.models[modelName].getStats();
 
         // Save versioned model binary to S3 body
         await storage.set(
@@ -1404,7 +1450,7 @@ export class MLPlugin extends Plugin {
               accuracy: modelStats.accuracy,
               samples: modelStats.samples
             },
-            savedAt: new Date().toISOString()
+            savedAt: timestamp
           },
           { behavior: 'body-only' } // Large binary data goes to S3 body
         );
@@ -1419,7 +1465,7 @@ export class MLPlugin extends Plugin {
             modelName,
             version,
             type: 'reference',
-            updatedAt: new Date().toISOString()
+            updatedAt: timestamp
           },
           { behavior: 'body-overflow' } // Small metadata
         );
@@ -1435,7 +1481,12 @@ export class MLPlugin extends Plugin {
             modelName,
             type: 'model',
             modelData: exportedModel,
-            savedAt: new Date().toISOString()
+            metrics: {
+              loss: modelStats.loss,
+              accuracy: modelStats.accuracy,
+              samples: modelStats.samples
+            },
+            savedAt: timestamp
           },
           { behavior: 'body-only' }
         );
@@ -1444,6 +1495,34 @@ export class MLPlugin extends Plugin {
           console.log(`[MLPlugin] Saved model "${modelName}" to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`);
         }
       }
+
+      // Legacy compatibility record (flat key: model_{modelName})
+      const activeVersion = enableVersioning
+        ? (this.modelVersions.get(modelName)?.latestVersion || 1)
+        : undefined;
+
+      const compatibilityData = enableVersioning
+        ? {
+            storageKey: storage.getPluginKey(resourceName, 'models', modelName, `v${activeVersion}`),
+            version: activeVersion
+          }
+        : exportedModel;
+
+      await storage.set(
+        `model_${modelName}`,
+        {
+          modelName,
+          type: 'model',
+          data: compatibilityData,
+          metrics: {
+            loss: modelStats.loss,
+            accuracy: modelStats.accuracy,
+            samples: modelStats.samples
+          },
+          savedAt: timestamp
+        },
+        { behavior: enableVersioning ? 'body-overflow' : 'body-only' }
+      );
     } catch (error) {
       console.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
     }
@@ -1681,12 +1760,14 @@ export class MLPlugin extends Plugin {
           return null;
         }
 
+        const samplesArray = Array.isArray(record.samples) ? record.samples : [];
+
         return {
           modelName: record.modelName,
-          samples: record.samples,
+          samples: samplesArray.length,
           features: record.features,
           target: record.target,
-          data: record.samples,
+          data: samplesArray,
           savedAt: record.savedAt
         };
       }
@@ -1703,11 +1784,15 @@ export class MLPlugin extends Plugin {
         return null;
       }
 
+      const historyEntries = Array.isArray(historyData.history)
+        ? historyData.history
+        : JSON.parse(historyData.history);
+
       const targetVersion = version || historyData.latestVersion;
       const reconstructedSamples = [];
 
       // Load and combine all versions up to target version
-      for (const entry of historyData.history) {
+      for (const entry of historyEntries) {
         if (entry.version > targetVersion) break;
 
         if (entry.storageKey && entry.newSamples > 0) {
@@ -1721,15 +1806,16 @@ export class MLPlugin extends Plugin {
         }
       }
 
-      const targetEntry = historyData.history.find(e => e.version === targetVersion);
+      const targetEntry = historyEntries.find(e => e.version === targetVersion);
 
       return {
         modelName,
         version: targetVersion,
-        samples: reconstructedSamples,
+        samples: reconstructedSamples.length,
         totalSamples: reconstructedSamples.length,
         features: modelConfig.features,
         target: modelConfig.target,
+        data: reconstructedSamples,
         metrics: targetEntry?.metrics,
         savedAt: targetEntry?.trainedAt
       };
@@ -1902,7 +1988,9 @@ export class MLPlugin extends Plugin {
 
       return {
         version,
-        metrics: versionData.metrics ? JSON.parse(versionData.metrics) : {},
+        metrics: typeof versionData.metrics === 'string'
+          ? JSON.parse(versionData.metrics)
+          : (versionData.metrics || {}),
         savedAt: versionData.savedAt
       };
     } catch (error) {
@@ -1967,11 +2055,15 @@ export class MLPlugin extends Plugin {
         return null;
       }
 
+      const historyEntries = Array.isArray(historyData.history)
+        ? historyData.history
+        : JSON.parse(historyData.history);
+
       return {
         modelName: historyData.modelName,
         totalTrainings: historyData.totalTrainings,
         latestVersion: historyData.latestVersion,
-        history: JSON.parse(historyData.history),
+        history: historyEntries,
         updatedAt: historyData.updatedAt
       };
     } catch (error) {
@@ -2008,8 +2100,8 @@ export class MLPlugin extends Plugin {
         throw new MLError(`Version ${version2} not found`, { modelName, version: version2 });
       }
 
-      const metrics1 = v1Data.metrics ? JSON.parse(v1Data.metrics) : {};
-      const metrics2 = v2Data.metrics ? JSON.parse(v2Data.metrics) : {};
+      const metrics1 = typeof v1Data.metrics === 'string' ? JSON.parse(v1Data.metrics) : (v1Data.metrics || {});
+      const metrics2 = typeof v2Data.metrics === 'string' ? JSON.parse(v2Data.metrics) : (v2Data.metrics || {});
 
       return {
         modelName,

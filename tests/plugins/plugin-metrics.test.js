@@ -89,7 +89,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       // Create resources first
       await database.createResource({
         name: 'metrics',
-        attributes: { id: 'string|required', type: 'string|required' }
+        attributes: { id: 'string|optional', type: 'string|required' }
       });
       
       await expect(metricsPlugin.install(database)).resolves.not.toThrow();
@@ -172,7 +172,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       const resource = await database.createResource({
         name: 'test_hooks',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -190,7 +190,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       const resource = await database.createResource({
         name: 'test_insert_hook',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -207,7 +207,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       const resource = await database.createResource({
         name: 'test_get_hook',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -226,7 +226,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       const resource = await database.createResource({
         name: 'test_update_hook',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -244,7 +244,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       const resource = await database.createResource({
         name: 'test_delete_hook',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });

@@ -44,7 +44,7 @@ describe('Audit Plugin', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required',
         department: 'string|required',
@@ -63,7 +63,7 @@ describe('Audit Plugin', () => {
     testResource = await database.createResource({
       name: 'test_users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required',
         age: 'number',
@@ -156,7 +156,7 @@ describe('Audit Plugin', () => {
       const freshUsers = await freshDatabase.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           department: 'string|required',
@@ -241,6 +241,7 @@ describe('Audit Plugin', () => {
       const isolatedClient = createClientForTest(`suite=plugins/audit-no-partitions`);
 
       const isolatedDatabase = new Database({ client: isolatedClient });
+      await isolatedDatabase.connect();
 
       const pluginWithoutPartitions = new AuditPlugin({
         enabled: true,
@@ -252,7 +253,7 @@ describe('Audit Plugin', () => {
       const isolatedUsers = await isolatedDatabase.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           department: 'string|required',
@@ -279,7 +280,7 @@ describe('Audit Plugin', () => {
       await isolatedUsers.insert(userData);
 
       // Wait for async audit logging
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       const auditLogs = await pluginWithoutPartitions.getAuditLogs({
         resourceName: 'users',
@@ -297,6 +298,7 @@ describe('Audit Plugin', () => {
       const isolatedClient = createClientForTest(`suite=plugins/audit-no-data`);
 
       const isolatedDatabase = new Database({ client: isolatedClient });
+      await isolatedDatabase.connect();
 
       const pluginWithoutData = new AuditPlugin({
         enabled: true,
@@ -307,7 +309,7 @@ describe('Audit Plugin', () => {
       const isolatedUsers = await isolatedDatabase.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           department: 'string|required',
@@ -326,7 +328,7 @@ describe('Audit Plugin', () => {
       await isolatedUsers.insert(userData);
 
       // Wait for async audit logging
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       const auditLogs = await pluginWithoutData.getAuditLogs({
         resourceName: 'users',
@@ -1086,7 +1088,7 @@ describe('Audit Plugin', () => {
       const usersNoData = await isolatedDatabase.createResource({
         name: 'users-no-data',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           department: 'string|required',
@@ -1130,7 +1132,7 @@ describe('Audit Plugin', () => {
       const usersNoPartitions = await isolatedDatabase.createResource({
         name: 'users-no-partitions',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           department: 'string|required',

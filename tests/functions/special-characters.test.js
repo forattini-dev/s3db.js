@@ -10,7 +10,7 @@ describe('Comprehensive Special Characters Encoding Tests', () => {
     resource = await db.createResource({
       name: 'test_comprehensive_special_chars',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         description: 'string|optional',
         location: 'string|optional',

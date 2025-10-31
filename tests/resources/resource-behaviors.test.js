@@ -28,7 +28,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           bio: 'string|optional'
@@ -39,7 +39,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string|optional'
         },
@@ -49,7 +49,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       database.createResource({
         name: 'articles',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string|optional'
         },
@@ -59,7 +59,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       database.createResource({
         name: 'documents',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string|optional'
         },
@@ -69,7 +69,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       database.createResource({
         name: 'logs',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           message: 'string|required',
           level: 'string|optional'
         },
@@ -157,7 +157,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const testResource = await database.createResource({
         name: 'test-users-' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           email: 'string|required',
           bio: 'string|optional'
@@ -220,7 +220,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const userManagedResource = await database.createResource({
         name: 'user_managed_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'user-managed'
@@ -244,7 +244,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const userManagedResource = await database.createResource({
         name: 'user_managed_preserve_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|optional',
           description: 'string|optional'
         },
@@ -316,7 +316,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const enforceLimitsResource = await database.createResource({
         name: 'enforce_limits_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'enforce-limits'
@@ -334,7 +334,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const enforceLimitsResource = await database.createResource({
         name: 'enforce_limits_small_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string|optional'
         },
@@ -360,7 +360,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const enforceLimitsResource = await database.createResource({
         name: 'enforce_limits_update_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'enforce-limits'
@@ -379,7 +379,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const enforceLimitsResource = await database.createResource({
         name: 'enforce_limits_upsert_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'enforce-limits'
@@ -397,7 +397,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const enforceLimitsResource = await database.createResource({
         name: 'enforce_limits_get_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         behavior: 'enforce-limits'
@@ -453,7 +453,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const truncateDataResource = await database.createResource({
         name: 'truncate_data_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string|optional'
         },
@@ -480,7 +480,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const truncateDataResource = await database.createResource({
         name: 'truncate_small_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string|optional'
         },
@@ -507,7 +507,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const truncateDataResource = await database.createResource({
         name: 'truncate_update_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'truncate-data'
@@ -529,7 +529,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const truncateDataResource = await database.createResource({
         name: 'truncate_upsert_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'truncate-data'
@@ -550,7 +550,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const truncateDataResource = await database.createResource({
         name: 'truncate_complex_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           description: 'string|optional',
           category: 'string|optional'
         },
@@ -576,7 +576,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const truncateDataResource = await database.createResource({
         name: 'truncate_priority_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           small: 'string|optional',
           medium: 'string|optional',
           large: 'string|optional'
@@ -639,7 +639,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const bodyOverflowResource = await database.createResource({
         name: 'body_overflow_small_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           description: 'string|optional'
         },
@@ -666,7 +666,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const bodyOverflowResource = await database.createResource({
         name: 'body_overflow_large_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'body-overflow'
@@ -725,7 +725,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const bodyOnlyResource = await database.createResource({
         name: 'body_only_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional',
           data: 'object|optional'
         },
@@ -752,7 +752,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       const bodyOnlyResource = await database.createResource({
         name: 'body_only_get_test_' + Date.now(),
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           content: 'string|optional'
         },
         behavior: 'body-only'

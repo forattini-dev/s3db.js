@@ -19,254 +19,256 @@ export function AdminUserFormPage(props = {}) {
 
   const isCurrentUser = editUser.id === user.id;
 
+  const inputClasses = [
+    'block w-full rounded-2xl border border-white/10 bg-white/[0.08]',
+    'px-4 py-2.5 text-sm text-white placeholder:text-slate-300/70',
+    'shadow-[0_1px_0_rgba(255,255,255,0.05)] transition focus:border-white/40 focus:outline-none focus:ring-2 focus:ring-white/30'
+  ].join(' ');
+
+  const checkboxClasses = [
+    'h-4 w-4 rounded border-white/30 bg-slate-900/70 text-primary',
+    'focus:ring-2 focus:ring-primary/40 focus:ring-offset-0 focus:outline-none'
+  ].join(' ');
+
+  const radioClasses = [
+    'h-4 w-4 border-white/30 text-primary focus:ring-2 focus:ring-primary/40 focus:ring-offset-0 focus:outline-none'
+  ].join(' ');
+
+  const primaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl bg-gradient-to-r',
+    'from-primary via-primary to-secondary px-5 py-2.5 text-sm font-semibold text-white',
+    'transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/30'
+  ].join(' ');
+
+  const secondaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06]',
+    'px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/[0.12]',
+    'focus:outline-none focus:ring-2 focus:ring-white/20'
+  ].join(' ');
+
+  const dangerButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-red-400/40 bg-red-500/10',
+    'px-4 py-2.5 text-sm font-semibold text-red-100 transition hover:bg-red-500/15 focus:outline-none focus:ring-2 focus:ring-red-400/40'
+  ].join(' ');
+
+  const statusOptions = [
+    {
+      value: 'active',
+      title: 'Active',
+      description: 'User can log in and access services.'
+    },
+    {
+      value: 'suspended',
+      title: 'Suspended',
+      description: 'User cannot log in.'
+    },
+    {
+      value: 'pending_verification',
+      title: 'Pending Verification',
+      description: 'Awaiting email verification.'
+    }
+  ];
+
+  const roleOptions = [
+    {
+      value: 'user',
+      title: 'User',
+      description: 'Standard access to identity provider services.'
+    },
+    {
+      value: 'admin',
+      title: 'Administrator',
+      description: 'Full administrative access.'
+    }
+  ];
+
   const content = html`
-    <div class="container-sm">
-      <div style="margin-bottom: 2rem;">
-        <a href="/admin/users" class="btn-link" style="font-size: 0.875rem;">← Back to Users</a>
-        <h1 class="mt-3">Edit User: ${editUser.name}</h1>
-      </div>
+    <section class="mx-auto w-full max-w-4xl space-y-8 text-slate-100">
+      <header>
+        <a href="/admin/users" class="text-sm font-semibold text-primary transition hover:text-white">
+          ← Back to Users
+        </a>
+        <h1 class="mt-3 text-3xl font-semibold text-white md:text-4xl">
+          Edit User: ${editUser.name}
+        </h1>
+        <p class="mt-2 text-sm text-slate-300">
+          Update profile details, status, and permissions for this user.
+        </p>
+      </header>
 
-      <div class="card">
-        <form method="POST" action="/admin/users/${editUser.id}/update">
-          <div class="p-3">
-            <!-- Name -->
-            <div class="form-group">
-              <label for="name" class="form-label form-label-required">Full Name</label>
-              <input
-                type="text"
-                class="form-control ${error ? 'is-invalid' : ''}"
-                id="name"
-                name="name"
-                value="${editUser.name}"
-                required
-                autofocus
-                placeholder="John Doe"
-              />
-              <small class="form-text">User's display name</small>
-              ${error ? html`<div class="invalid-feedback">${error}</div>` : ''}
-            </div>
+      <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-8 shadow-xl shadow-black/30 backdrop-blur">
+        <form method="POST" action="/admin/users/${editUser.id}/update" class="space-y-6">
+          <div class="space-y-2">
+            <label for="name" class="text-sm font-semibold text-slate-200">Full Name</label>
+            <input
+              type="text"
+              class="${inputClasses} ${error ? 'border-red-400/60 focus:border-red-400 focus:ring-red-400/40' : ''}"
+              id="name"
+              name="name"
+              value="${editUser.name}"
+              required
+              autofocus
+              placeholder="John Doe"
+            />
+            <p class="text-xs text-slate-400">User's display name.</p>
+            ${error ? html`<p class="text-xs text-red-200">${error}</p>` : ''}
+          </div>
 
-            <!-- Email -->
-            <div class="form-group">
-              <label for="email" class="form-label form-label-required">Email Address</label>
-              <input
-                type="email"
-                class="form-control"
-                id="email"
-                name="email"
-                value="${editUser.email}"
-                required
-                placeholder="user@example.com"
-              />
-              <small class="form-text">Email address for login and notifications</small>
-            </div>
+          <div class="space-y-2">
+            <label for="email" class="text-sm font-semibold text-slate-200">Email Address</label>
+            <input
+              type="email"
+              class="${inputClasses}"
+              id="email"
+              name="email"
+              value="${editUser.email}"
+              required
+              placeholder="user@example.com"
+            />
+            <p class="text-xs text-slate-400">Email address used for login and notifications.</p>
+          </div>
 
-            <!-- Status -->
-            <div class="form-group">
-              <label class="form-label form-label-required">Account Status</label>
-              <div style="display: grid; gap: 0.75rem;">
-                <div class="form-check">
+          <div class="space-y-3">
+            <span class="text-sm font-semibold text-slate-200">Account Status</span>
+            <div class="grid gap-3">
+              ${statusOptions.map(option => html`
+                <label class="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200">
                   <input
                     type="radio"
-                    class="form-check-input"
-                    id="status_active"
+                    class="${radioClasses} mt-1"
+                    id="status_${option.value}"
                     name="status"
-                    value="active"
-                    ${editUser.status === 'active' ? 'checked' : ''}
+                    value="${option.value}"
+                    ${editUser.status === option.value ? 'checked' : ''}
                     ${isCurrentUser ? 'disabled' : ''}
                   />
-                  <label class="form-check-label" for="status_active">
-                    <strong>Active</strong> - User can log in and access services
-                  </label>
-                </div>
-                <div class="form-check">
-                  <input
-                    type="radio"
-                    class="form-check-input"
-                    id="status_suspended"
-                    name="status"
-                    value="suspended"
-                    ${editUser.status === 'suspended' ? 'checked' : ''}
-                    ${isCurrentUser ? 'disabled' : ''}
-                  />
-                  <label class="form-check-label" for="status_suspended">
-                    <strong>Suspended</strong> - User cannot log in
-                  </label>
-                </div>
-                <div class="form-check">
-                  <input
-                    type="radio"
-                    class="form-check-input"
-                    id="status_pending"
-                    name="status"
-                    value="pending_verification"
-                    ${editUser.status === 'pending_verification' ? 'checked' : ''}
-                    ${isCurrentUser ? 'disabled' : ''}
-                  />
-                  <label class="form-check-label" for="status_pending">
-                    <strong>Pending Verification</strong> - Awaiting email verification
-                  </label>
-                </div>
-              </div>
-              ${isCurrentUser ? html`
-                <small class="form-text" style="color: var(--color-warning);">You cannot change your own status</small>
-              ` : ''}
-            </div>
-
-            <!-- Role -->
-            <div class="form-group">
-              <label class="form-label form-label-required">Role</label>
-              <div style="display: grid; gap: 0.75rem;">
-                <div class="form-check">
-                  <input
-                    type="radio"
-                    class="form-check-input"
-                    id="role_user"
-                    name="role"
-                    value="user"
-                    ${editUser.role !== 'admin' ? 'checked' : ''}
-                    ${isCurrentUser ? 'disabled' : ''}
-                  />
-                  <label class="form-check-label" for="role_user">
-                    <strong>User</strong> - Standard user access
-                  </label>
-                </div>
-                <div class="form-check">
-                  <input
-                    type="radio"
-                    class="form-check-input"
-                    id="role_admin"
-                    name="role"
-                    value="admin"
-                    ${editUser.role === 'admin' ? 'checked' : ''}
-                    ${isCurrentUser ? 'disabled' : ''}
-                  />
-                  <label class="form-check-label" for="role_admin">
-                    <strong>Admin</strong> - Full administrative access
-                  </label>
-                </div>
-              </div>
-              ${isCurrentUser ? html`
-                <small class="form-text" style="color: var(--color-warning);">You cannot change your own role</small>
-              ` : ''}
-            </div>
-
-            <!-- Email Verification -->
-            <div class="form-group">
-              <div class="form-check">
-                <input
-                  type="checkbox"
-                  class="form-check-input"
-                  id="emailVerified"
-                  name="emailVerified"
-                  value="1"
-                  ${editUser.emailVerified ? 'checked' : ''}
-                />
-                <label class="form-check-label" for="emailVerified">
-                  <strong>Email Verified</strong> - User has confirmed their email address
+                  <span>
+                    <strong class="text-white">${option.title}</strong><br>
+                    <span class="text-xs text-slate-400">${option.description}</span>
+                  </span>
                 </label>
-              </div>
+              `)}
             </div>
+            ${isCurrentUser ? html`
+              <p class="text-xs text-amber-300">You cannot change your own status.</p>
+            ` : ''}
+          </div>
 
-            <!-- Submit Buttons -->
-            <div class="form-group mb-0" style="display: flex; gap: 1rem;">
-              <button type="submit" class="btn btn-primary">
-                Update User
-              </button>
-              <a href="/admin/users" class="btn btn-secondary">
-                Cancel
-              </a>
+          <div class="space-y-3">
+            <span class="text-sm font-semibold text-slate-200">Role</span>
+            <div class="grid gap-3">
+              ${roleOptions.map(option => html`
+                <label class="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200">
+                  <input
+                    type="radio"
+                    class="${radioClasses} mt-1"
+                    id="role_${option.value}"
+                    name="role"
+                    value="${option.value}"
+                    ${editUser.role === option.value ? 'checked' : ''}
+                    ${isCurrentUser ? 'disabled' : ''}
+                  />
+                  <span>
+                    <strong class="text-white">${option.title}</strong><br>
+                    <span class="text-xs text-slate-400">${option.description}</span>
+                  </span>
+                </label>
+              `)}
             </div>
+            ${isCurrentUser ? html`
+              <p class="text-xs text-amber-300">You cannot change your own role.</p>
+            ` : ''}
+          </div>
+
+          <label class="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              class="${checkboxClasses} mt-1"
+              id="emailVerified"
+              name="emailVerified"
+              value="1"
+              ${editUser.emailVerified ? 'checked' : ''}
+            />
+            <span>
+              <strong class="text-white">Email Verified</strong><br>
+              <span class="text-xs text-slate-400">User has confirmed their email address.</span>
+            </span>
+          </label>
+
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-start">
+            <button type="submit" class="${primaryButtonClass} sm:w-auto" style="box-shadow: 0 18px 45px var(--color-primary-glow);">
+              Update User
+            </button>
+            <a href="/admin/users" class="${secondaryButtonClass}">
+              Cancel
+            </a>
           </div>
         </form>
       </div>
 
-      <!-- User Information -->
-      <div class="card mt-4">
-        <div class="card-header">
-          User Information
-        </div>
-        <div class="p-3">
-          <div style="display: grid; gap: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
-              <span style="font-weight: 500;">User ID:</span>
-              <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem;">
+      <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-6 shadow-xl shadow-black/30 backdrop-blur">
+        <h2 class="text-lg font-semibold text-white">User Information</h2>
+        <dl class="mt-4 divide-y divide-white/10 text-sm text-slate-200">
+          <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <dt class="text-slate-400">User ID</dt>
+            <dd>
+              <code class="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-1 text-xs text-slate-200">
                 ${editUser.id}
               </code>
-            </div>
-            ${editUser.createdAt ? html`
-              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
-                <span style="font-weight: 500;">Joined:</span>
-                <span>${new Date(editUser.createdAt).toLocaleString()}</span>
-              </div>
-            ` : ''}
-            ${editUser.updatedAt ? html`
-              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
-                <span style="font-weight: 500;">Last Updated:</span>
-                <span>${new Date(editUser.updatedAt).toLocaleString()}</span>
-              </div>
-            ` : ''}
-            ${editUser.lastLoginAt ? html`
-              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
-                <span style="font-weight: 500;">Last Login:</span>
-                <span>${new Date(editUser.lastLoginAt).toLocaleString()}</span>
-              </div>
-            ` : html`
-              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
-                <span style="font-weight: 500;">Last Login:</span>
-                <span style="color: var(--color-text-muted);">Never</span>
-              </div>
-            `}
+            </dd>
           </div>
-        </div>
+          ${editUser.createdAt ? html`
+            <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <dt class="text-slate-400">Joined</dt>
+              <dd>${new Date(editUser.createdAt).toLocaleString()}</dd>
+            </div>
+          ` : ''}
+          ${editUser.updatedAt ? html`
+            <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <dt class="text-slate-400">Last Updated</dt>
+              <dd>${new Date(editUser.updatedAt).toLocaleString()}</dd>
+            </div>
+          ` : ''}
+          <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <dt class="text-slate-400">Last Login</dt>
+            <dd>${editUser.lastLoginAt ? new Date(editUser.lastLoginAt).toLocaleString() : html`<span class="text-slate-400">Never</span>`}</dd>
+          </div>
+        </dl>
       </div>
 
-      <!-- Danger Zone -->
       ${!isCurrentUser ? html`
-        <div class="card mt-4" style="border-color: var(--color-danger);">
-          <div class="card-header" style="background-color: var(--color-danger); color: white;">
-            Danger Zone
+        <div class="rounded-3xl border border-red-500/40 bg-red-500/5 shadow-xl shadow-black/30 backdrop-blur">
+          <div class="rounded-t-3xl border-b border-red-500/40 bg-red-500/20 px-6 py-4 text-white">
+            <h2 class="text-lg font-semibold">Danger Zone</h2>
           </div>
-          <div class="p-3">
-            <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <!-- Send Password Reset -->
-              <div>
-                <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Send Password Reset Email</h3>
-                <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.75rem;">
-                  Send a password reset link to ${editUser.email}
-                </p>
-                <form method="POST" action="/admin/users/${editUser.id}/reset-password" style="margin: 0;">
-                  <button
-                    type="submit"
-                    class="btn btn-secondary"
-                    onclick="return confirm('Send password reset email to ${editUser.email}?')"
-                  >
-                    🔑 Send Password Reset
-                  </button>
-                </form>
-              </div>
+          <div class="space-y-6 px-6 py-6 text-sm text-slate-100">
+            <div>
+              <h3 class="text-base font-semibold text-white">Send Password Reset Email</h3>
+              <p class="mt-2 text-xs text-red-100">
+                Send a password reset link to ${editUser.email}.
+              </p>
+              <form method="POST" action="/admin/users/${editUser.id}/reset-password" onsubmit="return confirm('Send password reset email to ${editUser.email}?')">
+                <button type="submit" class="${secondaryButtonClass} mt-3">
+                  🔑 Send Password Reset
+                </button>
+              </form>
+            </div>
 
-              <!-- Delete User -->
-              <div style="padding-top: 1rem; border-top: 1px solid var(--color-border);">
-                <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Delete User Account</h3>
-                <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 0.75rem;">
-                  Permanently delete this user account. This action cannot be undone.
-                </p>
-                <form method="POST" action="/admin/users/${editUser.id}/delete" style="margin: 0;">
-                  <button
-                    type="submit"
-                    class="btn btn-danger"
-                    onclick="return confirm('Are you sure you want to delete ${editUser.name}? This action cannot be undone.')"
-                  >
-                    🗑️ Delete User
-                  </button>
-                </form>
-              </div>
+            <div class="border-t border-red-500/30 pt-6">
+              <h3 class="text-base font-semibold text-white">Delete User Account</h3>
+              <p class="mt-2 text-xs text-red-100">
+                Permanently delete this user account. This action cannot be undone.
+              </p>
+              <form method="POST" action="/admin/users/${editUser.id}/delete" onsubmit="return confirm('Are you sure you want to delete ${editUser.name}? This action cannot be undone.')">
+                <button type="submit" class="${dangerButtonClass} mt-3">
+                  🗑️ Delete User
+                </button>
+              </form>
             </div>
           </div>
         </div>
       ` : ''}
-    </div>
+    </section>
   `;
 
   return BaseLayout({

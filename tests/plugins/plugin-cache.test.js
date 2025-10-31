@@ -103,12 +103,12 @@ describe('Cache Plugin - Comprehensive Tests', () => {
     });
 
     test('should handle TTL expiration', async () => {
-      const cache = new MemoryCache({ ttl: 0.05 }); // 50ms TTL
-      
+      const cache = new MemoryCache({ ttl: 50 }); // 50ms TTL
+
       await cache.set('expire-key', { data: 'will-expire' });
       const immediate = await cache.get('expire-key');
       expect(immediate).toEqual({ data: 'will-expire' });
-      
+
       // Wait for expiration
       await new Promise(resolve => setTimeout(resolve, 100));
       const expired = await cache.get('expire-key');

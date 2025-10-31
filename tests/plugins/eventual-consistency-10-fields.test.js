@@ -30,7 +30,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     metrics = await database.createResource({
       name: 'metrics',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         // 10 metric fields
         impressions: 'number|default:0',
@@ -103,7 +103,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     metrics = await database.createResource({
       name: 'metrics',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         impressions: 'number|default:0',
         clicks: 'number|default:0',
@@ -197,7 +197,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     metrics = await database.createResource({
       name: 'metrics',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         impressions: 'number|default:0',
         clicks: 'number|default:0',

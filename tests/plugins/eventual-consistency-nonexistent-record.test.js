@@ -29,7 +29,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         shortUrl: 'string|required', // Required field!
         clicks: 'number|default:0'
       }
@@ -133,7 +133,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         shortUrl: 'string|required',
         clicks: 'number|default:0'
       }
@@ -219,7 +219,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         shortUrl: 'string|required',
         longUrl: 'string|required',
         clicks: 'number|default:0'

@@ -67,8 +67,9 @@ export function createAuthRoutes(authResource, config = {}) {
 
       // Create user with dynamic fields
       // Only include fields from request + required auth fields
+      const { id, ...dataWithoutId } = data; // Exclude id from request data
       const userData = {
-        ...data, // Include all fields from request first
+        ...dataWithoutId, // Include all fields from request except id
         [usernameField]: username, // Override to ensure correct value
         [passwordField]: password // Will be auto-encrypted by schema (secret field)
       };
@@ -139,8 +140,27 @@ export function createAuthRoutes(authResource, config = {}) {
       }
 
       // Verify password (compare with password field)
-      // Schema handles encryption/decryption for 'secret' field types
-      const isValid = user[passwordField] === password;
+      // For 'password' field type (bcrypt hash), use verifyPassword
+      // For 'secret' field type (AES encryption), compare directly
+      let isValid = false;
+
+      const storedPassword = user[passwordField];
+      if (!storedPassword) {
+        const response = formatter.unauthorized('Invalid credentials');
+        return c.json(response, response._status);
+      }
+
+      // Check if it's a bcrypt hash (starts with $ or is compacted 53 chars)
+      const isBcryptHash = storedPassword.startsWith('$') || (storedPassword.length === 53 && !storedPassword.includes(':'));
+
+      if (isBcryptHash) {
+        // Import verifyPassword for bcrypt hashes
+        const { verifyPassword } = await import('../../../concerns/password-hashing.js');
+        isValid = await verifyPassword(password, storedPassword);
+      } else {
+        // For encrypted/secret fields, direct comparison
+        isValid = storedPassword === password;
+      }
 
       if (!isValid) {
         const response = formatter.unauthorized('Invalid credentials');

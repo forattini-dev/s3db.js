@@ -16,146 +16,158 @@ import { BaseLayout } from '../../layouts/base.js';
 export function AdminDashboardPage(props = {}) {
   const { stats = {}, user = {}, config = {} } = props;
 
+  const formatNumber = value => Number(value || 0).toLocaleString();
+
+  const statCards = [
+    {
+      title: 'Total Users',
+      value: formatNumber(stats.totalUsers),
+      description: `${formatNumber(stats.activeUsers)} active · ${formatNumber(stats.pendingUsers)} pending`,
+      gradient: 'from-sky-500/90 via-blue-500/80 to-indigo-500/80'
+    },
+    {
+      title: 'OAuth2 Clients',
+      value: formatNumber(stats.totalClients),
+      description: `${formatNumber(stats.activeClients)} active`,
+      gradient: 'from-fuchsia-500/90 via-rose-500/80 to-orange-500/80'
+    },
+    {
+      title: 'Active Sessions',
+      value: formatNumber(stats.activeSessions),
+      description: `${formatNumber(stats.uniqueUsers)} unique users`,
+      gradient: 'from-cyan-400/90 via-blue-400/80 to-sky-400/80'
+    },
+    {
+      title: 'Auth Codes',
+      value: formatNumber(stats.totalAuthCodes),
+      description: `${formatNumber(stats.unusedAuthCodes)} unused`,
+      gradient: 'from-emerald-400/90 via-teal-400/80 to-green-400/80'
+    }
+  ];
+
+  const quickLinks = [
+    { href: '/admin/clients', label: '📱 Manage Clients' },
+    { href: '/admin/users', label: '👥 Manage Users' },
+    { href: '/admin/sessions', label: '🔐 View Sessions' },
+    { href: '/admin/auth-codes', label: '🎫 Auth Codes' }
+  ];
+
+  const recentUsers = Array.isArray(stats.recentUsers) ? stats.recentUsers : [];
+
   const content = html`
-    <div class="container">
-      <h1 class="mb-4">Admin Dashboard</h1>
-
-      <!-- Statistics Cards -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
-        <!-- Users Card -->
-        <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-          <div class="p-3">
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Total Users</div>
-            <div style="font-size: 2rem; font-weight: bold;">${stats.totalUsers || 0}</div>
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
-              ${stats.activeUsers || 0} active · ${stats.pendingUsers || 0} pending
-            </div>
+    <section class="mx-auto w-full max-w-6xl space-y-8 text-slate-100">
+      <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 class="text-3xl font-semibold text-white md:text-4xl">Admin Dashboard</h1>
+          <p class="mt-1 text-sm text-slate-300">
+            Overview of identity activity, clients, and health metrics.
+          </p>
+        </div>
+        <div class="rounded-2xl border border-white/15 bg-white/[0.06] px-4 py-3 text-xs text-slate-300">
+          <div class="text-sm font-semibold text-white">${user.email || 'admin@s3db.identity'}</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <span class="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-200">
+              Administrator
+            </span>
+            ${stats.serverUptime ? html`
+              <span class="text-xs text-slate-400">
+                Uptime: ${stats.serverUptime}
+              </span>
+            ` : ''}
           </div>
         </div>
+      </header>
 
-        <!-- OAuth2 Clients Card -->
-        <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
-          <div class="p-3">
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">OAuth2 Clients</div>
-            <div style="font-size: 2rem; font-weight: bold;">${stats.totalClients || 0}</div>
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
-              ${stats.activeClients || 0} active
-            </div>
+      <div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+        ${statCards.map(card => html`
+          <div class="rounded-3xl border border-white/10 bg-gradient-to-br ${card.gradient} p-6 shadow-xl shadow-black/30 backdrop-blur">
+            <div class="text-xs uppercase tracking-wide text-white/80">${card.title}</div>
+            <div class="mt-3 text-3xl font-semibold text-white">${card.value}</div>
+            <div class="mt-2 text-sm text-white/80">${card.description}</div>
           </div>
-        </div>
+        `)}
+      </div>
 
-        <!-- Sessions Card -->
-        <div class="card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
-          <div class="p-3">
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Active Sessions</div>
-            <div style="font-size: 2rem; font-weight: bold;">${stats.activeSessions || 0}</div>
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
-              ${stats.uniqueUsers || 0} unique users
-            </div>
-          </div>
-        </div>
-
-        <!-- Auth Codes Card -->
-        <div class="card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white;">
-          <div class="p-3">
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Auth Codes</div>
-            <div style="font-size: 2rem; font-weight: bold;">${stats.totalAuthCodes || 0}</div>
-            <div style="font-size: 0.875rem; opacity: 0.9; margin-top: 0.5rem;">
-              ${stats.unusedAuthCodes || 0} unused
-            </div>
-          </div>
+      <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-6 shadow-xl shadow-black/30 backdrop-blur">
+        <h2 class="text-lg font-semibold text-white">Quick Actions</h2>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          ${quickLinks.map(link => html`
+            <a
+              href="${link.href}"
+              class="flex items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/[0.12] focus:outline-none focus:ring-2 focus:ring-white/20"
+            >
+              ${link.label}
+            </a>
+          `)}
         </div>
       </div>
 
-      <!-- Quick Actions -->
-      <div class="card mb-4">
-        <div class="card-header">
-          Quick Actions
-        </div>
-        <div class="p-3">
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-            <a href="/admin/clients" class="btn btn-primary" style="text-decoration: none; text-align: center;">
-              📱 Manage Clients
-            </a>
-            <a href="/admin/users" class="btn btn-primary" style="text-decoration: none; text-align: center;">
-              👥 Manage Users
-            </a>
-            <a href="/admin/sessions" class="btn btn-primary" style="text-decoration: none; text-align: center;">
-              🔐 View Sessions
-            </a>
-            <a href="/admin/auth-codes" class="btn btn-primary" style="text-decoration: none; text-align: center;">
-              🎫 Auth Codes
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Recent Activity -->
-      ${stats.recentUsers && stats.recentUsers.length > 0 ? html`
-        <div class="card mb-4">
-          <div class="card-header">
-            Recent Users
-          </div>
-          <div class="p-3">
-            <table style="width: 100%; border-collapse: collapse;">
-              <thead>
-                <tr style="border-bottom: 2px solid var(--color-border);">
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Email</th>
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Name</th>
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Status</th>
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 500;">Created</th>
+      ${recentUsers.length > 0 ? html`
+        <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-6 shadow-xl shadow-black/30 backdrop-blur">
+          <h2 class="text-lg font-semibold text-white">Recent Users</h2>
+          <div class="mt-4 overflow-hidden rounded-2xl border border-white/10">
+            <table class="min-w-full divide-y divide-white/10 text-left text-sm text-slate-200">
+              <thead class="bg-white/[0.04] text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th class="px-4 py-3 font-medium">Email</th>
+                  <th class="px-4 py-3 font-medium">Name</th>
+                  <th class="px-4 py-3 font-medium">Status</th>
+                  <th class="px-4 py-3 font-medium">Created</th>
                 </tr>
               </thead>
-              <tbody>
-                ${stats.recentUsers.map(user => html`
-                  <tr style="border-bottom: 1px solid var(--color-border);">
-                    <td style="padding: 0.75rem;">${user.email}</td>
-                    <td style="padding: 0.75rem;">${user.name}</td>
-                    <td style="padding: 0.75rem;">
-                      <span class="badge" style="background-color: ${user.status === 'active' ? 'var(--color-success)' : user.status === 'suspended' ? 'var(--color-danger)' : 'var(--color-warning)'}; color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
-                        ${user.status}
-                      </span>
-                    </td>
-                    <td style="padding: 0.75rem; color: var(--color-text-muted); font-size: 0.875rem;">
-                      ${new Date(user.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                `)}
+              <tbody class="divide-y divide-white/5">
+                ${recentUsers.map(recentUser => {
+                  const statusClass = recentUser.status === 'active'
+                    ? 'bg-emerald-500/20 text-emerald-200'
+                    : recentUser.status === 'suspended'
+                      ? 'bg-red-500/20 text-red-200'
+                      : 'bg-amber-500/20 text-amber-200';
+
+                  return html`
+                    <tr class="hover:bg-white/[0.04]">
+                      <td class="px-4 py-3">${recentUser.email}</td>
+                      <td class="px-4 py-3">${recentUser.name}</td>
+                      <td class="px-4 py-3">
+                        <span class="rounded-full px-3 py-1 text-xs font-semibold ${statusClass}">
+                          ${recentUser.status}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-slate-400">
+                        ${new Date(recentUser.createdAt).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  `;
+                })}
               </tbody>
             </table>
           </div>
         </div>
       ` : ''}
 
-      <!-- System Information -->
-      <div class="card">
-        <div class="card-header">
-          System Information
-        </div>
-        <div class="p-3">
-          <div style="display: grid; gap: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
-              <span style="font-weight: 500;">Identity Provider:</span>
-              <span>${config.title || 'S3DB Identity'}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
-              <span style="font-weight: 500;">Your Role:</span>
-              <span style="color: var(--color-primary);">Administrator</span>
-            </div>
-            ${stats.serverUptime ? html`
-              <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border);">
-                <span style="font-weight: 500;">Server Uptime:</span>
-                <span>${stats.serverUptime}</span>
-              </div>
-            ` : ''}
-            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
-              <span style="font-weight: 500;">Database Type:</span>
-              <span>S3DB (S3-based Document Database)</span>
-            </div>
+      <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-6 shadow-xl shadow-black/30 backdrop-blur">
+        <h2 class="text-lg font-semibold text-white">System Information</h2>
+        <dl class="mt-4 divide-y divide-white/10 text-sm text-slate-200">
+          <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <dt class="text-slate-400">Identity Provider</dt>
+            <dd class="font-medium text-white">${config.title || 'S3DB Identity'}</dd>
           </div>
-        </div>
+          <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <dt class="text-slate-400">Your Role</dt>
+            <dd class="font-medium text-primary">Administrator</dd>
+          </div>
+          ${stats.serverUptime ? html`
+            <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <dt class="text-slate-400">Server Uptime</dt>
+              <dd>${stats.serverUptime}</dd>
+            </div>
+          ` : ''}
+          <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <dt class="text-slate-400">Database Type</dt>
+            <dd>S3DB (S3-based Document Database)</dd>
+          </div>
+        </dl>
       </div>
-    </div>
+    </section>
   `;
 
   return BaseLayout({

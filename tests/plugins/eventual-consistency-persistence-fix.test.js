@@ -27,7 +27,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|optional',
         clicks: 'number|default:0',
         views: 'number|default:0'
@@ -179,7 +179,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         link: 'string|optional',
         clicks: 'number|default:0'
       }

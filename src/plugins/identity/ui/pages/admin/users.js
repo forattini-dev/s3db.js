@@ -5,6 +5,12 @@
 import { html } from 'hono/html';
 import { BaseLayout } from '../../layouts/base.js';
 
+const STATUS_STYLES = {
+  active: 'bg-emerald-500/20 text-emerald-200',
+  suspended: 'bg-red-500/20 text-red-200',
+  pending_verification: 'bg-amber-500/20 text-amber-200'
+};
+
 /**
  * Render users list page
  * @param {Object} props - Page properties
@@ -18,203 +24,230 @@ import { BaseLayout } from '../../layouts/base.js';
 export function AdminUsersPage(props = {}) {
   const { users = [], user = {}, error = null, success = null, config = {} } = props;
 
-  const statusColors = {
-    active: 'var(--color-success)',
-    suspended: 'var(--color-danger)',
-    pending_verification: 'var(--color-warning)'
-  };
+  const secondaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06]',
+    'px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/[0.12]',
+    'focus:outline-none focus:ring-2 focus:ring-white/20'
+  ].join(' ');
+
+  const dangerButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-red-400/40 bg-red-500/10',
+    'px-4 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/15 focus:outline-none focus:ring-2 focus:ring-red-400/40'
+  ].join(' ');
+
+  const successButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10',
+    'px-4 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/15 focus:outline-none focus:ring-2 focus:ring-emerald-400/40'
+  ].join(' ');
+
+  const primaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl bg-gradient-to-r',
+    'from-primary via-primary to-secondary px-4 py-2 text-xs font-semibold text-white',
+    'transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/30'
+  ].join(' ');
+
+  const headerSecondaryButtonClass = [
+    'inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06]',
+    'px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/[0.12]',
+    'focus:outline-none focus:ring-2 focus:ring-white/20'
+  ].join(' ');
+
+  const summaryCards = [
+    {
+      label: 'Total Users',
+      value: users.length,
+      gradient: 'from-sky-500/90 via-blue-500/80 to-indigo-500/80'
+    },
+    {
+      label: 'Active',
+      value: users.filter(u => u.status === 'active').length,
+      gradient: 'from-emerald-400/90 via-green-400/80 to-teal-400/80'
+    },
+    {
+      label: 'Pending',
+      value: users.filter(u => u.status === 'pending_verification').length,
+      gradient: 'from-amber-400/90 via-orange-400/80 to-yellow-400/80'
+    },
+    {
+      label: 'Verified Emails',
+      value: users.filter(u => u.emailVerified).length,
+      gradient: 'from-fuchsia-500/90 via-rose-500/80 to-purple-500/80'
+    }
+  ];
+
+  const tableRows = users.map(current => {
+    const statusClass = STATUS_STYLES[current.status] || 'bg-white/10 text-slate-200';
+    const isCurrentUser = current.id === user.id;
+
+    const actions = [];
+
+    actions.push(html`
+      <a href="/admin/users/${current.id}/edit" class="${secondaryButtonClass}">
+        Edit
+      </a>
+    `);
+
+    if (!isCurrentUser) {
+      actions.push(html`
+        <form method="POST" action="/admin/users/${current.id}/delete" onsubmit="return confirm('Delete user ${current.email}? This cannot be undone.')">
+          <button type="submit" class="${dangerButtonClass}">
+            Delete
+          </button>
+        </form>
+      `);
+
+      actions.push(html`
+        <form method="POST" action="/admin/users/${current.id}/toggle-status">
+          <button type="submit" class="${current.status === 'active' ? dangerButtonClass : successButtonClass}">
+            ${current.status === 'active' ? '🔴 Suspend' : '🟢 Activate'}
+          </button>
+        </form>
+      `);
+
+      if (!current.emailVerified) {
+        actions.push(html`
+          <form method="POST" action="/admin/users/${current.id}/verify-email">
+            <button type="submit" class="${secondaryButtonClass}">
+              ✓ Mark Verified
+            </button>
+          </form>
+        `);
+      }
+
+      if (current.lockedUntil || current.failedLoginAttempts > 0) {
+        const isLocked = current.lockedUntil && new Date(current.lockedUntil) > new Date();
+        const lockInfo = isLocked
+          ? `Locked until ${new Date(current.lockedUntil).toLocaleString()}`
+          : `${current.failedLoginAttempts} failed attempts`;
+
+        actions.push(html`
+          <form method="POST" action="/admin/users/${current.id}/unlock-account" onsubmit="return confirm('Unlock account for ${current.email}?\\n\\n${lockInfo}')">
+            <button type="submit" class="${successButtonClass}">
+              🔓 Unlock Account
+            </button>
+          </form>
+        `);
+      }
+
+      actions.push(html`
+        <form method="POST" action="/admin/users/${current.id}/reset-password" onsubmit="return confirm('Send password reset email to ${current.email}?')">
+          <button type="submit" class="${secondaryButtonClass}">
+            🔑 Send Reset
+          </button>
+        </form>
+      `);
+
+      actions.push(html`
+        <form method="POST" action="/admin/users/${current.id}/toggle-admin" onsubmit="return confirm('${current.role === 'admin' ? 'Remove admin privileges from' : 'Grant admin privileges to'} ${current.name}?')">
+          <button type="submit" class="${current.role === 'admin' ? dangerButtonClass : primaryButtonClass}">
+            ${current.role === 'admin' ? '👤 Remove Admin' : '⚡ Make Admin'}
+          </button>
+        </form>
+      `);
+    }
+
+    return html`
+      <tr class="border-b border-white/10 hover:bg-white/[0.04]">
+        <td class="px-4 py-3 align-top">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold text-white">${current.name}</span>
+            ${isCurrentUser ? html`
+              <span class="rounded-full bg-primary/20 px-3 py-1 text-xs font-semibold text-primary">
+                You
+              </span>
+            ` : ''}
+          </div>
+        </td>
+        <td class="px-4 py-3 align-top">
+          <code class="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-1 text-xs text-slate-200">
+            ${current.email}
+          </code>
+        </td>
+        <td class="px-4 py-3 align-top">
+          <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass}">
+            ${current.status.replace('_', ' ')}
+          </span>
+        </td>
+        <td class="px-4 py-3 align-top">
+          ${current.role === 'admin' ? html`
+            <span class="rounded-full bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-200">
+              Admin
+            </span>
+          ` : html`
+            <span class="text-xs text-slate-300">User</span>
+          `}
+        </td>
+        <td class="px-4 py-3 align-top">
+          ${current.emailVerified ? html`
+            <span class="text-emerald-300">✓</span>
+          ` : html`
+            <span class="text-slate-400">✗</span>
+          `}
+        </td>
+        <td class="px-4 py-3 align-top text-xs text-slate-400">
+          ${current.createdAt ? new Date(current.createdAt).toLocaleDateString() : 'Unknown'}
+        </td>
+        <td class="px-4 py-3 align-top">
+          <div class="flex flex-wrap justify-end gap-2">
+            ${actions}
+          </div>
+        </td>
+      </tr>
+    `;
+  });
 
   const content = html`
-    <div class="container">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-        <h1>User Management</h1>
-        <a href="/admin" class="btn btn-secondary">
+    <section class="mx-auto w-full max-w-7xl space-y-8 text-slate-100">
+      <header class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 class="text-3xl font-semibold text-white md:text-4xl">User Management</h1>
+          <p class="mt-1 text-sm text-slate-300">
+            Audit user accounts, toggle access, and elevate permissions.
+          </p>
+        </div>
+        <a href="/admin" class="${headerSecondaryButtonClass}">
           ← Back to Dashboard
         </a>
-      </div>
+      </header>
 
       ${users.length === 0 ? html`
-        <div class="card">
-          <div class="p-3 text-center">
-            <p class="text-muted">No users found.</p>
-          </div>
+        <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-10 text-center shadow-xl shadow-black/30 backdrop-blur">
+          <p class="text-sm text-slate-300">
+            No users found.
+          </p>
         </div>
       ` : html`
-        <div class="card">
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="border-bottom: 2px solid var(--color-border); background-color: var(--color-light);">
-                <th style="text-align: left; padding: 1rem; font-weight: 500;">Name</th>
-                <th style="text-align: left; padding: 1rem; font-weight: 500;">Email</th>
-                <th style="text-align: left; padding: 1rem; font-weight: 500;">Status</th>
-                <th style="text-align: left; padding: 1rem; font-weight: 500;">Role</th>
-                <th style="text-align: left; padding: 1rem; font-weight: 500;">Verified</th>
-                <th style="text-align: left; padding: 1rem; font-weight: 500;">Joined</th>
-                <th style="text-align: right; padding: 1rem; font-weight: 500;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${users.map(u => {
-                const statusColor = statusColors[u.status] || 'var(--color-text-muted)';
-                const isCurrentUser = u.id === user.id;
-
-                return html`
-                  <tr style="border-bottom: 1px solid var(--color-border);">
-                    <td style="padding: 1rem;">
-                      <strong>${u.name}</strong>
-                      ${isCurrentUser ? html`
-                        <span class="badge" style="background-color: var(--color-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem; margin-left: 0.5rem;">
-                          You
-                        </span>
-                      ` : ''}
-                    </td>
-                    <td style="padding: 1rem;">
-                      <code style="background: var(--color-light); padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.875rem;">
-                        ${u.email}
-                      </code>
-                    </td>
-                    <td style="padding: 1rem;">
-                      <span class="badge" style="background-color: ${statusColor}; color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
-                        ${u.status.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td style="padding: 1rem;">
-                      ${u.role === 'admin' ? html`
-                        <span class="badge" style="background-color: var(--color-danger); color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.75rem;">
-                          Admin
-                        </span>
-                      ` : html`
-                        <span style="color: var(--color-text-muted); font-size: 0.875rem;">User</span>
-                      `}
-                    </td>
-                    <td style="padding: 1rem;">
-                      ${u.emailVerified ? html`
-                        <span style="color: var(--color-success);">✓</span>
-                      ` : html`
-                        <span style="color: var(--color-text-muted);">✗</span>
-                      `}
-                    </td>
-                    <td style="padding: 1rem; color: var(--color-text-muted); font-size: 0.875rem;">
-                      ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'Unknown'}
-                    </td>
-                    <td style="padding: 1rem; text-align: right;">
-                      <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-                        <a href="/admin/users/${u.id}/edit" class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.5rem 0.75rem;">
-                          Edit
-                        </a>
-                        ${!isCurrentUser ? html`
-                          <form method="POST" action="/admin/users/${u.id}/delete" style="margin: 0; display: inline;">
-                            <button
-                              type="submit"
-                              class="btn btn-danger"
-                              style="font-size: 0.875rem; padding: 0.5rem 0.75rem;"
-                              onclick="return confirm('Are you sure you want to delete this user? This action cannot be undone.')"
-                            >
-                              Delete
-                            </button>
-                          </form>
-                        ` : ''}
-                      </div>
-                    </td>
-                  </tr>
-
-                  <!-- Expandable Actions Row -->
-                  <tr style="border-bottom: 1px solid var(--color-border); background-color: var(--color-light);">
-                    <td colspan="7" style="padding: 0.75rem 1rem;">
-                      <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                        <!-- Status Management -->
-                        ${!isCurrentUser ? html`
-                          <form method="POST" action="/admin/users/${u.id}/change-status" style="margin: 0;">
-                            <input type="hidden" name="status" value="${u.status === 'active' ? 'suspended' : 'active'}" />
-                            <button type="submit" class="btn ${u.status === 'active' ? 'btn-danger' : 'btn-success'}" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
-                              ${u.status === 'active' ? '🔴 Suspend' : '🟢 Activate'}
-                            </button>
-                          </form>
-                        ` : ''}
-
-                        <!-- Mark as Verified -->
-                        ${!u.emailVerified && !isCurrentUser ? html`
-                          <form method="POST" action="/admin/users/${u.id}/verify-email" style="margin: 0;">
-                            <button type="submit" class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
-                              ✓ Mark Email Verified
-                            </button>
-                          </form>
-                        ` : ''}
-
-                        <!-- Reset Password -->
-                        ${!isCurrentUser ? html`
-                          <form method="POST" action="/admin/users/${u.id}/reset-password" style="margin: 0;">
-                            <button
-                              type="submit"
-                              class="btn btn-secondary"
-                              style="font-size: 0.875rem; padding: 0.5rem 1rem;"
-                              onclick="return confirm('Send password reset email to ${u.email}?')"
-                            >
-                              🔑 Send Password Reset
-                            </button>
-                          </form>
-                        ` : ''}
-
-                        <!-- Toggle Admin -->
-                        ${!isCurrentUser ? html`
-                          <form method="POST" action="/admin/users/${u.id}/toggle-admin" style="margin: 0;">
-                            <button
-                              type="submit"
-                              class="btn ${u.role === 'admin' ? 'btn-danger' : 'btn-primary'}"
-                              style="font-size: 0.875rem; padding: 0.5rem 1rem;"
-                              onclick="return confirm('${u.role === 'admin' ? 'Remove admin privileges from' : 'Grant admin privileges to'} ${u.name}?')"
-                            >
-                              ${u.role === 'admin' ? '👤 Remove Admin' : '⚡ Make Admin'}
-                            </button>
-                          </form>
-                        ` : ''}
-                      </div>
-                    </td>
-                  </tr>
-                `;
-              })}
-            </tbody>
-          </table>
+        <div class="rounded-3xl border border-white/10 bg-white/[0.05] shadow-xl shadow-black/30 backdrop-blur">
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-white/10 text-left text-sm text-slate-200">
+              <thead class="bg-white/[0.04] text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th class="px-4 py-3 font-medium">Name</th>
+                  <th class="px-4 py-3 font-medium">Email</th>
+                  <th class="px-4 py-3 font-medium">Status</th>
+                  <th class="px-4 py-3 font-medium">Role</th>
+                  <th class="px-4 py-3 font-medium">Verified</th>
+                  <th class="px-4 py-3 font-medium">Joined</th>
+                  <th class="px-4 py-3 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/10">
+                ${tableRows}
+              </tbody>
+            </table>
+          </div>
         </div>
       `}
 
-      <!-- Statistics Summary -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 2rem;">
-        <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-          <div class="p-3 text-center">
-            <div style="font-size: 0.875rem; opacity: 0.9;">Total Users</div>
-            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">${users.length}</div>
+      <div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+        ${summaryCards.map(card => html`
+          <div class="rounded-3xl border border-white/10 bg-gradient-to-br ${card.gradient} p-6 text-center shadow-xl shadow-black/30 backdrop-blur">
+            <div class="text-xs uppercase tracking-wide text-white/80">${card.label}</div>
+            <div class="mt-3 text-3xl font-semibold text-white">${card.value}</div>
           </div>
-        </div>
-
-        <div class="card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white;">
-          <div class="p-3 text-center">
-            <div style="font-size: 0.875rem; opacity: 0.9;">Active</div>
-            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">
-              ${users.filter(u => u.status === 'active').length}
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white;">
-          <div class="p-3 text-center">
-            <div style="font-size: 0.875rem; opacity: 0.9;">Pending</div>
-            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">
-              ${users.filter(u => u.status === 'pending_verification').length}
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
-          <div class="p-3 text-center">
-            <div style="font-size: 0.875rem; opacity: 0.9;">Verified Emails</div>
-            <div style="font-size: 2rem; font-weight: bold; margin-top: 0.5rem;">
-              ${users.filter(u => u.emailVerified).length}
-            </div>
-          </div>
-        </div>
+        `)}
       </div>
-    </div>
+    </section>
   `;
 
   return BaseLayout({

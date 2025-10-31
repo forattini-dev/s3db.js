@@ -15,7 +15,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'users',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'email|required',
         region: 'string|required',
@@ -102,7 +102,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'products',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         brand: 'string|required',
@@ -180,7 +180,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'events',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         date: 'string|required',
         priority: 'number|required',
@@ -249,7 +249,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'test',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         subcategory: 'string|required'
@@ -311,7 +311,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'logs',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         message: 'string|required',
         level: 'string|required',
         timestamp: 'string|required'
@@ -371,7 +371,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'orders',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderId: 'string|required',
         status: 'string|required',
         amount: 'number|required'
@@ -446,7 +446,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'performance',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         value: 'number|required'
@@ -498,7 +498,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       name: 'documents',
       asyncPartitions: false, // Use sync mode for tests
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         authorName: 'string|required',
         department: 'string|required',
@@ -576,7 +576,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       await database.createResource({
         name: 'invalid',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         },
         partitions: {
@@ -593,7 +593,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
     const resource = await database.createResource({
       name: 'valid',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required'
       },

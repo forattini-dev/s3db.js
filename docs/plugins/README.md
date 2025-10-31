@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Extend your database with powerful plugins</strong><br>
-  <em>19 production-ready plugins • Zero core modifications • Infinite possibilities</em>
+  <em>20 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
 
 ---
@@ -11,25 +11,26 @@
 
 | Plugin | Purpose | Use Cases | Docs |
 |--------|---------|-----------|------|
+| **[🌐 API](./api.md)** | Auto-generated REST API with OpenAPI, path-based auth, template engine | RESTful endpoints, Swagger UI, multi-auth, SSR | [→](./api.md) |
+| **[📝 Audit](./audit.md)** | Comprehensive operation logging | Compliance, security | [→](./audit.md) |
+| **[💾 Backup](./backup.md)** | Multi-destination backup system | Data protection, disaster recovery | [→](./backup.md) |
 | **[💾 Cache](./cache.md)** | Multi-driver caching (memory/S3/filesystem) | Performance, cost reduction | [→](./cache.md) |
 | **[💰 Costs](./costs.md)** | Real-time AWS S3 cost tracking | Budget monitoring, optimization | [→](./costs.md) |
-| **[📝 Audit](./audit.md)** | Comprehensive operation logging | Compliance, security | [→](./audit.md) |
-| **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
-| **[💾 Backup](./backup.md)** | Multi-destination backup system | Data protection, disaster recovery | [→](./backup.md) |
-| **[🔄 Replicator](./replicator.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator.md) |
-| **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
-| **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
+| **[☁️ Cloud Inventory](./cloud-inventory.md)** | Multi-cloud inventory with versioning & diffs | CMDB, compliance, drift detection | [→](./cloud-inventory.md) |
 | **[⚡ Eventual Consistency](./eventual-consistency.md)** | Transaction-based counters | Balances, analytics, aggregations | [→](./eventual-consistency.md) |
-| **[🤖 State Machine](./state-machine.md)** | Finite state machine workflows | Business processes, automation | [→](./state-machine.md) |
-| **[⏰ Scheduler](./scheduler.md)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler.md) |
-| **[📬 Queue Consumer](./queue-consumer.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](./queue-consumer.md) |
-| **[🔒 S3Queue](./s3-queue.md)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue.md) |
-| **[🌐 API](./api.md)** | Auto-generated REST API with OpenAPI | RESTful endpoints, Swagger UI | [→](./api.md) |
+| **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
 | **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
-| **[🎯 Vector](./vector.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector.md) |
-| **[⏳ TTL](./ttl.md)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl.md) |
+| **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
+| **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
+| **[📬 Queue Consumer](./queue-consumer.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](./queue-consumer.md) |
 | **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
+| **[🔄 Replicator](./replicator.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator.md) |
+| **[🔒 S3Queue](./s3-queue.md)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue.md) |
+| **[⏰ Scheduler](./scheduler.md)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler.md) |
+| **[🤖 State Machine](./state-machine.md)** | Finite state machine workflows | Business processes, automation | [→](./state-machine.md) |
 | **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
+| **[⏳ TTL](./ttl.md)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl.md) |
+| **[🎯 Vector](./vector.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector.md) |
 
 **💡 Can't find what you need?** [Build your own plugin](#-plugin-development) in ~50 lines of code!
 

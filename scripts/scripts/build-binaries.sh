@@ -16,7 +16,7 @@ rm -rf build-binaries releases
 mkdir -p build-binaries releases
 
 # Build CommonJS version if needed
-if [ ! -f "dist/s3db.cjs.js" ]; then
+if [ ! -f "dist/s3db.cjs" ]; then
     echo -e "${YELLOW}📦 Building CommonJS version...${NC}"
     pnpm run build
 fi

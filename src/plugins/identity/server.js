@@ -52,6 +52,8 @@ export class IdentityServer {
       sessionManager: options.sessionManager || null,
       usersResource: options.usersResource || null,
       identityPlugin: options.identityPlugin || null,
+      failbanManager: options.failbanManager || null,
+      failbanConfig: options.failbanConfig || {},
       cors: options.cors || {},
       security: options.security || {},
       logging: options.logging || {}
@@ -61,6 +63,97 @@ export class IdentityServer {
     this.server = null;
     this.isRunning = false;
     this.initialized = false;
+  }
+
+  /**
+   * Setup failban middleware for brute force protection
+   * @private
+   */
+  _setupFailbanMiddleware() {
+    const { failbanManager } = this.options;
+
+    // Global ban check middleware
+    this.app.use('*', async (c, next) => {
+      // Extract IP address
+      const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+                 c.req.header('x-real-ip') ||
+                 c.env?.ip ||
+                 'unknown';
+
+      // Store IP in context for later use
+      c.set('clientIp', ip);
+
+      // Check if blacklisted
+      if (failbanManager.isBlacklisted(ip)) {
+        c.header('X-Ban-Status', 'blacklisted');
+        c.header('X-Ban-Reason', 'IP is permanently blacklisted');
+
+        if (this.options.verbose) {
+          console.log(`[Failban] Blocked blacklisted IP: ${ip}`);
+        }
+
+        return c.json({
+          error: 'Forbidden',
+          message: 'Your IP address has been permanently blocked',
+          ip
+        }, 403);
+      }
+
+      // Check country restrictions (GeoIP)
+      if (this.options.failbanConfig.geo?.enabled) {
+        const countryBlock = failbanManager.checkCountryBlock(ip);
+        if (countryBlock) {
+          c.header('X-Ban-Status', 'country_blocked');
+          c.header('X-Ban-Reason', countryBlock.reason);
+          c.header('X-Country-Code', countryBlock.country);
+
+          if (this.options.verbose) {
+            console.log(`[Failban] Blocked country ${countryBlock.country} for IP: ${ip}`);
+          }
+
+          return c.json({
+            error: 'Forbidden',
+            message: 'Access from your country is not allowed',
+            country: countryBlock.country,
+            ip
+          }, 403);
+        }
+      }
+
+      // Check if banned
+      if (failbanManager.isBanned(ip)) {
+        const ban = await failbanManager.getBan(ip);
+
+        if (ban) {
+          const expiresAt = new Date(ban.expiresAt);
+          const retryAfter = Math.ceil((expiresAt.getTime() - Date.now()) / 1000);
+
+          c.header('Retry-After', String(retryAfter));
+          c.header('X-Ban-Status', 'banned');
+          c.header('X-Ban-Reason', ban.reason);
+          c.header('X-Ban-Expires', ban.expiresAt);
+
+          if (this.options.verbose) {
+            console.log(`[Failban] Blocked banned IP: ${ip} (expires in ${retryAfter}s)`);
+          }
+
+          return c.json({
+            error: 'Forbidden',
+            message: 'Your IP address has been temporarily banned due to security violations',
+            reason: ban.reason,
+            expiresAt: ban.expiresAt,
+            retryAfter
+          }, 403);
+        }
+      }
+
+      // Not banned - continue
+      await next();
+    });
+
+    if (this.options.verbose) {
+      console.log('[Identity Server] Failban middleware enabled (global ban check)');
+    }
   }
 
   /**
@@ -85,6 +178,11 @@ export class IdentityServer {
     if (this.options.security.enabled) {
       const securityMiddleware = createSecurityMiddleware(this.options.security);
       this.app.use('*', securityMiddleware);
+    }
+
+    // Apply failban middleware if enabled (global IP ban check)
+    if (this.options.failbanManager && this.options.failbanConfig.enabled) {
+      this._setupFailbanMiddleware();
     }
 
     // Apply logging middleware if enabled

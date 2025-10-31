@@ -27,7 +27,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const users = await database.createResource({
         name: 'users_overflow',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           // Large field to force overflow
           description: 'string|optional'
@@ -65,7 +65,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const posts = await database.createResource({
         name: 'posts_overflow',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string|required'
         },
@@ -92,7 +92,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const docs = await database.createResource({
         name: 'docs_overflow',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           content: 'string|optional'
         },
@@ -122,7 +122,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const items = await database.createResource({
         name: 'items_overflow',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           data: 'string|optional'
         },
@@ -159,7 +159,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const users = await database.createResource({
         name: 'users_managed',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           bio: 'string|optional'
         },
@@ -199,7 +199,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const tags = await database.createResource({
         name: 'tags_managed',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           color: 'string|optional'
         },
@@ -232,7 +232,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const notes = await database.createResource({
         name: 'notes_managed',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string|optional'
         },
@@ -269,7 +269,7 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
       const records = await database.createResource({
         name: 'records_mixed',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           data: 'string|required'
         },
         behavior: 'body-overflow',

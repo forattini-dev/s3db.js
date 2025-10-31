@@ -26,7 +26,7 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required|email',
         age: 'number|optional'
@@ -86,7 +86,7 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
       const posts = await database.createResource({
         name: 'posts',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string|required',
           content: 'string|required'
         },
@@ -109,7 +109,7 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
       await database.createResource({
         name: 'comments',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           text: 'string|required'
         },
         timestamps: false
@@ -166,7 +166,7 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
       await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           price: 'number|required'
         },

@@ -124,7 +124,20 @@ export class IdentityPlugin extends Plugin {
 
       // Security headers
       security: {
-        enabled: options.security?.enabled !== false
+        enabled: options.security?.enabled !== false,
+        contentSecurityPolicy: {
+          enabled: true,
+          directives: {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", "'unsafe-inline'"],
+            'style-src': ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+            'img-src': ["'self'", 'data:', 'https:'],
+            'font-src': ["'self'", 'https://unpkg.com'],
+            ...options.security?.contentSecurityPolicy?.directives
+          },
+          reportOnly: options.security?.contentSecurityPolicy?.reportOnly || false,
+          reportUri: options.security?.contentSecurityPolicy?.reportUri || null
+        }
       },
 
       // Logging
@@ -170,7 +183,9 @@ export class IdentityPlugin extends Plugin {
         // Branding
         title: options.ui?.title || 'S3DB Identity',
         companyName: options.ui?.companyName || 'S3DB',
+        legalName: options.ui?.legalName || options.ui?.companyName || 'S3DB Corp',
         tagline: options.ui?.tagline || 'Secure Identity & Access Management',
+        welcomeMessage: options.ui?.welcomeMessage || 'Welcome back!',
         logoUrl: options.ui?.logoUrl || null,
         logo: options.ui?.logo || null,  // Deprecated, use logoUrl
         favicon: options.ui?.favicon || null,
@@ -242,6 +257,67 @@ export class IdentityPlugin extends Plugin {
         }
       },
 
+      // MFA Configuration (Multi-Factor Authentication)
+      mfa: {
+        enabled: options.mfa?.enabled || false,                              // Enable MFA/TOTP
+        required: options.mfa?.required || false,                            // Require MFA for all users
+        issuer: options.mfa?.issuer || options.ui?.title || 'S3DB Identity', // TOTP issuer name
+        algorithm: options.mfa?.algorithm || 'SHA1',                         // SHA1, SHA256, SHA512
+        digits: options.mfa?.digits || 6,                                    // 6 or 8 digits
+        period: options.mfa?.period || 30,                                   // 30 seconds
+        window: options.mfa?.window || 1,                                    // Time window tolerance
+        backupCodesCount: options.mfa?.backupCodesCount || 10,               // Number of backup codes
+        backupCodeLength: options.mfa?.backupCodeLength || 8                 // Backup code length
+      },
+
+      // Audit Configuration (Compliance & Security Logging)
+      audit: {
+        enabled: options.audit?.enabled !== false,                           // Enable audit logging
+        includeData: options.audit?.includeData !== false,                   // Store before/after data
+        includePartitions: options.audit?.includePartitions !== false,       // Track partition info
+        maxDataSize: options.audit?.maxDataSize || 10000,                    // Max bytes for data field
+        resources: options.audit?.resources || ['users', 'plg_oauth_clients'], // Resources to audit
+        events: options.audit?.events || [                                   // Custom events to audit
+          'login', 'logout', 'login_failed',
+          'account_locked', 'account_unlocked',
+          'ip_banned', 'ip_unbanned',
+          'password_reset_requested', 'password_changed',
+          'email_verified', 'user_created', 'user_deleted',
+          'mfa_enrolled', 'mfa_disabled', 'mfa_verified', 'mfa_failed'
+        ]
+      },
+
+      // Account Lockout Configuration (Per-User Brute Force Protection)
+      accountLockout: {
+        enabled: options.accountLockout?.enabled !== false,                  // Enable account lockout
+        maxAttempts: options.accountLockout?.maxAttempts || 5,               // Max failed attempts before lockout
+        lockoutDuration: options.accountLockout?.lockoutDuration || 900000,  // Lockout duration (15 min)
+        resetOnSuccess: options.accountLockout?.resetOnSuccess !== false     // Reset counter on successful login
+      },
+
+      // Failban Configuration (IP-Based Brute Force Protection)
+      failban: {
+        enabled: options.failban?.enabled !== false,                         // Enable failban protection
+        maxViolations: options.failban?.maxViolations || 5,                  // Max failed attempts before ban
+        violationWindow: options.failban?.violationWindow || 300000,         // Time window for violations (5 min)
+        banDuration: options.failban?.banDuration || 900000,                 // Ban duration (15 min)
+        whitelist: options.failban?.whitelist || ['127.0.0.1', '::1'],      // IPs to never ban
+        blacklist: options.failban?.blacklist || [],                         // IPs to always ban
+        persistViolations: options.failban?.persistViolations !== false,     // Persist violations to DB
+        endpoints: {
+          login: options.failban?.endpoints?.login !== false,                // Protect /oauth/authorize POST
+          token: options.failban?.endpoints?.token !== false,                // Protect /oauth/token
+          register: options.failban?.endpoints?.register !== false           // Protect /register
+        },
+        geo: {
+          enabled: options.failban?.geo?.enabled || false,                   // Enable GeoIP blocking
+          databasePath: options.failban?.geo?.databasePath || null,          // Path to GeoLite2-Country.mmdb
+          allowedCountries: options.failban?.geo?.allowedCountries || [],    // Whitelist countries (ISO codes)
+          blockedCountries: options.failban?.geo?.blockedCountries || [],    // Blacklist countries (ISO codes)
+          blockUnknown: options.failban?.geo?.blockUnknown || false          // Block IPs with unknown country
+        }
+      },
+
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -284,12 +360,16 @@ export class IdentityPlugin extends Plugin {
     this.oauth2Server = null;
     this.sessionManager = null;
     this.emailService = null;
+    this.failbanManager = null;
+    this.auditPlugin = null;
+    this.mfaManager = null;
 
     // Internal plugin resources (prefixed with plg_)
     this.oauth2KeysResource = null;
     this.oauth2AuthCodesResource = null;
     this.sessionsResource = null;
     this.passwordResetTokensResource = null;
+    this.mfaDevicesResource = null;
 
     // User-managed resources (user chooses names)
     this.usersResource = null;
@@ -338,6 +418,15 @@ export class IdentityPlugin extends Plugin {
 
     // Initialize Email Service
     await this._initializeEmailService();
+
+    // Initialize Failban Manager
+    await this._initializeFailbanManager();
+
+    // Initialize Audit Plugin
+    await this._initializeAuditPlugin();
+
+    // Initialize MFA Manager
+    await this._initializeMFAManager();
 
     if (this.config.verbose) {
       console.log('[Identity Plugin] Installed successfully');
@@ -479,6 +568,48 @@ export class IdentityPlugin extends Plugin {
       }
     } else {
       throw errResetTokens;
+    }
+
+    // 5. MFA Devices Resource (for multi-factor authentication)
+    if (this.config.mfa.enabled) {
+      const [okMFA, errMFA, mfaResource] = await tryFn(() =>
+        this.database.createResource({
+          name: 'plg_mfa_devices',
+          attributes: {
+            userId: 'string|required',
+            type: 'string|required',              // 'totp', 'sms', 'email'
+            secret: 'secret|required',            // TOTP secret (encrypted by S3DB)
+            verified: 'boolean|default:false',
+            backupCodes: 'array|items:string',    // Hashed backup codes
+            enrolledAt: 'string',
+            lastUsedAt: 'string|optional',
+            deviceName: 'string|optional',        // User-friendly name
+            metadata: 'object|optional'
+          },
+          behavior: 'body-overflow',
+          timestamps: true,
+          partitions: {
+            byUser: {
+              fields: { userId: 'string' }
+            }
+          },
+          createdBy: 'IdentityPlugin'
+        })
+      );
+
+      if (okMFA) {
+        this.mfaDevicesResource = mfaResource;
+        if (this.config.verbose) {
+          console.log('[Identity Plugin] Created plg_mfa_devices resource');
+        }
+      } else if (this.database.resources.plg_mfa_devices) {
+        this.mfaDevicesResource = this.database.resources.plg_mfa_devices;
+        if (this.config.verbose) {
+          console.log('[Identity Plugin] Using existing plg_mfa_devices resource');
+        }
+      } else {
+        console.warn('[Identity Plugin] MFA enabled but failed to create plg_mfa_devices resource:', errMFA?.message);
+      }
     }
   }
 
@@ -672,6 +803,142 @@ export class IdentityPlugin extends Plugin {
   }
 
   /**
+   * Initialize failban manager
+   * @private
+   */
+  async _initializeFailbanManager() {
+    if (!this.config.failban.enabled) {
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] Failban disabled');
+      }
+      return;
+    }
+
+    const { FailbanManager } = await import('../api/concerns/failban-manager.js');
+
+    this.failbanManager = new FailbanManager({
+      database: this.database,
+      enabled: this.config.failban.enabled,
+      maxViolations: this.config.failban.maxViolations,
+      violationWindow: this.config.failban.violationWindow,
+      banDuration: this.config.failban.banDuration,
+      whitelist: this.config.failban.whitelist,
+      blacklist: this.config.failban.blacklist,
+      persistViolations: this.config.failban.persistViolations,
+      verbose: this.config.verbose,
+      geo: this.config.failban.geo
+    });
+
+    await this.failbanManager.initialize();
+
+    if (this.config.verbose) {
+      console.log('[Identity Plugin] Failban Manager initialized');
+      console.log(`[Identity Plugin] Max violations: ${this.config.failban.maxViolations}`);
+      console.log(`[Identity Plugin] Violation window: ${this.config.failban.violationWindow}ms`);
+      console.log(`[Identity Plugin] Ban duration: ${this.config.failban.banDuration}ms`);
+      console.log(`[Identity Plugin] Protected endpoints: login=${this.config.failban.endpoints.login}, token=${this.config.failban.endpoints.token}, register=${this.config.failban.endpoints.register}`);
+      if (this.config.failban.geo.enabled) {
+        console.log(`[Identity Plugin] GeoIP enabled`);
+        console.log(`[Identity Plugin] Allowed countries: ${this.config.failban.geo.allowedCountries.join(', ') || 'all'}`);
+        console.log(`[Identity Plugin] Blocked countries: ${this.config.failban.geo.blockedCountries.join(', ') || 'none'}`);
+      }
+    }
+  }
+
+  /**
+   * Initialize audit plugin
+   * @private
+   */
+  async _initializeAuditPlugin() {
+    if (!this.config.audit.enabled) {
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] Audit logging disabled');
+      }
+      return;
+    }
+
+    const { AuditPlugin } = await import('../audit.plugin.js');
+
+    this.auditPlugin = new AuditPlugin({
+      includeData: this.config.audit.includeData,
+      includePartitions: this.config.audit.includePartitions,
+      maxDataSize: this.config.audit.maxDataSize,
+      resources: this.config.audit.resources
+    });
+
+    await this.database.usePlugin(this.auditPlugin);
+
+    if (this.config.verbose) {
+      console.log('[Identity Plugin] Audit Plugin initialized');
+      console.log(`[Identity Plugin] Auditing resources: ${this.config.audit.resources.join(', ')}`);
+      console.log(`[Identity Plugin] Include data: ${this.config.audit.includeData}`);
+      console.log(`[Identity Plugin] Max data size: ${this.config.audit.maxDataSize} bytes`);
+    }
+  }
+
+  /**
+   * Log custom audit event
+   * @param {string} event - Event name
+   * @param {Object} data - Event data
+   * @private
+   */
+  async _logAuditEvent(event, data = {}) {
+    if (!this.config.audit.enabled || !this.auditPlugin) {
+      return;
+    }
+
+    if (!this.config.audit.events.includes(event)) {
+      return;
+    }
+
+    try {
+      await this.auditPlugin.logCustomEvent(event, data);
+
+      if (this.config.verbose) {
+        console.log(`[Audit] ${event}:`, JSON.stringify(data));
+      }
+    } catch (error) {
+      console.error(`[Audit] Failed to log event ${event}:`, error.message);
+    }
+  }
+
+  /**
+   * Initialize MFA Manager (Multi-Factor Authentication)
+   * @private
+   */
+  async _initializeMFAManager() {
+    if (!this.config.mfa.enabled) {
+      if (this.config.verbose) {
+        console.log('[Identity Plugin] MFA disabled');
+      }
+      return;
+    }
+
+    const { MFAManager } = await import('./concerns/mfa-manager.js');
+
+    this.mfaManager = new MFAManager({
+      issuer: this.config.mfa.issuer,
+      algorithm: this.config.mfa.algorithm,
+      digits: this.config.mfa.digits,
+      period: this.config.mfa.period,
+      window: this.config.mfa.window,
+      backupCodesCount: this.config.mfa.backupCodesCount,
+      backupCodeLength: this.config.mfa.backupCodeLength
+    });
+
+    await this.mfaManager.initialize();
+
+    if (this.config.verbose) {
+      console.log('[Identity Plugin] MFA Manager initialized');
+      console.log(`[Identity Plugin] Issuer: ${this.config.mfa.issuer}`);
+      console.log(`[Identity Plugin] Algorithm: ${this.config.mfa.algorithm}`);
+      console.log(`[Identity Plugin] Digits: ${this.config.mfa.digits}`);
+      console.log(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
+      console.log(`[Identity Plugin] Required: ${this.config.mfa.required}`);
+    }
+  }
+
+  /**
    * Start plugin
    */
   async onStart() {
@@ -692,6 +959,9 @@ export class IdentityPlugin extends Plugin {
       sessionManager: this.sessionManager,
       usersResource: this.usersResource,
       identityPlugin: this,
+      failbanManager: this.failbanManager,
+      failbanConfig: this.config.failban,
+      accountLockoutConfig: this.config.accountLockout,
       cors: this.config.cors,
       security: this.config.security,
       logging: this.config.logging
@@ -728,6 +998,11 @@ export class IdentityPlugin extends Plugin {
     // Close email service connection
     if (this.emailService) {
       await this.emailService.close();
+    }
+
+    // Cleanup failban manager
+    if (this.failbanManager) {
+      await this.failbanManager.cleanup();
     }
 
     this.emit('plugin.stopped');

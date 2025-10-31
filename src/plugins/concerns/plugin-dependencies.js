@@ -152,6 +152,18 @@ export const PLUGIN_DEPENDENCIES = {
       }
     }
   },
+  'cloud-inventory-plugin': {
+    name: 'Cloud Inventory Plugin',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/cloud-inventory.md',
+    dependencies: {
+      'node-cron': {
+        version: '^4.0.0',
+        description: 'Cron scheduler for automated discovery',
+        installCommand: 'pnpm add -D node-cron',
+        npmUrl: 'https://www.npmjs.com/package/node-cron'
+      }
+    }
+  },
   'ml-plugin': {
     name: 'ML Plugin',
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/ml-plugin.md',

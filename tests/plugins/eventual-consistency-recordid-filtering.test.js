@@ -21,7 +21,7 @@ describe('EventualConsistency Analytics - RecordId Filtering', () => {
     urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         slug: 'string|optional',
         clicks: 'number|default:0'
       }

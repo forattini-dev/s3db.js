@@ -2432,7 +2432,7 @@ describe('Schema Auto-Hook Logic for Numbers', () => {
       const schema = new Schema({
         name: 'embedding-validation',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           vector: 'embedding:1536'
         }
       });
@@ -2503,7 +2503,7 @@ describe('Schema Auto-Hook Logic for Numbers', () => {
       const schema = new Schema({
         name: 'mixed-embedding',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           title: 'string',
           embedding: 'embedding:1536',
           score: 'number',
@@ -2536,7 +2536,7 @@ describe('Schema Auto-Hook Logic for Numbers', () => {
       const schema = new Schema({
         name: 'optional-embedding',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           vector: 'embedding:768|optional:true'
         }
       });

@@ -27,7 +27,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     // Create resource BEFORE installing plugin
     await db.createResource({
       name: 'sessions',
-      attributes: { id: 'string|required', token: 'string' }
+      attributes: { id: 'string|optional', token: 'string' }
     });
 
     const plugin = new TTLPlugin({
@@ -52,7 +52,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     // Create resource BEFORE installing plugin
     await db.createResource({
       name: 'subscriptions',
-      attributes: { id: 'string|required', endsAt: 'number' }
+      attributes: { id: 'string|optional', endsAt: 'number' }
     });
 
     const plugin = new TTLPlugin({
@@ -110,7 +110,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     // Create resource BEFORE installing plugin
     await db.createResource({
       name: 'sessions',
-      attributes: { id: 'string|required' }
+      attributes: { id: 'string|optional' }
     });
 
     const plugin = new TTLPlugin({
@@ -133,10 +133,10 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     await db.connect();
 
     // Create resources BEFORE installing plugin
-    await db.createResource({ name: 'shortLived', attributes: { id: 'string|required' } });
-    await db.createResource({ name: 'mediumLived', attributes: { id: 'string|required' } });
-    await db.createResource({ name: 'longLived', attributes: { id: 'string|required' } });
-    await db.createResource({ name: 'veryLongLived', attributes: { id: 'string|required' } });
+    await db.createResource({ name: 'shortLived', attributes: { id: 'string|optional' } });
+    await db.createResource({ name: 'mediumLived', attributes: { id: 'string|optional' } });
+    await db.createResource({ name: 'longLived', attributes: { id: 'string|optional' } });
+    await db.createResource({ name: 'veryLongLived', attributes: { id: 'string|optional' } });
 
     const plugin = new TTLPlugin({
       resources: {
@@ -202,7 +202,7 @@ describe('TTLPlugin v2 - Plugin Storage & Expiration Index', () => {
     sessions = await db.createResource({
       name: 'sessions',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         token: 'string'
       }
     });
@@ -338,7 +338,7 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
     sessions = await db.createResource({
       name: 'sessions',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         token: 'string'
       }
     });
@@ -420,7 +420,7 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
     tempFiles = await db.createResource({
       name: 'temp_files',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         filename: 'string'
       }
     });
@@ -495,7 +495,7 @@ describe('TTLPlugin v2 - Archive Strategy', () => {
     orders = await db.createResource({
       name: 'orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderNumber: 'string',
         total: 'number'
       }
@@ -504,7 +504,7 @@ describe('TTLPlugin v2 - Archive Strategy', () => {
     archivedOrders = await db.createResource({
       name: 'archived_orders',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         orderNumber: 'string',
         total: 'number',
         archivedAt: 'string',
@@ -585,7 +585,7 @@ describe('TTLPlugin v2 - Callback Strategy', () => {
     customData = await db.createResource({
       name: 'custom_data',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         value: 'string',
         priority: 'string'
       }
@@ -687,7 +687,7 @@ describe('TTLPlugin v2 - Stats and Monitoring', () => {
     testResource = await db.createResource({
       name: 'test_resource',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         value: 'string'
       }
     });
@@ -749,7 +749,7 @@ describe('TTLPlugin v2 - Manual Cleanup', () => {
     sessions = await db.createResource({
       name: 'sessions',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         token: 'string'
       }
     });
@@ -805,7 +805,7 @@ describe('TTLPlugin v2 - Custom Field Support', () => {
     subscriptions = await db.createResource({
       name: 'subscriptions',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         userId: 'string',
         endsAt: 'number'
       }
@@ -857,17 +857,17 @@ describe('TTLPlugin v2 - Multiple Granularities', () => {
 
     await db.createResource({
       name: 'short_lived',
-      attributes: { id: 'string|required' }
+      attributes: { id: 'string|optional' }
     });
 
     await db.createResource({
       name: 'medium_lived',
-      attributes: { id: 'string|required' }
+      attributes: { id: 'string|optional' }
     });
 
     await db.createResource({
       name: 'long_lived',
-      attributes: { id: 'string|required' }
+      attributes: { id: 'string|optional' }
     });
 
     plugin = new TTLPlugin({
@@ -928,7 +928,7 @@ describe('TTLPlugin v2 - Interval Management', () => {
 
     await db.createResource({
       name: 'test_data',
-      attributes: { id: 'string|required' }
+      attributes: { id: 'string|optional' }
     });
 
     plugin = new TTLPlugin({

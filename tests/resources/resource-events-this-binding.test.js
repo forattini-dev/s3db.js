@@ -20,7 +20,7 @@ describe('Resource Events - this.database Binding', () => {
     stats = await database.createResource({
       name: 'stats',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         count: 'number|default:0'
       }
     });
@@ -29,7 +29,7 @@ describe('Resource Events - this.database Binding', () => {
     users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required'
       },
@@ -144,7 +144,7 @@ describe('Resource Events - this.database Binding', () => {
     const posts = await database.createResource({
       name: 'posts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         title: 'string|required',
         userId: 'string|required'
       },

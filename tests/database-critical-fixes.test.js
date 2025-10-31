@@ -297,7 +297,7 @@ describe('Database Critical Fixes', () => {
       await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });

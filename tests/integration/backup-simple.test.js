@@ -29,7 +29,7 @@ describe('Backup Integration (Simple)', () => {
     const users = await database.createResource({
       name: 'simple_users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       }
     });

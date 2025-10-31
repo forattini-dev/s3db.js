@@ -34,7 +34,7 @@ describe('MemoryClient - Basic Operations', () => {
     const users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         email: 'string|required|email'
       },
@@ -245,7 +245,7 @@ describe('MemoryClient - Limits Enforcement', () => {
     const docs = await database.createResource({
       name: 'docs',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         metadata: 'object|optional'
       },
       behavior: 'enforce-limits',
@@ -327,7 +327,7 @@ describe('MemoryClient - Compatibility with Real Client', () => {
       const resource = await database.createResource({
         name: `test_${behavior}`,
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           data: 'string|optional'
         },
         behavior,
@@ -345,7 +345,7 @@ describe('MemoryClient - Compatibility with Real Client', () => {
     const logs = await database.createResource({
       name: 'logs',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         level: 'string|required',
         message: 'string|required'
       },
@@ -370,7 +370,7 @@ describe('MemoryClient - Compatibility with Real Client', () => {
     const items = await database.createResource({
       name: 'items',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required'
       },
       timestamps: true
@@ -387,7 +387,7 @@ describe('MemoryClient - Compatibility with Real Client', () => {
     const accounts = await database.createResource({
       name: 'accounts',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         username: 'string|required',
         password: 'secret|required'
       },
@@ -409,7 +409,7 @@ describe('MemoryClient - Compatibility with Real Client', () => {
     const vectors = await database.createResource({
       name: 'vectors',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         embedding: 'embedding:3',
         tags: 'array|items:string',
         metadata: 'object'

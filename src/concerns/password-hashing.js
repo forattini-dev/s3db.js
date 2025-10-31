@@ -9,6 +9,24 @@
 import bcrypt from 'bcrypt';
 
 /**
+ * Hash a password using bcrypt (synchronous)
+ * @param {string} password - Plaintext password
+ * @param {number} [rounds=10] - Bcrypt cost factor (4-31, default 10)
+ * @returns {string} Bcrypt hash (60 bytes)
+ */
+export function hashPasswordSync(password, rounds = 10) {
+  if (!password || typeof password !== 'string') {
+    throw new Error('Password must be a non-empty string');
+  }
+
+  if (rounds < 4 || rounds > 31) {
+    throw new Error('Bcrypt rounds must be between 4 and 31');
+  }
+
+  return bcrypt.hashSync(password, rounds);
+}
+
+/**
  * Hash a password using bcrypt
  * @param {string} password - Plaintext password
  * @param {number} [rounds=10] - Bcrypt cost factor (4-31, default 10)

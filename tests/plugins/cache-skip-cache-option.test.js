@@ -29,7 +29,7 @@ describe('CachePlugin - skipCache Option', () => {
     const users = await database.createResource({
       name: 'users',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         balance: 'number|default:0'
       }
@@ -98,7 +98,7 @@ describe('CachePlugin - skipCache Option', () => {
     const urls = await database.createResource({
       name: 'urls',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         clicks: 'number|default:0'
       }
     });
@@ -163,7 +163,7 @@ describe('CachePlugin - skipCache Option', () => {
     const products = await database.createResource({
       name: 'products',
       attributes: {
-        id: 'string|required',
+        id: 'string|optional',
         name: 'string|required',
         category: 'string|required',
         price: 'number|required'

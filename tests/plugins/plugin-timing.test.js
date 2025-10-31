@@ -37,7 +37,7 @@ describe('Plugin Timing Tests', () => {
       const walletResource = await database.createResource({
         name: 'wallets',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           userId: 'string|required',
           balance: 'number|default:0'
         }
@@ -70,7 +70,7 @@ describe('Plugin Timing Tests', () => {
       const walletResource = await database.createResource({
         name: 'wallets',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           userId: 'string|required',
           balance: 'number|default:0'
         }
@@ -123,7 +123,7 @@ describe('Plugin Timing Tests', () => {
       const userResource = await database.createResource({
         name: 'users',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required'
         }
       });
@@ -135,7 +135,7 @@ describe('Plugin Timing Tests', () => {
       const accountResource = await database.createResource({
         name: 'accounts',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           credits: 'number|default:0'
         }
       });
@@ -164,7 +164,7 @@ describe('Plugin Timing Tests', () => {
       const resource = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           price: 'number|required'
         }
@@ -200,7 +200,7 @@ describe('Plugin Timing Tests', () => {
       const resource = await database.createResource({
         name: 'products',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           price: 'number|required'
         }
@@ -253,7 +253,7 @@ describe('Plugin Timing Tests', () => {
       const resource = await database.createResource({
         name: 'items',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           name: 'string|required',
           count: 'number|default:0'
         }
@@ -317,7 +317,7 @@ describe('Plugin Timing Tests', () => {
       const resource = await database.createResource({
         name: 'balances',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           amount: 'number|default:0'
         }
       });
@@ -360,7 +360,7 @@ describe('Plugin Timing Tests', () => {
       const resource = await database.createResource({
         name: 'other',
         attributes: {
-          id: 'string|required',
+          id: 'string|optional',
           data: 'string'
         }
       });
