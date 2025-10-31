@@ -15,6 +15,10 @@ import { AdminUsersPage } from './pages/admin/users.js';
 import { AdminUserFormPage } from './pages/admin/user-form.js';
 import { ConsentPage } from './pages/consent.js';
 import { VerifyEmailPage } from './pages/verify-email.js';
+import { MFAVerificationPage } from './pages/mfa-verification.js';
+import { MFAEnrollmentPage } from './pages/mfa-enrollment.js';
+import { MFABackupCodesPage } from './pages/mfa-backup-codes.js';
+import { OAuthErrorPage } from './pages/oauth-error.js';
 import { verifyPassword, validatePassword } from '../concerns/password.js';
 import { generatePasswordResetToken, calculateExpiration, isExpired } from '../concerns/token-generator.js';
 import { generateAuthCode } from '../oidc-discovery.js';
@@ -434,94 +438,15 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/login?error=${encodeURIComponent('MFA session expired. Please login again.')}`);
       }
 
-      // TODO: Create proper MFAVerificationPage component
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Two-Factor Authentication - ${config.ui.title}</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 400px; margin: 0 auto; background: ${config.ui.backgroundLight}; }
-            .container { background: white; padding: 2rem; border-radius: ${config.ui.borderRadius}; box-shadow: ${config.ui.boxShadow}; }
-            h1 { color: ${config.ui.primaryColor}; text-align: center; margin-bottom: 1.5rem; }
-            .error { background: #f8d7da; color: #721c24; padding: 0.75rem; border-radius: ${config.ui.borderRadius}; margin-bottom: 1rem; }
-            label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
-            input { padding: 0.75rem; border: 1px solid ${config.ui.borderColor}; border-radius: ${config.ui.borderRadius}; width: 100%; box-sizing: border-box; font-size: 1.2rem; letter-spacing: 0.2em; text-align: center; }
-            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; width: 100%; margin-top: 1rem; font-size: 1rem; }
-            button:hover { opacity: 0.9; }
-            .backup-link { text-align: center; margin-top: 1rem; }
-            .backup-link a { color: ${config.ui.primaryColor}; text-decoration: none; }
-            .backup-link a:hover { text-decoration: underline; }
-            .back-link { text-align: center; margin-top: 1rem; color: ${config.ui.textMuted}; }
-            .back-link a { color: ${config.ui.secondaryColor}; text-decoration: none; }
-            #backup-code-form { display: none; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>🔐 Two-Factor Authentication</h1>
+      // Store email/password in hidden fields for form submission
+      const mfaToken = JSON.stringify({ email: userData.email, password: userData.password });
 
-            ${error ? `<div class="error">${decodeURIComponent(error)}</div>` : ''}
-
-            <p style="text-align: center; color: ${config.ui.textMuted}; margin-bottom: 1.5rem;">
-              Enter the 6-digit code from your authenticator app to continue.
-            </p>
-
-            <form method="POST" action="/login" id="mfa-form">
-              <input type="hidden" name="email" value="${userData.email}" />
-              <input type="hidden" name="password" value="${userData.password}" />
-              <input type="hidden" name="remember" value="${remember || ''}" />
-
-              <label for="mfa_token">Verification Code:</label>
-              <input type="text" id="mfa_token" name="mfa_token" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="off" />
-
-              <button type="submit">✓ Verify</button>
-            </form>
-
-            <div class="backup-link">
-              <a href="#" onclick="showBackupCodeForm(); return false;">Lost your device? Use backup code</a>
-            </div>
-
-            <form method="POST" action="/login" id="backup-code-form">
-              <input type="hidden" name="email" value="${userData.email}" />
-              <input type="hidden" name="password" value="${userData.password}" />
-              <input type="hidden" name="remember" value="${remember || ''}" />
-
-              <label for="backup_code">Backup Code:</label>
-              <input type="text" id="backup_code" name="backup_code" maxlength="16" required autocomplete="off" style="text-transform: uppercase;" />
-
-              <button type="submit">✓ Verify with Backup Code</button>
-
-              <div style="text-align: center; margin-top: 1rem;">
-                <a href="#" onclick="showMFAForm(); return false;" style="color: ${config.ui.secondaryColor};">← Back to authenticator</a>
-              </div>
-            </form>
-
-            <div class="back-link">
-              <a href="/login">← Back to login</a>
-            </div>
-          </div>
-
-          <script>
-            function showBackupCodeForm() {
-              document.getElementById('mfa-form').style.display = 'none';
-              document.getElementById('backup-code-form').style.display = 'block';
-              document.getElementById('backup_code').focus();
-              document.querySelector('.backup-link').style.display = 'none';
-            }
-
-            function showMFAForm() {
-              document.getElementById('mfa-form').style.display = 'block';
-              document.getElementById('backup-code-form').style.display = 'none';
-              document.getElementById('mfa_token').focus();
-              document.querySelector('.backup-link').style.display = 'block';
-            }
-          </script>
-        </body>
-        </html>
-      `);
+      return c.html(MFAVerificationPage({
+        error: error ? decodeURIComponent(error) : null,
+        token: mfaToken,
+        remember: remember || '',
+        config: uiConfig
+      }));
 
     } catch (error) {
       if (config.verbose) {
@@ -1280,81 +1205,12 @@ export function registerUIRoutes(app, plugin) {
       // We'll store it after successful verification
       c.set('mfaEnrollment', enrollment);
 
-      // TODO: Create MFAEnrollmentPage component
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Enable MFA - ${config.ui.title}</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 600px; margin: 0 auto; }
-            h1 { color: ${config.ui.primaryColor}; }
-            .qr-code { text-align: center; margin: 2rem 0; }
-            .qr-code img { border: 2px solid ${config.ui.borderColor}; padding: 1rem; }
-            .secret { background: ${config.ui.backgroundLight}; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 1rem 0; }
-            .backup-codes { background: #fff3cd; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 2rem 0; }
-            .backup-codes-list { font-family: monospace; columns: 2; }
-            input { padding: 0.5rem; border: 1px solid ${config.ui.borderColor}; border-radius: ${config.ui.borderRadius}; width: 100%; margin: 0.5rem 0; }
-            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; }
-            button:hover { opacity: 0.9; }
-            .cancel-btn { background: ${config.ui.secondaryColor}; margin-left: 0.5rem; }
-          </style>
-        </head>
-        <body>
-          <h1>Enable Two-Factor Authentication</h1>
-
-          <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, 1Password, etc.):</p>
-
-          <div class="qr-code">
-            <img src="${qrCodeDataUrl}" alt="QR Code" />
-          </div>
-
-          <div class="secret">
-            <strong>Manual Entry Key:</strong><br/>
-            <code>${enrollment.secret}</code><br/>
-            <small>Use this if you can't scan the QR code</small>
-          </div>
-
-          <div class="backup-codes">
-            <strong>⚠️ Save these backup codes!</strong>
-            <p>You can use these codes to access your account if you lose your authenticator device. Each code can only be used once.</p>
-            <div class="backup-codes-list">
-              ${enrollment.backupCodes.map(code => `<div>${code}</div>`).join('')}
-            </div>
-            <button onclick="downloadBackupCodes()">💾 Download Backup Codes</button>
-          </div>
-
-          <form method="POST" action="/profile/mfa/enroll">
-            <label>Enter the 6-digit code from your authenticator app to verify:</label>
-            <input type="text" name="token" pattern="[0-9]{6}" maxlength="6" required autofocus />
-
-            <input type="hidden" name="enrollment_secret" value="${enrollment.secret}" />
-            <input type="hidden" name="enrollment_backup_codes" value="${JSON.stringify(enrollment.backupCodes)}" />
-
-            <div style="margin-top: 1rem;">
-              <button type="submit">✓ Verify and Enable MFA</button>
-              <a href="/profile"><button type="button" class="cancel-btn">Cancel</button></a>
-            </div>
-          </form>
-
-          <script>
-            function downloadBackupCodes() {
-              const codes = ${JSON.stringify(enrollment.backupCodes)};
-              const text = 'MFA Backup Codes - ${config.ui.title}\\n\\n' + codes.join('\\n') + '\\n\\nKeep these codes safe!';
-              const blob = new Blob([text], { type: 'text/plain' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'mfa-backup-codes.txt';
-              a.click();
-              URL.revokeObjectURL(url);
-            }
-          </script>
-        </body>
-        </html>
-      `);
+      return c.html(MFAEnrollmentPage({
+        qrCodeDataUrl,
+        secret: enrollment.secret,
+        backupCodes: enrollment.backupCodes,
+        config: uiConfig
+      }));
 
     } catch (error) {
       if (config.verbose) {
@@ -1533,54 +1389,10 @@ export function registerUIRoutes(app, plugin) {
         return c.redirect(`/profile?error=${encodeURIComponent('Failed to regenerate backup codes. Please try again.')}`);
       }
 
-      // TODO: Create proper UI page for this
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>New Backup Codes - ${config.ui.title}</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 600px; margin: 0 auto; }
-            h1 { color: ${config.ui.primaryColor}; }
-            .backup-codes { background: #fff3cd; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 2rem 0; }
-            .backup-codes-list { font-family: monospace; columns: 2; }
-            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; margin-right: 0.5rem; }
-            button:hover { opacity: 0.9; }
-            .back-btn { background: ${config.ui.secondaryColor}; }
-          </style>
-        </head>
-        <body>
-          <h1>New Backup Codes Generated</h1>
-
-          <div class="backup-codes">
-            <strong>⚠️ Save these new backup codes!</strong>
-            <p>Your old backup codes have been invalidated. Save these new codes in a safe place.</p>
-            <div class="backup-codes-list">
-              ${backupCodes.map(code => `<div>${code}</div>`).join('')}
-            </div>
-          </div>
-
-          <button onclick="downloadBackupCodes()">💾 Download Backup Codes</button>
-          <a href="/profile"><button class="back-btn">Back to Profile</button></a>
-
-          <script>
-            function downloadBackupCodes() {
-              const codes = ${JSON.stringify(backupCodes)};
-              const text = 'MFA Backup Codes - ${config.ui.title}\\n\\n' + codes.join('\\n') + '\\n\\nKeep these codes safe!';
-              const blob = new Blob([text], { type: 'text/plain' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'mfa-backup-codes.txt';
-              a.click();
-              URL.revokeObjectURL(url);
-            }
-          </script>
-        </body>
-        </html>
-      `);
+      return c.html(MFABackupCodesPage({
+        backupCodes,
+        config: uiConfig
+      }));
 
     } catch (error) {
       if (config.verbose) {
@@ -2356,14 +2168,11 @@ export function registerUIRoutes(app, plugin) {
     try {
       // Validate required parameters
       if (!response_type || !client_id || !redirect_uri) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Invalid Request</h1>
-              <p>response_type, client_id, and redirect_uri are required</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: 'invalid_request',
+          errorDescription: 'Missing required parameters: response_type, client_id, and redirect_uri are required',
+          config: uiConfig
+        }), 400);
       }
 
       // Check if user is logged in
@@ -2380,40 +2189,31 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okClient || !clients || clients.length === 0) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Invalid Client</h1>
-              <p>Client not found</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: 'invalid_client',
+          errorDescription: 'Client not found',
+          config: uiConfig
+        }), 400);
       }
 
       const client = clients[0];
 
       // Check if client is active
       if (client.active === false) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Client Inactive</h1>
-              <p>This client is not currently active</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: 'unauthorized_client',
+          errorDescription: 'This client is not currently active',
+          config: uiConfig
+        }), 400);
       }
 
       // Validate redirect_uri
       if (!client.redirectUris || !client.redirectUris.includes(redirect_uri)) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Invalid Redirect URI</h1>
-              <p>The redirect_uri does not match any registered URIs for this client</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: 'invalid_request',
+          errorDescription: 'The redirect_uri does not match any registered URIs for this client',
+          config: uiConfig
+        }), 400);
       }
 
       // Parse and validate scopes
@@ -2424,14 +2224,11 @@ export function registerUIRoutes(app, plugin) {
         );
 
         if (invalidScopes.length > 0) {
-          return c.html(`
-            <html>
-              <body>
-                <h1>Invalid Scopes</h1>
-                <p>Invalid scopes: ${invalidScopes.join(', ')}</p>
-              </body>
-            </html>
-          `, 400);
+          return c.html(OAuthErrorPage({
+            error: 'invalid_scope',
+            errorDescription: `Invalid scopes: ${invalidScopes.join(', ')}`,
+            config: uiConfig
+          }), 400);
         }
       }
 
@@ -2453,14 +2250,11 @@ export function registerUIRoutes(app, plugin) {
       }));
     } catch (error) {
       console.error('[Identity Plugin] OAuth authorize error:', error);
-      return c.html(`
-        <html>
-          <body>
-            <h1>Server Error</h1>
-            <p>An error occurred while processing your request</p>
-          </body>
-        </html>
-      `, 500);
+      return c.html(OAuthErrorPage({
+        error: 'server_error',
+        errorDescription: 'An error occurred while processing your request',
+        config: uiConfig
+      }), 500);
     }
   });
 
@@ -2519,14 +2313,11 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okCode) {
         console.error('[Identity Plugin] Failed to store auth code:', errCode);
-        return c.html(`
-          <html>
-            <body>
-              <h1>Server Error</h1>
-              <p>Failed to generate authorization code</p>
-            </body>
-          </html>
-        `, 500);
+        return c.html(OAuthErrorPage({
+          error: 'server_error',
+          errorDescription: 'Failed to generate authorization code',
+          config: uiConfig
+        }), 500);
       }
 
       // If trust_application is enabled, store consent for future use
