@@ -1843,6 +1843,8 @@ actions: {
 ### 5. Handle Concurrent State Changes
 
 ```javascript
+import { StateMachineError } from 's3db.js';
+
 // Implement optimistic locking for concurrent updates
 actions: {
   safeStateUpdate: async (context, event, machine) => {
@@ -1850,7 +1852,15 @@ actions: {
     
     // Check if state has changed since we started
     if (currentRecord._state !== context._state) {
-      throw new Error(`State conflict: expected ${context._state}, got ${currentRecord._state}`);
+      throw new StateMachineError('State conflict detected during safe update', {
+        statusCode: 409,
+        retriable: false,
+        suggestion: 'Reload the record and retry the transition.',
+        currentState: currentRecord._state,
+        targetState: context._state,
+        resourceName: 'orders',
+        operation: 'safeStateUpdate'
+      });
     }
     
     // Proceed with update using version check

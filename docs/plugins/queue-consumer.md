@@ -451,13 +451,20 @@ const processor = new MessageProcessor(s3db.plugins.queueConsumer);
 
 ```javascript
 // Complex transformation scenarios
+import { PluginError } from 's3db.js';
+
 const transformationExamples = {
   // User registration events
   users: {
     transform: (message) => {
       // Validate required fields
       if (!message.data.email || !message.data.name) {
-        throw new Error('Missing required fields: email, name');
+        throw new PluginError('QueueConsumer transform requires email and name', {
+          statusCode: 422,
+          retriable: false,
+          suggestion: 'Ensure upstream producer populates both fields before enqueueing.',
+          metadata: { messageId: message.metadata?.messageId }
+        });
       }
       
       return {
@@ -662,6 +669,8 @@ plugin.on('consumer_disconnected', (data) => {
 ### 1. Implement Proper Error Handling
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 // Comprehensive error handling
 {
   consumers: [
@@ -671,12 +680,22 @@ plugin.on('consumer_disconnected', (data) => {
         try {
           // Validate message structure
           if (!message.data || !message.action) {
-            throw new Error('Invalid message structure');
+            throw new PluginError('Queue consumer message is missing data/action', {
+              statusCode: 400,
+              retriable: false,
+              suggestion: 'Ensure the producer publishes both "data" and "action" fields.',
+              metadata: { messageId: message.id }
+            });
           }
           
           // Validate required fields
           if (message.action === 'inserted' && !message.data.email) {
-            throw new Error('Email is required for user creation');
+            throw new PluginError('Email is required for user creation', {
+              statusCode: 422,
+              retriable: false,
+              suggestion: 'Populate data.email before enqueueing inserted user messages.',
+              metadata: { messageId: message.id }
+            });
           }
           
           return {

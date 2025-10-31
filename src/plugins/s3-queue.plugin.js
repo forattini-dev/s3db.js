@@ -94,6 +94,7 @@ export class S3QueuePlugin extends Plugin {
     this.config.pollBatchSize = options.pollBatchSize ?? Math.max((this.config.concurrency || 1) * 4, 16);
     this.config.recoveryInterval = options.recoveryInterval ?? 5000;
     this.config.recoveryBatchSize = options.recoveryBatchSize ?? Math.max((this.config.concurrency || 1) * 2, 10);
+    this.config.processedCacheTTL = options.processedCacheTTL ?? 30000;
 
     this._queueResourceDescriptor = {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
@@ -123,7 +124,7 @@ export class S3QueuePlugin extends Plugin {
 
     // Deduplication cache to prevent S3 eventual consistency issues
     // Tracks recently processed messages to avoid reprocessing
-    this.processedCache = new Map(); // queueId -> timestamp
+    this.processedCache = new Map(); // queueId -> expiresAt
     this.cacheCleanupInterval = null;
     this.lockCleanupInterval = null;
     this.messageLocks = new Map();
@@ -330,10 +331,10 @@ export class S3QueuePlugin extends Plugin {
     // Start cache cleanup (every 5 seconds, remove entries older than 30 seconds)
     this.cacheCleanupInterval = setInterval(() => {
       const now = Date.now();
-      const maxAge = 30000; // 30 seconds
+      const ttl = this.config.processedCacheTTL;
 
-      for (const [queueId, timestamp] of this.processedCache.entries()) {
-        if (now - timestamp > maxAge) {
+      for (const [queueId, expiresAt] of this.processedCache.entries()) {
+        if (expiresAt <= now || expiresAt - now > ttl * 4) {
           this.processedCache.delete(queueId);
         }
       }
@@ -531,7 +532,8 @@ export class S3QueuePlugin extends Plugin {
 
     try {
       // Check deduplication cache (protected by lock)
-      if (this.processedCache.has(msg.id)) {
+      const alreadyProcessed = await this._isRecentlyProcessed(msg.id);
+      if (alreadyProcessed) {
         if (this.config.verbose) {
           console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
         }
@@ -540,7 +542,7 @@ export class S3QueuePlugin extends Plugin {
 
       // Add to cache immediately (while still holding lock)
       // This prevents other workers from claiming this message
-      this.processedCache.set(msg.id, Date.now());
+      await this._markMessageProcessed(msg.id);
     } finally {
       await this.releaseLock(lock);
     }
@@ -553,6 +555,7 @@ export class S3QueuePlugin extends Plugin {
     if (!okGet || !msgWithETag) {
       // Message was deleted or not found - remove from cache
       this.processedCache.delete(msg.id);
+      await this._clearProcessedMarker(msg.id);
       if (this.config.verbose) {
         console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
       }
@@ -693,6 +696,7 @@ export class S3QueuePlugin extends Plugin {
       status: 'failed',
       error
     });
+    await this._clearProcessedMarker(queueId);
   }
 
   async retryMessage(queueId, attempts, error) {
@@ -706,7 +710,7 @@ export class S3QueuePlugin extends Plugin {
     });
 
     // Remove from cache so it can be retried
-    this.processedCache.delete(queueId);
+    await this._clearProcessedMarker(queueId);
   }
 
   async moveToDeadLetter(queueId, record, error) {
@@ -732,6 +736,7 @@ export class S3QueuePlugin extends Plugin {
     });
 
     // Note: message already in cache from attemptClaim()
+    await this._clearProcessedMarker(queueId);
   }
 
   async getStats() {

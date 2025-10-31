@@ -1244,6 +1244,8 @@ for (const group of duplicatePairs) {
 **Preventive Duplicate Detection (Before Insert)**
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 // Add hook to check for duplicates before inserting
 products.beforeInsert(async (data) => {
   // Generate embedding for new product
@@ -1259,11 +1261,15 @@ products.beforeInsert(async (data) => {
 
   if (similar.length > 0) {
     const existing = similar[0];
-    throw new Error(
-      `Potential duplicate detected! ` +
-      `Similar to existing product "${existing.record.name}" ` +
-      `(similarity: ${((1 - existing.distance) * 100).toFixed(1)}%)`
-    );
+    throw new PluginError('Potential duplicate product detected', {
+      statusCode: 409,
+      retriable: false,
+      suggestion: 'Review the similar product and adjust the description or metadata before inserting.',
+      metadata: {
+        similarId: existing.record.id,
+        similarityPercent: Number(((1 - existing.distance) * 100).toFixed(1))
+      }
+    });
   }
 
   return data;
@@ -2364,6 +2370,8 @@ async function getEmbedding(text) {
 ### 2. Validate Vectors
 
 ```javascript
+import { ValidationError } from 's3db.js';
+
 // When using embedding notation, dimension validation is automatic!
 const products = await db.createResource({
   name: 'products',
@@ -2377,7 +2385,12 @@ products.beforeInsert(async (data) => {
   if (data.vector) {
     // Check for NaN/Infinity
     if (data.vector.some(v => !isFinite(v))) {
-      throw new Error('Vector contains invalid values');
+      throw new ValidationError('Vector payload contains NaN or Infinity values', {
+        statusCode: 422,
+        retriable: false,
+        suggestion: 'Cleanse embeddings before insert; ensure upstream model outputs finite numbers.',
+        metadata: { resource: 'products', field: 'vector' }
+      });
     }
 
     // Optionally normalize
