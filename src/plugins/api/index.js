@@ -134,10 +134,11 @@ export class ApiPlugin extends Plugin {
     const normalizedAuth = normalizeAuthConfig(options.auth);
     this.usersResourceName = resolveResourceName('api', {
       defaultName: 'plg_api_users',
-      override: normalizedAuth.resource
+      override: options.auth?.resource
     });
-    this.legacyUsersResourceNames = ['plg_users'];
+    this.legacyUsersResourceNames = ['plg_api_users', 'plg_users', 'users'];
     normalizedAuth.resource = this.usersResourceName;
+    normalizedAuth.createResource = options.auth?.createResource !== false;
 
     this.config = {
       // Server configuration
@@ -417,18 +418,41 @@ export class ApiPlugin extends Plugin {
    * @private
    */
   async _createUsersResource() {
+    const existingResource = this._findExistingUsersResource();
+
+    if (!this.config.auth.createResource) {
+      if (!existingResource) {
+        throw new Error(
+          `[API Plugin] Auth resource "${this.usersResourceName}" not found and auth.createResource is false`
+        );
+      }
+      this.usersResource = existingResource;
+      if (this.config.verbose) {
+        console.log(`[API Plugin] Using existing ${existingResource.name} resource for authentication`);
+      }
+      return;
+    }
+
+    if (existingResource) {
+      this.usersResource = existingResource;
+      if (this.config.verbose) {
+        console.log(`[API Plugin] Reusing existing ${existingResource.name} resource for authentication`);
+      }
+      return;
+    }
+
     const [ok, err, resource] = await tryFn(() =>
       this.database.createResource({
         name: this.usersResourceName,
         attributes: {
           id: 'string|required',
           username: 'string|required|minlength:3',
-          email: 'string|required|email',  // Required to support email-based auth
+          email: 'string|required|email',
           password: 'secret|required|minlength:8',
           apiKey: 'string|optional',
           jwtSecret: 'string|optional',
           role: 'string|default:user',
-          scopes: 'array|items:string|optional',  // Authorization scopes (e.g., ['read:users', 'write:cars'])
+          scopes: 'array|items:string|optional',
           active: 'boolean|default:true',
           createdAt: 'string|optional',
           lastLoginAt: 'string|optional',
@@ -440,28 +464,25 @@ export class ApiPlugin extends Plugin {
       })
     );
 
-    if (ok) {
-      this.usersResource = resource;
-      if (this.config.verbose) {
-        console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
-      }
-    } else {
-      const existing =
-        this.database.resources[this.usersResourceName] ||
-        this.legacyUsersResourceNames
-          .map((name) => this.database.resources[name])
-          .find(Boolean);
+    if (!ok) {
+      throw err;
+    }
 
-      // Resource already exists
-      if (existing) {
-        this.usersResource = existing;
-        if (this.config.verbose) {
-          console.log(`[API Plugin] Using existing ${existing.name} resource`);
-        }
-      } else {
-        throw err;
+    this.usersResource = resource;
+    if (this.config.verbose) {
+      console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
+    }
+  }
+
+  _findExistingUsersResource() {
+    const candidates = new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
+    for (const name of candidates) {
+      const resource = this.database.resources?.[name];
+      if (resource) {
+        return resource;
       }
     }
+    return null;
   }
   /**
    * Setup middlewares

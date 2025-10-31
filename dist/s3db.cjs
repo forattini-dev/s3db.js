@@ -10012,10 +10012,11 @@ class ApiPlugin extends Plugin {
     const normalizedAuth = normalizeAuthConfig(options.auth);
     this.usersResourceName = resolveResourceName("api", {
       defaultName: "plg_api_users",
-      override: normalizedAuth.resource
+      override: options.auth?.resource
     });
-    this.legacyUsersResourceNames = ["plg_users"];
+    this.legacyUsersResourceNames = ["plg_api_users", "plg_users", "users"];
     normalizedAuth.resource = this.usersResourceName;
+    normalizedAuth.createResource = options.auth?.createResource !== false;
     this.config = {
       // Server configuration
       port: options.port || 3e3,
@@ -10260,6 +10261,26 @@ class ApiPlugin extends Plugin {
    * @private
    */
   async _createUsersResource() {
+    const existingResource = this._findExistingUsersResource();
+    if (!this.config.auth.createResource) {
+      if (!existingResource) {
+        throw new Error(
+          `[API Plugin] Auth resource "${this.usersResourceName}" not found and auth.createResource is false`
+        );
+      }
+      this.usersResource = existingResource;
+      if (this.config.verbose) {
+        console.log(`[API Plugin] Using existing ${existingResource.name} resource for authentication`);
+      }
+      return;
+    }
+    if (existingResource) {
+      this.usersResource = existingResource;
+      if (this.config.verbose) {
+        console.log(`[API Plugin] Reusing existing ${existingResource.name} resource for authentication`);
+      }
+      return;
+    }
     const [ok, err, resource] = await tryFn(
       () => this.database.createResource({
         name: this.usersResourceName,
@@ -10267,13 +10288,11 @@ class ApiPlugin extends Plugin {
           id: "string|required",
           username: "string|required|minlength:3",
           email: "string|required|email",
-          // Required to support email-based auth
           password: "secret|required|minlength:8",
           apiKey: "string|optional",
           jwtSecret: "string|optional",
           role: "string|default:user",
           scopes: "array|items:string|optional",
-          // Authorization scopes (e.g., ['read:users', 'write:cars'])
           active: "boolean|default:true",
           createdAt: "string|optional",
           lastLoginAt: "string|optional",
@@ -10284,22 +10303,23 @@ class ApiPlugin extends Plugin {
         createdBy: "ApiPlugin"
       })
     );
-    if (ok) {
-      this.usersResource = resource;
-      if (this.config.verbose) {
-        console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
-      }
-    } else {
-      const existing = this.database.resources[this.usersResourceName] || this.legacyUsersResourceNames.map((name) => this.database.resources[name]).find(Boolean);
-      if (existing) {
-        this.usersResource = existing;
-        if (this.config.verbose) {
-          console.log(`[API Plugin] Using existing ${existing.name} resource`);
-        }
-      } else {
-        throw err;
+    if (!ok) {
+      throw err;
+    }
+    this.usersResource = resource;
+    if (this.config.verbose) {
+      console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
+    }
+  }
+  _findExistingUsersResource() {
+    const candidates = /* @__PURE__ */ new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
+    for (const name of candidates) {
+      const resource = this.database.resources?.[name];
+      if (resource) {
+        return resource;
       }
     }
+    return null;
   }
   /**
    * Setup middlewares
@@ -37650,7 +37670,7 @@ class Database extends EventEmitter {
 class S3db extends Database {
 }
 
-function normalizeResourceName$1(name) {
+function normalizeResourceName(name) {
   return typeof name === "string" ? name.trim().toLowerCase() : name;
 }
 class S3dbReplicator extends BaseReplicator {
@@ -37664,10 +37684,10 @@ class S3dbReplicator extends BaseReplicator {
     else if (Array.isArray(resources)) {
       normalizedResources = {};
       for (const res of resources) {
-        if (typeof res === "string") normalizedResources[normalizeResourceName$1(res)] = res;
+        if (typeof res === "string") normalizedResources[normalizeResourceName(res)] = res;
       }
     } else if (typeof resources === "string") {
-      normalizedResources[normalizeResourceName$1(resources)] = resources;
+      normalizedResources[normalizeResourceName(resources)] = resources;
     }
     this.resourcesMap = this._normalizeResources(normalizedResources);
   }
@@ -37676,9 +37696,9 @@ class S3dbReplicator extends BaseReplicator {
     if (Array.isArray(resources)) {
       const map = {};
       for (const res of resources) {
-        if (typeof res === "string") map[normalizeResourceName$1(res)] = res;
+        if (typeof res === "string") map[normalizeResourceName(res)] = res;
         else if (typeof res === "object" && res.resource) {
-          map[normalizeResourceName$1(res.resource)] = res;
+          map[normalizeResourceName(res.resource)] = res;
         }
       }
       return map;
@@ -37686,7 +37706,7 @@ class S3dbReplicator extends BaseReplicator {
     if (typeof resources === "object") {
       const map = {};
       for (const [src, dest] of Object.entries(resources)) {
-        const normSrc = normalizeResourceName$1(src);
+        const normSrc = normalizeResourceName(src);
         if (typeof dest === "string") map[normSrc] = dest;
         else if (Array.isArray(dest)) {
           map[normSrc] = dest.map((item) => {
@@ -37765,7 +37785,7 @@ class S3dbReplicator extends BaseReplicator {
       payload = data;
       id = recordId;
     }
-    const normResource = normalizeResourceName$1(resource);
+    const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     if (!entry) {
       throw new ReplicationError("Resource not configured for replication", {
@@ -37850,7 +37870,7 @@ class S3dbReplicator extends BaseReplicator {
   }
   _applyTransformer(resource, data) {
     let cleanData = this._cleanInternalFields(data);
-    const normResource = normalizeResourceName$1(resource);
+    const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     let result;
     if (!entry) return cleanData;
@@ -37886,7 +37906,7 @@ class S3dbReplicator extends BaseReplicator {
     return cleanData;
   }
   _resolveDestResource(resource, data) {
-    const normResource = normalizeResourceName$1(resource);
+    const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     if (!entry) return resource;
     if (Array.isArray(entry)) {
@@ -37904,8 +37924,8 @@ class S3dbReplicator extends BaseReplicator {
   _getDestResourceObj(resource) {
     const db = this.targetDatabase || this.client;
     const available = Object.keys(db.resources || {});
-    const norm = normalizeResourceName$1(resource);
-    const found = available.find((r) => normalizeResourceName$1(r) === norm);
+    const norm = normalizeResourceName(resource);
+    const found = available.find((r) => normalizeResourceName(r) === norm);
     if (!found) {
       throw new ReplicationError("Destination resource not found in target database", {
         operation: "_getDestResourceObj",
@@ -38001,7 +38021,7 @@ class S3dbReplicator extends BaseReplicator {
     await super.cleanup();
   }
   shouldReplicateResource(resource, action) {
-    const normResource = normalizeResourceName$1(resource);
+    const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     if (!entry) return false;
     if (!action) return true;
@@ -39089,9 +39109,6 @@ function validateReplicatorConfig(driver, config, resources = [], client = null)
   return replicator.validateConfig();
 }
 
-function normalizeResourceName(name) {
-  return typeof name === "string" ? name.trim().toLowerCase() : name;
-}
 class ReplicatorPlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -39142,6 +39159,11 @@ class ReplicatorPlugin extends Plugin {
       timeout: options.timeout || 3e4,
       verbose: options.verbose || false
     };
+    this.config.replicatorLogResource = resolveResourceName("replicator", {
+      defaultName: "plg_replicator_logs",
+      override: options.replicatorLogResource
+    });
+    this.legacyReplicatorLogNames = ["plg_replicator_logs", "replicator_log"];
     this.replicators = [];
     this.database = null;
     this.eventListenersInstalled = /* @__PURE__ */ new Set();
@@ -39152,6 +39174,22 @@ class ReplicatorPlugin extends Plugin {
       lastSync: null
     };
     this._afterCreateResourceHook = null;
+    this.replicatorLog = null;
+  }
+  _getLogResourceCandidates() {
+    return Array.from(new Set([this.config.replicatorLogResource, ...this.legacyReplicatorLogNames].filter(Boolean)));
+  }
+  _isLogResourceName(name) {
+    return this._getLogResourceCandidates().includes(name);
+  }
+  _getExistingLogResource() {
+    for (const candidate of this._getLogResourceCandidates()) {
+      const resource = this.database?.resources?.[candidate];
+      if (resource) {
+        return resource;
+      }
+    }
+    return null;
   }
   // Helper to filter out internal S3DB fields
   filterInternalFields(obj) {
@@ -39169,7 +39207,7 @@ class ReplicatorPlugin extends Plugin {
     return ok ? completeRecord : data;
   }
   installEventListeners(resource, database, plugin) {
-    if (!resource || this.eventListenersInstalled.has(resource.name) || resource.name === this.config.replicatorLogResource) {
+    if (!resource || this.eventListenersInstalled.has(resource.name) || this._isLogResourceName(resource.name)) {
       return;
     }
     const insertHandler = async (data) => {
@@ -39220,8 +39258,9 @@ class ReplicatorPlugin extends Plugin {
   }
   async onInstall() {
     if (this.config.persistReplicatorLog) {
+      const logResourceName = this.config.replicatorLogResource;
       const [ok, err, logResource] = await tryFn(() => this.database.createResource({
-        name: this.config.replicatorLogResource || "plg_replicator_logs",
+        name: logResourceName,
         attributes: {
           id: "string|required",
           resource: "string|required",
@@ -39235,13 +39274,17 @@ class ReplicatorPlugin extends Plugin {
       if (ok) {
         this.replicatorLogResource = logResource;
       } else {
-        this.replicatorLogResource = this.database.resources[this.config.replicatorLogResource || "plg_replicator_logs"];
+        this.replicatorLogResource = this._getExistingLogResource();
+        if (!this.replicatorLogResource && this.config.verbose) {
+          console.warn("[ReplicatorPlugin] Failed to create replicator log resource:", err?.message);
+        }
       }
+      this.replicatorLog = this.replicatorLogResource || this.replicatorLog || this._getExistingLogResource();
     }
     await this.initializeReplicators(this.database);
     this.installDatabaseHooks();
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== (this.config.replicatorLogResource || "plg_replicator_logs")) {
+      if (!this._isLogResourceName(resource.name)) {
         this.installEventListeners(resource, this.database, this);
       }
     }
@@ -39250,7 +39293,7 @@ class ReplicatorPlugin extends Plugin {
   }
   installDatabaseHooks() {
     this._afterCreateResourceHook = (resource) => {
-      if (resource.name !== (this.config.replicatorLogResource || "plg_replicator_logs")) {
+      if (!this._isLogResourceName(resource.name)) {
         this.installEventListeners(resource, this.database, this);
       }
     };
@@ -39307,9 +39350,8 @@ class ReplicatorPlugin extends Plugin {
   }
   async logError(replicator, resourceName, operation, recordId, data, error) {
     const [ok, logError] = await tryFn(async () => {
-      const logResourceName = this.config.replicatorLogResource;
-      if (this.database && this.database.resources && this.database.resources[logResourceName]) {
-        const logResource = this.database.resources[logResourceName];
+      const logResource = this.replicatorLogResource || this._getExistingLogResource();
+      if (logResource) {
         await logResource.insert({
           replicator: replicator.name || replicator.id,
           resourceName,
@@ -39443,7 +39485,7 @@ class ReplicatorPlugin extends Plugin {
     return Promise.allSettled(promises);
   }
   async logReplicator(item) {
-    const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
+    const logRes = this.replicatorLog || this.replicatorLogResource || this._getExistingLogResource();
     if (!logRes) {
       this.emit("plg:replicator:log-failed", { error: "replicator log resource not found", item });
       return;
@@ -39557,7 +39599,7 @@ class ReplicatorPlugin extends Plugin {
     }
     this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
     for (const resourceName in this.database.resources) {
-      if (normalizeResourceName(resourceName) === normalizeResourceName("plg_replicator_logs")) continue;
+      if (this._isLogResourceName(resourceName)) continue;
       if (replicator.shouldReplicateResource(resourceName)) {
         this.emit("plg:replicator:sync-resource", { resourceName, replicatorId });
         const resource = this.database.resources[resourceName];
