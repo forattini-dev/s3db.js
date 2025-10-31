@@ -86,7 +86,10 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
           config: {
             jwtSecret: 'test-secret-key',
             jwtExpiresIn: '1h',
-            allowRegistration: true
+            registration: {
+              enabled: true,
+              allowedFields: ['name']
+            }
           }
         },
         resources: {
@@ -122,17 +125,20 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
         body: JSON.stringify({
           email: 'test@example.com',
           password: 'SecurePass123!',
-          role: 'user'
+          name: 'Test User'
         })
       });
 
       expect(response.status).toBe(201);
       const data = await response.json();
       expect(data.success).toBe(true);
-      expect(data.data.email).toBe('test@example.com');
+      expect(data.data.user).toBeDefined();
+      expect(data.data.user.email).toBe('test@example.com');
+      expect(data.data.user.role).toBe('user');
+      expect(data.data.user.name).toBe('Test User');
+      expect(data.data.user.password).toBeUndefined();
       expect(data.data.token).toBeDefined();
       expect(typeof data.data.token).toBe('string');
-      expect(data.data.password).toBeUndefined(); // Should not return password
     });
 
     it('should not allow duplicate registration', async () => {
@@ -145,7 +151,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
         })
       });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
       const data = await response.json();
       expect(data.success).toBe(false);
     });
@@ -286,7 +292,9 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
           config: {
             realm: 'Test API',
             passphrase: 'test-key',
-            allowRegistration: true
+            registration: {
+              enabled: true
+            }
           }
         },
         resources: {
@@ -324,9 +332,11 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
       expect(response.status).toBe(201);
       const data = await response.json();
       expect(data.success).toBe(true);
-      expect(data.data.username).toBe('alice');
+      expect(data.data.user).toBeDefined();
+      expect(data.data.user.username).toBe('alice');
+      expect(data.data.user.role).toBe('user');
       expect(data.data.token).toBeUndefined(); // Basic auth doesn't return token
-      expect(data.data.secret).toBeUndefined(); // Should not return password
+      expect(data.data.user.secret).toBeUndefined(); // Should not return password
     });
 
     it('should NOT have /auth/login endpoint (Basic auth only)', async () => {
