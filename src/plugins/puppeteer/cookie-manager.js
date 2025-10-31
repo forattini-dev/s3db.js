@@ -107,6 +107,8 @@ export class CookieManager {
       userAgent: page._userAgent,
       viewport: page._viewport,
       proxyId: page._proxyId || null, // IMMUTABLE: Proxy binding
+      domain: this._extractMainDomain(cookies),
+      date: new Date().toISOString().split('T')[0],  // YYYY-MM-DD
       reputation: {
         successCount: 0,
         failCount: 0,
@@ -123,6 +125,10 @@ export class CookieManager {
 
     // Update cookies
     session.cookies = cookies;
+
+    // Update domain (in case it changed)
+    session.domain = this._extractMainDomain(cookies);
+    session.date = new Date().toISOString().split('T')[0];
 
     // Update reputation
     if (this.config.farming.reputation.enabled && this.config.farming.reputation.trackSuccess) {
@@ -440,6 +446,28 @@ export class CookieManager {
     } catch (err) {
       // Ignore errors
     }
+  }
+
+  /**
+   * Extract main domain from cookies
+   * @private
+   */
+  _extractMainDomain(cookies) {
+    if (!cookies || cookies.length === 0) {
+      return 'unknown';
+    }
+
+    // Get most common domain from cookies
+    const domains = {};
+    cookies.forEach(cookie => {
+      const domain = cookie.domain || 'unknown';
+      domains[domain] = (domains[domain] || 0) + 1;
+    });
+
+    // Return domain with most cookies
+    return Object.entries(domains)
+      .sort((a, b) => b[1] - a[1])[0][0]
+      .replace(/^\./, '');  // Remove leading dot
   }
 
   /**

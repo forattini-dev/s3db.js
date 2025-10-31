@@ -246,6 +246,12 @@ export class PuppeteerPlugin extends Plugin {
       override: options.cookies?.storage?.resource
     });
     this.legacyCookieStorageNames = ['puppeteer_cookies'];
+    if (options.cookies?.storage?.resource) {
+      this.legacyCookieStorageNames.push(options.cookies.storage.resource);
+    }
+    if (resourceNamesOption.cookies) {
+      this.legacyCookieStorageNames.push(resourceNamesOption.cookies);
+    }
 
     // Internal state
     this.browserPool = [];
@@ -403,6 +409,8 @@ export class PuppeteerPlugin extends Plugin {
           userAgent: 'string',
           viewport: 'object',
           proxyId: 'string|optional', // IMMUTABLE: Proxy binding
+          domain: 'string',            // Main domain for cookies
+          date: 'string',              // YYYY-MM-DD for temporal partitioning
           reputation: {
             successCount: 'number',
             failCount: 'number',
@@ -417,7 +425,12 @@ export class PuppeteerPlugin extends Plugin {
           }
         },
         timestamps: true,
-        behavior: 'body-only'
+        behavior: 'body-only',
+        partitions: {
+          byProxy: { fields: { proxyId: 'string' } },   // Query cookies for a proxy
+          byDate: { fields: { date: 'string' } },       // Query by date (for rotation)
+          byDomain: { fields: { domain: 'string' } }    // Query cookies for a domain
+        }
       });
     }
   }

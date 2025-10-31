@@ -114,9 +114,15 @@ export class CookieFarmPlugin extends Plugin {
 
     this.config.storage.resource = resolveResourceName('cookiefarm', {
       defaultName: 'plg_cookie_farm_personas',
-      override: options.storage?.resource
+      override: resourceNamesOption.personas || options.storage?.resource
     });
     this.legacyStorageResourceNames = ['cookie_farm_personas'];
+    if (options.storage?.resource) {
+      this.legacyStorageResourceNames.push(options.storage.resource);
+    }
+    if (resourceNamesOption.personas) {
+      this.legacyStorageResourceNames.push(resourceNamesOption.personas);
+    }
 
     // Internal state
     this.puppeteerPlugin = null;
