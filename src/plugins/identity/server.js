@@ -22,15 +22,123 @@ import { idGenerator } from '../../concerns/id.js';
 function createExpressStyleResponse(c) {
   let statusCode = 200;
 
-  return {
+  const response = {
     status(code) {
       statusCode = code;
       return this;
     },
     json(data) {
       return c.json(data, statusCode);
+    },
+    header(name, value) {
+      c.header(name, value);
+      return this;
+    },
+    setHeader(name, value) {
+      c.header(name, value);
+      return this;
+    },
+    send(data) {
+      if (data === undefined || data === null) {
+        return c.body('', statusCode);
+      }
+
+      if (typeof data === 'string' || data instanceof Uint8Array) {
+        return c.body(data, statusCode);
+      }
+
+      // Fallback to JSON serialization for objects
+      return c.json(data, statusCode);
+    },
+    redirect(url, code = 302) {
+      return c.redirect(url, code);
     }
   };
+
+  return response;
+}
+
+/**
+ * Parse cookies from request header
+ * @param {string} cookieHeader
+ * @returns {Object}
+ */
+function parseCookies(cookieHeader) {
+  if (!cookieHeader) {
+    return {};
+  }
+
+  return cookieHeader
+    .split(';')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const [key, ...rest] = part.split('=');
+      acc[key] = decodeURIComponent(rest.join('=') || '');
+      return acc;
+    }, {});
+}
+
+/**
+ * Create Express-style request adapter for Hono context
+ * @param {Object} c - Hono context
+ * @returns {Promise<Object>} Express-style request object
+ */
+async function createExpressStyleRequest(c) {
+  const cached = c.get('expressStyleRequest');
+  if (cached) {
+    return cached;
+  }
+
+  const raw = c.req.raw;
+  const headers = {};
+  raw.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
+  });
+
+  const url = new URL(raw.url);
+  let body = undefined;
+  const contentType = headers['content-type']?.split(';')[0].trim();
+
+  try {
+    if (contentType === 'application/json') {
+      body = await c.req.json();
+    } else if (
+      contentType === 'application/x-www-form-urlencoded' ||
+      contentType === 'multipart/form-data'
+    ) {
+      body = await c.req.parseBody();
+    }
+  } catch {
+    body = undefined;
+  }
+
+  const query = Object.fromEntries(url.searchParams.entries());
+  const cookies = parseCookies(headers.cookie);
+  const clientIp =
+    c.get('clientIp') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    'unknown';
+
+  const expressReq = {
+    method: raw.method,
+    url: raw.url,
+    originalUrl: raw.url,
+    path: url.pathname,
+    headers,
+    query,
+    body: body ?? {},
+    cookies,
+    ip: clientIp,
+    protocol: url.protocol.replace(':', ''),
+    get(name) {
+      return headers[name.toLowerCase()];
+    }
+  };
+
+  c.set('expressStyleRequest', expressReq);
+  return expressReq;
 }
 
 /**
@@ -272,56 +380,65 @@ export class IdentityServer {
 
     // OIDC Discovery endpoint
     this.app.get('/.well-known/openid-configuration', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.discoveryHandler(c.req, res);
+      return await oauth2Server.discoveryHandler(req, res);
     });
 
     // JWKS (JSON Web Key Set) endpoint
     this.app.get('/.well-known/jwks.json', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.jwksHandler(c.req, res);
+      return await oauth2Server.jwksHandler(req, res);
     });
 
     // OAuth2 Token endpoint
     this.app.post('/oauth/token', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.tokenHandler(c.req, res);
+      return await oauth2Server.tokenHandler(req, res);
     });
 
     // OIDC UserInfo endpoint
     this.app.get('/oauth/userinfo', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.userinfoHandler(c.req, res);
+      return await oauth2Server.userinfoHandler(req, res);
     });
 
     // Token introspection endpoint
     this.app.post('/oauth/introspect', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.introspectHandler(c.req, res);
+      return await oauth2Server.introspectHandler(req, res);
     });
 
     // Authorization endpoint (GET for user consent UI)
     this.app.get('/oauth/authorize', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizeHandler(c.req, res);
+      return await oauth2Server.authorizeHandler(req, res);
     });
 
     // Authorization endpoint (POST for processing login)
     this.app.post('/oauth/authorize', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizePostHandler(c.req, res);
+      return await oauth2Server.authorizePostHandler(req, res);
     });
 
     // Client registration endpoint
     this.app.post('/oauth/register', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.registerClientHandler(c.req, res);
+      return await oauth2Server.registerClientHandler(req, res);
     });
 
     // Token revocation endpoint
     this.app.post('/oauth/revoke', async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.revokeHandler(c.req, res);
+      return await oauth2Server.revokeHandler(req, res);
     });
 
     if (this.options.verbose) {

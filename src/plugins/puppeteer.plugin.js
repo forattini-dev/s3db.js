@@ -465,6 +465,35 @@ export class PuppeteerPlugin extends Plugin {
    */
   async _closeBrowserPool() {
     for (const browser of this.browserPool) {
+      if (this.cookieManager) {
+        const tabs = this.tabPool.get(browser);
+        if (tabs) {
+          for (const page of tabs) {
+            if (!page || page._sessionSaved || !page._sessionId) {
+              continue;
+            }
+
+            // Skip if page already closed
+            if (typeof page.isClosed === 'function' && page.isClosed()) {
+              continue;
+            }
+
+            try {
+              await this.cookieManager.saveSession(page, page._sessionId, {
+                success: !!page._navigationSuccess
+              });
+              page._sessionSaved = true;
+            } catch (err) {
+              page._sessionSaved = true;
+              this.emit('puppeteer.cookieSaveFailed', {
+                sessionId: page._sessionId,
+                error: err.message
+              });
+            }
+          }
+        }
+      }
+
       try {
         await browser.close();
       } catch (err) {
@@ -640,11 +669,52 @@ export class PuppeteerPlugin extends Plugin {
     page._userAgent = userAgent;
     page._viewport = viewport;
     page._proxyId = proxyId; // IMMUTABLE: Proxy binding stored on page
+    page._sessionId = useSession;
+    page._navigationSuccess = navigationSuccess;
+    page._sessionSaved = false;
 
     // Add human behavior methods
     if (this.config.humanBehavior.enabled) {
       this._attachHumanBehaviorMethods(page);
     }
+
+    let hasSavedSession = false;
+    const originalClose = page.close?.bind(page) || (async () => {});
+
+    page.on('close', () => {
+      if (isPooledBrowser) {
+        const tabs = this.tabPool.get(browser);
+        tabs?.delete(page);
+      }
+    });
+
+    page.close = async (...closeArgs) => {
+      if (!hasSavedSession && useSession && this.cookieManager && !page._sessionSaved) {
+        try {
+          await this.cookieManager.saveSession(page, useSession, {
+            success: navigationSuccess
+          });
+          page._sessionSaved = true;
+        } catch (err) {
+          this.emit('puppeteer.cookieSaveFailed', {
+            sessionId: useSession,
+            error: err.message
+          });
+          page._sessionSaved = true;
+        } finally {
+          hasSavedSession = true;
+        }
+      }
+
+      try {
+        return await originalClose(...closeArgs);
+      } finally {
+        if (isPooledBrowser) {
+          const tabs = this.tabPool.get(browser);
+          tabs?.delete(page);
+        }
+      }
+    };
 
     this.emit('puppeteer.navigate', {
       url,

@@ -10761,14 +10761,14 @@ function generateDiscoveryDocument(options = {}) {
   const baseUrl = issuer.replace(/\/$/, "");
   return {
     issuer: baseUrl,
-    authorization_endpoint: `${baseUrl}/auth/authorize`,
-    token_endpoint: `${baseUrl}/auth/token`,
-    userinfo_endpoint: `${baseUrl}/auth/userinfo`,
+    authorization_endpoint: `${baseUrl}/oauth/authorize`,
+    token_endpoint: `${baseUrl}/oauth/token`,
+    userinfo_endpoint: `${baseUrl}/oauth/userinfo`,
     jwks_uri: `${baseUrl}/.well-known/jwks.json`,
-    registration_endpoint: `${baseUrl}/auth/register`,
-    introspection_endpoint: `${baseUrl}/auth/introspect`,
-    revocation_endpoint: `${baseUrl}/auth/revoke`,
-    end_session_endpoint: `${baseUrl}/auth/logout`,
+    registration_endpoint: `${baseUrl}/oauth/register`,
+    introspection_endpoint: `${baseUrl}/oauth/introspect`,
+    revocation_endpoint: `${baseUrl}/oauth/revoke`,
+    end_session_endpoint: `${baseUrl}/logout`,
     // Supported features
     scopes_supported: scopes,
     response_types_supported: responseTypes,
@@ -10914,6 +10914,47 @@ function generateClientId() {
 }
 function generateClientSecret(length = 64) {
   return crypto.randomBytes(length / 2).toString("hex");
+}
+
+const DEFAULT_PASSWORD_POLICY = {
+  minLength: 8,
+  maxLength: 128,
+  requireUppercase: true,
+  requireLowercase: true,
+  requireNumbers: true,
+  requireSymbols: false
+};
+async function verifyPassword(plaintext, storedHash) {
+  return await verifyPassword$1(plaintext, storedHash);
+}
+function validatePassword(password, policy = DEFAULT_PASSWORD_POLICY) {
+  const errors = [];
+  if (!password || typeof password !== "string") {
+    return { valid: false, errors: ["Password must be a string"] };
+  }
+  const rules = { ...DEFAULT_PASSWORD_POLICY, ...policy };
+  if (password.length < rules.minLength) {
+    errors.push(`Password must be at least ${rules.minLength} characters long`);
+  }
+  if (password.length > rules.maxLength) {
+    errors.push(`Password must not exceed ${rules.maxLength} characters`);
+  }
+  if (rules.requireUppercase && !/[A-Z]/.test(password)) {
+    errors.push("Password must contain at least one uppercase letter");
+  }
+  if (rules.requireLowercase && !/[a-z]/.test(password)) {
+    errors.push("Password must contain at least one lowercase letter");
+  }
+  if (rules.requireNumbers && !/[0-9]/.test(password)) {
+    errors.push("Password must contain at least one number");
+  }
+  if (rules.requireSymbols && !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    errors.push("Password must contain at least one symbol");
+  }
+  return {
+    valid: errors.length === 0,
+    errors
+  };
 }
 
 class OAuth2Server {
@@ -11106,8 +11147,15 @@ class OAuth2Server {
       });
     }
     const authCode = authCodes[0];
-    const now = Math.floor(Date.now() / 1e3);
-    if (authCode.expiresAt < now) {
+    const expiresAtMs = this.parseAuthCodeExpiry(authCode.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+      await this.authCodeResource.remove(authCode.id);
+      return res.status(400).json({
+        error: "invalid_grant",
+        error_description: "Authorization code is invalid"
+      });
+    }
+    if (expiresAtMs <= Date.now()) {
       await this.authCodeResource.remove(authCode.id);
       return res.status(400).json({
         error: "invalid_grant",
@@ -11535,7 +11583,17 @@ class OAuth2Server {
         });
       }
       const user = users[0];
-      if (user.password !== password) {
+      const [okVerify, errVerify, isValid] = await tryFn(
+        () => verifyPassword(password, user.password)
+      );
+      if (!okVerify) {
+        console.error("[OAuth2Server] Password verification error:", errVerify);
+        return res.status(500).json({
+          error: "server_error",
+          error_description: "Authentication failed"
+        });
+      }
+      if (!isValid) {
         return res.status(401).json({
           error: "access_denied",
           error_description: "Invalid credentials"
@@ -11703,6 +11761,21 @@ class OAuth2Server {
    */
   async rotateKeys() {
     return await this.keyManager.rotateKey();
+  }
+  /**
+   * Normalize authorization code expiry representation
+   * @param {string|number} value
+   * @returns {number} Expiry timestamp in milliseconds or NaN
+   */
+  parseAuthCodeExpiry(value) {
+    if (typeof value === "number") {
+      return value > 1e12 ? value : value * 1e3;
+    }
+    if (typeof value === "string") {
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? NaN : parsed;
+    }
+    return NaN;
   }
 }
 
@@ -31144,6 +31217,31 @@ class PuppeteerPlugin extends Plugin {
    */
   async _closeBrowserPool() {
     for (const browser of this.browserPool) {
+      if (this.cookieManager) {
+        const tabs = this.tabPool.get(browser);
+        if (tabs) {
+          for (const page of tabs) {
+            if (!page || page._sessionSaved || !page._sessionId) {
+              continue;
+            }
+            if (typeof page.isClosed === "function" && page.isClosed()) {
+              continue;
+            }
+            try {
+              await this.cookieManager.saveSession(page, page._sessionId, {
+                success: !!page._navigationSuccess
+              });
+              page._sessionSaved = true;
+            } catch (err) {
+              page._sessionSaved = true;
+              this.emit("puppeteer.cookieSaveFailed", {
+                sessionId: page._sessionId,
+                error: err.message
+              });
+            }
+          }
+        }
+      }
       try {
         await browser.close();
       } catch (err) {
@@ -31280,9 +31378,47 @@ class PuppeteerPlugin extends Plugin {
     page._userAgent = userAgent;
     page._viewport = viewport;
     page._proxyId = proxyId;
+    page._sessionId = useSession;
+    page._navigationSuccess = navigationSuccess;
+    page._sessionSaved = false;
     if (this.config.humanBehavior.enabled) {
       this._attachHumanBehaviorMethods(page);
     }
+    let hasSavedSession = false;
+    const originalClose = page.close?.bind(page) || (async () => {
+    });
+    page.on("close", () => {
+      if (isPooledBrowser) {
+        const tabs = this.tabPool.get(browser);
+        tabs?.delete(page);
+      }
+    });
+    page.close = async (...closeArgs) => {
+      if (!hasSavedSession && useSession && this.cookieManager && !page._sessionSaved) {
+        try {
+          await this.cookieManager.saveSession(page, useSession, {
+            success: navigationSuccess
+          });
+          page._sessionSaved = true;
+        } catch (err) {
+          this.emit("puppeteer.cookieSaveFailed", {
+            sessionId: useSession,
+            error: err.message
+          });
+          page._sessionSaved = true;
+        } finally {
+          hasSavedSession = true;
+        }
+      }
+      try {
+        return await originalClose(...closeArgs);
+      } finally {
+        if (isPooledBrowser) {
+          const tabs = this.tabPool.get(browser);
+          tabs?.delete(page);
+        }
+      }
+    };
     this.emit("puppeteer.navigate", {
       url,
       userAgent,
@@ -48152,15 +48288,89 @@ function createSecurityMiddleware(config = {}) {
 
 function createExpressStyleResponse(c) {
   let statusCode = 200;
-  return {
+  const response = {
     status(code) {
       statusCode = code;
       return this;
     },
     json(data) {
       return c.json(data, statusCode);
+    },
+    header(name, value) {
+      c.header(name, value);
+      return this;
+    },
+    setHeader(name, value) {
+      c.header(name, value);
+      return this;
+    },
+    send(data) {
+      if (data === void 0 || data === null) {
+        return c.body("", statusCode);
+      }
+      if (typeof data === "string" || data instanceof Uint8Array) {
+        return c.body(data, statusCode);
+      }
+      return c.json(data, statusCode);
+    },
+    redirect(url, code = 302) {
+      return c.redirect(url, code);
     }
   };
+  return response;
+}
+function parseCookies(cookieHeader) {
+  if (!cookieHeader) {
+    return {};
+  }
+  return cookieHeader.split(";").map((part) => part.trim()).filter(Boolean).reduce((acc, part) => {
+    const [key, ...rest] = part.split("=");
+    acc[key] = decodeURIComponent(rest.join("=") || "");
+    return acc;
+  }, {});
+}
+async function createExpressStyleRequest(c) {
+  const cached = c.get("expressStyleRequest");
+  if (cached) {
+    return cached;
+  }
+  const raw = c.req.raw;
+  const headers = {};
+  raw.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
+  });
+  const url = new URL(raw.url);
+  let body = void 0;
+  const contentType = headers["content-type"]?.split(";")[0].trim();
+  try {
+    if (contentType === "application/json") {
+      body = await c.req.json();
+    } else if (contentType === "application/x-www-form-urlencoded" || contentType === "multipart/form-data") {
+      body = await c.req.parseBody();
+    }
+  } catch {
+    body = void 0;
+  }
+  const query = Object.fromEntries(url.searchParams.entries());
+  const cookies = parseCookies(headers.cookie);
+  const clientIp = c.get("clientIp") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
+  const expressReq = {
+    method: raw.method,
+    url: raw.url,
+    originalUrl: raw.url,
+    path: url.pathname,
+    headers,
+    query,
+    body: body ?? {},
+    cookies,
+    ip: clientIp,
+    protocol: url.protocol.replace(":", ""),
+    get(name) {
+      return headers[name.toLowerCase()];
+    }
+  };
+  c.set("expressStyleRequest", expressReq);
+  return expressReq;
 }
 class IdentityServer {
   /**
@@ -48340,40 +48550,49 @@ class IdentityServer {
       return;
     }
     this.app.get("/.well-known/openid-configuration", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.discoveryHandler(c.req, res);
+      return await oauth2Server.discoveryHandler(req, res);
     });
     this.app.get("/.well-known/jwks.json", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.jwksHandler(c.req, res);
+      return await oauth2Server.jwksHandler(req, res);
     });
     this.app.post("/oauth/token", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.tokenHandler(c.req, res);
+      return await oauth2Server.tokenHandler(req, res);
     });
     this.app.get("/oauth/userinfo", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.userinfoHandler(c.req, res);
+      return await oauth2Server.userinfoHandler(req, res);
     });
     this.app.post("/oauth/introspect", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.introspectHandler(c.req, res);
+      return await oauth2Server.introspectHandler(req, res);
     });
     this.app.get("/oauth/authorize", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizeHandler(c.req, res);
+      return await oauth2Server.authorizeHandler(req, res);
     });
     this.app.post("/oauth/authorize", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizePostHandler(c.req, res);
+      return await oauth2Server.authorizePostHandler(req, res);
     });
     this.app.post("/oauth/register", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.registerClientHandler(c.req, res);
+      return await oauth2Server.registerClientHandler(req, res);
     });
     this.app.post("/oauth/revoke", async (c) => {
+      const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.revokeHandler(c.req, res);
+      return await oauth2Server.revokeHandler(req, res);
     });
     if (this.options.verbose) {
       console.log("[Identity Server] Mounted OAuth2/OIDC routes:");
@@ -52809,47 +53028,6 @@ function OAuthErrorPage(props = {}) {
     error: null,
     success: null
   });
-}
-
-const DEFAULT_PASSWORD_POLICY = {
-  minLength: 8,
-  maxLength: 128,
-  requireUppercase: true,
-  requireLowercase: true,
-  requireNumbers: true,
-  requireSymbols: false
-};
-async function verifyPassword(plaintext, storedHash) {
-  return await verifyPassword$1(plaintext, storedHash);
-}
-function validatePassword(password, policy = DEFAULT_PASSWORD_POLICY) {
-  const errors = [];
-  if (!password || typeof password !== "string") {
-    return { valid: false, errors: ["Password must be a string"] };
-  }
-  const rules = { ...DEFAULT_PASSWORD_POLICY, ...policy };
-  if (password.length < rules.minLength) {
-    errors.push(`Password must be at least ${rules.minLength} characters long`);
-  }
-  if (password.length > rules.maxLength) {
-    errors.push(`Password must not exceed ${rules.maxLength} characters`);
-  }
-  if (rules.requireUppercase && !/[A-Z]/.test(password)) {
-    errors.push("Password must contain at least one uppercase letter");
-  }
-  if (rules.requireLowercase && !/[a-z]/.test(password)) {
-    errors.push("Password must contain at least one lowercase letter");
-  }
-  if (rules.requireNumbers && !/[0-9]/.test(password)) {
-    errors.push("Password must contain at least one number");
-  }
-  if (rules.requireSymbols && !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
-    errors.push("Password must contain at least one symbol");
-  }
-  return {
-    valid: errors.length === 0,
-    errors
-  };
 }
 
 function sessionAuth(sessionManager, options = {}) {
