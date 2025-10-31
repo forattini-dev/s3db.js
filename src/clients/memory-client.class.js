@@ -133,6 +133,7 @@ export class MemoryClient extends EventEmitter {
     const contentEncoding = input.ContentEncoding;
     const contentLength = input.ContentLength;
     const ifMatch = input.IfMatch;
+    const ifNoneMatch = input.IfNoneMatch;
 
     return await this.storage.put(key, {
       body,
@@ -140,7 +141,8 @@ export class MemoryClient extends EventEmitter {
       contentType,
       contentEncoding,
       contentLength,
-      ifMatch
+      ifMatch,
+      ifNoneMatch
     });
   }
 
@@ -217,7 +219,7 @@ export class MemoryClient extends EventEmitter {
   /**
    * Put an object (Client interface method)
    */
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
     const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
 
     // Encode metadata using s3db encoding
@@ -236,7 +238,8 @@ export class MemoryClient extends EventEmitter {
       contentType,
       contentEncoding,
       contentLength,
-      ifMatch
+      ifMatch,
+      ifNoneMatch
     });
 
     this.emit('cl:PutObject', null, { key, metadata, contentType, body, contentEncoding, contentLength });

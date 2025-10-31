@@ -303,7 +303,27 @@ function calculateEffectiveLimit(config = {}) {
 }
 
 class BaseError extends Error {
-  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, description, ...rest }) {
+  constructor({
+    verbose,
+    bucket,
+    key,
+    message,
+    code,
+    statusCode,
+    requestId,
+    awsMessage,
+    original,
+    commandName,
+    commandInput,
+    metadata,
+    description,
+    suggestion,
+    retriable,
+    docs,
+    title,
+    hint,
+    ...rest
+  }) {
     if (verbose) message = message + `
 
 Verbose:
@@ -321,7 +341,7 @@ ${JSON.stringify(rest, null, 2)}`;
     this.key = key;
     this.thrownAt = /* @__PURE__ */ new Date();
     this.code = code;
-    this.statusCode = statusCode;
+    this.statusCode = statusCode ?? 500;
     this.requestId = requestId;
     this.awsMessage = awsMessage;
     this.original = original;
@@ -329,7 +349,23 @@ ${JSON.stringify(rest, null, 2)}`;
     this.commandInput = commandInput;
     this.metadata = metadata;
     this.description = description;
-    this.data = { bucket, key, ...rest, verbose, message };
+    this.suggestion = suggestion;
+    this.retriable = retriable ?? false;
+    this.docs = docs;
+    this.title = title || this.constructor.name;
+    this.hint = hint;
+    this.data = {
+      bucket,
+      key,
+      ...rest,
+      verbose,
+      message,
+      suggestion: this.suggestion,
+      retriable: this.retriable,
+      docs: this.docs,
+      title: this.title,
+      hint: this.hint
+    };
   }
   toJson() {
     return {
@@ -342,6 +378,11 @@ ${JSON.stringify(rest, null, 2)}`;
       bucket: this.bucket,
       key: this.key,
       thrownAt: this.thrownAt,
+      retriable: this.retriable,
+      suggestion: this.suggestion,
+      docs: this.docs,
+      title: this.title,
+      hint: this.hint,
       commandName: this.commandName,
       commandInput: this.commandInput,
       metadata: this.metadata,
@@ -371,32 +412,62 @@ class S3dbError extends BaseError {
 }
 class DatabaseError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Check database configuration and ensure the operation parameters are valid.",
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class ValidationError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 422,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Review validation errors and adjust the request payload before retrying.",
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class AuthenticationError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 401,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Provide valid authentication credentials and try again.",
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class PermissionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 403,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Verify IAM permissions, bucket policies, and credentials before retrying.",
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class EncryptionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Check encryption keys and inputs. This error generally requires code/config changes before retrying.",
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class ResourceNotFound extends S3dbError {
@@ -409,6 +480,9 @@ class ResourceNotFound extends S3dbError {
       resourceName,
       id,
       original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? "Confirm the resource ID and ensure it exists before retrying.",
       ...rest
     });
   }
@@ -416,7 +490,14 @@ class ResourceNotFound extends S3dbError {
 class NoSuchBucket extends S3dbError {
   constructor({ bucket, original, ...rest }) {
     if (typeof bucket !== "string") throw new Error("bucket must be a string");
-    super(`Bucket does not exists [bucket:${bucket}]`, { bucket, original, ...rest });
+    super(`Bucket does not exists [bucket:${bucket}]`, {
+      bucket,
+      original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? "Verify the bucket name and AWS region. Create the bucket if it is missing.",
+      ...rest
+    });
   }
 }
 class NoSuchKey extends S3dbError {
@@ -424,7 +505,17 @@ class NoSuchKey extends S3dbError {
     if (typeof key !== "string") throw new Error("key must be a string");
     if (typeof bucket !== "string") throw new Error("bucket must be a string");
     if (id !== void 0 && typeof id !== "string") throw new Error("id must be a string");
-    super(`No such key: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+    super(`No such key: ${key} [bucket:${bucket}]`, {
+      bucket,
+      key,
+      resourceName,
+      id,
+      original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? "Check if the object key is correct and that the object was uploaded.",
+      ...rest
+    });
     this.resourceName = resourceName;
     this.id = id;
   }
@@ -433,7 +524,17 @@ class NotFound extends S3dbError {
   constructor({ bucket, key, resourceName, id, original, ...rest }) {
     if (typeof key !== "string") throw new Error("key must be a string");
     if (typeof bucket !== "string") throw new Error("bucket must be a string");
-    super(`Not found: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+    super(`Not found: ${key} [bucket:${bucket}]`, {
+      bucket,
+      key,
+      resourceName,
+      id,
+      original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? "Confirm the key and bucket. Upload the object if it is missing.",
+      ...rest
+    });
     this.resourceName = resourceName;
     this.id = id;
   }
@@ -441,7 +542,14 @@ class NotFound extends S3dbError {
 class MissingMetadata extends S3dbError {
   constructor({ bucket, original, ...rest }) {
     if (typeof bucket !== "string") throw new Error("bucket must be a string");
-    super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, original, ...rest });
+    super(`Missing metadata for bucket [bucket:${bucket}]`, {
+      bucket,
+      original,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? "Re-upload metadata or run db.uploadMetadataFile() to regenerate it.",
+      ...rest
+    });
   }
 }
 class InvalidResourceItem extends S3dbError {
@@ -465,6 +573,9 @@ ${JSON.stringify(validation, null, 2)}`,
         attributes,
         validation,
         original,
+        statusCode: rest.statusCode ?? 422,
+        retriable: rest.retriable ?? false,
+        suggestion: rest.suggestion ?? "Fix validation errors on the provided attributes before retrying the request.",
         ...rest
       }
     );
@@ -488,23 +599,63 @@ function mapAwsError(err, context = {}) {
   let description;
   if (code === "NoSuchKey" || code === "NotFound") {
     description = "The specified key does not exist in the bucket. Check if the key exists and if your credentials have permission to access it.";
-    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, description });
+    return new NoSuchKey({
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === "NoSuchBucket") {
     description = "The specified bucket does not exist. Check if the bucket name is correct and if your credentials have permission to access it.";
-    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, description });
+    return new NoSuchBucket({
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === "AccessDenied" || err.statusCode === 403 || code === "Forbidden") {
     description = "Access denied. Check your AWS credentials, IAM permissions, and bucket policy.";
-    return new PermissionError("Access denied", { ...context, original: err, metadata, commandName, commandInput, description });
+    return new PermissionError("Access denied", {
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === "ValidationError" || err.statusCode === 400) {
     description = "Validation error. Check the request parameters and payload format.";
-    return new ValidationError("Validation error", { ...context, original: err, metadata, commandName, commandInput, description });
+    return new ValidationError("Validation error", {
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === "MissingMetadata") {
     description = "Object metadata is missing or invalid. Check if the object was uploaded correctly.";
-    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, description });
+    return new MissingMetadata({
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   const errorDetails = [
     `Unknown error: ${err.message || err.toString()}`,
@@ -513,31 +664,67 @@ function mapAwsError(err, context = {}) {
     err.stack && `Stack: ${err.stack.split("\n")[0]}`
   ].filter(Boolean).join(" | ");
   description = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
-  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, description });
+  return new UnknownError(errorDetails, {
+    ...context,
+    original: err,
+    metadata,
+    commandName,
+    commandInput,
+    description,
+    retriable: context.retriable ?? false
+  });
 }
 class ConnectionStringError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || "Invalid connection string format. Check the connection string syntax and credentials.";
-    super(message, { ...details, description });
+    const merged = {
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Fix the connection string and retry the operation.",
+      description,
+      ...details
+    };
+    super(message, merged);
   }
 }
 class CryptoError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || "Cryptography operation failed. Check if the crypto library is available and input is valid.";
-    super(message, { ...details, description });
+    const merged = {
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Validate crypto inputs and environment setup before retrying.",
+      description,
+      ...details
+    };
+    super(message, merged);
   }
 }
 class SchemaError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || "Schema validation failed. Check schema definition and input data format.";
-    super(message, { ...details, description });
+    const merged = {
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Update the schema or adjust the data to match the schema definition.",
+      description,
+      ...details
+    };
+    super(message, merged);
   }
 }
 class ResourceError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || "Resource operation failed. Check resource configuration, attributes, and operation context.";
-    super(message, { ...details, description });
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Review the resource configuration and request payload before retrying.",
+      description,
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class PartitionError extends S3dbError {
@@ -570,6 +757,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitio
     }
     super(message, {
       ...details,
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
       description
     });
   }
@@ -639,6 +828,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/eventual-c
       configuredResources,
       registeredResources,
       pluginInitialized,
+      statusCode: rest.statusCode ?? 400,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -683,6 +874,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
       ...rest,
       pluginName,
       operation,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -721,6 +914,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md#
       pluginSlug,
       key,
       operation,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -767,6 +962,8 @@ Check driver configuration and permissions.
       operation,
       queueSize,
       maxQueueSize,
+      statusCode: rest.statusCode ?? 503,
+      retriable: rest.retriable ?? queueSize >= maxQueueSize,
       description
     });
   }
@@ -800,6 +997,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#behavior
       ...rest,
       behavior,
       availableBehaviors,
+      statusCode: rest.statusCode ?? 400,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -834,6 +1033,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#streamin
       ...rest,
       operation,
       resource,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -888,6 +1089,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata
       excess,
       resourceName,
       operation,
+      statusCode: rest.statusCode ?? 413,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -1798,7 +2001,7 @@ class PluginStorage {
    * @param {number} options.ttl - Time-to-live in seconds (optional)
    * @param {string} options.behavior - 'body-overflow' | 'body-only' | 'enforce-limits'
    * @param {string} options.contentType - Content type (default: application/json)
-   * @returns {Promise<void>}
+   * @returns {Promise<Object>} Underlying client response (includes ETag when available)
    */
   async set(key, data, options = {}) {
     const {
@@ -1821,7 +2024,13 @@ class PluginStorage {
     if (body !== null) {
       putParams.body = JSON.stringify(body);
     }
-    const [ok, err] = await tryFn(() => this.client.putObject(putParams));
+    if (ifMatch !== void 0) {
+      putParams.ifMatch = ifMatch;
+    }
+    if (ifNoneMatch !== void 0) {
+      putParams.ifNoneMatch = ifNoneMatch;
+    }
+    const [ok, err, response] = await tryFn(() => this.client.putObject(putParams));
     if (!ok) {
       throw new PluginStorageError(`Failed to save plugin data`, {
         pluginSlug: this.pluginSlug,
@@ -1833,6 +2042,7 @@ class PluginStorage {
         suggestion: "Check S3 permissions and key format"
       });
     }
+    return response;
   }
   /**
    * Batch set multiple items
@@ -2211,30 +2421,148 @@ class PluginStorage {
    * @returns {Promise<Object|null>} Lock object or null if couldn't acquire
    */
   async acquireLock(lockName, options = {}) {
-    const { ttl = 30, timeout = 0, workerId = "unknown" } = options;
+    const {
+      ttl = 30,
+      timeout = 0,
+      workerId = "unknown",
+      retryDelay = 100,
+      maxRetryDelay = 1e3
+    } = options;
     const key = this.getPluginKey(null, "locks", lockName);
+    const token = idGenerator();
     const startTime = Date.now();
+    let attempt = 0;
     while (true) {
-      const existing = await this.get(key);
-      if (!existing) {
-        await this.set(key, { workerId, acquiredAt: Date.now() }, { ttl });
-        return { key, workerId };
+      const payload = {
+        workerId,
+        token,
+        acquiredAt: Date.now()
+      };
+      const [ok, err] = await tryFn(() => this.set(key, payload, {
+        ttl,
+        behavior: "body-only",
+        ifNoneMatch: "*"
+      }));
+      if (ok) {
+        return {
+          name: lockName,
+          key,
+          token,
+          workerId,
+          expiresAt: Date.now() + ttl * 1e3
+        };
       }
-      if (Date.now() - startTime >= timeout) {
+      const originalError = err?.original || err;
+      const errorCode = originalError?.code || originalError?.Code || originalError?.name;
+      const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
+      const isPreconditionFailure = errorCode === "PreconditionFailed" || statusCode === 412;
+      if (!isPreconditionFailure) {
+        throw err;
+      }
+      if (timeout && Date.now() - startTime >= timeout) {
         return null;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      const current = await this.get(key);
+      if (!current) {
+        continue;
+      }
+      attempt += 1;
+      const delay = this._computeBackoff(attempt, retryDelay, maxRetryDelay);
+      await this._sleep(delay);
     }
   }
   /**
    * Release a distributed lock
    *
-   * @param {string} lockName - Lock identifier
+   * @param {Object|string} lock - Lock object returned by acquireLock or lock name
+   * @param {string} [token] - Lock token (required when passing lock name)
    * @returns {Promise<void>}
    */
-  async releaseLock(lockName) {
-    const key = this.getPluginKey(null, "locks", lockName);
+  async releaseLock(lock, token) {
+    if (!lock) return;
+    let lockName;
+    let key;
+    let expectedToken = token;
+    if (typeof lock === "object") {
+      lockName = lock.name || lock.lockName;
+      key = lock.key || (lockName ? this.getPluginKey(null, "locks", lockName) : null);
+      expectedToken = lock.token ?? token;
+      if (!expectedToken && lock.token !== void 0) {
+        throw new PluginStorageError("Lock token missing on lock object", {
+          pluginSlug: this.pluginSlug,
+          operation: "releaseLock",
+          lockName
+        });
+      }
+    } else if (typeof lock === "string") {
+      lockName = lock;
+      key = this.getPluginKey(null, "locks", lockName);
+      expectedToken = token;
+      if (!expectedToken) {
+        throw new PluginStorageError("releaseLock(lockName) now requires the lock token", {
+          pluginSlug: this.pluginSlug,
+          operation: "releaseLock",
+          lockName,
+          suggestion: "Pass the original lock object or provide the token explicitly"
+        });
+      }
+    } else {
+      throw new PluginStorageError("releaseLock expects a lock object or lock name", {
+        pluginSlug: this.pluginSlug,
+        operation: "releaseLock"
+      });
+    }
+    if (!key) {
+      throw new PluginStorageError("Invalid lock key", {
+        pluginSlug: this.pluginSlug,
+        operation: "releaseLock"
+      });
+    }
+    const current = await this.get(key);
+    if (!current) {
+      return;
+    }
+    if (current.token !== void 0) {
+      if (!expectedToken) {
+        throw new PluginStorageError("releaseLock detected a stored token but none was provided", {
+          pluginSlug: this.pluginSlug,
+          operation: "releaseLock",
+          lockName,
+          suggestion: "Always release using the lock object returned by acquireLock"
+        });
+      }
+      if (current.token !== expectedToken) {
+        return;
+      }
+    }
     await this.delete(key);
+  }
+  /**
+   * Acquire a lock, execute a callback, and release automatically.
+   *
+   * @param {string} lockName - Lock identifier
+   * @param {Object} options - Options forwarded to acquireLock
+   * @param {Function} callback - Async function to execute while holding the lock
+   * @returns {Promise<*>} Callback result, or null when lock not acquired
+   */
+  async withLock(lockName, options, callback) {
+    if (typeof callback !== "function") {
+      throw new PluginStorageError("withLock requires a callback function", {
+        pluginSlug: this.pluginSlug,
+        operation: "withLock",
+        lockName,
+        suggestion: "Pass an async function as the third argument"
+      });
+    }
+    const lock = await this.acquireLock(lockName, options);
+    if (!lock) {
+      return null;
+    }
+    try {
+      return await callback(lock);
+    } finally {
+      await tryFn(() => this.releaseLock(lock));
+    }
   }
   /**
    * Check if a lock is currently held
@@ -2246,6 +2574,14 @@ class PluginStorage {
     const key = this.getPluginKey(null, "locks", lockName);
     const lock = await this.get(key);
     return lock !== null;
+  }
+  _computeBackoff(attempt, baseDelay, maxDelay) {
+    const exponential = Math.min(baseDelay * Math.pow(2, Math.max(attempt - 1, 0)), maxDelay);
+    const jitter = Math.floor(Math.random() * Math.max(baseDelay / 2, 1));
+    return exponential + jitter;
+  }
+  _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
   /**
    * Increment a counter value
@@ -15566,6 +15902,9 @@ class Cache extends EventEmitter {
     this.emit("clear", { prefix, value: data });
     return data;
   }
+  stats() {
+    return typeof this.getStats === "function" ? this.getStats() : {};
+  }
 }
 
 class S3Cache extends Cache {
@@ -15917,11 +16256,14 @@ class MemoryCache extends Cache {
     if (!this.enableStats) {
       return { enabled: false };
     }
+    const total = this.stats.hits + this.stats.misses;
+    const hitRate = total > 0 ? this.stats.hits / total : 0;
     return {
       ...this.stats,
       memoryUsageBytes: this.currentMemoryBytes,
       maxMemoryBytes: this.maxMemoryBytes,
-      evictedDueToMemory: this.evictedDueToMemory
+      evictedDueToMemory: this.evictedDueToMemory,
+      hitRate
     };
   }
   /**
@@ -16103,6 +16445,8 @@ class FilesystemCache extends Cache {
         finalData = compressedBuffer.toString("base64");
         compressed = true;
       }
+      const dir = path.dirname(filePath);
+      await this._ensureDirectory(dir);
       if (this.enableBackup && await this._fileExists(filePath)) {
         const backupPath = filePath + this.backupSuffix;
         await this._copyFile(filePath, backupPath);
@@ -17258,10 +17602,12 @@ class CachePlugin extends Plugin {
   // Utility methods
   async getCacheStats() {
     if (!this.driver) return null;
+    const driverStats = typeof this.driver.getStats === "function" ? this.driver.getStats() : null;
     return {
       size: await this.driver.size(),
       keys: await this.driver.keys(),
-      driver: this.driver.constructor.name
+      driver: this.driver.constructor.name,
+      stats: driverStats
     };
   }
   async clearAllCache() {
@@ -26062,7 +26408,14 @@ ${errorDetails}`,
       if (okParse) contentType = "application/json";
     }
     if (this.behavior === "body-only" && (!body || body === "")) {
-      throw new Error(`[Resource.insert] Attempt to save object without body! Data: id=${finalId}, resource=${this.name}`);
+      throw new ResourceError("Body required for body-only behavior", {
+        resourceName: this.name,
+        operation: "insert",
+        id: finalId,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Include a request body when using behavior "body-only" or switch to "body-overflow".'
+      });
     }
     const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
       key,
@@ -26140,8 +26493,22 @@ ${errorDetails}`,
    * const user = await resource.get('user-123');
    */
   async get(id) {
-    if (isObject(id)) throw new Error(`id cannot be an object`);
-    if (isEmpty(id)) throw new Error("id cannot be empty");
+    if (isObject(id)) {
+      throw new ValidationError("Resource id must be a string", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass the resource id as a string value (e.g. "user-123").'
+      });
+    }
+    if (isEmpty(id)) {
+      throw new ValidationError("Resource id cannot be empty", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide a non-empty id when calling resource methods."
+      });
+    }
     await this.executeHooks("beforeGet", { id });
     const key = this.getResourceKey(id);
     const [ok, err, request] = await tryFn(() => this.client.getObject(key));
@@ -26277,7 +26644,13 @@ ${errorDetails}`,
     }
     const exists = await this.exists(id);
     if (!exists) {
-      throw new Error(`Resource with id '${id}' does not exist`);
+      throw new ResourceError(`Resource with id '${id}' does not exist`, {
+        resourceName: this.name,
+        id,
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Ensure the record exists or create it before attempting an update."
+      });
     }
     const originalData = await this.get(id);
     const attributesClone = cloneDeep(attributes);
@@ -26489,10 +26862,20 @@ ${errorDetails}`,
    */
   async patch(id, fields, options = {}) {
     if (isEmpty(id)) {
-      throw new Error("id cannot be empty");
+      throw new ValidationError("Resource id cannot be empty", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide the target id when calling patch()."
+      });
     }
     if (!fields || typeof fields !== "object") {
-      throw new Error("fields must be a non-empty object");
+      throw new ValidationError("fields must be a non-empty object", {
+        field: "fields",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass a plain object with the fields to update (e.g. { status: "active" }).'
+      });
     }
     await this.executeHooks("beforePatch", { id, fields, options });
     const behavior = this.behavior;
@@ -26601,10 +26984,20 @@ ${errorDetails}`,
    */
   async replace(id, fullData, options = {}) {
     if (isEmpty(id)) {
-      throw new Error("id cannot be empty");
+      throw new ValidationError("Resource id cannot be empty", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide the target id when calling replace()."
+      });
     }
     if (!fullData || typeof fullData !== "object") {
-      throw new Error("fullData must be a non-empty object");
+      throw new ValidationError("fullData must be a non-empty object", {
+        field: "fullData",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Pass a plain object containing the full resource payload to replace()."
+      });
     }
     await this.executeHooks("beforeReplace", { id, fullData, options });
     const { partition, partitionValues } = options;
@@ -26649,7 +27042,14 @@ ${errorDetails}`,
       if (okParse) contentType = "application/json";
     }
     if (this.behavior === "body-only" && (!body || body === "")) {
-      throw new Error(`[Resource.replace] Attempt to save object without body! Data: id=${id}, resource=${this.name}`);
+      throw new ResourceError("Body required for body-only behavior", {
+        resourceName: this.name,
+        operation: "replace",
+        id,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Include a request body when using behavior "body-only" or switch to "body-overflow".'
+      });
     }
     const [okPut, errPut] = await tryFn(() => this.client.putObject({
       key,
@@ -26714,11 +27114,21 @@ ${errorDetails}`,
    */
   async updateConditional(id, attributes, options = {}) {
     if (isEmpty(id)) {
-      throw new Error("id cannot be empty");
+      throw new ValidationError("Resource id cannot be empty", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide the target id when calling updateConditional()."
+      });
     }
     const { ifMatch } = options;
     if (!ifMatch) {
-      throw new Error("updateConditional requires ifMatch option with ETag value");
+      throw new ValidationError("updateConditional requires ifMatch option with ETag value", {
+        field: "ifMatch",
+        statusCode: 428,
+        retriable: false,
+        suggestion: "Pass the current object ETag in options.ifMatch to enable conditional updates."
+      });
     }
     const exists = await this.exists(id);
     if (!exists) {
@@ -28196,7 +28606,15 @@ ${errorDetails}`,
           let idx = -1;
           const stack = this._middlewares.get(method);
           const dispatch = async (i) => {
-            if (i <= idx) throw new Error("next() called multiple times");
+            if (i <= idx) {
+              throw new ResourceError("Resource middleware next() called multiple times", {
+                resourceName: this.name,
+                operation: method,
+                statusCode: 500,
+                retriable: false,
+                suggestion: "Ensure each middleware awaits next() at most once."
+              });
+            }
             idx = i;
             if (i < stack.length) {
               return await stack[i](ctx, () => dispatch(i + 1));
@@ -28254,9 +28672,14 @@ ${errorDetails}`,
     const resource = this;
     const throwIfNoStateMachine = () => {
       if (!resource._stateMachine) {
-        throw new Error(
-          `No state machine configured for resource '${resource.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
-        );
+        throw new ResourceError(`State machine not configured for resource '${resource.name}'`, {
+          resourceName: resource.name,
+          operation: "stateMachine",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Install and configure the StateMachinePlugin before calling resource.state.* methods.",
+          docs: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/state-machine.md"
+        });
       }
     };
     return {
@@ -36546,7 +36969,7 @@ class S3Client extends EventEmitter {
     this.emit("cl:response", command.constructor.name, response, command.input);
     return response;
   }
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     keyPrefix ? path.join(keyPrefix, key) : key;
     const stringMetadata = {};
@@ -36567,6 +36990,7 @@ class S3Client extends EventEmitter {
     if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
     if (contentLength !== void 0) options.ContentLength = contentLength;
     if (ifMatch !== void 0) options.IfMatch = ifMatch;
+    if (ifNoneMatch !== void 0) options.IfNoneMatch = ifNoneMatch;
     const [ok, err, response] = await tryFn(() => this.sendCommand(new PutObjectCommand(options)));
     this.emit("cl:PutObject", err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
     if (!ok) {
@@ -37737,10 +38161,20 @@ class Database extends EventEmitter {
     const normalized = {};
     for (const fieldName of partitions) {
       if (typeof fieldName !== "string") {
-        throw new Error(`Partition field must be a string, got ${typeof fieldName}`);
+        throw new SchemaError("Invalid partition field type", {
+          fieldName,
+          receivedType: typeof fieldName,
+          retriable: false,
+          suggestion: 'Use string field names when declaring partitions (e.g. ["status", "region"]).'
+        });
       }
       if (!attributes[fieldName]) {
-        throw new Error(`Partition field '${fieldName}' not found in attributes`);
+        throw new SchemaError(`Partition field '${fieldName}' not found in attributes`, {
+          fieldName,
+          availableFields: Object.keys(attributes),
+          retriable: false,
+          suggestion: "Ensure the partition field exists in the resource attributes definition."
+        });
       }
       const partitionName = `by${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)}`;
       const fieldDef = attributes[fieldName];
@@ -40179,6 +40613,7 @@ class S3QueuePlugin extends Plugin {
     this.processedCache = /* @__PURE__ */ new Map();
     this.cacheCleanupInterval = null;
     this.lockCleanupInterval = null;
+    this.messageLocks = /* @__PURE__ */ new Map();
   }
   async onInstall() {
     this.targetResource = this.database.resources[this.config.resource];
@@ -40365,36 +40800,55 @@ class S3QueuePlugin extends Plugin {
    * Acquire a distributed lock using PluginStorage TTL
    * This ensures only one worker can claim a message at a time
    */
+  _lockNameForMessage(messageId) {
+    return `msg-${messageId}`;
+  }
   async acquireLock(messageId) {
     const storage = this.getStorage();
-    const lockKey = `msg-${messageId}`;
+    const lockName = this._lockNameForMessage(messageId);
     try {
-      const lock = await storage.acquireLock(lockKey, {
+      const lock = await storage.acquireLock(lockName, {
         ttl: 5,
         // 5 seconds
         timeout: 0,
         // Don't wait if locked
         workerId: this.workerId
       });
-      return lock !== null;
+      if (lock) {
+        this.messageLocks.set(lock.name, lock);
+      }
+      return lock;
     } catch (error) {
       if (this.config.verbose) {
         console.log(`[acquireLock] Error: ${error.message}`);
       }
-      return false;
+      return null;
     }
   }
   /**
    * Release a distributed lock via PluginStorage
    */
-  async releaseLock(messageId) {
+  async releaseLock(lockOrMessageId) {
     const storage = this.getStorage();
-    const lockKey = `msg-${messageId}`;
+    let lock = null;
+    if (lockOrMessageId && typeof lockOrMessageId === "object") {
+      lock = lockOrMessageId;
+    } else {
+      const lockName = this._lockNameForMessage(lockOrMessageId);
+      lock = this.messageLocks.get(lockName) || null;
+    }
+    if (!lock) {
+      return;
+    }
     try {
-      await storage.releaseLock(lockKey);
+      await storage.releaseLock(lock);
     } catch (error) {
       if (this.config.verbose) {
-        console.log(`[releaseLock] Failed to release lock for ${messageId}: ${error.message}`);
+        console.log(`[releaseLock] Failed to release lock '${lock.name}': ${error.message}`);
+      }
+    } finally {
+      if (lock?.name) {
+        this.messageLocks.delete(lock.name);
       }
     }
   }
@@ -40407,19 +40861,21 @@ class S3QueuePlugin extends Plugin {
   }
   async attemptClaim(msg) {
     const now = Date.now();
-    const lockAcquired = await this.acquireLock(msg.id);
-    if (!lockAcquired) {
+    const lock = await this.acquireLock(msg.id);
+    if (!lock) {
       return null;
     }
-    if (this.processedCache.has(msg.id)) {
-      await this.releaseLock(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
+    try {
+      if (this.processedCache.has(msg.id)) {
+        if (this.config.verbose) {
+          console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
+        }
+        return null;
       }
-      return null;
+      this.processedCache.set(msg.id, Date.now());
+    } finally {
+      await this.releaseLock(lock);
     }
-    this.processedCache.set(msg.id, Date.now());
-    await this.releaseLock(msg.id);
     const [okGet, errGet, msgWithETag] = await tryFn(
       () => this.queueResource.get(msg.id)
     );
@@ -40857,8 +41313,8 @@ class SchedulerPlugin extends Plugin {
     }
     this.activeJobs.set(jobName, "acquiring-lock");
     const storage = this.getStorage();
-    const lockKey = `job-${jobName}`;
-    const lock = await storage.acquireLock(lockKey, {
+    const lockName = `job-${jobName}`;
+    const lock = await storage.acquireLock(lockName, {
       ttl: Math.ceil(job.timeout / 1e3) + 60,
       // Job timeout + 60 seconds buffer
       timeout: 0,
@@ -40969,7 +41425,9 @@ class SchedulerPlugin extends Plugin {
         throw lastError;
       }
     } finally {
-      await tryFn(() => storage.releaseLock(lockKey));
+      if (lock) {
+        await tryFn(() => storage.releaseLock(lock));
+      }
     }
   }
   async _persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, error, retryCount) {
@@ -41623,7 +42081,7 @@ class StateMachinePlugin extends Plugin {
         suggestion: "Check machine ID or use getMachines() to list available machines"
       });
     }
-    const lockName = await this._acquireTransitionLock(machineId, entityId);
+    const lock = await this._acquireTransitionLock(machineId, entityId);
     try {
       const currentState = await this.getState(machineId, entityId);
       const stateConfig = machine.config.states[currentState];
@@ -41683,7 +42141,7 @@ class StateMachinePlugin extends Plugin {
         timestamp: (/* @__PURE__ */ new Date()).toISOString()
       };
     } finally {
-      await this._releaseTransitionLock(lockName);
+      await this._releaseTransitionLock(lock);
     }
   }
   async _executeAction(actionName, context, event, machineId, entityId) {
@@ -41869,17 +42327,18 @@ class StateMachinePlugin extends Plugin {
         suggestion: "Wait for current transition to complete or increase lockTimeout"
       });
     }
-    return lockName;
+    return lock;
   }
   /**
    * Release distributed lock for transition
    * @private
    */
-  async _releaseTransitionLock(lockName) {
+  async _releaseTransitionLock(lock) {
+    if (!lock) return;
     const storage = this.getStorage();
-    const [ok, err] = await tryFn(() => storage.releaseLock(lockName));
+    const [ok, err] = await tryFn(() => storage.releaseLock(lock));
     if (!ok && this.config.verbose) {
-      console.warn(`[StateMachinePlugin] Failed to release lock '${lockName}':`, err.message);
+      console.warn(`[StateMachinePlugin] Failed to release lock '${lock?.name}':`, err.message);
     }
   }
   /**
@@ -46587,12 +47046,39 @@ class MemoryStorage {
   /**
    * Store an object
    */
-  async put(key, { body, metadata, contentType, contentEncoding, contentLength, ifMatch }) {
+  async put(key, { body, metadata, contentType, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
     this._validateLimits(body, metadata);
+    const existing = this.objects.get(key);
     if (ifMatch !== void 0) {
-      const existing = this.objects.get(key);
-      if (existing && existing.etag !== ifMatch) {
-        throw new Error(`Precondition failed: ETag mismatch for key "${key}"`);
+      if (!existing || existing.etag !== ifMatch) {
+        const error = new Error(`Precondition failed: ETag mismatch for key "${key}"`);
+        error.name = "PreconditionFailed";
+        error.code = "PreconditionFailed";
+        error.statusCode = 412;
+        error.$metadata = {
+          httpStatusCode: 412,
+          requestId: "memory-" + Date.now(),
+          attempts: 1,
+          totalRetryDelay: 0
+        };
+        throw error;
+      }
+    }
+    if (ifNoneMatch !== void 0) {
+      const targetValue = existing ? existing.etag : null;
+      const shouldFail = ifNoneMatch === "*" && existing || ifNoneMatch !== "*" && existing && targetValue === ifNoneMatch;
+      if (shouldFail) {
+        const error = new Error(`Precondition failed: object already exists for key "${key}"`);
+        error.name = "PreconditionFailed";
+        error.code = "PreconditionFailed";
+        error.statusCode = 412;
+        error.$metadata = {
+          httpStatusCode: 412,
+          requestId: "memory-" + Date.now(),
+          attempts: 1,
+          totalRetryDelay: 0
+        };
+        throw error;
       }
     }
     const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || "");
@@ -47018,13 +47504,15 @@ class MemoryClient extends EventEmitter {
     const contentEncoding = input.ContentEncoding;
     const contentLength = input.ContentLength;
     const ifMatch = input.IfMatch;
+    const ifNoneMatch = input.IfNoneMatch;
     return await this.storage.put(key, {
       body,
       metadata,
       contentType,
       contentEncoding,
       contentLength,
-      ifMatch
+      ifMatch,
+      ifNoneMatch
     });
   }
   /**
@@ -47088,7 +47576,7 @@ class MemoryClient extends EventEmitter {
   /**
    * Put an object (Client interface method)
    */
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
     const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
     const stringMetadata = {};
     if (metadata) {
@@ -47104,7 +47592,8 @@ class MemoryClient extends EventEmitter {
       contentType,
       contentEncoding,
       contentLength,
-      ifMatch
+      ifMatch,
+      ifNoneMatch
     });
     this.emit("cl:PutObject", null, { key, metadata, contentType, body, contentEncoding, contentLength });
     return response;

@@ -501,12 +501,15 @@ await resource.cache.clear();
 
 // Get statistics (if enabled)
 const stats = resource.cache.stats();
-console.log('Cache stats:', {
-  hits: stats.hits,
-  misses: stats.misses,
-  hitRate: stats.hitRate,
-  size: stats.size
-});
+if (stats.enabled) {
+  console.log('Cache stats:', {
+    hits: stats.hits,
+    misses: stats.misses,
+    hitRate: `${(stats.hitRate * 100).toFixed(1)}%`,
+    evictions: stats.evictions,
+    memoryUsageBytes: stats.memoryUsageBytes
+  });
+}
 ```
 
 ---

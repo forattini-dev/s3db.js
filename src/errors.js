@@ -1,5 +1,25 @@
 export class BaseError extends Error {
-  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, description, ...rest }) {
+  constructor({
+    verbose,
+    bucket,
+    key,
+    message,
+    code,
+    statusCode,
+    requestId,
+    awsMessage,
+    original,
+    commandName,
+    commandInput,
+    metadata,
+    description,
+    suggestion,
+    retriable,
+    docs,
+    title,
+    hint,
+    ...rest
+  }) {
     if (verbose) message = message + `\n\nVerbose:\n\n${JSON.stringify(rest, null, 2)}`;
     super(message);
 
@@ -15,7 +35,7 @@ export class BaseError extends Error {
     this.key = key;
     this.thrownAt = new Date();
     this.code = code;
-    this.statusCode = statusCode;
+    this.statusCode = statusCode ?? 500;
     this.requestId = requestId;
     this.awsMessage = awsMessage;
     this.original = original;
@@ -23,7 +43,23 @@ export class BaseError extends Error {
     this.commandInput = commandInput;
     this.metadata = metadata;
     this.description = description;
-    this.data = { bucket, key, ...rest, verbose, message };
+    this.suggestion = suggestion;
+    this.retriable = retriable ?? false;
+    this.docs = docs;
+    this.title = title || this.constructor.name;
+    this.hint = hint;
+    this.data = {
+      bucket,
+      key,
+      ...rest,
+      verbose,
+      message,
+      suggestion: this.suggestion,
+      retriable: this.retriable,
+      docs: this.docs,
+      title: this.title,
+      hint: this.hint
+    };
   }
 
   toJson() {
@@ -37,6 +73,11 @@ export class BaseError extends Error {
       bucket: this.bucket,
       key: this.key,
       thrownAt: this.thrownAt,
+      retriable: this.retriable,
+      suggestion: this.suggestion,
+      docs: this.docs,
+      title: this.title,
+      hint: this.hint,
       commandName: this.commandName,
       commandInput: this.commandInput,
       metadata: this.metadata,
@@ -72,40 +113,70 @@ export class S3dbError extends BaseError {
 // Database operation errors
 export class DatabaseError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Check database configuration and ensure the operation parameters are valid.',
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
 // Validation errors
 export class ValidationError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 422,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Review validation errors and adjust the request payload before retrying.',
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
 // Authentication errors
 export class AuthenticationError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 401,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Provide valid authentication credentials and try again.',
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
 // Permission/Authorization errors
 export class PermissionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 403,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Verify IAM permissions, bucket policies, and credentials before retrying.',
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
 // Encryption errors
 export class EncryptionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Check encryption keys and inputs. This error generally requires code/config changes before retrying.',
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
@@ -120,6 +191,9 @@ export class ResourceNotFound extends S3dbError {
       resourceName,
       id,
       original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? 'Confirm the resource ID and ensure it exists before retrying.',
       ...rest
     });
   }
@@ -128,7 +202,14 @@ export class ResourceNotFound extends S3dbError {
 export class NoSuchBucket extends S3dbError {
   constructor({ bucket, original, ...rest }) {
     if (typeof bucket !== 'string') throw new Error('bucket must be a string');
-    super(`Bucket does not exists [bucket:${bucket}]`, { bucket, original, ...rest });
+    super(`Bucket does not exists [bucket:${bucket}]`, {
+      bucket,
+      original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? 'Verify the bucket name and AWS region. Create the bucket if it is missing.',
+      ...rest
+    });
   }
 }
 
@@ -137,7 +218,17 @@ export class NoSuchKey extends S3dbError {
     if (typeof key !== 'string') throw new Error('key must be a string');
     if (typeof bucket !== 'string') throw new Error('bucket must be a string');
     if (id !== undefined && typeof id !== 'string') throw new Error('id must be a string');
-    super(`No such key: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+    super(`No such key: ${key} [bucket:${bucket}]`, {
+      bucket,
+      key,
+      resourceName,
+      id,
+      original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? 'Check if the object key is correct and that the object was uploaded.',
+      ...rest
+    });
     this.resourceName = resourceName;
     this.id = id;
   }
@@ -147,7 +238,17 @@ export class NotFound extends S3dbError {
   constructor({ bucket, key, resourceName, id, original, ...rest }) {
     if (typeof key !== 'string') throw new Error('key must be a string');
     if (typeof bucket !== 'string') throw new Error('bucket must be a string');
-    super(`Not found: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+    super(`Not found: ${key} [bucket:${bucket}]`, {
+      bucket,
+      key,
+      resourceName,
+      id,
+      original,
+      statusCode: rest.statusCode ?? 404,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? 'Confirm the key and bucket. Upload the object if it is missing.',
+      ...rest
+    });
     this.resourceName = resourceName;
     this.id = id;
   }
@@ -156,7 +257,14 @@ export class NotFound extends S3dbError {
 export class MissingMetadata extends S3dbError {
   constructor({ bucket, original, ...rest }) {
     if (typeof bucket !== 'string') throw new Error('bucket must be a string');
-    super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, original, ...rest });
+    super(`Missing metadata for bucket [bucket:${bucket}]`, {
+      bucket,
+      original,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
+      suggestion: rest.suggestion ?? 'Re-upload metadata or run db.uploadMetadataFile() to regenerate it.',
+      ...rest
+    });
   }
 }
 
@@ -180,6 +288,9 @@ export class InvalidResourceItem extends S3dbError {
         attributes,
         validation,
         original,
+        statusCode: rest.statusCode ?? 422,
+        retriable: rest.retriable ?? false,
+        suggestion: rest.suggestion ?? 'Fix validation errors on the provided attributes before retrying the request.',
         ...rest
       }
     );
@@ -206,23 +317,63 @@ export function mapAwsError(err, context = {}) {
   let description;
   if (code === 'NoSuchKey' || code === 'NotFound') {
     description = 'The specified key does not exist in the bucket. Check if the key exists and if your credentials have permission to access it.';
-    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, description });
+    return new NoSuchKey({
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === 'NoSuchBucket') {
     description = 'The specified bucket does not exist. Check if the bucket name is correct and if your credentials have permission to access it.';
-    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, description });
+    return new NoSuchBucket({
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === 'AccessDenied' || (err.statusCode === 403) || code === 'Forbidden') {
     description = 'Access denied. Check your AWS credentials, IAM permissions, and bucket policy.';
-    return new PermissionError('Access denied', { ...context, original: err, metadata, commandName, commandInput, description });
+    return new PermissionError('Access denied', {
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === 'ValidationError' || (err.statusCode === 400)) {
     description = 'Validation error. Check the request parameters and payload format.';
-    return new ValidationError('Validation error', { ...context, original: err, metadata, commandName, commandInput, description });
+    return new ValidationError('Validation error', {
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   if (code === 'MissingMetadata') {
     description = 'Object metadata is missing or invalid. Check if the object was uploaded correctly.';
-    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, description });
+    return new MissingMetadata({
+      ...context,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      retriable: false
+    });
   }
   // Outros mapeamentos podem ser adicionados aqui
   // Incluir detalhes do erro original para facilitar debug
@@ -234,35 +385,71 @@ export function mapAwsError(err, context = {}) {
   ].filter(Boolean).join(' | ');
 
   description = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
-  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, description });
+  return new UnknownError(errorDetails, {
+    ...context,
+    original: err,
+    metadata,
+    commandName,
+    commandInput,
+    description,
+    retriable: context.retriable ?? false
+  });
 }
 
 export class ConnectionStringError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || 'Invalid connection string format. Check the connection string syntax and credentials.';
-    super(message, { ...details, description });
+    const merged = {
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Fix the connection string and retry the operation.',
+      description,
+      ...details
+    };
+    super(message, merged);
   }
 }
 
 export class CryptoError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || 'Cryptography operation failed. Check if the crypto library is available and input is valid.';
-    super(message, { ...details, description });
+    const merged = {
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Validate crypto inputs and environment setup before retrying.',
+      description,
+      ...details
+    };
+    super(message, merged);
   }
 }
 
 export class SchemaError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || 'Schema validation failed. Check schema definition and input data format.';
-    super(message, { ...details, description });
+    const merged = {
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Update the schema or adjust the data to match the schema definition.',
+      description,
+      ...details
+    };
+    super(message, merged);
   }
 }
 
 export class ResourceError extends S3dbError {
   constructor(message, details = {}) {
     const description = details.description || 'Resource operation failed. Check resource configuration, attributes, and operation context.';
-    super(message, { ...details, description });
-    Object.assign(this, details);
+    const merged = {
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? 'Review the resource configuration and request payload before retrying.',
+      description,
+      ...details
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
@@ -300,6 +487,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitio
 
     super(message, {
       ...details,
+      statusCode: details.statusCode ?? 400,
+      retriable: details.retriable ?? false,
       description
     });
   }
@@ -374,6 +563,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/eventual-c
       configuredResources,
       registeredResources,
       pluginInitialized,
+      statusCode: rest.statusCode ?? 400,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -422,6 +613,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
       ...rest,
       pluginName,
       operation,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -464,6 +657,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md#
       pluginSlug,
       key,
       operation,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -516,6 +711,8 @@ Check driver configuration and permissions.
       operation,
       queueSize,
       maxQueueSize,
+      statusCode: rest.statusCode ?? 503,
+      retriable: rest.retriable ?? (queueSize >= maxQueueSize),
       description
     });
   }
@@ -553,6 +750,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#behavior
       ...rest,
       behavior,
       availableBehaviors,
+      statusCode: rest.statusCode ?? 400,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -591,6 +790,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#streamin
       ...rest,
       operation,
       resource,
+      statusCode: rest.statusCode ?? 500,
+      retriable: rest.retriable ?? false,
       description
     });
   }
@@ -649,6 +850,8 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata
       excess,
       resourceName,
       operation,
+      statusCode: rest.statusCode ?? 413,
+      retriable: rest.retriable ?? false,
       description
     });
   }

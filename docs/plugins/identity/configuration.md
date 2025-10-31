@@ -118,21 +118,26 @@ const identityPlugin = new IdentityPlugin({
 
 ## Rate Limiting Options
 
+Rate limiting is applied per sensitive endpoint. Each limiter uses a sliding window. Leave a section undefined to adopt defaults.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `rateLimit.enabled` | boolean | `false` | Enable rate limiting |
-| `rateLimit.windowMs` | number | `60000` | Time window in ms |
-| `rateLimit.max` | number | `100` | Max requests per window |
-| `rateLimit.message` | string | `'Too many requests'` | Rate limit error message |
+| `rateLimit.enabled` | boolean | `true` | Enable built-in rate limiting |
+| `rateLimit.login.windowMs` | number | `60000` | Login window size (ms) |
+| `rateLimit.login.max` | number | `10` | Max login attempts per window per IP |
+| `rateLimit.token.windowMs` | number | `60000` | Token endpoint window size (ms) |
+| `rateLimit.token.max` | number | `60` | Max token requests per window per IP |
+| `rateLimit.authorize.windowMs` | number | `60000` | `/oauth/authorize` window size (ms) |
+| `rateLimit.authorize.max` | number | `30` | Max authorize hits per window per IP |
 
 **Example:**
 ```javascript
 const identityPlugin = new IdentityPlugin({
   rateLimit: {
     enabled: true,
-    windowMs: 60000,      // 1 minute
-    max: 100,             // 100 requests per minute per IP
-    message: 'Too many requests, please try again later'
+    login: { windowMs: 120000, max: 5 },    // aggressive for login
+    token: { windowMs: 60000, max: 120 },   // allow burst on token endpoint
+    authorize: { windowMs: 60000, max: 50 } // default for consent UI
   }
 });
 ```
@@ -266,8 +271,9 @@ const identityPlugin = new IdentityPlugin({
 
   rateLimit: {
     enabled: true,
-    windowMs: 60000,
-    max: 100
+    login: { windowMs: 120000, max: 10 },
+    token: { windowMs: 60000, max: 120 },
+    authorize: { windowMs: 60000, max: 40 }
   },
 
   compression: {

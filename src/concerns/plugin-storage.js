@@ -90,7 +90,7 @@ export class PluginStorage {
    * @param {number} options.ttl - Time-to-live in seconds (optional)
    * @param {string} options.behavior - 'body-overflow' | 'body-only' | 'enforce-limits'
    * @param {string} options.contentType - Content type (default: application/json)
-   * @returns {Promise<void>}
+   * @returns {Promise<Object>} Underlying client response (includes ETag when available)
    */
   async set(key, data, options = {}) {
     const {
@@ -124,8 +124,15 @@ export class PluginStorage {
       putParams.body = JSON.stringify(body);
     }
 
+    if (ifMatch !== undefined) {
+      putParams.ifMatch = ifMatch;
+    }
+    if (ifNoneMatch !== undefined) {
+      putParams.ifNoneMatch = ifNoneMatch;
+    }
+
     // Save to S3
-    const [ok, err] = await tryFn(() => this.client.putObject(putParams));
+    const [ok, err, response] = await tryFn(() => this.client.putObject(putParams));
 
     if (!ok) {
       throw new PluginStorageError(`Failed to save plugin data`, {
@@ -138,6 +145,8 @@ export class PluginStorage {
         suggestion: 'Check S3 permissions and key format'
       });
     }
+
+    return response;
   }
 
   /**
@@ -632,38 +641,168 @@ export class PluginStorage {
    * @returns {Promise<Object|null>} Lock object or null if couldn't acquire
    */
   async acquireLock(lockName, options = {}) {
-    const { ttl = 30, timeout = 0, workerId = 'unknown' } = options;
+    const {
+      ttl = 30,
+      timeout = 0,
+      workerId = 'unknown',
+      retryDelay = 100,
+      maxRetryDelay = 1000
+    } = options;
     const key = this.getPluginKey(null, 'locks', lockName);
+    const token = idGenerator();
 
     const startTime = Date.now();
+    let attempt = 0;
 
     while (true) {
-      // Try to acquire
-      const existing = await this.get(key);
-      if (!existing) {
-        await this.set(key, { workerId, acquiredAt: Date.now() }, { ttl });
-        return { key, workerId };
+      const payload = {
+        workerId,
+        token,
+        acquiredAt: Date.now()
+      };
+
+      const [ok, err] = await tryFn(() => this.set(key, payload, {
+        ttl,
+        behavior: 'body-only',
+        ifNoneMatch: '*'
+      }));
+
+      if (ok) {
+        return {
+          name: lockName,
+          key,
+          token,
+          workerId,
+          expiresAt: Date.now() + ttl * 1000
+        };
       }
 
-      // Check timeout
-      if (Date.now() - startTime >= timeout) {
-        return null; // Could not acquire
+      const originalError = err?.original || err;
+      const errorCode = originalError?.code || originalError?.Code || originalError?.name;
+      const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
+      const isPreconditionFailure = errorCode === 'PreconditionFailed' || statusCode === 412;
+
+      if (!isPreconditionFailure) {
+        throw err;
       }
 
-      // Wait and retry (100ms intervals)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      if (timeout && Date.now() - startTime >= timeout) {
+        return null;
+      }
+
+      // Remove expired locks (get deletes expired entries automatically)
+      const current = await this.get(key);
+      if (!current) {
+        continue; // Lock expired - retry immediately
+      }
+
+      attempt += 1;
+      const delay = this._computeBackoff(attempt, retryDelay, maxRetryDelay);
+      await this._sleep(delay);
     }
   }
 
   /**
    * Release a distributed lock
    *
-   * @param {string} lockName - Lock identifier
+   * @param {Object|string} lock - Lock object returned by acquireLock or lock name
+   * @param {string} [token] - Lock token (required when passing lock name)
    * @returns {Promise<void>}
    */
-  async releaseLock(lockName) {
-    const key = this.getPluginKey(null, 'locks', lockName);
+  async releaseLock(lock, token) {
+    if (!lock) return;
+
+    let lockName;
+    let key;
+    let expectedToken = token;
+
+    if (typeof lock === 'object') {
+      lockName = lock.name || lock.lockName;
+      key = lock.key || (lockName ? this.getPluginKey(null, 'locks', lockName) : null);
+      expectedToken = lock.token ?? token;
+      if (!expectedToken && lock.token !== undefined) {
+        throw new PluginStorageError('Lock token missing on lock object', {
+          pluginSlug: this.pluginSlug,
+          operation: 'releaseLock',
+          lockName
+        });
+      }
+    } else if (typeof lock === 'string') {
+      lockName = lock;
+      key = this.getPluginKey(null, 'locks', lockName);
+      expectedToken = token;
+      if (!expectedToken) {
+        throw new PluginStorageError('releaseLock(lockName) now requires the lock token', {
+          pluginSlug: this.pluginSlug,
+          operation: 'releaseLock',
+          lockName,
+          suggestion: 'Pass the original lock object or provide the token explicitly'
+        });
+      }
+    } else {
+      throw new PluginStorageError('releaseLock expects a lock object or lock name', {
+        pluginSlug: this.pluginSlug,
+        operation: 'releaseLock'
+      });
+    }
+
+    if (!key) {
+      throw new PluginStorageError('Invalid lock key', {
+        pluginSlug: this.pluginSlug,
+        operation: 'releaseLock'
+      });
+    }
+
+    const current = await this.get(key);
+    if (!current) {
+      return;
+    }
+
+    if (current.token !== undefined) {
+      if (!expectedToken) {
+        throw new PluginStorageError('releaseLock detected a stored token but none was provided', {
+          pluginSlug: this.pluginSlug,
+          operation: 'releaseLock',
+          lockName,
+          suggestion: 'Always release using the lock object returned by acquireLock'
+        });
+      }
+      if (current.token !== expectedToken) {
+        return;
+      }
+    }
+
     await this.delete(key);
+  }
+
+  /**
+   * Acquire a lock, execute a callback, and release automatically.
+   *
+   * @param {string} lockName - Lock identifier
+   * @param {Object} options - Options forwarded to acquireLock
+   * @param {Function} callback - Async function to execute while holding the lock
+   * @returns {Promise<*>} Callback result, or null when lock not acquired
+   */
+  async withLock(lockName, options, callback) {
+    if (typeof callback !== 'function') {
+      throw new PluginStorageError('withLock requires a callback function', {
+        pluginSlug: this.pluginSlug,
+        operation: 'withLock',
+        lockName,
+        suggestion: 'Pass an async function as the third argument'
+      });
+    }
+
+    const lock = await this.acquireLock(lockName, options);
+    if (!lock) {
+      return null;
+    }
+
+    try {
+      return await callback(lock);
+    } finally {
+      await tryFn(() => this.releaseLock(lock));
+    }
   }
 
   /**
@@ -676,6 +815,16 @@ export class PluginStorage {
     const key = this.getPluginKey(null, 'locks', lockName);
     const lock = await this.get(key);
     return lock !== null;
+  }
+
+  _computeBackoff(attempt, baseDelay, maxDelay) {
+    const exponential = Math.min(baseDelay * Math.pow(2, Math.max(attempt - 1, 0)), maxDelay);
+    const jitter = Math.floor(Math.random() * Math.max(baseDelay / 2, 1));
+    return exponential + jitter;
+  }
+
+  _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**

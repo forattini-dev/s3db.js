@@ -414,8 +414,8 @@ export class SchedulerPlugin extends Plugin {
 
     // Acquire distributed lock with TTL to prevent concurrent execution across instances
     const storage = this.getStorage();
-    const lockKey = `job-${jobName}`;
-    const lock = await storage.acquireLock(lockKey, {
+    const lockName = `job-${jobName}`;
+    const lock = await storage.acquireLock(lockName, {
       ttl: Math.ceil(job.timeout / 1000) + 60, // Job timeout + 60 seconds buffer
       timeout: 0, // Don't wait if locked
       workerId: process.pid ? String(process.pid) : 'unknown'
@@ -571,7 +571,9 @@ export class SchedulerPlugin extends Plugin {
       }
     } finally {
       // Always release the distributed lock
-      await tryFn(() => storage.releaseLock(lockKey));
+      if (lock) {
+        await tryFn(() => storage.releaseLock(lock));
+      }
     }
   }
 

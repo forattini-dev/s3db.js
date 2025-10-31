@@ -16,6 +16,9 @@ function createMockResource(overrides = {}) {
     delete: jest.fn().mockResolvedValue(true),
     deleteMany: jest.fn().mockResolvedValue(true),
     useMiddleware: () => {},
+    $schema: {
+      partitions: overrides.config?.partitions || {}
+    },
     ...overrides
   };
 }

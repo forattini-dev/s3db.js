@@ -304,7 +304,7 @@ export class StateMachinePlugin extends Plugin {
     }
 
     // Acquire distributed lock to prevent concurrent transitions
-    const lockName = await this._acquireTransitionLock(machineId, entityId);
+    const lock = await this._acquireTransitionLock(machineId, entityId);
 
     try {
       const currentState = await this.getState(machineId, entityId);
@@ -380,7 +380,7 @@ export class StateMachinePlugin extends Plugin {
       };
     } finally {
       // Always release lock, even if transition fails
-      await this._releaseTransitionLock(lockName);
+      await this._releaseTransitionLock(lock);
     }
   }
 
@@ -624,19 +624,21 @@ export class StateMachinePlugin extends Plugin {
       });
     }
 
-    return lockName;
+    return lock;
   }
 
   /**
    * Release distributed lock for transition
    * @private
    */
-  async _releaseTransitionLock(lockName) {
+  async _releaseTransitionLock(lock) {
+    if (!lock) return;
+
     const storage = this.getStorage();
-    const [ok, err] = await tryFn(() => storage.releaseLock(lockName));
+    const [ok, err] = await tryFn(() => storage.releaseLock(lock));
 
     if (!ok && this.config.verbose) {
-      console.warn(`[StateMachinePlugin] Failed to release lock '${lockName}':`, err.message);
+      console.warn(`[StateMachinePlugin] Failed to release lock '${lock?.name}':`, err.message);
     }
   }
 
