@@ -1,6 +1,51 @@
 # Cloud Inventory Plugin
 
-The **Cloud Inventory Plugin** ingests configuration metadata from external cloud providers (AWS, GCP, DigitalOcean, Vultr, Oracle Cloud, etc.) and keeps a canonical inventory inside **S3DB**. Each discovery cycle produces:
+The **Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery and inventory system that ingests configuration metadata from **11 cloud providers** with support for **200+ resource types** across IaaS, PaaS, Serverless, Edge Computing, and Database-as-a-Service platforms.
+
+## 🚀 What's New
+
+**Latest Update**: Added **MongoDB Atlas** support and expanded coverage for Alibaba Cloud, Linode, Hetzner, and Cloudflare!
+
+### ✨ New in This Release
+
+**🆕 MongoDB Atlas Support** (11th provider!)
+- Projects, Clusters, Serverless Instances
+- Database Users, IP Access Lists
+- Cloud Backups, Alert Configurations
+- Data Lakes, Atlas Search Indexes
+- Custom DB Roles, Events (audit logs)
+
+**📈 Expanded Cloud Coverage:**
+- **Alibaba Cloud**: +5 services (Security Groups, Snapshots, Auto Scaling, NAT Gateway, Container Registry)
+- **Linode**: +3 services (Managed Databases, StackScripts, Placement Groups)
+- **Hetzner**: +3 services (Primary IPs, Placement Groups, ISOs)
+- **Cloudflare**: +3 services (SSL Certificates, WAF Rulesets, Access Applications/Policies)
+
+**Total Coverage:** 11 cloud providers, 200+ resource types, production-ready with resilient error handling!
+
+---
+
+## 🌐 Supported Cloud Providers
+
+| Provider | Services | Resources | Key Features |
+|----------|----------|-----------|--------------|
+| **AWS** | 43+ | 60+ | EC2, S3, RDS, Lambda, VPC, EKS, and more |
+| **GCP** | 20+ | 25+ | Compute, GKE, Cloud Storage, Cloud SQL, Pub/Sub |
+| **Alibaba Cloud** | 15+ | 40+ | ECS, ACK, OSS, RDS, Auto Scaling, Security Groups |
+| **Azure** | 10+ | 25+ | VMs, AKS, Storage, Databases, Networking |
+| **Oracle Cloud** | 10+ | 25+ | Compute, OKE, Block Storage, VCN, Databases |
+| **DigitalOcean** | 15+ | 20+ | Droplets, Kubernetes, Databases, Load Balancers |
+| **Linode** | 12+ | 18+ | Linodes, LKE, Managed Databases, NodeBalancers |
+| **Hetzner** | 12+ | 15+ | Servers, Volumes, Networks, Primary IPs |
+| **Vultr** | 12+ | 15+ | Instances, Kubernetes, Block Storage, Firewalls |
+| **Cloudflare** | 11+ | 15+ | Workers, R2, Pages, D1, WAF, Access |
+| **MongoDB Atlas** | 11+ | 15+ | Clusters, Serverless, Backups, Search Indexes |
+
+---
+
+## Overview
+
+The **Cloud Inventory Plugin** ingests configuration metadata from external cloud providers and keeps a canonical inventory inside **S3DB**. Each discovery cycle produces:
 
 - A _snapshot_ record with the latest digest for the resource
 - An immutable _version_ entry where the raw configuration is frozen
@@ -989,9 +1034,142 @@ Cloudflare specializes in edge computing, serverless, and global content deliver
 
 ---
 
+### MongoDB Atlas Driver
+
+**✨ PRODUCTION-READY** - Comprehensive coverage of **11+ MongoDB Atlas services** across **15+ resource types**
+
+MongoDB Atlas is a fully managed cloud database service (DBaaS) for MongoDB. The driver provides complete visibility into your Atlas organization infrastructure.
+
+#### Database & Compute
+- ✅ Clusters (M0/M2/M5/M10+ shared and dedicated clusters)
+- ✅ Serverless Instances (serverless MongoDB databases)
+- ✅ Projects (project/group organization)
+
+#### Security & Access
+- ✅ Database Users (authentication and authorization)
+- ✅ IP Access Lists (network security whitelists)
+- ✅ Custom DB Roles (custom RBAC roles)
+
+#### Backup & Recovery
+- ✅ Cloud Backups (snapshots and continuous backups)
+
+#### Monitoring & Alerts
+- ✅ Alert Configurations (monitoring alert rules)
+- ✅ Events (audit logs and activity tracking)
+
+#### Advanced Features
+- ✅ Data Lakes (federated database instances)
+- ✅ Atlas Search Indexes (full-text search indexes)
+
+**Production Features:**
+- ✅ **Resilient error handling** - continues if individual services fail
+- ✅ **Complete tag collection** - every resource type includes tags
+- ✅ **Full configuration** - stores complete MongoDB Atlas API responses
+- ✅ **Memory efficient** - async generators for streaming
+- ✅ **Detailed logging** - comprehensive error tracking
+- ✅ **Multi-project support** - scan all accessible projects or specific ones
+- ✅ **Nested resource collection** - search indexes per cluster, policies per application
+
+**Authentication:** MongoDB Atlas API Keys (Public Key + Private Key)
+
+**Configuration:**
+```javascript
+{
+  driver: 'mongodb-atlas', // or 'atlas' alias
+  credentials: {
+    publicKey: process.env.MONGODB_ATLAS_PUBLIC_KEY,
+    privateKey: process.env.MONGODB_ATLAS_PRIVATE_KEY,
+    organizationId: 'YOUR_ORG_ID' // Optional: for organization-level filtering
+  },
+  config: {
+    organizationId: 'my-atlas-org', // Optional: filter by organization
+    projectIds: ['project-1', 'project-2'], // Optional: specific projects (null = all)
+    services: ['clusters', 'serverless', 'users', 'backups'] // Optional: filter services
+  }
+}
+```
+
+**Available Services:**
+- `projects` - Projects (groups) in the organization
+- `clusters` - Database clusters (M0-M10+, replica sets, sharded clusters)
+- `serverless` - Serverless instances
+- `users` - Database users with roles and permissions
+- `accesslists` - IP access lists (whitelists)
+- `backups` - Cloud backups and snapshots
+- `alerts` - Alert configurations
+- `datalakes` - Data Lake (federated database instances)
+- `search` - Atlas Search indexes
+- `customroles` - Custom database roles
+- `events` - Events (audit logs, last 7 days)
+
+**Getting API Keys:**
+1. Log in to [MongoDB Atlas Console](https://cloud.mongodb.com/)
+2. Navigate to Organization → Access Manager → API Keys
+3. Click "Create API Key"
+4. Set permissions (Organization Project Creator for read-only inventory)
+5. Copy the Public Key and Private Key
+6. Add your IP to the API Access List
+
+**Finding Organization ID:**
+1. Log in to MongoDB Atlas Console
+2. Click on your organization name in the top-left
+3. Go to Settings
+4. Organization ID is displayed in the General tab
+
+**SDK:** Uses [mongodb-atlas-api-client](https://www.npmjs.com/package/mongodb-atlas-api-client) or direct HTTP Digest Authentication
+
+**API Version:** Atlas Administration API v2 (2025)
+
+**Resource Types:**
+- `mongodb-atlas.project` - Projects/groups
+- `mongodb-atlas.cluster` - Database clusters
+- `mongodb-atlas.serverless` - Serverless instances
+- `mongodb-atlas.user` - Database users
+- `mongodb-atlas.accesslist` - IP access list entries
+- `mongodb-atlas.backup` - Cloud backup snapshots
+- `mongodb-atlas.alert` - Alert configurations
+- `mongodb-atlas.datalake` - Data Lake instances
+- `mongodb-atlas.search.index` - Atlas Search indexes
+- `mongodb-atlas.customrole` - Custom database roles
+- `mongodb-atlas.event` - Audit log events
+
+**Example Usage:**
+```javascript
+import { CloudInventoryPlugin } from 's3db.js/plugins';
+
+const plugin = new CloudInventoryPlugin({
+  clouds: [
+    {
+      driver: 'mongodb-atlas',
+      credentials: {
+        publicKey: process.env.MONGODB_ATLAS_PUBLIC_KEY,
+        privateKey: process.env.MONGODB_ATLAS_PRIVATE_KEY
+      },
+      config: {
+        organizationId: 'my-org',
+        services: ['clusters', 'users', 'backups', 'search']
+      }
+    }
+  ]
+});
+
+await plugin.install(database);
+const results = await plugin.syncAll();
+```
+
+**Important Notes:**
+- Event collection is limited to the last 7 days to avoid overwhelming the API
+- Most resources are global (no specific region)
+- Backups require cluster enumeration first (nested collection)
+- Search indexes require cluster enumeration first (nested collection)
+- HTTP Digest Authentication is used for API requests
+- Connection strings and passwords are automatically sanitized
+
+---
+
 ### Mock Drivers
 
-- `aws-mock`, `gcp-mock`, `vultr-mock`, `digitalocean-mock` (alias `do-mock`), `oracle-mock` (alias `oci-mock`), `azure-mock` (alias `az-mock`), `linode-mock`, `hetzner-mock`, `alibaba-mock` (alias `aliyun-mock`), `cloudflare-mock` (alias `cf-mock`) – mocks determinísticos para desenvolvimento e testes rápidos.
+- `aws-mock`, `gcp-mock`, `vultr-mock`, `digitalocean-mock` (alias `do-mock`), `oracle-mock` (alias `oci-mock`), `azure-mock` (alias `az-mock`), `linode-mock`, `hetzner-mock`, `alibaba-mock` (alias `aliyun-mock`), `cloudflare-mock` (alias `cf-mock`), `mongodb-atlas-mock` (alias `atlas-mock`) – mocks determinísticos para desenvolvimento e testes rápidos.
 
 Os drivers mock emitem recursos estáticos para exercitar o fluxo (por exemplo `driver: "aws-mock"`). É possível substituir os exemplos padrões passando `config.sampleResources`:
 
