@@ -235,9 +235,74 @@ routes: {
   // ✅ Redirect
   'GET /old-url': async (c, ctx) => {
     return ctx.redirect('/new-url', 301);  // Permanent redirect
+  },
+
+  // ✅ Template rendering (if configured)
+  'GET /page': async (c, ctx) => {
+    const users = await ctx.resources.users.list();
+
+    return await ctx.render('users', {
+      title: 'User List',
+      users
+    });
   }
 }
 ```
+
+---
+
+### Template Rendering
+
+**Configure template engine** in API Plugin:
+
+```javascript
+await db.use(new ApiPlugin({
+  templates: {
+    engine: 'ejs',        // or 'pug', 'jsx'
+    templatesDir: './views',
+    layout: 'layouts/main' // Optional layout (EJS only)
+  },
+
+  routes: {
+    // ✅ Render EJS template
+    'GET /': async (c, ctx) => {
+      const users = await ctx.resources.users.list();
+
+      return await ctx.render('home', {
+        title: 'Home',
+        userCount: users.length,
+        features: ['Feature 1', 'Feature 2']
+      });
+    },
+
+    // ✅ Render without layout
+    'GET /partial': async (c, ctx) => {
+      return await ctx.render('user-table', {
+        users: await ctx.resources.users.list()
+      }, {
+        layout: false  // No layout
+      });
+    },
+
+    // ✅ Pug template (if engine: 'pug')
+    'GET /about': async (c, ctx) => {
+      return await ctx.render('about', {
+        appName: 'My App',
+        version: '1.0.0'
+      });
+    }
+  }
+}));
+```
+
+**Template engines supported**:
+- **EJS** - `<%= variable %>`, layouts, includes
+- **Pug** - `extends`, `block`, minimal syntax
+- **JSX** - React-like syntax (Hono native)
+
+**See examples**:
+- `docs/examples/e87-api-templates-ejs-pug.js` - EJS templates
+- `docs/examples/e88-api-templates-pug-only.js` - Pug templates
 
 ---
 
