@@ -661,7 +661,7 @@ export class PluginStorage {
         acquiredAt: Date.now()
       };
 
-      const [ok, err] = await tryFn(() => this.set(key, payload, {
+      const [ok, err, putResponse] = await tryFn(() => this.set(key, payload, {
         ttl,
         behavior: 'body-only',
         ifNoneMatch: '*'
@@ -673,7 +673,8 @@ export class PluginStorage {
           key,
           token,
           workerId,
-          expiresAt: Date.now() + ttl * 1000
+          expiresAt: Date.now() + ttl * 1000,
+          etag: putResponse?.ETag || null
         };
       }
 

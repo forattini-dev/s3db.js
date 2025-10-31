@@ -22,6 +22,43 @@ var lodashEs = require('lodash-es');
 var flat = require('flat');
 var FastestValidator = require('fastest-validator');
 var web = require('node:stream/web');
+var credentialProviders = require('@aws-sdk/credential-providers');
+var clientSts = require('@aws-sdk/client-sts');
+var clientEc2 = require('@aws-sdk/client-ec2');
+var clientRds = require('@aws-sdk/client-rds');
+var clientIam = require('@aws-sdk/client-iam');
+var clientLambda = require('@aws-sdk/client-lambda');
+var clientElasticLoadBalancing = require('@aws-sdk/client-elastic-load-balancing');
+var clientElasticLoadBalancingV2 = require('@aws-sdk/client-elastic-load-balancing-v2');
+var clientDynamodb = require('@aws-sdk/client-dynamodb');
+var clientSqs = require('@aws-sdk/client-sqs');
+var clientSns = require('@aws-sdk/client-sns');
+var clientEcs = require('@aws-sdk/client-ecs');
+var clientEks = require('@aws-sdk/client-eks');
+var clientApiGateway = require('@aws-sdk/client-api-gateway');
+var clientApigatewayv2 = require('@aws-sdk/client-apigatewayv2');
+var clientCloudfront = require('@aws-sdk/client-cloudfront');
+var clientRoute53 = require('@aws-sdk/client-route-53');
+var clientKms = require('@aws-sdk/client-kms');
+var clientSecretsManager = require('@aws-sdk/client-secrets-manager');
+var clientSsm = require('@aws-sdk/client-ssm');
+var clientElasticache = require('@aws-sdk/client-elasticache');
+var clientEfs = require('@aws-sdk/client-efs');
+var clientEcr = require('@aws-sdk/client-ecr');
+var clientSfn = require('@aws-sdk/client-sfn');
+var clientEventbridge = require('@aws-sdk/client-eventbridge');
+var clientCloudwatch = require('@aws-sdk/client-cloudwatch');
+var clientCloudwatchLogs = require('@aws-sdk/client-cloudwatch-logs');
+var clientCloudtrail = require('@aws-sdk/client-cloudtrail');
+var clientConfigService = require('@aws-sdk/client-config-service');
+var clientAcm = require('@aws-sdk/client-acm');
+var clientWaf = require('@aws-sdk/client-waf');
+var clientWafv2 = require('@aws-sdk/client-wafv2');
+var clientCognitoIdentityProvider = require('@aws-sdk/client-cognito-identity-provider');
+var clientBackup = require('@aws-sdk/client-backup');
+var clientKinesis = require('@aws-sdk/client-kinesis');
+var googleAuthLibrary = require('google-auth-library');
+var readline = require('readline');
 var http = require('http');
 var https = require('https');
 var nodeHttpHandler = require('@smithy/node-http-handler');
@@ -33,6 +70,26 @@ var bcrypt = require('bcrypt');
 var node_crypto = require('node:crypto');
 
 var _documentCurrentScript = typeof document !== 'undefined' ? document.currentScript : null;
+function _interopNamespaceDefault(e) {
+  var n = Object.create(null);
+  if (e) {
+    Object.keys(e).forEach(function (k) {
+      if (k !== 'default') {
+        var d = Object.getOwnPropertyDescriptor(e, k);
+        Object.defineProperty(n, k, d.get ? d : {
+          enumerable: true,
+          get: function () { return e[k]; }
+        });
+      }
+    });
+  }
+  n.default = e;
+  return Object.freeze(n);
+}
+
+var fs__namespace = /*#__PURE__*/_interopNamespaceDefault(fs$1);
+var readline__namespace = /*#__PURE__*/_interopNamespaceDefault(readline);
+
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const base = alphabet.length;
 const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
@@ -477,9 +534,30 @@ class EncryptionError extends S3dbError {
 }
 class ResourceNotFound extends S3dbError {
   constructor({ bucket, resourceName, id, original, ...rest }) {
-    if (typeof id !== "string") throw new Error("id must be a string");
-    if (typeof bucket !== "string") throw new Error("bucket must be a string");
-    if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
+    if (typeof id !== "string") {
+      throw new ValidationError("ResourceNotFound requires id to be a string", {
+        field: "id",
+        value: id,
+        retriable: false,
+        suggestion: "Provide the resource id as a string when constructing ResourceNotFound."
+      });
+    }
+    if (typeof bucket !== "string") {
+      throw new ValidationError("ResourceNotFound requires bucket to be a string", {
+        field: "bucket",
+        value: bucket,
+        retriable: false,
+        suggestion: "Provide the bucket name as a string when constructing ResourceNotFound."
+      });
+    }
+    if (typeof resourceName !== "string") {
+      throw new ValidationError("ResourceNotFound requires resourceName to be a string", {
+        field: "resourceName",
+        value: resourceName,
+        retriable: false,
+        suggestion: "Provide the resource name as a string when constructing ResourceNotFound."
+      });
+    }
     super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
       bucket,
       resourceName,
@@ -494,7 +572,14 @@ class ResourceNotFound extends S3dbError {
 }
 class NoSuchBucket extends S3dbError {
   constructor({ bucket, original, ...rest }) {
-    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    if (typeof bucket !== "string") {
+      throw new ValidationError("NoSuchBucket requires bucket to be a string", {
+        field: "bucket",
+        value: bucket,
+        retriable: false,
+        suggestion: "Provide the bucket name as a string when constructing NoSuchBucket."
+      });
+    }
     super(`Bucket does not exists [bucket:${bucket}]`, {
       bucket,
       original,
@@ -507,9 +592,30 @@ class NoSuchBucket extends S3dbError {
 }
 class NoSuchKey extends S3dbError {
   constructor({ bucket, key, resourceName, id, original, ...rest }) {
-    if (typeof key !== "string") throw new Error("key must be a string");
-    if (typeof bucket !== "string") throw new Error("bucket must be a string");
-    if (id !== void 0 && typeof id !== "string") throw new Error("id must be a string");
+    if (typeof key !== "string") {
+      throw new ValidationError("NoSuchKey requires key to be a string", {
+        field: "key",
+        value: key,
+        retriable: false,
+        suggestion: "Provide the object key as a string when constructing NoSuchKey."
+      });
+    }
+    if (typeof bucket !== "string") {
+      throw new ValidationError("NoSuchKey requires bucket to be a string", {
+        field: "bucket",
+        value: bucket,
+        retriable: false,
+        suggestion: "Provide the bucket name as a string when constructing NoSuchKey."
+      });
+    }
+    if (id !== void 0 && typeof id !== "string") {
+      throw new ValidationError("NoSuchKey requires id to be a string when provided", {
+        field: "id",
+        value: id,
+        retriable: false,
+        suggestion: "Provide the resource id as a string when including it in NoSuchKey."
+      });
+    }
     super(`No such key: ${key} [bucket:${bucket}]`, {
       bucket,
       key,
@@ -527,8 +633,22 @@ class NoSuchKey extends S3dbError {
 }
 class NotFound extends S3dbError {
   constructor({ bucket, key, resourceName, id, original, ...rest }) {
-    if (typeof key !== "string") throw new Error("key must be a string");
-    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    if (typeof key !== "string") {
+      throw new ValidationError("NotFound requires key to be a string", {
+        field: "key",
+        value: key,
+        retriable: false,
+        suggestion: "Provide the object key as a string when constructing NotFound."
+      });
+    }
+    if (typeof bucket !== "string") {
+      throw new ValidationError("NotFound requires bucket to be a string", {
+        field: "bucket",
+        value: bucket,
+        retriable: false,
+        suggestion: "Provide the bucket name as a string when constructing NotFound."
+      });
+    }
     super(`Not found: ${key} [bucket:${bucket}]`, {
       bucket,
       key,
@@ -546,7 +666,14 @@ class NotFound extends S3dbError {
 }
 class MissingMetadata extends S3dbError {
   constructor({ bucket, original, ...rest }) {
-    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    if (typeof bucket !== "string") {
+      throw new ValidationError("MissingMetadata requires bucket to be a string", {
+        field: "bucket",
+        value: bucket,
+        retriable: false,
+        suggestion: "Provide the bucket name as a string when constructing MissingMetadata."
+      });
+    }
     super(`Missing metadata for bucket [bucket:${bucket}]`, {
       bucket,
       original,
@@ -567,8 +694,22 @@ class InvalidResourceItem extends S3dbError {
     original,
     ...rest
   }) {
-    if (typeof bucket !== "string") throw new Error("bucket must be a string");
-    if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
+    if (typeof bucket !== "string") {
+      throw new ValidationError("InvalidResourceItem requires bucket to be a string", {
+        field: "bucket",
+        value: bucket,
+        retriable: false,
+        suggestion: "Provide the bucket name as a string when constructing InvalidResourceItem."
+      });
+    }
+    if (typeof resourceName !== "string") {
+      throw new ValidationError("InvalidResourceItem requires resourceName to be a string", {
+        field: "resourceName",
+        value: resourceName,
+        retriable: false,
+        suggestion: "Provide the resource name as a string when constructing InvalidResourceItem."
+      });
+    }
     super(
       message || `Validation error: This item is not valid. Resource=${resourceName} [bucket:${bucket}].
 ${JSON.stringify(validation, null, 2)}`,
@@ -1284,19 +1425,39 @@ function base64ToArrayBuffer(base64) {
 
 function hashPasswordSync(password, rounds = 10) {
   if (!password || typeof password !== "string") {
-    throw new Error("Password must be a non-empty string");
+    throw new ValidationError("Password must be a non-empty string", {
+      field: "password",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a non-empty string before calling hashPasswordSync()."
+    });
   }
   if (rounds < 4 || rounds > 31) {
-    throw new Error("Bcrypt rounds must be between 4 and 31");
+    throw new ValidationError("Bcrypt rounds must be between 4 and 31", {
+      field: "rounds",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Configure bcrypt rounds between 4 and 31 (inclusive)."
+    });
   }
   return bcrypt.hashSync(password, rounds);
 }
 async function hashPassword(password, rounds = 10) {
   if (!password || typeof password !== "string") {
-    throw new Error("Password must be a non-empty string");
+    throw new ValidationError("Password must be a non-empty string", {
+      field: "password",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a non-empty string before calling hashPassword()."
+    });
   }
   if (rounds < 4 || rounds > 31) {
-    throw new Error("Bcrypt rounds must be between 4 and 31");
+    throw new ValidationError("Bcrypt rounds must be between 4 and 31", {
+      field: "rounds",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Configure bcrypt rounds between 4 and 31 (inclusive)."
+    });
   }
   return await bcrypt.hash(password, rounds);
 }
@@ -1316,20 +1477,40 @@ async function verifyPassword$1(plaintext, hash) {
 }
 function compactHash(bcryptHash) {
   if (!bcryptHash || typeof bcryptHash !== "string") {
-    throw new Error("Invalid bcrypt hash");
+    throw new ValidationError("Invalid bcrypt hash", {
+      field: "bcryptHash",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a valid bcrypt hash generated by hashPassword()."
+    });
   }
   if (!bcryptHash.startsWith("$2")) {
-    throw new Error("Not a valid bcrypt hash");
+    throw new ValidationError("Not a valid bcrypt hash", {
+      field: "bcryptHash",
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Ensure the hash starts with "$2" and was produced by bcrypt.'
+    });
   }
   const parts = bcryptHash.split("$");
   if (parts.length !== 4) {
-    throw new Error("Invalid bcrypt hash format");
+    throw new ValidationError("Invalid bcrypt hash format", {
+      field: "bcryptHash",
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide a complete bcrypt hash (e.g., "$2b$10$...").'
+    });
   }
   return parts[3];
 }
 function expandHash(compactHash2, rounds = 10) {
   if (!compactHash2 || typeof compactHash2 !== "string") {
-    throw new Error("Invalid compacted hash");
+    throw new ValidationError("Invalid compacted hash", {
+      field: "compactHash",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a compacted hash returned from compactHash()."
+    });
   }
   if (compactHash2.startsWith("$")) {
     return compactHash2;
@@ -2443,7 +2624,7 @@ class PluginStorage {
         token,
         acquiredAt: Date.now()
       };
-      const [ok, err] = await tryFn(() => this.set(key, payload, {
+      const [ok, err, putResponse] = await tryFn(() => this.set(key, payload, {
         ttl,
         behavior: "body-only",
         ifNoneMatch: "*"
@@ -2454,7 +2635,8 @@ class PluginStorage {
           key,
           token,
           workerId,
-          expiresAt: Date.now() + ttl * 1e3
+          expiresAt: Date.now() + ttl * 1e3,
+          etag: putResponse?.ETag || null
         };
       }
       const originalError = err?.original || err;
@@ -2722,8 +2904,15 @@ class Plugin extends EventEmitter {
     this.name = this.constructor.name;
     this.options = options;
     this.hooks = /* @__PURE__ */ new Map();
-    this.slug = options.slug || this._generateSlug();
+    this.baseSlug = options.slug || this._generateSlug();
+    this.slug = this.baseSlug;
     this._storage = null;
+    this.instanceName = null;
+    this.namespace = null;
+    this._namespaceExplicit = false;
+    if (options.namespace || options.instanceId) {
+      this.setNamespace(options.namespace || options.instanceId, { explicit: true });
+    }
   }
   /**
    * Generate kebab-case slug from class name
@@ -2734,13 +2923,83 @@ class Plugin extends EventEmitter {
     return this.name.replace(/Plugin$/, "").replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
   }
   /**
+   * Normalize namespace into kebab-case
+   * @private
+   */
+  _normalizeNamespace(value) {
+    if (value === null || value === void 0) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").replace(/-+$/, "") || null;
+  }
+  /**
+   * Update plugin namespace (affects storage slug & helpers)
+   * @param {string|null} value
+   * @param {Object} options
+   * @param {boolean} options.explicit - Whether namespace was set explicitly by the user
+   */
+  setNamespace(value, { explicit = false } = {}) {
+    const normalized = this._normalizeNamespace(value);
+    if (!normalized) {
+      if (explicit) {
+        this.namespace = null;
+        this.slug = this.baseSlug;
+        this._namespaceExplicit = true;
+        this._storage = null;
+        if (typeof this.onNamespaceChanged === "function") {
+          this.onNamespaceChanged(this.namespace);
+        }
+      }
+      return;
+    }
+    if (this.namespace === normalized && (explicit === false || this._namespaceExplicit)) {
+      return;
+    }
+    this.namespace = normalized;
+    if (explicit) {
+      this._namespaceExplicit = true;
+    }
+    this.slug = `${this.baseSlug}--${normalized}`;
+    this._storage = null;
+    if (typeof this.onNamespaceChanged === "function") {
+      this.onNamespaceChanged(this.namespace);
+    }
+  }
+  /**
+   * Set instance name (called by Database when registering the plugin)
+   * Automatically derives namespace when not explicitly provided.
+   */
+  setInstanceName(name) {
+    if (!name) return;
+    this.instanceName = name;
+    if (!this._namespaceExplicit) {
+      const normalized = this._normalizeNamespace(name);
+      if (normalized && normalized !== this.baseSlug) {
+        this.setNamespace(normalized);
+      }
+    }
+  }
+  /**
+   * Hook for subclasses to react to namespace changes
+   * @param {string|null} namespace
+   */
+  // eslint-disable-next-line no-unused-vars
+  onNamespaceChanged(namespace) {
+  }
+  /**
    * Get PluginStorage instance (lazy-loaded)
    * @returns {PluginStorage}
    */
   getStorage() {
     if (!this._storage) {
       if (!this.database || !this.database.client) {
-        throw new Error("Plugin must be installed before accessing storage");
+        throw new PluginError("Plugin storage unavailable until plugin is installed", {
+          pluginName: this.name,
+          operation: "getStorage",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Call db.installPlugin(new Plugin()) or ensure db.connect() completed before accessing storage."
+        });
       }
       this._storage = new PluginStorage(this.database.client, this.slug);
     }
@@ -2846,7 +3105,15 @@ class Plugin extends EventEmitter {
    */
   addMiddleware(resource, methodName, middleware) {
     if (typeof resource[methodName] !== "function") {
-      throw new Error(`Cannot add middleware to "${methodName}": method does not exist on resource "${resource.name || "unknown"}"`);
+      throw new PluginError(`Cannot add middleware to "${methodName}"`, {
+        pluginName: this.name,
+        operation: "addMiddleware",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Ensure the resource exposes the method before registering middleware.",
+        resourceName: resource.name || "unknown",
+        methodName
+      });
     }
     if (!resource._pluginMiddlewares) {
       resource._pluginMiddlewares = {};
@@ -3101,6 +3368,56 @@ const PLUGIN_DEPENDENCIES = {
         npmUrl: "https://www.npmjs.com/package/@tensorflow/tfjs-node"
       }
     }
+  },
+  "puppeteer": {
+    name: "Puppeteer Suite",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/puppeteer/README.md",
+    dependencies: {
+      "puppeteer-extra": {
+        version: "^3.3.4",
+        description: "Headless Chrome automation toolkit",
+        installCommand: "pnpm add puppeteer-extra",
+        npmUrl: "https://www.npmjs.com/package/puppeteer-extra"
+      },
+      "puppeteer-extra-plugin-stealth": {
+        version: "^2.11.2",
+        description: "Stealth plugin to evade bot detection",
+        installCommand: "pnpm add puppeteer-extra-plugin-stealth",
+        npmUrl: "https://www.npmjs.com/package/puppeteer-extra-plugin-stealth"
+      },
+      "user-agents": {
+        version: "^2.0.0",
+        description: "Randomized user agent generator",
+        installCommand: "pnpm add user-agents",
+        npmUrl: "https://www.npmjs.com/package/user-agents"
+      },
+      "ghost-cursor": {
+        version: "^1.4.1",
+        description: "Human-like mouse movement generator",
+        installCommand: "pnpm add ghost-cursor",
+        npmUrl: "https://www.npmjs.com/package/ghost-cursor"
+      }
+    }
+  },
+  "puppeteer-extra": {
+    name: "puppeteer-extra",
+    docsUrl: "https://github.com/berstend/puppeteer-extra",
+    dependencies: {}
+  },
+  "puppeteer-extra-plugin-stealth": {
+    name: "puppeteer-extra-plugin-stealth",
+    docsUrl: "https://github.com/berstend/puppeteer-extra/tree/master/packages/puppeteer-extra-plugin-stealth",
+    dependencies: {}
+  },
+  "user-agents": {
+    name: "user-agents",
+    docsUrl: "https://github.com/intoli/user-agents",
+    dependencies: {}
+  },
+  "ghost-cursor": {
+    name: "ghost-cursor",
+    docsUrl: "https://github.com/Xetera/ghost-cursor",
+    dependencies: {}
   }
 };
 function isVersionCompatible(actual, required) {
@@ -3149,6 +3466,9 @@ async function requirePluginDependency(pluginId, options = {}) {
     );
     if (throwOnError) throw error;
     return { valid: false, missing: [], incompatible: [], messages: [error.message] };
+  }
+  if (process?.env?.S3DB_SKIP_PLUGIN_DEP_CHECK === "1") {
+    return { valid: true, missing: [], incompatible: [], messages: [] };
   }
   const missing = [];
   const incompatible = [];
@@ -8229,6 +8549,24 @@ function createFailbanAdminRoutes(Hono, plugin) {
 }
 
 const PREFIX = "plg_";
+function normalizeNamespace(namespace) {
+  if (!namespace) return null;
+  const text = String(namespace).trim().toLowerCase();
+  if (!text) return null;
+  const normalized = text.replace(/[^a-z0-9]+/g, "_").replace(/^_+/, "").replace(/_+$/, "");
+  return normalized || null;
+}
+function applyNamespace(name, namespace) {
+  const ensured = ensurePlgPrefix(name);
+  if (!namespace) {
+    return ensured;
+  }
+  const withoutPrefix = ensured.slice(PREFIX.length);
+  if (withoutPrefix.startsWith(`${namespace}_`)) {
+    return ensured;
+  }
+  return `${PREFIX}${namespace}_${withoutPrefix}`;
+}
 function sanitizeName(name) {
   if (!name || typeof name !== "string") {
     throw new Error("[resource-names] Resource name must be a non-empty string");
@@ -8242,37 +8580,43 @@ function ensurePlgPrefix(name) {
   }
   return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
 }
-function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}) {
+function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}, options = {}) {
+  const namespace = normalizeNamespace(options.namespace);
+  const applyOverrideNamespace = options.applyNamespaceToOverrides === true;
   if (!defaultName && !override && !suffix) {
     throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
   }
   if (override) {
-    return ensurePlgPrefix(override);
+    const ensured2 = ensurePlgPrefix(override);
+    return applyOverrideNamespace ? applyNamespace(ensured2, namespace) : ensured2;
   }
   if (defaultName) {
-    return defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
+    const ensured2 = defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
+    return applyNamespace(ensured2, namespace);
   }
   if (!suffix) {
     throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
   }
-  return ensurePlgPrefix(`${pluginKey}_${suffix}`);
+  const ensured = ensurePlgPrefix(`${pluginKey}_${suffix}`);
+  return applyNamespace(ensured, namespace);
 }
-function resolveResourceNames(pluginKey, descriptors = {}) {
+function resolveResourceNames(pluginKey, descriptors = {}, options = {}) {
   const result = {};
   for (const [key, descriptor] of Object.entries(descriptors)) {
     if (typeof descriptor === "string") {
-      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor });
+      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor }, options);
       continue;
     }
-    result[key] = resolveResourceName(pluginKey, descriptor);
+    result[key] = resolveResourceName(pluginKey, descriptor, options);
   }
   return result;
 }
 
 class FailbanManager {
   constructor(options = {}) {
+    this.namespace = options.namespace || null;
     const resourceOverrides = options.resourceNames || options.resources || {};
-    this.resourceNames = resolveResourceNames("api_failban", {
+    this._resourceDescriptors = {
       bans: {
         defaultName: "plg_api_failban_bans",
         override: resourceOverrides.bans
@@ -8281,7 +8625,8 @@ class FailbanManager {
         defaultName: "plg_api_failban_violations",
         override: resourceOverrides.violations
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
     this.options = {
       enabled: options.enabled !== false,
       database: options.database,
@@ -8309,6 +8654,16 @@ class FailbanManager {
     this.geoCache = /* @__PURE__ */ new Map();
     this.geoReader = null;
     this.cleanupTimer = null;
+  }
+  _resolveResourceNames() {
+    return resolveResourceNames("api_failban", this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  setNamespace(namespace) {
+    this.namespace = namespace;
+    this.resourceNames = this._resolveResourceNames();
+    this.options.resources = this.resourceNames;
   }
   /**
    * Initialize failban manager
@@ -9219,6 +9574,7 @@ class ApiServer {
       // Custom handler for root path, if not provided redirects to /docs
       versionPrefix: options.versionPrefix,
       // Global version prefix config
+      namespace: options.namespace || null,
       apiInfo: {
         title: options.apiTitle || "s3db.js API",
         version: options.apiVersion || "1.0.0",
@@ -9250,6 +9606,7 @@ class ApiServer {
     if (this.options.failban?.enabled) {
       this.failban = new FailbanManager({
         database: this.options.database,
+        namespace: this.options.namespace,
         enabled: true,
         maxViolations: this.options.failban.maxViolations || 3,
         violationWindow: this.options.failban.violationWindow || 36e5,
@@ -10399,11 +10756,12 @@ class ApiPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     const resourceNamesOption = options.resourceNames || {};
-    const normalizedAuth = normalizeAuthConfig(options.auth);
-    this.usersResourceName = resolveResourceName("api", {
+    this._usersResourceDescriptor = {
       defaultName: "plg_api_users",
       override: resourceNamesOption.authUsers || options.auth?.resource
-    });
+    };
+    const normalizedAuth = normalizeAuthConfig(options.auth);
+    this.usersResourceName = this._resolveUsersResourceName();
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;
     this.config = {
@@ -11053,6 +11411,7 @@ class ApiPlugin extends Plugin {
       port: this.config.port,
       host: this.config.host,
       database: this.database,
+      namespace: this.namespace,
       versionPrefix: this.config.versionPrefix,
       resources: this.config.resources,
       routes: this.config.routes,
@@ -11081,9 +11440,22 @@ class ApiPlugin extends Plugin {
     }
     if (this.server) {
       await this.server.stop();
-      this.server = null;
     }
-    this.emit("plugin.stopped");
+    this.server = null;
+  }
+  _resolveUsersResourceName() {
+    return resolveResourceName("api", this._usersResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.usersResourceName = this._resolveUsersResourceName();
+    if (this.config?.auth) {
+      this.config.auth.resource = this.usersResourceName;
+    }
+    if (this.server?.failban) {
+      this.server.failban.setNamespace(this.namespace);
+    }
   }
   /**
    * Uninstall plugin
@@ -12697,29 +13069,30 @@ class IdentityPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
-    const internalResourceOverrides = options.resourceNames || options.internalResources || {};
-    this.internalResourceNames = resolveResourceNames("identity", {
+    this._internalResourceOverrides = options.resourceNames || options.internalResources || {};
+    this._internalResourceDescriptors = {
       oauthKeys: {
         defaultName: "plg_identity_oauth_keys",
-        override: internalResourceOverrides.oauthKeys
+        override: this._internalResourceOverrides.oauthKeys
       },
       authCodes: {
         defaultName: "plg_identity_auth_codes",
-        override: internalResourceOverrides.authCodes
+        override: this._internalResourceOverrides.authCodes
       },
       sessions: {
         defaultName: "plg_identity_sessions",
-        override: internalResourceOverrides.sessions
+        override: this._internalResourceOverrides.sessions
       },
       passwordResetTokens: {
         defaultName: "plg_identity_password_reset_tokens",
-        override: internalResourceOverrides.passwordResetTokens
+        override: this._internalResourceOverrides.passwordResetTokens
       },
       mfaDevices: {
         defaultName: "plg_identity_mfa_devices",
-        override: internalResourceOverrides.mfaDevices
+        override: this._internalResourceOverrides.mfaDevices
       }
-    });
+    };
+    this.internalResourceNames = this._resolveInternalResourceNames();
     const resourcesValidation = validateResourcesConfig$1(options.resources);
     if (!resourcesValidation.valid) {
       throw new Error(
@@ -13095,6 +13468,17 @@ class IdentityPlugin extends Plugin {
     this.tenantsResource = null;
     this.clientsResource = null;
     this.rateLimiters = this._createRateLimiters();
+  }
+  _resolveInternalResourceNames() {
+    return resolveResourceNames("identity", this._internalResourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.internalResourceNames = this._resolveInternalResourceNames();
+    if (this.config) {
+      this.config.resourceNames = this.internalResourceNames;
+    }
   }
   /**
    * Validate plugin dependencies
@@ -13698,16 +14082,25 @@ class AuditPlugin extends Plugin {
     super(options);
     const resourceNames = options.resourceNames || {};
     this.auditResource = null;
-    this.auditResourceName = resolveResourceName("audit", {
+    this._auditResourceDescriptor = {
       defaultName: "plg_audits",
       override: resourceNames.audit || options.resourceName
-    });
+    };
+    this.auditResourceName = this._resolveAuditResourceName();
     this.config = {
       includeData: options.includeData !== false,
       includePartitions: options.includePartitions !== false,
       maxDataSize: options.maxDataSize || 1e4,
       ...options
     };
+  }
+  _resolveAuditResourceName() {
+    return resolveResourceName("audit", this._auditResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.auditResourceName = this._resolveAuditResourceName();
   }
   async onInstall() {
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
@@ -16031,15 +16424,24 @@ class MemoryCache extends Cache {
     this.meta = {};
     this.maxSize = config.maxSize !== void 0 ? config.maxSize : 1e3;
     if (config.maxMemoryBytes && config.maxMemoryBytes > 0 && config.maxMemoryPercent && config.maxMemoryPercent > 0) {
-      throw new Error(
-        "[MemoryCache] Cannot use both maxMemoryBytes and maxMemoryPercent. Choose one: maxMemoryBytes (absolute) or maxMemoryPercent (0...1 fraction)."
-      );
+      throw new CacheError("MemoryCache cannot use both maxMemoryBytes and maxMemoryPercent", {
+        driver: "memory",
+        operation: "constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Choose either maxMemoryBytes or maxMemoryPercent to limit memory usage."
+      });
     }
     if (config.maxMemoryPercent && config.maxMemoryPercent > 0) {
       if (config.maxMemoryPercent > 1) {
-        throw new Error(
-          `[MemoryCache] maxMemoryPercent must be between 0 and 1 (e.g., 0.1 for 10%). Received: ${config.maxMemoryPercent}`
-        );
+        throw new CacheError("MemoryCache maxMemoryPercent must be between 0 and 1", {
+          driver: "memory",
+          operation: "constructor",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Provide a fraction between 0 and 1 (e.g., 0.1 for 10%).",
+          maxMemoryPercent: config.maxMemoryPercent
+        });
       }
       const totalMemory = os$1.totalmem();
       this.maxMemoryBytes = Math.floor(totalMemory * config.maxMemoryPercent);
@@ -16094,14 +16496,28 @@ class MemoryCache extends Cache {
     try {
       serialized = this.serializer(data);
     } catch (error) {
-      throw new Error(`[MemoryCache] Failed to serialize data for key '${key}': ${error.message}`);
+      throw new CacheError(`Failed to serialize data for key '${key}'`, {
+        driver: "memory",
+        operation: "set",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Ensure the custom serializer handles the provided data type.",
+        key,
+        original: error
+      });
     }
     let finalData = serialized;
     let compressed = false;
     let originalSize = 0;
     let compressedSize = 0;
     if (typeof serialized !== "string") {
-      throw new Error("[MemoryCache] Serializer must return a string");
+      throw new CacheError("MemoryCache serializer must return a string", {
+        driver: "memory",
+        operation: "set",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Update the custom serializer to return a string output."
+      });
     }
     originalSize = Buffer.byteLength(serialized, "utf8");
     if (this.enableCompression) {
@@ -16373,7 +16789,13 @@ class FilesystemCache extends Cache {
   }) {
     super(config);
     if (!directory) {
-      throw new Error("FilesystemCache: directory parameter is required");
+      throw new CacheError("FilesystemCache requires a directory", {
+        driver: "filesystem",
+        operation: "constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass { directory: "./cache" } or configure a valid cache directory before enabling FilesystemCache.'
+      });
     }
     this.directory = path.resolve(directory);
     this.prefix = prefix;
@@ -16424,7 +16846,15 @@ class FilesystemCache extends Cache {
       await fs.mkdir(dir, { recursive: true });
     });
     if (!ok && err.code !== "EEXIST") {
-      throw new Error(`Failed to create cache directory: ${err.message}`);
+      throw new CacheError(`Failed to create cache directory: ${err.message}`, {
+        driver: "filesystem",
+        operation: "ensureDirectory",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Check filesystem permissions and ensure the process can create directories.",
+        directory: dir,
+        original: err
+      });
     }
   }
   _getFilePath(key) {
@@ -16441,7 +16871,16 @@ class FilesystemCache extends Cache {
       let serialized = JSON.stringify(data);
       const originalSize = Buffer.byteLength(serialized, this.encoding);
       if (originalSize > this.maxFileSize) {
-        throw new Error(`Cache data exceeds maximum file size: ${originalSize} > ${this.maxFileSize}`);
+        throw new CacheError("Cache data exceeds maximum file size", {
+          driver: "filesystem",
+          operation: "set",
+          statusCode: 413,
+          retriable: false,
+          suggestion: "Increase maxFileSize or reduce the cached payload size.",
+          key,
+          size: originalSize,
+          maxFileSize: this.maxFileSize
+        });
       }
       let compressed = false;
       let finalData = serialized;
@@ -16495,7 +16934,15 @@ class FilesystemCache extends Cache {
       if (this.enableStats) {
         this.stats.errors++;
       }
-      throw new Error(`Failed to set cache key '${key}': ${error.message}`);
+      throw new CacheError(`Failed to set cache key '${key}': ${error.message}`, {
+        driver: "filesystem",
+        operation: "set",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Verify filesystem permissions and available disk space.",
+        key,
+        original: error
+      });
     }
   }
   async _get(key) {
@@ -16606,7 +17053,15 @@ class FilesystemCache extends Cache {
       if (this.enableStats) {
         this.stats.errors++;
       }
-      throw new Error(`Failed to delete cache key '${key}': ${error.message}`);
+      throw new CacheError(`Failed to delete cache key '${key}': ${error.message}`, {
+        driver: "filesystem",
+        operation: "delete",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Ensure cache files are writable and not locked by another process.",
+        key,
+        original: error
+      });
     }
   }
   async _clear(prefix) {
@@ -16680,7 +17135,14 @@ class FilesystemCache extends Cache {
       if (this.enableStats) {
         this.stats.errors++;
       }
-      throw new Error(`Failed to clear cache: ${error.message}`);
+      throw new CacheError(`Failed to clear cache: ${error.message}`, {
+        driver: "filesystem",
+        operation: "clear",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Verify the cache directory is accessible and not in use by another process.",
+        original: error
+      });
     }
   }
   async size() {
@@ -16766,7 +17228,14 @@ class FilesystemCache extends Cache {
     const startTime = Date.now();
     while (this.locks.has(lockKey)) {
       if (Date.now() - startTime > this.lockTimeout) {
-        throw new Error(`Lock timeout for file: ${filePath}`);
+        throw new CacheError(`Lock timeout for file: ${filePath}`, {
+          driver: "filesystem",
+          operation: "acquireLock",
+          statusCode: 408,
+          retriable: true,
+          suggestion: "Increase lockTimeout or investigate long-running cache writes holding the lock.",
+          key: lockKey
+        });
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -17217,7 +17686,15 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
       });
     });
     if (!ok) {
-      throw new Error(`Failed to write cache file: ${err.message}`);
+      throw new CacheError(`Failed to write cache file: ${err.message}`, {
+        driver: "filesystem-partitioned",
+        operation: "writeFileWithMetadata",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Check filesystem permissions and disk space for the partition-aware cache directory.",
+        filePath,
+        original: err
+      });
     }
     return true;
   }
@@ -17341,16 +17818,51 @@ class CachePlugin extends Plugin {
   }
   installResourceHooksForResource(resource) {
     if (!this.driver) return;
-    Object.defineProperty(resource, "cache", {
-      value: this.driver,
-      writable: true,
-      configurable: true,
-      enumerable: false
-    });
-    resource.cacheKeyFor = async (options = {}) => {
+    const driver = this.driver;
+    const instanceKey = this.instanceName || this.slug;
+    resource.cacheInstances = resource.cacheInstances || {};
+    resource.cacheInstances[instanceKey] = driver;
+    if (!Object.prototype.hasOwnProperty.call(resource, "cache")) {
+      Object.defineProperty(resource, "cache", {
+        value: driver,
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
+    if (typeof resource.getCacheDriver !== "function") {
+      Object.defineProperty(resource, "getCacheDriver", {
+        value: (name = null) => {
+          if (!name) {
+            return resource.cache;
+          }
+          return resource.cacheInstances?.[name] || null;
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
+    const computeCacheKey = async (options = {}) => {
       const { action, params = {}, partition, partitionValues } = options;
       return this.generateCacheKey(resource, action, params, partition, partitionValues);
     };
+    resource.cacheKeyResolvers = resource.cacheKeyResolvers || {};
+    resource.cacheKeyResolvers[instanceKey] = computeCacheKey;
+    if (!resource.cacheKeyFor) {
+      resource.cacheKeyFor = computeCacheKey;
+    }
+    if (typeof resource.getCacheKeyResolver !== "function") {
+      Object.defineProperty(resource, "getCacheKeyResolver", {
+        value: (name = null) => {
+          if (!name) return resource.cacheKeyFor;
+          return resource.cacheKeyResolvers?.[name] || null;
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
     if (this.driver instanceof PartitionAwareFilesystemCache) {
       resource.clearPartitionCache = async (partition, partitionValues = {}) => {
         return await this.driver.clearPartition(resource.name, partition, partitionValues);
@@ -17381,6 +17893,7 @@ class CachePlugin extends Plugin {
     ];
     for (const method of cacheMethods) {
       resource.useMiddleware(method, async (ctx, next) => {
+        const resolveCacheKey = resource.cacheKeyResolvers?.[instanceKey] || computeCacheKey;
         let skipCache = false;
         const lastArg = ctx.args[ctx.args.length - 1];
         if (lastArg && typeof lastArg === "object" && lastArg.skipCache === true) {
@@ -17391,17 +17904,17 @@ class CachePlugin extends Plugin {
         }
         let key;
         if (method === "getMany") {
-          key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
+          key = await resolveCacheKey({ action: method, params: { ids: ctx.args[0] } });
         } else if (method === "page") {
           const { offset, size, partition, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ action: method, params: { offset, size }, partition, partitionValues });
+          key = await resolveCacheKey({ action: method, params: { offset, size }, partition, partitionValues });
         } else if (method === "list" || method === "listIds" || method === "count") {
           const { partition, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+          key = await resolveCacheKey({ action: method, partition, partitionValues });
         } else if (method === "query") {
           const filter = ctx.args[0] || {};
           const options = ctx.args[1] || {};
-          key = await resource.cacheKeyFor({
+          key = await resolveCacheKey({
             action: method,
             params: { filter, options: { limit: options.limit, offset: options.offset } },
             partition: options.partition,
@@ -17409,16 +17922,16 @@ class CachePlugin extends Plugin {
           });
         } else if (method === "getFromPartition") {
           const { id, partitionName, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({
+          key = await resolveCacheKey({
             action: method,
             params: { id, partitionName },
             partition: partitionName,
             partitionValues
           });
         } else if (method === "getAll") {
-          key = await resource.cacheKeyFor({ action: method });
+          key = await resolveCacheKey({ action: method });
         } else if (["get", "exists", "content", "hasContent"].includes(method)) {
-          key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
+          key = await resolveCacheKey({ action: method, params: { id: ctx.args[0] } });
         }
         if (this.driver instanceof PartitionAwareFilesystemCache) {
           let partition, partitionValues;
@@ -17435,7 +17948,7 @@ class CachePlugin extends Plugin {
             partition = partitionName;
             partitionValues = pValues;
           }
-          const [ok, err, result] = await tryFn(() => resource.cache._get(key, {
+          const [ok, err, result] = await tryFn(() => driver._get(key, {
             resource: resource.name,
             action: method,
             partition,
@@ -17452,7 +17965,7 @@ class CachePlugin extends Plugin {
           this.stats.misses++;
           const freshResult = await next();
           this.stats.writes++;
-          await resource.cache._set(key, freshResult, {
+          await driver._set(key, freshResult, {
             resource: resource.name,
             action: method,
             partition,
@@ -17460,7 +17973,7 @@ class CachePlugin extends Plugin {
           });
           return freshResult;
         } else {
-          const [ok, err, result] = await tryFn(() => resource.cache.get(key));
+          const [ok, err, result] = await tryFn(() => driver.get(key));
           if (ok && result !== null && result !== void 0) {
             this.stats.hits++;
             return result;
@@ -17472,7 +17985,7 @@ class CachePlugin extends Plugin {
           this.stats.misses++;
           const freshResult = await next();
           this.stats.writes++;
-          await resource.cache.set(key, freshResult);
+          await driver.set(key, freshResult);
           return freshResult;
         }
       });
@@ -17506,13 +18019,14 @@ class CachePlugin extends Plugin {
     }
   }
   async clearCacheForResource(resource, data) {
-    if (!resource.cache) return;
+    const driver = this._getDriverForResource(resource);
+    if (!driver) return;
     const keyPrefix = `resource=${resource.name}`;
     if (data && data.id) {
       const itemSpecificMethods = ["get", "exists", "content", "hasContent"];
       for (const method of itemSpecificMethods) {
         const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
-        const [ok2, err2] = await this.clearCacheWithRetry(resource.cache, specificKey);
+        const [ok2, err2] = await this.clearCacheWithRetry(driver, specificKey);
         if (!ok2) {
           this.emit("plg:cache:clear-error", {
             resource: resource.name,
@@ -17530,7 +18044,7 @@ class CachePlugin extends Plugin {
         for (const [partitionName, values] of Object.entries(partitionValues)) {
           if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
             const partitionKeyPrefix = path.join(keyPrefix, `partition=${partitionName}`);
-            const [ok2, err2] = await this.clearCacheWithRetry(resource.cache, partitionKeyPrefix);
+            const [ok2, err2] = await this.clearCacheWithRetry(driver, partitionKeyPrefix);
             if (!ok2) {
               this.emit("plg:cache:clear-error", {
                 resource: resource.name,
@@ -17545,7 +18059,7 @@ class CachePlugin extends Plugin {
         }
       }
     }
-    const [ok, err] = await this.clearCacheWithRetry(resource.cache, keyPrefix);
+    const [ok, err] = await this.clearCacheWithRetry(driver, keyPrefix);
     if (!ok) {
       this.emit("plg:cache:clear-error", {
         resource: resource.name,
@@ -17557,8 +18071,8 @@ class CachePlugin extends Plugin {
       }
       const aggregateMethods = ["count", "list", "listIds", "getAll", "page", "query"];
       for (const method of aggregateMethods) {
-        await this.clearCacheWithRetry(resource.cache, `${keyPrefix}/action=${method}`);
-        await this.clearCacheWithRetry(resource.cache, `resource=${resource.name}/action=${method}`);
+        await this.clearCacheWithRetry(driver, `${keyPrefix}/action=${method}`);
+        await this.clearCacheWithRetry(driver, `resource=${resource.name}/action=${method}`);
       }
     }
   }
@@ -17580,6 +18094,13 @@ class CachePlugin extends Plugin {
       }
     }
     return [false, lastError];
+  }
+  _getDriverForResource(resource) {
+    const instanceKey = this.instanceName || this.slug;
+    if (resource?.cacheInstances && instanceKey && resource.cacheInstances[instanceKey]) {
+      return resource.cacheInstances[instanceKey];
+    }
+    return this.driver;
   }
   async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
     const keyParts = [
@@ -17618,10 +18139,10 @@ class CachePlugin extends Plugin {
   async clearAllCache() {
     if (!this.driver) return;
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.cache) {
-        const keyPrefix = `resource=${resource.name}`;
-        await resource.cache.clear(keyPrefix);
-      }
+      const driver = this._getDriverForResource(resource);
+      if (!driver) continue;
+      const keyPrefix = `resource=${resource.name}`;
+      await driver.clear(keyPrefix);
     }
   }
   async warmCache(resourceName, options = {}) {
@@ -17777,6 +18298,1089 @@ class CachePlugin extends Plugin {
   }
 }
 
+class PuppeteerPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.config = {
+      // Browser Pool
+      pool: {
+        enabled: true,
+        maxBrowsers: 5,
+        maxTabsPerBrowser: 10,
+        reuseTab: false,
+        closeOnIdle: true,
+        idleTimeout: 3e5,
+        // 5 minutes
+        ...options.pool
+      },
+      // Browser Launch Options
+      launch: {
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-accelerated-2d-canvas",
+          "--no-first-run",
+          "--no-zygote",
+          "--disable-gpu"
+        ],
+        ignoreHTTPSErrors: true,
+        ...options.launch
+      },
+      // Viewport & User Agent
+      viewport: {
+        width: 1920,
+        height: 1080,
+        deviceScaleFactor: 1,
+        randomize: true,
+        presets: ["desktop", "laptop", "tablet"],
+        ...options.viewport
+      },
+      // User Agent Management
+      userAgent: {
+        enabled: true,
+        random: true,
+        filters: {
+          deviceCategory: "desktop",
+          ...options.userAgent?.filters
+        },
+        custom: options.userAgent?.custom || null,
+        ...options.userAgent
+      },
+      // Stealth Mode (Anti-Detection)
+      stealth: {
+        enabled: true,
+        enableEvasions: true,
+        ...options.stealth
+      },
+      // Human Behavior Simulation
+      humanBehavior: {
+        enabled: true,
+        mouse: {
+          enabled: true,
+          bezierCurves: true,
+          overshoot: true,
+          jitter: true,
+          pathThroughElements: true,
+          ...options.humanBehavior?.mouse
+        },
+        typing: {
+          enabled: true,
+          mistakes: true,
+          corrections: true,
+          pauseAfterWord: true,
+          speedVariation: true,
+          delayRange: [50, 150],
+          ...options.humanBehavior?.typing
+        },
+        scrolling: {
+          enabled: true,
+          randomStops: true,
+          backScroll: true,
+          horizontalJitter: true,
+          ...options.humanBehavior?.scrolling
+        },
+        ...options.humanBehavior
+      },
+      // Cookie Management & Farming
+      cookies: {
+        enabled: true,
+        storage: {
+          resource: "plg_puppeteer_cookies",
+          autoSave: true,
+          autoLoad: true,
+          encrypt: true,
+          ...options.cookies?.storage
+        },
+        farming: {
+          enabled: true,
+          warmup: {
+            enabled: true,
+            pages: ["https://www.google.com", "https://www.youtube.com", "https://www.wikipedia.org"],
+            randomOrder: true,
+            timePerPage: { min: 5e3, max: 15e3 },
+            interactions: { scroll: true, click: true, hover: true },
+            ...options.cookies?.farming?.warmup
+          },
+          rotation: {
+            enabled: true,
+            requestsPerCookie: 100,
+            maxAge: 864e5,
+            // 24 hours
+            poolSize: 10,
+            ...options.cookies?.farming?.rotation
+          },
+          reputation: {
+            enabled: true,
+            trackSuccess: true,
+            retireThreshold: 0.5,
+            ageBoost: true,
+            ...options.cookies?.farming?.reputation
+          },
+          ...options.cookies?.farming
+        },
+        ...options.cookies
+      },
+      // Performance Optimization
+      performance: {
+        blockResources: {
+          enabled: true,
+          types: ["image", "stylesheet", "font", "media"],
+          ...options.performance?.blockResources
+        },
+        cacheEnabled: true,
+        javascriptEnabled: true,
+        ...options.performance
+      },
+      // Network Monitoring (CDP)
+      networkMonitor: {
+        enabled: false,
+        // Disabled by default (adds overhead)
+        persist: false,
+        // Save to S3DB
+        filters: {
+          types: null,
+          // ['image', 'script'] or null for all
+          statuses: null,
+          // [404, 500] or null for all
+          minSize: null,
+          // Only requests >= size (bytes)
+          maxSize: null,
+          // Only requests <= size (bytes)
+          saveErrors: true,
+          // Always save failed requests
+          saveLargeAssets: true,
+          // Always save assets > 1MB
+          ...options.networkMonitor?.filters
+        },
+        compression: {
+          enabled: true,
+          threshold: 10240,
+          // Compress payloads > 10KB
+          ...options.networkMonitor?.compression
+        },
+        ...options.networkMonitor
+      },
+      // Console Monitoring
+      consoleMonitor: {
+        enabled: false,
+        // Disabled by default
+        persist: false,
+        // Save to S3DB
+        filters: {
+          levels: null,
+          // ['error', 'warning'] or null for all
+          excludePatterns: [],
+          // Regex patterns to exclude
+          includeStackTraces: true,
+          includeSourceLocation: true,
+          captureNetwork: false,
+          // Also capture network errors
+          ...options.consoleMonitor?.filters
+        },
+        ...options.consoleMonitor
+      },
+      // Screenshot & Recording
+      screenshot: {
+        fullPage: false,
+        type: "png",
+        ...options.screenshot
+      },
+      // Proxy Support
+      proxy: {
+        enabled: false,
+        list: [],
+        // Array of proxy URLs or objects
+        selectionStrategy: "round-robin",
+        // 'round-robin' | 'random' | 'least-used' | 'best-performance'
+        bypassList: [],
+        // Domains to bypass proxy
+        healthCheck: {
+          enabled: true,
+          interval: 3e5,
+          // 5 minutes
+          testUrl: "https://www.google.com",
+          timeout: 1e4,
+          successRateThreshold: 0.3
+        },
+        // Legacy single proxy support (deprecated)
+        server: null,
+        username: null,
+        password: null,
+        ...options.proxy
+      },
+      // Error Handling & Retries
+      retries: {
+        enabled: true,
+        maxAttempts: 3,
+        backoff: "exponential",
+        initialDelay: 1e3,
+        ...options.retries
+      },
+      // Logging & Debugging
+      debug: {
+        enabled: false,
+        screenshots: false,
+        console: false,
+        network: false,
+        ...options.debug
+      }
+    };
+    const resourceNamesOption = options.resourceNames || {};
+    this._resourceDescriptors = {
+      cookies: {
+        defaultName: "plg_puppeteer_cookies",
+        override: resourceNamesOption.cookies || options.cookies?.storage?.resource
+      },
+      consoleSessions: {
+        defaultName: "plg_puppeteer_console_sessions",
+        override: resourceNamesOption.consoleSessions
+      },
+      consoleMessages: {
+        defaultName: "plg_puppeteer_console_messages",
+        override: resourceNamesOption.consoleMessages
+      },
+      consoleErrors: {
+        defaultName: "plg_puppeteer_console_errors",
+        override: resourceNamesOption.consoleErrors
+      },
+      networkSessions: {
+        defaultName: "plg_puppeteer_network_sessions",
+        override: resourceNamesOption.networkSessions
+      },
+      networkRequests: {
+        defaultName: "plg_puppeteer_network_requests",
+        override: resourceNamesOption.networkRequests
+      },
+      networkErrors: {
+        defaultName: "plg_puppeteer_network_errors",
+        override: resourceNamesOption.networkErrors
+      }
+    };
+    this.resourceNames = this._resolveResourceNames();
+    this.config.cookies.storage.resource = this.resourceNames.cookies;
+    this.browserPool = [];
+    this.tabPool = /* @__PURE__ */ new Map();
+    this.browserIdleTimers = /* @__PURE__ */ new Map();
+    this.dedicatedBrowsers = /* @__PURE__ */ new Set();
+    this.userAgentGenerator = null;
+    this.ghostCursor = null;
+    this.cookieManager = null;
+    this.proxyManager = null;
+    this.performanceManager = null;
+    this.networkMonitor = null;
+    this.consoleMonitor = null;
+    this.initialized = false;
+    if (this.config.pool.reuseTab) {
+      this.emit("puppeteer.configWarning", {
+        setting: "pool.reuseTab",
+        message: "pool.reuseTab is not supported yet and will be ignored."
+      });
+    }
+  }
+  _resolveResourceNames() {
+    return resolveResourceNames("puppeteer", this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.resourceNames = this._resolveResourceNames();
+    if (this.config?.cookies?.storage) {
+      this.config.cookies.storage.resource = this.resourceNames.cookies;
+    }
+  }
+  /**
+   * Install plugin and validate dependencies
+   */
+  async onInstall() {
+    requirePluginDependency("puppeteer", this.name);
+    requirePluginDependency("puppeteer-extra", this.name);
+    requirePluginDependency("puppeteer-extra-plugin-stealth", this.name);
+    requirePluginDependency("user-agents", this.name);
+    requirePluginDependency("ghost-cursor", this.name);
+    if (this.config.cookies.enabled) {
+      await this._setupCookieStorage();
+    }
+    this.emit("puppeteer.installed");
+  }
+  /**
+   * Start plugin and initialize browser pool
+   */
+  async onStart() {
+    if (this.initialized) return;
+    await this._importDependencies();
+    if (this.config.cookies.enabled) {
+      await this._initializeCookieManager();
+    }
+    if (this.config.proxy.enabled) {
+      await this._initializeProxyManager();
+    }
+    await this._initializePerformanceManager();
+    if (this.config.networkMonitor.enabled) {
+      await this._initializeNetworkMonitor();
+    }
+    if (this.config.consoleMonitor.enabled) {
+      await this._initializeConsoleMonitor();
+    }
+    if (this.config.pool.enabled) {
+      await this._warmupBrowserPool();
+    }
+    this.initialized = true;
+    this.emit("puppeteer.started");
+  }
+  /**
+   * Stop plugin and cleanup resources
+   */
+  async onStop() {
+    await this._closeBrowserPool();
+    await this._closeDedicatedBrowsers();
+    this.initialized = false;
+    this.emit("puppeteer.stopped");
+  }
+  /**
+   * Uninstall plugin
+   */
+  async onUninstall(options = {}) {
+    await this.onStop();
+    this.emit("puppeteer.uninstalled");
+  }
+  /**
+   * Import required dependencies (lazy loading)
+   * @private
+   */
+  async _importDependencies() {
+    const puppeteerModule = await import('puppeteer-extra');
+    const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+    const UserAgent = (await import('user-agents')).default;
+    const { createCursor } = await import('ghost-cursor');
+    this.puppeteer = puppeteerModule.default || puppeteerModule;
+    if (this.config.stealth.enabled) {
+      this.puppeteer.use(StealthPlugin());
+    }
+    if (this.config.userAgent.enabled && this.config.userAgent.random) {
+      this.UserAgent = UserAgent;
+    }
+    this.createGhostCursor = createCursor;
+  }
+  /**
+   * Setup cookie storage resource
+   * @private
+   */
+  async _setupCookieStorage() {
+    const resourceName = this.config.cookies.storage.resource;
+    try {
+      await this.database.getResource(resourceName);
+      return;
+    } catch (err) {
+    }
+    const [created, createErr] = await tryFn(() => this.database.createResource({
+      name: resourceName,
+      attributes: {
+        sessionId: "string|required",
+        cookies: "array|required",
+        userAgent: "string",
+        viewport: "object",
+        proxyId: "string|optional",
+        domain: "string",
+        date: "string",
+        reputation: {
+          successCount: "number",
+          failCount: "number",
+          successRate: "number",
+          lastUsed: "number"
+        },
+        metadata: {
+          createdAt: "number",
+          expiresAt: "number",
+          requestCount: "number",
+          age: "number"
+        }
+      },
+      timestamps: true,
+      behavior: "body-only",
+      partitions: {
+        byProxy: { fields: { proxyId: "string" } },
+        byDate: { fields: { date: "string" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }));
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (!existing) {
+        throw createErr;
+      }
+    }
+  }
+  /**
+   * Initialize proxy manager
+   * @private
+   */
+  async _initializeProxyManager() {
+    const { ProxyManager } = await Promise.resolve().then(function () { return proxyManager; });
+    this.proxyManager = new ProxyManager(this);
+    await this.proxyManager.initialize();
+  }
+  /**
+   * Initialize cookie manager
+   * @private
+   */
+  async _initializeCookieManager() {
+    const { CookieManager } = await Promise.resolve().then(function () { return cookieManager; });
+    this.cookieManager = new CookieManager(this);
+    await this.cookieManager.initialize();
+  }
+  /**
+   * Initialize performance manager
+   * @private
+   */
+  async _initializePerformanceManager() {
+    const { PerformanceManager } = await Promise.resolve().then(function () { return performanceManager; });
+    this.performanceManager = new PerformanceManager(this);
+    this.emit("puppeteer.performanceManager.initialized");
+  }
+  /**
+   * Initialize network monitor
+   * @private
+   */
+  async _initializeNetworkMonitor() {
+    const { NetworkMonitor } = await Promise.resolve().then(function () { return networkMonitor; });
+    this.networkMonitor = new NetworkMonitor(this);
+    if (this.config.networkMonitor.persist) {
+      await this.networkMonitor.initialize();
+    }
+    this.emit("puppeteer.networkMonitor.initialized");
+  }
+  /**
+   * Initialize console monitor
+   * @private
+   */
+  async _initializeConsoleMonitor() {
+    const { ConsoleMonitor } = await Promise.resolve().then(function () { return consoleMonitor; });
+    this.consoleMonitor = new ConsoleMonitor(this);
+    if (this.config.consoleMonitor.persist) {
+      await this.consoleMonitor.initialize();
+    }
+    this.emit("puppeteer.consoleMonitor.initialized");
+  }
+  /**
+   * Warmup browser pool
+   * @private
+   */
+  async _warmupBrowserPool() {
+    const poolSize = Math.min(this.config.pool.maxBrowsers, 2);
+    for (let i = 0; i < poolSize; i++) {
+      await this._createBrowser();
+    }
+    this.emit("puppeteer.poolWarmed", { size: this.browserPool.length });
+  }
+  /**
+   * Create a new browser instance
+   * @private
+   * @param {Object} proxy - Optional proxy configuration
+   * @returns {Promise<Browser>}
+   */
+  async _createBrowser(proxy = null) {
+    const launchOptions = {
+      ...this.config.launch,
+      args: [...this.config.launch.args || []]
+    };
+    if (proxy && this.proxyManager) {
+      const proxyArgs = this.proxyManager.getProxyLaunchArgs(proxy);
+      launchOptions.args.push(...proxyArgs);
+    } else if (this.config.proxy.enabled && this.config.proxy.server) {
+      launchOptions.args.push(`--proxy-server=${this.config.proxy.server}`);
+    }
+    const browser = await this.puppeteer.launch(launchOptions);
+    if (!proxy && this.config.pool.enabled) {
+      this.browserPool.push(browser);
+      this.tabPool.set(browser, /* @__PURE__ */ new Set());
+      browser.on("disconnected", () => {
+        const index = this.browserPool.indexOf(browser);
+        if (index > -1) {
+          this.browserPool.splice(index, 1);
+        }
+        this.tabPool.delete(browser);
+        this._clearIdleTimer(browser);
+        this.dedicatedBrowsers.delete(browser);
+      });
+    }
+    return browser;
+  }
+  /**
+   * Get or create a browser instance
+   * @private
+   * @param {Object} proxy - Optional proxy configuration
+   * @returns {Promise<Browser>}
+   */
+  async _getBrowser(proxy = null) {
+    if (proxy) {
+      return await this._createBrowser(proxy);
+    }
+    if (this.config.pool.enabled) {
+      for (const browser of this.browserPool) {
+        const tabs = this.tabPool.get(browser);
+        if (!tabs || tabs.size < this.config.pool.maxTabsPerBrowser) {
+          return browser;
+        }
+      }
+      if (this.browserPool.length < this.config.pool.maxBrowsers) {
+        return await this._createBrowser();
+      }
+      let targetBrowser = this.browserPool[0];
+      let minTabs = this.tabPool.get(targetBrowser)?.size || 0;
+      for (const browser of this.browserPool.slice(1)) {
+        const tabs = this.tabPool.get(browser)?.size || 0;
+        if (tabs < minTabs) {
+          targetBrowser = browser;
+          minTabs = tabs;
+        }
+      }
+      return targetBrowser;
+    } else {
+      return await this._createBrowser();
+    }
+  }
+  /**
+   * Close all browsers in pool
+   * @private
+   */
+  async _closeBrowserPool() {
+    for (const browser of this.browserPool) {
+      this._clearIdleTimer(browser);
+      if (this.cookieManager) {
+        const tabs = this.tabPool.get(browser);
+        if (tabs) {
+          for (const page of tabs) {
+            if (!page || page._sessionSaved || !page._sessionId) {
+              continue;
+            }
+            if (typeof page.isClosed === "function" && page.isClosed()) {
+              continue;
+            }
+            try {
+              await this.cookieManager.saveSession(page, page._sessionId, {
+                success: !!page._navigationSuccess
+              });
+              page._sessionSaved = true;
+            } catch (err) {
+              page._sessionSaved = true;
+              this.emit("puppeteer.cookieSaveFailed", {
+                sessionId: page._sessionId,
+                error: err.message
+              });
+            }
+          }
+        }
+      }
+      try {
+        await browser.close();
+      } catch (err) {
+      }
+    }
+    this.browserPool = [];
+    this.tabPool.clear();
+  }
+  /**
+   * Clear idle timer for pooled browser
+   * @private
+   */
+  _clearIdleTimer(browser) {
+    const timer = this.browserIdleTimers.get(browser);
+    if (timer) {
+      clearTimeout(timer);
+      this.browserIdleTimers.delete(browser);
+    }
+  }
+  /**
+   * Schedule pooled browser retirement when idle
+   * @private
+   */
+  _scheduleIdleCloseIfNeeded(browser) {
+    if (!this.config.pool.closeOnIdle) return;
+    const tabs = this.tabPool.get(browser);
+    if (!tabs || tabs.size > 0) return;
+    if (this.browserIdleTimers.has(browser)) return;
+    const timeout = this.config.pool.idleTimeout || 3e5;
+    const timer = setTimeout(async () => {
+      this.browserIdleTimers.delete(browser);
+      const currentTabs = this.tabPool.get(browser);
+      if (currentTabs && currentTabs.size === 0) {
+        await this._retireIdleBrowser(browser);
+      }
+    }, timeout);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+    this.browserIdleTimers.set(browser, timer);
+  }
+  /**
+   * Retire pooled browser if still idle
+   * @private
+   * @param {Browser} browser
+   */
+  async _retireIdleBrowser(browser) {
+    this.tabPool.delete(browser);
+    const index = this.browserPool.indexOf(browser);
+    if (index > -1) {
+      this.browserPool.splice(index, 1);
+    }
+    try {
+      await browser.close();
+      this.emit("puppeteer.browserRetired", { pooled: true });
+    } catch (err) {
+      this.emit("puppeteer.browserRetiredError", {
+        pooled: true,
+        error: err.message
+      });
+    }
+  }
+  /**
+   * Close dedicated (non-pooled) browsers
+   * @private
+   */
+  async _closeDedicatedBrowsers() {
+    for (const browser of Array.from(this.dedicatedBrowsers)) {
+      try {
+        await browser.close();
+      } catch (err) {
+      } finally {
+        this.dedicatedBrowsers.delete(browser);
+      }
+    }
+  }
+  /**
+   * Generate random user agent
+   * @private
+   * @returns {string}
+   */
+  _generateUserAgent() {
+    if (this.config.userAgent.custom) {
+      return this.config.userAgent.custom;
+    }
+    if (this.config.userAgent.random && this.UserAgent) {
+      const userAgent = new this.UserAgent(this.config.userAgent.filters);
+      return userAgent.toString();
+    }
+    return null;
+  }
+  /**
+   * Generate random viewport
+   * @private
+   * @returns {Object}
+   */
+  _generateViewport() {
+    if (!this.config.viewport.randomize) {
+      return {
+        width: this.config.viewport.width,
+        height: this.config.viewport.height,
+        deviceScaleFactor: this.config.viewport.deviceScaleFactor
+      };
+    }
+    const presets = {
+      desktop: [
+        { width: 1920, height: 1080, deviceScaleFactor: 1 },
+        { width: 1680, height: 1050, deviceScaleFactor: 1 },
+        { width: 1600, height: 900, deviceScaleFactor: 1 },
+        { width: 1440, height: 900, deviceScaleFactor: 1 },
+        { width: 1366, height: 768, deviceScaleFactor: 1 }
+      ],
+      laptop: [
+        { width: 1440, height: 900, deviceScaleFactor: 1 },
+        { width: 1366, height: 768, deviceScaleFactor: 1 },
+        { width: 1280, height: 800, deviceScaleFactor: 1 }
+      ],
+      tablet: [
+        { width: 1024, height: 768, deviceScaleFactor: 2 },
+        { width: 768, height: 1024, deviceScaleFactor: 2 }
+      ]
+    };
+    const categories = this.config.viewport.presets || ["desktop"];
+    const availablePresets = categories.flatMap((cat) => presets[cat] || []);
+    return availablePresets[Math.floor(Math.random() * availablePresets.length)];
+  }
+  /**
+   * PUBLIC API
+   */
+  /**
+   * Navigate to URL with human behavior
+   * @param {string} url - URL to navigate to
+   * @param {Object} options - Navigation options
+   * @returns {Promise<Page>}
+   */
+  async navigate(url, options = {}) {
+    const {
+      useSession = null,
+      screenshot = false,
+      waitUntil = "networkidle2",
+      timeout = 3e4
+    } = options;
+    let proxy = null;
+    let proxyId = null;
+    if (useSession && this.proxyManager) {
+      proxy = this.proxyManager.getProxyForSession(useSession, true);
+      proxyId = proxy?.id || null;
+    }
+    const browser = await this._getBrowser(proxy);
+    const page = await browser.newPage();
+    const isPooledBrowser = !proxy && this.config.pool.enabled;
+    if (isPooledBrowser) {
+      const tabs = this.tabPool.get(browser);
+      if (tabs) {
+        tabs.add(page);
+        this._clearIdleTimer(browser);
+      }
+    } else {
+      this.dedicatedBrowsers.add(browser);
+      browser.once("disconnected", () => {
+        this.dedicatedBrowsers.delete(browser);
+      });
+    }
+    if (proxy && this.proxyManager) {
+      await this.proxyManager.authenticateProxy(page, proxy);
+    }
+    const viewport = this._generateViewport();
+    await page.setViewport(viewport);
+    const userAgent = this._generateUserAgent();
+    if (userAgent) {
+      await page.setUserAgent(userAgent);
+    }
+    if (this.config.performance.blockResources.enabled) {
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        if (this.config.performance.blockResources.types.includes(request.resourceType())) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+    }
+    if (useSession && this.cookieManager) {
+      await this.cookieManager.loadSession(page, useSession);
+    }
+    let cursor = null;
+    if (this.config.humanBehavior.enabled && this.config.humanBehavior.mouse.enabled) {
+      cursor = this.createGhostCursor(page);
+    }
+    let navigationSuccess = false;
+    try {
+      await page.goto(url, { waitUntil, timeout });
+      navigationSuccess = true;
+      if (proxyId && this.proxyManager) {
+        this.proxyManager.recordProxyUsage(proxyId, true);
+      }
+    } catch (err) {
+      if (proxyId && this.proxyManager) {
+        this.proxyManager.recordProxyUsage(proxyId, false);
+      }
+      throw err;
+    }
+    if (screenshot) {
+      const screenshotBuffer = await page.screenshot(this.config.screenshot);
+      page._screenshot = screenshotBuffer;
+    }
+    page._cursor = cursor;
+    page._userAgent = userAgent;
+    page._viewport = viewport;
+    page._proxyId = proxyId;
+    page._sessionId = useSession;
+    page._navigationSuccess = navigationSuccess;
+    page._sessionSaved = false;
+    if (this.config.humanBehavior.enabled) {
+      this._attachHumanBehaviorMethods(page);
+    }
+    let hasSavedSession = false;
+    let browserClosed = false;
+    const originalClose = page.close?.bind(page) || (async () => {
+    });
+    const shouldAutoCloseBrowser = !isPooledBrowser;
+    page.on("close", () => {
+      if (isPooledBrowser) {
+        const tabs = this.tabPool.get(browser);
+        tabs?.delete(page);
+        this._scheduleIdleCloseIfNeeded(browser);
+      } else {
+        this.dedicatedBrowsers.delete(browser);
+      }
+    });
+    page.close = async (...closeArgs) => {
+      if (!hasSavedSession && useSession && this.cookieManager && !page._sessionSaved) {
+        try {
+          await this.cookieManager.saveSession(page, useSession, {
+            success: navigationSuccess
+          });
+          page._sessionSaved = true;
+        } catch (err) {
+          this.emit("puppeteer.cookieSaveFailed", {
+            sessionId: useSession,
+            error: err.message
+          });
+          page._sessionSaved = true;
+        } finally {
+          hasSavedSession = true;
+        }
+      }
+      try {
+        const result = await originalClose(...closeArgs);
+        return result;
+      } finally {
+        if (isPooledBrowser) {
+          const tabs = this.tabPool.get(browser);
+          tabs?.delete(page);
+          this._scheduleIdleCloseIfNeeded(browser);
+        } else if (shouldAutoCloseBrowser && !browserClosed) {
+          try {
+            await browser.close();
+            this.emit("puppeteer.browserClosed", { pooled: false });
+          } catch (err) {
+            this.emit("puppeteer.browserCloseFailed", {
+              pooled: false,
+              error: err.message
+            });
+          } finally {
+            browserClosed = true;
+            this.dedicatedBrowsers.delete(browser);
+          }
+        }
+      }
+    };
+    this.emit("puppeteer.navigate", {
+      url,
+      userAgent,
+      viewport,
+      proxyId,
+      sessionId: useSession
+    });
+    return page;
+  }
+  /**
+   * Run handler with session-aware navigation helper
+   * @param {string} sessionId - Session identifier
+   * @param {Function} handler - Async function receiving the page instance
+   * @param {Object} options - Navigate options (requires url)
+   * @returns {Promise<*>}
+   */
+  async withSession(sessionId, handler, options = {}) {
+    if (!sessionId) {
+      throw new Error("withSession requires a sessionId");
+    }
+    if (typeof handler !== "function") {
+      throw new TypeError("withSession handler must be a function");
+    }
+    const { url, ...navigateOptions } = options;
+    if (!url) {
+      throw new Error("withSession requires an options.url value");
+    }
+    this.emit("puppeteer.withSession.start", { sessionId, url });
+    const page = await this.navigate(url, {
+      ...navigateOptions,
+      useSession: sessionId
+    });
+    let handlerError = null;
+    try {
+      const result = await handler(page, this);
+      return result;
+    } catch (err) {
+      handlerError = err;
+      throw err;
+    } finally {
+      try {
+        await page.close();
+      } catch (err) {
+        this.emit("puppeteer.withSession.cleanupFailed", {
+          sessionId,
+          url,
+          error: err.message
+        });
+      }
+      this.emit("puppeteer.withSession.finish", {
+        sessionId,
+        url,
+        error: handlerError ? handlerError.message : null
+      });
+    }
+  }
+  /**
+   * Attach human behavior methods to page
+   * @private
+   */
+  _attachHumanBehaviorMethods(page) {
+    page.humanClick = async (selector, options = {}) => {
+      const element = await page.$(selector);
+      if (!element) throw new Error(`Element not found: ${selector}`);
+      if (this.config.humanBehavior.mouse.pathThroughElements && page._cursor) {
+        await page._cursor.moveTo(selector);
+        await page._cursor.click();
+      } else {
+        await element.click();
+      }
+    };
+    page.humanMoveTo = async (selector, options = {}) => {
+      if (!page._cursor) {
+        throw new Error("Ghost cursor not initialized");
+      }
+      await page._cursor.moveTo(selector);
+    };
+    page.humanType = async (selector, text, options = {}) => {
+      const element = await page.$(selector);
+      if (!element) throw new Error(`Element not found: ${selector}`);
+      await element.click();
+      if (this.config.humanBehavior.typing.mistakes) {
+        await this._typeWithMistakes(page, text, options);
+      } else {
+        const [min, max] = this.config.humanBehavior.typing.delayRange;
+        await page.type(selector, text, {
+          delay: min + Math.random() * (max - min)
+        });
+      }
+    };
+    page.humanScroll = async (options = {}) => {
+      const { distance = null, direction = "down" } = options;
+      if (distance) {
+        await page.evaluate((dist, dir) => {
+          window.scrollBy(0, dir === "down" ? dist : -dist);
+        }, distance, direction);
+      } else {
+        await this._scrollWithStops(page, direction);
+      }
+    };
+  }
+  /**
+   * Type with random mistakes and corrections
+   * @private
+   */
+  async _typeWithMistakes(page, text, options = {}) {
+    const words = text.split(" ");
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (Math.random() < 0.2 && word.length > 3) {
+        const wrongPos = Math.floor(Math.random() * word.length);
+        const wrongChar = String.fromCharCode(97 + Math.floor(Math.random() * 26));
+        const wrongWord = word.slice(0, wrongPos) + wrongChar + word.slice(wrongPos + 1);
+        await page.keyboard.type(wrongWord, { delay: 100 });
+        await this._randomDelay(200, 500);
+        for (let j = 0; j < wrongWord.length; j++) {
+          await page.keyboard.press("Backspace");
+          await this._randomDelay(50, 100);
+        }
+        await page.keyboard.type(word, { delay: 100 });
+      } else {
+        await page.keyboard.type(word, { delay: 100 });
+      }
+      if (i < words.length - 1) {
+        await page.keyboard.press("Space");
+        await this._randomDelay(100, 300);
+      }
+    }
+  }
+  /**
+   * Scroll with random stops
+   * @private
+   */
+  async _scrollWithStops(page, direction = "down") {
+    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    const steps = Math.floor(scrollHeight / viewportHeight);
+    for (let i = 0; i < steps; i++) {
+      await page.evaluate((dir, vh) => {
+        window.scrollBy(0, dir === "down" ? vh : -vh);
+      }, direction, viewportHeight);
+      await this._randomDelay(500, 1500);
+      if (this.config.humanBehavior.scrolling.backScroll && Math.random() < 0.1) {
+        await page.evaluate(() => window.scrollBy(0, -100));
+        await this._randomDelay(200, 500);
+      }
+    }
+  }
+  /**
+   * Random delay helper
+   * @private
+   */
+  async _randomDelay(min, max) {
+    const delay = min + Math.random() * (max - min);
+    return new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  /**
+   * Farm cookies for a session
+   * @param {string} sessionId - Session identifier
+   * @returns {Promise<void>}
+   */
+  async farmCookies(sessionId) {
+    if (!this.cookieManager) {
+      throw new Error("Cookie manager not initialized");
+    }
+    return await this.cookieManager.farmCookies(sessionId);
+  }
+  /**
+   * Get cookie pool statistics
+   * @returns {Promise<Object>}
+   */
+  async getCookieStats() {
+    if (!this.cookieManager) {
+      throw new Error("Cookie manager not initialized");
+    }
+    return await this.cookieManager.getStats();
+  }
+  /**
+   * Get proxy pool statistics
+   * @returns {Array}
+   */
+  getProxyStats() {
+    if (!this.proxyManager) {
+      throw new Error("Proxy manager not initialized");
+    }
+    return this.proxyManager.getProxyStats();
+  }
+  /**
+   * Get session-proxy bindings
+   * @returns {Array}
+   */
+  getSessionProxyBindings() {
+    if (!this.proxyManager) {
+      throw new Error("Proxy manager not initialized");
+    }
+    return this.proxyManager.getSessionBindings();
+  }
+  /**
+   * Check health of all proxies
+   * @returns {Promise<Object>}
+   */
+  async checkProxyHealth() {
+    if (!this.proxyManager) {
+      throw new Error("Proxy manager not initialized");
+    }
+    return await this.proxyManager.checkAllProxies();
+  }
+}
+
+class CookieFarmError extends PluginError {
+  constructor(message, details = {}) {
+    const merged = {
+      pluginName: details.pluginName || "CookieFarmPlugin",
+      operation: details.operation || "unknown",
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Check CookieFarmPlugin configuration and persona storage before retrying.",
+      ...details
+    };
+    super(message, merged);
+  }
+}
+class PersonaNotFoundError extends CookieFarmError {
+  constructor(personaId, details = {}) {
+    super(`Persona not found: ${personaId}`, {
+      code: "PERSONA_NOT_FOUND",
+      personaId,
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Ensure the persona exists or create it before running CookieFarm operations.",
+      docs: details.docs || "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/cookie-farm.md",
+      ...details
+    });
+    this.name = "PersonaNotFoundError";
+  }
+}
+
 class CookieFarmPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
@@ -17880,30 +19484,70 @@ class CookieFarmPlugin extends Plugin {
         ...options.stealth
       }
     };
-    this.config.storage.resource = resolveResourceName("cookiefarm", {
+    this._storageResourceDescriptor = {
       defaultName: "plg_cookie_farm_personas",
       override: resourceNamesOption.personas || options.storage?.resource
-    });
+    };
+    this.config.storage.resource = this._resolveStorageResourceName();
     this.puppeteerPlugin = null;
     this.stealthManager = null;
     this.personaPool = /* @__PURE__ */ new Map();
     this.initialized = false;
   }
+  _resolveStorageResourceName() {
+    return resolveResourceName("cookiefarm", this._storageResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    if (this.config?.storage) {
+      this.config.storage.resource = this._resolveStorageResourceName();
+    }
+  }
   /**
    * Install plugin and validate dependencies
    */
   async onInstall() {
-    const puppeteerPlugin = this.database.plugins.find(
-      (p) => p.name === "PuppeteerPlugin"
-    );
+    const puppeteerPlugin = this._findPuppeteerDependency();
     if (!puppeteerPlugin) {
-      throw new Error(
-        "CookieFarmPlugin requires PuppeteerPlugin to be installed first"
-      );
+      throw new CookieFarmError("PuppeteerPlugin is required before installing CookieFarmPlugin", {
+        pluginName: "CookieFarmPlugin",
+        operation: "onInstall",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Install PuppeteerPlugin in db configuration before adding CookieFarmPlugin."
+      });
     }
     this.puppeteerPlugin = puppeteerPlugin;
     await this._setupPersonaStorage();
     this.emit("cookieFarm.installed");
+  }
+  /**
+   * Locate PuppeteerPlugin dependency respecting namespaces
+   * @private
+   */
+  _findPuppeteerDependency() {
+    const registries = [
+      this.database?.plugins,
+      this.database?.pluginRegistry,
+      Array.isArray(this.database?.pluginList) ? this.database.pluginList : null
+    ].filter(Boolean);
+    const candidates = [];
+    for (const registry of registries) {
+      if (Array.isArray(registry)) {
+        candidates.push(...registry);
+      } else {
+        candidates.push(...Object.values(registry));
+      }
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    const sameNamespace = candidates.find(
+      (plugin) => plugin instanceof PuppeteerPlugin && (plugin.namespace === this.namespace || !this.namespace)
+    );
+    if (sameNamespace) return sameNamespace;
+    return candidates.find((plugin) => plugin instanceof PuppeteerPlugin) || null;
   }
   /**
    * Start plugin
@@ -18148,7 +19792,7 @@ class CookieFarmPlugin extends Plugin {
   async warmupPersona(personaId) {
     const persona = this.personaPool.get(personaId);
     if (!persona) {
-      throw new Error(`Persona ${personaId} not found`);
+      throw new PersonaNotFoundError(personaId);
     }
     if (persona.metadata.warmupCompleted) {
       this.emit("cookieFarm.warmupSkipped", {
@@ -18297,7 +19941,7 @@ class CookieFarmPlugin extends Plugin {
     const { success = true } = result;
     const persona = this.personaPool.get(personaId);
     if (!persona) {
-      throw new Error(`Persona ${personaId} not found`);
+      throw new PersonaNotFoundError(personaId);
     }
     persona.reputation.totalRequests++;
     persona.metadata.lastUsed = Date.now();
@@ -18348,7 +19992,7 @@ class CookieFarmPlugin extends Plugin {
   async retirePersona(personaId) {
     const persona = this.personaPool.get(personaId);
     if (!persona) {
-      throw new Error(`Persona ${personaId} not found`);
+      throw new PersonaNotFoundError(personaId);
     }
     persona.metadata.retired = true;
     await this._savePersona(persona);
@@ -18422,6 +20066,1381 @@ class CookieFarmPlugin extends Plugin {
    */
   async _delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+class QueueError extends S3dbError {
+  constructor(message, details = {}) {
+    const { queueName, operation = "unknown", messageId, ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Queue Operation Error
+
+Operation: ${operation}
+${queueName ? `Queue: ${queueName}` : ""}
+${messageId ? `Message ID: ${messageId}` : ""}
+
+Common causes:
+1. Queue not properly configured
+2. Message handler not registered
+3. Queue resource not found
+4. SQS/RabbitMQ connection failed
+5. Message processing timeout
+
+Solution:
+Check queue configuration and message handler registration.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue.md
+`.trim();
+    }
+    super(message, { ...rest, queueName, operation, messageId, description });
+  }
+}
+
+class S3QueuePlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    const resourceNamesOption = options.resourceNames || {};
+    if (!options.resource) {
+      throw new QueueError('S3QueuePlugin requires "resource" option', {
+        pluginName: "S3QueuePlugin",
+        operation: "constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target resource name: new S3QueuePlugin({ resource: "orders", ... }).'
+      });
+    }
+    this.config = {
+      resource: options.resource,
+      visibilityTimeout: options.visibilityTimeout || 3e4,
+      // 30 seconds
+      pollInterval: options.pollInterval || 1e3,
+      // 1 second
+      maxAttempts: options.maxAttempts || 3,
+      concurrency: options.concurrency || 1,
+      deadLetterResource: options.deadLetterResource || null,
+      autoStart: options.autoStart !== false,
+      onMessage: options.onMessage,
+      onError: options.onError,
+      onComplete: options.onComplete,
+      verbose: options.verbose || false,
+      ...options
+    };
+    this._queueResourceDescriptor = {
+      defaultName: `plg_s3queue_${this.config.resource}_queue`,
+      override: resourceNamesOption.queue || options.queueResource
+    };
+    this.queueResourceName = this._resolveQueueResourceName();
+    this.config.queueResourceName = this.queueResourceName;
+    if (this.config.deadLetterResource) {
+      this._deadLetterDescriptor = {
+        defaultName: `plg_s3queue_${this.config.resource}_dead`,
+        override: resourceNamesOption.deadLetter || this.config.deadLetterResource
+      };
+    } else {
+      this._deadLetterDescriptor = null;
+    }
+    this.deadLetterResourceName = this._resolveDeadLetterResourceName();
+    this.config.deadLetterResource = this.deadLetterResourceName;
+    this.queueResource = null;
+    this.targetResource = null;
+    this.deadLetterResourceObj = null;
+    this.workers = [];
+    this.isRunning = false;
+    this.workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    this.processedCache = /* @__PURE__ */ new Map();
+    this.cacheCleanupInterval = null;
+    this.lockCleanupInterval = null;
+    this.messageLocks = /* @__PURE__ */ new Map();
+  }
+  _resolveQueueResourceName() {
+    return resolveResourceName("s3queue", this._queueResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  _resolveDeadLetterResourceName() {
+    if (!this._deadLetterDescriptor) return null;
+    return resolveResourceName("s3queue", this._deadLetterDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.queueResourceName = this._resolveQueueResourceName();
+    this.config.queueResourceName = this.queueResourceName;
+    this.deadLetterResourceName = this._resolveDeadLetterResourceName();
+    this.config.deadLetterResource = this.deadLetterResourceName;
+  }
+  async onInstall() {
+    this.targetResource = this.database.resources[this.config.resource];
+    if (!this.targetResource) {
+      throw new QueueError(`Resource '${this.config.resource}' not found`, {
+        pluginName: "S3QueuePlugin",
+        operation: "onInstall",
+        resourceName: this.config.resource,
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Create the resource before installing S3QueuePlugin or update the plugin configuration.",
+        availableResources: Object.keys(this.database.resources || {})
+      });
+    }
+    const queueName = this.queueResourceName;
+    const [ok, err] = await tryFn(
+      () => this.database.createResource({
+        name: queueName,
+        attributes: {
+          id: "string|required",
+          originalId: "string|required",
+          // ID do registro original
+          status: "string|required",
+          // pending/processing/completed/failed/dead
+          visibleAt: "number|required",
+          // Timestamp de visibilidade
+          claimedBy: "string|optional",
+          // Worker que claimed
+          claimedAt: "number|optional",
+          // Timestamp do claim
+          attempts: "number|default:0",
+          maxAttempts: "number|default:3",
+          error: "string|optional",
+          result: "json|optional",
+          createdAt: "string|required",
+          completedAt: "number|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        asyncPartitions: true,
+        partitions: {
+          byStatus: { fields: { status: "string" } },
+          byDate: { fields: { createdAt: "string|maxlength:10" } }
+        }
+      })
+    );
+    if (ok) {
+      this.queueResource = this.database.resources[queueName];
+    } else {
+      this.queueResource = this.database.resources[queueName];
+      if (!this.queueResource) {
+        throw new QueueError(`Failed to create queue resource: ${err?.message}`, {
+          pluginName: "S3QueuePlugin",
+          operation: "createQueueResource",
+          queueName,
+          statusCode: 500,
+          retriable: false,
+          suggestion: "Check database permissions and ensure createResource() was successful.",
+          original: err
+        });
+      }
+    }
+    this.queueResourceName = this.queueResource.name;
+    this.addHelperMethods();
+    if (this.config.deadLetterResource) {
+      await this.createDeadLetterResource();
+    }
+    if (this.config.verbose) {
+      console.log(`[S3QueuePlugin] Setup completed for resource '${this.config.resource}'`);
+    }
+  }
+  async onStart() {
+    if (this.config.autoStart && this.config.onMessage) {
+      await this.startProcessing();
+    }
+  }
+  async onStop() {
+    await this.stopProcessing();
+  }
+  addHelperMethods() {
+    const plugin = this;
+    const resource = this.targetResource;
+    resource.enqueue = async function(data, options = {}) {
+      const recordData = {
+        id: data.id || idGenerator(),
+        ...data
+      };
+      const record = await resource.insert(recordData);
+      const queueEntry = {
+        id: idGenerator(),
+        originalId: record.id,
+        status: "pending",
+        visibleAt: Date.now(),
+        attempts: 0,
+        maxAttempts: options.maxAttempts || plugin.config.maxAttempts,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
+      };
+      await plugin.queueResource.insert(queueEntry);
+      plugin.emit("plg:s3-queue:message-enqueued", { id: record.id, queueId: queueEntry.id });
+      return record;
+    };
+    resource.queueStats = async function() {
+      return await plugin.getStats();
+    };
+    resource.startProcessing = async function(handler, options = {}) {
+      return await plugin.startProcessing(handler, options);
+    };
+    resource.stopProcessing = async function() {
+      return await plugin.stopProcessing();
+    };
+  }
+  async startProcessing(handler = null, options = {}) {
+    if (this.isRunning) {
+      if (this.config.verbose) {
+        console.log("[S3QueuePlugin] Already running");
+      }
+      return;
+    }
+    const messageHandler = handler || this.config.onMessage;
+    if (!messageHandler) {
+      throw new QueueError("onMessage handler required", {
+        pluginName: "S3QueuePlugin",
+        operation: "startProcessing",
+        queueName: this.queueResourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Pass a handler: resource.startProcessing(async msg => {...}) or configure onMessage in plugin options."
+      });
+    }
+    this.isRunning = true;
+    const concurrency = options.concurrency || this.config.concurrency;
+    this.cacheCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      const maxAge = 3e4;
+      for (const [queueId, timestamp] of this.processedCache.entries()) {
+        if (now - timestamp > maxAge) {
+          this.processedCache.delete(queueId);
+        }
+      }
+    }, 5e3);
+    for (let i = 0; i < concurrency; i++) {
+      const worker = this.createWorker(messageHandler, i);
+      this.workers.push(worker);
+    }
+    if (this.config.verbose) {
+      console.log(`[S3QueuePlugin] Started ${concurrency} workers`);
+    }
+    this.emit("plg:s3-queue:workers-started", { concurrency, workerId: this.workerId });
+  }
+  async stopProcessing() {
+    if (!this.isRunning) return;
+    this.isRunning = false;
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+    await Promise.all(this.workers);
+    this.workers = [];
+    this.processedCache.clear();
+    if (this.config.verbose) {
+      console.log("[S3QueuePlugin] Stopped all workers");
+    }
+    this.emit("plg:s3-queue:workers-stopped", { workerId: this.workerId });
+  }
+  createWorker(handler, workerIndex) {
+    return (async () => {
+      while (this.isRunning) {
+        try {
+          const message = await this.claimMessage();
+          if (message) {
+            await this.processMessage(message, handler);
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, this.config.pollInterval));
+          }
+        } catch (error) {
+          if (this.config.verbose) {
+            console.error(`[Worker ${workerIndex}] Error:`, error.message);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1e3));
+        }
+      }
+    })();
+  }
+  async claimMessage() {
+    const now = Date.now();
+    const [ok, err, messages] = await tryFn(
+      () => this.queueResource.query({
+        status: "pending"
+      })
+    );
+    if (!ok || !messages || messages.length === 0) {
+      return null;
+    }
+    const available = messages.filter((m) => m.visibleAt <= now);
+    if (available.length === 0) {
+      return null;
+    }
+    for (const msg of available) {
+      const claimed = await this.attemptClaim(msg);
+      if (claimed) {
+        return claimed;
+      }
+    }
+    return null;
+  }
+  /**
+   * Acquire a distributed lock using PluginStorage TTL
+   * This ensures only one worker can claim a message at a time
+   */
+  _lockNameForMessage(messageId) {
+    return `msg-${messageId}`;
+  }
+  async acquireLock(messageId) {
+    const storage = this.getStorage();
+    const lockName = this._lockNameForMessage(messageId);
+    try {
+      const lock = await storage.acquireLock(lockName, {
+        ttl: 5,
+        // 5 seconds
+        timeout: 0,
+        // Don't wait if locked
+        workerId: this.workerId
+      });
+      if (lock) {
+        this.messageLocks.set(lock.name, lock);
+      }
+      return lock;
+    } catch (error) {
+      if (this.config.verbose) {
+        console.log(`[acquireLock] Error: ${error.message}`);
+      }
+      return null;
+    }
+  }
+  /**
+   * Release a distributed lock via PluginStorage
+   */
+  async releaseLock(lockOrMessageId) {
+    const storage = this.getStorage();
+    let lock = null;
+    if (lockOrMessageId && typeof lockOrMessageId === "object") {
+      lock = lockOrMessageId;
+    } else {
+      const lockName = this._lockNameForMessage(lockOrMessageId);
+      lock = this.messageLocks.get(lockName) || null;
+    }
+    if (!lock) {
+      return;
+    }
+    try {
+      await storage.releaseLock(lock);
+    } catch (error) {
+      if (this.config.verbose) {
+        console.log(`[releaseLock] Failed to release lock '${lock.name}': ${error.message}`);
+      }
+    } finally {
+      if (lock?.name) {
+        this.messageLocks.delete(lock.name);
+      }
+    }
+  }
+  /**
+   * Clean up stale locks - NO LONGER NEEDED
+   * TTL handles automatic expiration, no manual cleanup required
+   */
+  async cleanupStaleLocks() {
+    return;
+  }
+  async attemptClaim(msg) {
+    const now = Date.now();
+    const lock = await this.acquireLock(msg.id);
+    if (!lock) {
+      return null;
+    }
+    try {
+      if (this.processedCache.has(msg.id)) {
+        if (this.config.verbose) {
+          console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
+        }
+        return null;
+      }
+      this.processedCache.set(msg.id, Date.now());
+    } finally {
+      await this.releaseLock(lock);
+    }
+    const [okGet, errGet, msgWithETag] = await tryFn(
+      () => this.queueResource.get(msg.id)
+    );
+    if (!okGet || !msgWithETag) {
+      this.processedCache.delete(msg.id);
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
+      }
+      return null;
+    }
+    if (msgWithETag.status !== "pending" || msgWithETag.visibleAt > now) {
+      this.processedCache.delete(msg.id);
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Message ${msg.id} not claimable: status=${msgWithETag.status}, visibleAt=${msgWithETag.visibleAt}, now=${now}`);
+      }
+      return null;
+    }
+    if (this.config.verbose) {
+      console.log(`[attemptClaim] Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`);
+    }
+    const [ok, err, result] = await tryFn(
+      () => this.queueResource.updateConditional(msgWithETag.id, {
+        status: "processing",
+        claimedBy: this.workerId,
+        claimedAt: now,
+        visibleAt: now + this.config.visibilityTimeout,
+        attempts: msgWithETag.attempts + 1
+      }, {
+        ifMatch: msgWithETag._etag
+        // ← ATOMIC CLAIM using ETag!
+      })
+    );
+    if (!ok || !result.success) {
+      this.processedCache.delete(msg.id);
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Failed to claim ${msg.id}: ${err?.message || result.error}`);
+      }
+      return null;
+    }
+    if (this.config.verbose) {
+      console.log(`[attemptClaim] Successfully claimed ${msg.id}`);
+    }
+    const [okRecord, errRecord, record] = await tryFn(
+      () => this.targetResource.get(msgWithETag.originalId)
+    );
+    if (!okRecord) {
+      await this.failMessage(msgWithETag.id, "Original record not found");
+      return null;
+    }
+    return {
+      queueId: msgWithETag.id,
+      record,
+      attempts: msgWithETag.attempts + 1,
+      maxAttempts: msgWithETag.maxAttempts
+    };
+  }
+  async processMessage(message, handler) {
+    const startTime = Date.now();
+    try {
+      const result = await handler(message.record, {
+        queueId: message.queueId,
+        attempts: message.attempts,
+        workerId: this.workerId
+      });
+      await this.completeMessage(message.queueId, result);
+      const duration = Date.now() - startTime;
+      this.emit("plg:s3-queue:message-completed", {
+        queueId: message.queueId,
+        originalId: message.record.id,
+        duration,
+        attempts: message.attempts
+      });
+      if (this.config.onComplete) {
+        await this.config.onComplete(message.record, result);
+      }
+    } catch (error) {
+      const shouldRetry = message.attempts < message.maxAttempts;
+      if (shouldRetry) {
+        await this.retryMessage(message.queueId, message.attempts, error.message);
+        this.emit("plg:s3-queue:message-retry", {
+          queueId: message.queueId,
+          originalId: message.record.id,
+          attempts: message.attempts,
+          error: error.message
+        });
+      } else {
+        await this.moveToDeadLetter(message.queueId, message.record, error.message);
+        this.emit("plg:s3-queue:message-dead", {
+          queueId: message.queueId,
+          originalId: message.record.id,
+          error: error.message
+        });
+      }
+      if (this.config.onError) {
+        await this.config.onError(error, message.record);
+      }
+    }
+  }
+  async completeMessage(queueId, result) {
+    await this.queueResource.update(queueId, {
+      status: "completed",
+      completedAt: Date.now(),
+      result
+    });
+  }
+  async failMessage(queueId, error) {
+    await this.queueResource.update(queueId, {
+      status: "failed",
+      error
+    });
+  }
+  async retryMessage(queueId, attempts, error) {
+    const backoff = Math.min(Math.pow(2, attempts) * 1e3, 3e4);
+    await this.queueResource.update(queueId, {
+      status: "pending",
+      visibleAt: Date.now() + backoff,
+      error
+    });
+    this.processedCache.delete(queueId);
+  }
+  async moveToDeadLetter(queueId, record, error) {
+    if (this.config.deadLetterResource && this.deadLetterResourceObj) {
+      const msg = await this.queueResource.get(queueId);
+      await this.deadLetterResourceObj.insert({
+        id: idGenerator(),
+        originalId: record.id,
+        queueId,
+        data: record,
+        error,
+        attempts: msg.attempts,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+    await this.queueResource.update(queueId, {
+      status: "dead",
+      error
+    });
+  }
+  async getStats() {
+    const [ok, err, allMessages] = await tryFn(
+      () => this.queueResource.list()
+    );
+    if (!ok) {
+      if (this.config.verbose) {
+        console.warn("[S3QueuePlugin] Failed to get stats:", err.message);
+      }
+      return null;
+    }
+    const stats = {
+      total: allMessages.length,
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+      dead: 0
+    };
+    for (const msg of allMessages) {
+      if (stats[msg.status] !== void 0) {
+        stats[msg.status]++;
+      }
+    }
+    return stats;
+  }
+  async createDeadLetterResource() {
+    if (!this.config.deadLetterResource) return;
+    const resourceName = this.config.deadLetterResource;
+    const [ok, err] = await tryFn(
+      () => this.database.createResource({
+        name: resourceName,
+        attributes: {
+          id: "string|required",
+          originalId: "string|required",
+          queueId: "string|required",
+          data: "json|required",
+          error: "string|required",
+          attempts: "number|required",
+          createdAt: "string|required"
+        },
+        behavior: "body-overflow",
+        timestamps: true
+      })
+    );
+    if (ok) {
+      this.deadLetterResourceObj = this.database.resources[resourceName];
+    } else {
+      this.deadLetterResourceObj = this.database.resources[resourceName];
+      if (!this.deadLetterResourceObj) {
+        throw err;
+      }
+    }
+    this.deadLetterResourceName = this.deadLetterResourceObj.name;
+    if (this.config.verbose) {
+      console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
+    }
+  }
+}
+
+const ONE_HOUR_SEC = 3600;
+const ONE_DAY_SEC = 86400;
+const THIRTY_DAYS_SEC = 2592e3;
+const TEN_SECONDS_MS = 1e4;
+const ONE_MINUTE_MS = 6e4;
+const TEN_MINUTES_MS = 6e5;
+const ONE_HOUR_MS = 36e5;
+const ONE_DAY_MS = 864e5;
+const ONE_WEEK_MS = 6048e5;
+const SECONDS_TO_MS = 1e3;
+const GRANULARITIES = {
+  minute: {
+    threshold: ONE_HOUR_SEC,
+    // TTL < 1 hour
+    interval: TEN_SECONDS_MS,
+    // Check every 10 seconds
+    cohortsToCheck: 3,
+    // Check last 3 minutes
+    cohortFormat: (date) => date.toISOString().substring(0, 16)
+    // '2024-10-25T14:30'
+  },
+  hour: {
+    threshold: ONE_DAY_SEC,
+    // TTL < 24 hours
+    interval: TEN_MINUTES_MS,
+    // Check every 10 minutes
+    cohortsToCheck: 2,
+    // Check last 2 hours
+    cohortFormat: (date) => date.toISOString().substring(0, 13)
+    // '2024-10-25T14'
+  },
+  day: {
+    threshold: THIRTY_DAYS_SEC,
+    // TTL < 30 days
+    interval: ONE_HOUR_MS,
+    // Check every 1 hour
+    cohortsToCheck: 2,
+    // Check last 2 days
+    cohortFormat: (date) => date.toISOString().substring(0, 10)
+    // '2024-10-25'
+  },
+  week: {
+    threshold: Infinity,
+    // TTL >= 30 days
+    interval: ONE_DAY_MS,
+    // Check every 24 hours
+    cohortsToCheck: 2,
+    // Check last 2 weeks
+    cohortFormat: (date) => {
+      const year = date.getUTCFullYear();
+      const week = getWeekNumber(date);
+      return `${year}-W${String(week).padStart(2, "0")}`;
+    }
+  }
+};
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / ONE_DAY_MS + 1) / 7);
+}
+function detectGranularity(ttl) {
+  if (!ttl) return "day";
+  if (ttl < GRANULARITIES.minute.threshold) return "minute";
+  if (ttl < GRANULARITIES.hour.threshold) return "hour";
+  if (ttl < GRANULARITIES.day.threshold) return "day";
+  return "week";
+}
+function getExpiredCohorts(granularity, count) {
+  const config = GRANULARITIES[granularity];
+  const cohorts = [];
+  const now = /* @__PURE__ */ new Date();
+  for (let i = 0; i < count; i++) {
+    let checkDate;
+    switch (granularity) {
+      case "minute":
+        checkDate = new Date(now.getTime() - i * ONE_MINUTE_MS);
+        break;
+      case "hour":
+        checkDate = new Date(now.getTime() - i * ONE_HOUR_MS);
+        break;
+      case "day":
+        checkDate = new Date(now.getTime() - i * ONE_DAY_MS);
+        break;
+      case "week":
+        checkDate = new Date(now.getTime() - i * ONE_WEEK_MS);
+        break;
+    }
+    cohorts.push(config.cohortFormat(checkDate));
+  }
+  return cohorts;
+}
+class TTLPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+    this.verbose = config.verbose !== void 0 ? config.verbose : false;
+    this.resources = config.resources || {};
+    this.batchSize = config.batchSize || 100;
+    this.stats = {
+      totalScans: 0,
+      totalExpired: 0,
+      totalDeleted: 0,
+      totalArchived: 0,
+      totalSoftDeleted: 0,
+      totalCallbacks: 0,
+      totalErrors: 0,
+      lastScanAt: null,
+      lastScanDuration: 0
+    };
+    this.intervals = [];
+    this.isRunning = false;
+    const resourceNamesOption = config.resourceNames || {};
+    this.expirationIndex = null;
+    this._indexResourceDescriptor = {
+      defaultName: "plg_ttl_expiration_index",
+      override: resourceNamesOption.index || config.indexResourceName
+    };
+    this.indexResourceName = this._resolveIndexResourceName();
+  }
+  /**
+   * Install the plugin
+   */
+  async install(database) {
+    await super.install(database);
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._validateResourceConfig(resourceName, config);
+    }
+    await this._createExpirationIndex();
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._setupResourceHooks(resourceName, config);
+    }
+    this._startIntervals();
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
+    }
+    this.emit("db:plugin:installed", {
+      plugin: "TTLPlugin",
+      resources: Object.keys(this.resources)
+    });
+  }
+  _resolveIndexResourceName() {
+    return resolveResourceName("ttl", this._indexResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.indexResourceName = this._resolveIndexResourceName();
+  }
+  /**
+   * Validate resource configuration
+   */
+  _validateResourceConfig(resourceName, config) {
+    if (!config.ttl && !config.field) {
+      throw new PluginError("[TTLPlugin] Missing TTL configuration", {
+        pluginName: "TTLPlugin",
+        operation: "validateResourceConfig",
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide either ttl (in seconds) or field (absolute expiration timestamp) for each resource."
+      });
+    }
+    const validStrategies = ["soft-delete", "hard-delete", "archive", "callback"];
+    if (!config.onExpire || !validStrategies.includes(config.onExpire)) {
+      throw new PluginError("[TTLPlugin] Invalid onExpire strategy", {
+        pluginName: "TTLPlugin",
+        operation: "validateResourceConfig",
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: `Set onExpire to one of: ${validStrategies.join(", ")}`,
+        onExpire: config.onExpire
+      });
+    }
+    if (config.onExpire === "soft-delete" && !config.deleteField) {
+      config.deleteField = "deletedat";
+    }
+    if (config.onExpire === "archive" && !config.archiveResource) {
+      throw new PluginError("[TTLPlugin] Archive resource required", {
+        pluginName: "TTLPlugin",
+        operation: "validateResourceConfig",
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide archiveResource pointing to the resource that stores archived records.",
+        onExpire: config.onExpire
+      });
+    }
+    if (config.onExpire === "callback" && typeof config.callback !== "function") {
+      throw new PluginError("[TTLPlugin] Callback handler required", {
+        pluginName: "TTLPlugin",
+        operation: "validateResourceConfig",
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide a callback function: { onExpire: "callback", callback: async (ctx) => {...} }',
+        onExpire: config.onExpire
+      });
+    }
+    if (!config.field) {
+      config.field = "_createdAt";
+    }
+    if (config.field === "_createdAt" && this.database) {
+      const resource = this.database.resources[resourceName];
+      if (resource && resource.$schema.timestamps === false) {
+        console.warn(
+          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
+        );
+      }
+    }
+    config.granularity = detectGranularity(config.ttl);
+  }
+  /**
+   * Create expiration index (plugin resource)
+   */
+  async _createExpirationIndex() {
+    this.expirationIndex = await this.database.createResource({
+      name: this.indexResourceName,
+      attributes: {
+        resourceName: "string|required",
+        recordId: "string|required",
+        expiresAtCohort: "string|required",
+        expiresAtTimestamp: "number|required",
+        // Exact expiration timestamp for precise checking
+        granularity: "string|required",
+        createdAt: "number"
+      },
+      partitions: {
+        byExpiresAtCohort: {
+          fields: { expiresAtCohort: "string" }
+        }
+      },
+      asyncPartitions: false
+      // Sync partitions for deterministic behavior
+    });
+    if (this.verbose) {
+      console.log("[TTLPlugin] Created expiration index with partition");
+    }
+  }
+  /**
+   * Setup hooks for a resource
+   */
+  _setupResourceHooks(resourceName, config) {
+    if (!this.database.resources[resourceName]) {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
+      }
+      return;
+    }
+    const resource = this.database.resources[resourceName];
+    if (typeof resource.insert !== "function" || typeof resource.delete !== "function") {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
+      }
+      return;
+    }
+    this.addMiddleware(resource, "insert", async (next, data, options) => {
+      const result = await next(data, options);
+      await this._addToIndex(resourceName, result, config);
+      return result;
+    });
+    this.addMiddleware(resource, "delete", async (next, id, options) => {
+      const result = await next(id, options);
+      await this._removeFromIndex(resourceName, id);
+      return result;
+    });
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
+    }
+  }
+  /**
+   * Add record to expiration index
+   */
+  async _addToIndex(resourceName, record, config) {
+    try {
+      let baseTime = record[config.field];
+      if (!baseTime && config.field === "_createdAt") {
+        baseTime = Date.now();
+      }
+      if (!baseTime) {
+        if (this.verbose) {
+          console.warn(
+            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
+          );
+        }
+        return;
+      }
+      const baseTimestamp = typeof baseTime === "number" ? baseTime : new Date(baseTime).getTime();
+      const expiresAt = config.ttl ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS) : new Date(baseTimestamp);
+      const cohortConfig = GRANULARITIES[config.granularity];
+      const cohort = cohortConfig.cohortFormat(expiresAt);
+      const indexId = `${resourceName}:${record.id}`;
+      await this.expirationIndex.insert({
+        id: indexId,
+        resourceName,
+        recordId: record.id,
+        expiresAtCohort: cohort,
+        expiresAtTimestamp: expiresAt.getTime(),
+        // Store exact timestamp for precise checking
+        granularity: config.granularity,
+        createdAt: Date.now()
+      });
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
+        );
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error adding to index:`, error);
+      this.stats.totalErrors++;
+    }
+  }
+  /**
+   * Remove record from expiration index (O(1) using deterministic ID)
+   */
+  async _removeFromIndex(resourceName, recordId) {
+    try {
+      const indexId = `${resourceName}:${recordId}`;
+      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
+      if (this.verbose && ok) {
+        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
+      }
+      if (!ok && err?.code !== "NoSuchKey") {
+        throw err;
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error removing from index:`, error);
+    }
+  }
+  /**
+   * Start interval-based cleanup for each granularity
+   */
+  _startIntervals() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length === 0) continue;
+      const granularityConfig = GRANULARITIES[granularity];
+      const handle = setInterval(
+        () => this._cleanupGranularity(granularity, resources),
+        granularityConfig.interval
+      );
+      this.intervals.push(handle);
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) for ${resources.length} resources`
+        );
+      }
+    }
+    this.isRunning = true;
+  }
+  /**
+   * Stop all intervals
+   */
+  _stopIntervals() {
+    for (const handle of this.intervals) {
+      clearInterval(handle);
+    }
+    this.intervals = [];
+    this.isRunning = false;
+    if (this.verbose) {
+      console.log("[TTLPlugin] Stopped all intervals");
+    }
+  }
+  /**
+   * Cleanup expired records for a specific granularity
+   */
+  async _cleanupGranularity(granularity, resources) {
+    const startTime = Date.now();
+    this.stats.totalScans++;
+    try {
+      const granularityConfig = GRANULARITIES[granularity];
+      const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
+      if (this.verbose) {
+        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
+      }
+      for (const cohort of cohorts) {
+        const expired = await this.expirationIndex.listPartition({
+          partition: "byExpiresAtCohort",
+          partitionValues: { expiresAtCohort: cohort }
+        });
+        const resourceNames = new Set(resources.map((r) => r.name));
+        const filtered = expired.filter((e) => resourceNames.has(e.resourceName));
+        if (this.verbose && filtered.length > 0) {
+          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
+        }
+        for (let i = 0; i < filtered.length; i += this.batchSize) {
+          const batch = filtered.slice(i, i + this.batchSize);
+          for (const entry of batch) {
+            const config = this.resources[entry.resourceName];
+            await this._processExpiredEntry(entry, config);
+          }
+        }
+      }
+      this.stats.lastScanAt = (/* @__PURE__ */ new Date()).toISOString();
+      this.stats.lastScanDuration = Date.now() - startTime;
+      this.emit("plg:ttl:scan-completed", {
+        granularity,
+        duration: this.stats.lastScanDuration,
+        cohorts
+      });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
+      this.stats.totalErrors++;
+      this.emit("plg:ttl:cleanup-error", { granularity, error });
+    }
+  }
+  /**
+   * Process a single expired index entry
+   */
+  async _processExpiredEntry(entry, config) {
+    try {
+      if (!this.database.resources[entry.resourceName]) {
+        if (this.verbose) {
+          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
+        }
+        return;
+      }
+      const resource = this.database.resources[entry.resourceName];
+      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
+      if (!ok || !record) {
+        await this.expirationIndex.delete(entry.id);
+        return;
+      }
+      if (entry.expiresAtTimestamp && Date.now() < entry.expiresAtTimestamp) {
+        return;
+      }
+      switch (config.onExpire) {
+        case "soft-delete":
+          await this._softDelete(resource, record, config);
+          this.stats.totalSoftDeleted++;
+          break;
+        case "hard-delete":
+          await this._hardDelete(resource, record);
+          this.stats.totalDeleted++;
+          break;
+        case "archive":
+          await this._archive(resource, record, config);
+          this.stats.totalArchived++;
+          this.stats.totalDeleted++;
+          break;
+        case "callback":
+          const shouldDelete = await config.callback(record, resource);
+          this.stats.totalCallbacks++;
+          if (shouldDelete) {
+            await this._hardDelete(resource, record);
+            this.stats.totalDeleted++;
+          }
+          break;
+      }
+      await this.expirationIndex.delete(entry.id);
+      this.stats.totalExpired++;
+      this.emit("plg:ttl:record-expired", { resource: entry.resourceName, record });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error processing expired entry:`, error);
+      this.stats.totalErrors++;
+    }
+  }
+  /**
+   * Soft delete: Mark record as deleted
+   */
+  async _softDelete(resource, record, config) {
+    const deleteField = config.deleteField || "deletedat";
+    const updates = {
+      [deleteField]: (/* @__PURE__ */ new Date()).toISOString(),
+      isdeleted: "true"
+      // Add isdeleted field for partition compatibility
+    };
+    await resource.update(record.id, updates);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
+    }
+  }
+  /**
+   * Hard delete: Remove record from S3
+   */
+  async _hardDelete(resource, record) {
+    await resource.delete(record.id);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
+    }
+  }
+  /**
+   * Archive: Copy to another resource then delete
+   */
+  async _archive(resource, record, config) {
+    if (!this.database.resources[config.archiveResource]) {
+      throw new PluginError(`Archive resource "${config.archiveResource}" not found`, {
+        pluginName: "TTLPlugin",
+        operation: "_archive",
+        resourceName: config.archiveResource,
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Create the archive resource before using onExpire: "archive" or update archiveResource config.'
+      });
+    }
+    const archiveResource = this.database.resources[config.archiveResource];
+    const archiveData = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (!key.startsWith("_")) {
+        archiveData[key] = value;
+      }
+    }
+    archiveData.archivedAt = (/* @__PURE__ */ new Date()).toISOString();
+    archiveData.archivedFrom = resource.name;
+    archiveData.originalId = record.id;
+    if (!config.keepOriginalId) {
+      delete archiveData.id;
+    }
+    await archiveResource.insert(archiveData);
+    await resource.delete(record.id);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
+    }
+  }
+  /**
+   * Manual cleanup of a specific resource
+   */
+  async cleanupResource(resourceName) {
+    const config = this.resources[resourceName];
+    if (!config) {
+      throw new PluginError(`Resource "${resourceName}" not configured in TTLPlugin`, {
+        pluginName: "TTLPlugin",
+        operation: "cleanupResource",
+        resourceName,
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Add the resource under TTLPlugin configuration before invoking cleanupResource."
+      });
+    }
+    const granularity = config.granularity;
+    await this._cleanupGranularity(granularity, [{ name: resourceName, config }]);
+    return {
+      resource: resourceName,
+      granularity
+    };
+  }
+  /**
+   * Manual cleanup of all resources
+   */
+  async runCleanup() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length > 0) {
+        await this._cleanupGranularity(granularity, resources);
+      }
+    }
+  }
+  /**
+   * Get plugin statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      resources: Object.keys(this.resources).length,
+      isRunning: this.isRunning,
+      intervals: this.intervals.length
+    };
+  }
+  /**
+   * Uninstall the plugin
+   */
+  async uninstall() {
+    this._stopIntervals();
+    await super.uninstall();
+    if (this.verbose) {
+      console.log("[TTLPlugin] Uninstalled");
+    }
+  }
+}
+
+function sanitizeNamespace$1(value) {
+  return (value || "persona").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+function defaultJobsResource(namespace) {
+  return `${namespace.replace(/[^a-z0-9]+/g, "_")}_persona_jobs`;
+}
+class CookieFarmSuitePlugin extends Plugin {
+  constructor(options = {}) {
+    const namespace = options.namespace || "persona";
+    super({ ...options, namespace });
+    this.namespace = this.namespace || sanitizeNamespace$1(namespace);
+    const jobsResource = options.jobsResource || options.resources && options.resources.jobs || defaultJobsResource(this.namespace);
+    this.config = {
+      namespace: this.namespace,
+      jobsResource,
+      queue: {
+        resource: jobsResource,
+        deadLetterResource: options.queue?.deadLetterResource || null,
+        visibilityTimeout: options.queue?.visibilityTimeout || 3e4,
+        pollInterval: options.queue?.pollInterval || 1e3,
+        maxAttempts: options.queue?.maxAttempts || 3,
+        concurrency: options.queue?.concurrency || 1,
+        autoStart: options.queue?.autoStart === true,
+        ...options.queue
+      },
+      puppeteer: {
+        pool: { enabled: false },
+        ...options.puppeteer
+      },
+      cookieFarm: {
+        ...options.cookieFarm
+      },
+      ttl: options.ttl || null,
+      processor: typeof options.processor === "function" ? options.processor : null
+    };
+    this.dependencies = [];
+    this.jobsResource = null;
+    this.puppeteerPlugin = null;
+    this.cookieFarmPlugin = null;
+    this.queuePlugin = null;
+    this.ttlPlugin = null;
+    this.processor = this.config.processor;
+    this.queueHandler = this.queueHandler.bind(this);
+  }
+  _dependencyName(alias) {
+    return `${this.namespace}-${alias}`.toLowerCase();
+  }
+  async _installDependency(alias, plugin) {
+    const name = this._dependencyName(alias);
+    const instance = await this.database.usePlugin(plugin, name);
+    this.dependencies.push({ name, instance });
+    return instance;
+  }
+  async _ensureJobsResource() {
+    if (this.database.resources?.[this.config.jobsResource]) {
+      this.jobsResource = this.database.resources[this.config.jobsResource];
+      return;
+    }
+    const [created, err, resource] = await tryFn(() => this.database.createResource({
+      name: this.config.jobsResource,
+      attributes: {
+        id: "string|required",
+        jobType: "string|required",
+        payload: "json|optional",
+        priority: "number|default:0",
+        requestedBy: "string|optional",
+        metadata: "json|optional",
+        createdAt: "string|required"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      asyncPartitions: true,
+      partitions: {
+        byJobType: { fields: { jobType: "string" } },
+        byPriority: { fields: { priority: "number" } },
+        byDate: { fields: { createdAt: "string|maxlength:10" } }
+      }
+    }));
+    if (!created) {
+      if (resource) {
+        this.jobsResource = resource;
+        return;
+      }
+      throw err;
+    }
+    this.jobsResource = this.database.resources[this.config.jobsResource];
+  }
+  async onInstall() {
+    await this._ensureJobsResource();
+    this.puppeteerPlugin = await this._installDependency(
+      "puppeteer",
+      new PuppeteerPlugin({
+        namespace: this.namespace,
+        ...this.config.puppeteer
+      })
+    );
+    this.cookieFarmPlugin = await this._installDependency(
+      "cookie-farm",
+      new CookieFarmPlugin({
+        namespace: this.namespace,
+        ...this.config.cookieFarm
+      })
+    );
+    const queueOptions = {
+      namespace: this.namespace,
+      resource: this.config.queue.resource,
+      deadLetterResource: this.config.queue.deadLetterResource,
+      visibilityTimeout: this.config.queue.visibilityTimeout,
+      pollInterval: this.config.queue.pollInterval,
+      maxAttempts: this.config.queue.maxAttempts,
+      concurrency: this.config.queue.concurrency,
+      autoStart: this.config.queue.autoStart && typeof this.processor === "function",
+      onMessage: this.queueHandler,
+      verbose: this.config.queue.verbose
+    };
+    this.queuePlugin = await this._installDependency(
+      "queue",
+      new S3QueuePlugin(queueOptions)
+    );
+    if (this.config.ttl) {
+      const ttlConfig = {
+        namespace: this.namespace,
+        ...this.config.ttl
+      };
+      ttlConfig.resources = ttlConfig.resources || {};
+      if (!ttlConfig.resources[this.queuePlugin.queueResourceName]) {
+        ttlConfig.resources[this.queuePlugin.queueResourceName] = {
+          ttl: ttlConfig.queue?.ttl || 7200,
+          onExpire: ttlConfig.queue?.onExpire || "hard-delete",
+          field: ttlConfig.queue?.field || null
+        };
+      }
+      delete ttlConfig.queue;
+      this.ttlPlugin = await this._installDependency(
+        "ttl",
+        new TTLPlugin(ttlConfig)
+      );
+    }
+    this.emit("cookieFarmSuite.installed", {
+      namespace: this.namespace,
+      jobsResource: this.config.jobsResource
+    });
+  }
+  async onStart() {
+    if (this.config.queue.autoStart && typeof this.processor === "function") {
+      await this.startProcessing();
+    }
+  }
+  async onStop() {
+    await this.stopProcessing();
+  }
+  async onUninstall(options = {}) {
+    await this.onStop();
+    for (const dep of [...this.dependencies].reverse()) {
+      await this.database.uninstallPlugin(dep.name, { purgeData: options.purgeData === true });
+    }
+    this.dependencies = [];
+  }
+  /**
+   * Register a job processor.
+   */
+  async setProcessor(handler, { autoStart = true, concurrency } = {}) {
+    this.processor = handler;
+    if (autoStart && typeof handler === "function") {
+      await this.startProcessing({ concurrency });
+    }
+  }
+  /**
+   * Enqueue a persona job.
+   */
+  async enqueueJob(data, options = {}) {
+    if (!this.jobsResource?.enqueue) {
+      throw new Error("[CookieFarmSuitePlugin] Queue helpers not initialized yet");
+    }
+    return await this.jobsResource.enqueue({
+      createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+      ...data
+    }, options);
+  }
+  async startProcessing(options = {}) {
+    if (!this.jobsResource?.startProcessing) return;
+    const concurrency = options.concurrency || this.config.queue.concurrency;
+    await this.jobsResource.startProcessing(this.queueHandler, { concurrency });
+  }
+  async stopProcessing() {
+    if (this.jobsResource?.stopProcessing) {
+      await this.jobsResource.stopProcessing();
+    }
+  }
+  async queueHandler(record, context) {
+    if (typeof this.processor !== "function") {
+      throw new Error("[CookieFarmSuitePlugin] No processor registered. Call setProcessor(fn) first.");
+    }
+    const helpers = {
+      puppeteer: this.puppeteerPlugin,
+      cookieFarm: this.cookieFarmPlugin,
+      queue: this.queuePlugin,
+      enqueue: this.enqueueJob.bind(this),
+      resource: this.jobsResource,
+      plugin: this
+    };
+    return await this.processor(record, context, helpers);
   }
 }
 
@@ -18731,15 +21750,23 @@ function createConfig(options, detectedTimezone) {
 }
 function validateResourcesConfig(resources) {
   if (!resources || typeof resources !== "object") {
-    throw new Error(
-      "EventualConsistencyPlugin requires 'resources' option.\nExample: { resources: { urls: ['clicks', 'views'], posts: ['likes'] } }"
-    );
+    throw new PluginError("EventualConsistencyPlugin requires a 'resources' option", {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "validateResourcesConfig",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide resources configuration, e.g., { resources: { urls: ['clicks', 'views'] } }"
+    });
   }
   for (const [resourceName, fields] of Object.entries(resources)) {
     if (!Array.isArray(fields)) {
-      throw new Error(
-        `EventualConsistencyPlugin resources.${resourceName} must be an array of field names`
-      );
+      throw new PluginError(`EventualConsistencyPlugin resources.${resourceName} must be an array of field names`, {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "validateResourcesConfig",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Ensure each resource entry maps to an array of field names (e.g., resources.users = ["logins", "visits"]).'
+      });
     }
   }
 }
@@ -18951,20 +21978,37 @@ function validateNestedPath(resource, fieldPath) {
 }
 function resolveFieldAndPlugin(resource, field, value) {
   if (!resource._eventualConsistencyPlugins) {
-    throw new Error(`No eventual consistency plugins configured for this resource`);
+    throw new PluginError("No eventual consistency plugins configured for this resource", {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "resolveFieldAndPlugin",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Configure EventualConsistencyPlugin resources before using helper methods."
+    });
   }
   if (field.includes(".")) {
     const validation = validateNestedPath(resource, field);
     if (!validation.valid) {
-      throw new Error(validation.error);
+      throw new PluginError(validation.error, {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resolveFieldAndPlugin",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Ensure nested field paths exist on the resource before using dot notation."
+      });
     }
     const rootField = validation.rootField;
     const fieldPlugin2 = resource._eventualConsistencyPlugins[rootField];
     if (!fieldPlugin2) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
-      throw new Error(
-        `No eventual consistency plugin found for root field "${rootField}". Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for root field "${rootField}"`, {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resolveFieldAndPlugin",
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field: rootField
+      });
     }
     return {
       field: rootField,
@@ -18978,9 +22022,14 @@ function resolveFieldAndPlugin(resource, field, value) {
   const fieldPlugin = resource._eventualConsistencyPlugins[field];
   if (!fieldPlugin) {
     const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
-    throw new Error(
-      `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
-    );
+    throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "resolveFieldAndPlugin",
+      statusCode: 404,
+      retriable: false,
+      suggestion: `Available fields: ${availableFields}`,
+      field
+    });
   }
   return { field, fieldPath: field, value, plugin: fieldPlugin };
 }
@@ -19594,11 +22643,16 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     }
     return consolidatedValue;
   } finally {
-    const [lockReleased, lockReleaseErr] = await tryFn(
-      () => storage.releaseLock(lockKey)
-    );
-    if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release lock ${lockKey}:`, lockReleaseErr?.message);
+    if (lock) {
+      const [lockReleased, lockReleaseErr] = await tryFn(
+        () => storage.releaseLock(lock)
+      );
+      if (!lockReleased && config.verbose) {
+        console.warn(
+          `[EventualConsistency] Failed to release lock ${lock?.name || lockKey}:`,
+          lockReleaseErr?.message
+        );
+      }
     }
   }
 }
@@ -19684,7 +22738,14 @@ async function recalculateRecord(originalId, transactionResource, targetResource
     if (config.verbose) {
       console.log(`[EventualConsistency] Recalculate lock for ${originalId} already held, skipping`);
     }
-    throw new Error(`Cannot recalculate ${originalId}: lock already held by another worker`);
+    throw new PluginError(`Cannot recalculate ${originalId}: lock already held by another worker`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "recalculateRecord",
+      statusCode: 409,
+      retriable: true,
+      suggestion: "Retry after the other worker releases the lock or increase lock TTL if necessary.",
+      recordId: originalId
+    });
   }
   try {
     if (config.verbose) {
@@ -19781,11 +22842,16 @@ async function recalculateRecord(originalId, transactionResource, targetResource
     }
     return consolidatedValue;
   } finally {
-    const [lockReleased, lockReleaseErr] = await tryFn(
-      () => storage.releaseLock(lockKey)
-    );
-    if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockKey}:`, lockReleaseErr?.message);
+    if (lock) {
+      const [lockReleased, lockReleaseErr] = await tryFn(
+        () => storage.releaseLock(lock)
+      );
+      if (!lockReleased && config.verbose) {
+        console.warn(
+          `[EventualConsistency] Failed to release recalculate lock ${lock?.name || lockKey}:`,
+          lockReleaseErr?.message
+        );
+      }
     }
   }
 }
@@ -19864,20 +22930,28 @@ async function runGarbageCollection(transactionResource, storage, config, emitFn
       emitFn("plg:eventual-consistency:gc-error", error);
     }
   } finally {
-    await tryFn(() => storage.releaseLock(lockKey));
+    if (lock) {
+      await tryFn(() => storage.releaseLock(lock));
+    }
   }
 }
 
 async function updateAnalytics(transactions, analyticsResource, config) {
   if (!analyticsResource || transactions.length === 0) return;
   if (!config.field) {
-    throw new Error(
-      `[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()!
-This indicates a race condition in the plugin where multiple handlers are sharing the same config object.
-Config: ${JSON.stringify({ resource: config.resource, field: config.field })}
-Transactions count: ${transactions.length}
-AnalyticsResource: ${analyticsResource?.name || "unknown"}`
-    );
+    throw new PluginError("config.field is undefined in updateAnalytics()", {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "updateAnalytics",
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Ensure each field handler uses its own configuration object when invoking analytics updates.",
+      context: {
+        resource: config.resource,
+        field: config.field,
+        transactions: transactions.length,
+        analyticsResource: analyticsResource?.name || "unknown"
+      }
+    });
   }
   if (config.verbose) {
     console.log(
@@ -19926,9 +23000,16 @@ AnalyticsResource: ${analyticsResource?.name || "unknown"}`
         transactionCount: transactions.length
       }
     );
-    throw new Error(
-      `Analytics update failed for ${config.resource}.${config.field}: ${error.message}`
-    );
+    throw new PluginError(`Analytics update failed for ${config.resource}.${config.field}: ${error.message}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "updateAnalytics",
+      statusCode: 500,
+      retriable: true,
+      suggestion: "Check the console logs above for the failing transaction and fix the reducer or analytics configuration.",
+      resource: config.resource,
+      field: config.field,
+      original: error
+    });
   }
 }
 async function upsertAnalytics(period, cohort, transactions, analyticsResource, config) {
@@ -20163,14 +23244,29 @@ function fillGaps(data, period, startDate, endDate) {
 async function getAnalytics(resourceName, field, options, fieldHandlers) {
   const resourceHandlers = fieldHandlers.get(resourceName);
   if (!resourceHandlers) {
-    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    throw new PluginError(`No eventual consistency configured for resource: ${resourceName}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getAnalytics",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Ensure the resource is registered under EventualConsistencyPlugin resources.",
+      resourceName
+    });
   }
   const handler = resourceHandlers.get(field);
   if (!handler) {
-    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    throw new PluginError(`No eventual consistency configured for field: ${resourceName}.${field}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getAnalytics",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Add the field to EventualConsistencyPlugin resources configuration.",
+      resourceName,
+      field
+    });
   }
   if (!handler.analyticsResource) {
-    throw new Error("Analytics not enabled for this plugin");
+    throw new AnalyticsNotEnabledError({ resourceName, field, pluginName: "EventualConsistencyPlugin" });
   }
   const { period = "day", date, startDate, endDate, month, year, breakdown = false, recordId } = options;
   if (recordId) {
@@ -20424,14 +23520,37 @@ async function getMonthByHour(resourceName, field, month, options, fieldHandlers
 async function getTopRecords(resourceName, field, options, fieldHandlers) {
   const resourceHandlers = fieldHandlers.get(resourceName);
   if (!resourceHandlers) {
-    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    throw new PluginError(`No eventual consistency configured for resource: ${resourceName}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getTopRecords",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Add the resource to EventualConsistencyPlugin resources configuration.",
+      resourceName
+    });
   }
   const handler = resourceHandlers.get(field);
   if (!handler) {
-    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    throw new PluginError(`No eventual consistency configured for field: ${resourceName}.${field}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getTopRecords",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Ensure the field is configured for eventual consistency before querying analytics.",
+      resourceName,
+      field
+    });
   }
   if (!handler.transactionResource) {
-    throw new Error("Transaction resource not initialized");
+    throw new PluginError("Transaction resource not initialized", {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getTopRecords",
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Verify plugin installation completed successfully and transaction resources were created.",
+      resourceName,
+      field
+    });
   }
   const { period = "day", date, metric = "transactionCount", limit = 10 } = options;
   const [ok, err, transactions] = await tryFn(
@@ -20615,14 +23734,37 @@ async function getLastNMonths(resourceName, field, months = 12, options, fieldHa
 async function getRawEvents(resourceName, field, options, fieldHandlers) {
   const resourceHandlers = fieldHandlers.get(resourceName);
   if (!resourceHandlers) {
-    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    throw new PluginError(`No eventual consistency configured for resource: ${resourceName}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getRawEvents",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Add the resource under EventualConsistencyPlugin configuration to retrieve raw events.",
+      resourceName
+    });
   }
   const handler = resourceHandlers.get(field);
   if (!handler) {
-    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    throw new PluginError(`No eventual consistency configured for field: ${resourceName}.${field}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getRawEvents",
+      statusCode: 404,
+      retriable: false,
+      suggestion: "Ensure the field is included in EventualConsistencyPlugin configuration.",
+      resourceName,
+      field
+    });
   }
   if (!handler.transactionResource) {
-    throw new Error("Transaction resource not initialized");
+    throw new PluginError("Transaction resource not initialized", {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "getRawEvents",
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Verify plugin installation completed successfully and transaction resources were created.",
+      resourceName,
+      field
+    });
   }
   const {
     recordId,
@@ -20779,14 +23921,25 @@ function addHelperMethods(resource, plugin, config) {
   };
   resource.consolidate = async (id, field) => {
     if (!field) {
-      throw new Error(`Field parameter is required: consolidate(id, field)`);
+      throw new PluginError("Field parameter is required: consolidate(id, field)", {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resource.consolidate",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Invoke consolidate with both id and field parameters."
+      });
     }
     const handler = resource._eventualConsistencyPlugins[field];
     if (!handler) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
-      throw new Error(
-        `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resource.consolidate",
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field
+      });
     }
     return await plugin._consolidateWithHandler(handler, id);
   };
@@ -20794,22 +23947,38 @@ function addHelperMethods(resource, plugin, config) {
     const handler = resource._eventualConsistencyPlugins[field];
     if (!handler) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
-      throw new Error(
-        `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resource.getConsolidatedValue",
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field
+      });
     }
     return await plugin._getConsolidatedValueWithHandler(handler, id, options);
   };
   resource.recalculate = async (id, field) => {
     if (!field) {
-      throw new Error(`Field parameter is required: recalculate(id, field)`);
+      throw new PluginError("Field parameter is required: recalculate(id, field)", {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resource.recalculate",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Invoke recalculate with both id and field parameters."
+      });
     }
     const handler = resource._eventualConsistencyPlugins[field];
     if (!handler) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
-      throw new Error(
-        `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+        pluginName: "EventualConsistencyPlugin",
+        operation: "resource.recalculate",
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field
+      });
     }
     return await plugin._recalculateWithHandler(handler, id);
   };
@@ -20880,7 +24049,16 @@ async function completeFieldSetup(handler, database, config, plugin) {
     })
   );
   if (!ok && !database.resources[transactionResourceName]) {
-    throw new Error(`Failed to create transaction resource for ${resourceName}.${fieldName}: ${err?.message}`);
+    throw new PluginError(`Failed to create transaction resource for ${resourceName}.${fieldName}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "createTransactionResource",
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Verify database permissions and configuration for creating plugin resources.",
+      resourceName,
+      fieldName,
+      original: err
+    });
   }
   handler.transactionResource = ok ? transactionResource : database.resources[transactionResourceName];
   if (config.enableAnalytics) {
@@ -20941,7 +24119,16 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
     })
   );
   if (!ok && !database.resources[analyticsResourceName]) {
-    throw new Error(`Failed to create analytics resource for ${resourceName}.${fieldName}: ${err?.message}`);
+    throw new PluginError(`Failed to create analytics resource for ${resourceName}.${fieldName}`, {
+      pluginName: "EventualConsistencyPlugin",
+      operation: "createAnalyticsResource",
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Verify database permissions and configuration for creating analytics resources.",
+      resourceName,
+      fieldName,
+      original: err
+    });
   }
   handler.analyticsResource = ok ? analyticsResource : database.resources[analyticsResourceName];
 }
@@ -21660,13 +24847,14 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/fulltext.m
 
 class FullTextPlugin extends Plugin {
   constructor(options = {}) {
-    super();
+    super(options);
     this.indexResource = null;
     const resourceNamesOption = options.resourceNames || {};
-    this.indexResourceName = resolveResourceName("fulltext", {
+    this._indexResourceDescriptor = {
       defaultName: "plg_fulltext_indexes",
       override: resourceNamesOption.index || options.indexResource
-    });
+    };
+    this.indexResourceName = this._resolveIndexResourceName();
     this.config = {
       minWordLength: options.minWordLength || 3,
       maxResults: options.maxResults || 100,
@@ -21675,6 +24863,14 @@ class FullTextPlugin extends Plugin {
     this.indexes = /* @__PURE__ */ new Map();
     this.dirtyIndexes = /* @__PURE__ */ new Set();
     this.deletedIndexes = /* @__PURE__ */ new Set();
+  }
+  _resolveIndexResourceName() {
+    return resolveResourceName("fulltext", this._indexResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.indexResourceName = this._resolveIndexResourceName();
   }
   async onInstall() {
     const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
@@ -22134,9 +25330,14 @@ class GeoPlugin extends Plugin {
       return;
     }
     if (!config.latField || !config.lonField) {
-      throw new Error(
-        `[GeoPlugin] Resource "${resourceName}" must have "latField" and "lonField" configured`
-      );
+      throw new PluginError(`[GeoPlugin] Resource "${resourceName}" must have "latField" and "lonField" configured`, {
+        pluginName: "GeoPlugin",
+        operation: "setupResource",
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Update GeoPlugin configuration with { latField: "...", lonField: "..." } for the resource.'
+      });
     }
     if (!config.precision || config.precision < 1 || config.precision > 12) {
       config.precision = 5;
@@ -22264,7 +25465,14 @@ class GeoPlugin extends Plugin {
     const plugin = this;
     resource.findNearby = async function({ lat, lon, radius = 10, limit = 100 }) {
       if (lat === void 0 || lon === void 0) {
-        throw new Error("lat and lon are required for findNearby");
+        throw new PluginError("Latitude and longitude are required for findNearby()", {
+          pluginName: "GeoPlugin",
+          operation: "findNearby",
+          resourceName: resource.name,
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Call findNearby({ lat, lon, radius }) with both coordinates."
+        });
       }
       const longitude = lon;
       let allRecords = [];
@@ -22329,7 +25537,14 @@ class GeoPlugin extends Plugin {
     };
     resource.findInBounds = async function({ north, south, east, west, limit = 100 }) {
       if (north === void 0 || south === void 0 || east === void 0 || west === void 0) {
-        throw new Error("north, south, east, west are required for findInBounds");
+        throw new PluginError("Bounding box requires north, south, east, west coordinates", {
+          pluginName: "GeoPlugin",
+          operation: "findInBounds",
+          resourceName: resource.name,
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Call findInBounds({ north, south, east, west }) with all four boundaries."
+        });
       }
       let allRecords = [];
       if (config.usePartitions) {
@@ -22404,19 +25619,44 @@ class GeoPlugin extends Plugin {
         ]);
       } catch (err) {
         if (err.name === "NoSuchKey" || err.message?.includes("No such key")) {
-          throw new Error("One or both records not found");
+          throw new PluginError("One or both records not found for distance calculation", {
+            pluginName: "GeoPlugin",
+            operation: "getDistance",
+            resourceName: resource.name,
+            statusCode: 404,
+            retriable: false,
+            suggestion: "Ensure both record IDs exist before calling getDistance().",
+            ids: [id1, id2],
+            original: err
+          });
         }
         throw err;
       }
       if (!record1 || !record2) {
-        throw new Error("One or both records not found");
+        throw new PluginError("One or both records not found for distance calculation", {
+          pluginName: "GeoPlugin",
+          operation: "getDistance",
+          resourceName: resource.name,
+          statusCode: 404,
+          retriable: false,
+          suggestion: "Ensure both record IDs exist before calling getDistance().",
+          ids: [id1, id2]
+        });
       }
       const lat1 = record1[config.latField];
       const lon1 = record1[config.lonField];
       const lat2 = record2[config.latField];
       const lon2 = record2[config.lonField];
       if (lat1 === void 0 || lon1 === void 0 || lat2 === void 0 || lon2 === void 0) {
-        throw new Error("One or both records missing coordinates");
+        throw new PluginError("One or both records are missing coordinates", {
+          pluginName: "GeoPlugin",
+          operation: "getDistance",
+          resourceName: resource.name,
+          statusCode: 422,
+          retriable: false,
+          suggestion: `Check that both records contain ${config.latField} and ${config.lonField} before using geospatial helpers.`,
+          ids: [id1, id2]
+        });
       }
       const distance = plugin.calculateDistance(lat1, lon1, lat2, lon2);
       return {
@@ -22487,7 +25727,14 @@ class GeoPlugin extends Plugin {
       const chr = geohash[i];
       const idx = this.base32.indexOf(chr);
       if (idx === -1) {
-        throw new Error(`Invalid geohash character: ${chr}`);
+        throw new PluginError(`Invalid geohash character: ${chr}`, {
+          pluginName: "GeoPlugin",
+          operation: "decodeGeohash",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Ensure geohash strings use the base32 alphabet 0123456789bcdefghjkmnpqrstuvwxyz.",
+          geohash
+        });
       }
       for (let n = 4; n >= 0; n--) {
         const bitN = idx >> n & 1;
@@ -22695,7 +25942,7 @@ class MetricsPlugin extends Plugin {
       errors: resourceNamesOption.errors ?? legacyResourceOption.errors,
       performance: resourceNamesOption.performance ?? legacyResourceOption.performance
     };
-    this.resourceNames = resolveResourceNames("metrics", {
+    this._resourceDescriptors = {
       metrics: {
         defaultName: "plg_metrics",
         override: resourceOverrides.metrics
@@ -22708,7 +25955,8 @@ class MetricsPlugin extends Plugin {
         defaultName: "plg_metrics_performance",
         override: resourceOverrides.performance
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
     this.config = {
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
@@ -22746,6 +25994,14 @@ class MetricsPlugin extends Plugin {
     };
     this.flushTimer = null;
     this.metricsServer = null;
+  }
+  _resolveResourceNames() {
+    return resolveResourceNames("metrics", this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.resourceNames = this._resolveResourceNames();
   }
   async onInstall() {
     if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
@@ -23305,9 +26561,13 @@ class MetricsPlugin extends Plugin {
       }
     } else if (mode === "integrated") {
       if (!apiPlugin || !apiPlugin.server) {
-        throw new Error(
-          "[Metrics Plugin] prometheus.mode=integrated requires API Plugin to be active"
-        );
+        throw new PluginError("[Metrics Plugin] prometheus.mode=integrated requires API Plugin to be active", {
+          pluginName: "MetricsPlugin",
+          operation: "_setupPrometheusExporter",
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Install and start the API plugin or switch prometheus.mode to "standalone" or "auto".'
+        });
       }
       await this._setupIntegratedMetrics(apiPlugin);
     } else if (mode === "standalone") {
@@ -23569,7 +26829,12 @@ function isValidIPv6(ip) {
 }
 function encodeIPv4(ip) {
   if (!isValidIPv4(ip)) {
-    throw new Error(`Invalid IPv4 address: ${ip}`);
+    throw new ValidationError("Invalid IPv4 address", {
+      field: "ip",
+      value: ip,
+      retriable: false,
+      suggestion: 'Provide a valid IPv4 address (e.g., "192.168.0.1").'
+    });
   }
   const octets = ip.split(".").map((octet) => parseInt(octet, 10));
   const buffer = Buffer.from(octets);
@@ -23577,23 +26842,45 @@ function encodeIPv4(ip) {
 }
 function decodeIPv4(encoded) {
   if (typeof encoded !== "string") {
-    throw new Error("Encoded IPv4 must be a string");
+    throw new ValidationError("Encoded IPv4 must be a string", {
+      field: "encoded",
+      retriable: false,
+      suggestion: "Pass the base64-encoded IPv4 string returned by encodeIPv4()."
+    });
   }
   const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length !== 4) {
-      throw new Error(`Invalid encoded IPv4 length: ${buffer.length} (expected 4)`);
+      throw new ValidationError("Invalid encoded IPv4 length", {
+        field: "encoded",
+        value: encoded,
+        retriable: false,
+        suggestion: "Ensure the encoded IPv4 string was produced by encodeIPv4()."
+      });
     }
     return Array.from(buffer).join(".");
   });
   if (!ok) {
-    throw new Error(`Failed to decode IPv4: ${err.message}`);
+    if (err instanceof ValidationError) {
+      throw err;
+    }
+    throw new ValidationError("Failed to decode IPv4", {
+      field: "encoded",
+      retriable: false,
+      suggestion: "Confirm the value is a base64-encoded IPv4 string generated by encodeIPv4().",
+      original: err
+    });
   }
   return result;
 }
 function expandIPv6(ip) {
   if (!isValidIPv6(ip)) {
-    throw new Error(`Invalid IPv6 address: ${ip}`);
+    throw new ValidationError("Invalid IPv6 address", {
+      field: "ip",
+      value: ip,
+      retriable: false,
+      suggestion: 'Provide a valid IPv6 address (e.g., "2001:db8::1").'
+    });
   }
   let expanded = ip;
   if (expanded === "::") {
@@ -23654,7 +26941,12 @@ function compressIPv6(ip) {
 }
 function encodeIPv6(ip) {
   if (!isValidIPv6(ip)) {
-    throw new Error(`Invalid IPv6 address: ${ip}`);
+    throw new ValidationError("Invalid IPv6 address", {
+      field: "ip",
+      value: ip,
+      retriable: false,
+      suggestion: 'Provide a valid IPv6 address (e.g., "2001:db8::1").'
+    });
   }
   const expanded = expandIPv6(ip);
   const groups = expanded.split(":");
@@ -23669,7 +26961,11 @@ function encodeIPv6(ip) {
 }
 function decodeIPv6(encoded, compress = true) {
   if (typeof encoded !== "string") {
-    throw new Error("Encoded IPv6 must be a string");
+    throw new ValidationError("Encoded IPv6 must be a string", {
+      field: "encoded",
+      retriable: false,
+      suggestion: "Pass the base64-encoded IPv6 string returned by encodeIPv6()."
+    });
   }
   if (encoded.length !== 24 && isValidIPv6(encoded)) {
     return compress ? encoded : expandIPv6(encoded);
@@ -23677,7 +26973,12 @@ function decodeIPv6(encoded, compress = true) {
   const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length !== 16) {
-      throw new Error(`Invalid encoded IPv6 length: ${buffer.length} (expected 16)`);
+      throw new ValidationError("Invalid encoded IPv6 length", {
+        field: "encoded",
+        value: encoded,
+        retriable: false,
+        suggestion: "Ensure the encoded IPv6 string was produced by encodeIPv6()."
+      });
     }
     const groups = [];
     for (let i = 0; i < 16; i += 2) {
@@ -23688,7 +26989,15 @@ function decodeIPv6(encoded, compress = true) {
     return compress ? compressIPv6(fullAddress) : fullAddress;
   });
   if (!ok) {
-    throw new Error(`Failed to decode IPv6: ${err.message}`);
+    if (err instanceof ValidationError) {
+      throw err;
+    }
+    throw new ValidationError("Failed to decode IPv6", {
+      field: "encoded",
+      retriable: false,
+      suggestion: "Confirm the value is a base64-encoded IPv6 string generated by encodeIPv6().",
+      original: err
+    });
   }
   return result;
 }
@@ -23698,7 +27007,15 @@ function encodeGeoLat(lat, precision = 6) {
   if (typeof lat !== "number" || isNaN(lat)) return lat;
   if (!isFinite(lat)) return lat;
   if (lat < -90 || lat > 90) {
-    throw new Error(`Latitude out of range [-90, 90]: ${lat}`);
+    throw new ValidationError("Latitude out of range", {
+      field: "lat",
+      value: lat,
+      min: -90,
+      max: 90,
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a latitude between -90 and +90 degrees."
+    });
   }
   const normalized = lat + 90;
   const scale = Math.pow(10, precision);
@@ -23719,7 +27036,15 @@ function encodeGeoLon(lon, precision = 6) {
   if (typeof lon !== "number" || isNaN(lon)) return lon;
   if (!isFinite(lon)) return lon;
   if (lon < -180 || lon > 180) {
-    throw new Error(`Longitude out of range [-180, 180]: ${lon}`);
+    throw new ValidationError("Longitude out of range", {
+      field: "lon",
+      value: lon,
+      min: -180,
+      max: 180,
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a longitude between -180 and +180 degrees."
+    });
   }
   const normalized = lon + 180;
   const scale = Math.pow(10, precision);
@@ -26645,7 +29970,12 @@ ${errorDetails}`,
       */
   async update(id, attributes) {
     if (lodashEs.isEmpty(id)) {
-      throw new Error("id cannot be empty");
+      throw new ValidationError("Resource id cannot be empty", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide the target id when calling update()."
+      });
     }
     const exists = await this.exists(id);
     if (!exists) {
@@ -27303,7 +30633,12 @@ ${errorDetails}`,
    */
   async delete(id) {
     if (lodashEs.isEmpty(id)) {
-      throw new Error("id cannot be empty");
+      throw new ValidationError("Resource id cannot be empty", {
+        field: "id",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide the target id when calling delete()."
+      });
     }
     let objectData;
     let deleteError = null;
@@ -28925,69 +32260,102 @@ function validateResourceConfig(config) {
   };
 }
 
-class MLError extends Error {
+class MLError extends PluginError {
   constructor(message, context = {}) {
-    super(message);
-    this.name = "MLError";
-    this.context = context;
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, this.constructor);
-    }
-  }
-  toJSON() {
-    return {
-      name: this.name,
-      message: this.message,
-      context: this.context,
-      stack: this.stack
+    const merged = {
+      pluginName: context.pluginName || "MLPlugin",
+      operation: context.operation || "unknown",
+      statusCode: context.statusCode ?? 500,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? "Review ML plugin configuration and datasets before retrying.",
+      ...context
     };
+    super(message, merged);
+    this.name = "MLError";
   }
 }
 class ModelConfigError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: context.statusCode ?? 400,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? "Validate layer definitions, optimizer, and loss function values.",
+      ...context
+    });
     this.name = "ModelConfigError";
   }
 }
 class TrainingError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      retriable: context.retriable ?? true,
+      suggestion: context.suggestion ?? "Inspect training logs, data shapes, and GPU availability, then retry.",
+      ...context
+    });
     this.name = "TrainingError";
   }
 }
 let PredictionError$1 = class PredictionError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      retriable: context.retriable ?? true,
+      suggestion: context.suggestion ?? "Verify the model is loaded and input tensors match the expected schema.",
+      ...context
+    });
     this.name = "PredictionError";
   }
 };
 class ModelNotFoundError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: 404,
+      retriable: false,
+      suggestion: context.suggestion ?? "Train the model or load it from storage before invoking inference.",
+      ...context
+    });
     this.name = "ModelNotFoundError";
   }
 }
 let ModelNotTrainedError$1 = class ModelNotTrainedError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: 409,
+      retriable: false,
+      suggestion: context.suggestion ?? "Run train() for this model or load a trained checkpoint.",
+      ...context
+    });
     this.name = "ModelNotTrainedError";
   }
 };
 class DataValidationError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: 422,
+      retriable: false,
+      suggestion: context.suggestion ?? "Normalize input data and ensure required features are provided.",
+      ...context
+    });
     this.name = "DataValidationError";
   }
 }
 class InsufficientDataError extends MLError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: 400,
+      retriable: false,
+      suggestion: context.suggestion ?? "Collect more samples, reduce batch size, or adjust minimumRecords configuration.",
+      ...context
+    });
     this.name = "InsufficientDataError";
   }
 }
 class TensorFlowDependencyError extends MLError {
   constructor(message = "TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node", context = {}) {
-    super(message, context);
+    super(message, {
+      retriable: false,
+      suggestion: context.suggestion ?? "Install @tensorflow/tfjs-node or @tensorflow/tfjs to enable ML features.",
+      ...context
+    });
     this.name = "TensorFlowDependencyError";
   }
 }
@@ -30432,7 +33800,13 @@ class MLPlugin extends Plugin {
           const resource = this;
           const mlPlugin = resource.database?._mlPlugin;
           if (!mlPlugin) {
-            throw new Error("MLPlugin not installed");
+            throw new MLError("MLPlugin is not installed on this database instance", {
+              pluginName: "MLPlugin",
+              operation: "Resource.ml accessor",
+              statusCode: 400,
+              retriable: false,
+              suggestion: "Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.ml.* methods."
+            });
           }
           return {
             /**
@@ -30572,7 +33946,13 @@ class MLPlugin extends Plugin {
       Resource.prototype.predict = async function(input, targetAttribute) {
         const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
-          throw new Error("MLPlugin not installed");
+          throw new MLError("MLPlugin is not installed on this database instance", {
+            pluginName: "MLPlugin",
+            operation: "Resource.predict",
+            statusCode: 400,
+            retriable: false,
+            suggestion: "Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.predict()."
+          });
         }
         return await mlPlugin._resourcePredict(this.name, input, targetAttribute);
       };
@@ -30581,7 +33961,13 @@ class MLPlugin extends Plugin {
       Resource.prototype.trainModel = async function(targetAttribute, options = {}) {
         const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
-          throw new Error("MLPlugin not installed");
+          throw new MLError("MLPlugin is not installed on this database instance", {
+            pluginName: "MLPlugin",
+            operation: "Resource.trainModel",
+            statusCode: 400,
+            retriable: false,
+            suggestion: "Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.trainModel()."
+          });
         }
         return await mlPlugin._resourceTrainModel(this.name, targetAttribute, options);
       };
@@ -30590,7 +33976,13 @@ class MLPlugin extends Plugin {
       Resource.prototype.listModels = function() {
         const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
-          throw new Error("MLPlugin not installed");
+          throw new MLError("MLPlugin is not installed on this database instance", {
+            pluginName: "MLPlugin",
+            operation: "Resource.listModels",
+            statusCode: 400,
+            retriable: false,
+            suggestion: "Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.listModels()."
+          });
         }
         return mlPlugin._resourceListModels(this.name);
       };
@@ -31950,1048 +35342,12658 @@ class MLPlugin extends Plugin {
   }
 }
 
-class PuppeteerPlugin extends Plugin {
+function sanitizeNamespace(value) {
+  return (value || "spider").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+function defaultTargetsResource(namespace) {
+  return `${namespace.replace(/[^a-z0-9]+/g, "_")}_targets`;
+}
+class SpiderSuitePlugin extends Plugin {
   constructor(options = {}) {
-    super(options);
+    const namespace = options.namespace || "spider";
+    super({ ...options, namespace });
+    this.namespace = this.namespace || sanitizeNamespace(namespace);
+    const targetsResource = options.targetsResource || options.resources && options.resources.targets || defaultTargetsResource(this.namespace);
     this.config = {
-      // Browser Pool
-      pool: {
-        enabled: true,
-        maxBrowsers: 5,
-        maxTabsPerBrowser: 10,
-        reuseTab: false,
-        closeOnIdle: true,
-        idleTimeout: 3e5,
-        // 5 minutes
-        ...options.pool
+      namespace: this.namespace,
+      targetsResource,
+      queue: {
+        resource: targetsResource,
+        deadLetterResource: options.queue?.deadLetterResource || null,
+        visibilityTimeout: options.queue?.visibilityTimeout || 3e4,
+        pollInterval: options.queue?.pollInterval || 1e3,
+        maxAttempts: options.queue?.maxAttempts || 3,
+        concurrency: options.queue?.concurrency || 3,
+        autoStart: options.queue?.autoStart === true,
+        ...options.queue
       },
-      // Browser Launch Options
-      launch: {
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--no-first-run",
-          "--no-zygote",
-          "--disable-gpu"
-        ],
-        ignoreHTTPSErrors: true,
-        ...options.launch
+      puppeteer: {
+        // Disable pool warmup by default to avoid immediate browser launches
+        pool: { enabled: false },
+        ...options.puppeteer
       },
-      // Viewport & User Agent
-      viewport: {
-        width: 1920,
-        height: 1080,
-        deviceScaleFactor: 1,
-        randomize: true,
-        presets: ["desktop", "laptop", "tablet"],
-        ...options.viewport
-      },
-      // User Agent Management
-      userAgent: {
-        enabled: true,
-        random: true,
-        filters: {
-          deviceCategory: "desktop",
-          ...options.userAgent?.filters
-        },
-        custom: options.userAgent?.custom || null,
-        ...options.userAgent
-      },
-      // Stealth Mode (Anti-Detection)
-      stealth: {
-        enabled: true,
-        enableEvasions: true,
-        ...options.stealth
-      },
-      // Human Behavior Simulation
-      humanBehavior: {
-        enabled: true,
-        mouse: {
-          enabled: true,
-          bezierCurves: true,
-          overshoot: true,
-          jitter: true,
-          pathThroughElements: true,
-          ...options.humanBehavior?.mouse
-        },
-        typing: {
-          enabled: true,
-          mistakes: true,
-          corrections: true,
-          pauseAfterWord: true,
-          speedVariation: true,
-          delayRange: [50, 150],
-          ...options.humanBehavior?.typing
-        },
-        scrolling: {
-          enabled: true,
-          randomStops: true,
-          backScroll: true,
-          horizontalJitter: true,
-          ...options.humanBehavior?.scrolling
-        },
-        ...options.humanBehavior
-      },
-      // Cookie Management & Farming
-      cookies: {
-        enabled: true,
-        storage: {
-          resource: "plg_puppeteer_cookies",
-          autoSave: true,
-          autoLoad: true,
-          encrypt: true,
-          ...options.cookies?.storage
-        },
-        farming: {
-          enabled: true,
-          warmup: {
-            enabled: true,
-            pages: ["https://www.google.com", "https://www.youtube.com", "https://www.wikipedia.org"],
-            randomOrder: true,
-            timePerPage: { min: 5e3, max: 15e3 },
-            interactions: { scroll: true, click: true, hover: true },
-            ...options.cookies?.farming?.warmup
-          },
-          rotation: {
-            enabled: true,
-            requestsPerCookie: 100,
-            maxAge: 864e5,
-            // 24 hours
-            poolSize: 10,
-            ...options.cookies?.farming?.rotation
-          },
-          reputation: {
-            enabled: true,
-            trackSuccess: true,
-            retireThreshold: 0.5,
-            ageBoost: true,
-            ...options.cookies?.farming?.reputation
-          },
-          ...options.cookies?.farming
-        },
-        ...options.cookies
-      },
-      // Performance Optimization
-      performance: {
-        blockResources: {
-          enabled: true,
-          types: ["image", "stylesheet", "font", "media"],
-          ...options.performance?.blockResources
-        },
-        cacheEnabled: true,
-        javascriptEnabled: true,
-        ...options.performance
-      },
-      // Network Monitoring (CDP)
-      networkMonitor: {
-        enabled: false,
-        // Disabled by default (adds overhead)
-        persist: false,
-        // Save to S3DB
-        filters: {
-          types: null,
-          // ['image', 'script'] or null for all
-          statuses: null,
-          // [404, 500] or null for all
-          minSize: null,
-          // Only requests >= size (bytes)
-          maxSize: null,
-          // Only requests <= size (bytes)
-          saveErrors: true,
-          // Always save failed requests
-          saveLargeAssets: true,
-          // Always save assets > 1MB
-          ...options.networkMonitor?.filters
-        },
-        compression: {
-          enabled: true,
-          threshold: 10240,
-          // Compress payloads > 10KB
-          ...options.networkMonitor?.compression
-        },
-        ...options.networkMonitor
-      },
-      // Console Monitoring
-      consoleMonitor: {
-        enabled: false,
-        // Disabled by default
-        persist: false,
-        // Save to S3DB
-        filters: {
-          levels: null,
-          // ['error', 'warning'] or null for all
-          excludePatterns: [],
-          // Regex patterns to exclude
-          includeStackTraces: true,
-          includeSourceLocation: true,
-          captureNetwork: false,
-          // Also capture network errors
-          ...options.consoleMonitor?.filters
-        },
-        ...options.consoleMonitor
-      },
-      // Screenshot & Recording
-      screenshot: {
-        fullPage: false,
-        type: "png",
-        ...options.screenshot
-      },
-      // Proxy Support
-      proxy: {
-        enabled: false,
-        list: [],
-        // Array of proxy URLs or objects
-        selectionStrategy: "round-robin",
-        // 'round-robin' | 'random' | 'least-used' | 'best-performance'
-        bypassList: [],
-        // Domains to bypass proxy
-        healthCheck: {
-          enabled: true,
-          interval: 3e5,
-          // 5 minutes
-          testUrl: "https://www.google.com",
-          timeout: 1e4,
-          successRateThreshold: 0.3
-        },
-        // Legacy single proxy support (deprecated)
-        server: null,
-        username: null,
-        password: null,
-        ...options.proxy
-      },
-      // Error Handling & Retries
-      retries: {
-        enabled: true,
-        maxAttempts: 3,
-        backoff: "exponential",
-        initialDelay: 1e3,
-        ...options.retries
-      },
-      // Logging & Debugging
-      debug: {
-        enabled: false,
-        screenshots: false,
-        console: false,
-        network: false,
-        ...options.debug
-      }
+      ttl: options.ttl || null,
+      processor: typeof options.processor === "function" ? options.processor : null
     };
-    const resourceNamesOption = options.resourceNames || {};
-    this.resourceNames = resolveResourceNames("puppeteer", {
-      cookies: {
-        defaultName: "plg_puppeteer_cookies",
-        override: resourceNamesOption.cookies || options.cookies?.storage?.resource
-      },
-      consoleSessions: {
-        defaultName: "plg_puppeteer_console_sessions",
-        override: resourceNamesOption.consoleSessions
-      },
-      consoleMessages: {
-        defaultName: "plg_puppeteer_console_messages",
-        override: resourceNamesOption.consoleMessages
-      },
-      consoleErrors: {
-        defaultName: "plg_puppeteer_console_errors",
-        override: resourceNamesOption.consoleErrors
-      },
-      networkSessions: {
-        defaultName: "plg_puppeteer_network_sessions",
-        override: resourceNamesOption.networkSessions
-      },
-      networkRequests: {
-        defaultName: "plg_puppeteer_network_requests",
-        override: resourceNamesOption.networkRequests
-      },
-      networkErrors: {
-        defaultName: "plg_puppeteer_network_errors",
-        override: resourceNamesOption.networkErrors
-      }
-    });
-    this.config.cookies.storage.resource = this.resourceNames.cookies;
-    this.browserPool = [];
-    this.tabPool = /* @__PURE__ */ new Map();
-    this.browserIdleTimers = /* @__PURE__ */ new Map();
-    this.dedicatedBrowsers = /* @__PURE__ */ new Set();
-    this.userAgentGenerator = null;
-    this.ghostCursor = null;
-    this.cookieManager = null;
-    this.proxyManager = null;
-    this.performanceManager = null;
-    this.networkMonitor = null;
-    this.consoleMonitor = null;
-    this.initialized = false;
-    if (this.config.pool.reuseTab) {
-      this.emit("puppeteer.configWarning", {
-        setting: "pool.reuseTab",
-        message: "pool.reuseTab is not supported yet and will be ignored."
-      });
-    }
+    this.dependencies = [];
+    this.targetsResource = null;
+    this.puppeteerPlugin = null;
+    this.queuePlugin = null;
+    this.ttlPlugin = null;
+    this.processor = this.config.processor;
+    this.queueHandler = this.queueHandler.bind(this);
   }
-  /**
-   * Install plugin and validate dependencies
-   */
-  async onInstall() {
-    requirePluginDependency("puppeteer", this.name);
-    requirePluginDependency("puppeteer-extra", this.name);
-    requirePluginDependency("puppeteer-extra-plugin-stealth", this.name);
-    requirePluginDependency("user-agents", this.name);
-    requirePluginDependency("ghost-cursor", this.name);
-    if (this.config.cookies.enabled) {
-      await this._setupCookieStorage();
-    }
-    this.emit("puppeteer.installed");
+  _dependencyName(alias) {
+    return `${this.namespace}-${alias}`.toLowerCase();
   }
-  /**
-   * Start plugin and initialize browser pool
-   */
-  async onStart() {
-    if (this.initialized) return;
-    await this._importDependencies();
-    if (this.config.cookies.enabled) {
-      await this._initializeCookieManager();
-    }
-    if (this.config.proxy.enabled) {
-      await this._initializeProxyManager();
-    }
-    await this._initializePerformanceManager();
-    if (this.config.networkMonitor.enabled) {
-      await this._initializeNetworkMonitor();
-    }
-    if (this.config.consoleMonitor.enabled) {
-      await this._initializeConsoleMonitor();
-    }
-    if (this.config.pool.enabled) {
-      await this._warmupBrowserPool();
-    }
-    this.initialized = true;
-    this.emit("puppeteer.started");
+  async _installDependency(alias, plugin) {
+    const name = this._dependencyName(alias);
+    const instance = await this.database.usePlugin(plugin, name);
+    this.dependencies.push({ name, instance });
+    return instance;
   }
-  /**
-   * Stop plugin and cleanup resources
-   */
-  async onStop() {
-    await this._closeBrowserPool();
-    await this._closeDedicatedBrowsers();
-    this.initialized = false;
-    this.emit("puppeteer.stopped");
-  }
-  /**
-   * Uninstall plugin
-   */
-  async onUninstall(options = {}) {
-    await this.onStop();
-    this.emit("puppeteer.uninstalled");
-  }
-  /**
-   * Import required dependencies (lazy loading)
-   * @private
-   */
-  async _importDependencies() {
-    const puppeteerModule = await import('puppeteer-extra');
-    const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
-    const UserAgent = (await import('user-agents')).default;
-    const { createCursor } = await import('ghost-cursor');
-    this.puppeteer = puppeteerModule.default || puppeteerModule;
-    if (this.config.stealth.enabled) {
-      this.puppeteer.use(StealthPlugin());
-    }
-    if (this.config.userAgent.enabled && this.config.userAgent.random) {
-      this.UserAgent = UserAgent;
-    }
-    this.createGhostCursor = createCursor;
-  }
-  /**
-   * Setup cookie storage resource
-   * @private
-   */
-  async _setupCookieStorage() {
-    const resourceName = this.config.cookies.storage.resource;
-    try {
-      await this.database.getResource(resourceName);
+  async _ensureTargetsResource() {
+    if (this.database.resources?.[this.config.targetsResource]) {
+      this.targetsResource = this.database.resources[this.config.targetsResource];
       return;
-    } catch (err) {
     }
-    const [created, createErr] = await tryFn(() => this.database.createResource({
-      name: resourceName,
+    const [created, err, resource] = await tryFn(() => this.database.createResource({
+      name: this.config.targetsResource,
       attributes: {
-        sessionId: "string|required",
-        cookies: "array|required",
-        userAgent: "string",
-        viewport: "object",
-        proxyId: "string|optional",
-        domain: "string",
-        date: "string",
-        reputation: {
-          successCount: "number",
-          failCount: "number",
-          successRate: "number",
-          lastUsed: "number"
-        },
-        metadata: {
-          createdAt: "number",
-          expiresAt: "number",
-          requestCount: "number",
-          age: "number"
-        }
+        id: "string|required",
+        url: "string|required",
+        method: "string|optional",
+        depth: "number|optional",
+        priority: "number|default:0",
+        headers: "json|optional",
+        metadata: "json|optional",
+        createdAt: "string|required"
       },
+      behavior: "body-overflow",
       timestamps: true,
-      behavior: "body-only",
+      asyncPartitions: true,
       partitions: {
-        byProxy: { fields: { proxyId: "string" } },
-        byDate: { fields: { date: "string" } },
-        byDomain: { fields: { domain: "string" } }
+        byPriority: { fields: { priority: "number" } },
+        byDate: { fields: { createdAt: "string|maxlength:10" } }
       }
     }));
     if (!created) {
-      const existing = this.database.resources?.[resourceName];
-      if (!existing) {
-        throw createErr;
+      if (resource) {
+        this.targetsResource = resource;
+        return;
       }
+      throw err;
     }
+    this.targetsResource = this.database.resources[this.config.targetsResource];
   }
-  /**
-   * Initialize proxy manager
-   * @private
-   */
-  async _initializeProxyManager() {
-    const { ProxyManager } = await Promise.resolve().then(function () { return proxyManager; });
-    this.proxyManager = new ProxyManager(this);
-    await this.proxyManager.initialize();
-  }
-  /**
-   * Initialize cookie manager
-   * @private
-   */
-  async _initializeCookieManager() {
-    const { CookieManager } = await Promise.resolve().then(function () { return cookieManager; });
-    this.cookieManager = new CookieManager(this);
-    await this.cookieManager.initialize();
-  }
-  /**
-   * Initialize performance manager
-   * @private
-   */
-  async _initializePerformanceManager() {
-    const { PerformanceManager } = await Promise.resolve().then(function () { return performanceManager; });
-    this.performanceManager = new PerformanceManager(this);
-    this.emit("puppeteer.performanceManager.initialized");
-  }
-  /**
-   * Initialize network monitor
-   * @private
-   */
-  async _initializeNetworkMonitor() {
-    const { NetworkMonitor } = await Promise.resolve().then(function () { return networkMonitor; });
-    this.networkMonitor = new NetworkMonitor(this);
-    if (this.config.networkMonitor.persist) {
-      await this.networkMonitor.initialize();
-    }
-    this.emit("puppeteer.networkMonitor.initialized");
-  }
-  /**
-   * Initialize console monitor
-   * @private
-   */
-  async _initializeConsoleMonitor() {
-    const { ConsoleMonitor } = await Promise.resolve().then(function () { return consoleMonitor; });
-    this.consoleMonitor = new ConsoleMonitor(this);
-    if (this.config.consoleMonitor.persist) {
-      await this.consoleMonitor.initialize();
-    }
-    this.emit("puppeteer.consoleMonitor.initialized");
-  }
-  /**
-   * Warmup browser pool
-   * @private
-   */
-  async _warmupBrowserPool() {
-    const poolSize = Math.min(this.config.pool.maxBrowsers, 2);
-    for (let i = 0; i < poolSize; i++) {
-      await this._createBrowser();
-    }
-    this.emit("puppeteer.poolWarmed", { size: this.browserPool.length });
-  }
-  /**
-   * Create a new browser instance
-   * @private
-   * @param {Object} proxy - Optional proxy configuration
-   * @returns {Promise<Browser>}
-   */
-  async _createBrowser(proxy = null) {
-    const launchOptions = {
-      ...this.config.launch,
-      args: [...this.config.launch.args || []]
+  async onInstall() {
+    await this._ensureTargetsResource();
+    this.puppeteerPlugin = await this._installDependency(
+      "puppeteer",
+      new PuppeteerPlugin({
+        namespace: this.namespace,
+        ...this.config.puppeteer
+      })
+    );
+    const queueOptions = {
+      namespace: this.namespace,
+      resource: this.config.queue.resource,
+      deadLetterResource: this.config.queue.deadLetterResource,
+      visibilityTimeout: this.config.queue.visibilityTimeout,
+      pollInterval: this.config.queue.pollInterval,
+      maxAttempts: this.config.queue.maxAttempts,
+      concurrency: this.config.queue.concurrency,
+      autoStart: this.config.queue.autoStart && typeof this.processor === "function",
+      onMessage: this.queueHandler,
+      verbose: this.config.queue.verbose
     };
-    if (proxy && this.proxyManager) {
-      const proxyArgs = this.proxyManager.getProxyLaunchArgs(proxy);
-      launchOptions.args.push(...proxyArgs);
-    } else if (this.config.proxy.enabled && this.config.proxy.server) {
-      launchOptions.args.push(`--proxy-server=${this.config.proxy.server}`);
-    }
-    const browser = await this.puppeteer.launch(launchOptions);
-    if (!proxy && this.config.pool.enabled) {
-      this.browserPool.push(browser);
-      this.tabPool.set(browser, /* @__PURE__ */ new Set());
-      browser.on("disconnected", () => {
-        const index = this.browserPool.indexOf(browser);
-        if (index > -1) {
-          this.browserPool.splice(index, 1);
-        }
-        this.tabPool.delete(browser);
-        this._clearIdleTimer(browser);
-        this.dedicatedBrowsers.delete(browser);
-      });
-    }
-    return browser;
-  }
-  /**
-   * Get or create a browser instance
-   * @private
-   * @param {Object} proxy - Optional proxy configuration
-   * @returns {Promise<Browser>}
-   */
-  async _getBrowser(proxy = null) {
-    if (proxy) {
-      return await this._createBrowser(proxy);
-    }
-    if (this.config.pool.enabled) {
-      for (const browser of this.browserPool) {
-        const tabs = this.tabPool.get(browser);
-        if (!tabs || tabs.size < this.config.pool.maxTabsPerBrowser) {
-          return browser;
-        }
-      }
-      if (this.browserPool.length < this.config.pool.maxBrowsers) {
-        return await this._createBrowser();
-      }
-      let targetBrowser = this.browserPool[0];
-      let minTabs = this.tabPool.get(targetBrowser)?.size || 0;
-      for (const browser of this.browserPool.slice(1)) {
-        const tabs = this.tabPool.get(browser)?.size || 0;
-        if (tabs < minTabs) {
-          targetBrowser = browser;
-          minTabs = tabs;
-        }
-      }
-      return targetBrowser;
-    } else {
-      return await this._createBrowser();
-    }
-  }
-  /**
-   * Close all browsers in pool
-   * @private
-   */
-  async _closeBrowserPool() {
-    for (const browser of this.browserPool) {
-      this._clearIdleTimer(browser);
-      if (this.cookieManager) {
-        const tabs = this.tabPool.get(browser);
-        if (tabs) {
-          for (const page of tabs) {
-            if (!page || page._sessionSaved || !page._sessionId) {
-              continue;
-            }
-            if (typeof page.isClosed === "function" && page.isClosed()) {
-              continue;
-            }
-            try {
-              await this.cookieManager.saveSession(page, page._sessionId, {
-                success: !!page._navigationSuccess
-              });
-              page._sessionSaved = true;
-            } catch (err) {
-              page._sessionSaved = true;
-              this.emit("puppeteer.cookieSaveFailed", {
-                sessionId: page._sessionId,
-                error: err.message
-              });
-            }
-          }
-        }
-      }
-      try {
-        await browser.close();
-      } catch (err) {
-      }
-    }
-    this.browserPool = [];
-    this.tabPool.clear();
-  }
-  /**
-   * Clear idle timer for pooled browser
-   * @private
-   */
-  _clearIdleTimer(browser) {
-    const timer = this.browserIdleTimers.get(browser);
-    if (timer) {
-      clearTimeout(timer);
-      this.browserIdleTimers.delete(browser);
-    }
-  }
-  /**
-   * Schedule pooled browser retirement when idle
-   * @private
-   */
-  _scheduleIdleCloseIfNeeded(browser) {
-    if (!this.config.pool.closeOnIdle) return;
-    const tabs = this.tabPool.get(browser);
-    if (!tabs || tabs.size > 0) return;
-    if (this.browserIdleTimers.has(browser)) return;
-    const timeout = this.config.pool.idleTimeout || 3e5;
-    const timer = setTimeout(async () => {
-      this.browserIdleTimers.delete(browser);
-      const currentTabs = this.tabPool.get(browser);
-      if (currentTabs && currentTabs.size === 0) {
-        await this._retireIdleBrowser(browser);
-      }
-    }, timeout);
-    if (typeof timer.unref === "function") {
-      timer.unref();
-    }
-    this.browserIdleTimers.set(browser, timer);
-  }
-  /**
-   * Retire pooled browser if still idle
-   * @private
-   * @param {Browser} browser
-   */
-  async _retireIdleBrowser(browser) {
-    this.tabPool.delete(browser);
-    const index = this.browserPool.indexOf(browser);
-    if (index > -1) {
-      this.browserPool.splice(index, 1);
-    }
-    try {
-      await browser.close();
-      this.emit("puppeteer.browserRetired", { pooled: true });
-    } catch (err) {
-      this.emit("puppeteer.browserRetiredError", {
-        pooled: true,
-        error: err.message
-      });
-    }
-  }
-  /**
-   * Close dedicated (non-pooled) browsers
-   * @private
-   */
-  async _closeDedicatedBrowsers() {
-    for (const browser of Array.from(this.dedicatedBrowsers)) {
-      try {
-        await browser.close();
-      } catch (err) {
-      } finally {
-        this.dedicatedBrowsers.delete(browser);
-      }
-    }
-  }
-  /**
-   * Generate random user agent
-   * @private
-   * @returns {string}
-   */
-  _generateUserAgent() {
-    if (this.config.userAgent.custom) {
-      return this.config.userAgent.custom;
-    }
-    if (this.config.userAgent.random && this.UserAgent) {
-      const userAgent = new this.UserAgent(this.config.userAgent.filters);
-      return userAgent.toString();
-    }
-    return null;
-  }
-  /**
-   * Generate random viewport
-   * @private
-   * @returns {Object}
-   */
-  _generateViewport() {
-    if (!this.config.viewport.randomize) {
-      return {
-        width: this.config.viewport.width,
-        height: this.config.viewport.height,
-        deviceScaleFactor: this.config.viewport.deviceScaleFactor
+    this.queuePlugin = await this._installDependency(
+      "queue",
+      new S3QueuePlugin(queueOptions)
+    );
+    if (this.config.ttl) {
+      const ttlConfig = {
+        namespace: this.namespace,
+        ...this.config.ttl
       };
-    }
-    const presets = {
-      desktop: [
-        { width: 1920, height: 1080, deviceScaleFactor: 1 },
-        { width: 1680, height: 1050, deviceScaleFactor: 1 },
-        { width: 1600, height: 900, deviceScaleFactor: 1 },
-        { width: 1440, height: 900, deviceScaleFactor: 1 },
-        { width: 1366, height: 768, deviceScaleFactor: 1 }
-      ],
-      laptop: [
-        { width: 1440, height: 900, deviceScaleFactor: 1 },
-        { width: 1366, height: 768, deviceScaleFactor: 1 },
-        { width: 1280, height: 800, deviceScaleFactor: 1 }
-      ],
-      tablet: [
-        { width: 1024, height: 768, deviceScaleFactor: 2 },
-        { width: 768, height: 1024, deviceScaleFactor: 2 }
-      ]
-    };
-    const categories = this.config.viewport.presets || ["desktop"];
-    const availablePresets = categories.flatMap((cat) => presets[cat] || []);
-    return availablePresets[Math.floor(Math.random() * availablePresets.length)];
-  }
-  /**
-   * PUBLIC API
-   */
-  /**
-   * Navigate to URL with human behavior
-   * @param {string} url - URL to navigate to
-   * @param {Object} options - Navigation options
-   * @returns {Promise<Page>}
-   */
-  async navigate(url, options = {}) {
-    const {
-      useSession = null,
-      screenshot = false,
-      waitUntil = "networkidle2",
-      timeout = 3e4
-    } = options;
-    let proxy = null;
-    let proxyId = null;
-    if (useSession && this.proxyManager) {
-      proxy = this.proxyManager.getProxyForSession(useSession, true);
-      proxyId = proxy?.id || null;
-    }
-    const browser = await this._getBrowser(proxy);
-    const page = await browser.newPage();
-    const isPooledBrowser = !proxy && this.config.pool.enabled;
-    if (isPooledBrowser) {
-      const tabs = this.tabPool.get(browser);
-      if (tabs) {
-        tabs.add(page);
-        this._clearIdleTimer(browser);
+      ttlConfig.resources = ttlConfig.resources || {};
+      if (!ttlConfig.resources[this.queuePlugin.queueResourceName]) {
+        ttlConfig.resources[this.queuePlugin.queueResourceName] = {
+          ttl: ttlConfig.queue?.ttl || 3600,
+          onExpire: ttlConfig.queue?.onExpire || "hard-delete",
+          field: ttlConfig.queue?.field || null
+        };
       }
-    } else {
-      this.dedicatedBrowsers.add(browser);
-      browser.once("disconnected", () => {
-        this.dedicatedBrowsers.delete(browser);
-      });
+      delete ttlConfig.queue;
+      this.ttlPlugin = await this._installDependency(
+        "ttl",
+        new TTLPlugin(ttlConfig)
+      );
     }
-    if (proxy && this.proxyManager) {
-      await this.proxyManager.authenticateProxy(page, proxy);
-    }
-    const viewport = this._generateViewport();
-    await page.setViewport(viewport);
-    const userAgent = this._generateUserAgent();
-    if (userAgent) {
-      await page.setUserAgent(userAgent);
-    }
-    if (this.config.performance.blockResources.enabled) {
-      await page.setRequestInterception(true);
-      page.on("request", (request) => {
-        if (this.config.performance.blockResources.types.includes(request.resourceType())) {
-          request.abort();
-        } else {
-          request.continue();
-        }
-      });
-    }
-    if (useSession && this.cookieManager) {
-      await this.cookieManager.loadSession(page, useSession);
-    }
-    let cursor = null;
-    if (this.config.humanBehavior.enabled && this.config.humanBehavior.mouse.enabled) {
-      cursor = this.createGhostCursor(page);
-    }
-    let navigationSuccess = false;
-    try {
-      await page.goto(url, { waitUntil, timeout });
-      navigationSuccess = true;
-      if (proxyId && this.proxyManager) {
-        this.proxyManager.recordProxyUsage(proxyId, true);
-      }
-    } catch (err) {
-      if (proxyId && this.proxyManager) {
-        this.proxyManager.recordProxyUsage(proxyId, false);
-      }
-      throw err;
-    }
-    if (screenshot) {
-      const screenshotBuffer = await page.screenshot(this.config.screenshot);
-      page._screenshot = screenshotBuffer;
-    }
-    page._cursor = cursor;
-    page._userAgent = userAgent;
-    page._viewport = viewport;
-    page._proxyId = proxyId;
-    page._sessionId = useSession;
-    page._navigationSuccess = navigationSuccess;
-    page._sessionSaved = false;
-    if (this.config.humanBehavior.enabled) {
-      this._attachHumanBehaviorMethods(page);
-    }
-    let hasSavedSession = false;
-    let browserClosed = false;
-    const originalClose = page.close?.bind(page) || (async () => {
+    this.emit("spiderSuite.installed", {
+      namespace: this.namespace,
+      targetsResource: this.config.targetsResource
     });
-    const shouldAutoCloseBrowser = !isPooledBrowser;
-    page.on("close", () => {
-      if (isPooledBrowser) {
-        const tabs = this.tabPool.get(browser);
-        tabs?.delete(page);
-        this._scheduleIdleCloseIfNeeded(browser);
-      } else {
-        this.dedicatedBrowsers.delete(browser);
-      }
-    });
-    page.close = async (...closeArgs) => {
-      if (!hasSavedSession && useSession && this.cookieManager && !page._sessionSaved) {
-        try {
-          await this.cookieManager.saveSession(page, useSession, {
-            success: navigationSuccess
-          });
-          page._sessionSaved = true;
-        } catch (err) {
-          this.emit("puppeteer.cookieSaveFailed", {
-            sessionId: useSession,
-            error: err.message
-          });
-          page._sessionSaved = true;
-        } finally {
-          hasSavedSession = true;
-        }
-      }
-      try {
-        const result = await originalClose(...closeArgs);
-        return result;
-      } finally {
-        if (isPooledBrowser) {
-          const tabs = this.tabPool.get(browser);
-          tabs?.delete(page);
-          this._scheduleIdleCloseIfNeeded(browser);
-        } else if (shouldAutoCloseBrowser && !browserClosed) {
-          try {
-            await browser.close();
-            this.emit("puppeteer.browserClosed", { pooled: false });
-          } catch (err) {
-            this.emit("puppeteer.browserCloseFailed", {
-              pooled: false,
-              error: err.message
-            });
-          } finally {
-            browserClosed = true;
-            this.dedicatedBrowsers.delete(browser);
-          }
-        }
-      }
+  }
+  async onStart() {
+    if (this.config.queue.autoStart && typeof this.processor === "function") {
+      await this.startProcessing();
+    }
+  }
+  async onStop() {
+    await this.stopProcessing();
+  }
+  async onUninstall(options = {}) {
+    await this.onStop();
+    for (const dep of [...this.dependencies].reverse()) {
+      await this.database.uninstallPlugin(dep.name, { purgeData: options.purgeData === true });
+    }
+    this.dependencies = [];
+  }
+  /**
+   * Register a queue processor.
+   */
+  async setProcessor(handler, { autoStart = true, concurrency } = {}) {
+    this.processor = handler;
+    if (autoStart && typeof handler === "function") {
+      await this.startProcessing({ concurrency });
+    }
+  }
+  /**
+   * Enqueue a target for crawling.
+   */
+  async enqueueTarget(data, options = {}) {
+    if (!this.targetsResource?.enqueue) {
+      throw new Error("[SpiderSuitePlugin] Queue helpers not initialized yet");
+    }
+    return await this.targetsResource.enqueue({
+      createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+      ...data
+    }, options);
+  }
+  /**
+   * Start processing queued targets.
+   */
+  async startProcessing(options = {}) {
+    if (!this.targetsResource?.startProcessing) return;
+    const concurrency = options.concurrency || this.config.queue.concurrency;
+    await this.targetsResource.startProcessing(this.queueHandler, { concurrency });
+  }
+  /**
+   * Stop processing queued targets.
+   */
+  async stopProcessing() {
+    if (this.targetsResource?.stopProcessing) {
+      await this.targetsResource.stopProcessing();
+    }
+  }
+  async queueHandler(record, context) {
+    if (typeof this.processor !== "function") {
+      throw new Error("[SpiderSuitePlugin] No processor registered. Call setProcessor(fn) first.");
+    }
+    const helpers = {
+      puppeteer: this.puppeteerPlugin,
+      queue: this.queuePlugin,
+      enqueue: this.enqueueTarget.bind(this),
+      resource: this.targetsResource,
+      plugin: this
     };
-    this.emit("puppeteer.navigate", {
-      url,
-      userAgent,
-      viewport,
-      proxyId,
-      sessionId: useSession
-    });
-    return page;
-  }
-  /**
-   * Run handler with session-aware navigation helper
-   * @param {string} sessionId - Session identifier
-   * @param {Function} handler - Async function receiving the page instance
-   * @param {Object} options - Navigate options (requires url)
-   * @returns {Promise<*>}
-   */
-  async withSession(sessionId, handler, options = {}) {
-    if (!sessionId) {
-      throw new Error("withSession requires a sessionId");
-    }
-    if (typeof handler !== "function") {
-      throw new TypeError("withSession handler must be a function");
-    }
-    const { url, ...navigateOptions } = options;
-    if (!url) {
-      throw new Error("withSession requires an options.url value");
-    }
-    this.emit("puppeteer.withSession.start", { sessionId, url });
-    const page = await this.navigate(url, {
-      ...navigateOptions,
-      useSession: sessionId
-    });
-    let handlerError = null;
-    try {
-      const result = await handler(page, this);
-      return result;
-    } catch (err) {
-      handlerError = err;
-      throw err;
-    } finally {
-      try {
-        await page.close();
-      } catch (err) {
-        this.emit("puppeteer.withSession.cleanupFailed", {
-          sessionId,
-          url,
-          error: err.message
-        });
-      }
-      this.emit("puppeteer.withSession.finish", {
-        sessionId,
-        url,
-        error: handlerError ? handlerError.message : null
-      });
-    }
-  }
-  /**
-   * Attach human behavior methods to page
-   * @private
-   */
-  _attachHumanBehaviorMethods(page) {
-    page.humanClick = async (selector, options = {}) => {
-      const element = await page.$(selector);
-      if (!element) throw new Error(`Element not found: ${selector}`);
-      if (this.config.humanBehavior.mouse.pathThroughElements && page._cursor) {
-        await page._cursor.moveTo(selector);
-        await page._cursor.click();
-      } else {
-        await element.click();
-      }
-    };
-    page.humanMoveTo = async (selector, options = {}) => {
-      if (!page._cursor) {
-        throw new Error("Ghost cursor not initialized");
-      }
-      await page._cursor.moveTo(selector);
-    };
-    page.humanType = async (selector, text, options = {}) => {
-      const element = await page.$(selector);
-      if (!element) throw new Error(`Element not found: ${selector}`);
-      await element.click();
-      if (this.config.humanBehavior.typing.mistakes) {
-        await this._typeWithMistakes(page, text, options);
-      } else {
-        const [min, max] = this.config.humanBehavior.typing.delayRange;
-        await page.type(selector, text, {
-          delay: min + Math.random() * (max - min)
-        });
-      }
-    };
-    page.humanScroll = async (options = {}) => {
-      const { distance = null, direction = "down" } = options;
-      if (distance) {
-        await page.evaluate((dist, dir) => {
-          window.scrollBy(0, dir === "down" ? dist : -dist);
-        }, distance, direction);
-      } else {
-        await this._scrollWithStops(page, direction);
-      }
-    };
-  }
-  /**
-   * Type with random mistakes and corrections
-   * @private
-   */
-  async _typeWithMistakes(page, text, options = {}) {
-    const words = text.split(" ");
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-      if (Math.random() < 0.2 && word.length > 3) {
-        const wrongPos = Math.floor(Math.random() * word.length);
-        const wrongChar = String.fromCharCode(97 + Math.floor(Math.random() * 26));
-        const wrongWord = word.slice(0, wrongPos) + wrongChar + word.slice(wrongPos + 1);
-        await page.keyboard.type(wrongWord, { delay: 100 });
-        await this._randomDelay(200, 500);
-        for (let j = 0; j < wrongWord.length; j++) {
-          await page.keyboard.press("Backspace");
-          await this._randomDelay(50, 100);
-        }
-        await page.keyboard.type(word, { delay: 100 });
-      } else {
-        await page.keyboard.type(word, { delay: 100 });
-      }
-      if (i < words.length - 1) {
-        await page.keyboard.press("Space");
-        await this._randomDelay(100, 300);
-      }
-    }
-  }
-  /**
-   * Scroll with random stops
-   * @private
-   */
-  async _scrollWithStops(page, direction = "down") {
-    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
-    const viewportHeight = await page.evaluate(() => window.innerHeight);
-    const steps = Math.floor(scrollHeight / viewportHeight);
-    for (let i = 0; i < steps; i++) {
-      await page.evaluate((dir, vh) => {
-        window.scrollBy(0, dir === "down" ? vh : -vh);
-      }, direction, viewportHeight);
-      await this._randomDelay(500, 1500);
-      if (this.config.humanBehavior.scrolling.backScroll && Math.random() < 0.1) {
-        await page.evaluate(() => window.scrollBy(0, -100));
-        await this._randomDelay(200, 500);
-      }
-    }
-  }
-  /**
-   * Random delay helper
-   * @private
-   */
-  async _randomDelay(min, max) {
-    const delay = min + Math.random() * (max - min);
-    return new Promise((resolve) => setTimeout(resolve, delay));
-  }
-  /**
-   * Farm cookies for a session
-   * @param {string} sessionId - Session identifier
-   * @returns {Promise<void>}
-   */
-  async farmCookies(sessionId) {
-    if (!this.cookieManager) {
-      throw new Error("Cookie manager not initialized");
-    }
-    return await this.cookieManager.farmCookies(sessionId);
-  }
-  /**
-   * Get cookie pool statistics
-   * @returns {Promise<Object>}
-   */
-  async getCookieStats() {
-    if (!this.cookieManager) {
-      throw new Error("Cookie manager not initialized");
-    }
-    return await this.cookieManager.getStats();
-  }
-  /**
-   * Get proxy pool statistics
-   * @returns {Array}
-   */
-  getProxyStats() {
-    if (!this.proxyManager) {
-      throw new Error("Proxy manager not initialized");
-    }
-    return this.proxyManager.getProxyStats();
-  }
-  /**
-   * Get session-proxy bindings
-   * @returns {Array}
-   */
-  getSessionProxyBindings() {
-    if (!this.proxyManager) {
-      throw new Error("Proxy manager not initialized");
-    }
-    return this.proxyManager.getSessionBindings();
-  }
-  /**
-   * Check health of all proxies
-   * @returns {Promise<Object>}
-   */
-  async checkProxyHealth() {
-    if (!this.proxyManager) {
-      throw new Error("Proxy manager not initialized");
-    }
-    return await this.proxyManager.checkAllProxies();
+    return await this.processor(record, context, helpers);
   }
 }
+
+/**
+ * Removes all key-value entries from the list cache.
+ *
+ * @private
+ * @name clear
+ * @memberOf ListCache
+ */
+function listCacheClear() {
+  this.__data__ = [];
+  this.size = 0;
+}
+
+/**
+ * Performs a
+ * [`SameValueZero`](http://ecma-international.org/ecma-262/7.0/#sec-samevaluezero)
+ * comparison between two values to determine if they are equivalent.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to compare.
+ * @param {*} other The other value to compare.
+ * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+ * @example
+ *
+ * var object = { 'a': 1 };
+ * var other = { 'a': 1 };
+ *
+ * _.eq(object, object);
+ * // => true
+ *
+ * _.eq(object, other);
+ * // => false
+ *
+ * _.eq('a', 'a');
+ * // => true
+ *
+ * _.eq('a', Object('a'));
+ * // => false
+ *
+ * _.eq(NaN, NaN);
+ * // => true
+ */
+function eq(value, other) {
+  return value === other || (value !== value && other !== other);
+}
+
+/**
+ * Gets the index at which the `key` is found in `array` of key-value pairs.
+ *
+ * @private
+ * @param {Array} array The array to inspect.
+ * @param {*} key The key to search for.
+ * @returns {number} Returns the index of the matched value, else `-1`.
+ */
+function assocIndexOf(array, key) {
+  var length = array.length;
+  while (length--) {
+    if (eq(array[length][0], key)) {
+      return length;
+    }
+  }
+  return -1;
+}
+
+/** Used for built-in method references. */
+var arrayProto = Array.prototype;
+
+/** Built-in value references. */
+var splice = arrayProto.splice;
+
+/**
+ * Removes `key` and its value from the list cache.
+ *
+ * @private
+ * @name delete
+ * @memberOf ListCache
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function listCacheDelete(key) {
+  var data = this.__data__,
+      index = assocIndexOf(data, key);
+
+  if (index < 0) {
+    return false;
+  }
+  var lastIndex = data.length - 1;
+  if (index == lastIndex) {
+    data.pop();
+  } else {
+    splice.call(data, index, 1);
+  }
+  --this.size;
+  return true;
+}
+
+/**
+ * Gets the list cache value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf ListCache
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function listCacheGet(key) {
+  var data = this.__data__,
+      index = assocIndexOf(data, key);
+
+  return index < 0 ? undefined : data[index][1];
+}
+
+/**
+ * Checks if a list cache value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf ListCache
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function listCacheHas(key) {
+  return assocIndexOf(this.__data__, key) > -1;
+}
+
+/**
+ * Sets the list cache `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf ListCache
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the list cache instance.
+ */
+function listCacheSet(key, value) {
+  var data = this.__data__,
+      index = assocIndexOf(data, key);
+
+  if (index < 0) {
+    ++this.size;
+    data.push([key, value]);
+  } else {
+    data[index][1] = value;
+  }
+  return this;
+}
+
+/**
+ * Creates an list cache object.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function ListCache(entries) {
+  var index = -1,
+      length = entries == null ? 0 : entries.length;
+
+  this.clear();
+  while (++index < length) {
+    var entry = entries[index];
+    this.set(entry[0], entry[1]);
+  }
+}
+
+// Add methods to `ListCache`.
+ListCache.prototype.clear = listCacheClear;
+ListCache.prototype['delete'] = listCacheDelete;
+ListCache.prototype.get = listCacheGet;
+ListCache.prototype.has = listCacheHas;
+ListCache.prototype.set = listCacheSet;
+
+/**
+ * Removes all key-value entries from the stack.
+ *
+ * @private
+ * @name clear
+ * @memberOf Stack
+ */
+function stackClear() {
+  this.__data__ = new ListCache;
+  this.size = 0;
+}
+
+/**
+ * Removes `key` and its value from the stack.
+ *
+ * @private
+ * @name delete
+ * @memberOf Stack
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function stackDelete(key) {
+  var data = this.__data__,
+      result = data['delete'](key);
+
+  this.size = data.size;
+  return result;
+}
+
+/**
+ * Gets the stack value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf Stack
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function stackGet(key) {
+  return this.__data__.get(key);
+}
+
+/**
+ * Checks if a stack value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf Stack
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function stackHas(key) {
+  return this.__data__.has(key);
+}
+
+/** Detect free variable `global` from Node.js. */
+var freeGlobal = typeof global == 'object' && global && global.Object === Object && global;
+
+/** Detect free variable `self`. */
+var freeSelf = typeof self == 'object' && self && self.Object === Object && self;
+
+/** Used as a reference to the global object. */
+var root = freeGlobal || freeSelf || Function('return this')();
+
+/** Built-in value references. */
+var Symbol$1 = root.Symbol;
+
+/** Used for built-in method references. */
+var objectProto$b = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$8 = objectProto$b.hasOwnProperty;
+
+/**
+ * Used to resolve the
+ * [`toStringTag`](http://ecma-international.org/ecma-262/7.0/#sec-object.prototype.tostring)
+ * of values.
+ */
+var nativeObjectToString$1 = objectProto$b.toString;
+
+/** Built-in value references. */
+var symToStringTag$1 = Symbol$1 ? Symbol$1.toStringTag : undefined;
+
+/**
+ * A specialized version of `baseGetTag` which ignores `Symbol.toStringTag` values.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the raw `toStringTag`.
+ */
+function getRawTag(value) {
+  var isOwn = hasOwnProperty$8.call(value, symToStringTag$1),
+      tag = value[symToStringTag$1];
+
+  try {
+    value[symToStringTag$1] = undefined;
+    var unmasked = true;
+  } catch (e) {}
+
+  var result = nativeObjectToString$1.call(value);
+  if (unmasked) {
+    if (isOwn) {
+      value[symToStringTag$1] = tag;
+    } else {
+      delete value[symToStringTag$1];
+    }
+  }
+  return result;
+}
+
+/** Used for built-in method references. */
+var objectProto$a = Object.prototype;
+
+/**
+ * Used to resolve the
+ * [`toStringTag`](http://ecma-international.org/ecma-262/7.0/#sec-object.prototype.tostring)
+ * of values.
+ */
+var nativeObjectToString = objectProto$a.toString;
+
+/**
+ * Converts `value` to a string using `Object.prototype.toString`.
+ *
+ * @private
+ * @param {*} value The value to convert.
+ * @returns {string} Returns the converted string.
+ */
+function objectToString(value) {
+  return nativeObjectToString.call(value);
+}
+
+/** `Object#toString` result references. */
+var nullTag = '[object Null]',
+    undefinedTag = '[object Undefined]';
+
+/** Built-in value references. */
+var symToStringTag = Symbol$1 ? Symbol$1.toStringTag : undefined;
+
+/**
+ * The base implementation of `getTag` without fallbacks for buggy environments.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the `toStringTag`.
+ */
+function baseGetTag(value) {
+  if (value == null) {
+    return value === undefined ? undefinedTag : nullTag;
+  }
+  return (symToStringTag && symToStringTag in Object(value))
+    ? getRawTag(value)
+    : objectToString(value);
+}
+
+/**
+ * Checks if `value` is the
+ * [language type](http://www.ecma-international.org/ecma-262/7.0/#sec-ecmascript-language-types)
+ * of `Object`. (e.g. arrays, functions, objects, regexes, `new Number(0)`, and `new String('')`)
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an object, else `false`.
+ * @example
+ *
+ * _.isObject({});
+ * // => true
+ *
+ * _.isObject([1, 2, 3]);
+ * // => true
+ *
+ * _.isObject(_.noop);
+ * // => true
+ *
+ * _.isObject(null);
+ * // => false
+ */
+function isObject(value) {
+  var type = typeof value;
+  return value != null && (type == 'object' || type == 'function');
+}
+
+/** `Object#toString` result references. */
+var asyncTag = '[object AsyncFunction]',
+    funcTag$1 = '[object Function]',
+    genTag = '[object GeneratorFunction]',
+    proxyTag = '[object Proxy]';
+
+/**
+ * Checks if `value` is classified as a `Function` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a function, else `false`.
+ * @example
+ *
+ * _.isFunction(_);
+ * // => true
+ *
+ * _.isFunction(/abc/);
+ * // => false
+ */
+function isFunction(value) {
+  if (!isObject(value)) {
+    return false;
+  }
+  // The use of `Object#toString` avoids issues with the `typeof` operator
+  // in Safari 9 which returns 'object' for typed arrays and other constructors.
+  var tag = baseGetTag(value);
+  return tag == funcTag$1 || tag == genTag || tag == asyncTag || tag == proxyTag;
+}
+
+/** Used to detect overreaching core-js shims. */
+var coreJsData = root['__core-js_shared__'];
+
+/** Used to detect methods masquerading as native. */
+var maskSrcKey = (function() {
+  var uid = /[^.]+$/.exec(coreJsData && coreJsData.keys && coreJsData.keys.IE_PROTO || '');
+  return uid ? ('Symbol(src)_1.' + uid) : '';
+}());
+
+/**
+ * Checks if `func` has its source masked.
+ *
+ * @private
+ * @param {Function} func The function to check.
+ * @returns {boolean} Returns `true` if `func` is masked, else `false`.
+ */
+function isMasked(func) {
+  return !!maskSrcKey && (maskSrcKey in func);
+}
+
+/** Used for built-in method references. */
+var funcProto$1 = Function.prototype;
+
+/** Used to resolve the decompiled source of functions. */
+var funcToString$1 = funcProto$1.toString;
+
+/**
+ * Converts `func` to its source code.
+ *
+ * @private
+ * @param {Function} func The function to convert.
+ * @returns {string} Returns the source code.
+ */
+function toSource(func) {
+  if (func != null) {
+    try {
+      return funcToString$1.call(func);
+    } catch (e) {}
+    try {
+      return (func + '');
+    } catch (e) {}
+  }
+  return '';
+}
+
+/**
+ * Used to match `RegExp`
+ * [syntax characters](http://ecma-international.org/ecma-262/7.0/#sec-patterns).
+ */
+var reRegExpChar = /[\\^$.*+?()[\]{}|]/g;
+
+/** Used to detect host constructors (Safari). */
+var reIsHostCtor = /^\[object .+?Constructor\]$/;
+
+/** Used for built-in method references. */
+var funcProto = Function.prototype,
+    objectProto$9 = Object.prototype;
+
+/** Used to resolve the decompiled source of functions. */
+var funcToString = funcProto.toString;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$7 = objectProto$9.hasOwnProperty;
+
+/** Used to detect if a method is native. */
+var reIsNative = RegExp('^' +
+  funcToString.call(hasOwnProperty$7).replace(reRegExpChar, '\\$&')
+  .replace(/hasOwnProperty|(function).*?(?=\\\()| for .+?(?=\\\])/g, '$1.*?') + '$'
+);
+
+/**
+ * The base implementation of `_.isNative` without bad shim checks.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a native function,
+ *  else `false`.
+ */
+function baseIsNative(value) {
+  if (!isObject(value) || isMasked(value)) {
+    return false;
+  }
+  var pattern = isFunction(value) ? reIsNative : reIsHostCtor;
+  return pattern.test(toSource(value));
+}
+
+/**
+ * Gets the value at `key` of `object`.
+ *
+ * @private
+ * @param {Object} [object] The object to query.
+ * @param {string} key The key of the property to get.
+ * @returns {*} Returns the property value.
+ */
+function getValue(object, key) {
+  return object == null ? undefined : object[key];
+}
+
+/**
+ * Gets the native function at `key` of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @param {string} key The key of the method to get.
+ * @returns {*} Returns the function if it's native, else `undefined`.
+ */
+function getNative(object, key) {
+  var value = getValue(object, key);
+  return baseIsNative(value) ? value : undefined;
+}
+
+/* Built-in method references that are verified to be native. */
+var Map$1 = getNative(root, 'Map');
+
+/* Built-in method references that are verified to be native. */
+var nativeCreate = getNative(Object, 'create');
+
+/**
+ * Removes all key-value entries from the hash.
+ *
+ * @private
+ * @name clear
+ * @memberOf Hash
+ */
+function hashClear() {
+  this.__data__ = nativeCreate ? nativeCreate(null) : {};
+  this.size = 0;
+}
+
+/**
+ * Removes `key` and its value from the hash.
+ *
+ * @private
+ * @name delete
+ * @memberOf Hash
+ * @param {Object} hash The hash to modify.
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function hashDelete(key) {
+  var result = this.has(key) && delete this.__data__[key];
+  this.size -= result ? 1 : 0;
+  return result;
+}
+
+/** Used to stand-in for `undefined` hash values. */
+var HASH_UNDEFINED$2 = '__lodash_hash_undefined__';
+
+/** Used for built-in method references. */
+var objectProto$8 = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$6 = objectProto$8.hasOwnProperty;
+
+/**
+ * Gets the hash value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf Hash
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function hashGet(key) {
+  var data = this.__data__;
+  if (nativeCreate) {
+    var result = data[key];
+    return result === HASH_UNDEFINED$2 ? undefined : result;
+  }
+  return hasOwnProperty$6.call(data, key) ? data[key] : undefined;
+}
+
+/** Used for built-in method references. */
+var objectProto$7 = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$5 = objectProto$7.hasOwnProperty;
+
+/**
+ * Checks if a hash value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf Hash
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function hashHas(key) {
+  var data = this.__data__;
+  return nativeCreate ? (data[key] !== undefined) : hasOwnProperty$5.call(data, key);
+}
+
+/** Used to stand-in for `undefined` hash values. */
+var HASH_UNDEFINED$1 = '__lodash_hash_undefined__';
+
+/**
+ * Sets the hash `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf Hash
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the hash instance.
+ */
+function hashSet(key, value) {
+  var data = this.__data__;
+  this.size += this.has(key) ? 0 : 1;
+  data[key] = (nativeCreate && value === undefined) ? HASH_UNDEFINED$1 : value;
+  return this;
+}
+
+/**
+ * Creates a hash object.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function Hash(entries) {
+  var index = -1,
+      length = entries == null ? 0 : entries.length;
+
+  this.clear();
+  while (++index < length) {
+    var entry = entries[index];
+    this.set(entry[0], entry[1]);
+  }
+}
+
+// Add methods to `Hash`.
+Hash.prototype.clear = hashClear;
+Hash.prototype['delete'] = hashDelete;
+Hash.prototype.get = hashGet;
+Hash.prototype.has = hashHas;
+Hash.prototype.set = hashSet;
+
+/**
+ * Removes all key-value entries from the map.
+ *
+ * @private
+ * @name clear
+ * @memberOf MapCache
+ */
+function mapCacheClear() {
+  this.size = 0;
+  this.__data__ = {
+    'hash': new Hash,
+    'map': new (Map$1 || ListCache),
+    'string': new Hash
+  };
+}
+
+/**
+ * Checks if `value` is suitable for use as unique object key.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is suitable, else `false`.
+ */
+function isKeyable(value) {
+  var type = typeof value;
+  return (type == 'string' || type == 'number' || type == 'symbol' || type == 'boolean')
+    ? (value !== '__proto__')
+    : (value === null);
+}
+
+/**
+ * Gets the data for `map`.
+ *
+ * @private
+ * @param {Object} map The map to query.
+ * @param {string} key The reference key.
+ * @returns {*} Returns the map data.
+ */
+function getMapData(map, key) {
+  var data = map.__data__;
+  return isKeyable(key)
+    ? data[typeof key == 'string' ? 'string' : 'hash']
+    : data.map;
+}
+
+/**
+ * Removes `key` and its value from the map.
+ *
+ * @private
+ * @name delete
+ * @memberOf MapCache
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function mapCacheDelete(key) {
+  var result = getMapData(this, key)['delete'](key);
+  this.size -= result ? 1 : 0;
+  return result;
+}
+
+/**
+ * Gets the map value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf MapCache
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function mapCacheGet(key) {
+  return getMapData(this, key).get(key);
+}
+
+/**
+ * Checks if a map value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf MapCache
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function mapCacheHas(key) {
+  return getMapData(this, key).has(key);
+}
+
+/**
+ * Sets the map `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf MapCache
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the map cache instance.
+ */
+function mapCacheSet(key, value) {
+  var data = getMapData(this, key),
+      size = data.size;
+
+  data.set(key, value);
+  this.size += data.size == size ? 0 : 1;
+  return this;
+}
+
+/**
+ * Creates a map cache object to store key-value pairs.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function MapCache(entries) {
+  var index = -1,
+      length = entries == null ? 0 : entries.length;
+
+  this.clear();
+  while (++index < length) {
+    var entry = entries[index];
+    this.set(entry[0], entry[1]);
+  }
+}
+
+// Add methods to `MapCache`.
+MapCache.prototype.clear = mapCacheClear;
+MapCache.prototype['delete'] = mapCacheDelete;
+MapCache.prototype.get = mapCacheGet;
+MapCache.prototype.has = mapCacheHas;
+MapCache.prototype.set = mapCacheSet;
+
+/** Used as the size to enable large array optimizations. */
+var LARGE_ARRAY_SIZE = 200;
+
+/**
+ * Sets the stack `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf Stack
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the stack cache instance.
+ */
+function stackSet(key, value) {
+  var data = this.__data__;
+  if (data instanceof ListCache) {
+    var pairs = data.__data__;
+    if (!Map$1 || (pairs.length < LARGE_ARRAY_SIZE - 1)) {
+      pairs.push([key, value]);
+      this.size = ++data.size;
+      return this;
+    }
+    data = this.__data__ = new MapCache(pairs);
+  }
+  data.set(key, value);
+  this.size = data.size;
+  return this;
+}
+
+/**
+ * Creates a stack cache object to store key-value pairs.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function Stack(entries) {
+  var data = this.__data__ = new ListCache(entries);
+  this.size = data.size;
+}
+
+// Add methods to `Stack`.
+Stack.prototype.clear = stackClear;
+Stack.prototype['delete'] = stackDelete;
+Stack.prototype.get = stackGet;
+Stack.prototype.has = stackHas;
+Stack.prototype.set = stackSet;
+
+/** Used to stand-in for `undefined` hash values. */
+var HASH_UNDEFINED = '__lodash_hash_undefined__';
+
+/**
+ * Adds `value` to the array cache.
+ *
+ * @private
+ * @name add
+ * @memberOf SetCache
+ * @alias push
+ * @param {*} value The value to cache.
+ * @returns {Object} Returns the cache instance.
+ */
+function setCacheAdd(value) {
+  this.__data__.set(value, HASH_UNDEFINED);
+  return this;
+}
+
+/**
+ * Checks if `value` is in the array cache.
+ *
+ * @private
+ * @name has
+ * @memberOf SetCache
+ * @param {*} value The value to search for.
+ * @returns {number} Returns `true` if `value` is found, else `false`.
+ */
+function setCacheHas(value) {
+  return this.__data__.has(value);
+}
+
+/**
+ *
+ * Creates an array cache object to store unique values.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [values] The values to cache.
+ */
+function SetCache(values) {
+  var index = -1,
+      length = values == null ? 0 : values.length;
+
+  this.__data__ = new MapCache;
+  while (++index < length) {
+    this.add(values[index]);
+  }
+}
+
+// Add methods to `SetCache`.
+SetCache.prototype.add = SetCache.prototype.push = setCacheAdd;
+SetCache.prototype.has = setCacheHas;
+
+/**
+ * A specialized version of `_.some` for arrays without support for iteratee
+ * shorthands.
+ *
+ * @private
+ * @param {Array} [array] The array to iterate over.
+ * @param {Function} predicate The function invoked per iteration.
+ * @returns {boolean} Returns `true` if any element passes the predicate check,
+ *  else `false`.
+ */
+function arraySome(array, predicate) {
+  var index = -1,
+      length = array == null ? 0 : array.length;
+
+  while (++index < length) {
+    if (predicate(array[index], index, array)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Checks if a `cache` value for `key` exists.
+ *
+ * @private
+ * @param {Object} cache The cache to query.
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function cacheHas(cache, key) {
+  return cache.has(key);
+}
+
+/** Used to compose bitmasks for value comparisons. */
+var COMPARE_PARTIAL_FLAG$3 = 1,
+    COMPARE_UNORDERED_FLAG$1 = 2;
+
+/**
+ * A specialized version of `baseIsEqualDeep` for arrays with support for
+ * partial deep comparisons.
+ *
+ * @private
+ * @param {Array} array The array to compare.
+ * @param {Array} other The other array to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} stack Tracks traversed `array` and `other` objects.
+ * @returns {boolean} Returns `true` if the arrays are equivalent, else `false`.
+ */
+function equalArrays(array, other, bitmask, customizer, equalFunc, stack) {
+  var isPartial = bitmask & COMPARE_PARTIAL_FLAG$3,
+      arrLength = array.length,
+      othLength = other.length;
+
+  if (arrLength != othLength && !(isPartial && othLength > arrLength)) {
+    return false;
+  }
+  // Check that cyclic values are equal.
+  var arrStacked = stack.get(array);
+  var othStacked = stack.get(other);
+  if (arrStacked && othStacked) {
+    return arrStacked == other && othStacked == array;
+  }
+  var index = -1,
+      result = true,
+      seen = (bitmask & COMPARE_UNORDERED_FLAG$1) ? new SetCache : undefined;
+
+  stack.set(array, other);
+  stack.set(other, array);
+
+  // Ignore non-index properties.
+  while (++index < arrLength) {
+    var arrValue = array[index],
+        othValue = other[index];
+
+    if (customizer) {
+      var compared = isPartial
+        ? customizer(othValue, arrValue, index, other, array, stack)
+        : customizer(arrValue, othValue, index, array, other, stack);
+    }
+    if (compared !== undefined) {
+      if (compared) {
+        continue;
+      }
+      result = false;
+      break;
+    }
+    // Recursively compare arrays (susceptible to call stack limits).
+    if (seen) {
+      if (!arraySome(other, function(othValue, othIndex) {
+            if (!cacheHas(seen, othIndex) &&
+                (arrValue === othValue || equalFunc(arrValue, othValue, bitmask, customizer, stack))) {
+              return seen.push(othIndex);
+            }
+          })) {
+        result = false;
+        break;
+      }
+    } else if (!(
+          arrValue === othValue ||
+            equalFunc(arrValue, othValue, bitmask, customizer, stack)
+        )) {
+      result = false;
+      break;
+    }
+  }
+  stack['delete'](array);
+  stack['delete'](other);
+  return result;
+}
+
+/** Built-in value references. */
+var Uint8Array$1 = root.Uint8Array;
+
+/**
+ * Converts `map` to its key-value pairs.
+ *
+ * @private
+ * @param {Object} map The map to convert.
+ * @returns {Array} Returns the key-value pairs.
+ */
+function mapToArray(map) {
+  var index = -1,
+      result = Array(map.size);
+
+  map.forEach(function(value, key) {
+    result[++index] = [key, value];
+  });
+  return result;
+}
+
+/**
+ * Converts `set` to an array of its values.
+ *
+ * @private
+ * @param {Object} set The set to convert.
+ * @returns {Array} Returns the values.
+ */
+function setToArray(set) {
+  var index = -1,
+      result = Array(set.size);
+
+  set.forEach(function(value) {
+    result[++index] = value;
+  });
+  return result;
+}
+
+/** Used to compose bitmasks for value comparisons. */
+var COMPARE_PARTIAL_FLAG$2 = 1,
+    COMPARE_UNORDERED_FLAG = 2;
+
+/** `Object#toString` result references. */
+var boolTag$1 = '[object Boolean]',
+    dateTag$1 = '[object Date]',
+    errorTag$1 = '[object Error]',
+    mapTag$2 = '[object Map]',
+    numberTag$1 = '[object Number]',
+    regexpTag$1 = '[object RegExp]',
+    setTag$2 = '[object Set]',
+    stringTag$1 = '[object String]',
+    symbolTag = '[object Symbol]';
+
+var arrayBufferTag$1 = '[object ArrayBuffer]',
+    dataViewTag$2 = '[object DataView]';
+
+/** Used to convert symbols to primitives and strings. */
+var symbolProto = Symbol$1 ? Symbol$1.prototype : undefined,
+    symbolValueOf = symbolProto ? symbolProto.valueOf : undefined;
+
+/**
+ * A specialized version of `baseIsEqualDeep` for comparing objects of
+ * the same `toStringTag`.
+ *
+ * **Note:** This function only supports comparing values with tags of
+ * `Boolean`, `Date`, `Error`, `Number`, `RegExp`, or `String`.
+ *
+ * @private
+ * @param {Object} object The object to compare.
+ * @param {Object} other The other object to compare.
+ * @param {string} tag The `toStringTag` of the objects to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} stack Tracks traversed `object` and `other` objects.
+ * @returns {boolean} Returns `true` if the objects are equivalent, else `false`.
+ */
+function equalByTag(object, other, tag, bitmask, customizer, equalFunc, stack) {
+  switch (tag) {
+    case dataViewTag$2:
+      if ((object.byteLength != other.byteLength) ||
+          (object.byteOffset != other.byteOffset)) {
+        return false;
+      }
+      object = object.buffer;
+      other = other.buffer;
+
+    case arrayBufferTag$1:
+      if ((object.byteLength != other.byteLength) ||
+          !equalFunc(new Uint8Array$1(object), new Uint8Array$1(other))) {
+        return false;
+      }
+      return true;
+
+    case boolTag$1:
+    case dateTag$1:
+    case numberTag$1:
+      // Coerce booleans to `1` or `0` and dates to milliseconds.
+      // Invalid dates are coerced to `NaN`.
+      return eq(+object, +other);
+
+    case errorTag$1:
+      return object.name == other.name && object.message == other.message;
+
+    case regexpTag$1:
+    case stringTag$1:
+      // Coerce regexes to strings and treat strings, primitives and objects,
+      // as equal. See http://www.ecma-international.org/ecma-262/7.0/#sec-regexp.prototype.tostring
+      // for more details.
+      return object == (other + '');
+
+    case mapTag$2:
+      var convert = mapToArray;
+
+    case setTag$2:
+      var isPartial = bitmask & COMPARE_PARTIAL_FLAG$2;
+      convert || (convert = setToArray);
+
+      if (object.size != other.size && !isPartial) {
+        return false;
+      }
+      // Assume cyclic values are equal.
+      var stacked = stack.get(object);
+      if (stacked) {
+        return stacked == other;
+      }
+      bitmask |= COMPARE_UNORDERED_FLAG;
+
+      // Recursively compare objects (susceptible to call stack limits).
+      stack.set(object, other);
+      var result = equalArrays(convert(object), convert(other), bitmask, customizer, equalFunc, stack);
+      stack['delete'](object);
+      return result;
+
+    case symbolTag:
+      if (symbolValueOf) {
+        return symbolValueOf.call(object) == symbolValueOf.call(other);
+      }
+  }
+  return false;
+}
+
+/**
+ * Appends the elements of `values` to `array`.
+ *
+ * @private
+ * @param {Array} array The array to modify.
+ * @param {Array} values The values to append.
+ * @returns {Array} Returns `array`.
+ */
+function arrayPush(array, values) {
+  var index = -1,
+      length = values.length,
+      offset = array.length;
+
+  while (++index < length) {
+    array[offset + index] = values[index];
+  }
+  return array;
+}
+
+/**
+ * Checks if `value` is classified as an `Array` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an array, else `false`.
+ * @example
+ *
+ * _.isArray([1, 2, 3]);
+ * // => true
+ *
+ * _.isArray(document.body.children);
+ * // => false
+ *
+ * _.isArray('abc');
+ * // => false
+ *
+ * _.isArray(_.noop);
+ * // => false
+ */
+var isArray = Array.isArray;
+
+/**
+ * The base implementation of `getAllKeys` and `getAllKeysIn` which uses
+ * `keysFunc` and `symbolsFunc` to get the enumerable property names and
+ * symbols of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @param {Function} keysFunc The function to get the keys of `object`.
+ * @param {Function} symbolsFunc The function to get the symbols of `object`.
+ * @returns {Array} Returns the array of property names and symbols.
+ */
+function baseGetAllKeys(object, keysFunc, symbolsFunc) {
+  var result = keysFunc(object);
+  return isArray(object) ? result : arrayPush(result, symbolsFunc(object));
+}
+
+/**
+ * A specialized version of `_.filter` for arrays without support for
+ * iteratee shorthands.
+ *
+ * @private
+ * @param {Array} [array] The array to iterate over.
+ * @param {Function} predicate The function invoked per iteration.
+ * @returns {Array} Returns the new filtered array.
+ */
+function arrayFilter(array, predicate) {
+  var index = -1,
+      length = array == null ? 0 : array.length,
+      resIndex = 0,
+      result = [];
+
+  while (++index < length) {
+    var value = array[index];
+    if (predicate(value, index, array)) {
+      result[resIndex++] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * This method returns a new empty array.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.13.0
+ * @category Util
+ * @returns {Array} Returns the new empty array.
+ * @example
+ *
+ * var arrays = _.times(2, _.stubArray);
+ *
+ * console.log(arrays);
+ * // => [[], []]
+ *
+ * console.log(arrays[0] === arrays[1]);
+ * // => false
+ */
+function stubArray() {
+  return [];
+}
+
+/** Used for built-in method references. */
+var objectProto$6 = Object.prototype;
+
+/** Built-in value references. */
+var propertyIsEnumerable$1 = objectProto$6.propertyIsEnumerable;
+
+/* Built-in method references for those with the same name as other `lodash` methods. */
+var nativeGetSymbols = Object.getOwnPropertySymbols;
+
+/**
+ * Creates an array of the own enumerable symbols of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of symbols.
+ */
+var getSymbols = !nativeGetSymbols ? stubArray : function(object) {
+  if (object == null) {
+    return [];
+  }
+  object = Object(object);
+  return arrayFilter(nativeGetSymbols(object), function(symbol) {
+    return propertyIsEnumerable$1.call(object, symbol);
+  });
+};
+
+/**
+ * The base implementation of `_.times` without support for iteratee shorthands
+ * or max array length checks.
+ *
+ * @private
+ * @param {number} n The number of times to invoke `iteratee`.
+ * @param {Function} iteratee The function invoked per iteration.
+ * @returns {Array} Returns the array of results.
+ */
+function baseTimes(n, iteratee) {
+  var index = -1,
+      result = Array(n);
+
+  while (++index < n) {
+    result[index] = iteratee(index);
+  }
+  return result;
+}
+
+/**
+ * Checks if `value` is object-like. A value is object-like if it's not `null`
+ * and has a `typeof` result of "object".
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is object-like, else `false`.
+ * @example
+ *
+ * _.isObjectLike({});
+ * // => true
+ *
+ * _.isObjectLike([1, 2, 3]);
+ * // => true
+ *
+ * _.isObjectLike(_.noop);
+ * // => false
+ *
+ * _.isObjectLike(null);
+ * // => false
+ */
+function isObjectLike(value) {
+  return value != null && typeof value == 'object';
+}
+
+/** `Object#toString` result references. */
+var argsTag$2 = '[object Arguments]';
+
+/**
+ * The base implementation of `_.isArguments`.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an `arguments` object,
+ */
+function baseIsArguments(value) {
+  return isObjectLike(value) && baseGetTag(value) == argsTag$2;
+}
+
+/** Used for built-in method references. */
+var objectProto$5 = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$4 = objectProto$5.hasOwnProperty;
+
+/** Built-in value references. */
+var propertyIsEnumerable = objectProto$5.propertyIsEnumerable;
+
+/**
+ * Checks if `value` is likely an `arguments` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an `arguments` object,
+ *  else `false`.
+ * @example
+ *
+ * _.isArguments(function() { return arguments; }());
+ * // => true
+ *
+ * _.isArguments([1, 2, 3]);
+ * // => false
+ */
+var isArguments = baseIsArguments(function() { return arguments; }()) ? baseIsArguments : function(value) {
+  return isObjectLike(value) && hasOwnProperty$4.call(value, 'callee') &&
+    !propertyIsEnumerable.call(value, 'callee');
+};
+
+/**
+ * This method returns `false`.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.13.0
+ * @category Util
+ * @returns {boolean} Returns `false`.
+ * @example
+ *
+ * _.times(2, _.stubFalse);
+ * // => [false, false]
+ */
+function stubFalse() {
+  return false;
+}
+
+/** Detect free variable `exports`. */
+var freeExports$1 = typeof exports == 'object' && exports && !exports.nodeType && exports;
+
+/** Detect free variable `module`. */
+var freeModule$1 = freeExports$1 && typeof module == 'object' && module && !module.nodeType && module;
+
+/** Detect the popular CommonJS extension `module.exports`. */
+var moduleExports$1 = freeModule$1 && freeModule$1.exports === freeExports$1;
+
+/** Built-in value references. */
+var Buffer$1 = moduleExports$1 ? root.Buffer : undefined;
+
+/* Built-in method references for those with the same name as other `lodash` methods. */
+var nativeIsBuffer = Buffer$1 ? Buffer$1.isBuffer : undefined;
+
+/**
+ * Checks if `value` is a buffer.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.3.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a buffer, else `false`.
+ * @example
+ *
+ * _.isBuffer(new Buffer(2));
+ * // => true
+ *
+ * _.isBuffer(new Uint8Array(2));
+ * // => false
+ */
+var isBuffer = nativeIsBuffer || stubFalse;
+
+/** Used as references for various `Number` constants. */
+var MAX_SAFE_INTEGER$1 = 9007199254740991;
+
+/** Used to detect unsigned integer values. */
+var reIsUint = /^(?:0|[1-9]\d*)$/;
+
+/**
+ * Checks if `value` is a valid array-like index.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @param {number} [length=MAX_SAFE_INTEGER] The upper bounds of a valid index.
+ * @returns {boolean} Returns `true` if `value` is a valid index, else `false`.
+ */
+function isIndex(value, length) {
+  var type = typeof value;
+  length = length == null ? MAX_SAFE_INTEGER$1 : length;
+
+  return !!length &&
+    (type == 'number' ||
+      (type != 'symbol' && reIsUint.test(value))) &&
+        (value > -1 && value % 1 == 0 && value < length);
+}
+
+/** Used as references for various `Number` constants. */
+var MAX_SAFE_INTEGER = 9007199254740991;
+
+/**
+ * Checks if `value` is a valid array-like length.
+ *
+ * **Note:** This method is loosely based on
+ * [`ToLength`](http://ecma-international.org/ecma-262/7.0/#sec-tolength).
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a valid length, else `false`.
+ * @example
+ *
+ * _.isLength(3);
+ * // => true
+ *
+ * _.isLength(Number.MIN_VALUE);
+ * // => false
+ *
+ * _.isLength(Infinity);
+ * // => false
+ *
+ * _.isLength('3');
+ * // => false
+ */
+function isLength(value) {
+  return typeof value == 'number' &&
+    value > -1 && value % 1 == 0 && value <= MAX_SAFE_INTEGER;
+}
+
+/** `Object#toString` result references. */
+var argsTag$1 = '[object Arguments]',
+    arrayTag$1 = '[object Array]',
+    boolTag = '[object Boolean]',
+    dateTag = '[object Date]',
+    errorTag = '[object Error]',
+    funcTag = '[object Function]',
+    mapTag$1 = '[object Map]',
+    numberTag = '[object Number]',
+    objectTag$2 = '[object Object]',
+    regexpTag = '[object RegExp]',
+    setTag$1 = '[object Set]',
+    stringTag = '[object String]',
+    weakMapTag$1 = '[object WeakMap]';
+
+var arrayBufferTag = '[object ArrayBuffer]',
+    dataViewTag$1 = '[object DataView]',
+    float32Tag = '[object Float32Array]',
+    float64Tag = '[object Float64Array]',
+    int8Tag = '[object Int8Array]',
+    int16Tag = '[object Int16Array]',
+    int32Tag = '[object Int32Array]',
+    uint8Tag = '[object Uint8Array]',
+    uint8ClampedTag = '[object Uint8ClampedArray]',
+    uint16Tag = '[object Uint16Array]',
+    uint32Tag = '[object Uint32Array]';
+
+/** Used to identify `toStringTag` values of typed arrays. */
+var typedArrayTags = {};
+typedArrayTags[float32Tag] = typedArrayTags[float64Tag] =
+typedArrayTags[int8Tag] = typedArrayTags[int16Tag] =
+typedArrayTags[int32Tag] = typedArrayTags[uint8Tag] =
+typedArrayTags[uint8ClampedTag] = typedArrayTags[uint16Tag] =
+typedArrayTags[uint32Tag] = true;
+typedArrayTags[argsTag$1] = typedArrayTags[arrayTag$1] =
+typedArrayTags[arrayBufferTag] = typedArrayTags[boolTag] =
+typedArrayTags[dataViewTag$1] = typedArrayTags[dateTag] =
+typedArrayTags[errorTag] = typedArrayTags[funcTag] =
+typedArrayTags[mapTag$1] = typedArrayTags[numberTag] =
+typedArrayTags[objectTag$2] = typedArrayTags[regexpTag] =
+typedArrayTags[setTag$1] = typedArrayTags[stringTag] =
+typedArrayTags[weakMapTag$1] = false;
+
+/**
+ * The base implementation of `_.isTypedArray` without Node.js optimizations.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a typed array, else `false`.
+ */
+function baseIsTypedArray(value) {
+  return isObjectLike(value) &&
+    isLength(value.length) && !!typedArrayTags[baseGetTag(value)];
+}
+
+/**
+ * The base implementation of `_.unary` without support for storing metadata.
+ *
+ * @private
+ * @param {Function} func The function to cap arguments for.
+ * @returns {Function} Returns the new capped function.
+ */
+function baseUnary(func) {
+  return function(value) {
+    return func(value);
+  };
+}
+
+/** Detect free variable `exports`. */
+var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
+
+/** Detect free variable `module`. */
+var freeModule = freeExports && typeof module == 'object' && module && !module.nodeType && module;
+
+/** Detect the popular CommonJS extension `module.exports`. */
+var moduleExports = freeModule && freeModule.exports === freeExports;
+
+/** Detect free variable `process` from Node.js. */
+var freeProcess = moduleExports && freeGlobal.process;
+
+/** Used to access faster Node.js helpers. */
+var nodeUtil = (function() {
+  try {
+    // Use `util.types` for Node.js 10+.
+    var types = freeModule && freeModule.require && freeModule.require('util').types;
+
+    if (types) {
+      return types;
+    }
+
+    // Legacy `process.binding('util')` for Node.js < 10.
+    return freeProcess && freeProcess.binding && freeProcess.binding('util');
+  } catch (e) {}
+}());
+
+/* Node.js helper references. */
+var nodeIsTypedArray = nodeUtil && nodeUtil.isTypedArray;
+
+/**
+ * Checks if `value` is classified as a typed array.
+ *
+ * @static
+ * @memberOf _
+ * @since 3.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a typed array, else `false`.
+ * @example
+ *
+ * _.isTypedArray(new Uint8Array);
+ * // => true
+ *
+ * _.isTypedArray([]);
+ * // => false
+ */
+var isTypedArray = nodeIsTypedArray ? baseUnary(nodeIsTypedArray) : baseIsTypedArray;
+
+/** Used for built-in method references. */
+var objectProto$4 = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$3 = objectProto$4.hasOwnProperty;
+
+/**
+ * Creates an array of the enumerable property names of the array-like `value`.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @param {boolean} inherited Specify returning inherited property names.
+ * @returns {Array} Returns the array of property names.
+ */
+function arrayLikeKeys(value, inherited) {
+  var isArr = isArray(value),
+      isArg = !isArr && isArguments(value),
+      isBuff = !isArr && !isArg && isBuffer(value),
+      isType = !isArr && !isArg && !isBuff && isTypedArray(value),
+      skipIndexes = isArr || isArg || isBuff || isType,
+      result = skipIndexes ? baseTimes(value.length, String) : [],
+      length = result.length;
+
+  for (var key in value) {
+    if ((hasOwnProperty$3.call(value, key)) &&
+        !(skipIndexes && (
+           // Safari 9 has enumerable `arguments.length` in strict mode.
+           key == 'length' ||
+           // Node.js 0.10 has enumerable non-index properties on buffers.
+           (isBuff && (key == 'offset' || key == 'parent')) ||
+           // PhantomJS 2 has enumerable non-index properties on typed arrays.
+           (isType && (key == 'buffer' || key == 'byteLength' || key == 'byteOffset')) ||
+           // Skip index properties.
+           isIndex(key, length)
+        ))) {
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+/** Used for built-in method references. */
+var objectProto$3 = Object.prototype;
+
+/**
+ * Checks if `value` is likely a prototype object.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a prototype, else `false`.
+ */
+function isPrototype(value) {
+  var Ctor = value && value.constructor,
+      proto = (typeof Ctor == 'function' && Ctor.prototype) || objectProto$3;
+
+  return value === proto;
+}
+
+/**
+ * Creates a unary function that invokes `func` with its argument transformed.
+ *
+ * @private
+ * @param {Function} func The function to wrap.
+ * @param {Function} transform The argument transform.
+ * @returns {Function} Returns the new function.
+ */
+function overArg(func, transform) {
+  return function(arg) {
+    return func(transform(arg));
+  };
+}
+
+/* Built-in method references for those with the same name as other `lodash` methods. */
+var nativeKeys = overArg(Object.keys, Object);
+
+/** Used for built-in method references. */
+var objectProto$2 = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$2 = objectProto$2.hasOwnProperty;
+
+/**
+ * The base implementation of `_.keys` which doesn't treat sparse arrays as dense.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of property names.
+ */
+function baseKeys(object) {
+  if (!isPrototype(object)) {
+    return nativeKeys(object);
+  }
+  var result = [];
+  for (var key in Object(object)) {
+    if (hasOwnProperty$2.call(object, key) && key != 'constructor') {
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+/**
+ * Checks if `value` is array-like. A value is considered array-like if it's
+ * not a function and has a `value.length` that's an integer greater than or
+ * equal to `0` and less than or equal to `Number.MAX_SAFE_INTEGER`.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is array-like, else `false`.
+ * @example
+ *
+ * _.isArrayLike([1, 2, 3]);
+ * // => true
+ *
+ * _.isArrayLike(document.body.children);
+ * // => true
+ *
+ * _.isArrayLike('abc');
+ * // => true
+ *
+ * _.isArrayLike(_.noop);
+ * // => false
+ */
+function isArrayLike(value) {
+  return value != null && isLength(value.length) && !isFunction(value);
+}
+
+/**
+ * Creates an array of the own enumerable property names of `object`.
+ *
+ * **Note:** Non-object values are coerced to objects. See the
+ * [ES spec](http://ecma-international.org/ecma-262/7.0/#sec-object.keys)
+ * for more details.
+ *
+ * @static
+ * @since 0.1.0
+ * @memberOf _
+ * @category Object
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of property names.
+ * @example
+ *
+ * function Foo() {
+ *   this.a = 1;
+ *   this.b = 2;
+ * }
+ *
+ * Foo.prototype.c = 3;
+ *
+ * _.keys(new Foo);
+ * // => ['a', 'b'] (iteration order is not guaranteed)
+ *
+ * _.keys('hi');
+ * // => ['0', '1']
+ */
+function keys(object) {
+  return isArrayLike(object) ? arrayLikeKeys(object) : baseKeys(object);
+}
+
+/**
+ * Creates an array of own enumerable property names and symbols of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of property names and symbols.
+ */
+function getAllKeys(object) {
+  return baseGetAllKeys(object, keys, getSymbols);
+}
+
+/** Used to compose bitmasks for value comparisons. */
+var COMPARE_PARTIAL_FLAG$1 = 1;
+
+/** Used for built-in method references. */
+var objectProto$1 = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty$1 = objectProto$1.hasOwnProperty;
+
+/**
+ * A specialized version of `baseIsEqualDeep` for objects with support for
+ * partial deep comparisons.
+ *
+ * @private
+ * @param {Object} object The object to compare.
+ * @param {Object} other The other object to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} stack Tracks traversed `object` and `other` objects.
+ * @returns {boolean} Returns `true` if the objects are equivalent, else `false`.
+ */
+function equalObjects(object, other, bitmask, customizer, equalFunc, stack) {
+  var isPartial = bitmask & COMPARE_PARTIAL_FLAG$1,
+      objProps = getAllKeys(object),
+      objLength = objProps.length,
+      othProps = getAllKeys(other),
+      othLength = othProps.length;
+
+  if (objLength != othLength && !isPartial) {
+    return false;
+  }
+  var index = objLength;
+  while (index--) {
+    var key = objProps[index];
+    if (!(isPartial ? key in other : hasOwnProperty$1.call(other, key))) {
+      return false;
+    }
+  }
+  // Check that cyclic values are equal.
+  var objStacked = stack.get(object);
+  var othStacked = stack.get(other);
+  if (objStacked && othStacked) {
+    return objStacked == other && othStacked == object;
+  }
+  var result = true;
+  stack.set(object, other);
+  stack.set(other, object);
+
+  var skipCtor = isPartial;
+  while (++index < objLength) {
+    key = objProps[index];
+    var objValue = object[key],
+        othValue = other[key];
+
+    if (customizer) {
+      var compared = isPartial
+        ? customizer(othValue, objValue, key, other, object, stack)
+        : customizer(objValue, othValue, key, object, other, stack);
+    }
+    // Recursively compare objects (susceptible to call stack limits).
+    if (!(compared === undefined
+          ? (objValue === othValue || equalFunc(objValue, othValue, bitmask, customizer, stack))
+          : compared
+        )) {
+      result = false;
+      break;
+    }
+    skipCtor || (skipCtor = key == 'constructor');
+  }
+  if (result && !skipCtor) {
+    var objCtor = object.constructor,
+        othCtor = other.constructor;
+
+    // Non `Object` object instances with different constructors are not equal.
+    if (objCtor != othCtor &&
+        ('constructor' in object && 'constructor' in other) &&
+        !(typeof objCtor == 'function' && objCtor instanceof objCtor &&
+          typeof othCtor == 'function' && othCtor instanceof othCtor)) {
+      result = false;
+    }
+  }
+  stack['delete'](object);
+  stack['delete'](other);
+  return result;
+}
+
+/* Built-in method references that are verified to be native. */
+var DataView = getNative(root, 'DataView');
+
+/* Built-in method references that are verified to be native. */
+var Promise$1 = getNative(root, 'Promise');
+
+/* Built-in method references that are verified to be native. */
+var Set$1 = getNative(root, 'Set');
+
+/* Built-in method references that are verified to be native. */
+var WeakMap = getNative(root, 'WeakMap');
+
+/** `Object#toString` result references. */
+var mapTag = '[object Map]',
+    objectTag$1 = '[object Object]',
+    promiseTag = '[object Promise]',
+    setTag = '[object Set]',
+    weakMapTag = '[object WeakMap]';
+
+var dataViewTag = '[object DataView]';
+
+/** Used to detect maps, sets, and weakmaps. */
+var dataViewCtorString = toSource(DataView),
+    mapCtorString = toSource(Map$1),
+    promiseCtorString = toSource(Promise$1),
+    setCtorString = toSource(Set$1),
+    weakMapCtorString = toSource(WeakMap);
+
+/**
+ * Gets the `toStringTag` of `value`.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the `toStringTag`.
+ */
+var getTag = baseGetTag;
+
+// Fallback for data views, maps, sets, and weak maps in IE 11 and promises in Node.js < 6.
+if ((DataView && getTag(new DataView(new ArrayBuffer(1))) != dataViewTag) ||
+    (Map$1 && getTag(new Map$1) != mapTag) ||
+    (Promise$1 && getTag(Promise$1.resolve()) != promiseTag) ||
+    (Set$1 && getTag(new Set$1) != setTag) ||
+    (WeakMap && getTag(new WeakMap) != weakMapTag)) {
+  getTag = function(value) {
+    var result = baseGetTag(value),
+        Ctor = result == objectTag$1 ? value.constructor : undefined,
+        ctorString = Ctor ? toSource(Ctor) : '';
+
+    if (ctorString) {
+      switch (ctorString) {
+        case dataViewCtorString: return dataViewTag;
+        case mapCtorString: return mapTag;
+        case promiseCtorString: return promiseTag;
+        case setCtorString: return setTag;
+        case weakMapCtorString: return weakMapTag;
+      }
+    }
+    return result;
+  };
+}
+
+/** Used to compose bitmasks for value comparisons. */
+var COMPARE_PARTIAL_FLAG = 1;
+
+/** `Object#toString` result references. */
+var argsTag = '[object Arguments]',
+    arrayTag = '[object Array]',
+    objectTag = '[object Object]';
+
+/** Used for built-in method references. */
+var objectProto = Object.prototype;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty = objectProto.hasOwnProperty;
+
+/**
+ * A specialized version of `baseIsEqual` for arrays and objects which performs
+ * deep comparisons and tracks traversed objects enabling objects with circular
+ * references to be compared.
+ *
+ * @private
+ * @param {Object} object The object to compare.
+ * @param {Object} other The other object to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} [stack] Tracks traversed `object` and `other` objects.
+ * @returns {boolean} Returns `true` if the objects are equivalent, else `false`.
+ */
+function baseIsEqualDeep(object, other, bitmask, customizer, equalFunc, stack) {
+  var objIsArr = isArray(object),
+      othIsArr = isArray(other),
+      objTag = objIsArr ? arrayTag : getTag(object),
+      othTag = othIsArr ? arrayTag : getTag(other);
+
+  objTag = objTag == argsTag ? objectTag : objTag;
+  othTag = othTag == argsTag ? objectTag : othTag;
+
+  var objIsObj = objTag == objectTag,
+      othIsObj = othTag == objectTag,
+      isSameTag = objTag == othTag;
+
+  if (isSameTag && isBuffer(object)) {
+    if (!isBuffer(other)) {
+      return false;
+    }
+    objIsArr = true;
+    objIsObj = false;
+  }
+  if (isSameTag && !objIsObj) {
+    stack || (stack = new Stack);
+    return (objIsArr || isTypedArray(object))
+      ? equalArrays(object, other, bitmask, customizer, equalFunc, stack)
+      : equalByTag(object, other, objTag, bitmask, customizer, equalFunc, stack);
+  }
+  if (!(bitmask & COMPARE_PARTIAL_FLAG)) {
+    var objIsWrapped = objIsObj && hasOwnProperty.call(object, '__wrapped__'),
+        othIsWrapped = othIsObj && hasOwnProperty.call(other, '__wrapped__');
+
+    if (objIsWrapped || othIsWrapped) {
+      var objUnwrapped = objIsWrapped ? object.value() : object,
+          othUnwrapped = othIsWrapped ? other.value() : other;
+
+      stack || (stack = new Stack);
+      return equalFunc(objUnwrapped, othUnwrapped, bitmask, customizer, stack);
+    }
+  }
+  if (!isSameTag) {
+    return false;
+  }
+  stack || (stack = new Stack);
+  return equalObjects(object, other, bitmask, customizer, equalFunc, stack);
+}
+
+/**
+ * The base implementation of `_.isEqual` which supports partial comparisons
+ * and tracks traversed objects.
+ *
+ * @private
+ * @param {*} value The value to compare.
+ * @param {*} other The other value to compare.
+ * @param {boolean} bitmask The bitmask flags.
+ *  1 - Unordered comparison
+ *  2 - Partial comparison
+ * @param {Function} [customizer] The function to customize comparisons.
+ * @param {Object} [stack] Tracks traversed `value` and `other` objects.
+ * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+ */
+function baseIsEqual(value, other, bitmask, customizer, stack) {
+  if (value === other) {
+    return true;
+  }
+  if (value == null || other == null || (!isObjectLike(value) && !isObjectLike(other))) {
+    return value !== value && other !== other;
+  }
+  return baseIsEqualDeep(value, other, bitmask, customizer, baseIsEqual, stack);
+}
+
+/**
+ * Performs a deep comparison between two values to determine if they are
+ * equivalent.
+ *
+ * **Note:** This method supports comparing arrays, array buffers, booleans,
+ * date objects, error objects, maps, numbers, `Object` objects, regexes,
+ * sets, strings, symbols, and typed arrays. `Object` objects are compared
+ * by their own, not inherited, enumerable properties. Functions and DOM
+ * nodes are compared by strict equality, i.e. `===`.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to compare.
+ * @param {*} other The other value to compare.
+ * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+ * @example
+ *
+ * var object = { 'a': 1 };
+ * var other = { 'a': 1 };
+ *
+ * _.isEqual(object, other);
+ * // => true
+ *
+ * object === other;
+ * // => false
+ */
+function isEqual(value, other) {
+  return baseIsEqual(value, other);
+}
+
+class BaseCloudDriver {
+  /**
+   * @param {Object} options
+   * @param {string} options.id - Unique identifier for this cloud source
+   * @param {string} options.driver - Driver name (aws, gcp, do, ...)
+   * @param {Object} options.credentials - Authentication material
+   * @param {Object} options.config - Driver specific configuration
+   * @param {Object} options.globals - Global plugin options
+   * @param {Function} options.logger - Optional logger fn (level, msg, meta)
+   */
+  constructor(options = {}) {
+    const {
+      id,
+      driver,
+      credentials = {},
+      config = {},
+      globals = {},
+      logger = null
+    } = options;
+    if (!driver) {
+      throw new Error('Cloud driver requires a "driver" identifier');
+    }
+    this.id = id || driver;
+    this.driver = driver;
+    this.credentials = credentials;
+    this.config = config;
+    this.globals = globals;
+    this.logger = typeof logger === "function" ? logger : () => {
+    };
+  }
+  /**
+   * Perform driver bootstrapping (auth warm-up, SDK clients, etc).
+   * Default implementation is a no-op.
+   */
+  async initialize() {
+    return;
+  }
+  /**
+   * Fetch resources from the cloud API.
+   * Must be implemented by subclasses.
+   * @param {Object} options
+   * @returns {Promise<Array<Object>|AsyncIterable<Object>>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async listResources(options = {}) {
+    throw new Error(`Driver "${this.driver}" does not implement listResources()`);
+  }
+  /**
+   * Optional health check hook.
+   * @returns {Promise<{ok: boolean, details?: any}>}
+   */
+  async healthCheck() {
+    return { ok: true };
+  }
+  /**
+   * Graceful shutdown hook for long-lived SDK clients.
+   */
+  async destroy() {
+    return;
+  }
+}
+
+const DEFAULT_SERVICES$1 = [
+  "ec2",
+  "s3",
+  "rds",
+  "iam",
+  "lambda",
+  "vpc",
+  "elb",
+  "alb",
+  "nlb",
+  "dynamodb",
+  "sqs",
+  "sns",
+  "ecs",
+  "eks",
+  "apigateway",
+  "cloudfront",
+  "route53",
+  "kms",
+  "secretsmanager",
+  "ssm",
+  "elasticache",
+  "efs",
+  "ecr",
+  "stepfunctions",
+  "eventbridge",
+  "cloudwatch",
+  "logs",
+  "cloudtrail",
+  "config",
+  "acm",
+  "waf",
+  "wafv2",
+  "cognito",
+  "ebs",
+  "vpn",
+  "transitgateway",
+  "backup",
+  "kinesis"
+];
+const GLOBAL_REGION = "us-east-1";
+function normaliseServiceName$1(name) {
+  return (name || "").toString().trim().toLowerCase();
+}
+function buildTagObject(entries, keyKey = "Key", valueKey = "Value") {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return null;
+  }
+  const out = {};
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const key = entry[keyKey];
+    if (!key) continue;
+    out[key] = entry[valueKey] ?? null;
+  }
+  return Object.keys(out).length ? out : null;
+}
+function buildCredentialProvider(credentials = {}) {
+  if (!credentials || typeof credentials !== "object") {
+    return credentialProviders.fromNodeProviderChain();
+  }
+  if (credentials.accessKeyId && credentials.secretAccessKey) {
+    const staticCredentials = {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken
+    };
+    return async () => staticCredentials;
+  }
+  if (credentials.profile) {
+    return credentialProviders.fromIni({ profile: credentials.profile });
+  }
+  if (credentials.processProfile) {
+    return credentialProviders.fromProcess({ profile: credentials.processProfile });
+  }
+  return credentialProviders.fromNodeProviderChain();
+}
+function ensureArray$1(value, fallback = []) {
+  if (!value) return fallback;
+  if (Array.isArray(value)) return value;
+  return [value];
+}
+function shouldCollect$1(service, includeSet, excludeSet) {
+  const name = normaliseServiceName$1(service);
+  if (excludeSet.has(name)) return false;
+  if (includeSet.size > 0 && !includeSet.has(name)) return false;
+  return true;
+}
+function extractEc2Tags(instance) {
+  if (!instance?.Tags) return null;
+  const tags = {};
+  for (const { Key, Value } of instance.Tags) {
+    if (!Key) continue;
+    tags[Key] = Value ?? null;
+  }
+  return Object.keys(tags).length ? tags : null;
+}
+class AwsInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "aws" });
+    this._clients = {
+      ec2: /* @__PURE__ */ new Map(),
+      s3: null,
+      rds: /* @__PURE__ */ new Map(),
+      iam: null,
+      lambda: /* @__PURE__ */ new Map(),
+      sts: null,
+      elb: /* @__PURE__ */ new Map(),
+      elbv2: /* @__PURE__ */ new Map(),
+      dynamodb: /* @__PURE__ */ new Map(),
+      sqs: /* @__PURE__ */ new Map(),
+      sns: /* @__PURE__ */ new Map(),
+      ecs: /* @__PURE__ */ new Map(),
+      eks: /* @__PURE__ */ new Map(),
+      apigateway: /* @__PURE__ */ new Map(),
+      apigatewayv2: /* @__PURE__ */ new Map(),
+      cloudfront: null,
+      route53: null,
+      kms: /* @__PURE__ */ new Map(),
+      secretsmanager: /* @__PURE__ */ new Map(),
+      ssm: /* @__PURE__ */ new Map(),
+      elasticache: /* @__PURE__ */ new Map(),
+      efs: /* @__PURE__ */ new Map(),
+      ecr: /* @__PURE__ */ new Map(),
+      sfn: /* @__PURE__ */ new Map(),
+      eventbridge: /* @__PURE__ */ new Map(),
+      cloudwatch: /* @__PURE__ */ new Map(),
+      logs: /* @__PURE__ */ new Map(),
+      cloudtrail: /* @__PURE__ */ new Map(),
+      config: /* @__PURE__ */ new Map(),
+      acm: /* @__PURE__ */ new Map(),
+      waf: null,
+      wafv2: /* @__PURE__ */ new Map(),
+      cognito: /* @__PURE__ */ new Map(),
+      backup: /* @__PURE__ */ new Map(),
+      kinesis: /* @__PURE__ */ new Map()
+    };
+    this._accountId = null;
+    this._credentialProvider = buildCredentialProvider(this.credentials);
+    this._services = ensureArray$1(this.config?.services, DEFAULT_SERVICES$1).map(normaliseServiceName$1).filter(Boolean);
+    if (!this._services.length) {
+      this._services = [...DEFAULT_SERVICES$1];
+    }
+    this._regions = ensureArray$1(this.config?.regions, [this.config?.region || GLOBAL_REGION]);
+    if (!this._regions.length) {
+      this._regions = [GLOBAL_REGION];
+    }
+  }
+  async initialize() {
+    await this._initializeSts();
+    this.logger("info", "AWS driver initialized", {
+      accountId: this._accountId,
+      services: this._services,
+      regions: this._regions
+    });
+  }
+  async *_collectEc2Instances() {
+    for (const region of this._regions) {
+      const client = this._getEc2Client(region);
+      const paginator = clientEc2.paginateDescribeInstances({ client }, {});
+      for await (const page of paginator) {
+        const reservations = page.Reservations || [];
+        for (const reservation of reservations) {
+          const instances = reservation.Instances || [];
+          for (const instance of instances) {
+            const instanceId = instance.InstanceId;
+            if (!instanceId) continue;
+            yield {
+              provider: "aws",
+              accountId: this._accountId,
+              region,
+              service: "ec2",
+              resourceType: "ec2.instance",
+              resourceId: instanceId,
+              name: extractInstanceName(instance),
+              tags: extractEc2Tags(instance),
+              configuration: sanitizeConfiguration$1(instance)
+            };
+          }
+        }
+      }
+    }
+  }
+  async *_collectS3Buckets() {
+    const client = this._getS3Client();
+    const response = await client.send(new clientS3.ListBucketsCommand({}));
+    const buckets = response.Buckets || [];
+    for (const bucket of buckets) {
+      const bucketName = bucket.Name;
+      if (!bucketName) continue;
+      const region = await this._resolveBucketRegion(client, bucketName);
+      const tags = await this._resolveBucketTags(client, bucketName);
+      yield {
+        provider: "aws",
+        accountId: this._accountId,
+        region,
+        service: "s3",
+        resourceType: "s3.bucket",
+        resourceId: bucketName,
+        name: bucketName,
+        tags,
+        configuration: sanitizeConfiguration$1({
+          ...bucket,
+          Region: region,
+          Owner: response.Owner || null
+        })
+      };
+    }
+  }
+  async *_collectRdsInstances() {
+    for (const region of this._regions) {
+      const client = this._getRdsClient(region);
+      const paginator = clientRds.paginateDescribeDBInstances({ client }, {});
+      for await (const page of paginator) {
+        const instances = page.DBInstances || [];
+        for (const instance of instances) {
+          const resourceId = instance.DbiResourceId || instance.DBInstanceIdentifier;
+          if (!resourceId) continue;
+          const arn = instance.DBInstanceArn;
+          const tags = await this._safeListTagsForResource(client, arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "rds",
+            resourceType: "rds.instance",
+            resourceId,
+            name: instance.DBInstanceIdentifier || resourceId,
+            tags,
+            configuration: sanitizeConfiguration$1(instance)
+          };
+        }
+      }
+    }
+  }
+  async *_collectIamIdentities() {
+    const client = this._getIamClient();
+    const userPaginator = clientIam.paginateListUsers({ client }, {});
+    for await (const page of userPaginator) {
+      const users = page.Users || [];
+      for (const user of users) {
+        const tags = await this._safeListIamTags(client, new clientIam.ListUserTagsCommand({ UserName: user.UserName }));
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region: null,
+          service: "iam",
+          resourceType: "iam.user",
+          resourceId: user.Arn || user.UserId || user.UserName,
+          name: user.UserName,
+          tags,
+          configuration: sanitizeConfiguration$1(user)
+        };
+      }
+    }
+    const rolePaginator = clientIam.paginateListRoles({ client }, {});
+    for await (const page of rolePaginator) {
+      const roles = page.Roles || [];
+      for (const role of roles) {
+        const tags = await this._safeListIamTags(client, new clientIam.ListRoleTagsCommand({ RoleName: role.RoleName }));
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region: null,
+          service: "iam",
+          resourceType: "iam.role",
+          resourceId: role.Arn || role.RoleId || role.RoleName,
+          name: role.RoleName,
+          tags,
+          configuration: sanitizeConfiguration$1(role)
+        };
+      }
+    }
+  }
+  async *_collectLambdaFunctions() {
+    for (const region of this._regions) {
+      const client = this._getLambdaClient(region);
+      const paginator = clientLambda.paginateListFunctions({ client }, {});
+      for await (const page of paginator) {
+        const functions = page.Functions || [];
+        for (const lambda of functions) {
+          const arn = lambda.FunctionArn;
+          let tags = null;
+          if (arn) {
+            tags = await this._safeListLambdaTags(client, arn);
+          }
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "lambda",
+            resourceType: "lambda.function",
+            resourceId: arn || lambda.FunctionName,
+            name: lambda.FunctionName,
+            tags,
+            configuration: sanitizeConfiguration$1(lambda)
+          };
+        }
+      }
+    }
+  }
+  async *_collectVpcResources() {
+    for (const region of this._regions) {
+      const client = this._getEc2Client(region);
+      const vpcPaginator = clientEc2.paginateDescribeVpcs({ client }, {});
+      for await (const page of vpcPaginator) {
+        const vpcs = page.Vpcs || [];
+        for (const vpc of vpcs) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.vpc",
+            resourceId: vpc.VpcId,
+            name: extractEc2Tags(vpc)?.Name || vpc.VpcId,
+            tags: extractEc2Tags(vpc),
+            configuration: sanitizeConfiguration$1(vpc)
+          };
+        }
+      }
+      const subnetPaginator = clientEc2.paginateDescribeSubnets({ client }, {});
+      for await (const page of subnetPaginator) {
+        const subnets = page.Subnets || [];
+        for (const subnet of subnets) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.subnet",
+            resourceId: subnet.SubnetId,
+            name: extractEc2Tags(subnet)?.Name || subnet.SubnetId,
+            tags: extractEc2Tags(subnet),
+            configuration: sanitizeConfiguration$1(subnet)
+          };
+        }
+      }
+      const sgPaginator = clientEc2.paginateDescribeSecurityGroups({ client }, {});
+      for await (const page of sgPaginator) {
+        const groups = page.SecurityGroups || [];
+        for (const sg of groups) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.security-group",
+            resourceId: sg.GroupId,
+            name: sg.GroupName,
+            tags: extractEc2Tags(sg),
+            configuration: sanitizeConfiguration$1(sg)
+          };
+        }
+      }
+      const rtPaginator = clientEc2.paginateDescribeRouteTables({ client }, {});
+      for await (const page of rtPaginator) {
+        const tables = page.RouteTables || [];
+        for (const rt of tables) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.route-table",
+            resourceId: rt.RouteTableId,
+            name: extractEc2Tags(rt)?.Name || rt.RouteTableId,
+            tags: extractEc2Tags(rt),
+            configuration: sanitizeConfiguration$1(rt)
+          };
+        }
+      }
+      const igwPaginator = clientEc2.paginateDescribeInternetGateways({ client }, {});
+      for await (const page of igwPaginator) {
+        const gateways = page.InternetGateways || [];
+        for (const igw of gateways) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.internet-gateway",
+            resourceId: igw.InternetGatewayId,
+            name: extractEc2Tags(igw)?.Name || igw.InternetGatewayId,
+            tags: extractEc2Tags(igw),
+            configuration: sanitizeConfiguration$1(igw)
+          };
+        }
+      }
+      const natPaginator = clientEc2.paginateDescribeNatGateways({ client }, {});
+      for await (const page of natPaginator) {
+        const gateways = page.NatGateways || [];
+        for (const nat of gateways) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.nat-gateway",
+            resourceId: nat.NatGatewayId,
+            name: extractEc2Tags(nat)?.Name || nat.NatGatewayId,
+            tags: extractEc2Tags(nat),
+            configuration: sanitizeConfiguration$1(nat)
+          };
+        }
+      }
+      const aclPaginator = clientEc2.paginateDescribeNetworkAcls({ client }, {});
+      for await (const page of aclPaginator) {
+        const acls = page.NetworkAcls || [];
+        for (const acl of acls) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "vpc.network-acl",
+            resourceId: acl.NetworkAclId,
+            name: extractEc2Tags(acl)?.Name || acl.NetworkAclId,
+            tags: extractEc2Tags(acl),
+            configuration: sanitizeConfiguration$1(acl)
+          };
+        }
+      }
+    }
+  }
+  async *_collectLoadBalancers() {
+    for (const region of this._regions) {
+      const elbClient = this._getElbClient(region);
+      const classicPaginator = clientElasticLoadBalancing.paginateDescribeLoadBalancers({ client: elbClient }, {});
+      for await (const page of classicPaginator) {
+        const lbs = page.LoadBalancerDescriptions || [];
+        for (const lb of lbs) {
+          const tags = await this._safeListClassicLBTags(elbClient, lb.LoadBalancerName);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "elb",
+            resourceType: "elb.classic",
+            resourceId: lb.LoadBalancerName,
+            name: lb.LoadBalancerName,
+            tags,
+            configuration: sanitizeConfiguration$1(lb)
+          };
+        }
+      }
+      const elbv2Client = this._getElbv2Client(region);
+      const v2Paginator = clientElasticLoadBalancingV2.paginateDescribeLoadBalancers({ client: elbv2Client }, {});
+      for await (const page of v2Paginator) {
+        const lbs = page.LoadBalancers || [];
+        for (const lb of lbs) {
+          const arn = lb.LoadBalancerArn;
+          const tags = await this._safeListELBv2Tags(elbv2Client, [arn]);
+          const lbType = lb.Type === "application" ? "alb" : lb.Type === "network" ? "nlb" : "elb";
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: lbType,
+            resourceType: `${lbType}.load-balancer`,
+            resourceId: arn,
+            name: lb.LoadBalancerName,
+            tags,
+            configuration: sanitizeConfiguration$1(lb)
+          };
+        }
+      }
+      const tgPaginator = clientElasticLoadBalancingV2.paginateDescribeTargetGroups({ client: elbv2Client }, {});
+      for await (const page of tgPaginator) {
+        const groups = page.TargetGroups || [];
+        for (const tg of groups) {
+          const arn = tg.TargetGroupArn;
+          const tags = await this._safeListELBv2Tags(elbv2Client, [arn]);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "elb",
+            resourceType: "elb.target-group",
+            resourceId: arn,
+            name: tg.TargetGroupName,
+            tags,
+            configuration: sanitizeConfiguration$1(tg)
+          };
+        }
+      }
+    }
+  }
+  async *_collectDynamoDBTables() {
+    for (const region of this._regions) {
+      const client = this._getDynamoDBClient(region);
+      const paginator = clientDynamodb.paginateListTables({ client }, {});
+      for await (const page of paginator) {
+        const tables = page.TableNames || [];
+        for (const tableName of tables) {
+          const description = await client.send(new clientDynamodb.DescribeTableCommand({ TableName: tableName }));
+          const table = description.Table;
+          const arn = table?.TableArn;
+          let tags = null;
+          if (arn) {
+            tags = await this._safeListDynamoDBTags(client, arn);
+          }
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "dynamodb",
+            resourceType: "dynamodb.table",
+            resourceId: arn || tableName,
+            name: tableName,
+            tags,
+            configuration: sanitizeConfiguration$1(table)
+          };
+        }
+      }
+    }
+  }
+  async *_collectSQSQueues() {
+    for (const region of this._regions) {
+      const client = this._getSqsClient(region);
+      const paginator = clientSqs.paginateListQueues({ client }, {});
+      for await (const page of paginator) {
+        const urls = page.QueueUrls || [];
+        for (const queueUrl of urls) {
+          const attributes = await this._safeGetQueueAttributes(client, queueUrl);
+          const tags = await this._safeListQueueTags(client, queueUrl);
+          const queueName = queueUrl.split("/").pop();
+          const arn = attributes?.QueueArn;
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "sqs",
+            resourceType: "sqs.queue",
+            resourceId: arn || queueUrl,
+            name: queueName,
+            tags,
+            configuration: sanitizeConfiguration$1({ ...attributes, QueueUrl: queueUrl })
+          };
+        }
+      }
+    }
+  }
+  async *_collectSNSTopics() {
+    for (const region of this._regions) {
+      const client = this._getSnsClient(region);
+      const paginator = clientSns.paginateListTopics({ client }, {});
+      for await (const page of paginator) {
+        const topics = page.Topics || [];
+        for (const topic of topics) {
+          const arn = topic.TopicArn;
+          const attributes = await this._safeGetTopicAttributes(client, arn);
+          const tags = await this._safeListSNSTags(client, arn);
+          const topicName = arn?.split(":").pop();
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "sns",
+            resourceType: "sns.topic",
+            resourceId: arn,
+            name: topicName,
+            tags,
+            configuration: sanitizeConfiguration$1({ ...attributes, TopicArn: arn })
+          };
+        }
+      }
+    }
+  }
+  async *_collectECSResources() {
+    for (const region of this._regions) {
+      const client = this._getEcsClient(region);
+      const clusterPaginator = clientEcs.paginateListClusters({ client }, {});
+      for await (const page of clusterPaginator) {
+        const arns = page.clusterArns || [];
+        for (const arn of arns) {
+          const tags = await this._safeListECSTags(client, arn);
+          const name = arn.split("/").pop();
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "ecs",
+            resourceType: "ecs.cluster",
+            resourceId: arn,
+            name,
+            tags,
+            configuration: sanitizeConfiguration$1({ clusterArn: arn })
+          };
+          const servicePaginator = clientEcs.paginateListServices({ client }, { cluster: arn });
+          for await (const servicePage of servicePaginator) {
+            const serviceArns = servicePage.serviceArns || [];
+            if (serviceArns.length === 0) continue;
+            const described = await client.send(new clientEcs.DescribeServicesCommand({
+              cluster: arn,
+              services: serviceArns,
+              include: ["TAGS"]
+            }));
+            const services = described.services || [];
+            for (const service of services) {
+              yield {
+                provider: "aws",
+                accountId: this._accountId,
+                region,
+                service: "ecs",
+                resourceType: "ecs.service",
+                resourceId: service.serviceArn,
+                name: service.serviceName,
+                tags: buildTagObject(service.tags),
+                configuration: sanitizeConfiguration$1(service)
+              };
+            }
+          }
+        }
+      }
+      const taskDefPaginator = clientEcs.paginateListTaskDefinitions({ client }, {});
+      for await (const page of taskDefPaginator) {
+        const arns = page.taskDefinitionArns || [];
+        for (const arn of arns) {
+          const described = await client.send(new clientEcs.DescribeTaskDefinitionCommand({
+            taskDefinition: arn,
+            include: ["TAGS"]
+          }));
+          const taskDef = described.taskDefinition;
+          const tags = buildTagObject(described.tags);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "ecs",
+            resourceType: "ecs.task-definition",
+            resourceId: taskDef?.taskDefinitionArn || arn,
+            name: taskDef?.family,
+            tags,
+            configuration: sanitizeConfiguration$1(taskDef)
+          };
+        }
+      }
+    }
+  }
+  async *_collectEKSClusters() {
+    for (const region of this._regions) {
+      const client = this._getEksClient(region);
+      const clusterPaginator = clientEks.paginateListClusters({ client }, {});
+      for await (const page of clusterPaginator) {
+        const names = page.clusters || [];
+        for (const name of names) {
+          const described = await client.send(new clientEks.DescribeClusterCommand({ name }));
+          const cluster = described.cluster;
+          const arn = cluster?.arn;
+          const tags = await this._safeListEKSTags(client, arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "eks",
+            resourceType: "eks.cluster",
+            resourceId: arn || name,
+            name,
+            tags,
+            configuration: sanitizeConfiguration$1(cluster)
+          };
+          const ngPaginator = clientEks.paginateListNodegroups({ client }, { clusterName: name });
+          for await (const ngPage of ngPaginator) {
+            const nodegroups = ngPage.nodegroups || [];
+            for (const ngName of nodegroups) {
+              const ngDescribed = await client.send(new clientEks.DescribeNodegroupCommand({
+                clusterName: name,
+                nodegroupName: ngName
+              }));
+              const ng = ngDescribed.nodegroup;
+              const ngArn = ng?.nodegroupArn;
+              const ngTags = await this._safeListEKSTags(client, ngArn);
+              yield {
+                provider: "aws",
+                accountId: this._accountId,
+                region,
+                service: "eks",
+                resourceType: "eks.nodegroup",
+                resourceId: ngArn || ngName,
+                name: ngName,
+                tags: ngTags,
+                configuration: sanitizeConfiguration$1(ng)
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+  async *_collectAPIGateways() {
+    for (const region of this._regions) {
+      const v1Client = this._getApiGatewayClient(region);
+      const v1Paginator = clientApiGateway.paginateGetRestApis({ client: v1Client }, {});
+      for await (const page of v1Paginator) {
+        const apis = page.items || [];
+        for (const api of apis) {
+          const tags = await this._safeGetAPIGatewayTags(v1Client, api.id);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "apigateway",
+            resourceType: "apigateway.rest-api",
+            resourceId: api.id,
+            name: api.name,
+            tags,
+            configuration: sanitizeConfiguration$1(api)
+          };
+        }
+      }
+      const v2Client = this._getApiGatewayV2Client(region);
+      const v2Paginator = clientApigatewayv2.paginateGetApis({ client: v2Client }, {});
+      for await (const page of v2Paginator) {
+        const apis = page.Items || [];
+        for (const api of apis) {
+          const tags = await this._safeGetAPIGatewayV2Tags(v2Client, api.ApiId);
+          const type = api.ProtocolType?.toLowerCase() || "http";
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "apigateway",
+            resourceType: `apigateway.${type}-api`,
+            resourceId: api.ApiId,
+            name: api.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(api)
+          };
+        }
+      }
+    }
+  }
+  async *_collectCloudFrontDistributions() {
+    const client = this._getCloudFrontClient();
+    const paginator = clientCloudfront.paginateListDistributions({ client }, {});
+    for await (const page of paginator) {
+      const items = page.DistributionList?.Items || [];
+      for (const dist of items) {
+        const arn = dist.ARN;
+        const tags = await this._safeListCloudFrontTags(client, arn);
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region: null,
+          service: "cloudfront",
+          resourceType: "cloudfront.distribution",
+          resourceId: dist.Id,
+          name: dist.DomainName,
+          tags,
+          configuration: sanitizeConfiguration$1(dist)
+        };
+      }
+    }
+  }
+  async *_collectRoute53HostedZones() {
+    const client = this._getRoute53Client();
+    const paginator = clientRoute53.paginateListHostedZones({ client }, {});
+    for await (const page of paginator) {
+      const zones = page.HostedZones || [];
+      for (const zone of zones) {
+        const zoneId = zone.Id?.replace("/hostedzone/", "");
+        const tags = await this._safeListRoute53Tags(client, zone.Id);
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region: null,
+          service: "route53",
+          resourceType: "route53.hosted-zone",
+          resourceId: zoneId,
+          name: zone.Name,
+          tags,
+          configuration: sanitizeConfiguration$1(zone)
+        };
+      }
+    }
+  }
+  async *_collectKMSKeys() {
+    for (const region of this._regions) {
+      const client = this._getKmsClient(region);
+      const paginator = clientKms.paginateListKeys({ client }, {});
+      for await (const page of paginator) {
+        const keys = page.Keys || [];
+        for (const key of keys) {
+          const described = await client.send(new clientKms.DescribeKeyCommand({ KeyId: key.KeyId }));
+          const metadata = described.KeyMetadata;
+          const tags = await this._safeListKMSTags(client, key.KeyId);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "kms",
+            resourceType: "kms.key",
+            resourceId: metadata?.Arn || key.KeyId,
+            name: metadata?.Description || key.KeyId,
+            tags,
+            configuration: sanitizeConfiguration$1(metadata)
+          };
+        }
+      }
+    }
+  }
+  async *_collectSecretsManagerSecrets() {
+    for (const region of this._regions) {
+      const client = this._getSecretsManagerClient(region);
+      const paginator = clientSecretsManager.paginateListSecrets({ client }, {});
+      for await (const page of paginator) {
+        const secrets = page.SecretList || [];
+        for (const secret of secrets) {
+          const described = await client.send(new clientSecretsManager.DescribeSecretCommand({ SecretId: secret.ARN }));
+          const tags = buildTagObject(described.Tags);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "secretsmanager",
+            resourceType: "secretsmanager.secret",
+            resourceId: described.ARN || secret.ARN,
+            name: described.Name || secret.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(described)
+          };
+        }
+      }
+    }
+  }
+  async *_collectSSMParameters() {
+    for (const region of this._regions) {
+      const client = this._getSsmClient(region);
+      const paginator = clientSsm.paginateDescribeParameters({ client }, {});
+      for await (const page of paginator) {
+        const params = page.Parameters || [];
+        for (const param of params) {
+          const tags = await this._safeListSSMTags(client, param.Name);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "ssm",
+            resourceType: "ssm.parameter",
+            resourceId: param.Name,
+            name: param.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(param)
+          };
+        }
+      }
+    }
+  }
+  async *_collectElastiCacheClusters() {
+    for (const region of this._regions) {
+      const client = this._getElastiCacheClient(region);
+      const paginator = clientElasticache.paginateDescribeCacheClusters({ client }, { ShowCacheNodeInfo: true });
+      for await (const page of paginator) {
+        const clusters = page.CacheClusters || [];
+        for (const cluster of clusters) {
+          const arn = cluster.ARN;
+          const tags = await this._safeListElastiCacheTags(client, arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "elasticache",
+            resourceType: "elasticache.cluster",
+            resourceId: arn || cluster.CacheClusterId,
+            name: cluster.CacheClusterId,
+            tags,
+            configuration: sanitizeConfiguration$1(cluster)
+          };
+        }
+      }
+    }
+  }
+  async *_collectEFSFileSystems() {
+    for (const region of this._regions) {
+      const client = this._getEfsClient(region);
+      const paginator = clientEfs.paginateDescribeFileSystems({ client }, {});
+      for await (const page of paginator) {
+        const filesystems = page.FileSystems || [];
+        for (const fs of filesystems) {
+          const tags = await this._safeDescribeEFSTags(client, fs.FileSystemId);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "efs",
+            resourceType: "efs.filesystem",
+            resourceId: fs.FileSystemArn || fs.FileSystemId,
+            name: fs.Name || fs.FileSystemId,
+            tags,
+            configuration: sanitizeConfiguration$1(fs)
+          };
+        }
+      }
+    }
+  }
+  async *_collectECRRepositories() {
+    for (const region of this._regions) {
+      const client = this._getEcrClient(region);
+      const paginator = clientEcr.paginateDescribeRepositories({ client }, {});
+      for await (const page of paginator) {
+        const repos = page.repositories || [];
+        for (const repo of repos) {
+          const tags = await this._safeListECRTags(client, repo.repositoryArn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "ecr",
+            resourceType: "ecr.repository",
+            resourceId: repo.repositoryArn,
+            name: repo.repositoryName,
+            tags,
+            configuration: sanitizeConfiguration$1(repo)
+          };
+        }
+      }
+    }
+  }
+  async *_collectStepFunctionsStateMachines() {
+    for (const region of this._regions) {
+      const client = this._getSfnClient(region);
+      const paginator = clientSfn.paginateListStateMachines({ client }, {});
+      for await (const page of paginator) {
+        const machines = page.stateMachines || [];
+        for (const machine of machines) {
+          const tags = await this._safeListSFNTags(client, machine.stateMachineArn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "stepfunctions",
+            resourceType: "stepfunctions.statemachine",
+            resourceId: machine.stateMachineArn,
+            name: machine.name,
+            tags,
+            configuration: sanitizeConfiguration$1(machine)
+          };
+        }
+      }
+    }
+  }
+  async *_collectEventBridgeResources() {
+    for (const region of this._regions) {
+      const client = this._getEventBridgeClient(region);
+      const busPaginator = clientEventbridge.paginateListEventBuses({ client }, {});
+      for await (const page of busPaginator) {
+        const buses = page.EventBuses || [];
+        for (const bus of buses) {
+          const tags = await this._safeListEventBridgeTags(client, bus.Arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "eventbridge",
+            resourceType: "eventbridge.bus",
+            resourceId: bus.Arn || bus.Name,
+            name: bus.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(bus)
+          };
+        }
+      }
+      const rulePaginator = clientEventbridge.paginateListRules({ client }, {});
+      for await (const page of rulePaginator) {
+        const rules = page.Rules || [];
+        for (const rule of rules) {
+          const tags = await this._safeListEventBridgeTags(client, rule.Arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "eventbridge",
+            resourceType: "eventbridge.rule",
+            resourceId: rule.Arn || rule.Name,
+            name: rule.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(rule)
+          };
+        }
+      }
+    }
+  }
+  async *_collectCloudWatchResources() {
+    for (const region of this._regions) {
+      const cwClient = this._getCloudWatchClient(region);
+      const alarmPaginator = clientCloudwatch.paginateDescribeAlarms({ client: cwClient }, {});
+      for await (const page of alarmPaginator) {
+        const alarms = page.MetricAlarms || [];
+        for (const alarm of alarms) {
+          const tags = await this._safeListCloudWatchTags(cwClient, alarm.AlarmArn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "cloudwatch",
+            resourceType: "cloudwatch.alarm",
+            resourceId: alarm.AlarmArn || alarm.AlarmName,
+            name: alarm.AlarmName,
+            tags,
+            configuration: sanitizeConfiguration$1(alarm)
+          };
+        }
+      }
+      const logsClient = this._getCloudWatchLogsClient(region);
+      const logsPaginator = clientCloudwatchLogs.paginateDescribeLogGroups({ client: logsClient }, {});
+      for await (const page of logsPaginator) {
+        const groups = page.logGroups || [];
+        for (const group of groups) {
+          const tags = await this._safeListCWLogsTags(logsClient, group.logGroupName);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "logs",
+            resourceType: "logs.group",
+            resourceId: group.arn || group.logGroupName,
+            name: group.logGroupName,
+            tags,
+            configuration: sanitizeConfiguration$1(group)
+          };
+        }
+      }
+    }
+  }
+  async *_collectCloudTrails() {
+    for (const region of this._regions) {
+      const client = this._getCloudTrailClient(region);
+      const paginator = clientCloudtrail.paginateListTrails({ client }, {});
+      for await (const page of paginator) {
+        const trails = page.Trails || [];
+        for (const trailInfo of trails) {
+          const described = await client.send(new clientCloudtrail.GetTrailCommand({ Name: trailInfo.TrailARN || trailInfo.Name }));
+          const trail = described.Trail;
+          const tags = await this._safeListCloudTrailTags(client, trail?.TrailARN);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "cloudtrail",
+            resourceType: "cloudtrail.trail",
+            resourceId: trail?.TrailARN || trail?.Name,
+            name: trail?.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(trail)
+          };
+        }
+      }
+    }
+  }
+  async *_collectConfigResources() {
+    for (const region of this._regions) {
+      const client = this._getConfigServiceClient(region);
+      const recorderResponse = await client.send(new clientConfigService.DescribeConfigurationRecordersCommand({}));
+      const recorders = recorderResponse.ConfigurationRecorders || [];
+      for (const recorder of recorders) {
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region,
+          service: "config",
+          resourceType: "config.recorder",
+          resourceId: recorder.name,
+          name: recorder.name,
+          tags: null,
+          configuration: sanitizeConfiguration$1(recorder)
+        };
+      }
+      const channelResponse = await client.send(new clientConfigService.DescribeDeliveryChannelsCommand({}));
+      const channels = channelResponse.DeliveryChannels || [];
+      for (const channel of channels) {
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region,
+          service: "config",
+          resourceType: "config.delivery-channel",
+          resourceId: channel.name,
+          name: channel.name,
+          tags: null,
+          configuration: sanitizeConfiguration$1(channel)
+        };
+      }
+    }
+  }
+  async *_collectACMCertificates() {
+    for (const region of this._regions) {
+      const client = this._getAcmClient(region);
+      const paginator = clientAcm.paginateListCertificates({ client }, {});
+      for await (const page of paginator) {
+        const certs = page.CertificateSummaryList || [];
+        for (const certSummary of certs) {
+          const arn = certSummary.CertificateArn;
+          const described = await client.send(new clientAcm.DescribeCertificateCommand({ CertificateArn: arn }));
+          const cert = described.Certificate;
+          const tags = await this._safeListACMTags(client, arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "acm",
+            resourceType: "acm.certificate",
+            resourceId: arn,
+            name: cert?.DomainName,
+            tags,
+            configuration: sanitizeConfiguration$1(cert)
+          };
+        }
+      }
+    }
+  }
+  async *_collectWAFResources() {
+    const wafClient = this._getWafClient();
+    const classicPaginator = clientWaf.paginateListWebACLs({ client: wafClient }, {});
+    for await (const page of classicPaginator) {
+      const webACLs = page.WebACLs || [];
+      for (const acl of webACLs) {
+        const tags = await this._safeListWAFTags(wafClient, acl.WebACLId);
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region: null,
+          service: "waf",
+          resourceType: "waf.webacl",
+          resourceId: acl.WebACLId,
+          name: acl.Name,
+          tags,
+          configuration: sanitizeConfiguration$1(acl)
+        };
+      }
+    }
+  }
+  async *_collectWAFV2Resources() {
+    for (const region of this._regions) {
+      const client = this._getWafv2Client(region);
+      const regionalPaginator = clientWafv2.paginateListWebACLs({ client }, { Scope: "REGIONAL" });
+      for await (const page of regionalPaginator) {
+        const webACLs = page.WebACLs || [];
+        for (const acl of webACLs) {
+          const tags = await this._safeListWAFV2Tags(client, acl.ARN);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "wafv2",
+            resourceType: "wafv2.webacl",
+            resourceId: acl.ARN,
+            name: acl.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(acl)
+          };
+        }
+      }
+    }
+    const cfClient = this._getWafv2Client(GLOBAL_REGION);
+    const cfPaginator = clientWafv2.paginateListWebACLs({ client: cfClient }, { Scope: "CLOUDFRONT" });
+    for await (const page of cfPaginator) {
+      const webACLs = page.WebACLs || [];
+      for (const acl of webACLs) {
+        const tags = await this._safeListWAFV2Tags(cfClient, acl.ARN);
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region: GLOBAL_REGION,
+          service: "wafv2",
+          resourceType: "wafv2.webacl-cloudfront",
+          resourceId: acl.ARN,
+          name: acl.Name,
+          tags,
+          configuration: sanitizeConfiguration$1(acl)
+        };
+      }
+    }
+  }
+  async *_collectCognitoUserPools() {
+    for (const region of this._regions) {
+      const client = this._getCognitoClient(region);
+      const paginator = clientCognitoIdentityProvider.paginateListUserPools({ client }, { MaxResults: 60 });
+      for await (const page of paginator) {
+        const pools = page.UserPools || [];
+        for (const pool of pools) {
+          const described = await client.send(new clientCognitoIdentityProvider.DescribeUserPoolCommand({ UserPoolId: pool.Id }));
+          const fullPool = described.UserPool;
+          const tags = await this._safeListCognitoTags(client, fullPool?.Arn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "cognito",
+            resourceType: "cognito.userpool",
+            resourceId: fullPool?.Arn || pool.Id,
+            name: pool.Name,
+            tags,
+            configuration: sanitizeConfiguration$1(fullPool)
+          };
+        }
+      }
+    }
+  }
+  async *_collectEBSResources() {
+    for (const region of this._regions) {
+      const client = this._getEc2Client(region);
+      const volPaginator = clientEc2.paginateDescribeVolumes({ client }, {});
+      for await (const page of volPaginator) {
+        const volumes = page.Volumes || [];
+        for (const volume of volumes) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "ebs",
+            resourceType: "ebs.volume",
+            resourceId: volume.VolumeId,
+            name: extractEc2Tags(volume)?.Name || volume.VolumeId,
+            tags: extractEc2Tags(volume),
+            configuration: sanitizeConfiguration$1(volume)
+          };
+        }
+      }
+      const snapPaginator = clientEc2.paginateDescribeSnapshots({ client }, { OwnerIds: ["self"] });
+      for await (const page of snapPaginator) {
+        const snapshots = page.Snapshots || [];
+        for (const snapshot of snapshots) {
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "ebs",
+            resourceType: "ebs.snapshot",
+            resourceId: snapshot.SnapshotId,
+            name: extractEc2Tags(snapshot)?.Name || snapshot.SnapshotId,
+            tags: extractEc2Tags(snapshot),
+            configuration: sanitizeConfiguration$1(snapshot)
+          };
+        }
+      }
+    }
+  }
+  async *_collectVPNResources() {
+    for (const region of this._regions) {
+      const client = this._getEc2Client(region);
+      const vpnResult = await client.send(new clientEc2.DescribeVpnConnectionsCommand({}));
+      const connections = vpnResult.VpnConnections || [];
+      for (const vpn of connections) {
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region,
+          service: "vpn",
+          resourceType: "vpn.connection",
+          resourceId: vpn.VpnConnectionId,
+          name: extractEc2Tags(vpn)?.Name || vpn.VpnConnectionId,
+          tags: extractEc2Tags(vpn),
+          configuration: sanitizeConfiguration$1(vpn)
+        };
+      }
+      const cgwResult = await client.send(new clientEc2.DescribeCustomerGatewaysCommand({}));
+      const gateways = cgwResult.CustomerGateways || [];
+      for (const cgw of gateways) {
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region,
+          service: "vpn",
+          resourceType: "vpn.customer-gateway",
+          resourceId: cgw.CustomerGatewayId,
+          name: extractEc2Tags(cgw)?.Name || cgw.CustomerGatewayId,
+          tags: extractEc2Tags(cgw),
+          configuration: sanitizeConfiguration$1(cgw)
+        };
+      }
+    }
+  }
+  async *_collectTransitGatewayResources() {
+    for (const region of this._regions) {
+      const client = this._getEc2Client(region);
+      const tgwResult = await client.send(new clientEc2.DescribeTransitGatewaysCommand({}));
+      const gateways = tgwResult.TransitGateways || [];
+      for (const tgw of gateways) {
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region,
+          service: "transitgateway",
+          resourceType: "transitgateway.gateway",
+          resourceId: tgw.TransitGatewayId,
+          name: extractEc2Tags(tgw)?.Name || tgw.TransitGatewayId,
+          tags: extractEc2Tags(tgw),
+          configuration: sanitizeConfiguration$1(tgw)
+        };
+      }
+      const attResult = await client.send(new clientEc2.DescribeTransitGatewayAttachmentsCommand({}));
+      const attachments = attResult.TransitGatewayAttachments || [];
+      for (const att of attachments) {
+        yield {
+          provider: "aws",
+          accountId: this._accountId,
+          region,
+          service: "transitgateway",
+          resourceType: "transitgateway.attachment",
+          resourceId: att.TransitGatewayAttachmentId,
+          name: extractEc2Tags(att)?.Name || att.TransitGatewayAttachmentId,
+          tags: extractEc2Tags(att),
+          configuration: sanitizeConfiguration$1(att)
+        };
+      }
+    }
+  }
+  async *_collectBackupResources() {
+    for (const region of this._regions) {
+      const client = this._getBackupClient(region);
+      const planPaginator = clientBackup.paginateListBackupPlans({ client }, {});
+      for await (const page of planPaginator) {
+        const plans = page.BackupPlansList || [];
+        for (const plan of plans) {
+          const tags = await this._safeListBackupTags(client, plan.BackupPlanArn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "backup",
+            resourceType: "backup.plan",
+            resourceId: plan.BackupPlanArn,
+            name: plan.BackupPlanName,
+            tags,
+            configuration: sanitizeConfiguration$1(plan)
+          };
+        }
+      }
+      const vaultPaginator = clientBackup.paginateListBackupVaults({ client }, {});
+      for await (const page of vaultPaginator) {
+        const vaults = page.BackupVaultList || [];
+        for (const vault of vaults) {
+          const tags = await this._safeListBackupTags(client, vault.BackupVaultArn);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "backup",
+            resourceType: "backup.vault",
+            resourceId: vault.BackupVaultArn,
+            name: vault.BackupVaultName,
+            tags,
+            configuration: sanitizeConfiguration$1(vault)
+          };
+        }
+      }
+    }
+  }
+  async *_collectKinesisStreams() {
+    for (const region of this._regions) {
+      const client = this._getKinesisClient(region);
+      const paginator = clientKinesis.paginateListStreams({ client }, {});
+      for await (const page of paginator) {
+        const streamNames = page.StreamNames || [];
+        for (const streamName of streamNames) {
+          const described = await client.send(new clientKinesis.DescribeStreamCommand({ StreamName: streamName }));
+          const stream = described.StreamDescription;
+          const arn = stream?.StreamARN;
+          const tags = await this._safeListKinesisTags(client, streamName);
+          yield {
+            provider: "aws",
+            accountId: this._accountId,
+            region,
+            service: "kinesis",
+            resourceType: "kinesis.stream",
+            resourceId: arn || streamName,
+            name: streamName,
+            tags,
+            configuration: sanitizeConfiguration$1(stream)
+          };
+        }
+      }
+    }
+  }
+  async *listResources(options = {}) {
+    const discoveryInclude = ensureArray$1(options.discovery?.include).map(normaliseServiceName$1).filter(Boolean);
+    const discoveryExclude = ensureArray$1(options.discovery?.exclude).map(normaliseServiceName$1).filter(Boolean);
+    const includeSet = new Set(discoveryInclude);
+    const excludeSet = new Set(discoveryExclude);
+    const runtime = options.runtime || {};
+    const emitProgress = typeof runtime.emitProgress === "function" ? runtime.emitProgress.bind(runtime) : null;
+    const collectors = {
+      ec2: this._collectEc2Instances.bind(this),
+      s3: this._collectS3Buckets.bind(this),
+      rds: this._collectRdsInstances.bind(this),
+      iam: this._collectIamIdentities.bind(this),
+      lambda: this._collectLambdaFunctions.bind(this),
+      vpc: this._collectVpcResources.bind(this),
+      elb: this._collectLoadBalancers.bind(this),
+      alb: this._collectLoadBalancers.bind(this),
+      nlb: this._collectLoadBalancers.bind(this),
+      dynamodb: this._collectDynamoDBTables.bind(this),
+      sqs: this._collectSQSQueues.bind(this),
+      sns: this._collectSNSTopics.bind(this),
+      ecs: this._collectECSResources.bind(this),
+      eks: this._collectEKSClusters.bind(this),
+      apigateway: this._collectAPIGateways.bind(this),
+      cloudfront: this._collectCloudFrontDistributions.bind(this),
+      route53: this._collectRoute53HostedZones.bind(this),
+      kms: this._collectKMSKeys.bind(this),
+      secretsmanager: this._collectSecretsManagerSecrets.bind(this),
+      ssm: this._collectSSMParameters.bind(this),
+      elasticache: this._collectElastiCacheClusters.bind(this),
+      efs: this._collectEFSFileSystems.bind(this),
+      ecr: this._collectECRRepositories.bind(this),
+      stepfunctions: this._collectStepFunctionsStateMachines.bind(this),
+      eventbridge: this._collectEventBridgeResources.bind(this),
+      cloudwatch: this._collectCloudWatchResources.bind(this),
+      logs: this._collectCloudWatchResources.bind(this),
+      cloudtrail: this._collectCloudTrails.bind(this),
+      config: this._collectConfigResources.bind(this),
+      acm: this._collectACMCertificates.bind(this),
+      waf: this._collectWAFResources.bind(this),
+      wafv2: this._collectWAFV2Resources.bind(this),
+      cognito: this._collectCognitoUserPools.bind(this),
+      ebs: this._collectEBSResources.bind(this),
+      vpn: this._collectVPNResources.bind(this),
+      transitgateway: this._collectTransitGatewayResources.bind(this),
+      backup: this._collectBackupResources.bind(this),
+      kinesis: this._collectKinesisStreams.bind(this)
+    };
+    for (const service of this._services) {
+      if (!collectors[service]) {
+        this.logger("debug", "AWS service collector not implemented, skipping", { service });
+        continue;
+      }
+      if (!shouldCollect$1(service, includeSet, excludeSet)) {
+        this.logger("debug", "AWS service filtered out", { service });
+        continue;
+      }
+      try {
+        for await (const resource of collectors[service]()) {
+          if (emitProgress) {
+            emitProgress({
+              service,
+              resourceId: resource.resourceId,
+              resourceType: resource.resourceType
+            });
+          }
+          yield resource;
+        }
+      } catch (err) {
+        this.logger("error", "AWS service collection failed, skipping to next service", {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  async _initializeSts() {
+    if (this._accountId) return;
+    const client = this._getStsClient();
+    const response = await client.send(new clientSts.GetCallerIdentityCommand({}));
+    this._accountId = response.Account || null;
+  }
+  _getStsClient() {
+    if (!this._clients.sts) {
+      this._clients.sts = new clientSts.STSClient({
+        region: this.config?.region || GLOBAL_REGION,
+        credentials: this._credentialProvider
+      });
+    }
+    return this._clients.sts;
+  }
+  _getEc2Client(region) {
+    if (!this._clients.ec2.has(region)) {
+      this._clients.ec2.set(region, new clientEc2.EC2Client({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.ec2.get(region);
+  }
+  _getS3Client() {
+    if (!this._clients.s3) {
+      this._clients.s3 = new clientS3.S3Client({
+        region: this.config?.s3Region || GLOBAL_REGION,
+        credentials: this._credentialProvider
+      });
+    }
+    return this._clients.s3;
+  }
+  _getRdsClient(region) {
+    if (!this._clients.rds.has(region)) {
+      this._clients.rds.set(region, new clientRds.RDSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.rds.get(region);
+  }
+  _getIamClient() {
+    if (!this._clients.iam) {
+      this._clients.iam = new clientIam.IAMClient({
+        region: this.config?.iamRegion || GLOBAL_REGION,
+        credentials: this._credentialProvider
+      });
+    }
+    return this._clients.iam;
+  }
+  _getLambdaClient(region) {
+    if (!this._clients.lambda.has(region)) {
+      this._clients.lambda.set(region, new clientLambda.LambdaClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.lambda.get(region);
+  }
+  _getElbClient(region) {
+    if (!this._clients.elb.has(region)) {
+      this._clients.elb.set(region, new clientElasticLoadBalancing.ElasticLoadBalancingClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.elb.get(region);
+  }
+  _getElbv2Client(region) {
+    if (!this._clients.elbv2.has(region)) {
+      this._clients.elbv2.set(region, new clientElasticLoadBalancingV2.ElasticLoadBalancingV2Client({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.elbv2.get(region);
+  }
+  _getDynamoDBClient(region) {
+    if (!this._clients.dynamodb.has(region)) {
+      this._clients.dynamodb.set(region, new clientDynamodb.DynamoDBClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.dynamodb.get(region);
+  }
+  _getSqsClient(region) {
+    if (!this._clients.sqs.has(region)) {
+      this._clients.sqs.set(region, new clientSqs.SQSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.sqs.get(region);
+  }
+  _getSnsClient(region) {
+    if (!this._clients.sns.has(region)) {
+      this._clients.sns.set(region, new clientSns.SNSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.sns.get(region);
+  }
+  _getEcsClient(region) {
+    if (!this._clients.ecs.has(region)) {
+      this._clients.ecs.set(region, new clientEcs.ECSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.ecs.get(region);
+  }
+  _getEksClient(region) {
+    if (!this._clients.eks.has(region)) {
+      this._clients.eks.set(region, new clientEks.EKSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.eks.get(region);
+  }
+  _getApiGatewayClient(region) {
+    if (!this._clients.apigateway.has(region)) {
+      this._clients.apigateway.set(region, new clientApiGateway.APIGatewayClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.apigateway.get(region);
+  }
+  _getApiGatewayV2Client(region) {
+    if (!this._clients.apigatewayv2.has(region)) {
+      this._clients.apigatewayv2.set(region, new clientApigatewayv2.ApiGatewayV2Client({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.apigatewayv2.get(region);
+  }
+  _getCloudFrontClient() {
+    if (!this._clients.cloudfront) {
+      this._clients.cloudfront = new clientCloudfront.CloudFrontClient({
+        region: GLOBAL_REGION,
+        credentials: this._credentialProvider
+      });
+    }
+    return this._clients.cloudfront;
+  }
+  _getRoute53Client() {
+    if (!this._clients.route53) {
+      this._clients.route53 = new clientRoute53.Route53Client({
+        region: GLOBAL_REGION,
+        credentials: this._credentialProvider
+      });
+    }
+    return this._clients.route53;
+  }
+  _getKmsClient(region) {
+    if (!this._clients.kms.has(region)) {
+      this._clients.kms.set(region, new clientKms.KMSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.kms.get(region);
+  }
+  _getSecretsManagerClient(region) {
+    if (!this._clients.secretsmanager.has(region)) {
+      this._clients.secretsmanager.set(region, new clientSecretsManager.SecretsManagerClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.secretsmanager.get(region);
+  }
+  _getSsmClient(region) {
+    if (!this._clients.ssm.has(region)) {
+      this._clients.ssm.set(region, new clientSsm.SSMClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.ssm.get(region);
+  }
+  _getElastiCacheClient(region) {
+    if (!this._clients.elasticache.has(region)) {
+      this._clients.elasticache.set(region, new clientElasticache.ElastiCacheClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.elasticache.get(region);
+  }
+  _getEfsClient(region) {
+    if (!this._clients.efs.has(region)) {
+      this._clients.efs.set(region, new clientEfs.EFSClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.efs.get(region);
+  }
+  _getEcrClient(region) {
+    if (!this._clients.ecr.has(region)) {
+      this._clients.ecr.set(region, new clientEcr.ECRClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.ecr.get(region);
+  }
+  _getSfnClient(region) {
+    if (!this._clients.sfn.has(region)) {
+      this._clients.sfn.set(region, new clientSfn.SFNClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.sfn.get(region);
+  }
+  _getEventBridgeClient(region) {
+    if (!this._clients.eventbridge.has(region)) {
+      this._clients.eventbridge.set(region, new clientEventbridge.EventBridgeClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.eventbridge.get(region);
+  }
+  _getCloudWatchClient(region) {
+    if (!this._clients.cloudwatch.has(region)) {
+      this._clients.cloudwatch.set(region, new clientCloudwatch.CloudWatchClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.cloudwatch.get(region);
+  }
+  _getCloudWatchLogsClient(region) {
+    if (!this._clients.logs.has(region)) {
+      this._clients.logs.set(region, new clientCloudwatchLogs.CloudWatchLogsClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.logs.get(region);
+  }
+  _getCloudTrailClient(region) {
+    if (!this._clients.cloudtrail.has(region)) {
+      this._clients.cloudtrail.set(region, new clientCloudtrail.CloudTrailClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.cloudtrail.get(region);
+  }
+  _getConfigServiceClient(region) {
+    if (!this._clients.config.has(region)) {
+      this._clients.config.set(region, new clientConfigService.ConfigServiceClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.config.get(region);
+  }
+  _getAcmClient(region) {
+    if (!this._clients.acm.has(region)) {
+      this._clients.acm.set(region, new clientAcm.ACMClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.acm.get(region);
+  }
+  _getWafClient() {
+    if (!this._clients.waf) {
+      this._clients.waf = new clientWaf.WAFClient({
+        region: GLOBAL_REGION,
+        credentials: this._credentialProvider
+      });
+    }
+    return this._clients.waf;
+  }
+  _getWafv2Client(region) {
+    if (!this._clients.wafv2.has(region)) {
+      this._clients.wafv2.set(region, new clientWafv2.WAFV2Client({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.wafv2.get(region);
+  }
+  _getCognitoClient(region) {
+    if (!this._clients.cognito.has(region)) {
+      this._clients.cognito.set(region, new clientCognitoIdentityProvider.CognitoIdentityProviderClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.cognito.get(region);
+  }
+  _getBackupClient(region) {
+    if (!this._clients.backup.has(region)) {
+      this._clients.backup.set(region, new clientBackup.BackupClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.backup.get(region);
+  }
+  _getKinesisClient(region) {
+    if (!this._clients.kinesis.has(region)) {
+      this._clients.kinesis.set(region, new clientKinesis.KinesisClient({
+        region,
+        credentials: this._credentialProvider
+      }));
+    }
+    return this._clients.kinesis.get(region);
+  }
+  async _resolveBucketRegion(client, bucketName) {
+    try {
+      const output = await client.send(new clientS3.GetBucketLocationCommand({ Bucket: bucketName }));
+      if (!output?.LocationConstraint) return "us-east-1";
+      if (output.LocationConstraint === "EU") return "eu-west-1";
+      return output.LocationConstraint;
+    } catch (err) {
+      this.logger("warn", "Failed to resolve bucket region", { bucketName, error: err.message });
+      return null;
+    }
+  }
+  async _resolveBucketTags(client, bucketName) {
+    try {
+      const output = await client.send(new clientS3.GetBucketTaggingCommand({ Bucket: bucketName }));
+      return buildTagObject(output?.TagSet);
+    } catch (err) {
+      if (err?.name === "NoSuchTagSet" || err?.$metadata?.httpStatusCode === 404) {
+        return null;
+      }
+      this.logger("warn", "Failed to resolve bucket tags", { bucketName, error: err.message });
+      return null;
+    }
+  }
+  async _safeListTagsForResource(client, arn) {
+    if (!arn) return null;
+    try {
+      const output = await client.send(new clientRds.ListTagsForResourceCommand({ ResourceName: arn }));
+      return buildTagObject(output?.TagList);
+    } catch (err) {
+      this.logger("warn", "Failed to list RDS tags", { arn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListIamTags(client, command) {
+    try {
+      const output = await client.send(command);
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      if (err?.name === "NoSuchEntity") {
+        return null;
+      }
+      this.logger("warn", "Failed to list IAM tags", { error: err.message });
+      return null;
+    }
+  }
+  async _safeListLambdaTags(client, functionArn) {
+    try {
+      const output = await client.send(new clientLambda.ListTagsCommand({ Resource: functionArn }));
+      return output?.Tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to list Lambda tags", { functionArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListClassicLBTags(client, loadBalancerName) {
+    try {
+      const output = await client.send(new clientElasticLoadBalancing.DescribeTagsCommand({
+        LoadBalancerNames: [loadBalancerName]
+      }));
+      const tagDescriptions = output?.TagDescriptions?.[0];
+      return buildTagObject(tagDescriptions?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list Classic LB tags", { loadBalancerName, error: err.message });
+      return null;
+    }
+  }
+  async _safeListELBv2Tags(client, resourceArns) {
+    try {
+      const output = await client.send(new clientElasticLoadBalancingV2.DescribeTagsCommand({
+        ResourceArns: resourceArns
+      }));
+      const tagDescription = output?.TagDescriptions?.[0];
+      return buildTagObject(tagDescription?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list ELBv2 tags", { error: err.message });
+      return null;
+    }
+  }
+  async _safeListDynamoDBTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientDynamodb.ListTagsOfResourceCommand({
+        ResourceArn: resourceArn
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list DynamoDB tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeGetQueueAttributes(client, queueUrl) {
+    try {
+      const output = await client.send(new clientSqs.GetQueueAttributesCommand({
+        QueueUrl: queueUrl,
+        AttributeNames: ["All"]
+      }));
+      return output?.Attributes || null;
+    } catch (err) {
+      this.logger("warn", "Failed to get queue attributes", { queueUrl, error: err.message });
+      return null;
+    }
+  }
+  async _safeListQueueTags(client, queueUrl) {
+    try {
+      const output = await client.send(new clientSqs.ListQueueTagsCommand({
+        QueueUrl: queueUrl
+      }));
+      return output?.Tags || null;
+    } catch (err) {
+      if (err?.name === "QueueDoesNotExist") {
+        return null;
+      }
+      this.logger("warn", "Failed to list queue tags", { queueUrl, error: err.message });
+      return null;
+    }
+  }
+  async _safeGetTopicAttributes(client, topicArn) {
+    try {
+      const output = await client.send(new clientSns.GetTopicAttributesCommand({
+        TopicArn: topicArn
+      }));
+      return output?.Attributes || null;
+    } catch (err) {
+      this.logger("warn", "Failed to get topic attributes", { topicArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListSNSTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientSns.ListTagsForResourceCommand({
+        ResourceArn: resourceArn
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list SNS tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListECSTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientEcs.ListTagsForResourceCommand({
+        resourceArn
+      }));
+      return buildTagObject(output?.tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list ECS tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListEKSTags(client, resourceArn) {
+    if (!resourceArn) return null;
+    try {
+      const output = await client.send(new clientEks.ListTagsForResourceCommand({
+        resourceArn
+      }));
+      return output?.tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to list EKS tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeGetAPIGatewayTags(client, resourceId) {
+    try {
+      const output = await client.send(new clientApiGateway.GetTagsCommand({
+        resourceArn: `arn:aws:apigateway:${this._regions[0]}::/restapis/${resourceId}`
+      }));
+      return output?.tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to get API Gateway tags", { resourceId, error: err.message });
+      return null;
+    }
+  }
+  async _safeGetAPIGatewayV2Tags(client, resourceId) {
+    try {
+      const output = await client.send(new clientApigatewayv2.GetTagsCommand({
+        ResourceArn: resourceId
+      }));
+      return output?.Tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to get API Gateway v2 tags", { resourceId, error: err.message });
+      return null;
+    }
+  }
+  async _safeListCloudFrontTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientCloudfront.ListTagsForResourceCommand({
+        Resource: resourceArn
+      }));
+      return buildTagObject(output?.Tags?.Items);
+    } catch (err) {
+      this.logger("warn", "Failed to list CloudFront tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListRoute53Tags(client, resourceId) {
+    try {
+      const output = await client.send(new clientRoute53.ListTagsForResourceCommand({
+        ResourceType: "hostedzone",
+        ResourceId: resourceId.replace("/hostedzone/", "")
+      }));
+      return buildTagObject(output?.ResourceTagSet?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list Route53 tags", { resourceId, error: err.message });
+      return null;
+    }
+  }
+  async _safeListKMSTags(client, keyId) {
+    try {
+      const output = await client.send(new clientKms.ListResourceTagsCommand({
+        KeyId: keyId
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list KMS tags", { keyId, error: err.message });
+      return null;
+    }
+  }
+  async _safeListSSMTags(client, resourceId) {
+    try {
+      const output = await client.send(new clientSsm.ListTagsForResourceCommand({
+        ResourceType: "Parameter",
+        ResourceId: resourceId
+      }));
+      return buildTagObject(output?.TagList);
+    } catch (err) {
+      this.logger("warn", "Failed to list SSM tags", { resourceId, error: err.message });
+      return null;
+    }
+  }
+  async _safeListElastiCacheTags(client, resourceArn) {
+    if (!resourceArn) return null;
+    try {
+      const output = await client.send(new clientElasticache.ListTagsForResourceCommand({
+        ResourceName: resourceArn
+      }));
+      return buildTagObject(output?.TagList);
+    } catch (err) {
+      this.logger("warn", "Failed to list ElastiCache tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeDescribeEFSTags(client, fileSystemId) {
+    try {
+      const output = await client.send(new clientEfs.DescribeTagsCommand({
+        FileSystemId: fileSystemId
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to describe EFS tags", { fileSystemId, error: err.message });
+      return null;
+    }
+  }
+  async _safeListECRTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientEcr.ListTagsForResourceCommand({
+        resourceArn
+      }));
+      return buildTagObject(output?.tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list ECR tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListSFNTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientSfn.ListTagsForResourceCommand({
+        resourceArn
+      }));
+      return buildTagObject(output?.tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list Step Functions tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListEventBridgeTags(client, resourceArn) {
+    if (!resourceArn) return null;
+    try {
+      const output = await client.send(new clientEventbridge.ListTagsForResourceCommand({
+        ResourceARN: resourceArn
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list EventBridge tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListCloudWatchTags(client, resourceArn) {
+    if (!resourceArn) return null;
+    try {
+      const output = await client.send(new clientCloudwatch.ListTagsForResourceCommand({
+        ResourceARN: resourceArn
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list CloudWatch tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListCWLogsTags(client, logGroupName) {
+    try {
+      const output = await client.send(new clientCloudwatchLogs.ListTagsForResourceCommand({
+        resourceArn: logGroupName
+      }));
+      return output?.tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to list CloudWatch Logs tags", { logGroupName, error: err.message });
+      return null;
+    }
+  }
+  async _safeListCloudTrailTags(client, resourceArn) {
+    if (!resourceArn) return null;
+    try {
+      const output = await client.send(new clientCloudtrail.ListTagsCommand({
+        ResourceIdList: [resourceArn]
+      }));
+      const tagsList = output?.ResourceTagList?.[0]?.TagsList;
+      return buildTagObject(tagsList);
+    } catch (err) {
+      this.logger("warn", "Failed to list CloudTrail tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListACMTags(client, certificateArn) {
+    try {
+      const output = await client.send(new clientAcm.ListTagsForCertificateCommand({
+        CertificateArn: certificateArn
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list ACM tags", { certificateArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListWAFTags(client, resourceId) {
+    try {
+      const output = await client.send(new clientWaf.ListTagsForResourceCommand({
+        ResourceARN: `arn:aws:waf::${this._accountId}:webacl/${resourceId}`
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list WAF tags", { resourceId, error: err.message });
+      return null;
+    }
+  }
+  async _safeListWAFV2Tags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientWafv2.ListTagsForResourceCommand({
+        ResourceARN: resourceArn
+      }));
+      return buildTagObject(output?.TagInfoForResource?.TagList);
+    } catch (err) {
+      this.logger("warn", "Failed to list WAFv2 tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListCognitoTags(client, resourceArn) {
+    if (!resourceArn) return null;
+    try {
+      const output = await client.send(new clientCognitoIdentityProvider.ListTagsForResourceCommand({
+        ResourceArn: resourceArn
+      }));
+      return output?.Tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to list Cognito tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListBackupTags(client, resourceArn) {
+    try {
+      const output = await client.send(new clientBackup.ListTagsCommand({
+        ResourceArn: resourceArn
+      }));
+      return output?.Tags || null;
+    } catch (err) {
+      this.logger("warn", "Failed to list Backup tags", { resourceArn, error: err.message });
+      return null;
+    }
+  }
+  async _safeListKinesisTags(client, streamName) {
+    try {
+      const output = await client.send(new clientKinesis.ListTagsForStreamCommand({
+        StreamName: streamName
+      }));
+      return buildTagObject(output?.Tags);
+    } catch (err) {
+      this.logger("warn", "Failed to list Kinesis tags", { streamName, error: err.message });
+      return null;
+    }
+  }
+}
+function extractInstanceName(instance) {
+  if (!instance?.Tags) return null;
+  const nameTag = instance.Tags.find((tag) => tag.Key === "Name");
+  return nameTag?.Value || null;
+}
+function sanitizeConfiguration$1(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  return JSON.parse(JSON.stringify(payload));
+}
+
+const DEFAULT_SERVICES = [
+  "compute",
+  "gke",
+  "run",
+  "functions",
+  "appengine",
+  "storage",
+  "sql",
+  "bigquery",
+  "spanner",
+  "firestore",
+  "vpc",
+  "loadbalancing",
+  "dns",
+  "cdn",
+  "iam",
+  "kms",
+  "secretmanager",
+  "pubsub",
+  "tasks",
+  "scheduler",
+  "monitoring",
+  "logging",
+  "artifactregistry",
+  "containerregistry"
+];
+function normaliseServiceName(name) {
+  return (name || "").toString().trim().toLowerCase();
+}
+function ensureArray(value, defaultValue = []) {
+  if (Array.isArray(value)) return value;
+  if (value != null) return [value];
+  return defaultValue;
+}
+function shouldCollect(service, includeSet, excludeSet) {
+  if (excludeSet.size > 0 && excludeSet.has(service)) return false;
+  if (includeSet.size > 0 && !includeSet.has(service)) return false;
+  return true;
+}
+function sanitizeConfiguration(config) {
+  return config;
+}
+function extractLabels(resource) {
+  return resource?.labels || null;
+}
+class GcpInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "gcp" });
+    this._clients = {
+      compute: null,
+      container: null,
+      run: null,
+      cloudfunctions: null,
+      appengine: null,
+      storage: null,
+      sqladmin: null,
+      bigquery: null,
+      spanner: null,
+      firestore: null,
+      iam: null,
+      cloudkms: null,
+      secretmanager: null,
+      pubsub: null,
+      cloudtasks: null,
+      cloudscheduler: null,
+      monitoring: null,
+      logging: null,
+      artifactregistry: null
+    };
+    this._auth = null;
+    this._projectId = this.config?.projectId || null;
+    this._services = ensureArray(this.config?.services, DEFAULT_SERVICES).map(normaliseServiceName).filter(Boolean);
+    if (!this._services.length) {
+      this._services = [...DEFAULT_SERVICES];
+    }
+    this._regions = ensureArray(this.config?.regions, [this.config?.region || "us-central1"]);
+    if (!this._regions.length) {
+      this._regions = ["us-central1"];
+    }
+  }
+  async initialize() {
+    await this._initializeAuth();
+    this.logger("info", "GCP driver initialized", {
+      cloudId: this.id,
+      projectId: this._projectId,
+      regions: this._regions,
+      services: this._services.length
+    });
+  }
+  async _initializeAuth() {
+    const credentials = this.credentials || {};
+    if (credentials.keyFile) {
+      this._auth = new googleAuthLibrary.GoogleAuth({
+        keyFile: credentials.keyFile,
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"]
+      });
+    } else if (credentials.credentials) {
+      this._auth = new googleAuthLibrary.GoogleAuth({
+        credentials: credentials.credentials,
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"]
+      });
+    } else {
+      this._auth = new googleAuthLibrary.GoogleAuth({
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"]
+      });
+    }
+    if (!this._projectId) {
+      this._projectId = await this._auth.getProjectId();
+    }
+    this.logger("debug", "GCP authentication initialized", {
+      projectId: this._projectId,
+      hasKeyFile: !!credentials.keyFile,
+      hasCredentials: !!credentials.credentials
+    });
+  }
+  async *_collectComputeInstances() {
+    const { compute } = await import('@google-cloud/compute');
+    const computeClient = new compute.InstancesClient({ auth: this._auth });
+    for (const region of this._regions) {
+      try {
+        const zones = await this._listZonesInRegion(region);
+        for (const zone of zones) {
+          const request = {
+            project: this._projectId,
+            zone: zone.name
+          };
+          const [instances] = await computeClient.list(request);
+          for (const instance of instances) {
+            yield {
+              provider: "gcp",
+              projectId: this._projectId,
+              region,
+              service: "compute",
+              resourceType: "gcp.compute.instance",
+              resourceId: instance.id?.toString() || instance.name,
+              name: instance.name,
+              labels: extractLabels(instance),
+              metadata: { zone: zone.name },
+              configuration: sanitizeConfiguration(instance)
+            };
+          }
+        }
+      } catch (err) {
+        this.logger("warn", "Failed to collect Compute instances", { region, error: err.message });
+      }
+    }
+  }
+  async *_collectGKEClusters() {
+    const { ClusterManagerClient } = await import('@google-cloud/container');
+    const client = new ClusterManagerClient({ auth: this._auth });
+    for (const region of this._regions) {
+      try {
+        const parent = `projects/${this._projectId}/locations/${region}`;
+        const [response] = await client.listClusters({ parent });
+        for (const cluster of response.clusters || []) {
+          yield {
+            provider: "gcp",
+            projectId: this._projectId,
+            region,
+            service: "gke",
+            resourceType: "gcp.gke.cluster",
+            resourceId: cluster.name,
+            name: cluster.name,
+            labels: extractLabels(cluster),
+            metadata: { zone: cluster.zone, location: cluster.location },
+            configuration: sanitizeConfiguration(cluster)
+          };
+        }
+      } catch (err) {
+        this.logger("warn", "Failed to collect GKE clusters", { region, error: err.message });
+      }
+    }
+  }
+  async *_collectCloudRunServices() {
+    const { ServicesClient } = await import('@google-cloud/run');
+    const client = new ServicesClient({ auth: this._auth });
+    for (const region of this._regions) {
+      try {
+        const parent = `projects/${this._projectId}/locations/${region}`;
+        const request = { parent };
+        const [services] = await client.listServices(request);
+        for (const service of services) {
+          yield {
+            provider: "gcp",
+            projectId: this._projectId,
+            region,
+            service: "run",
+            resourceType: "gcp.run.service",
+            resourceId: service.uid || service.name,
+            name: service.name?.split("/").pop(),
+            labels: extractLabels(service.metadata),
+            metadata: {},
+            configuration: sanitizeConfiguration(service)
+          };
+        }
+      } catch (err) {
+        this.logger("warn", "Failed to collect Cloud Run services", { region, error: err.message });
+      }
+    }
+  }
+  async *_collectCloudFunctions() {
+    const { CloudFunctionsServiceClient } = await import('@google-cloud/functions');
+    const client = new CloudFunctionsServiceClient({ auth: this._auth });
+    for (const region of this._regions) {
+      try {
+        const parent = `projects/${this._projectId}/locations/${region}`;
+        const [functions] = await client.listFunctions({ parent });
+        for (const fn of functions) {
+          yield {
+            provider: "gcp",
+            projectId: this._projectId,
+            region,
+            service: "functions",
+            resourceType: "gcp.functions.function",
+            resourceId: fn.name?.split("/").pop(),
+            name: fn.name?.split("/").pop(),
+            labels: extractLabels(fn),
+            metadata: {},
+            configuration: sanitizeConfiguration(fn)
+          };
+        }
+      } catch (err) {
+        this.logger("warn", "Failed to collect Cloud Functions", { region, error: err.message });
+      }
+    }
+  }
+  async *_collectStorageBuckets() {
+    const { Storage } = await import('@google-cloud/storage');
+    const storage = new Storage({ auth: this._auth, projectId: this._projectId });
+    try {
+      const [buckets] = await storage.getBuckets();
+      for (const bucket of buckets) {
+        const [metadata] = await bucket.getMetadata();
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: metadata.location,
+          service: "storage",
+          resourceType: "gcp.storage.bucket",
+          resourceId: bucket.id || bucket.name,
+          name: bucket.name,
+          labels: extractLabels(metadata),
+          metadata: { location: metadata.location, storageClass: metadata.storageClass },
+          configuration: sanitizeConfiguration(metadata)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect Storage buckets", { error: err.message });
+    }
+  }
+  async *_collectCloudSQLInstances() {
+    const { SqlInstancesServiceClient } = await import('@google-cloud/sql');
+    const client = new SqlInstancesServiceClient({ auth: this._auth });
+    try {
+      const request = { project: this._projectId };
+      const [instances] = await client.list(request);
+      for (const instance of instances) {
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: instance.region,
+          service: "sql",
+          resourceType: "gcp.sql.instance",
+          resourceId: instance.name,
+          name: instance.name,
+          labels: extractLabels({ labels: instance.settings?.userLabels }),
+          metadata: { databaseVersion: instance.databaseVersion },
+          configuration: sanitizeConfiguration(instance)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect Cloud SQL instances", { error: err.message });
+    }
+  }
+  async *_collectBigQueryDatasets() {
+    const { BigQuery } = await import('@google-cloud/bigquery');
+    const bigquery = new BigQuery({ auth: this._auth, projectId: this._projectId });
+    try {
+      const [datasets] = await bigquery.getDatasets();
+      for (const dataset of datasets) {
+        const [metadata] = await dataset.getMetadata();
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: metadata.location,
+          service: "bigquery",
+          resourceType: "gcp.bigquery.dataset",
+          resourceId: dataset.id,
+          name: dataset.id?.split(":").pop(),
+          labels: extractLabels(metadata),
+          metadata: { location: metadata.location },
+          configuration: sanitizeConfiguration(metadata)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect BigQuery datasets", { error: err.message });
+    }
+  }
+  async *_collectPubSubTopics() {
+    const { PubSub } = await import('@google-cloud/pubsub');
+    const pubsub = new PubSub({ auth: this._auth, projectId: this._projectId });
+    try {
+      const [topics] = await pubsub.getTopics();
+      for (const topic of topics) {
+        const [metadata] = await topic.getMetadata();
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: null,
+          service: "pubsub",
+          resourceType: "gcp.pubsub.topic",
+          resourceId: topic.name?.split("/").pop(),
+          name: topic.name?.split("/").pop(),
+          labels: extractLabels(metadata),
+          metadata: {},
+          configuration: sanitizeConfiguration(metadata)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect Pub/Sub topics", { error: err.message });
+    }
+  }
+  async *_collectPubSubSubscriptions() {
+    const { PubSub } = await import('@google-cloud/pubsub');
+    const pubsub = new PubSub({ auth: this._auth, projectId: this._projectId });
+    try {
+      const [subscriptions] = await pubsub.getSubscriptions();
+      for (const subscription of subscriptions) {
+        const [metadata] = await subscription.getMetadata();
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: null,
+          service: "pubsub",
+          resourceType: "gcp.pubsub.subscription",
+          resourceId: subscription.name?.split("/").pop(),
+          name: subscription.name?.split("/").pop(),
+          labels: extractLabels(metadata),
+          metadata: { topic: metadata.topic },
+          configuration: sanitizeConfiguration(metadata)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect Pub/Sub subscriptions", { error: err.message });
+    }
+  }
+  async *_collectVPCNetworks() {
+    const { compute } = await import('@google-cloud/compute');
+    const networksClient = new compute.NetworksClient({ auth: this._auth });
+    try {
+      const request = { project: this._projectId };
+      const [networks] = await networksClient.list(request);
+      for (const network of networks) {
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: null,
+          service: "vpc",
+          resourceType: "gcp.vpc.network",
+          resourceId: network.id?.toString() || network.name,
+          name: network.name,
+          labels: null,
+          metadata: { autoCreateSubnetworks: network.autoCreateSubnetworks },
+          configuration: sanitizeConfiguration(network)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect VPC networks", { error: err.message });
+    }
+  }
+  async *_collectVPCSubnets() {
+    const { compute } = await import('@google-cloud/compute');
+    const subnetsClient = new compute.SubnetworksClient({ auth: this._auth });
+    for (const region of this._regions) {
+      try {
+        const request = {
+          project: this._projectId,
+          region
+        };
+        const [subnets] = await subnetsClient.list(request);
+        for (const subnet of subnets) {
+          yield {
+            provider: "gcp",
+            projectId: this._projectId,
+            region,
+            service: "vpc",
+            resourceType: "gcp.vpc.subnet",
+            resourceId: subnet.id?.toString() || subnet.name,
+            name: subnet.name,
+            labels: null,
+            metadata: { network: subnet.network, ipCidrRange: subnet.ipCidrRange },
+            configuration: sanitizeConfiguration(subnet)
+          };
+        }
+      } catch (err) {
+        this.logger("warn", "Failed to collect VPC subnets", { region, error: err.message });
+      }
+    }
+  }
+  async *_collectVPCFirewalls() {
+    const { compute } = await import('@google-cloud/compute');
+    const firewallsClient = new compute.FirewallsClient({ auth: this._auth });
+    try {
+      const request = { project: this._projectId };
+      const [firewalls] = await firewallsClient.list(request);
+      for (const firewall of firewalls) {
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: null,
+          service: "vpc",
+          resourceType: "gcp.vpc.firewall",
+          resourceId: firewall.id?.toString() || firewall.name,
+          name: firewall.name,
+          labels: null,
+          metadata: { network: firewall.network, direction: firewall.direction },
+          configuration: sanitizeConfiguration(firewall)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect VPC firewalls", { error: err.message });
+    }
+  }
+  async *_collectIAMServiceAccounts() {
+    const { IAMClient } = await import('@google-cloud/iam');
+    const client = new IAMClient({ auth: this._auth });
+    try {
+      const parent = `projects/${this._projectId}`;
+      const request = { name: parent };
+      const [serviceAccounts] = await client.listServiceAccounts(request);
+      for (const sa of serviceAccounts) {
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: null,
+          service: "iam",
+          resourceType: "gcp.iam.serviceaccount",
+          resourceId: sa.uniqueId || sa.email,
+          name: sa.email,
+          labels: null,
+          metadata: { email: sa.email },
+          configuration: sanitizeConfiguration(sa)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect IAM service accounts", { error: err.message });
+    }
+  }
+  async *_collectKMSKeyRings() {
+    const { KeyManagementServiceClient } = await import('@google-cloud/kms');
+    const client = new KeyManagementServiceClient({ auth: this._auth });
+    for (const region of this._regions) {
+      try {
+        const parent = `projects/${this._projectId}/locations/${region}`;
+        const [keyRings] = await client.listKeyRings({ parent });
+        for (const keyRing of keyRings) {
+          yield {
+            provider: "gcp",
+            projectId: this._projectId,
+            region,
+            service: "kms",
+            resourceType: "gcp.kms.keyring",
+            resourceId: keyRing.name?.split("/").pop(),
+            name: keyRing.name?.split("/").pop(),
+            labels: null,
+            metadata: {},
+            configuration: sanitizeConfiguration(keyRing)
+          };
+        }
+      } catch (err) {
+        this.logger("warn", "Failed to collect KMS key rings", { region, error: err.message });
+      }
+    }
+  }
+  async *_collectSecretManagerSecrets() {
+    const { SecretManagerServiceClient } = await import('@google-cloud/secret-manager');
+    const client = new SecretManagerServiceClient({ auth: this._auth });
+    try {
+      const parent = `projects/${this._projectId}`;
+      const [secrets] = await client.listSecrets({ parent });
+      for (const secret of secrets) {
+        yield {
+          provider: "gcp",
+          projectId: this._projectId,
+          region: null,
+          service: "secretmanager",
+          resourceType: "gcp.secretmanager.secret",
+          resourceId: secret.name?.split("/").pop(),
+          name: secret.name?.split("/").pop(),
+          labels: extractLabels(secret),
+          metadata: {},
+          configuration: sanitizeConfiguration(secret)
+        };
+      }
+    } catch (err) {
+      this.logger("warn", "Failed to collect Secret Manager secrets", { error: err.message });
+    }
+  }
+  async _listZonesInRegion(region) {
+    const { compute } = await import('@google-cloud/compute');
+    const zonesClient = new compute.ZonesClient({ auth: this._auth });
+    try {
+      const request = { project: this._projectId };
+      const [zones] = await zonesClient.list(request);
+      return zones.filter((z) => z.region?.includes(region));
+    } catch (err) {
+      this.logger("warn", "Failed to list zones", { region, error: err.message });
+      return [];
+    }
+  }
+  async *listResources(options = {}) {
+    const discoveryInclude = ensureArray(options.discovery?.include).map(normaliseServiceName).filter(Boolean);
+    const discoveryExclude = ensureArray(options.discovery?.exclude).map(normaliseServiceName).filter(Boolean);
+    const includeSet = new Set(discoveryInclude);
+    const excludeSet = new Set(discoveryExclude);
+    const runtime = options.runtime || {};
+    const emitProgress = typeof runtime.emitProgress === "function" ? runtime.emitProgress.bind(runtime) : null;
+    const collectors = {
+      compute: this._collectComputeInstances.bind(this),
+      gke: this._collectGKEClusters.bind(this),
+      run: this._collectCloudRunServices.bind(this),
+      functions: this._collectCloudFunctions.bind(this),
+      storage: this._collectStorageBuckets.bind(this),
+      sql: this._collectCloudSQLInstances.bind(this),
+      bigquery: this._collectBigQueryDatasets.bind(this),
+      pubsub: async function* () {
+        yield* this._collectPubSubTopics();
+        yield* this._collectPubSubSubscriptions();
+      }.bind(this),
+      vpc: async function* () {
+        yield* this._collectVPCNetworks();
+        yield* this._collectVPCSubnets();
+        yield* this._collectVPCFirewalls();
+      }.bind(this),
+      iam: this._collectIAMServiceAccounts.bind(this),
+      kms: this._collectKMSKeyRings.bind(this),
+      secretmanager: this._collectSecretManagerSecrets.bind(this)
+    };
+    for (const service of this._services) {
+      if (!collectors[service]) {
+        this.logger("debug", "GCP service collector not implemented, skipping", { service });
+        continue;
+      }
+      if (!shouldCollect(service, includeSet, excludeSet)) {
+        this.logger("debug", "GCP service filtered out", { service });
+        continue;
+      }
+      try {
+        for await (const resource of collectors[service]()) {
+          if (emitProgress) {
+            emitProgress({
+              service,
+              resourceId: resource.resourceId,
+              resourceType: resource.resourceType
+            });
+          }
+          yield resource;
+        }
+      } catch (err) {
+        this.logger("error", "GCP service collection failed, skipping to next service", {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+}
+
+class VultrInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "vultr" });
+    this._apiKey = null;
+    this._client = null;
+    this._accountId = this.config?.accountId || "vultr";
+    this._services = this.config?.services || [
+      "instances",
+      "baremetal",
+      "kubernetes",
+      "blockstorage",
+      "snapshots",
+      "loadbalancers",
+      "firewalls",
+      "vpc",
+      "dns",
+      "databases",
+      "sshkeys",
+      "objectstorage"
+    ];
+  }
+  /**
+   * Initialize the Vultr API client.
+   */
+  async _initializeClient() {
+    if (this._client) return;
+    const credentials = this.credentials || {};
+    this._apiKey = credentials.apiKey || credentials.token || process.env.VULTR_API_KEY;
+    if (!this._apiKey) {
+      throw new Error("Vultr API key is required. Provide via credentials.apiKey or VULTR_API_KEY env var.");
+    }
+    const { VultrNode } = await import('@vultr/vultr-node');
+    this._client = VultrNode.initialize({ apiKey: this._apiKey });
+    this.logger("info", "Vultr API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      instances: () => this._collectInstances(),
+      baremetal: () => this._collectBareMetal(),
+      kubernetes: () => this._collectKubernetes(),
+      blockstorage: () => this._collectBlockStorage(),
+      snapshots: () => this._collectSnapshots(),
+      loadbalancers: () => this._collectLoadBalancers(),
+      firewalls: () => this._collectFirewalls(),
+      vpc: () => this._collectVPC(),
+      dns: () => this._collectDNS(),
+      databases: () => this._collectDatabases(),
+      sshkeys: () => this._collectSSHKeys(),
+      objectstorage: () => this._collectObjectStorage()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Vultr service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Vultr ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Vultr service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Compute Instances (VPS).
+   */
+  async *_collectInstances() {
+    try {
+      const response = await this._client.instances.listInstances();
+      const instances = response.instances || [];
+      for (const instance of instances) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: instance.region,
+          service: "instances",
+          resourceType: "vultr.compute.instance",
+          resourceId: instance.id,
+          name: instance.label || instance.hostname || instance.id,
+          tags: instance.tags || [],
+          configuration: this._sanitize(instance)
+        };
+      }
+      this.logger("info", `Collected ${instances.length} Vultr instances`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr instances", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Bare Metal servers.
+   */
+  async *_collectBareMetal() {
+    try {
+      const response = await this._client.bareMetal.listBareMetalServers();
+      const servers = response.bare_metals || [];
+      for (const server of servers) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: server.region,
+          service: "baremetal",
+          resourceType: "vultr.baremetal.server",
+          resourceId: server.id,
+          name: server.label || server.id,
+          tags: server.tags || [],
+          configuration: this._sanitize(server)
+        };
+      }
+      this.logger("info", `Collected ${servers.length} Vultr bare metal servers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr bare metal", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Kubernetes clusters (VKE).
+   */
+  async *_collectKubernetes() {
+    try {
+      const response = await this._client.kubernetes.listKubernetesClusters();
+      const clusters = response.vke_clusters || [];
+      for (const cluster of clusters) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: cluster.region,
+          service: "kubernetes",
+          resourceType: "vultr.kubernetes.cluster",
+          resourceId: cluster.id,
+          name: cluster.label || cluster.id,
+          tags: [],
+          configuration: this._sanitize(cluster)
+        };
+        try {
+          const npResponse = await this._client.kubernetes.listNodePools({ "vke-id": cluster.id });
+          const nodePools = npResponse.node_pools || [];
+          for (const nodePool of nodePools) {
+            yield {
+              provider: "vultr",
+              accountId: this._accountId,
+              region: cluster.region,
+              service: "kubernetes",
+              resourceType: "vultr.kubernetes.nodepool",
+              resourceId: nodePool.id,
+              name: nodePool.label || nodePool.id,
+              tags: [],
+              metadata: { clusterId: cluster.id, clusterLabel: cluster.label },
+              configuration: this._sanitize(nodePool)
+            };
+          }
+        } catch (npErr) {
+          this.logger("warn", `Failed to collect node pools for cluster ${cluster.id}`, {
+            clusterId: cluster.id,
+            error: npErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${clusters.length} Vultr Kubernetes clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr Kubernetes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Block Storage volumes.
+   */
+  async *_collectBlockStorage() {
+    try {
+      const response = await this._client.blockStorage.listBlockStorages();
+      const volumes = response.blocks || [];
+      for (const volume of volumes) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: volume.region,
+          service: "blockstorage",
+          resourceType: "vultr.blockstorage.volume",
+          resourceId: volume.id,
+          name: volume.label || volume.id,
+          tags: [],
+          configuration: this._sanitize(volume)
+        };
+      }
+      this.logger("info", `Collected ${volumes.length} Vultr block storage volumes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr block storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Snapshots.
+   */
+  async *_collectSnapshots() {
+    try {
+      const response = await this._client.snapshots.listSnapshots();
+      const snapshots = response.snapshots || [];
+      for (const snapshot of snapshots) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: null,
+          // Snapshots are global
+          service: "snapshots",
+          resourceType: "vultr.snapshot",
+          resourceId: snapshot.id,
+          name: snapshot.description || snapshot.id,
+          tags: [],
+          configuration: this._sanitize(snapshot)
+        };
+      }
+      this.logger("info", `Collected ${snapshots.length} Vultr snapshots`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr snapshots", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const response = await this._client.loadBalancers.listLoadBalancers();
+      const lbs = response.load_balancers || [];
+      for (const lb of lbs) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: lb.region,
+          service: "loadbalancers",
+          resourceType: "vultr.loadbalancer",
+          resourceId: lb.id,
+          name: lb.label || lb.id,
+          tags: [],
+          configuration: this._sanitize(lb)
+        };
+      }
+      this.logger("info", `Collected ${lbs.length} Vultr load balancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Firewall Groups.
+   */
+  async *_collectFirewalls() {
+    try {
+      const response = await this._client.firewalls.listFirewallGroups();
+      const firewalls = response.firewall_groups || [];
+      for (const firewall of firewalls) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: null,
+          // Firewalls are global
+          service: "firewalls",
+          resourceType: "vultr.firewall.group",
+          resourceId: firewall.id,
+          name: firewall.description || firewall.id,
+          tags: [],
+          configuration: this._sanitize(firewall)
+        };
+        try {
+          const rulesResponse = await this._client.firewalls.listFirewallGroupRules({
+            "firewall-group-id": firewall.id
+          });
+          const rules = rulesResponse.firewall_rules || [];
+          for (const rule of rules) {
+            yield {
+              provider: "vultr",
+              accountId: this._accountId,
+              region: null,
+              service: "firewalls",
+              resourceType: "vultr.firewall.rule",
+              resourceId: `${firewall.id}/${rule.id}`,
+              name: `${firewall.description || firewall.id} - Rule ${rule.id}`,
+              tags: [],
+              metadata: { firewallGroupId: firewall.id },
+              configuration: this._sanitize(rule)
+            };
+          }
+        } catch (rulesErr) {
+          this.logger("warn", `Failed to collect firewall rules for ${firewall.id}`, {
+            firewallId: firewall.id,
+            error: rulesErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${firewalls.length} Vultr firewall groups`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr firewalls", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VPC/VPC 2.0 networks.
+   */
+  async *_collectVPC() {
+    try {
+      try {
+        const response = await this._client.vpc2.listVPC2s();
+        const vpcs = response.vpcs || [];
+        for (const vpc of vpcs) {
+          yield {
+            provider: "vultr",
+            accountId: this._accountId,
+            region: vpc.region,
+            service: "vpc",
+            resourceType: "vultr.vpc.network",
+            resourceId: vpc.id,
+            name: vpc.description || vpc.id,
+            tags: [],
+            configuration: this._sanitize(vpc)
+          };
+        }
+        this.logger("info", `Collected ${vpcs.length} Vultr VPC 2.0 networks`);
+      } catch (vpc2Err) {
+        this.logger("warn", "Failed to collect VPC 2.0, trying legacy VPC", {
+          error: vpc2Err.message
+        });
+        const legacyResponse = await this._client.vpc.listVPCs();
+        const legacyVpcs = legacyResponse.vpcs || [];
+        for (const vpc of legacyVpcs) {
+          yield {
+            provider: "vultr",
+            accountId: this._accountId,
+            region: vpc.region,
+            service: "vpc",
+            resourceType: "vultr.vpc.network.legacy",
+            resourceId: vpc.id,
+            name: vpc.description || vpc.id,
+            tags: [],
+            configuration: this._sanitize(vpc)
+          };
+        }
+        this.logger("info", `Collected ${legacyVpcs.length} Vultr legacy VPC networks`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr VPC", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS domains and records.
+   */
+  async *_collectDNS() {
+    try {
+      const response = await this._client.dns.listDomains();
+      const domains = response.domains || [];
+      for (const domain of domains) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "dns",
+          resourceType: "vultr.dns.domain",
+          resourceId: domain.domain,
+          name: domain.domain,
+          tags: [],
+          configuration: this._sanitize(domain)
+        };
+        try {
+          const recordsResponse = await this._client.dns.listRecords({ "dns-domain": domain.domain });
+          const records = recordsResponse.records || [];
+          for (const record of records) {
+            yield {
+              provider: "vultr",
+              accountId: this._accountId,
+              region: null,
+              service: "dns",
+              resourceType: "vultr.dns.record",
+              resourceId: record.id,
+              name: `${record.name}.${domain.domain}`,
+              tags: [],
+              metadata: { domain: domain.domain },
+              configuration: this._sanitize(record)
+            };
+          }
+        } catch (recordsErr) {
+          this.logger("warn", `Failed to collect DNS records for ${domain.domain}`, {
+            domain: domain.domain,
+            error: recordsErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${domains.length} Vultr DNS domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr DNS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Managed Databases.
+   */
+  async *_collectDatabases() {
+    try {
+      const response = await this._client.databases.listDatabases();
+      const databases = response.databases || [];
+      for (const db of databases) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: db.region,
+          service: "databases",
+          resourceType: "vultr.database",
+          resourceId: db.id,
+          name: db.label || db.id,
+          tags: db.tag ? [db.tag] : [],
+          configuration: this._sanitize(db)
+        };
+      }
+      this.logger("info", `Collected ${databases.length} Vultr managed databases`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr databases", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSH Keys.
+   */
+  async *_collectSSHKeys() {
+    try {
+      const response = await this._client.sshKeys.listSshKeys();
+      const keys = response.ssh_keys || [];
+      for (const key of keys) {
+        yield {
+          provider: "vultr",
+          accountId: this._accountId,
+          region: null,
+          // SSH keys are global
+          service: "sshkeys",
+          resourceType: "vultr.sshkey",
+          resourceId: key.id,
+          name: key.name || key.id,
+          tags: [],
+          configuration: this._sanitize(key)
+        };
+      }
+      this.logger("info", `Collected ${keys.length} Vultr SSH keys`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr SSH keys", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Object Storage buckets.
+   */
+  async *_collectObjectStorage() {
+    try {
+      const clustersResponse = await this._client.objectStorage.listObjectStorageClusters();
+      const clusters = clustersResponse.clusters || [];
+      for (const cluster of clusters) {
+        try {
+          const response = await this._client.objectStorage.listObjectStorages();
+          const storages = response.object_storages || [];
+          for (const storage of storages) {
+            if (storage.object_storage_cluster_id === cluster.id) {
+              yield {
+                provider: "vultr",
+                accountId: this._accountId,
+                region: cluster.region,
+                service: "objectstorage",
+                resourceType: "vultr.objectstorage.bucket",
+                resourceId: storage.id,
+                name: storage.label || storage.id,
+                tags: [],
+                metadata: { clusterId: cluster.id, clusterRegion: cluster.region },
+                configuration: this._sanitize(storage)
+              };
+            }
+          }
+        } catch (storageErr) {
+          this.logger("warn", `Failed to collect object storage for cluster ${cluster.id}`, {
+            clusterId: cluster.id,
+            error: storageErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected object storage from ${clusters.length} Vultr clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Vultr object storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = ["api_key", "password", "secret", "token", "ssh_key", "private_key"];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class DigitalOceanInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "digitalocean" });
+    this._apiToken = null;
+    this._client = null;
+    this._accountId = this.config?.accountId || "digitalocean";
+    this._services = this.config?.services || [
+      "droplets",
+      "kubernetes",
+      "databases",
+      "volumes",
+      "snapshots",
+      "loadbalancers",
+      "firewalls",
+      "vpc",
+      "floatingips",
+      "domains",
+      "cdn",
+      "registry",
+      "apps",
+      "sshkeys",
+      "spaces"
+    ];
+    this._regions = this.config?.regions || null;
+  }
+  /**
+   * Initialize the DigitalOcean API client.
+   */
+  async _initializeClient() {
+    if (this._client) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.token || credentials.apiToken || process.env.DIGITALOCEAN_TOKEN;
+    if (!this._apiToken) {
+      throw new Error("DigitalOcean API token is required. Provide via credentials.token or DIGITALOCEAN_TOKEN env var.");
+    }
+    const { DigitalOcean } = await import('digitalocean-js');
+    this._client = new DigitalOcean(this._apiToken);
+    this.logger("info", "DigitalOcean API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      droplets: () => this._collectDroplets(),
+      kubernetes: () => this._collectKubernetes(),
+      databases: () => this._collectDatabases(),
+      volumes: () => this._collectVolumes(),
+      snapshots: () => this._collectSnapshots(),
+      loadbalancers: () => this._collectLoadBalancers(),
+      firewalls: () => this._collectFirewalls(),
+      vpc: () => this._collectVPC(),
+      floatingips: () => this._collectFloatingIPs(),
+      domains: () => this._collectDomains(),
+      cdn: () => this._collectCDN(),
+      registry: () => this._collectRegistry(),
+      apps: () => this._collectApps(),
+      sshkeys: () => this._collectSSHKeys(),
+      spaces: () => this._collectSpaces()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown DigitalOcean service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting DigitalOcean ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `DigitalOcean service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Droplets (VMs).
+   */
+  async *_collectDroplets() {
+    try {
+      const response = await this._client.droplets.getAllDroplets();
+      const droplets = response.droplets || [];
+      for (const droplet of droplets) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: droplet.region?.slug || null,
+          service: "droplets",
+          resourceType: "digitalocean.droplet",
+          resourceId: droplet.id?.toString(),
+          name: droplet.name,
+          tags: droplet.tags || [],
+          configuration: this._sanitize(droplet)
+        };
+      }
+      this.logger("info", `Collected ${droplets.length} DigitalOcean droplets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean droplets", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Kubernetes clusters (DOKS).
+   */
+  async *_collectKubernetes() {
+    try {
+      const response = await this._client.kubernetes.listClusters();
+      const clusters = response.kubernetes_clusters || [];
+      for (const cluster of clusters) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: cluster.region,
+          service: "kubernetes",
+          resourceType: "digitalocean.kubernetes.cluster",
+          resourceId: cluster.id,
+          name: cluster.name,
+          tags: cluster.tags || [],
+          configuration: this._sanitize(cluster)
+        };
+        if (cluster.node_pools && Array.isArray(cluster.node_pools)) {
+          for (const nodePool of cluster.node_pools) {
+            yield {
+              provider: "digitalocean",
+              accountId: this._accountId,
+              region: cluster.region,
+              service: "kubernetes",
+              resourceType: "digitalocean.kubernetes.nodepool",
+              resourceId: nodePool.id,
+              name: nodePool.name,
+              tags: nodePool.tags || [],
+              metadata: { clusterId: cluster.id, clusterName: cluster.name },
+              configuration: this._sanitize(nodePool)
+            };
+          }
+        }
+      }
+      this.logger("info", `Collected ${clusters.length} DigitalOcean Kubernetes clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean Kubernetes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Managed Databases.
+   */
+  async *_collectDatabases() {
+    try {
+      const response = await this._client.databases.listClusters();
+      const databases = response.databases || [];
+      for (const db of databases) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: db.region,
+          service: "databases",
+          resourceType: "digitalocean.database.cluster",
+          resourceId: db.id,
+          name: db.name,
+          tags: db.tags || [],
+          configuration: this._sanitize(db)
+        };
+      }
+      this.logger("info", `Collected ${databases.length} DigitalOcean managed databases`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean databases", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Block Storage Volumes.
+   */
+  async *_collectVolumes() {
+    try {
+      const response = await this._client.volumes.getAllVolumes();
+      const volumes = response.volumes || [];
+      for (const volume of volumes) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: volume.region?.slug || null,
+          service: "volumes",
+          resourceType: "digitalocean.volume",
+          resourceId: volume.id,
+          name: volume.name,
+          tags: volume.tags || [],
+          configuration: this._sanitize(volume)
+        };
+      }
+      this.logger("info", `Collected ${volumes.length} DigitalOcean volumes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean volumes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Snapshots.
+   */
+  async *_collectSnapshots() {
+    try {
+      const response = await this._client.snapshots.getAll();
+      const snapshots = response.snapshots || [];
+      for (const snapshot of snapshots) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: snapshot.regions?.[0] || null,
+          service: "snapshots",
+          resourceType: "digitalocean.snapshot",
+          resourceId: snapshot.id,
+          name: snapshot.name,
+          tags: snapshot.tags || [],
+          configuration: this._sanitize(snapshot)
+        };
+      }
+      this.logger("info", `Collected ${snapshots.length} DigitalOcean snapshots`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean snapshots", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const response = await this._client.loadBalancers.getAllLoadBalancers();
+      const lbs = response.load_balancers || [];
+      for (const lb of lbs) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: lb.region?.slug || null,
+          service: "loadbalancers",
+          resourceType: "digitalocean.loadbalancer",
+          resourceId: lb.id,
+          name: lb.name,
+          tags: lb.tags || [],
+          configuration: this._sanitize(lb)
+        };
+      }
+      this.logger("info", `Collected ${lbs.length} DigitalOcean load balancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Firewalls.
+   */
+  async *_collectFirewalls() {
+    try {
+      const response = await this._client.firewalls.getAllFirewalls();
+      const firewalls = response.firewalls || [];
+      for (const firewall of firewalls) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: null,
+          // Firewalls are global
+          service: "firewalls",
+          resourceType: "digitalocean.firewall",
+          resourceId: firewall.id,
+          name: firewall.name,
+          tags: firewall.tags || [],
+          configuration: this._sanitize(firewall)
+        };
+      }
+      this.logger("info", `Collected ${firewalls.length} DigitalOcean firewalls`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean firewalls", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VPCs.
+   */
+  async *_collectVPC() {
+    try {
+      const response = await this._client.vpcs.listVpcs();
+      const vpcs = response.vpcs || [];
+      for (const vpc of vpcs) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: vpc.region,
+          service: "vpc",
+          resourceType: "digitalocean.vpc",
+          resourceId: vpc.id,
+          name: vpc.name,
+          tags: [],
+          configuration: this._sanitize(vpc)
+        };
+      }
+      this.logger("info", `Collected ${vpcs.length} DigitalOcean VPCs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean VPCs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Floating IPs.
+   */
+  async *_collectFloatingIPs() {
+    try {
+      const response = await this._client.floatingIps.getAllFloatingIps();
+      const ips = response.floating_ips || [];
+      for (const ip of ips) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: ip.region?.slug || null,
+          service: "floatingips",
+          resourceType: "digitalocean.floatingip",
+          resourceId: ip.ip,
+          name: ip.ip,
+          tags: [],
+          configuration: this._sanitize(ip)
+        };
+      }
+      this.logger("info", `Collected ${ips.length} DigitalOcean floating IPs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean floating IPs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS Domains and Records.
+   */
+  async *_collectDomains() {
+    try {
+      const response = await this._client.domains.getAllDomains();
+      const domains = response.domains || [];
+      for (const domain of domains) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "domains",
+          resourceType: "digitalocean.domain",
+          resourceId: domain.name,
+          name: domain.name,
+          tags: [],
+          configuration: this._sanitize(domain)
+        };
+        try {
+          const recordsResponse = await this._client.domains.getAllDomainRecords(domain.name);
+          const records = recordsResponse.domain_records || [];
+          for (const record of records) {
+            yield {
+              provider: "digitalocean",
+              accountId: this._accountId,
+              region: null,
+              service: "domains",
+              resourceType: "digitalocean.domain.record",
+              resourceId: `${domain.name}/${record.id}`,
+              name: `${record.name}.${domain.name}`,
+              tags: [],
+              metadata: { domain: domain.name },
+              configuration: this._sanitize(record)
+            };
+          }
+        } catch (recordsErr) {
+          this.logger("warn", `Failed to collect DNS records for ${domain.name}`, {
+            domain: domain.name,
+            error: recordsErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${domains.length} DigitalOcean domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean domains", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect CDN Endpoints.
+   */
+  async *_collectCDN() {
+    try {
+      const response = await this._client.cdnEndpoints.getAllEndpoints();
+      const endpoints = response.endpoints || [];
+      for (const endpoint of endpoints) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: null,
+          // CDN is global
+          service: "cdn",
+          resourceType: "digitalocean.cdn.endpoint",
+          resourceId: endpoint.id,
+          name: endpoint.endpoint,
+          tags: [],
+          configuration: this._sanitize(endpoint)
+        };
+      }
+      this.logger("info", `Collected ${endpoints.length} DigitalOcean CDN endpoints`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean CDN", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Container Registry.
+   */
+  async *_collectRegistry() {
+    try {
+      const response = await this._client.registry.get();
+      const registry = response.registry;
+      if (registry) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: registry.region,
+          service: "registry",
+          resourceType: "digitalocean.registry",
+          resourceId: registry.name,
+          name: registry.name,
+          tags: [],
+          configuration: this._sanitize(registry)
+        };
+        try {
+          const reposResponse = await this._client.registry.listRepositories(registry.name);
+          const repositories = reposResponse.repositories || [];
+          for (const repo of repositories) {
+            yield {
+              provider: "digitalocean",
+              accountId: this._accountId,
+              region: registry.region,
+              service: "registry",
+              resourceType: "digitalocean.registry.repository",
+              resourceId: repo.name,
+              name: repo.name,
+              tags: [],
+              metadata: { registryName: registry.name },
+              configuration: this._sanitize(repo)
+            };
+          }
+        } catch (reposErr) {
+          this.logger("warn", `Failed to collect registry repositories`, {
+            registry: registry.name,
+            error: reposErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected DigitalOcean container registry`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean registry", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect App Platform apps.
+   */
+  async *_collectApps() {
+    try {
+      const response = await this._client.apps.listApps();
+      const apps = response.apps || [];
+      for (const app of apps) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: app.region?.slug || null,
+          service: "apps",
+          resourceType: "digitalocean.app",
+          resourceId: app.id,
+          name: app.spec?.name || app.id,
+          tags: [],
+          configuration: this._sanitize(app)
+        };
+      }
+      this.logger("info", `Collected ${apps.length} DigitalOcean App Platform apps`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean apps", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSH Keys.
+   */
+  async *_collectSSHKeys() {
+    try {
+      const response = await this._client.accountKeys.getAllKeys();
+      const keys = response.ssh_keys || [];
+      for (const key of keys) {
+        yield {
+          provider: "digitalocean",
+          accountId: this._accountId,
+          region: null,
+          // SSH keys are global
+          service: "sshkeys",
+          resourceType: "digitalocean.sshkey",
+          resourceId: key.id?.toString(),
+          name: key.name,
+          tags: [],
+          configuration: this._sanitize(key)
+        };
+      }
+      this.logger("info", `Collected ${keys.length} DigitalOcean SSH keys`);
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean SSH keys", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Spaces (Object Storage).
+   * Note: Spaces API is S3-compatible, not part of the main DO API.
+   * This is a placeholder - full implementation would require AWS S3 SDK.
+   */
+  async *_collectSpaces() {
+    try {
+      this.logger("info", "Spaces collection requires S3-compatible API implementation");
+    } catch (err) {
+      this.logger("error", "Failed to collect DigitalOcean Spaces", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "token",
+      "password",
+      "secret",
+      "api_key",
+      "ssh_key",
+      "private_key",
+      "public_key",
+      "connection_string",
+      "uri"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class OracleInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "oracle" });
+    this._provider = null;
+    this._tenancyId = null;
+    this._compartmentId = null;
+    this._accountId = this.config?.accountId || "oracle";
+    this._services = this.config?.services || [
+      "compute",
+      "kubernetes",
+      "database",
+      "blockstorage",
+      "objectstorage",
+      "filestorage",
+      "vcn",
+      "loadbalancer",
+      "identity",
+      "dns"
+    ];
+    this._regions = this.config?.regions || null;
+  }
+  /**
+   * Initialize the OCI provider and clients.
+   */
+  async _initializeProvider() {
+    if (this._provider) return;
+    const credentials = this.credentials || {};
+    const common = await import('oci-common');
+    if (credentials.configFilePath) {
+      this._provider = new common.ConfigFileAuthenticationDetailsProvider(
+        credentials.configFilePath,
+        credentials.profile || "DEFAULT"
+      );
+    } else if (credentials.instancePrincipal) {
+      this._provider = await common.ResourcePrincipalAuthenticationDetailsProvider.builder();
+    } else if (credentials.user && credentials.fingerprint && credentials.privateKey) {
+      this._provider = new common.SimpleAuthenticationDetailsProvider(
+        credentials.tenancy || this.config?.tenancyId,
+        credentials.user,
+        credentials.fingerprint,
+        credentials.privateKey,
+        credentials.passphrase || null,
+        credentials.region || this.config?.region || common.Region.US_ASHBURN_1
+      );
+    } else {
+      this._provider = new common.ConfigFileAuthenticationDetailsProvider();
+    }
+    this._tenancyId = credentials.tenancy || this.config?.tenancyId;
+    this._compartmentId = this.config?.compartmentId || this._tenancyId;
+    this.logger("info", "OCI provider initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeProvider();
+    const serviceCollectors = {
+      compute: () => this._collectCompute(),
+      kubernetes: () => this._collectKubernetes(),
+      database: () => this._collectDatabases(),
+      blockstorage: () => this._collectBlockStorage(),
+      objectstorage: () => this._collectObjectStorage(),
+      filestorage: () => this._collectFileStorage(),
+      vcn: () => this._collectVCN(),
+      loadbalancer: () => this._collectLoadBalancers(),
+      identity: () => this._collectIdentity(),
+      dns: () => this._collectDNS()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown OCI service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting OCI ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `OCI service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Compute instances.
+   */
+  async *_collectCompute() {
+    try {
+      const { core } = await import('oci-core');
+      const computeClient = new core.ComputeClient({ authenticationDetailsProvider: this._provider });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        computeClient.region = region;
+        const instancesResponse = await computeClient.listInstances({
+          compartmentId: this._compartmentId
+        });
+        const instances = instancesResponse.items || [];
+        for (const instance of instances) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "compute",
+            resourceType: "oracle.compute.instance",
+            resourceId: instance.id,
+            name: instance.displayName || instance.id,
+            tags: this._extractTags(instance.freeformTags, instance.definedTags),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} OCI compute instances in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI compute", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Kubernetes (OKE) clusters.
+   */
+  async *_collectKubernetes() {
+    try {
+      const { containerengine } = await import('oci-containerengine');
+      const containerClient = new containerengine.ContainerEngineClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        containerClient.region = region;
+        const clustersResponse = await containerClient.listClusters({
+          compartmentId: this._compartmentId
+        });
+        const clusters = clustersResponse.items || [];
+        for (const cluster of clusters) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "kubernetes",
+            resourceType: "oracle.kubernetes.cluster",
+            resourceId: cluster.id,
+            name: cluster.name,
+            tags: this._extractTags(cluster.freeformTags, cluster.definedTags),
+            configuration: this._sanitize(cluster)
+          };
+          try {
+            const nodePoolsResponse = await containerClient.listNodePools({
+              compartmentId: this._compartmentId,
+              clusterId: cluster.id
+            });
+            const nodePools = nodePoolsResponse.items || [];
+            for (const nodePool of nodePools) {
+              yield {
+                provider: "oracle",
+                accountId: this._accountId,
+                region: region.regionName,
+                service: "kubernetes",
+                resourceType: "oracle.kubernetes.nodepool",
+                resourceId: nodePool.id,
+                name: nodePool.name,
+                tags: this._extractTags(nodePool.freeformTags, nodePool.definedTags),
+                metadata: { clusterId: cluster.id, clusterName: cluster.name },
+                configuration: this._sanitize(nodePool)
+              };
+            }
+          } catch (npErr) {
+            this.logger("warn", `Failed to collect node pools for cluster ${cluster.id}`, {
+              clusterId: cluster.id,
+              error: npErr.message
+            });
+          }
+        }
+        this.logger("info", `Collected ${clusters.length} OCI OKE clusters in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI Kubernetes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Databases (Autonomous Database, DB Systems).
+   */
+  async *_collectDatabases() {
+    try {
+      const { database } = await import('oci-database');
+      const databaseClient = new database.DatabaseClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        databaseClient.region = region;
+        const autonomousDbsResponse = await databaseClient.listAutonomousDatabases({
+          compartmentId: this._compartmentId
+        });
+        const autonomousDbs = autonomousDbsResponse.items || [];
+        for (const db of autonomousDbs) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "database",
+            resourceType: "oracle.database.autonomous",
+            resourceId: db.id,
+            name: db.displayName || db.dbName,
+            tags: this._extractTags(db.freeformTags, db.definedTags),
+            configuration: this._sanitize(db)
+          };
+        }
+        const dbSystemsResponse = await databaseClient.listDbSystems({
+          compartmentId: this._compartmentId
+        });
+        const dbSystems = dbSystemsResponse.items || [];
+        for (const dbSystem of dbSystems) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "database",
+            resourceType: "oracle.database.system",
+            resourceId: dbSystem.id,
+            name: dbSystem.displayName,
+            tags: this._extractTags(dbSystem.freeformTags, dbSystem.definedTags),
+            configuration: this._sanitize(dbSystem)
+          };
+        }
+        this.logger("info", `Collected ${autonomousDbs.length} Autonomous DBs and ${dbSystems.length} DB Systems in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI databases", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Block Storage volumes.
+   */
+  async *_collectBlockStorage() {
+    try {
+      const { core } = await import('oci-core');
+      const blockstorageClient = new core.BlockstorageClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        blockstorageClient.region = region;
+        const volumesResponse = await blockstorageClient.listVolumes({
+          compartmentId: this._compartmentId
+        });
+        const volumes = volumesResponse.items || [];
+        for (const volume of volumes) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "blockstorage",
+            resourceType: "oracle.blockstorage.volume",
+            resourceId: volume.id,
+            name: volume.displayName,
+            tags: this._extractTags(volume.freeformTags, volume.definedTags),
+            configuration: this._sanitize(volume)
+          };
+        }
+        this.logger("info", `Collected ${volumes.length} OCI block volumes in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI block storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Object Storage buckets.
+   */
+  async *_collectObjectStorage() {
+    try {
+      const { objectstorage } = await import('oci-objectstorage');
+      const objectStorageClient = new objectstorage.ObjectStorageClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      const namespaceResponse = await objectStorageClient.getNamespace({});
+      const namespace = namespaceResponse.value;
+      for (const region of regions) {
+        objectStorageClient.region = region;
+        const bucketsResponse = await objectStorageClient.listBuckets({
+          namespaceName: namespace,
+          compartmentId: this._compartmentId
+        });
+        const buckets = bucketsResponse.items || [];
+        for (const bucket of buckets) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "objectstorage",
+            resourceType: "oracle.objectstorage.bucket",
+            resourceId: bucket.name,
+            name: bucket.name,
+            tags: this._extractTags(bucket.freeformTags, bucket.definedTags),
+            metadata: { namespace },
+            configuration: this._sanitize(bucket)
+          };
+        }
+        this.logger("info", `Collected ${buckets.length} OCI object storage buckets in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI object storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect File Storage file systems.
+   */
+  async *_collectFileStorage() {
+    try {
+      const { filestorage } = await import('oci-filestorage');
+      const fileStorageClient = new filestorage.FileStorageClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        fileStorageClient.region = region;
+        const fileSystemsResponse = await fileStorageClient.listFileSystems({
+          compartmentId: this._compartmentId,
+          availabilityDomain: region.regionName
+          // Note: may need proper AD
+        });
+        const fileSystems = fileSystemsResponse.items || [];
+        for (const fs of fileSystems) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "filestorage",
+            resourceType: "oracle.filestorage.filesystem",
+            resourceId: fs.id,
+            name: fs.displayName,
+            tags: this._extractTags(fs.freeformTags, fs.definedTags),
+            configuration: this._sanitize(fs)
+          };
+        }
+        this.logger("info", `Collected ${fileSystems.length} OCI file systems in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI file storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VCN (Virtual Cloud Network) resources.
+   */
+  async *_collectVCN() {
+    try {
+      const { core } = await import('oci-core');
+      const vcnClient = new core.VirtualNetworkClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        vcnClient.region = region;
+        const vcnsResponse = await vcnClient.listVcns({
+          compartmentId: this._compartmentId
+        });
+        const vcns = vcnsResponse.items || [];
+        for (const vcn of vcns) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "vcn",
+            resourceType: "oracle.vcn.network",
+            resourceId: vcn.id,
+            name: vcn.displayName,
+            tags: this._extractTags(vcn.freeformTags, vcn.definedTags),
+            configuration: this._sanitize(vcn)
+          };
+          try {
+            const subnetsResponse = await vcnClient.listSubnets({
+              compartmentId: this._compartmentId,
+              vcnId: vcn.id
+            });
+            const subnets = subnetsResponse.items || [];
+            for (const subnet of subnets) {
+              yield {
+                provider: "oracle",
+                accountId: this._accountId,
+                region: region.regionName,
+                service: "vcn",
+                resourceType: "oracle.vcn.subnet",
+                resourceId: subnet.id,
+                name: subnet.displayName,
+                tags: this._extractTags(subnet.freeformTags, subnet.definedTags),
+                metadata: { vcnId: vcn.id, vcnName: vcn.displayName },
+                configuration: this._sanitize(subnet)
+              };
+            }
+          } catch (subnetErr) {
+            this.logger("warn", `Failed to collect subnets for VCN ${vcn.id}`, {
+              vcnId: vcn.id,
+              error: subnetErr.message
+            });
+          }
+        }
+        this.logger("info", `Collected ${vcns.length} OCI VCNs in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI VCN", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const { loadbalancer } = await import('oci-loadbalancer');
+      const lbClient = new loadbalancer.LoadBalancerClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const regions = await this._getRegions();
+      for (const region of regions) {
+        lbClient.region = region;
+        const lbsResponse = await lbClient.listLoadBalancers({
+          compartmentId: this._compartmentId
+        });
+        const lbs = lbsResponse.items || [];
+        for (const lb of lbs) {
+          yield {
+            provider: "oracle",
+            accountId: this._accountId,
+            region: region.regionName,
+            service: "loadbalancer",
+            resourceType: "oracle.loadbalancer",
+            resourceId: lb.id,
+            name: lb.displayName,
+            tags: this._extractTags(lb.freeformTags, lb.definedTags),
+            configuration: this._sanitize(lb)
+          };
+        }
+        this.logger("info", `Collected ${lbs.length} OCI load balancers in ${region.regionName}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Identity resources (users, groups, compartments).
+   */
+  async *_collectIdentity() {
+    try {
+      const { identity } = await import('oci-identity');
+      const identityClient = new identity.IdentityClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const usersResponse = await identityClient.listUsers({
+        compartmentId: this._tenancyId
+      });
+      const users = usersResponse.items || [];
+      for (const user of users) {
+        yield {
+          provider: "oracle",
+          accountId: this._accountId,
+          region: null,
+          // Identity is global
+          service: "identity",
+          resourceType: "oracle.identity.user",
+          resourceId: user.id,
+          name: user.name,
+          tags: this._extractTags(user.freeformTags, user.definedTags),
+          configuration: this._sanitize(user)
+        };
+      }
+      const groupsResponse = await identityClient.listGroups({
+        compartmentId: this._tenancyId
+      });
+      const groups = groupsResponse.items || [];
+      for (const group of groups) {
+        yield {
+          provider: "oracle",
+          accountId: this._accountId,
+          region: null,
+          service: "identity",
+          resourceType: "oracle.identity.group",
+          resourceId: group.id,
+          name: group.name,
+          tags: this._extractTags(group.freeformTags, group.definedTags),
+          configuration: this._sanitize(group)
+        };
+      }
+      const compartmentsResponse = await identityClient.listCompartments({
+        compartmentId: this._tenancyId
+      });
+      const compartments = compartmentsResponse.items || [];
+      for (const compartment of compartments) {
+        yield {
+          provider: "oracle",
+          accountId: this._accountId,
+          region: null,
+          service: "identity",
+          resourceType: "oracle.identity.compartment",
+          resourceId: compartment.id,
+          name: compartment.name,
+          tags: this._extractTags(compartment.freeformTags, compartment.definedTags),
+          configuration: this._sanitize(compartment)
+        };
+      }
+      this.logger("info", `Collected ${users.length} users, ${groups.length} groups, ${compartments.length} compartments`);
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI identity", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS zones.
+   */
+  async *_collectDNS() {
+    try {
+      const { dns } = await import('oci-dns');
+      const dnsClient = new dns.DnsClient({
+        authenticationDetailsProvider: this._provider
+      });
+      const zonesResponse = await dnsClient.listZones({
+        compartmentId: this._compartmentId
+      });
+      const zones = zonesResponse.items || [];
+      for (const zone of zones) {
+        yield {
+          provider: "oracle",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "dns",
+          resourceType: "oracle.dns.zone",
+          resourceId: zone.id,
+          name: zone.name,
+          tags: this._extractTags(zone.freeformTags, zone.definedTags),
+          configuration: this._sanitize(zone)
+        };
+      }
+      this.logger("info", `Collected ${zones.length} OCI DNS zones`);
+    } catch (err) {
+      this.logger("error", "Failed to collect OCI DNS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Get list of subscribed regions.
+   */
+  async _getRegions() {
+    if (this._regions && Array.isArray(this._regions)) {
+      const common = await import('oci-common');
+      return this._regions.map((r) => ({ regionName: r, region: common.Region[r] }));
+    }
+    const { identity } = await import('oci-identity');
+    const identityClient = new identity.IdentityClient({
+      authenticationDetailsProvider: this._provider
+    });
+    const regionsResponse = await identityClient.listRegionSubscriptions({
+      tenancyId: this._tenancyId
+    });
+    return regionsResponse.items || [];
+  }
+  /**
+   * Extract tags from OCI freeform and defined tags.
+   */
+  _extractTags(freeformTags, definedTags) {
+    const tags = {};
+    if (freeformTags && typeof freeformTags === "object") {
+      Object.assign(tags, freeformTags);
+    }
+    if (definedTags && typeof definedTags === "object") {
+      for (const [namespace, namespaceTags] of Object.entries(definedTags)) {
+        for (const [key, value] of Object.entries(namespaceTags)) {
+          tags[`${namespace}.${key}`] = value;
+        }
+      }
+    }
+    return tags;
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "password",
+      "adminPassword",
+      "privateKey",
+      "publicKey",
+      "secret",
+      "token",
+      "connectionString",
+      "connectionStrings"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class AzureInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "azure" });
+    this._credential = null;
+    this._subscriptionId = null;
+    this._accountId = this.config?.accountId || "azure";
+    this._services = this.config?.services || [
+      "compute",
+      "kubernetes",
+      "storage",
+      "disks",
+      "databases",
+      "cosmosdb",
+      "network",
+      "containerregistry",
+      "dns",
+      "identity"
+    ];
+    this._resourceGroups = this.config?.resourceGroups || null;
+  }
+  /**
+   * Initialize Azure credential and subscription.
+   */
+  async _initializeCredential() {
+    if (this._credential) return;
+    const credentials = this.credentials || {};
+    const { DefaultAzureCredential, ClientSecretCredential } = await import('@azure/identity');
+    if (credentials.clientId && credentials.clientSecret && credentials.tenantId) {
+      this._credential = new ClientSecretCredential(
+        credentials.tenantId,
+        credentials.clientId,
+        credentials.clientSecret
+      );
+    } else {
+      this._credential = new DefaultAzureCredential();
+    }
+    this._subscriptionId = credentials.subscriptionId || this.config?.subscriptionId;
+    if (!this._subscriptionId) {
+      throw new Error("Azure subscription ID is required. Provide via credentials.subscriptionId or config.subscriptionId.");
+    }
+    this.logger("info", "Azure credential initialized", {
+      accountId: this._accountId,
+      subscriptionId: this._subscriptionId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeCredential();
+    const serviceCollectors = {
+      compute: () => this._collectCompute(),
+      kubernetes: () => this._collectKubernetes(),
+      storage: () => this._collectStorage(),
+      disks: () => this._collectDisks(),
+      databases: () => this._collectDatabases(),
+      cosmosdb: () => this._collectCosmosDB(),
+      network: () => this._collectNetwork(),
+      containerregistry: () => this._collectContainerRegistry(),
+      dns: () => this._collectDNS(),
+      identity: () => this._collectIdentity()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Azure service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Azure ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Azure service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Compute resources (VMs, VM scale sets).
+   */
+  async *_collectCompute() {
+    try {
+      const { ComputeManagementClient } = await import('@azure/arm-compute');
+      const computeClient = new ComputeManagementClient(this._credential, this._subscriptionId);
+      const vmsIterator = computeClient.virtualMachines.listAll();
+      for await (const vm of vmsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: vm.location,
+          service: "compute",
+          resourceType: "azure.compute.virtualmachine",
+          resourceId: vm.id,
+          name: vm.name,
+          tags: vm.tags || {},
+          configuration: this._sanitize(vm)
+        };
+      }
+      const scaleSetsIterator = computeClient.virtualMachineScaleSets.listAll();
+      for await (const scaleSet of scaleSetsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: scaleSet.location,
+          service: "compute",
+          resourceType: "azure.compute.vmscaleset",
+          resourceId: scaleSet.id,
+          name: scaleSet.name,
+          tags: scaleSet.tags || {},
+          configuration: this._sanitize(scaleSet)
+        };
+      }
+      this.logger("info", `Collected Azure compute resources`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure compute", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Kubernetes (AKS) clusters.
+   */
+  async *_collectKubernetes() {
+    try {
+      const { ContainerServiceClient } = await import('@azure/arm-containerservice');
+      const aksClient = new ContainerServiceClient(this._credential, this._subscriptionId);
+      const clustersIterator = aksClient.managedClusters.list();
+      for await (const cluster of clustersIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: cluster.location,
+          service: "kubernetes",
+          resourceType: "azure.kubernetes.cluster",
+          resourceId: cluster.id,
+          name: cluster.name,
+          tags: cluster.tags || {},
+          configuration: this._sanitize(cluster)
+        };
+        if (cluster.agentPoolProfiles && Array.isArray(cluster.agentPoolProfiles)) {
+          for (const pool of cluster.agentPoolProfiles) {
+            yield {
+              provider: "azure",
+              accountId: this._accountId,
+              region: cluster.location,
+              service: "kubernetes",
+              resourceType: "azure.kubernetes.nodepool",
+              resourceId: `${cluster.id}/agentPools/${pool.name}`,
+              name: pool.name,
+              tags: {},
+              metadata: { clusterId: cluster.id, clusterName: cluster.name },
+              configuration: this._sanitize(pool)
+            };
+          }
+        }
+      }
+      this.logger("info", `Collected Azure AKS clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure Kubernetes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Storage Accounts.
+   */
+  async *_collectStorage() {
+    try {
+      const { StorageManagementClient } = await import('@azure/arm-storage');
+      const storageClient = new StorageManagementClient(this._credential, this._subscriptionId);
+      const accountsIterator = storageClient.storageAccounts.list();
+      for await (const account of accountsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: account.location,
+          service: "storage",
+          resourceType: "azure.storage.account",
+          resourceId: account.id,
+          name: account.name,
+          tags: account.tags || {},
+          configuration: this._sanitize(account)
+        };
+      }
+      this.logger("info", `Collected Azure storage accounts`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Disks and Snapshots.
+   */
+  async *_collectDisks() {
+    try {
+      const { ComputeManagementClient } = await import('@azure/arm-compute');
+      const computeClient = new ComputeManagementClient(this._credential, this._subscriptionId);
+      const disksIterator = computeClient.disks.list();
+      for await (const disk of disksIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: disk.location,
+          service: "disks",
+          resourceType: "azure.disk",
+          resourceId: disk.id,
+          name: disk.name,
+          tags: disk.tags || {},
+          configuration: this._sanitize(disk)
+        };
+      }
+      const snapshotsIterator = computeClient.snapshots.list();
+      for await (const snapshot of snapshotsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: snapshot.location,
+          service: "disks",
+          resourceType: "azure.snapshot",
+          resourceId: snapshot.id,
+          name: snapshot.name,
+          tags: snapshot.tags || {},
+          configuration: this._sanitize(snapshot)
+        };
+      }
+      this.logger("info", `Collected Azure disks and snapshots`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure disks", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SQL Databases.
+   */
+  async *_collectDatabases() {
+    try {
+      const { SqlManagementClient } = await import('@azure/arm-sql');
+      const sqlClient = new SqlManagementClient(this._credential, this._subscriptionId);
+      const serversIterator = sqlClient.servers.list();
+      for await (const server of serversIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: server.location,
+          service: "databases",
+          resourceType: "azure.sql.server",
+          resourceId: server.id,
+          name: server.name,
+          tags: server.tags || {},
+          configuration: this._sanitize(server)
+        };
+        try {
+          const resourceGroupName = this._extractResourceGroup(server.id);
+          const databasesIterator = sqlClient.databases.listByServer(resourceGroupName, server.name);
+          for await (const database of databasesIterator) {
+            yield {
+              provider: "azure",
+              accountId: this._accountId,
+              region: database.location,
+              service: "databases",
+              resourceType: "azure.sql.database",
+              resourceId: database.id,
+              name: database.name,
+              tags: database.tags || {},
+              metadata: { serverId: server.id, serverName: server.name },
+              configuration: this._sanitize(database)
+            };
+          }
+        } catch (dbErr) {
+          this.logger("warn", `Failed to collect databases for server ${server.name}`, {
+            serverId: server.id,
+            error: dbErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected Azure SQL databases`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure databases", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Cosmos DB accounts.
+   */
+  async *_collectCosmosDB() {
+    try {
+      const { CosmosDBManagementClient } = await import('@azure/arm-cosmosdb');
+      const cosmosClient = new CosmosDBManagementClient(this._credential, this._subscriptionId);
+      const accountsIterator = cosmosClient.databaseAccounts.list();
+      for await (const account of accountsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: account.location,
+          service: "cosmosdb",
+          resourceType: "azure.cosmosdb.account",
+          resourceId: account.id,
+          name: account.name,
+          tags: account.tags || {},
+          configuration: this._sanitize(account)
+        };
+      }
+      this.logger("info", `Collected Azure Cosmos DB accounts`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure Cosmos DB", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Network resources (VNets, Subnets, Load Balancers, Public IPs).
+   */
+  async *_collectNetwork() {
+    try {
+      const { NetworkManagementClient } = await import('@azure/arm-network');
+      const networkClient = new NetworkManagementClient(this._credential, this._subscriptionId);
+      const vnetsIterator = networkClient.virtualNetworks.listAll();
+      for await (const vnet of vnetsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: vnet.location,
+          service: "network",
+          resourceType: "azure.network.virtualnetwork",
+          resourceId: vnet.id,
+          name: vnet.name,
+          tags: vnet.tags || {},
+          configuration: this._sanitize(vnet)
+        };
+        if (vnet.subnets && Array.isArray(vnet.subnets)) {
+          for (const subnet of vnet.subnets) {
+            yield {
+              provider: "azure",
+              accountId: this._accountId,
+              region: vnet.location,
+              service: "network",
+              resourceType: "azure.network.subnet",
+              resourceId: subnet.id,
+              name: subnet.name,
+              tags: {},
+              metadata: { vnetId: vnet.id, vnetName: vnet.name },
+              configuration: this._sanitize(subnet)
+            };
+          }
+        }
+      }
+      const lbsIterator = networkClient.loadBalancers.listAll();
+      for await (const lb of lbsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: lb.location,
+          service: "network",
+          resourceType: "azure.network.loadbalancer",
+          resourceId: lb.id,
+          name: lb.name,
+          tags: lb.tags || {},
+          configuration: this._sanitize(lb)
+        };
+      }
+      const ipsIterator = networkClient.publicIPAddresses.listAll();
+      for await (const ip of ipsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: ip.location,
+          service: "network",
+          resourceType: "azure.network.publicip",
+          resourceId: ip.id,
+          name: ip.name,
+          tags: ip.tags || {},
+          configuration: this._sanitize(ip)
+        };
+      }
+      const nsgsIterator = networkClient.networkSecurityGroups.listAll();
+      for await (const nsg of nsgsIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: nsg.location,
+          service: "network",
+          resourceType: "azure.network.securitygroup",
+          resourceId: nsg.id,
+          name: nsg.name,
+          tags: nsg.tags || {},
+          configuration: this._sanitize(nsg)
+        };
+      }
+      this.logger("info", `Collected Azure network resources`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure network", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Container Registry.
+   */
+  async *_collectContainerRegistry() {
+    try {
+      const { ContainerRegistryManagementClient } = await import('@azure/arm-containerregistry');
+      const acrClient = new ContainerRegistryManagementClient(this._credential, this._subscriptionId);
+      const registriesIterator = acrClient.registries.list();
+      for await (const registry of registriesIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: registry.location,
+          service: "containerregistry",
+          resourceType: "azure.containerregistry",
+          resourceId: registry.id,
+          name: registry.name,
+          tags: registry.tags || {},
+          configuration: this._sanitize(registry)
+        };
+      }
+      this.logger("info", `Collected Azure container registries`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure container registry", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS zones.
+   */
+  async *_collectDNS() {
+    try {
+      const { DnsManagementClient } = await import('@azure/arm-dns');
+      const dnsClient = new DnsManagementClient(this._credential, this._subscriptionId);
+      const zonesIterator = dnsClient.zones.list();
+      for await (const zone of zonesIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: zone.location,
+          service: "dns",
+          resourceType: "azure.dns.zone",
+          resourceId: zone.id,
+          name: zone.name,
+          tags: zone.tags || {},
+          configuration: this._sanitize(zone)
+        };
+      }
+      this.logger("info", `Collected Azure DNS zones`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure DNS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Managed Identities.
+   */
+  async *_collectIdentity() {
+    try {
+      const { ManagedServiceIdentityClient } = await import('@azure/arm-msi');
+      const identityClient = new ManagedServiceIdentityClient(this._credential, this._subscriptionId);
+      const identitiesIterator = identityClient.userAssignedIdentities.listBySubscription();
+      for await (const identity of identitiesIterator) {
+        yield {
+          provider: "azure",
+          accountId: this._accountId,
+          region: identity.location,
+          service: "identity",
+          resourceType: "azure.identity.userassigned",
+          resourceId: identity.id,
+          name: identity.name,
+          tags: identity.tags || {},
+          configuration: this._sanitize(identity)
+        };
+      }
+      this.logger("info", `Collected Azure managed identities`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Azure identity", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Extract resource group name from Azure resource ID.
+   */
+  _extractResourceGroup(resourceId) {
+    if (!resourceId) return null;
+    const match = resourceId.match(/\/resourceGroups\/([^\/]+)/i);
+    return match ? match[1] : null;
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "administratorLogin",
+      "administratorLoginPassword",
+      "password",
+      "adminPassword",
+      "adminUsername",
+      "connectionString",
+      "primaryKey",
+      "secondaryKey",
+      "keys",
+      "secret",
+      "token"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class LinodeInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "linode" });
+    this._apiToken = null;
+    this._accountId = this.config?.accountId || "linode";
+    this._services = this.config?.services || [
+      "linodes",
+      "kubernetes",
+      "volumes",
+      "nodebalancers",
+      "firewalls",
+      "vlans",
+      "domains",
+      "images",
+      "objectstorage",
+      "databases",
+      "stackscripts",
+      "placementgroups"
+    ];
+    this._regions = this.config?.regions || null;
+  }
+  /**
+   * Initialize Linode API client.
+   */
+  async _initializeClient() {
+    if (this._apiToken) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.token || credentials.apiToken || process.env.LINODE_TOKEN;
+    if (!this._apiToken) {
+      throw new Error("Linode API token is required. Provide via credentials.token or LINODE_TOKEN env var.");
+    }
+    const { setToken } = await import('@linode/api-v4');
+    setToken(this._apiToken);
+    this.logger("info", "Linode API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      linodes: () => this._collectLinodes(),
+      kubernetes: () => this._collectKubernetes(),
+      volumes: () => this._collectVolumes(),
+      nodebalancers: () => this._collectNodeBalancers(),
+      firewalls: () => this._collectFirewalls(),
+      vlans: () => this._collectVLANs(),
+      domains: () => this._collectDomains(),
+      images: () => this._collectImages(),
+      objectstorage: () => this._collectObjectStorage(),
+      databases: () => this._collectDatabases(),
+      stackscripts: () => this._collectStackScripts(),
+      placementgroups: () => this._collectPlacementGroups()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Linode service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Linode ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Linode service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Linodes (compute instances).
+   */
+  async *_collectLinodes() {
+    try {
+      const { getLinodes } = await import('@linode/api-v4/lib/linodes');
+      const response = await getLinodes();
+      const linodes = response.data || [];
+      for (const linode of linodes) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: linode.region,
+          service: "linodes",
+          resourceType: "linode.compute.instance",
+          resourceId: linode.id?.toString(),
+          name: linode.label,
+          tags: linode.tags || [],
+          configuration: this._sanitize(linode)
+        };
+      }
+      this.logger("info", `Collected ${linodes.length} Linode instances`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode instances", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Kubernetes (LKE) clusters.
+   */
+  async *_collectKubernetes() {
+    try {
+      const { getKubernetesClusters, getKubernetesClusterPools } = await import('@linode/api-v4/lib/kubernetes');
+      const response = await getKubernetesClusters();
+      const clusters = response.data || [];
+      for (const cluster of clusters) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: cluster.region,
+          service: "kubernetes",
+          resourceType: "linode.kubernetes.cluster",
+          resourceId: cluster.id?.toString(),
+          name: cluster.label,
+          tags: cluster.tags || [],
+          configuration: this._sanitize(cluster)
+        };
+        try {
+          const poolsResponse = await getKubernetesClusterPools(cluster.id);
+          const pools = poolsResponse.data || [];
+          for (const pool of pools) {
+            yield {
+              provider: "linode",
+              accountId: this._accountId,
+              region: cluster.region,
+              service: "kubernetes",
+              resourceType: "linode.kubernetes.nodepool",
+              resourceId: pool.id?.toString(),
+              name: `${cluster.label}-${pool.type}`,
+              tags: cluster.tags || [],
+              metadata: { clusterId: cluster.id, clusterLabel: cluster.label },
+              configuration: this._sanitize(pool)
+            };
+          }
+        } catch (poolErr) {
+          this.logger("warn", `Failed to collect node pools for cluster ${cluster.id}`, {
+            clusterId: cluster.id,
+            error: poolErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${clusters.length} Linode Kubernetes clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode Kubernetes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Block Storage volumes.
+   */
+  async *_collectVolumes() {
+    try {
+      const { getVolumes } = await import('@linode/api-v4/lib/volumes');
+      const response = await getVolumes();
+      const volumes = response.data || [];
+      for (const volume of volumes) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: volume.region,
+          service: "volumes",
+          resourceType: "linode.volume",
+          resourceId: volume.id?.toString(),
+          name: volume.label,
+          tags: volume.tags || [],
+          configuration: this._sanitize(volume)
+        };
+      }
+      this.logger("info", `Collected ${volumes.length} Linode volumes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode volumes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect NodeBalancers (load balancers).
+   */
+  async *_collectNodeBalancers() {
+    try {
+      const { getNodeBalancers } = await import('@linode/api-v4/lib/nodebalancers');
+      const response = await getNodeBalancers();
+      const nodebalancers = response.data || [];
+      for (const nb of nodebalancers) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: nb.region,
+          service: "nodebalancers",
+          resourceType: "linode.nodebalancer",
+          resourceId: nb.id?.toString(),
+          name: nb.label,
+          tags: nb.tags || [],
+          configuration: this._sanitize(nb)
+        };
+      }
+      this.logger("info", `Collected ${nodebalancers.length} Linode NodeBalancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode NodeBalancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Firewalls.
+   */
+  async *_collectFirewalls() {
+    try {
+      const { getFirewalls } = await import('@linode/api-v4/lib/firewalls');
+      const response = await getFirewalls();
+      const firewalls = response.data || [];
+      for (const firewall of firewalls) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: null,
+          // Firewalls are global
+          service: "firewalls",
+          resourceType: "linode.firewall",
+          resourceId: firewall.id?.toString(),
+          name: firewall.label,
+          tags: firewall.tags || [],
+          configuration: this._sanitize(firewall)
+        };
+      }
+      this.logger("info", `Collected ${firewalls.length} Linode firewalls`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode firewalls", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VLANs.
+   */
+  async *_collectVLANs() {
+    try {
+      const { getVLANs } = await import('@linode/api-v4/lib/vlans');
+      const response = await getVLANs();
+      const vlans = response.data || [];
+      for (const vlan of vlans) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: vlan.region,
+          service: "vlans",
+          resourceType: "linode.vlan",
+          resourceId: vlan.label,
+          // VLANs use label as ID
+          name: vlan.label,
+          tags: [],
+          configuration: this._sanitize(vlan)
+        };
+      }
+      this.logger("info", `Collected ${vlans.length} Linode VLANs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode VLANs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS domains and records.
+   */
+  async *_collectDomains() {
+    try {
+      const { getDomains, getDomainRecords } = await import('@linode/api-v4/lib/domains');
+      const response = await getDomains();
+      const domains = response.data || [];
+      for (const domain of domains) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "domains",
+          resourceType: "linode.dns.domain",
+          resourceId: domain.id?.toString(),
+          name: domain.domain,
+          tags: domain.tags || [],
+          configuration: this._sanitize(domain)
+        };
+        try {
+          const recordsResponse = await getDomainRecords(domain.id);
+          const records = recordsResponse.data || [];
+          for (const record of records) {
+            yield {
+              provider: "linode",
+              accountId: this._accountId,
+              region: null,
+              service: "domains",
+              resourceType: "linode.dns.record",
+              resourceId: `${domain.id}/${record.id}`,
+              name: `${record.name}.${domain.domain}`,
+              tags: [],
+              metadata: { domainId: domain.id, domain: domain.domain },
+              configuration: this._sanitize(record)
+            };
+          }
+        } catch (recordErr) {
+          this.logger("warn", `Failed to collect DNS records for domain ${domain.domain}`, {
+            domainId: domain.id,
+            error: recordErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${domains.length} Linode DNS domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode domains", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect custom Images.
+   */
+  async *_collectImages() {
+    try {
+      const { getImages } = await import('@linode/api-v4/lib/images');
+      const response = await getImages();
+      const images = response.data || [];
+      const customImages = images.filter((img) => img.is_public === false);
+      for (const image of customImages) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: image.region || null,
+          service: "images",
+          resourceType: "linode.image",
+          resourceId: image.id,
+          name: image.label,
+          tags: [],
+          configuration: this._sanitize(image)
+        };
+      }
+      this.logger("info", `Collected ${customImages.length} custom Linode images`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode images", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Object Storage buckets.
+   */
+  async *_collectObjectStorage() {
+    try {
+      const { getObjectStorageBuckets } = await import('@linode/api-v4/lib/object-storage');
+      const response = await getObjectStorageBuckets();
+      const buckets = response.data || [];
+      for (const bucket of buckets) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: bucket.region,
+          service: "objectstorage",
+          resourceType: "linode.objectstorage.bucket",
+          resourceId: `${bucket.cluster}/${bucket.label}`,
+          name: bucket.label,
+          tags: [],
+          metadata: { cluster: bucket.cluster },
+          configuration: this._sanitize(bucket)
+        };
+      }
+      this.logger("info", `Collected ${buckets.length} Linode object storage buckets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode object storage", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Managed Databases (MySQL, PostgreSQL, MongoDB).
+   */
+  async *_collectDatabases() {
+    try {
+      const { getDatabases } = await import('@linode/api-v4/lib/databases');
+      const response = await getDatabases();
+      const databases = response.data || [];
+      for (const db of databases) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: db.region,
+          service: "databases",
+          resourceType: "linode.database",
+          resourceId: db.id?.toString(),
+          name: db.label,
+          tags: [],
+          metadata: {
+            engine: db.engine,
+            version: db.version,
+            status: db.status
+          },
+          configuration: this._sanitize(db)
+        };
+      }
+      this.logger("info", `Collected ${databases.length} Linode databases`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode databases", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect StackScripts (deployment scripts).
+   */
+  async *_collectStackScripts() {
+    try {
+      const { getStackScripts } = await import('@linode/api-v4/lib/stackscripts');
+      const response = await getStackScripts({ mine: true });
+      const stackScripts = response.data || [];
+      for (const script of stackScripts) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: null,
+          // StackScripts are global
+          service: "stackscripts",
+          resourceType: "linode.stackscript",
+          resourceId: script.id?.toString(),
+          name: script.label,
+          tags: [],
+          metadata: {
+            isPublic: script.is_public,
+            deploymentsTotal: script.deployments_total
+          },
+          configuration: this._sanitize(script)
+        };
+      }
+      this.logger("info", `Collected ${stackScripts.length} Linode StackScripts`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode StackScripts", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Placement Groups (anti-affinity groups).
+   */
+  async *_collectPlacementGroups() {
+    try {
+      const { getPlacementGroups } = await import('@linode/api-v4/lib/placement-groups');
+      const response = await getPlacementGroups();
+      const placementGroups = response.data || [];
+      for (const pg of placementGroups) {
+        yield {
+          provider: "linode",
+          accountId: this._accountId,
+          region: pg.region,
+          service: "placementgroups",
+          resourceType: "linode.placementgroup",
+          resourceId: pg.id?.toString(),
+          name: pg.label,
+          tags: [],
+          metadata: {
+            placementGroupType: pg.placement_group_type,
+            placementGroupPolicy: pg.placement_group_policy
+          },
+          configuration: this._sanitize(pg)
+        };
+      }
+      this.logger("info", `Collected ${placementGroups.length} Linode placement groups`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Linode placement groups", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "root_pass",
+      "password",
+      "token",
+      "secret",
+      "api_key",
+      "private_key",
+      "public_key"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class HetznerInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "hetzner" });
+    this._apiToken = null;
+    this._client = null;
+    this._accountId = this.config?.accountId || "hetzner";
+    this._services = this.config?.services || [
+      "servers",
+      "volumes",
+      "networks",
+      "loadbalancers",
+      "firewalls",
+      "floatingips",
+      "sshkeys",
+      "images",
+      "certificates",
+      "primaryips",
+      "placementgroups",
+      "isos"
+    ];
+  }
+  /**
+   * Initialize Hetzner Cloud API client.
+   */
+  async _initializeClient() {
+    if (this._client) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.token || credentials.apiToken || process.env.HETZNER_TOKEN;
+    if (!this._apiToken) {
+      throw new Error("Hetzner API token is required. Provide via credentials.token or HETZNER_TOKEN env var.");
+    }
+    const hcloud = await import('hcloud-js');
+    this._client = new hcloud.Client(this._apiToken);
+    this.logger("info", "Hetzner Cloud API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      servers: () => this._collectServers(),
+      volumes: () => this._collectVolumes(),
+      networks: () => this._collectNetworks(),
+      loadbalancers: () => this._collectLoadBalancers(),
+      firewalls: () => this._collectFirewalls(),
+      floatingips: () => this._collectFloatingIPs(),
+      sshkeys: () => this._collectSSHKeys(),
+      images: () => this._collectImages(),
+      certificates: () => this._collectCertificates(),
+      primaryips: () => this._collectPrimaryIPs(),
+      placementgroups: () => this._collectPlacementGroups(),
+      isos: () => this._collectISOs()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Hetzner service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Hetzner ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Hetzner service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Servers (VPS).
+   */
+  async *_collectServers() {
+    try {
+      const response = await this._client.servers.list();
+      const servers = response.servers || [];
+      for (const server of servers) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: server.datacenter?.location?.name || null,
+          service: "servers",
+          resourceType: "hetzner.server",
+          resourceId: server.id?.toString(),
+          name: server.name,
+          tags: this._extractLabels(server.labels),
+          configuration: this._sanitize(server)
+        };
+      }
+      this.logger("info", `Collected ${servers.length} Hetzner servers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner servers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Volumes (block storage).
+   */
+  async *_collectVolumes() {
+    try {
+      const response = await this._client.volumes.list();
+      const volumes = response.volumes || [];
+      for (const volume of volumes) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: volume.location?.name || null,
+          service: "volumes",
+          resourceType: "hetzner.volume",
+          resourceId: volume.id?.toString(),
+          name: volume.name,
+          tags: this._extractLabels(volume.labels),
+          configuration: this._sanitize(volume)
+        };
+      }
+      this.logger("info", `Collected ${volumes.length} Hetzner volumes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner volumes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Networks (private networks/VPC).
+   */
+  async *_collectNetworks() {
+    try {
+      const response = await this._client.networks.list();
+      const networks = response.networks || [];
+      for (const network of networks) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Networks span multiple locations
+          service: "networks",
+          resourceType: "hetzner.network",
+          resourceId: network.id?.toString(),
+          name: network.name,
+          tags: this._extractLabels(network.labels),
+          configuration: this._sanitize(network)
+        };
+        if (network.subnets && Array.isArray(network.subnets)) {
+          for (const subnet of network.subnets) {
+            yield {
+              provider: "hetzner",
+              accountId: this._accountId,
+              region: subnet.network_zone,
+              service: "networks",
+              resourceType: "hetzner.network.subnet",
+              resourceId: `${network.id}/subnet/${subnet.ip_range}`,
+              name: `${network.name}-${subnet.type}`,
+              tags: {},
+              metadata: { networkId: network.id, networkName: network.name },
+              configuration: this._sanitize(subnet)
+            };
+          }
+        }
+      }
+      this.logger("info", `Collected ${networks.length} Hetzner networks`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner networks", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const response = await this._client.loadBalancers.list();
+      const loadBalancers = response.load_balancers || [];
+      for (const lb of loadBalancers) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: lb.location?.name || null,
+          service: "loadbalancers",
+          resourceType: "hetzner.loadbalancer",
+          resourceId: lb.id?.toString(),
+          name: lb.name,
+          tags: this._extractLabels(lb.labels),
+          configuration: this._sanitize(lb)
+        };
+      }
+      this.logger("info", `Collected ${loadBalancers.length} Hetzner load balancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Firewalls.
+   */
+  async *_collectFirewalls() {
+    try {
+      const response = await this._client.firewalls.list();
+      const firewalls = response.firewalls || [];
+      for (const firewall of firewalls) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Firewalls are global
+          service: "firewalls",
+          resourceType: "hetzner.firewall",
+          resourceId: firewall.id?.toString(),
+          name: firewall.name,
+          tags: this._extractLabels(firewall.labels),
+          configuration: this._sanitize(firewall)
+        };
+      }
+      this.logger("info", `Collected ${firewalls.length} Hetzner firewalls`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner firewalls", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Floating IPs.
+   */
+  async *_collectFloatingIPs() {
+    try {
+      const response = await this._client.floatingIPs.list();
+      const floatingIPs = response.floating_ips || [];
+      for (const fip of floatingIPs) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: fip.home_location?.name || null,
+          service: "floatingips",
+          resourceType: "hetzner.floatingip",
+          resourceId: fip.id?.toString(),
+          name: fip.name || fip.ip,
+          tags: this._extractLabels(fip.labels),
+          configuration: this._sanitize(fip)
+        };
+      }
+      this.logger("info", `Collected ${floatingIPs.length} Hetzner floating IPs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner floating IPs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSH Keys.
+   */
+  async *_collectSSHKeys() {
+    try {
+      const response = await this._client.sshKeys.list();
+      const sshKeys = response.ssh_keys || [];
+      for (const key of sshKeys) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // SSH keys are global
+          service: "sshkeys",
+          resourceType: "hetzner.sshkey",
+          resourceId: key.id?.toString(),
+          name: key.name,
+          tags: this._extractLabels(key.labels),
+          configuration: this._sanitize(key)
+        };
+      }
+      this.logger("info", `Collected ${sshKeys.length} Hetzner SSH keys`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner SSH keys", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect custom Images.
+   */
+  async *_collectImages() {
+    try {
+      const response = await this._client.images.list();
+      const images = response.images || [];
+      const customImages = images.filter((img) => img.type === "snapshot" || img.type === "backup");
+      for (const image of customImages) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Images are global
+          service: "images",
+          resourceType: "hetzner.image",
+          resourceId: image.id?.toString(),
+          name: image.description || image.name || image.id?.toString(),
+          tags: this._extractLabels(image.labels),
+          configuration: this._sanitize(image)
+        };
+      }
+      this.logger("info", `Collected ${customImages.length} custom Hetzner images`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner images", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSL Certificates.
+   */
+  async *_collectCertificates() {
+    try {
+      const response = await this._client.certificates.list();
+      const certificates = response.certificates || [];
+      for (const cert of certificates) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Certificates are global
+          service: "certificates",
+          resourceType: "hetzner.certificate",
+          resourceId: cert.id?.toString(),
+          name: cert.name,
+          tags: this._extractLabels(cert.labels),
+          configuration: this._sanitize(cert)
+        };
+      }
+      this.logger("info", `Collected ${certificates.length} Hetzner certificates`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner certificates", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Primary IPs (independent public IPs).
+   */
+  async *_collectPrimaryIPs() {
+    try {
+      const response = await this._client.primaryIPs.list();
+      const primaryIPs = response.primary_ips || [];
+      for (const ip of primaryIPs) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: ip.datacenter?.location?.name || null,
+          service: "primaryips",
+          resourceType: "hetzner.primaryip",
+          resourceId: ip.id?.toString(),
+          name: ip.name || ip.ip,
+          tags: this._extractLabels(ip.labels),
+          metadata: {
+            type: ip.type,
+            // ipv4 or ipv6
+            assignedToId: ip.assignee_id
+          },
+          configuration: this._sanitize(ip)
+        };
+      }
+      this.logger("info", `Collected ${primaryIPs.length} Hetzner primary IPs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner primary IPs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Placement Groups (server anti-affinity).
+   */
+  async *_collectPlacementGroups() {
+    try {
+      const response = await this._client.placementGroups.list();
+      const placementGroups = response.placement_groups || [];
+      for (const pg of placementGroups) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // Placement groups are global
+          service: "placementgroups",
+          resourceType: "hetzner.placementgroup",
+          resourceId: pg.id?.toString(),
+          name: pg.name,
+          tags: this._extractLabels(pg.labels),
+          metadata: {
+            type: pg.type,
+            servers: pg.servers || []
+          },
+          configuration: this._sanitize(pg)
+        };
+      }
+      this.logger("info", `Collected ${placementGroups.length} Hetzner placement groups`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner placement groups", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect ISOs (custom installation images).
+   */
+  async *_collectISOs() {
+    try {
+      const response = await this._client.isos.list();
+      const isos = response.isos || [];
+      for (const iso of isos) {
+        yield {
+          provider: "hetzner",
+          accountId: this._accountId,
+          region: null,
+          // ISOs are global
+          service: "isos",
+          resourceType: "hetzner.iso",
+          resourceId: iso.id?.toString(),
+          name: iso.name,
+          tags: {},
+          metadata: {
+            type: iso.type,
+            deprecated: iso.deprecated,
+            deprecation: iso.deprecation
+          },
+          configuration: this._sanitize(iso)
+        };
+      }
+      this.logger("info", `Collected ${isos.length} Hetzner ISOs`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Hetzner ISOs", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Extract labels from Hetzner labels object.
+   */
+  _extractLabels(labels) {
+    if (!labels || typeof labels !== "object") return {};
+    return { ...labels };
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "root_password",
+      "password",
+      "token",
+      "secret",
+      "api_key",
+      "private_key",
+      "public_key",
+      "certificate",
+      "private_key"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class AlibabaInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "alibaba" });
+    this._accessKeyId = null;
+    this._accessKeySecret = null;
+    this._accountId = this.config?.accountId || "alibaba";
+    this._services = this.config?.services || [
+      "ecs",
+      "ack",
+      "oss",
+      "rds",
+      "redis",
+      "vpc",
+      "slb",
+      "eip",
+      "cdn",
+      "dns",
+      "securitygroups",
+      "snapshots",
+      "autoscaling",
+      "natgateway",
+      "acr"
+    ];
+    this._regions = this.config?.regions || ["cn-hangzhou", "cn-shanghai", "cn-beijing"];
+  }
+  /**
+   * Initialize Alibaba Cloud credentials.
+   */
+  async _initializeCredentials() {
+    if (this._accessKeyId) return;
+    const credentials = this.credentials || {};
+    this._accessKeyId = credentials.accessKeyId || process.env.ALIBABA_CLOUD_ACCESS_KEY_ID;
+    this._accessKeySecret = credentials.accessKeySecret || process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET;
+    if (!this._accessKeyId || !this._accessKeySecret) {
+      throw new Error("Alibaba Cloud AccessKeyId and AccessKeySecret are required. Provide via credentials or env vars.");
+    }
+    this.logger("info", "Alibaba Cloud credentials initialized", {
+      accountId: this._accountId,
+      services: this._services.length,
+      regions: this._regions.length
+    });
+  }
+  /**
+   * Create RPC client for a specific service.
+   */
+  async _createRPCClient(endpoint, apiVersion) {
+    const RPCClient = await import('@alicloud/pop-core');
+    return new RPCClient.default({
+      accessKeyId: this._accessKeyId,
+      accessKeySecret: this._accessKeySecret,
+      endpoint,
+      apiVersion
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeCredentials();
+    const serviceCollectors = {
+      ecs: () => this._collectECS(),
+      ack: () => this._collectACK(),
+      oss: () => this._collectOSS(),
+      rds: () => this._collectRDS(),
+      redis: () => this._collectRedis(),
+      vpc: () => this._collectVPC(),
+      slb: () => this._collectSLB(),
+      eip: () => this._collectEIP(),
+      cdn: () => this._collectCDN(),
+      dns: () => this._collectDNS(),
+      securitygroups: () => this._collectSecurityGroups(),
+      snapshots: () => this._collectSnapshots(),
+      autoscaling: () => this._collectAutoScaling(),
+      natgateway: () => this._collectNATGateway(),
+      acr: () => this._collectACR()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Alibaba Cloud service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Alibaba Cloud ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Alibaba Cloud service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect ECS instances.
+   */
+  async *_collectECS() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://ecs.${region}.aliyuncs.com`, "2014-05-26");
+        const params = {
+          RegionId: region,
+          PageSize: 100
+        };
+        const response = await client.request("DescribeInstances", params, { method: "POST" });
+        const instances = response.Instances?.Instance || [];
+        for (const instance of instances) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "ecs",
+            resourceType: "alibaba.ecs.instance",
+            resourceId: instance.InstanceId,
+            name: instance.InstanceName,
+            tags: this._extractTags(instance.Tags?.Tag),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} ECS instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud ECS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect ACK (Container Service for Kubernetes) clusters.
+   */
+  async *_collectACK() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://cs.${region}.aliyuncs.com`, "2015-12-15");
+        try {
+          const response = await client.request("DescribeClustersV1", {}, { method: "GET" });
+          const clusters = response.clusters || [];
+          for (const cluster of clusters) {
+            yield {
+              provider: "alibaba",
+              accountId: this._accountId,
+              region,
+              service: "ack",
+              resourceType: "alibaba.ack.cluster",
+              resourceId: cluster.cluster_id,
+              name: cluster.name,
+              tags: this._extractTags(cluster.tags),
+              configuration: this._sanitize(cluster)
+            };
+          }
+          this.logger("info", `Collected ${clusters.length} ACK clusters in ${region}`);
+        } catch (regionErr) {
+          this.logger("debug", `ACK not available in ${region}`, { region, error: regionErr.message });
+        }
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud ACK", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect OSS buckets.
+   */
+  async *_collectOSS() {
+    try {
+      const OSS = await import('ali-oss');
+      const ossClient = new OSS.default({
+        accessKeyId: this._accessKeyId,
+        accessKeySecret: this._accessKeySecret,
+        region: this._regions[0]
+        // Use first region as default
+      });
+      const response = await ossClient.listBuckets();
+      const buckets = response.buckets || [];
+      for (const bucket of buckets) {
+        yield {
+          provider: "alibaba",
+          accountId: this._accountId,
+          region: bucket.region,
+          service: "oss",
+          resourceType: "alibaba.oss.bucket",
+          resourceId: bucket.name,
+          name: bucket.name,
+          tags: {},
+          configuration: this._sanitize(bucket)
+        };
+      }
+      this.logger("info", `Collected ${buckets.length} OSS buckets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud OSS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect RDS instances.
+   */
+  async *_collectRDS() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://rds.${region}.aliyuncs.com`, "2014-08-15");
+        const params = {
+          RegionId: region,
+          PageSize: 100
+        };
+        const response = await client.request("DescribeDBInstances", params, { method: "POST" });
+        const instances = response.Items?.DBInstance || [];
+        for (const instance of instances) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "rds",
+            resourceType: "alibaba.rds.instance",
+            resourceId: instance.DBInstanceId,
+            name: instance.DBInstanceDescription || instance.DBInstanceId,
+            tags: this._extractTags(instance.Tags?.Tag),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} RDS instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud RDS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Redis instances.
+   */
+  async *_collectRedis() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://r-kvstore.${region}.aliyuncs.com`, "2015-01-01");
+        const params = {
+          RegionId: region,
+          PageSize: 100
+        };
+        const response = await client.request("DescribeInstances", params, { method: "POST" });
+        const instances = response.Instances?.KVStoreInstance || [];
+        for (const instance of instances) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "redis",
+            resourceType: "alibaba.redis.instance",
+            resourceId: instance.InstanceId,
+            name: instance.InstanceName,
+            tags: this._extractTags(instance.Tags?.Tag),
+            configuration: this._sanitize(instance)
+          };
+        }
+        this.logger("info", `Collected ${instances.length} Redis instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud Redis", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect VPC resources.
+   */
+  async *_collectVPC() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://vpc.${region}.aliyuncs.com`, "2016-04-28");
+        const vpcParams = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const vpcResponse = await client.request("DescribeVpcs", vpcParams, { method: "POST" });
+        const vpcs = vpcResponse.Vpcs?.Vpc || [];
+        for (const vpc of vpcs) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "vpc",
+            resourceType: "alibaba.vpc.network",
+            resourceId: vpc.VpcId,
+            name: vpc.VpcName,
+            tags: this._extractTags(vpc.Tags?.Tag),
+            configuration: this._sanitize(vpc)
+          };
+          try {
+            const vswitchParams = {
+              VpcId: vpc.VpcId,
+              PageSize: 50
+            };
+            const vswitchResponse = await client.request("DescribeVSwitches", vswitchParams, { method: "POST" });
+            const vswitches = vswitchResponse.VSwitches?.VSwitch || [];
+            for (const vswitch of vswitches) {
+              yield {
+                provider: "alibaba",
+                accountId: this._accountId,
+                region,
+                service: "vpc",
+                resourceType: "alibaba.vpc.vswitch",
+                resourceId: vswitch.VSwitchId,
+                name: vswitch.VSwitchName,
+                tags: this._extractTags(vswitch.Tags?.Tag),
+                metadata: { vpcId: vpc.VpcId, vpcName: vpc.VpcName },
+                configuration: this._sanitize(vswitch)
+              };
+            }
+          } catch (vswitchErr) {
+            this.logger("warn", `Failed to collect vSwitches for VPC ${vpc.VpcId}`, {
+              vpcId: vpc.VpcId,
+              error: vswitchErr.message
+            });
+          }
+        }
+        this.logger("info", `Collected ${vpcs.length} VPCs in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud VPC", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SLB (Server Load Balancer) instances.
+   */
+  async *_collectSLB() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://slb.${region}.aliyuncs.com`, "2014-05-15");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeLoadBalancers", params, { method: "POST" });
+        const loadBalancers = response.LoadBalancers?.LoadBalancer || [];
+        for (const lb of loadBalancers) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "slb",
+            resourceType: "alibaba.slb.loadbalancer",
+            resourceId: lb.LoadBalancerId,
+            name: lb.LoadBalancerName,
+            tags: this._extractTags(lb.Tags?.Tag),
+            configuration: this._sanitize(lb)
+          };
+        }
+        this.logger("info", `Collected ${loadBalancers.length} SLB instances in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud SLB", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect EIP (Elastic IP) addresses.
+   */
+  async *_collectEIP() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://vpc.${region}.aliyuncs.com`, "2016-04-28");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeEipAddresses", params, { method: "POST" });
+        const eips = response.EipAddresses?.EipAddress || [];
+        for (const eip of eips) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "eip",
+            resourceType: "alibaba.eip",
+            resourceId: eip.AllocationId,
+            name: eip.Name || eip.IpAddress,
+            tags: this._extractTags(eip.Tags?.Tag),
+            configuration: this._sanitize(eip)
+          };
+        }
+        this.logger("info", `Collected ${eips.length} EIPs in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud EIP", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect CDN domains.
+   */
+  async *_collectCDN() {
+    try {
+      const client = await this._createRPCClient("https://cdn.aliyuncs.com", "2018-05-10");
+      const params = {
+        PageSize: 50
+      };
+      const response = await client.request("DescribeUserDomains", params, { method: "POST" });
+      const domains = response.Domains?.PageData || [];
+      for (const domain of domains) {
+        yield {
+          provider: "alibaba",
+          accountId: this._accountId,
+          region: null,
+          // CDN is global
+          service: "cdn",
+          resourceType: "alibaba.cdn.domain",
+          resourceId: domain.DomainName,
+          name: domain.DomainName,
+          tags: {},
+          configuration: this._sanitize(domain)
+        };
+      }
+      this.logger("info", `Collected ${domains.length} CDN domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud CDN", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect DNS domains.
+   */
+  async *_collectDNS() {
+    try {
+      const client = await this._createRPCClient("https://alidns.aliyuncs.com", "2015-01-09");
+      const params = {
+        PageSize: 100
+      };
+      const response = await client.request("DescribeDomains", params, { method: "POST" });
+      const domains = response.Domains?.Domain || [];
+      for (const domain of domains) {
+        yield {
+          provider: "alibaba",
+          accountId: this._accountId,
+          region: null,
+          // DNS is global
+          service: "dns",
+          resourceType: "alibaba.dns.domain",
+          resourceId: domain.DomainId,
+          name: domain.DomainName,
+          tags: this._extractTags(domain.Tags?.Tag),
+          configuration: this._sanitize(domain)
+        };
+      }
+      this.logger("info", `Collected ${domains.length} DNS domains`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud DNS", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Security Groups.
+   */
+  async *_collectSecurityGroups() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://ecs.${region}.aliyuncs.com`, "2014-05-26");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeSecurityGroups", params, { method: "POST" });
+        const securityGroups = response.SecurityGroups?.SecurityGroup || [];
+        for (const sg of securityGroups) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "securitygroups",
+            resourceType: "alibaba.ecs.securitygroup",
+            resourceId: sg.SecurityGroupId,
+            name: sg.SecurityGroupName,
+            tags: this._extractTags(sg.Tags?.Tag),
+            metadata: { vpcId: sg.VpcId },
+            configuration: this._sanitize(sg)
+          };
+        }
+        this.logger("info", `Collected ${securityGroups.length} security groups in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud security groups", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Disk Snapshots.
+   */
+  async *_collectSnapshots() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://ecs.${region}.aliyuncs.com`, "2014-05-26");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeSnapshots", params, { method: "POST" });
+        const snapshots = response.Snapshots?.Snapshot || [];
+        for (const snapshot of snapshots) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "snapshots",
+            resourceType: "alibaba.ecs.snapshot",
+            resourceId: snapshot.SnapshotId,
+            name: snapshot.SnapshotName || snapshot.SnapshotId,
+            tags: this._extractTags(snapshot.Tags?.Tag),
+            metadata: { sourceDiskId: snapshot.SourceDiskId },
+            configuration: this._sanitize(snapshot)
+          };
+        }
+        this.logger("info", `Collected ${snapshots.length} snapshots in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud snapshots", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Auto Scaling Groups.
+   */
+  async *_collectAutoScaling() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://ess.${region}.aliyuncs.com`, "2014-08-28");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeScalingGroups", params, { method: "POST" });
+        const scalingGroups = response.ScalingGroups?.ScalingGroup || [];
+        for (const group of scalingGroups) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "autoscaling",
+            resourceType: "alibaba.ess.scalinggroup",
+            resourceId: group.ScalingGroupId,
+            name: group.ScalingGroupName,
+            tags: this._extractTags(group.Tags?.Tag),
+            configuration: this._sanitize(group)
+          };
+          try {
+            const configParams = {
+              ScalingGroupId: group.ScalingGroupId,
+              PageSize: 50
+            };
+            const configResponse = await client.request("DescribeScalingConfigurations", configParams, { method: "POST" });
+            const configurations = configResponse.ScalingConfigurations?.ScalingConfiguration || [];
+            for (const config of configurations) {
+              yield {
+                provider: "alibaba",
+                accountId: this._accountId,
+                region,
+                service: "autoscaling",
+                resourceType: "alibaba.ess.scalingconfiguration",
+                resourceId: config.ScalingConfigurationId,
+                name: config.ScalingConfigurationName,
+                tags: {},
+                metadata: { scalingGroupId: group.ScalingGroupId },
+                configuration: this._sanitize(config)
+              };
+            }
+          } catch (configErr) {
+            this.logger("warn", `Failed to collect scaling configurations for group ${group.ScalingGroupId}`, {
+              error: configErr.message
+            });
+          }
+        }
+        this.logger("info", `Collected ${scalingGroups.length} auto scaling groups in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud auto scaling", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect NAT Gateways.
+   */
+  async *_collectNATGateway() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://vpc.${region}.aliyuncs.com`, "2016-04-28");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        const response = await client.request("DescribeNatGateways", params, { method: "POST" });
+        const natGateways = response.NatGateways?.NatGateway || [];
+        for (const nat of natGateways) {
+          yield {
+            provider: "alibaba",
+            accountId: this._accountId,
+            region,
+            service: "natgateway",
+            resourceType: "alibaba.vpc.natgateway",
+            resourceId: nat.NatGatewayId,
+            name: nat.Name || nat.NatGatewayId,
+            tags: this._extractTags(nat.Tags?.Tag),
+            metadata: { vpcId: nat.VpcId },
+            configuration: this._sanitize(nat)
+          };
+        }
+        this.logger("info", `Collected ${natGateways.length} NAT gateways in ${region}`);
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud NAT gateways", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Container Registry (ACR) repositories.
+   */
+  async *_collectACR() {
+    try {
+      for (const region of this._regions) {
+        const client = await this._createRPCClient(`https://cr.${region}.aliyuncs.com`, "2018-12-01");
+        const params = {
+          RegionId: region,
+          PageSize: 50
+        };
+        try {
+          const response = await client.request("ListRepository", params, { method: "POST" });
+          const repositories = response.Repositories?.Repository || [];
+          for (const repo of repositories) {
+            yield {
+              provider: "alibaba",
+              accountId: this._accountId,
+              region,
+              service: "acr",
+              resourceType: "alibaba.acr.repository",
+              resourceId: repo.RepoId || `${repo.RepoNamespace}/${repo.RepoName}`,
+              name: `${repo.RepoNamespace}/${repo.RepoName}`,
+              tags: {},
+              configuration: this._sanitize(repo)
+            };
+          }
+          this.logger("info", `Collected ${repositories.length} ACR repositories in ${region}`);
+        } catch (regionErr) {
+          this.logger("debug", `ACR not available or no repositories in ${region}`, {
+            error: regionErr.message
+          });
+        }
+      }
+    } catch (err) {
+      this.logger("error", "Failed to collect Alibaba Cloud ACR", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Extract tags from Alibaba Cloud tag format.
+   */
+  _extractTags(tags) {
+    if (!tags || !Array.isArray(tags)) return {};
+    const tagMap = {};
+    for (const tag of tags) {
+      if (tag.TagKey) {
+        tagMap[tag.TagKey] = tag.TagValue || "";
+      }
+    }
+    return tagMap;
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "Password",
+      "MasterUserPassword",
+      "AccessKeySecret",
+      "SecretAccessKey",
+      "PrivateKey",
+      "Certificate"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class CloudflareInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "cloudflare" });
+    this._apiToken = null;
+    this._accountId = null;
+    this._client = null;
+    this._services = this.config?.services || [
+      "workers",
+      "r2",
+      "pages",
+      "d1",
+      "kv",
+      "durable-objects",
+      "zones",
+      "loadbalancers",
+      "certificates",
+      "waf",
+      "access"
+    ];
+  }
+  /**
+   * Initialize Cloudflare API client.
+   */
+  async _initializeClient() {
+    if (this._client) return;
+    const credentials = this.credentials || {};
+    this._apiToken = credentials.apiToken || credentials.token || process.env.CLOUDFLARE_API_TOKEN;
+    this._accountId = credentials.accountId || this.config?.accountId || process.env.CLOUDFLARE_ACCOUNT_ID;
+    if (!this._apiToken) {
+      throw new Error("Cloudflare API token is required. Provide via credentials.apiToken or CLOUDFLARE_API_TOKEN env var.");
+    }
+    const Cloudflare = await import('cloudflare');
+    this._client = new Cloudflare.default({
+      apiToken: this._apiToken
+    });
+    this.logger("info", "Cloudflare API client initialized", {
+      accountId: this._accountId,
+      services: this._services.length
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeClient();
+    const serviceCollectors = {
+      workers: () => this._collectWorkers(),
+      r2: () => this._collectR2(),
+      pages: () => this._collectPages(),
+      "d1": () => this._collectD1(),
+      kv: () => this._collectKV(),
+      "durable-objects": () => this._collectDurableObjects(),
+      zones: () => this._collectZones(),
+      loadbalancers: () => this._collectLoadBalancers(),
+      certificates: () => this._collectCertificates(),
+      waf: () => this._collectWAF(),
+      access: () => this._collectAccess()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown Cloudflare service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting Cloudflare ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `Cloudflare service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Collect Workers scripts.
+   */
+  async *_collectWorkers() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Workers collection, skipping");
+        return;
+      }
+      const scripts = await this._client.workers.scripts.list({ account_id: this._accountId });
+      for (const script of scripts) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          // Workers are global/edge
+          service: "workers",
+          resourceType: "cloudflare.workers.script",
+          resourceId: script.id,
+          name: script.id,
+          tags: script.tags || [],
+          configuration: this._sanitize(script)
+        };
+      }
+      this.logger("info", `Collected ${scripts.length || 0} Cloudflare Workers scripts`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Workers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect R2 buckets.
+   */
+  async *_collectR2() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for R2 collection, skipping");
+        return;
+      }
+      const buckets = await this._client.r2.buckets.list({ account_id: this._accountId });
+      for (const bucket of buckets) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: bucket.location || "global",
+          service: "r2",
+          resourceType: "cloudflare.r2.bucket",
+          resourceId: bucket.name,
+          name: bucket.name,
+          tags: [],
+          configuration: this._sanitize(bucket)
+        };
+      }
+      this.logger("info", `Collected ${buckets.length || 0} Cloudflare R2 buckets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare R2", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Pages projects.
+   */
+  async *_collectPages() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Pages collection, skipping");
+        return;
+      }
+      const projects = await this._client.pages.projects.list({ account_id: this._accountId });
+      for (const project of projects) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "pages",
+          resourceType: "cloudflare.pages.project",
+          resourceId: project.id || project.name,
+          name: project.name,
+          tags: [],
+          configuration: this._sanitize(project)
+        };
+      }
+      this.logger("info", `Collected ${projects.length || 0} Cloudflare Pages projects`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Pages", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect D1 databases.
+   */
+  async *_collectD1() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for D1 collection, skipping");
+        return;
+      }
+      const databases = await this._client.d1.database.list({ account_id: this._accountId });
+      for (const database of databases) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "d1",
+          resourceType: "cloudflare.d1.database",
+          resourceId: database.uuid,
+          name: database.name,
+          tags: [],
+          configuration: this._sanitize(database)
+        };
+      }
+      this.logger("info", `Collected ${databases.length || 0} Cloudflare D1 databases`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare D1", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect KV namespaces.
+   */
+  async *_collectKV() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for KV collection, skipping");
+        return;
+      }
+      const namespaces = await this._client.kv.namespaces.list({ account_id: this._accountId });
+      for (const namespace of namespaces) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "kv",
+          resourceType: "cloudflare.kv.namespace",
+          resourceId: namespace.id,
+          name: namespace.title,
+          tags: [],
+          configuration: this._sanitize(namespace)
+        };
+      }
+      this.logger("info", `Collected ${namespaces.length || 0} Cloudflare KV namespaces`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare KV", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Durable Objects namespaces.
+   */
+  async *_collectDurableObjects() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Durable Objects collection, skipping");
+        return;
+      }
+      const namespaces = await this._client.durableObjects.namespaces.list({ account_id: this._accountId });
+      for (const namespace of namespaces) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "durable-objects",
+          resourceType: "cloudflare.durableobjects.namespace",
+          resourceId: namespace.id,
+          name: namespace.name,
+          tags: [],
+          configuration: this._sanitize(namespace)
+        };
+      }
+      this.logger("info", `Collected ${namespaces.length || 0} Cloudflare Durable Objects namespaces`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Durable Objects", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Zones (domains) and DNS records.
+   */
+  async *_collectZones() {
+    try {
+      const zones = await this._client.zones.list();
+      for (const zone of zones) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId || zone.account?.id,
+          region: "global",
+          service: "zones",
+          resourceType: "cloudflare.zone",
+          resourceId: zone.id,
+          name: zone.name,
+          tags: [],
+          configuration: this._sanitize(zone)
+        };
+        try {
+          const records = await this._client.dns.records.list({ zone_id: zone.id });
+          for (const record of records) {
+            yield {
+              provider: "cloudflare",
+              accountId: this._accountId || zone.account?.id,
+              region: "global",
+              service: "zones",
+              resourceType: "cloudflare.dns.record",
+              resourceId: record.id,
+              name: `${record.name} (${record.type})`,
+              tags: record.tags || [],
+              metadata: { zoneId: zone.id, zoneName: zone.name },
+              configuration: this._sanitize(record)
+            };
+          }
+        } catch (recordErr) {
+          this.logger("warn", `Failed to collect DNS records for zone ${zone.name}`, {
+            zoneId: zone.id,
+            error: recordErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected ${zones.length || 0} Cloudflare zones`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare zones", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Load Balancers.
+   */
+  async *_collectLoadBalancers() {
+    try {
+      const zones = await this._client.zones.list();
+      for (const zone of zones) {
+        try {
+          const loadBalancers = await this._client.loadBalancers.list({ zone_id: zone.id });
+          for (const lb of loadBalancers) {
+            yield {
+              provider: "cloudflare",
+              accountId: this._accountId || zone.account?.id,
+              region: "global",
+              service: "loadbalancers",
+              resourceType: "cloudflare.loadbalancer",
+              resourceId: lb.id,
+              name: lb.name,
+              tags: [],
+              metadata: { zoneId: zone.id, zoneName: zone.name },
+              configuration: this._sanitize(lb)
+            };
+          }
+        } catch (lbErr) {
+          this.logger("debug", `No load balancers in zone ${zone.name}`, {
+            zoneId: zone.id,
+            error: lbErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected Cloudflare load balancers`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare load balancers", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect SSL/TLS Certificates.
+   */
+  async *_collectCertificates() {
+    try {
+      const zones = await this._client.zones.list();
+      for (const zone of zones) {
+        try {
+          const certificates = await this._client.ssl.certificatePacks.list({ zone_id: zone.id });
+          for (const cert of certificates) {
+            yield {
+              provider: "cloudflare",
+              accountId: this._accountId || zone.account?.id,
+              region: "global",
+              service: "certificates",
+              resourceType: "cloudflare.ssl.certificate",
+              resourceId: cert.id,
+              name: `${zone.name} - ${cert.type}`,
+              tags: [],
+              metadata: {
+                zoneId: zone.id,
+                zoneName: zone.name,
+                type: cert.type,
+                status: cert.status
+              },
+              configuration: this._sanitize(cert)
+            };
+          }
+        } catch (certErr) {
+          this.logger("debug", `No certificates in zone ${zone.name}`, {
+            zoneId: zone.id,
+            error: certErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected Cloudflare certificates`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare certificates", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect WAF (Web Application Firewall) Rulesets via new Rulesets API (2025).
+   */
+  async *_collectWAF() {
+    try {
+      const zones = await this._client.zones.list();
+      for (const zone of zones) {
+        try {
+          const rulesets = await this._client.rulesets.list({ zone_id: zone.id });
+          for (const ruleset of rulesets) {
+            if (ruleset.phase && (ruleset.phase.includes("http_") || ruleset.phase.includes("firewall"))) {
+              yield {
+                provider: "cloudflare",
+                accountId: this._accountId || zone.account?.id,
+                region: "global",
+                service: "waf",
+                resourceType: "cloudflare.waf.ruleset",
+                resourceId: ruleset.id,
+                name: ruleset.name,
+                tags: [],
+                metadata: {
+                  zoneId: zone.id,
+                  zoneName: zone.name,
+                  phase: ruleset.phase,
+                  kind: ruleset.kind
+                },
+                configuration: this._sanitize(ruleset)
+              };
+            }
+          }
+        } catch (wafErr) {
+          this.logger("debug", `No WAF rulesets in zone ${zone.name}`, {
+            zoneId: zone.id,
+            error: wafErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected Cloudflare WAF rulesets`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare WAF", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Cloudflare Access Applications (Zero Trust).
+   */
+  async *_collectAccess() {
+    try {
+      if (!this._accountId) {
+        this.logger("warn", "Account ID required for Access collection, skipping");
+        return;
+      }
+      const applications = await this._client.access.applications.list({ account_id: this._accountId });
+      for (const app of applications) {
+        yield {
+          provider: "cloudflare",
+          accountId: this._accountId,
+          region: "global",
+          service: "access",
+          resourceType: "cloudflare.access.application",
+          resourceId: app.id,
+          name: app.name,
+          tags: [],
+          metadata: {
+            domain: app.domain,
+            type: app.type
+          },
+          configuration: this._sanitize(app)
+        };
+        try {
+          const policies = await this._client.access.policies.list({
+            account_id: this._accountId,
+            application_id: app.id
+          });
+          for (const policy of policies) {
+            yield {
+              provider: "cloudflare",
+              accountId: this._accountId,
+              region: "global",
+              service: "access",
+              resourceType: "cloudflare.access.policy",
+              resourceId: policy.id,
+              name: policy.name,
+              tags: [],
+              metadata: {
+                applicationId: app.id,
+                applicationName: app.name,
+                decision: policy.decision
+              },
+              configuration: this._sanitize(policy)
+            };
+          }
+        } catch (policyErr) {
+          this.logger("warn", `Failed to collect policies for Access application ${app.name}`, {
+            applicationId: app.id,
+            error: policyErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected Cloudflare Access applications`);
+    } catch (err) {
+      this.logger("error", "Failed to collect Cloudflare Access", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "api_token",
+      "api_key",
+      "token",
+      "secret",
+      "password",
+      "private_key"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+class MongoDBAtlasInventoryDriver extends BaseCloudDriver {
+  constructor(options = {}) {
+    super({ ...options, driver: options.driver || "mongodb-atlas" });
+    this._publicKey = null;
+    this._privateKey = null;
+    this._baseUrl = "https://cloud.mongodb.com/api/atlas/v2";
+    this._organizationId = this.config?.organizationId || null;
+    this._services = this.config?.services || [
+      "projects",
+      "clusters",
+      "serverless",
+      "users",
+      "accesslists",
+      "backups",
+      "alerts",
+      "datalakes",
+      "search",
+      "customroles",
+      "events"
+    ];
+    this._projectIds = this.config?.projectIds || null;
+  }
+  /**
+   * Initialize MongoDB Atlas credentials.
+   */
+  async _initializeCredentials() {
+    if (this._publicKey) return;
+    const credentials = this.credentials || {};
+    this._publicKey = credentials.publicKey || process.env.MONGODB_ATLAS_PUBLIC_KEY;
+    this._privateKey = credentials.privateKey || process.env.MONGODB_ATLAS_PRIVATE_KEY;
+    this._organizationId = credentials.organizationId || this._organizationId;
+    if (!this._publicKey || !this._privateKey) {
+      throw new Error("MongoDB Atlas API keys are required. Provide via credentials.publicKey/privateKey or env vars.");
+    }
+    this.logger("info", "MongoDB Atlas credentials initialized", {
+      organizationId: this._organizationId || "auto-discover",
+      services: this._services.length
+    });
+  }
+  /**
+   * Create Atlas API client.
+   */
+  async _createClient() {
+    const AtlasClient = await import('mongodb-atlas-api-client');
+    return AtlasClient.default({
+      publicKey: this._publicKey,
+      privateKey: this._privateKey,
+      baseUrl: this._baseUrl
+    });
+  }
+  /**
+   * Make authenticated request to Atlas API.
+   */
+  async _makeRequest(endpoint, options = {}) {
+    const crypto = await import('crypto');
+    const https = await import('https');
+    const url = new URL(endpoint, this._baseUrl);
+    const method = options.method || "GET";
+    crypto.randomBytes(16).toString("hex");
+    (/* @__PURE__ */ new Date()).toISOString();
+    return new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method,
+        headers: {
+          "Accept": "application/vnd.atlas.2025-03-12+json",
+          "Content-Type": "application/json"
+        },
+        auth: `${this._publicKey}:${this._privateKey}`
+      }, (res) => {
+        let data = "";
+        res.on("data", (chunk) => data += chunk);
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (err) {
+            resolve(data);
+          }
+        });
+      });
+      req.on("error", reject);
+      if (options.body) {
+        req.write(JSON.stringify(options.body));
+      }
+      req.end();
+    });
+  }
+  /**
+   * Main entry point - lists all resources from configured services.
+   */
+  async *listResources(options = {}) {
+    await this._initializeCredentials();
+    const serviceCollectors = {
+      projects: () => this._collectProjects(),
+      clusters: () => this._collectClusters(),
+      serverless: () => this._collectServerless(),
+      users: () => this._collectUsers(),
+      accesslists: () => this._collectAccessLists(),
+      backups: () => this._collectBackups(),
+      alerts: () => this._collectAlerts(),
+      datalakes: () => this._collectDataLakes(),
+      search: () => this._collectSearchIndexes(),
+      customroles: () => this._collectCustomRoles(),
+      events: () => this._collectEvents()
+    };
+    for (const service of this._services) {
+      const collector = serviceCollectors[service];
+      if (!collector) {
+        this.logger("warn", `Unknown MongoDB Atlas service: ${service}`, { service });
+        continue;
+      }
+      try {
+        this.logger("info", `Collecting MongoDB Atlas ${service} resources`, { service });
+        yield* collector();
+      } catch (err) {
+        this.logger("error", `MongoDB Atlas service collection failed, skipping to next service`, {
+          service,
+          error: err.message,
+          errorName: err.name,
+          stack: err.stack
+        });
+      }
+    }
+  }
+  /**
+   * Get list of projects to iterate.
+   */
+  async _getProjects() {
+    if (this._projectIds) {
+      return this._projectIds.map((id) => ({ id }));
+    }
+    try {
+      const response = await this._makeRequest("/groups");
+      return response.results || [];
+    } catch (err) {
+      this.logger("error", "Failed to fetch projects list", { error: err.message });
+      return [];
+    }
+  }
+  /**
+   * Collect Projects (Groups).
+   */
+  async *_collectProjects() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        yield {
+          provider: "mongodb-atlas",
+          accountId: this._organizationId || project.orgId,
+          region: null,
+          // Projects are global
+          service: "projects",
+          resourceType: "mongodb-atlas.project",
+          resourceId: project.id,
+          name: project.name,
+          tags: {},
+          metadata: {
+            orgId: project.orgId,
+            clusterCount: project.clusterCount
+          },
+          configuration: this._sanitize(project)
+        };
+      }
+      this.logger("info", `Collected ${projects.length} MongoDB Atlas projects`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas projects", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Clusters.
+   */
+  async *_collectClusters() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/clusters`);
+          const clusters = response.results || [];
+          for (const cluster of clusters) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: cluster.providerSettings?.regionName || null,
+              service: "clusters",
+              resourceType: "mongodb-atlas.cluster",
+              resourceId: cluster.id || cluster.name,
+              name: cluster.name,
+              tags: cluster.tags || {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                tier: cluster.providerSettings?.instanceSizeName,
+                provider: cluster.providerSettings?.providerName,
+                mongoDBVersion: cluster.mongoDBVersion,
+                clusterType: cluster.clusterType,
+                state: cluster.stateName
+              },
+              configuration: this._sanitize(cluster)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("warn", `Failed to collect clusters for project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas clusters`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas clusters", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Serverless Instances.
+   */
+  async *_collectServerless() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/serverless`);
+          const instances = response.results || [];
+          for (const instance of instances) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: instance.providerSettings?.regionName || null,
+              service: "serverless",
+              resourceType: "mongodb-atlas.serverless",
+              resourceId: instance.id || instance.name,
+              name: instance.name,
+              tags: instance.tags || {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                provider: instance.providerSettings?.providerName,
+                state: instance.stateName
+              },
+              configuration: this._sanitize(instance)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("debug", `No serverless instances in project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas serverless instances`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas serverless", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Database Users.
+   */
+  async *_collectUsers() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/databaseUsers`);
+          const users = response.results || [];
+          for (const user of users) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: null,
+              service: "users",
+              resourceType: "mongodb-atlas.user",
+              resourceId: `${project.id}/${user.username}`,
+              name: user.username,
+              tags: {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                databaseName: user.databaseName,
+                roles: user.roles?.map((r) => r.roleName)
+              },
+              configuration: this._sanitize(user)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("warn", `Failed to collect users for project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas database users`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas users", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect IP Access Lists (Whitelists).
+   */
+  async *_collectAccessLists() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/accessList`);
+          const entries = response.results || [];
+          for (const entry of entries) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: null,
+              service: "accesslists",
+              resourceType: "mongodb-atlas.accesslist",
+              resourceId: `${project.id}/${entry.ipAddress || entry.cidrBlock}`,
+              name: entry.comment || entry.ipAddress || entry.cidrBlock,
+              tags: {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                ipAddress: entry.ipAddress,
+                cidrBlock: entry.cidrBlock
+              },
+              configuration: this._sanitize(entry)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("warn", `Failed to collect access lists for project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas IP access lists`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas access lists", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Cloud Backups.
+   */
+  async *_collectBackups() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const clustersResponse = await this._makeRequest(`/groups/${project.id}/clusters`);
+          const clusters = clustersResponse.results || [];
+          for (const cluster of clusters) {
+            try {
+              const response = await this._makeRequest(
+                `/groups/${project.id}/clusters/${cluster.name}/backup/snapshots`
+              );
+              const snapshots = response.results || [];
+              for (const snapshot of snapshots) {
+                yield {
+                  provider: "mongodb-atlas",
+                  accountId: this._organizationId || project.orgId,
+                  region: cluster.providerSettings?.regionName || null,
+                  service: "backups",
+                  resourceType: "mongodb-atlas.backup",
+                  resourceId: snapshot.id,
+                  name: `${cluster.name}-${snapshot.id}`,
+                  tags: {},
+                  metadata: {
+                    projectId: project.id,
+                    projectName: project.name,
+                    clusterName: cluster.name,
+                    type: snapshot.type,
+                    status: snapshot.status
+                  },
+                  configuration: this._sanitize(snapshot)
+                };
+              }
+            } catch (clusterErr) {
+              this.logger("debug", `No backups for cluster ${cluster.name}`, {
+                clusterName: cluster.name,
+                error: clusterErr.message
+              });
+            }
+          }
+        } catch (projectErr) {
+          this.logger("warn", `Failed to collect backups for project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas backups`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas backups", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Alert Configurations.
+   */
+  async *_collectAlerts() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/alertConfigs`);
+          const alerts = response.results || [];
+          for (const alert of alerts) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: null,
+              service: "alerts",
+              resourceType: "mongodb-atlas.alert",
+              resourceId: alert.id,
+              name: alert.eventTypeName,
+              tags: {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                enabled: alert.enabled,
+                eventTypeName: alert.eventTypeName
+              },
+              configuration: this._sanitize(alert)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("warn", `Failed to collect alerts for project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas alerts`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas alerts", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Data Lakes (Federated Database Instances).
+   */
+  async *_collectDataLakes() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/dataLakes`);
+          const dataLakes = response || [];
+          for (const lake of dataLakes) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: lake.cloudProviderConfig?.aws?.roleId ? "aws" : null,
+              service: "datalakes",
+              resourceType: "mongodb-atlas.datalake",
+              resourceId: lake.name,
+              name: lake.name,
+              tags: {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                state: lake.state
+              },
+              configuration: this._sanitize(lake)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("debug", `No data lakes in project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas data lakes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas data lakes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Atlas Search Indexes.
+   */
+  async *_collectSearchIndexes() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const clustersResponse = await this._makeRequest(`/groups/${project.id}/clusters`);
+          const clusters = clustersResponse.results || [];
+          for (const cluster of clusters) {
+            try {
+              const response = await this._makeRequest(
+                `/groups/${project.id}/clusters/${cluster.name}/fts/indexes`
+              );
+              const indexes = response || [];
+              for (const index of indexes) {
+                yield {
+                  provider: "mongodb-atlas",
+                  accountId: this._organizationId || project.orgId,
+                  region: cluster.providerSettings?.regionName || null,
+                  service: "search",
+                  resourceType: "mongodb-atlas.search.index",
+                  resourceId: index.indexID,
+                  name: index.name,
+                  tags: {},
+                  metadata: {
+                    projectId: project.id,
+                    projectName: project.name,
+                    clusterName: cluster.name,
+                    collectionName: index.collectionName,
+                    database: index.database,
+                    status: index.status
+                  },
+                  configuration: this._sanitize(index)
+                };
+              }
+            } catch (clusterErr) {
+              this.logger("debug", `No search indexes for cluster ${cluster.name}`, {
+                clusterName: cluster.name,
+                error: clusterErr.message
+              });
+            }
+          }
+        } catch (projectErr) {
+          this.logger("warn", `Failed to collect search indexes for project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas search indexes`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas search indexes", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Custom Database Roles.
+   */
+  async *_collectCustomRoles() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const response = await this._makeRequest(`/groups/${project.id}/customDBRoles/roles`);
+          const roles = response || [];
+          for (const role of roles) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: null,
+              service: "customroles",
+              resourceType: "mongodb-atlas.customrole",
+              resourceId: `${project.id}/${role.roleName}`,
+              name: role.roleName,
+              tags: {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name
+              },
+              configuration: this._sanitize(role)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("debug", `No custom roles in project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas custom roles`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas custom roles", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Collect Events (audit logs).
+   */
+  async *_collectEvents() {
+    try {
+      const projects = await this._getProjects();
+      for (const project of projects) {
+        try {
+          const minDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3).toISOString();
+          const response = await this._makeRequest(
+            `/groups/${project.id}/events?minDate=${minDate}&itemsPerPage=100`
+          );
+          const events = response.results || [];
+          for (const event of events) {
+            yield {
+              provider: "mongodb-atlas",
+              accountId: this._organizationId || project.orgId,
+              region: null,
+              service: "events",
+              resourceType: "mongodb-atlas.event",
+              resourceId: event.id,
+              name: event.eventTypeName,
+              tags: {},
+              metadata: {
+                projectId: project.id,
+                projectName: project.name,
+                eventTypeName: event.eventTypeName,
+                created: event.created
+              },
+              configuration: this._sanitize(event)
+            };
+          }
+        } catch (projectErr) {
+          this.logger("debug", `No recent events in project ${project.id}`, {
+            projectId: project.id,
+            error: projectErr.message
+          });
+        }
+      }
+      this.logger("info", `Collected MongoDB Atlas events`);
+    } catch (err) {
+      this.logger("error", "Failed to collect MongoDB Atlas events", {
+        error: err.message,
+        stack: err.stack
+      });
+      throw err;
+    }
+  }
+  /**
+   * Sanitize configuration by removing sensitive data.
+   */
+  _sanitize(config) {
+    if (!config || typeof config !== "object") return config;
+    const sanitized = { ...config };
+    const sensitiveFields = [
+      "password",
+      "privateKey",
+      "apiKey",
+      "connectionStrings",
+      "mongoURI",
+      "mongoURIUpdated",
+      "mongoURIWithOptions"
+    ];
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = "***REDACTED***";
+      }
+    }
+    return sanitized;
+  }
+}
+
+const DEFAULT_TAGS = { environment: "mock" };
+function cloneValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(cloneValue);
+  }
+  if (value && typeof value === "object") {
+    return JSON.parse(JSON.stringify(value));
+  }
+  return value;
+}
+function mergeWithDefaults(defaults, resource = {}) {
+  const merged = {
+    ...defaults,
+    ...resource
+  };
+  const baseTags = defaults.tags || null;
+  const resourceTags = resource.tags || null;
+  merged.tags = baseTags || resourceTags ? { ...baseTags || {}, ...resourceTags || {} } : null;
+  const baseLabels = defaults.labels || null;
+  const resourceLabels = resource.labels || null;
+  merged.labels = baseLabels || resourceLabels ? { ...baseLabels || {}, ...resourceLabels || {} } : null;
+  const baseMetadata = defaults.metadata || {};
+  const resourceMetadata = resource.metadata || {};
+  merged.metadata = { ...baseMetadata, ...resourceMetadata };
+  const configuration = resource.configuration ?? defaults.configuration ?? {
+    id: merged.resourceId,
+    note: `Mock configuration for ${defaults.provider}`
+  };
+  merged.configuration = cloneValue(configuration);
+  return merged;
+}
+class MockCloudDriver extends BaseCloudDriver {
+  constructor(options = {}, defaultsBuilder) {
+    super(options);
+    this._defaultsBuilder = defaultsBuilder;
+  }
+  _buildDefaults() {
+    return this._defaultsBuilder(this);
+  }
+  async initialize() {
+    this.logger("debug", "Mock cloud driver initialized", {
+      cloudId: this.id,
+      driver: this.driver
+    });
+  }
+  async listResources() {
+    const defaults = this._buildDefaults();
+    const samples = Array.isArray(this.config.sampleResources) && this.config.sampleResources.length ? this.config.sampleResources : [defaults];
+    return samples.map((entry) => mergeWithDefaults(defaults, entry));
+  }
+}
+function awsDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-aws-account";
+  const region = driver.config.region || driver.config.regions?.[0] || "us-east-1";
+  const resourceId = driver.config.resourceId || `i-${accountId.slice(-6) || "mock"}001`;
+  return {
+    provider: "aws",
+    driver: "aws",
+    accountId,
+    region,
+    service: "ec2",
+    resourceType: "ec2.instance",
+    resourceId,
+    name: "mock-ec2-instance",
+    tags: { ...DEFAULT_TAGS, Owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      instanceId: resourceId,
+      instanceType: "t3.micro",
+      region,
+      accountId,
+      state: "running",
+      tags: { Environment: "mock", Owner: "cloud-inventory" }
+    }
+  };
+}
+function gcpDefaults(driver) {
+  const projectId = driver.config.projectId || "mock-gcp-project";
+  const region = driver.config.region || driver.config.regions?.[0] || "us-central1";
+  const zone = driver.config.zone || `${region}-a`;
+  const resourceId = driver.config.resourceId || `${projectId}-instance-1`;
+  return {
+    provider: "gcp",
+    driver: "gcp",
+    projectId,
+    region,
+    service: "compute",
+    resourceType: "gcp.compute.instance",
+    resourceId,
+    name: "mock-gce-instance",
+    labels: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock", zone },
+    configuration: {
+      id: resourceId,
+      name: "mock-gce-instance",
+      machineType: "e2-medium",
+      status: "RUNNING",
+      projectId,
+      zone,
+      labels: { environment: "mock", owner: "cloud-inventory" }
+    }
+  };
+}
+function digitalOceanDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-do-account";
+  const region = driver.config.region || driver.config.regions?.[0] || "nyc3";
+  const resourceId = driver.config.resourceId || `do-${accountId.slice(-6) || "mock"}-droplet`;
+  return {
+    provider: "digitalocean",
+    driver: "digitalocean",
+    accountId,
+    region,
+    service: "droplet",
+    resourceType: "do.droplet",
+    resourceId,
+    name: "mock-droplet",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      name: "mock-droplet",
+      size: "s-2vcpu-4gb",
+      region,
+      status: "active",
+      tags: ["mock", "cloud-inventory"]
+    }
+  };
+}
+function oracleDefaults(driver) {
+  const tenancyId = driver.config.tenancyId || driver.config.organizationId || "ocid1.tenancy.oc1..mock";
+  const compartmentId = driver.config.compartmentId || "ocid1.compartment.oc1..mock";
+  const region = driver.config.region || "us-phoenix-1";
+  const resourceId = driver.config.resourceId || "ocid1.instance.oc1..mock";
+  return {
+    provider: "oracle",
+    driver: "oracle",
+    organizationId: tenancyId,
+    region,
+    service: "compute",
+    resourceType: "oci.compute.instance",
+    resourceId,
+    name: "mock-oci-instance",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: {
+      source: "cloud-inventory-mock",
+      compartmentId
+    },
+    configuration: {
+      id: resourceId,
+      displayName: "mock-oci-instance",
+      compartmentId,
+      lifecycleState: "RUNNING",
+      region,
+      shape: "VM.Standard.E4.Flex",
+      freeformTags: { Environment: "mock", Owner: "cloud-inventory" }
+    }
+  };
+}
+function azureDefaults(driver) {
+  const subscriptionId = driver.config.subscriptionId || driver.config.accountId || "00000000-0000-0000-0000-000000000000";
+  const resourceGroup = driver.config.resourceGroup || "rg-mock";
+  const region = driver.config.region || "eastus";
+  const vmName = driver.config.vmName || "mock-azure-vm";
+  const resourceId = driver.config.resourceId || `/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.Compute/virtualMachines/${vmName}`;
+  return {
+    provider: "azure",
+    driver: "azure",
+    subscriptionId,
+    region,
+    service: "compute",
+    resourceType: "azure.vm",
+    resourceId,
+    name: vmName,
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: {
+      source: "cloud-inventory-mock",
+      resourceGroup
+    },
+    configuration: {
+      id: resourceId,
+      name: vmName,
+      location: region,
+      resourceGroup,
+      subscriptionId,
+      hardwareProfile: { vmSize: "Standard_B2s" },
+      provisioningState: "Succeeded",
+      tags: { Environment: "mock", Owner: "cloud-inventory" }
+    }
+  };
+}
+function vultrDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-vultr-account";
+  const region = driver.config.region || "ewr";
+  const resourceId = driver.config.resourceId || `vultr-${accountId.slice(-6) || "mock"}-instance`;
+  return {
+    provider: "vultr",
+    driver: "vultr",
+    accountId,
+    region,
+    service: "compute",
+    resourceType: "vultr.instance",
+    resourceId,
+    name: "mock-vultr-instance",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      label: "mock-vultr-instance",
+      plan: "vc2-1c-1gb",
+      region,
+      status: "active",
+      tags: ["mock", "cloud-inventory"]
+    }
+  };
+}
+class AwsMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, awsDefaults);
+  }
+}
+class GcpMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, gcpDefaults);
+  }
+}
+class DigitalOceanMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, digitalOceanDefaults);
+  }
+}
+class OracleMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, oracleDefaults);
+  }
+}
+class AzureMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, azureDefaults);
+  }
+}
+class VultrMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, vultrDefaults);
+  }
+}
+function linodeDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-linode-account";
+  const region = driver.config.region || driver.config.regions?.[0] || "us-east";
+  const resourceId = driver.config.resourceId || `linode-${accountId.slice(-6) || "mock"}-instance`;
+  return {
+    provider: "linode",
+    driver: "linode",
+    accountId,
+    region,
+    service: "linodes",
+    resourceType: "linode.compute.instance",
+    resourceId,
+    name: "mock-linode-instance",
+    tags: ["mock", "cloud-inventory"],
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      label: "mock-linode-instance",
+      type: "g6-nanode-1",
+      region,
+      status: "running",
+      tags: ["mock", "cloud-inventory"]
+    }
+  };
+}
+function hetznerDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-hetzner-account";
+  const region = driver.config.region || "fsn1";
+  const resourceId = driver.config.resourceId || `hetzner-${accountId.slice(-6) || "mock"}-server`;
+  return {
+    provider: "hetzner",
+    driver: "hetzner",
+    accountId,
+    region,
+    service: "servers",
+    resourceType: "hetzner.server",
+    resourceId,
+    name: "mock-hetzner-server",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      name: "mock-hetzner-server",
+      serverType: "cx11",
+      datacenter: { location: { name: region } },
+      status: "running",
+      labels: { environment: "mock", owner: "cloud-inventory" }
+    }
+  };
+}
+function alibabaDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-alibaba-account";
+  const region = driver.config.region || driver.config.regions?.[0] || "cn-hangzhou";
+  const resourceId = driver.config.resourceId || `i-${accountId.slice(-6) || "mock"}001`;
+  return {
+    provider: "alibaba",
+    driver: "alibaba",
+    accountId,
+    region,
+    service: "ecs",
+    resourceType: "alibaba.ecs.instance",
+    resourceId,
+    name: "mock-ecs-instance",
+    tags: { ...DEFAULT_TAGS, owner: "cloud-inventory" },
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      InstanceId: resourceId,
+      InstanceName: "mock-ecs-instance",
+      InstanceType: "ecs.t5-lc1m1.small",
+      RegionId: region,
+      Status: "Running",
+      Tags: { Tag: [{ TagKey: "environment", TagValue: "mock" }] }
+    }
+  };
+}
+function cloudflareDefaults(driver) {
+  const accountId = driver.config.accountId || "mock-cloudflare-account";
+  const resourceId = driver.config.resourceId || `cf-worker-${accountId.slice(-6) || "mock"}`;
+  return {
+    provider: "cloudflare",
+    driver: "cloudflare",
+    accountId,
+    region: "global",
+    service: "workers",
+    resourceType: "cloudflare.workers.script",
+    resourceId,
+    name: "mock-worker-script",
+    tags: ["mock", "cloud-inventory"],
+    metadata: { source: "cloud-inventory-mock" },
+    configuration: {
+      id: resourceId,
+      script: "mock-worker-script",
+      etag: "mock-etag",
+      created_on: (/* @__PURE__ */ new Date()).toISOString(),
+      modified_on: (/* @__PURE__ */ new Date()).toISOString(),
+      tags: ["mock", "cloud-inventory"]
+    }
+  };
+}
+class LinodeMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, linodeDefaults);
+  }
+}
+class HetznerMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, hetznerDefaults);
+  }
+}
+class AlibabaMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, alibabaDefaults);
+  }
+}
+class CloudflareMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, cloudflareDefaults);
+  }
+}
+function mongodbAtlasDefaults(driver) {
+  const organizationId = driver.config.organizationId || "mock-atlas-org";
+  const projectId = driver.config.projectId || "mock-atlas-project";
+  const resourceId = driver.config.resourceId || `cluster-${projectId.slice(-6) || "mock"}`;
+  return {
+    provider: "mongodb-atlas",
+    driver: "mongodb-atlas",
+    accountId: organizationId,
+    region: "US_EAST_1",
+    service: "clusters",
+    resourceType: "mongodb-atlas.cluster",
+    resourceId,
+    name: "mock-atlas-cluster",
+    tags: { ...DEFAULT_TAGS, environment: "development" },
+    metadata: {
+      source: "cloud-inventory-mock",
+      projectId,
+      tier: "M10",
+      provider: "AWS",
+      mongoDBVersion: "7.0"
+    },
+    configuration: {
+      id: resourceId,
+      name: "mock-atlas-cluster",
+      clusterType: "REPLICASET",
+      stateName: "IDLE",
+      mongoDBVersion: "7.0.2",
+      providerSettings: {
+        providerName: "AWS",
+        regionName: "US_EAST_1",
+        instanceSizeName: "M10"
+      },
+      tags: { environment: "development", owner: "cloud-inventory" }
+    }
+  };
+}
+class MongoDBAtlasMockDriver extends MockCloudDriver {
+  constructor(options = {}) {
+    super(options, mongodbAtlasDefaults);
+  }
+}
+
+const CLOUD_DRIVERS = /* @__PURE__ */ new Map();
+function registerCloudDriver(name, factory) {
+  if (!name || typeof name !== "string") {
+    throw new Error("registerCloudDriver: name must be a non-empty string");
+  }
+  if (typeof factory !== "function") {
+    throw new Error(`registerCloudDriver("${name}") expects a factory function`);
+  }
+  CLOUD_DRIVERS.set(name, factory);
+}
+function createCloudDriver(name, options) {
+  if (!CLOUD_DRIVERS.has(name)) {
+    throw new Error(`Cloud driver "${name}" is not registered. Registered drivers: ${[...CLOUD_DRIVERS.keys()].join(", ") || "none"}`);
+  }
+  const driver = CLOUD_DRIVERS.get(name)(options);
+  if (!(driver instanceof BaseCloudDriver)) {
+    throw new Error(`Driver "${name}" factory must return an instance of BaseCloudDriver`);
+  }
+  return driver;
+}
+function listCloudDrivers() {
+  return [...CLOUD_DRIVERS.keys()];
+}
+function validateCloudDefinition(cloud) {
+  if (!cloud || typeof cloud !== "object") {
+    throw new Error("Each cloud configuration must be an object");
+  }
+  const { driver, credentials } = cloud;
+  if (!driver || typeof driver !== "string") {
+    throw new Error('Cloud configuration requires a "driver" string');
+  }
+  if (!CLOUD_DRIVERS.has(driver)) {
+    throw new Error(`Cloud driver "${driver}" is not registered`);
+  }
+  if (!credentials || typeof credentials !== "object") {
+    throw new Error(`Cloud "${driver}" requires a credentials object`);
+  }
+}
+registerCloudDriver("noop", (options = {}) => {
+  class NoopDriver extends BaseCloudDriver {
+    async listResources() {
+      const { sampleResources = [] } = options.config || {};
+      return Array.isArray(sampleResources) ? sampleResources : [];
+    }
+  }
+  return new NoopDriver({
+    ...options,
+    driver: options.driver || "noop"
+  });
+});
+function registerMockDriver(names, DriverClass) {
+  const list = Array.isArray(names) ? names : [names];
+  for (const name of list) {
+    registerCloudDriver(name, (options = {}) => new DriverClass(options));
+  }
+}
+registerCloudDriver("aws", (options = {}) => new AwsInventoryDriver(options));
+registerCloudDriver("gcp", (options = {}) => new GcpInventoryDriver(options));
+registerCloudDriver("vultr", (options = {}) => new VultrInventoryDriver(options));
+registerCloudDriver("digitalocean", (options = {}) => new DigitalOceanInventoryDriver(options));
+registerCloudDriver("do", (options = {}) => new DigitalOceanInventoryDriver(options));
+registerCloudDriver("oracle", (options = {}) => new OracleInventoryDriver(options));
+registerCloudDriver("oci", (options = {}) => new OracleInventoryDriver(options));
+registerCloudDriver("azure", (options = {}) => new AzureInventoryDriver(options));
+registerCloudDriver("az", (options = {}) => new AzureInventoryDriver(options));
+registerCloudDriver("linode", (options = {}) => new LinodeInventoryDriver(options));
+registerCloudDriver("hetzner", (options = {}) => new HetznerInventoryDriver(options));
+registerCloudDriver("alibaba", (options = {}) => new AlibabaInventoryDriver(options));
+registerCloudDriver("aliyun", (options = {}) => new AlibabaInventoryDriver(options));
+registerCloudDriver("cloudflare", (options = {}) => new CloudflareInventoryDriver(options));
+registerCloudDriver("cf", (options = {}) => new CloudflareInventoryDriver(options));
+registerCloudDriver("mongodb-atlas", (options = {}) => new MongoDBAtlasInventoryDriver(options));
+registerCloudDriver("atlas", (options = {}) => new MongoDBAtlasInventoryDriver(options));
+registerMockDriver("aws-mock", AwsMockDriver);
+registerMockDriver("gcp-mock", GcpMockDriver);
+registerMockDriver("vultr-mock", VultrMockDriver);
+registerMockDriver(["digitalocean-mock", "do-mock"], DigitalOceanMockDriver);
+registerMockDriver(["oracle-mock", "oci-mock"], OracleMockDriver);
+registerMockDriver(["azure-mock", "az-mock"], AzureMockDriver);
+registerMockDriver("linode-mock", LinodeMockDriver);
+registerMockDriver("hetzner-mock", HetznerMockDriver);
+registerMockDriver(["alibaba-mock", "aliyun-mock"], AlibabaMockDriver);
+registerMockDriver(["cloudflare-mock", "cf-mock"], CloudflareMockDriver);
+registerMockDriver(["mongodb-atlas-mock", "atlas-mock"], MongoDBAtlasMockDriver);
+
+const DEFAULT_RESOURCES = {
+  snapshots: "plg_cloud_inventory_snapshots",
+  versions: "plg_cloud_inventory_versions",
+  changes: "plg_cloud_inventory_changes",
+  clouds: "plg_cloud_inventory_clouds"
+};
+const DEFAULT_DISCOVERY = {
+  concurrency: 3,
+  include: null,
+  exclude: [],
+  runOnInstall: true,
+  dryRun: false
+};
+const DEFAULT_LOCK = {
+  ttl: 300,
+  timeout: 0
+};
+const BASE_SCHEDULE = {
+  enabled: false,
+  cron: null,
+  timezone: void 0,
+  runOnStart: false
+};
+const DEFAULT_TERRAFORM = {
+  enabled: false,
+  autoExport: false,
+  output: null,
+  outputType: "file",
+  // 'file', 's3', or 'custom'
+  filters: {
+    providers: [],
+    resourceTypes: [],
+    cloudId: null
+  },
+  terraformVersion: "1.5.0",
+  serial: 1
+};
+const INLINE_DRIVER_NAMES = /* @__PURE__ */ new Map();
+class CloudInventoryPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    const pendingLogs = [];
+    const normalizedClouds = normalizeCloudDefinitions(
+      Array.isArray(options.clouds) ? options.clouds : [],
+      (level, message, meta) => pendingLogs.push({ level, message, meta })
+    );
+    this.config = {
+      clouds: normalizedClouds,
+      discovery: {
+        ...DEFAULT_DISCOVERY,
+        ...options.discovery || {}
+      },
+      resources: {
+        ...DEFAULT_RESOURCES,
+        ...options.resources || {}
+      },
+      logger: typeof options.logger === "function" ? options.logger : null,
+      verbose: options.verbose === true,
+      scheduled: normalizeSchedule(options.scheduled),
+      lock: {
+        ttl: options.lock?.ttl ?? DEFAULT_LOCK.ttl,
+        timeout: options.lock?.timeout ?? DEFAULT_LOCK.timeout
+      },
+      terraform: {
+        ...DEFAULT_TERRAFORM,
+        ...options.terraform || {},
+        filters: {
+          ...DEFAULT_TERRAFORM.filters,
+          ...options.terraform?.filters || {}
+        }
+      }
+    };
+    this.cloudDrivers = /* @__PURE__ */ new Map();
+    this._resourceHandles = {};
+    this._scheduledJobs = [];
+    this._cron = null;
+    for (const entry of pendingLogs) {
+      this._log(entry.level, entry.message, entry.meta);
+    }
+  }
+  async onInstall() {
+    this._validateConfiguration();
+    await this._ensureResources();
+    await this._initializeDrivers();
+    if (this.config.discovery.runOnInstall) {
+      await this.syncAll();
+    }
+  }
+  async onStart() {
+    await this._setupSchedules();
+  }
+  async onStop() {
+    await this._teardownSchedules();
+    await this._destroyDrivers();
+  }
+  async onUninstall() {
+    await this._teardownSchedules();
+    await this._destroyDrivers();
+  }
+  async syncAll(options = {}) {
+    const results = [];
+    for (const cloud of this.config.clouds) {
+      const result = await this.syncCloud(cloud.id, options);
+      results.push(result);
+    }
+    if (this.config.terraform.enabled && this.config.terraform.autoExport && !this.config.terraform.filters.cloudId) {
+      await this._autoExportTerraform(null);
+    }
+    return results;
+  }
+  async syncCloud(cloudId, options = {}) {
+    const driverEntry = this.cloudDrivers.get(cloudId);
+    if (!driverEntry) {
+      throw new PluginError(`Cloud "${cloudId}" is not registered`, {
+        pluginName: "CloudInventoryPlugin",
+        operation: "syncCloud",
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Register the cloud definition in CloudInventoryPlugin configuration. Available: ${[...this.cloudDrivers.keys()].join(", ") || "none"}.`,
+        cloudId
+      });
+    }
+    const { driver, definition } = driverEntry;
+    const summaryResource = this._resourceHandles.clouds;
+    const summaryBefore = await summaryResource.getOrNull(cloudId) ?? await this._ensureCloudSummaryRecord(cloudId, definition, definition.scheduled);
+    const storage = this.getStorage();
+    const lockKey = `cloud-inventory-sync-${cloudId}`;
+    const lock = await storage.acquireLock(lockKey, {
+      ttl: this.config.lock.ttl,
+      timeout: this.config.lock.timeout
+    });
+    if (!lock) {
+      this._log("info", "Cloud sync already running on another worker, skipping", { cloudId });
+      return {
+        cloudId,
+        driver: definition.driver,
+        skipped: true,
+        reason: "lock-not-acquired"
+      };
+    }
+    const runId = createRunIdentifier();
+    const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await this._updateCloudSummary(cloudId, {
+      status: "running",
+      lastRunAt: startedAt,
+      lastRunId: runId,
+      lastError: null,
+      progress: null
+    });
+    let pendingCheckpoint = summaryBefore?.checkpoint ?? null;
+    let pendingRateLimit = summaryBefore?.rateLimit ?? null;
+    let pendingState = summaryBefore?.state ?? null;
+    const runtimeContext = {
+      checkpoint: summaryBefore?.checkpoint ?? null,
+      state: summaryBefore?.state ?? null,
+      emitCheckpoint: (value) => {
+        if (value === void 0) return;
+        pendingCheckpoint = value;
+        this._updateCloudSummary(cloudId, {
+          checkpoint: value,
+          checkpointUpdatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        }).catch((err) => this._log("warn", "Failed to persist checkpoint", { cloudId, error: err.message }));
+      },
+      emitRateLimit: (value) => {
+        pendingRateLimit = value;
+        this._updateCloudSummary(cloudId, {
+          rateLimit: value,
+          rateLimitUpdatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        }).catch((err) => this._log("warn", "Failed to persist rate-limit metadata", { cloudId, error: err.message }));
+      },
+      emitState: (value) => {
+        pendingState = value;
+        this._updateCloudSummary(cloudId, {
+          state: value,
+          stateUpdatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        }).catch((err) => this._log("warn", "Failed to persist driver state", { cloudId, error: err.message }));
+      },
+      emitProgress: (value) => {
+        this._updateCloudSummary(cloudId, { progress: value }).catch((err) => this._log("warn", "Failed to persist progress", { cloudId, error: err.message }));
+      }
+    };
+    try {
+      let items;
+      try {
+        items = await driver.listResources({
+          discovery: this.config.discovery,
+          checkpoint: runtimeContext.checkpoint,
+          state: runtimeContext.state,
+          runtime: runtimeContext,
+          ...options
+        });
+      } catch (err) {
+        await this._updateCloudSummary(cloudId, {
+          status: "error",
+          lastErrorAt: (/* @__PURE__ */ new Date()).toISOString(),
+          lastError: err.message || "Driver failure during listResources"
+        });
+        throw err;
+      }
+      let countCreated = 0;
+      let countUpdated = 0;
+      let countUnchanged = 0;
+      let processed = 0;
+      let errorDuringRun = null;
+      const startMs = Date.now();
+      const processItem = async (rawItem) => {
+        const normalized = this._normalizeResource(definition, rawItem);
+        if (!normalized) return;
+        const persisted = await this._persistSnapshot(normalized, rawItem);
+        processed += 1;
+        if (persisted?.status === "created") countCreated += 1;
+        else if (persisted?.status === "updated") countUpdated += 1;
+        else countUnchanged += 1;
+      };
+      try {
+        if (isAsyncIterable(items)) {
+          for await (const item of items) {
+            await processItem(item);
+          }
+        } else if (Array.isArray(items)) {
+          for (const item of items) {
+            await processItem(item);
+          }
+        } else if (items) {
+          await processItem(items);
+        }
+      } catch (err) {
+        errorDuringRun = err;
+      }
+      const finishedAt = (/* @__PURE__ */ new Date()).toISOString();
+      const durationMs = Date.now() - startMs;
+      const summaryPatch = {
+        status: errorDuringRun ? "error" : "idle",
+        lastRunAt: startedAt,
+        lastRunId: runId,
+        lastResult: {
+          runId,
+          startedAt,
+          finishedAt,
+          durationMs,
+          counts: {
+            created: countCreated,
+            updated: countUpdated,
+            unchanged: countUnchanged
+          },
+          processed,
+          checkpoint: pendingCheckpoint
+        },
+        totalResources: Math.max(0, (summaryBefore?.totalResources ?? 0) + countCreated),
+        totalVersions: Math.max(0, (summaryBefore?.totalVersions ?? 0) + countCreated + countUpdated),
+        checkpoint: pendingCheckpoint,
+        checkpointUpdatedAt: pendingCheckpoint !== summaryBefore?.checkpoint ? finishedAt : summaryBefore?.checkpointUpdatedAt,
+        rateLimit: pendingRateLimit,
+        rateLimitUpdatedAt: pendingRateLimit !== summaryBefore?.rateLimit ? finishedAt : summaryBefore?.rateLimitUpdatedAt,
+        state: pendingState,
+        stateUpdatedAt: pendingState !== summaryBefore?.state ? finishedAt : summaryBefore?.stateUpdatedAt,
+        progress: null
+      };
+      if (errorDuringRun) {
+        summaryPatch.lastError = errorDuringRun.message;
+        summaryPatch.lastErrorAt = finishedAt;
+      } else {
+        summaryPatch.lastError = null;
+        summaryPatch.lastSuccessAt = finishedAt;
+      }
+      await this._updateCloudSummary(cloudId, summaryPatch);
+      if (errorDuringRun) {
+        throw errorDuringRun;
+      }
+      const summary = {
+        cloudId,
+        driver: definition.driver,
+        created: countCreated,
+        updated: countUpdated,
+        unchanged: countUnchanged,
+        processed,
+        durationMs
+      };
+      this._log("info", "Cloud sync finished", summary);
+      if (this.config.terraform.enabled && this.config.terraform.autoExport) {
+        await this._autoExportTerraform(cloudId);
+      }
+      return summary;
+    } finally {
+      try {
+        await storage.releaseLock(lock);
+      } catch (releaseErr) {
+        this._log("warn", "Failed to release sync lock", {
+          cloudId,
+          lockName: lock?.name ?? lockKey,
+          error: releaseErr.message
+        });
+      }
+    }
+  }
+  _validateConfiguration() {
+    if (!Array.isArray(this.config.clouds) || this.config.clouds.length === 0) {
+      throw new PluginError('CloudInventoryPlugin requires a "clouds" array in the configuration', {
+        pluginName: "CloudInventoryPlugin",
+        operation: "validateConfiguration",
+        statusCode: 400,
+        retriable: false,
+        suggestion: `Provide at least one cloud definition. Registered drivers: ${listCloudDrivers().join(", ") || "none"}.`
+      });
+    }
+    for (const cloud of this.config.clouds) {
+      validateCloudDefinition(cloud);
+      try {
+        normalizeSchedule(cloud.scheduled);
+      } catch (err) {
+        throw new PluginError(`Cloud "${cloud.id}" has an invalid scheduled configuration`, {
+          pluginName: "CloudInventoryPlugin",
+          operation: "validateConfiguration",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Provide a valid cron expression and timezone when enabling scheduled discovery.",
+          cloudId: cloud.id,
+          original: err
+        });
+      }
+    }
+  }
+  /**
+   * Export discovered cloud resources to Terraform/OpenTofu state format
+   * @param {Object} options - Export options
+   * @param {Array<string>} options.resourceTypes - Filter by cloud resource types (e.g., ['aws.ec2.instance'])
+   * @param {Array<string>} options.providers - Filter by provider (e.g., ['aws', 'gcp'])
+   * @param {string} options.cloudId - Filter by specific cloud ID
+   * @param {string} options.terraformVersion - Terraform version (default: '1.5.0')
+   * @param {string} options.lineage - State lineage UUID (default: auto-generated)
+   * @param {number} options.serial - State serial number (default: 1)
+   * @param {Object} options.outputs - Terraform outputs (default: {})
+   * @returns {Promise<Object>} - { state, stats }
+   *
+   * @example
+   * // Export all resources
+   * const result = await plugin.exportToTerraformState();
+   * console.log(result.state); // Terraform state object
+   * console.log(result.stats); // { total, converted, skipped }
+   *
+   * // Export specific provider
+   * const awsOnly = await plugin.exportToTerraformState({ providers: ['aws'] });
+   *
+   * // Export specific resource types
+   * const ec2Only = await plugin.exportToTerraformState({
+   *   resourceTypes: ['aws.ec2.instance', 'aws.rds.instance']
+   * });
+   */
+  async exportToTerraformState(options = {}) {
+    const { exportToTerraformState: exportFn } = await Promise.resolve().then(function () { return terraformExporter; });
+    const {
+      resourceTypes = [],
+      providers = [],
+      cloudId = null,
+      ...exportOptions
+    } = options;
+    const snapshotsResource = this._resourceHandles.snapshots;
+    if (!snapshotsResource) {
+      throw new PluginError("Snapshots resource not initialized", {
+        pluginName: "CloudInventoryPlugin",
+        operation: "exportToTerraformState",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Call database.usePlugin(new CloudInventoryPlugin(...)) and ensure onInstall completed before exporting."
+      });
+    }
+    const queryOptions = {};
+    if (cloudId) {
+      queryOptions.cloudId = cloudId;
+    }
+    const snapshots = await snapshotsResource.query(queryOptions);
+    this._log("info", "Exporting cloud inventory to Terraform state", {
+      totalSnapshots: snapshots.length,
+      resourceTypes: resourceTypes.length > 0 ? resourceTypes : "all",
+      providers: providers.length > 0 ? providers : "all"
+    });
+    const result = exportFn(snapshots, {
+      ...exportOptions,
+      resourceTypes,
+      providers
+    });
+    this._log("info", "Export complete", result.stats);
+    return result;
+  }
+  /**
+   * Export cloud inventory to Terraform state file
+   * @param {string} filePath - Output file path
+   * @param {Object} options - Export options (see exportToTerraformState)
+   * @returns {Promise<Object>} - { filePath, stats }
+   *
+   * @example
+   * // Export to file
+   * await plugin.exportToTerraformStateFile('./terraform.tfstate');
+   *
+   * // Export AWS resources only
+   * await plugin.exportToTerraformStateFile('./aws-resources.tfstate', {
+   *   providers: ['aws']
+   * });
+   */
+  async exportToTerraformStateFile(filePath, options = {}) {
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const result = await this.exportToTerraformState(options);
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(result.state, null, 2), "utf8");
+    this._log("info", `Terraform state exported to: ${filePath}`, result.stats);
+    return {
+      filePath,
+      ...result
+    };
+  }
+  /**
+   * Export cloud inventory to Terraform state in S3
+   * @param {string} bucket - S3 bucket name
+   * @param {string} key - S3 object key
+   * @param {Object} options - Export options (see exportToTerraformState)
+   * @returns {Promise<Object>} - { bucket, key, stats }
+   *
+   * @example
+   * // Export to S3
+   * await plugin.exportToTerraformStateToS3('my-bucket', 'terraform/state.tfstate');
+   *
+   * // Export GCP resources to S3
+   * await plugin.exportToTerraformStateToS3('my-bucket', 'terraform/gcp.tfstate', {
+   *   providers: ['gcp']
+   * });
+   */
+  async exportToTerraformStateToS3(bucket, key, options = {}) {
+    const result = await this.exportToTerraformState(options);
+    const s3Client = this.database.client;
+    if (!s3Client || typeof s3Client.putObject !== "function") {
+      throw new PluginError("S3 client not available. Database must use S3-compatible storage.", {
+        pluginName: "CloudInventoryPlugin",
+        operation: "exportToTerraformStateToS3",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Initialize the database with an S3-compatible client before exporting Terraform state to S3."
+      });
+    }
+    await s3Client.putObject({
+      Bucket: bucket,
+      Key: key,
+      Body: JSON.stringify(result.state, null, 2),
+      ContentType: "application/json"
+    });
+    this._log("info", `Terraform state exported to S3: s3://${bucket}/${key}`, result.stats);
+    return {
+      bucket,
+      key,
+      ...result
+    };
+  }
+  /**
+   * Auto-export Terraform state after discovery (internal)
+   * @private
+   */
+  async _autoExportTerraform(cloudId = null) {
+    try {
+      const { terraform } = this.config;
+      const exportOptions = {
+        ...terraform.filters,
+        terraformVersion: terraform.terraformVersion,
+        serial: terraform.serial
+      };
+      if (cloudId) {
+        exportOptions.cloudId = cloudId;
+      }
+      this._log("info", "Auto-exporting Terraform state", {
+        output: terraform.output,
+        outputType: terraform.outputType,
+        cloudId: cloudId || "all"
+      });
+      let result;
+      if (terraform.outputType === "s3") {
+        const s3Match = terraform.output?.match(/^s3:\/\/([^/]+)\/(.+)$/);
+        if (!s3Match) {
+          throw new PluginError(`Invalid S3 URL format: ${terraform.output}`, {
+            pluginName: "CloudInventoryPlugin",
+            operation: "_autoExportTerraform",
+            statusCode: 400,
+            retriable: false,
+            suggestion: "Provide a Terraform export destination using s3://bucket/path/file.tfstate.",
+            output: terraform.output
+          });
+        }
+        const [, bucket, key] = s3Match;
+        result = await this.exportToTerraformStateToS3(bucket, key, exportOptions);
+      } else if (terraform.outputType === "file") {
+        if (!terraform.output) {
+          throw new PluginError("Terraform output path not configured", {
+            pluginName: "CloudInventoryPlugin",
+            operation: "_autoExportTerraform",
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Set terraform.output to a file path (e.g., ./terraform/state.tfstate) when using outputType "file".'
+          });
+        }
+        result = await this.exportToTerraformStateFile(terraform.output, exportOptions);
+      } else {
+        if (typeof terraform.output === "function") {
+          const stateData = await this.exportToTerraformState(exportOptions);
+          result = await terraform.output(stateData);
+        } else {
+          throw new PluginError(`Unknown terraform.outputType: ${terraform.outputType}`, {
+            pluginName: "CloudInventoryPlugin",
+            operation: "_autoExportTerraform",
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Use one of the supported output types: "file", "s3", or provide a custom function.',
+            outputType: terraform.outputType
+          });
+        }
+      }
+      this._log("info", "Terraform state auto-export completed", result.stats);
+    } catch (err) {
+      this._log("error", "Failed to auto-export Terraform state", {
+        error: err.message,
+        stack: err.stack
+      });
+    }
+  }
+  async _ensureResources() {
+    const {
+      snapshots,
+      versions,
+      changes,
+      clouds
+    } = this.config.resources;
+    const resourceDefinitions = [
+      {
+        name: snapshots,
+        attributes: {
+          id: "string|required",
+          cloudId: "string|required",
+          driver: "string|required",
+          accountId: "string|optional",
+          subscriptionId: "string|optional",
+          organizationId: "string|optional",
+          projectId: "string|optional",
+          region: "string|optional",
+          service: "string|optional",
+          resourceType: "string|required",
+          resourceId: "string|required",
+          name: "string|optional",
+          tags: "json|optional",
+          labels: "json|optional",
+          latestDigest: "string|required",
+          latestVersion: "number|required",
+          latestSnapshotId: "string|required",
+          lastSeenAt: "string|required",
+          firstSeenAt: "string|required",
+          changelogSize: "number|default:0",
+          metadata: "json|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        partitions: {
+          byCloudId: {
+            fields: {
+              cloudId: "string|required"
+            }
+          },
+          byResourceType: {
+            fields: {
+              resourceType: "string|required"
+            }
+          },
+          byCloudAndType: {
+            fields: {
+              cloudId: "string|required",
+              resourceType: "string|required"
+            }
+          },
+          byRegion: {
+            fields: {
+              region: "string|optional"
+            }
+          }
+        }
+      },
+      {
+        name: versions,
+        attributes: {
+          id: "string|required",
+          resourceKey: "string|required",
+          cloudId: "string|required",
+          driver: "string|required",
+          version: "number|required",
+          digest: "string|required",
+          capturedAt: "string|required",
+          configuration: "json|required",
+          summary: "json|optional",
+          raw: "json|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        partitions: {
+          byResourceKey: {
+            fields: {
+              resourceKey: "string|required"
+            }
+          },
+          byCloudId: {
+            fields: {
+              cloudId: "string|required"
+            }
+          }
+        }
+      },
+      {
+        name: changes,
+        attributes: {
+          id: "string|required",
+          resourceKey: "string|required",
+          cloudId: "string|required",
+          driver: "string|required",
+          fromVersion: "number|required",
+          toVersion: "number|required",
+          fromDigest: "string|required",
+          toDigest: "string|required",
+          diff: "json|required",
+          summary: "json|optional",
+          capturedAt: "string|required"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        partitions: {
+          byResourceKey: {
+            fields: {
+              resourceKey: "string|required"
+            }
+          },
+          byCloudId: {
+            fields: {
+              cloudId: "string|required"
+            }
+          }
+        }
+      },
+      {
+        name: clouds,
+        attributes: {
+          id: "string|required",
+          driver: "string|required",
+          status: "string|default:idle",
+          lastRunAt: "string|optional",
+          lastRunId: "string|optional",
+          lastSuccessAt: "string|optional",
+          lastErrorAt: "string|optional",
+          lastError: "string|optional",
+          totalResources: "number|default:0",
+          totalVersions: "number|default:0",
+          lastResult: "json|optional",
+          tags: "json|optional",
+          metadata: "json|optional",
+          schedule: "json|optional",
+          checkpoint: "json|optional",
+          checkpointUpdatedAt: "string|optional",
+          rateLimit: "json|optional",
+          rateLimitUpdatedAt: "string|optional",
+          state: "json|optional",
+          stateUpdatedAt: "string|optional",
+          progress: "json|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true
+      }
+    ];
+    for (const definition of resourceDefinitions) {
+      const [ok, err] = await tryFn(() => this.database.createResource(definition));
+      if (!ok && err?.message?.includes("already exists")) {
+        this._log("debug", "Resource already exists, skipping creation", { resource: definition.name });
+      } else if (!ok) {
+        throw err;
+      }
+    }
+    this._resourceHandles.snapshots = this.database.resources[snapshots];
+    this._resourceHandles.versions = this.database.resources[versions];
+    this._resourceHandles.changes = this.database.resources[changes];
+    this._resourceHandles.clouds = this.database.resources[clouds];
+  }
+  async _initializeDrivers() {
+    for (const cloudDef of this.config.clouds) {
+      const driverId = cloudDef.id;
+      if (this.cloudDrivers.has(driverId)) continue;
+      const schedule = normalizeSchedule(cloudDef.scheduled);
+      const summary = await this._ensureCloudSummaryRecord(driverId, cloudDef, schedule);
+      const driver = createCloudDriver(cloudDef.driver, {
+        ...cloudDef,
+        globals: this.config,
+        schedule,
+        logger: (level, message, meta = {}) => {
+          this._log(level, message, { cloudId: driverId, driver: cloudDef.driver, ...meta });
+        }
+      });
+      await driver.initialize();
+      this.cloudDrivers.set(driverId, {
+        driver,
+        definition: { ...cloudDef, scheduled: schedule },
+        summary
+      });
+      this._log("info", "Cloud driver initialized", { cloudId: driverId, driver: cloudDef.driver });
+    }
+  }
+  async _destroyDrivers() {
+    for (const [cloudId, { driver }] of this.cloudDrivers.entries()) {
+      try {
+        await driver.destroy?.();
+      } catch (err) {
+        this._log("warn", "Failed to destroy cloud driver", { cloudId, error: err.message });
+      }
+    }
+    this.cloudDrivers.clear();
+  }
+  async _setupSchedules() {
+    await this._teardownSchedules();
+    const globalSchedule = this.config.scheduled;
+    const cloudsWithSchedule = [...this.cloudDrivers.values()].filter((entry) => entry.definition.scheduled?.enabled);
+    const needsCron = globalSchedule.enabled || cloudsWithSchedule.length > 0;
+    if (!needsCron) return;
+    await requirePluginDependency("cloud-inventory-plugin");
+    if (!this._cron) {
+      const cronModule = await import('node-cron');
+      this._cron = cronModule.default || cronModule;
+    }
+    if (globalSchedule.enabled) {
+      this._scheduleJob(globalSchedule, async () => {
+        try {
+          await this.syncAll({ reason: "scheduled-global" });
+        } catch (err) {
+          this._log("error", "Scheduled global sync failed", { error: err.message });
+        }
+      });
+      if (globalSchedule.runOnStart) {
+        this.syncAll({ reason: "scheduled-global-runOnStart" }).catch((err) => {
+          this._log("error", "Initial global scheduled sync failed", { error: err.message });
+        });
+      }
+    }
+    for (const { definition } of this.cloudDrivers.values()) {
+      const schedule = definition.scheduled;
+      if (!schedule?.enabled) continue;
+      const cloudId = definition.id;
+      this._scheduleJob(schedule, async () => {
+        try {
+          await this.syncCloud(cloudId, { reason: "scheduled-cloud" });
+        } catch (err) {
+          this._log("error", "Scheduled cloud sync failed", { cloudId, error: err.message });
+        }
+      });
+      if (schedule.runOnStart) {
+        this.syncCloud(cloudId, { reason: "scheduled-cloud-runOnStart" }).catch((err) => {
+          this._log("error", "Initial cloud scheduled sync failed", { cloudId, error: err.message });
+        });
+      }
+    }
+  }
+  _scheduleJob(schedule, handler) {
+    if (!this._cron) return;
+    const job = this._cron.schedule(
+      schedule.cron,
+      handler,
+      { timezone: schedule.timezone }
+    );
+    if (job?.start) {
+      job.start();
+    }
+    this._scheduledJobs.push(job);
+  }
+  async _teardownSchedules() {
+    if (!this._scheduledJobs.length) return;
+    for (const job of this._scheduledJobs) {
+      try {
+        job?.stop?.();
+        job?.destroy?.();
+      } catch (err) {
+        this._log("warn", "Failed to teardown scheduled job", { error: err.message });
+      }
+    }
+    this._scheduledJobs = [];
+  }
+  _normalizeResource(cloudDefinition, entry) {
+    if (!entry || typeof entry !== "object") {
+      this._log("warn", "Skipping invalid resource entry", { cloudId: cloudDefinition.id });
+      return null;
+    }
+    const configuration = ensureObject(
+      entry.configuration ?? entry.state ?? entry.attributes ?? entry
+    );
+    const normalized = {
+      cloudId: cloudDefinition.id,
+      driver: cloudDefinition.driver,
+      accountId: entry.accountId || cloudDefinition.config?.accountId || null,
+      subscriptionId: entry.subscriptionId || null,
+      organizationId: entry.organizationId || null,
+      projectId: entry.projectId || cloudDefinition.config?.projectId || null,
+      region: entry.region || entry.location || null,
+      service: entry.service || entry.product || null,
+      resourceType: entry.resourceType || entry.type || "unknown",
+      resourceId: entry.resourceId || entry.id || configuration.id || configuration.arn || configuration.name,
+      name: entry.name || configuration.name || configuration.displayName || null,
+      tags: entry.tags || configuration.tags || null,
+      labels: entry.labels || configuration.labels || null,
+      metadata: entry.metadata || {},
+      configuration
+    };
+    if (!normalized.resourceId) {
+      this._log("warn", "Entry missing resource identifier, skipping", {
+        cloudId: normalized.cloudId,
+        driver: normalized.driver,
+        resourceType: normalized.resourceType
+      });
+      return null;
+    }
+    normalized.resourceKey = [
+      normalized.cloudId,
+      normalized.resourceType,
+      normalized.resourceId
+    ].filter(Boolean).join(":");
+    return normalized;
+  }
+  async _persistSnapshot(normalized, rawItem) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const digest = computeDigest(normalized.configuration);
+    const resourceKey = normalized.resourceKey;
+    const snapshots = this._resourceHandles.snapshots;
+    const versions = this._resourceHandles.versions;
+    const changes = this._resourceHandles.changes;
+    const existing = await snapshots.getOrNull(resourceKey);
+    if (!existing) {
+      const versionNumber = 1;
+      const versionId = buildVersionId(resourceKey, versionNumber);
+      await versions.insert({
+        id: versionId,
+        resourceKey,
+        cloudId: normalized.cloudId,
+        driver: normalized.driver,
+        version: versionNumber,
+        digest,
+        capturedAt: now,
+        configuration: normalized.configuration,
+        summary: buildSummary(normalized),
+        raw: rawItem
+      });
+      await snapshots.insert({
+        id: resourceKey,
+        cloudId: normalized.cloudId,
+        driver: normalized.driver,
+        accountId: normalized.accountId,
+        subscriptionId: normalized.subscriptionId,
+        organizationId: normalized.organizationId,
+        projectId: normalized.projectId,
+        region: normalized.region,
+        service: normalized.service,
+        resourceType: normalized.resourceType,
+        resourceId: normalized.resourceId,
+        name: normalized.name,
+        tags: normalized.tags,
+        labels: normalized.labels,
+        metadata: normalized.metadata,
+        latestDigest: digest,
+        latestVersion: versionNumber,
+        latestSnapshotId: versionId,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        changelogSize: 0
+      });
+      return { status: "created", resourceKey, version: versionNumber };
+    }
+    if (existing.latestDigest === digest) {
+      await snapshots.update(resourceKey, { lastSeenAt: now });
+      return { status: "unchanged", resourceKey, version: existing.latestVersion };
+    }
+    const previousVersionId = existing.latestSnapshotId;
+    const previousVersion = await versions.getOrNull(previousVersionId);
+    const nextVersionNumber = existing.latestVersion + 1;
+    const nextVersionId = buildVersionId(resourceKey, nextVersionNumber);
+    await versions.insert({
+      id: nextVersionId,
+      resourceKey,
+      cloudId: normalized.cloudId,
+      driver: normalized.driver,
+      version: nextVersionNumber,
+      digest,
+      capturedAt: now,
+      configuration: normalized.configuration,
+      summary: buildSummary(normalized),
+      raw: rawItem
+    });
+    const diff = computeDiff(previousVersion?.configuration, normalized.configuration);
+    await changes.insert({
+      id: `${resourceKey}:${existing.latestVersion}->${nextVersionNumber}`,
+      resourceKey,
+      cloudId: normalized.cloudId,
+      driver: normalized.driver,
+      fromVersion: existing.latestVersion,
+      toVersion: nextVersionNumber,
+      fromDigest: existing.latestDigest,
+      toDigest: digest,
+      diff,
+      summary: {
+        added: Object.keys(diff.added || {}).length,
+        removed: Object.keys(diff.removed || {}).length,
+        updated: Object.keys(diff.updated || {}).length
+      },
+      capturedAt: now
+    });
+    await snapshots.update(resourceKey, {
+      latestDigest: digest,
+      latestVersion: nextVersionNumber,
+      latestSnapshotId: nextVersionId,
+      lastSeenAt: now,
+      changelogSize: (existing.changelogSize || 0) + 1,
+      metadata: normalized.metadata,
+      tags: normalized.tags,
+      labels: normalized.labels,
+      region: normalized.region,
+      service: normalized.service,
+      name: normalized.name
+    });
+    return { status: "updated", resourceKey, version: nextVersionNumber };
+  }
+  async _ensureCloudSummaryRecord(cloudId, cloudDef, schedule) {
+    const clouds = this._resourceHandles.clouds;
+    const existing = await clouds.getOrNull(cloudId);
+    const payload = {
+      driver: cloudDef.driver,
+      schedule: schedule.enabled ? schedule : null,
+      tags: cloudDef.tags ?? existing?.tags ?? null,
+      metadata: cloudDef.metadata ?? existing?.metadata ?? null
+    };
+    if (!existing) {
+      await clouds.insert({
+        id: cloudId,
+        status: "idle",
+        totalResources: 0,
+        totalVersions: 0,
+        lastResult: null,
+        checkpoint: null,
+        rateLimit: null,
+        ...payload
+      });
+      return await clouds.get(cloudId);
+    }
+    await clouds.update(cloudId, payload);
+    return await clouds.get(cloudId);
+  }
+  async _updateCloudSummary(cloudId, patch) {
+    const clouds = this._resourceHandles.clouds;
+    if (!clouds) return;
+    const [ok, err] = await tryFn(() => clouds.update(cloudId, patch));
+    if (ok) return;
+    if (err?.message?.includes("does not exist")) {
+      await tryFn(() => clouds.insert({
+        id: cloudId,
+        status: "idle",
+        totalResources: 0,
+        totalVersions: 0,
+        ...patch
+      }));
+    } else {
+      this._log("warn", "Failed to update cloud summary", { cloudId, error: err?.message });
+    }
+  }
+  _log(level, message, meta = {}) {
+    if (this.config.logger) {
+      this.config.logger(level, message, meta);
+      return;
+    }
+    const shouldLog = this.config.verbose || level === "error" || level === "warn";
+    if (shouldLog && typeof console[level] === "function") {
+      console[level](`[CloudInventoryPlugin] ${message}`, meta);
+    }
+  }
+}
+function ensureObject(value) {
+  if (value && typeof value === "object") return value;
+  return {};
+}
+function computeDigest(payload) {
+  const canonical = jsonStableStringify(payload ?? {});
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+function buildVersionId(resourceKey, version) {
+  return `${resourceKey}:${String(version).padStart(6, "0")}`;
+}
+function buildSummary(normalized) {
+  return {
+    name: normalized.name,
+    region: normalized.region,
+    service: normalized.service,
+    resourceType: normalized.resourceType,
+    tags: normalized.tags,
+    labels: normalized.labels,
+    metadata: normalized.metadata
+  };
+}
+function computeDiff(previousConfig = {}, nextConfig = {}) {
+  const prevFlat = flat.flatten(previousConfig, { safe: true }) || {};
+  const nextFlat = flat.flatten(nextConfig, { safe: true }) || {};
+  const diff = {
+    added: {},
+    removed: {},
+    updated: {}
+  };
+  for (const key of Object.keys(nextFlat)) {
+    if (!(key in prevFlat)) {
+      diff.added[key] = nextFlat[key];
+    } else if (!isEqual(prevFlat[key], nextFlat[key])) {
+      diff.updated[key] = {
+        before: prevFlat[key],
+        after: nextFlat[key]
+      };
+    }
+  }
+  for (const key of Object.keys(prevFlat)) {
+    if (!(key in nextFlat)) {
+      diff.removed[key] = prevFlat[key];
+    }
+  }
+  if (!Object.keys(diff.added).length) delete diff.added;
+  if (!Object.keys(diff.removed).length) delete diff.removed;
+  if (!Object.keys(diff.updated).length) delete diff.updated;
+  return diff;
+}
+function isAsyncIterable(obj) {
+  return obj?.[Symbol.asyncIterator];
+}
+function createRunIdentifier() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `run-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  }
+}
+function normalizeSchedule(input) {
+  const schedule = {
+    ...BASE_SCHEDULE,
+    ...typeof input === "object" && input !== null ? input : {}
+  };
+  schedule.enabled = Boolean(schedule.enabled);
+  schedule.cron = typeof schedule.cron === "string" && schedule.cron.trim().length > 0 ? schedule.cron.trim() : null;
+  schedule.timezone = typeof schedule.timezone === "string" && schedule.timezone.trim().length > 0 ? schedule.timezone.trim() : void 0;
+  schedule.runOnStart = Boolean(schedule.runOnStart);
+  if (schedule.enabled && !schedule.cron) {
+    throw new PluginError("Scheduled configuration requires a valid cron expression when enabled is true", {
+      pluginName: "CloudInventoryPlugin",
+      operation: "normalizeSchedule",
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Set scheduled.cron to a valid cron expression (e.g., "0 * * * *") when enabling scheduled discovery.'
+    });
+  }
+  return schedule;
+}
+function resolveDriverReference(driverInput, logFn) {
+  if (typeof driverInput === "string") {
+    return driverInput;
+  }
+  if (typeof driverInput === "function") {
+    if (INLINE_DRIVER_NAMES.has(driverInput)) {
+      return INLINE_DRIVER_NAMES.get(driverInput);
+    }
+    const baseName = sanitizeId(driverInput.name || "inline-driver");
+    let candidate = `inline-${baseName}`;
+    const existing = new Set(listCloudDrivers().concat([...INLINE_DRIVER_NAMES.values()]));
+    let attempt = 1;
+    while (existing.has(candidate)) {
+      attempt += 1;
+      candidate = `inline-${baseName}-${attempt}`;
+    }
+    registerCloudDriver(candidate, (options) => instantiateInlineDriver(driverInput, options));
+    INLINE_DRIVER_NAMES.set(driverInput, candidate);
+    if (typeof logFn === "function") {
+      logFn("info", `Registered inline cloud driver "${candidate}"`, { driver: driverInput.name || "anonymous" });
+    }
+    return candidate;
+  }
+  throw new PluginError("Cloud driver must be a string identifier or a factory/class that produces a BaseCloudDriver instance", {
+    pluginName: "CloudInventoryPlugin",
+    operation: "resolveDriverReference",
+    statusCode: 400,
+    retriable: false,
+    suggestion: "Register the driver name via registerCloudDriver() or supply a factory/class returning BaseCloudDriver."
+  });
+}
+function instantiateInlineDriver(driverInput, options) {
+  if (isSubclassOfBase(driverInput)) {
+    return new driverInput(options);
+  }
+  const result = driverInput(options);
+  if (result instanceof BaseCloudDriver) {
+    return result;
+  }
+  if (result && typeof result === "object" && typeof result.listResources === "function") {
+    return result;
+  }
+  throw new PluginError("Inline driver factory must return an instance of BaseCloudDriver", {
+    pluginName: "CloudInventoryPlugin",
+    operation: "instantiateInlineDriver",
+    statusCode: 500,
+    retriable: false,
+    suggestion: "Ensure the inline driver function returns a BaseCloudDriver instance or class."
+  });
+}
+function isSubclassOfBase(fn) {
+  return typeof fn === "function" && (fn === BaseCloudDriver || fn.prototype instanceof BaseCloudDriver);
+}
+function normalizeCloudDefinitions(rawClouds, logFn) {
+  const usedIds = /* @__PURE__ */ new Set();
+  const results = [];
+  const emitLog = (level, message, meta = {}) => {
+    if (typeof logFn === "function") {
+      logFn(level, message, meta);
+    }
+  };
+  for (const cloud of rawClouds) {
+    if (!cloud || typeof cloud !== "object") {
+      continue;
+    }
+    const driverName = resolveDriverReference(cloud.driver, emitLog);
+    const cloudWithDriver = { ...cloud, driver: driverName };
+    let id = typeof cloudWithDriver.id === "string" && cloudWithDriver.id.trim().length > 0 ? cloudWithDriver.id.trim() : null;
+    if (!id) {
+      const derived = deriveCloudId(cloudWithDriver);
+      let candidate = derived;
+      let attempt = 1;
+      while (usedIds.has(candidate)) {
+        attempt += 1;
+        candidate = `${derived}-${attempt}`;
+      }
+      id = candidate;
+      emitLog("info", `Cloud id not provided for driver "${driverName}", using derived id "${id}"`, { driver: driverName });
+    } else if (usedIds.has(id)) {
+      let candidate = id;
+      let attempt = 1;
+      while (usedIds.has(candidate)) {
+        attempt += 1;
+        candidate = `${id}-${attempt}`;
+      }
+      emitLog("warn", `Duplicated cloud id "${id}" detected, using "${candidate}" instead`, { driver: driverName });
+      id = candidate;
+    }
+    usedIds.add(id);
+    results.push({ ...cloudWithDriver, id });
+  }
+  return results;
+}
+function deriveCloudId(cloud) {
+  const driver = (cloud.driver || "cloud").toString().toLowerCase();
+  const hints = extractIdentityHints(cloud);
+  const base = hints.length > 0 ? `${driver}-${sanitizeId(hints[0])}` : driver;
+  return base || driver;
+}
+function extractIdentityHints(cloud) {
+  const values = [];
+  const candidatePaths = [
+    ["config", "accountId"],
+    ["config", "projectId"],
+    ["config", "subscriptionId"],
+    ["credentials", "accountId"],
+    ["credentials", "accountNumber"],
+    ["credentials", "subscriptionId"],
+    ["credentials", "tenantId"],
+    ["credentials", "email"],
+    ["credentials", "user"],
+    ["credentials", "profile"],
+    ["credentials", "organizationId"]
+  ];
+  for (const path of candidatePaths) {
+    let ref = cloud;
+    for (const segment of path) {
+      if (ref && typeof ref === "object" && segment in ref) {
+        ref = ref[segment];
+      } else {
+        ref = null;
+        break;
+      }
+    }
+    if (typeof ref === "string" && ref.trim().length > 0) {
+      values.push(ref.trim());
+    }
+  }
+  return values;
+}
+function sanitizeId(value) {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "cloud";
+}
+
+class ImporterDriver extends EventEmitter.EventEmitter {
+  constructor(config) {
+    super();
+    this.config = config;
+  }
+  /**
+   * Parse file and return records
+   * @param {string} filePath - Path to file
+   * @param {Object} options - Parser options
+   * @returns {AsyncIterator<Object>} - Async iterator of records
+   */
+  async *parse(filePath, options) {
+    throw new PluginError("Importer driver must implement parse()", {
+      pluginName: "ImporterPlugin",
+      operation: "driver.parse",
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Ensure custom importer drivers override parse(filePath, options)."
+    });
+  }
+  /**
+   * Validate file format
+   * @param {string} filePath - Path to file
+   * @returns {boolean}
+   */
+  async validate(filePath) {
+    return true;
+  }
+}
+class JSONImportDriver extends ImporterDriver {
+  async *parse(filePath, options = {}) {
+    const isGzipped = filePath.endsWith(".gz");
+    let fileStream = fs__namespace.createReadStream(filePath);
+    if (isGzipped) {
+      const gunzip = zlib.createGunzip();
+      fileStream = fileStream.pipe(gunzip);
+      fileStream.setEncoding("utf8");
+    } else {
+      fileStream.setEncoding("utf8");
+    }
+    const rl = readline__namespace.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
+    let buffer = "";
+    let inArray = false;
+    let lineNumber = 0;
+    let firstNonEmpty = true;
+    for await (const line of rl) {
+      lineNumber++;
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (firstNonEmpty) {
+        firstNonEmpty = false;
+        if (trimmed.startsWith("[")) {
+          inArray = true;
+          buffer = trimmed;
+          if (trimmed.endsWith("]")) {
+            try {
+              const array = JSON.parse(buffer);
+              if (Array.isArray(array)) {
+                for (const record of array) {
+                  yield record;
+                }
+              } else {
+                throw new PluginError("JSON import expects an array of objects", {
+                  pluginName: "ImporterPlugin",
+                  operation: "JSONImportDriver.parse",
+                  statusCode: 400,
+                  retriable: false,
+                  suggestion: "Ensure the JSON file contains an array at the root (e.g., [ {...}, {...} ])."
+                });
+              }
+            } catch (error) {
+              throw new PluginError(`Failed to parse JSON array: ${error.message}`, {
+                pluginName: "ImporterPlugin",
+                operation: "JSONImportDriver.parse",
+                statusCode: 400,
+                retriable: false,
+                suggestion: "Validate JSON syntax; consider using jsonlint before importing.",
+                original: error
+              });
+            }
+            buffer = "";
+            inArray = false;
+          }
+          continue;
+        }
+      }
+      if (inArray) {
+        buffer += "\n" + trimmed;
+        if (trimmed === "]" || trimmed.endsWith("]")) {
+          try {
+            const array = JSON.parse(buffer);
+            if (Array.isArray(array)) {
+              for (const record of array) {
+                yield record;
+              }
+            } else {
+              throw new PluginError("JSON import expects an array of objects", {
+                pluginName: "ImporterPlugin",
+                operation: "JSONImportDriver.parse",
+                statusCode: 400,
+                retriable: false,
+                suggestion: "Ensure the JSON file contains an array at the root (e.g., [ {...}, {...} ])."
+              });
+            }
+          } catch (error) {
+            throw new PluginError(`Failed to parse JSON array: ${error.message}`, {
+              pluginName: "ImporterPlugin",
+              operation: "JSONImportDriver.parse",
+              statusCode: 400,
+              retriable: false,
+              suggestion: "Validate JSON syntax; consider using jsonlint before importing.",
+              original: error
+            });
+          }
+          buffer = "";
+          inArray = false;
+        }
+      } else {
+        try {
+          const record = JSON.parse(trimmed);
+          yield record;
+        } catch (error) {
+          if (this.listenerCount("error") > 0) {
+            this.emit("error", {
+              line: lineNumber,
+              message: `Invalid JSON on line ${lineNumber}: ${error.message}`,
+              data: trimmed
+            });
+          }
+        }
+      }
+    }
+  }
+  async validate(filePath) {
+    if (!fs__namespace.existsSync(filePath)) {
+      throw new PluginError(`File not found: ${filePath}`, {
+        pluginName: "ImporterPlugin",
+        operation: "JSONImportDriver.validate",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Verify the file path before importing or ensure the file is accessible to the process.",
+        filePath
+      });
+    }
+    const lowerPath = filePath.toLowerCase();
+    if (lowerPath.endsWith(".gz")) {
+      const parts = lowerPath.split(".");
+      if (parts.length < 3) {
+        throw new PluginError("Invalid file extension for JSON driver: .gz without format extension", {
+          pluginName: "ImporterPlugin",
+          operation: "JSONImportDriver.validate",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Rename the file to include the format before .gz (e.g., data.json.gz).",
+          filePath
+        });
+      }
+      const formatExt = parts[parts.length - 2];
+      if (!["json", "jsonl", "ndjson"].includes(formatExt)) {
+        throw new PluginError(`Invalid file extension for JSON driver: .${formatExt}.gz (expected .json.gz, .jsonl.gz, or .ndjson.gz)`, {
+          pluginName: "ImporterPlugin",
+          operation: "JSONImportDriver.validate",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Use supported extensions (.json, .jsonl, .ndjson) before .gz compression.",
+          filePath
+        });
+      }
+    } else {
+      const ext = lowerPath.split(".").pop();
+      if (!["json", "jsonl", "ndjson"].includes(ext)) {
+        throw new PluginError(`Invalid file extension for JSON driver: .${ext}`, {
+          pluginName: "ImporterPlugin",
+          operation: "JSONImportDriver.validate",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Rename the file to use .json, .jsonl, or .ndjson extensions.",
+          filePath
+        });
+      }
+    }
+    return true;
+  }
+}
+class CSVImportDriver extends ImporterDriver {
+  async *parse(filePath, options = {}) {
+    const delimiter = options.delimiter || await this._detectDelimiter(filePath);
+    const hasHeader = options.hasHeader !== void 0 ? options.hasHeader : true;
+    const isGzipped = filePath.endsWith(".gz");
+    let fileStream = fs__namespace.createReadStream(filePath);
+    if (isGzipped) {
+      const gunzip = zlib.createGunzip();
+      fileStream = fileStream.pipe(gunzip);
+      fileStream.setEncoding("utf8");
+    } else {
+      fileStream.setEncoding("utf8");
+    }
+    const rl = readline__namespace.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
+    let headers = null;
+    let lineNumber = 0;
+    for await (const line of rl) {
+      lineNumber++;
+      if (!line.trim()) continue;
+      const fields = this._parseLine(line, delimiter);
+      if (lineNumber === 1 && hasHeader) {
+        headers = fields;
+        continue;
+      }
+      let record;
+      if (headers) {
+        record = {};
+        for (let i = 0; i < Math.min(headers.length, fields.length); i++) {
+          record[headers[i]] = fields[i];
+        }
+      } else {
+        record = Object.fromEntries(fields.map((val, idx) => [String(idx), val]));
+      }
+      yield record;
+    }
+  }
+  /**
+   * Parse a single CSV line, handling quotes and escaped delimiters
+   * @private
+   */
+  _parseLine(line, delimiter) {
+    const fields = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      const nextChar = line[i + 1];
+      if (char === '"') {
+        if (inQuotes && nextChar === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === delimiter && !inQuotes) {
+        fields.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    fields.push(current.trim());
+    return fields;
+  }
+  /**
+   * Auto-detect delimiter from first few lines
+   * @private
+   */
+  async _detectDelimiter(filePath) {
+    const isGzipped = filePath.endsWith(".gz");
+    let fileStream = fs__namespace.createReadStream(filePath);
+    if (isGzipped) {
+      const gunzip = zlib.createGunzip();
+      fileStream = fileStream.pipe(gunzip);
+      fileStream.setEncoding("utf8");
+    } else {
+      fileStream.setEncoding("utf8");
+    }
+    const rl = readline__namespace.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
+    const delimiters = [",", ";", "	", "|"];
+    const counts = {};
+    let linesRead = 0;
+    for await (const line of rl) {
+      if (linesRead >= 5) break;
+      linesRead++;
+      for (const delimiter of delimiters) {
+        counts[delimiter] = (counts[delimiter] || 0) + (line.split(delimiter).length - 1);
+      }
+    }
+    fileStream.destroy();
+    let maxCount = 0;
+    let bestDelimiter = ",";
+    for (const [delimiter, count] of Object.entries(counts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        bestDelimiter = delimiter;
+      }
+    }
+    return bestDelimiter;
+  }
+  async validate(filePath) {
+    if (!fs__namespace.existsSync(filePath)) {
+      throw new PluginError(`File not found: ${filePath}`, {
+        pluginName: "ImporterPlugin",
+        operation: "CSVImportDriver.validate",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Verify the CSV file path or download it locally before importing.",
+        filePath
+      });
+    }
+    const lowerPath = filePath.toLowerCase();
+    if (lowerPath.endsWith(".gz")) {
+      const parts = lowerPath.split(".");
+      if (parts.length < 3) {
+        throw new PluginError("Invalid file extension for CSV driver: .gz without format extension", {
+          pluginName: "ImporterPlugin",
+          operation: "CSVImportDriver.validate",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Rename the file to include .csv or .tsv before .gz (e.g., data.csv.gz).",
+          filePath
+        });
+      }
+      const formatExt = parts[parts.length - 2];
+      if (!["csv", "tsv", "txt"].includes(formatExt)) {
+        throw new PluginError(`Invalid file extension for CSV driver: .${formatExt}.gz (expected .csv.gz or .tsv.gz)`, {
+          pluginName: "ImporterPlugin",
+          operation: "CSVImportDriver.validate",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Use supported extensions (.csv, .tsv, .txt) before gzip compression.",
+          filePath
+        });
+      }
+    } else {
+      const ext = lowerPath.split(".").pop();
+      if (!["csv", "tsv", "txt"].includes(ext)) {
+        throw new PluginError(`Invalid file extension for CSV driver: .${ext}`, {
+          pluginName: "ImporterPlugin",
+          operation: "CSVImportDriver.validate",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Rename the file to use .csv, .tsv, or .txt extensions.",
+          filePath
+        });
+      }
+    }
+    return true;
+  }
+}
+class ParquetImportDriver extends ImporterDriver {
+  async *parse(filePath, options = {}) {
+    throw new PluginError("ParquetImportDriver not yet implemented", {
+      pluginName: "ImporterPlugin",
+      operation: "ParquetImportDriver.parse",
+      statusCode: 501,
+      retriable: false,
+      suggestion: "Parquet import support is under development. Convert data to CSV/JSON or implement a custom driver."
+    });
+  }
+}
+class ExcelImportDriver extends ImporterDriver {
+  async *parse(filePath, options = {}) {
+    throw new PluginError("ExcelImportDriver not yet implemented", {
+      pluginName: "ImporterPlugin",
+      operation: "ExcelImportDriver.parse",
+      statusCode: 501,
+      retriable: false,
+      suggestion: "Convert Excel files to CSV/JSON or implement a custom Excel driver before importing."
+    });
+  }
+}
+class ImporterPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+    this.resourceName = config.resource || config.resourceName;
+    this.format = config.format || "json";
+    this.mapping = config.mapping || {};
+    this.transforms = config.transforms || {};
+    this.validate = config.validate || null;
+    this.deduplicateBy = config.deduplicateBy || null;
+    this.batchSize = config.batchSize || 1e3;
+    this.parallelism = config.parallelism || 10;
+    this.continueOnError = config.continueOnError !== void 0 ? config.continueOnError : true;
+    this.streaming = config.streaming !== void 0 ? config.streaming : true;
+    this.driverConfig = config.driverConfig || {};
+    this.sheet = config.sheet || 0;
+    this.headerRow = config.headerRow || 0;
+    this.startRow = config.startRow || 1;
+    this.binarySchema = config.binarySchema || null;
+    this.recordSize = config.recordSize || null;
+    this.resource = null;
+    this.driver = null;
+    this.seenKeys = /* @__PURE__ */ new Set();
+    this.stats = {
+      totalProcessed: 0,
+      totalInserted: 0,
+      totalSkipped: 0,
+      totalErrors: 0,
+      totalDuplicates: 0,
+      startTime: null,
+      endTime: null
+    };
+  }
+  /**
+   * Install plugin
+   */
+  async onInstall() {
+    try {
+      this.resource = this.database.resources[this.resourceName];
+      if (this.resource && typeof this.resource.then === "function") {
+        this.resource = await this.resource;
+      }
+    } catch (error) {
+      throw new PluginError(`Resource "${this.resourceName}" not found`, {
+        pluginName: "ImporterPlugin",
+        operation: "onInstall",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Create the target resource before running ImporterPlugin or update the configuration.",
+        resourceName: this.resourceName,
+        original: error
+      });
+    }
+    if (!this.resource) {
+      throw new PluginError(`Resource "${this.resourceName}" not found`, {
+        pluginName: "ImporterPlugin",
+        operation: "onInstall",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Create the target resource before running ImporterPlugin or update the configuration.",
+        resourceName: this.resourceName
+      });
+    }
+    this.driver = this._createDriver(this.format);
+    this.emit("installed", {
+      plugin: "ImporterPlugin",
+      resource: this.resourceName,
+      format: this.format
+    });
+  }
+  /**
+   * Create driver for format
+   * @private
+   */
+  _createDriver(format) {
+    switch (format.toLowerCase()) {
+      case "json":
+      case "jsonl":
+      case "ndjson":
+        return new JSONImportDriver(this.driverConfig);
+      case "csv":
+      case "tsv":
+        return new CSVImportDriver(this.driverConfig);
+      case "parquet":
+        return new ParquetImportDriver(this.driverConfig);
+      case "excel":
+      case "xls":
+      case "xlsx":
+        return new ExcelImportDriver(this.driverConfig);
+      default:
+        throw new PluginError(`Unsupported import format: ${format}`, {
+          pluginName: "ImporterPlugin",
+          operation: "_createDriver",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Use one of the supported formats: json, jsonl, ndjson, csv, tsv, parquet, excel.",
+          format
+        });
+    }
+  }
+  /**
+   * Import data from file
+   * @param {string} filePath - Path to file (local, S3, or URL)
+   * @param {Object} options - Import options
+   * @returns {Promise<Object>} - Import result
+   */
+  async import(filePath, options = {}) {
+    this.stats.startTime = Date.now();
+    this.stats.totalProcessed = 0;
+    this.stats.totalInserted = 0;
+    this.stats.totalSkipped = 0;
+    this.stats.totalErrors = 0;
+    this.stats.totalDuplicates = 0;
+    this.seenKeys.clear();
+    try {
+      await this.driver.validate(filePath);
+      const records = [];
+      let batch = [];
+      for await (const record of this.driver.parse(filePath, options)) {
+        this.stats.totalProcessed++;
+        const transformed = this._transformRecord(record);
+        const mapped = this._mapRecord(transformed);
+        if (this.validate && !this.validate(mapped)) {
+          this.stats.totalSkipped++;
+          if (this.listenerCount("error") > 0) {
+            this.emit("error", {
+              row: this.stats.totalProcessed,
+              message: "Validation failed",
+              record: mapped
+            });
+          }
+          if (!this.continueOnError) {
+            throw new PluginError("Validation failed", {
+              pluginName: "ImporterPlugin",
+              operation: "import",
+              statusCode: 422,
+              retriable: false,
+              suggestion: "Fix the invalid record or enable continueOnError to skip bad rows.",
+              row: this.stats.totalProcessed,
+              record: mapped
+            });
+          }
+          continue;
+        }
+        if (this.deduplicateBy) {
+          const key = mapped[this.deduplicateBy];
+          if (this.seenKeys.has(key)) {
+            this.stats.totalDuplicates++;
+            continue;
+          }
+          this.seenKeys.add(key);
+        }
+        batch.push(mapped);
+        if (batch.length >= this.batchSize) {
+          await this._processBatch(batch);
+          batch = [];
+          this.emit("progress", {
+            processed: this.stats.totalProcessed,
+            inserted: this.stats.totalInserted,
+            skipped: this.stats.totalSkipped,
+            errors: this.stats.totalErrors,
+            percent: 0
+            // Unknown total for streaming
+          });
+        }
+      }
+      if (batch.length > 0) {
+        await this._processBatch(batch);
+      }
+      this.stats.endTime = Date.now();
+      const result = {
+        processed: this.stats.totalProcessed,
+        inserted: this.stats.totalInserted,
+        skipped: this.stats.totalSkipped,
+        errors: this.stats.totalErrors,
+        duplicates: this.stats.totalDuplicates,
+        duration: this.stats.endTime - this.stats.startTime
+      };
+      this.emit("complete", result);
+      return result;
+    } catch (error) {
+      if (this.listenerCount("error") > 0) {
+        this.emit("error", { message: error.message, error });
+      }
+      throw error;
+    }
+  }
+  /**
+   * Map record fields according to mapping config
+   * @private
+   */
+  _mapRecord(record) {
+    if (Object.keys(this.mapping).length === 0) {
+      return record;
+    }
+    const mapped = {};
+    for (const [sourceField, targetField] of Object.entries(this.mapping)) {
+      if (sourceField in record) {
+        mapped[targetField] = record[sourceField];
+      }
+    }
+    return mapped;
+  }
+  /**
+   * Transform record fields according to transforms config
+   * @private
+   */
+  _transformRecord(record, originalRecord = null) {
+    if (Object.keys(this.transforms).length === 0) {
+      return record;
+    }
+    const transformed = { ...record };
+    const contextRecord = originalRecord || record;
+    for (const [field, transformFn] of Object.entries(this.transforms)) {
+      if (field in transformed) {
+        transformed[field] = transformFn(transformed[field], contextRecord);
+      }
+    }
+    return transformed;
+  }
+  /**
+   * Process batch of records with parallelism
+   * @private
+   */
+  async _processBatch(records) {
+    const batches = [];
+    for (let i = 0; i < records.length; i += this.parallelism) {
+      batches.push(records.slice(i, i + this.parallelism));
+    }
+    for (const batch of batches) {
+      const promises = batch.map(async (record) => {
+        const [ok, err] = await tryFn(async () => {
+          return await this.resource.insert(record);
+        });
+        if (ok) {
+          this.stats.totalInserted++;
+        } else {
+          this.stats.totalErrors++;
+          if (this.listenerCount("error") > 0) {
+            this.emit("error", {
+              message: err.message,
+              record,
+              error: err
+            });
+          }
+          if (!this.continueOnError) throw err;
+        }
+      });
+      await Promise.all(promises);
+    }
+  }
+  /**
+   * Get statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      recordsPerSecond: this.stats.endTime ? Math.round(this.stats.totalProcessed / ((this.stats.endTime - this.stats.startTime) / 1e3)) : 0
+    };
+  }
+}
+const Transformers = {
+  parseDate: (format) => (value) => {
+    return new Date(value).getTime();
+  },
+  parseFloat: (decimals = 2) => (value) => {
+    return parseFloat(parseFloat(value).toFixed(decimals));
+  },
+  parseInt: () => (value) => {
+    return parseInt(value, 10);
+  },
+  toLowerCase: () => (value) => {
+    return String(value).toLowerCase();
+  },
+  toUpperCase: () => (value) => {
+    return String(value).toUpperCase();
+  },
+  split: (delimiter = ",") => (value) => {
+    return String(value).split(delimiter).map((s) => s.trim());
+  },
+  parseJSON: () => (value) => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  },
+  trim: () => (value) => {
+    return String(value).trim();
+  }
+};
 
 class SqsConsumer {
   constructor({ queueUrl, onMessage, onError, poolingInterval = 5e3, maxMessages = 10, region = "us-east-1", credentials, endpoint, driver = "sqs" }) {
@@ -33016,7 +48018,16 @@ class SqsConsumer {
   async start() {
     await requirePluginDependency("sqs-consumer");
     const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
-    if (!ok) throw new Error("SqsConsumer: @aws-sdk/client-sqs is not installed. Please install it to use the SQS consumer.");
+    if (!ok) {
+      throw new PluginError("SqsConsumer requires @aws-sdk/client-sqs", {
+        pluginName: "ConsumersPlugin",
+        operation: "SqsConsumer.start",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Install @aws-sdk/client-sqs as a dependency to enable SQS consumption.",
+        original: err
+      });
+    }
     const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } = sdk;
     this._SQSClient = SQSClient;
     this._ReceiveMessageCommand = ReceiveMessageCommand;
@@ -33147,38 +48158,16 @@ const CONSUMER_DRIVERS = {
 function createConsumer(driver, config) {
   const ConsumerClass = CONSUMER_DRIVERS[driver];
   if (!ConsumerClass) {
-    throw new Error(`Unknown consumer driver: ${driver}. Available: ${Object.keys(CONSUMER_DRIVERS).join(", ")}`);
+    throw new PluginError(`Unknown consumer driver: ${driver}`, {
+      pluginName: "ConsumersPlugin",
+      operation: "createConsumer",
+      statusCode: 400,
+      retriable: false,
+      suggestion: `Use one of the available drivers: ${Object.keys(CONSUMER_DRIVERS).join(", ")}`,
+      driver
+    });
   }
   return new ConsumerClass(config);
-}
-
-class QueueError extends S3dbError {
-  constructor(message, details = {}) {
-    const { queueName, operation = "unknown", messageId, ...rest } = details;
-    let description = details.description;
-    if (!description) {
-      description = `
-Queue Operation Error
-
-Operation: ${operation}
-${queueName ? `Queue: ${queueName}` : ""}
-${messageId ? `Message ID: ${messageId}` : ""}
-
-Common causes:
-1. Queue not properly configured
-2. Message handler not registered
-3. Queue resource not found
-4. SQS/RabbitMQ connection failed
-5. Message processing timeout
-
-Solution:
-Check queue configuration and message handler registration.
-
-Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue.md
-`.trim();
-    }
-    super(message, { ...rest, queueName, operation, messageId, description });
-  }
 }
 
 class QueueConsumerPlugin extends Plugin {
@@ -33282,37 +48271,66 @@ class QueueConsumerPlugin extends Plugin {
   }
 }
 
-class RelationError extends Error {
+class RelationError extends PluginError {
   constructor(message, context = {}) {
-    super(message);
+    const merged = {
+      pluginName: context.pluginName || "RelationPlugin",
+      operation: context.operation || "unknown",
+      statusCode: context.statusCode ?? 500,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? "Inspect relation configuration (type, resource, foreign keys) before retrying.",
+      ...context
+    };
+    super(message, merged);
     this.name = "RelationError";
-    this.context = context;
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 class RelationConfigError extends RelationError {
   constructor(message, context = {}) {
-    super(message, context);
+    super(message, {
+      statusCode: context.statusCode ?? 400,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? "Review relation configuration fields (type, resource, localKey, foreignKey).",
+      ...context
+    });
     this.name = "RelationConfigError";
   }
 }
 class UnsupportedRelationTypeError extends RelationError {
   constructor(type, context = {}) {
-    super(`Unsupported relation type: ${type}. Supported types: hasOne, hasMany, belongsTo, belongsToMany`, context);
+    super(`Unsupported relation type: ${type}. Supported types: hasOne, hasMany, belongsTo, belongsToMany`, {
+      statusCode: context.statusCode ?? 400,
+      retriable: false,
+      suggestion: context.suggestion ?? "Use one of the supported relation types or implement a custom handler.",
+      relationType: type,
+      ...context
+    });
     this.name = "UnsupportedRelationTypeError";
     this.relationType = type;
   }
 }
 class RelatedResourceNotFoundError extends RelationError {
   constructor(resourceName, context = {}) {
-    super(`Related resource "${resourceName}" not found`, context);
+    super(`Related resource "${resourceName}" not found`, {
+      statusCode: context.statusCode ?? 404,
+      retriable: false,
+      suggestion: context.suggestion ?? "Ensure the related resource is created and registered before defining the relation.",
+      resourceName,
+      ...context
+    });
     this.name = "RelatedResourceNotFoundError";
     this.resourceName = resourceName;
   }
 }
 class JunctionTableNotFoundError extends RelationError {
   constructor(junctionTable, context = {}) {
-    super(`Junction table "${junctionTable}" not found for belongsToMany relation`, context);
+    super(`Junction table "${junctionTable}" not found for belongsToMany relation`, {
+      statusCode: context.statusCode ?? 404,
+      retriable: false,
+      suggestion: context.suggestion ?? "Create the junction resource or update belongsToMany configuration to reference an existing one.",
+      junctionTable,
+      ...context
+    });
     this.name = "JunctionTableNotFoundError";
     this.junctionTable = junctionTable;
   }
@@ -33321,7 +48339,15 @@ class CascadeError extends RelationError {
   constructor(operation, resourceName, recordId, originalError, context = {}) {
     super(
       `Cascade ${operation} failed for resource "${resourceName}" record "${recordId}": ${originalError.message}`,
-      context
+      {
+        retriable: context.retriable ?? false,
+        suggestion: context.suggestion ?? "Check cascade configuration and ensure dependent records allow deletion/update.",
+        operation,
+        resourceName,
+        recordId,
+        originalError,
+        ...context
+      }
     );
     this.name = "CascadeError";
     this.operation = operation;
@@ -33332,7 +48358,14 @@ class CascadeError extends RelationError {
 }
 class InvalidIncludePathError extends RelationError {
   constructor(path, reason, context = {}) {
-    super(`Invalid include path "${path}": ${reason}`, context);
+    super(`Invalid include path "${path}": ${reason}`, {
+      statusCode: context.statusCode ?? 400,
+      retriable: false,
+      suggestion: context.suggestion ?? "Verify include syntax (users.posts.comments) and ensure each relation exists.",
+      includePath: path,
+      reason,
+      ...context
+    });
     this.name = "InvalidIncludePathError";
     this.includePath = path;
     this.reason = reason;
@@ -37704,8 +52737,13 @@ class Database extends EventEmitter {
     if (!lodashEs.isEmpty(this.pluginList)) {
       const plugins = this.pluginList.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
       const installProms = plugins.map(async (plugin) => {
-        await plugin.install(db);
         const pluginName = this._getPluginName(plugin);
+        if (typeof plugin.setInstanceName === "function") {
+          plugin.setInstanceName(pluginName);
+        } else {
+          plugin.instanceName = pluginName;
+        }
+        await plugin.install(db);
         this.pluginRegistry[pluginName] = plugin;
       });
       await Promise.all(installProms);
@@ -37729,6 +52767,11 @@ class Database extends EventEmitter {
   }
   async usePlugin(plugin, name = null) {
     const pluginName = this._getPluginName(plugin, name);
+    if (typeof plugin.setInstanceName === "function") {
+      plugin.setInstanceName(pluginName);
+    } else {
+      plugin.instanceName = pluginName;
+    }
     this.plugins[pluginName] = plugin;
     if (this.isConnected()) {
       await plugin.install(this);
@@ -40081,10 +55124,12 @@ class ReplicatorPlugin extends Plugin {
       timeout: options.timeout || 3e4,
       verbose: options.verbose || false
     };
-    this.logResourceName = resolveResourceName("replicator", {
+    this._logResourceDescriptor = {
       defaultName: "plg_replicator_logs",
       override: resourceNamesOption.log || options.replicatorLogResource
-    });
+    };
+    this.logResourceName = this._resolveLogResourceName();
+    this.config.logResourceName = this.logResourceName;
     this.replicators = [];
     this.database = null;
     this.eventListenersInstalled = /* @__PURE__ */ new Set();
@@ -40096,6 +55141,17 @@ class ReplicatorPlugin extends Plugin {
     };
     this._afterCreateResourceHook = null;
     this.replicatorLog = null;
+  }
+  _resolveLogResourceName() {
+    return resolveResourceName("replicator", this._logResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.logResourceName = this._resolveLogResourceName();
+    if (this.config) {
+      this.config.logResourceName = this.logResourceName;
+    }
   }
   // Helper to filter out internal S3DB fields
   filterInternalFields(obj) {
@@ -40572,508 +55628,6 @@ class ReplicatorPlugin extends Plugin {
       this.emit("plg:replicator:plugin-stop-error", {
         error: error.message
       });
-    }
-  }
-}
-
-class S3QueuePlugin extends Plugin {
-  constructor(options = {}) {
-    super(options);
-    const resourceNamesOption = options.resourceNames || {};
-    if (!options.resource) {
-      throw new Error('S3QueuePlugin requires "resource" option');
-    }
-    this.config = {
-      resource: options.resource,
-      visibilityTimeout: options.visibilityTimeout || 3e4,
-      // 30 seconds
-      pollInterval: options.pollInterval || 1e3,
-      // 1 second
-      maxAttempts: options.maxAttempts || 3,
-      concurrency: options.concurrency || 1,
-      deadLetterResource: options.deadLetterResource || null,
-      autoStart: options.autoStart !== false,
-      onMessage: options.onMessage,
-      onError: options.onError,
-      onComplete: options.onComplete,
-      verbose: options.verbose || false,
-      ...options
-    };
-    this.queueResourceName = resolveResourceName("s3queue", {
-      defaultName: `plg_s3queue_${this.config.resource}_queue`,
-      override: resourceNamesOption.queue || options.queueResource
-    });
-    this.config.queueResourceName = this.queueResourceName;
-    this.deadLetterResourceName = this.config.deadLetterResource ? resolveResourceName("s3queue", {
-      defaultName: `plg_s3queue_${this.config.resource}_dead`,
-      override: resourceNamesOption.deadLetter || this.config.deadLetterResource
-    }) : null;
-    this.config.deadLetterResource = this.deadLetterResourceName;
-    this.queueResource = null;
-    this.targetResource = null;
-    this.deadLetterResourceObj = null;
-    this.workers = [];
-    this.isRunning = false;
-    this.workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    this.processedCache = /* @__PURE__ */ new Map();
-    this.cacheCleanupInterval = null;
-    this.lockCleanupInterval = null;
-    this.messageLocks = /* @__PURE__ */ new Map();
-  }
-  async onInstall() {
-    this.targetResource = this.database.resources[this.config.resource];
-    if (!this.targetResource) {
-      throw new Error(`S3QueuePlugin: resource '${this.config.resource}' not found`);
-    }
-    const queueName = this.queueResourceName;
-    const [ok, err] = await tryFn(
-      () => this.database.createResource({
-        name: queueName,
-        attributes: {
-          id: "string|required",
-          originalId: "string|required",
-          // ID do registro original
-          status: "string|required",
-          // pending/processing/completed/failed/dead
-          visibleAt: "number|required",
-          // Timestamp de visibilidade
-          claimedBy: "string|optional",
-          // Worker que claimed
-          claimedAt: "number|optional",
-          // Timestamp do claim
-          attempts: "number|default:0",
-          maxAttempts: "number|default:3",
-          error: "string|optional",
-          result: "json|optional",
-          createdAt: "string|required",
-          completedAt: "number|optional"
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        asyncPartitions: true,
-        partitions: {
-          byStatus: { fields: { status: "string" } },
-          byDate: { fields: { createdAt: "string|maxlength:10" } }
-        }
-      })
-    );
-    if (ok) {
-      this.queueResource = this.database.resources[queueName];
-    } else {
-      this.queueResource = this.database.resources[queueName];
-      if (!this.queueResource) {
-        throw new Error(`Failed to create queue resource: ${err?.message}`);
-      }
-    }
-    this.queueResourceName = this.queueResource.name;
-    this.addHelperMethods();
-    if (this.config.deadLetterResource) {
-      await this.createDeadLetterResource();
-    }
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Setup completed for resource '${this.config.resource}'`);
-    }
-  }
-  async onStart() {
-    if (this.config.autoStart && this.config.onMessage) {
-      await this.startProcessing();
-    }
-  }
-  async onStop() {
-    await this.stopProcessing();
-  }
-  addHelperMethods() {
-    const plugin = this;
-    const resource = this.targetResource;
-    resource.enqueue = async function(data, options = {}) {
-      const recordData = {
-        id: data.id || idGenerator(),
-        ...data
-      };
-      const record = await resource.insert(recordData);
-      const queueEntry = {
-        id: idGenerator(),
-        originalId: record.id,
-        status: "pending",
-        visibleAt: Date.now(),
-        attempts: 0,
-        maxAttempts: options.maxAttempts || plugin.config.maxAttempts,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
-      };
-      await plugin.queueResource.insert(queueEntry);
-      plugin.emit("plg:s3-queue:message-enqueued", { id: record.id, queueId: queueEntry.id });
-      return record;
-    };
-    resource.queueStats = async function() {
-      return await plugin.getStats();
-    };
-    resource.startProcessing = async function(handler, options = {}) {
-      return await plugin.startProcessing(handler, options);
-    };
-    resource.stopProcessing = async function() {
-      return await plugin.stopProcessing();
-    };
-  }
-  async startProcessing(handler = null, options = {}) {
-    if (this.isRunning) {
-      if (this.config.verbose) {
-        console.log("[S3QueuePlugin] Already running");
-      }
-      return;
-    }
-    const messageHandler = handler || this.config.onMessage;
-    if (!messageHandler) {
-      throw new Error("S3QueuePlugin: onMessage handler required");
-    }
-    this.isRunning = true;
-    const concurrency = options.concurrency || this.config.concurrency;
-    this.cacheCleanupInterval = setInterval(() => {
-      const now = Date.now();
-      const maxAge = 3e4;
-      for (const [queueId, timestamp] of this.processedCache.entries()) {
-        if (now - timestamp > maxAge) {
-          this.processedCache.delete(queueId);
-        }
-      }
-    }, 5e3);
-    for (let i = 0; i < concurrency; i++) {
-      const worker = this.createWorker(messageHandler, i);
-      this.workers.push(worker);
-    }
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Started ${concurrency} workers`);
-    }
-    this.emit("plg:s3-queue:workers-started", { concurrency, workerId: this.workerId });
-  }
-  async stopProcessing() {
-    if (!this.isRunning) return;
-    this.isRunning = false;
-    if (this.cacheCleanupInterval) {
-      clearInterval(this.cacheCleanupInterval);
-      this.cacheCleanupInterval = null;
-    }
-    await Promise.all(this.workers);
-    this.workers = [];
-    this.processedCache.clear();
-    if (this.config.verbose) {
-      console.log("[S3QueuePlugin] Stopped all workers");
-    }
-    this.emit("plg:s3-queue:workers-stopped", { workerId: this.workerId });
-  }
-  createWorker(handler, workerIndex) {
-    return (async () => {
-      while (this.isRunning) {
-        try {
-          const message = await this.claimMessage();
-          if (message) {
-            await this.processMessage(message, handler);
-          } else {
-            await new Promise((resolve) => setTimeout(resolve, this.config.pollInterval));
-          }
-        } catch (error) {
-          if (this.config.verbose) {
-            console.error(`[Worker ${workerIndex}] Error:`, error.message);
-          }
-          await new Promise((resolve) => setTimeout(resolve, 1e3));
-        }
-      }
-    })();
-  }
-  async claimMessage() {
-    const now = Date.now();
-    const [ok, err, messages] = await tryFn(
-      () => this.queueResource.query({
-        status: "pending"
-      })
-    );
-    if (!ok || !messages || messages.length === 0) {
-      return null;
-    }
-    const available = messages.filter((m) => m.visibleAt <= now);
-    if (available.length === 0) {
-      return null;
-    }
-    for (const msg of available) {
-      const claimed = await this.attemptClaim(msg);
-      if (claimed) {
-        return claimed;
-      }
-    }
-    return null;
-  }
-  /**
-   * Acquire a distributed lock using PluginStorage TTL
-   * This ensures only one worker can claim a message at a time
-   */
-  _lockNameForMessage(messageId) {
-    return `msg-${messageId}`;
-  }
-  async acquireLock(messageId) {
-    const storage = this.getStorage();
-    const lockName = this._lockNameForMessage(messageId);
-    try {
-      const lock = await storage.acquireLock(lockName, {
-        ttl: 5,
-        // 5 seconds
-        timeout: 0,
-        // Don't wait if locked
-        workerId: this.workerId
-      });
-      if (lock) {
-        this.messageLocks.set(lock.name, lock);
-      }
-      return lock;
-    } catch (error) {
-      if (this.config.verbose) {
-        console.log(`[acquireLock] Error: ${error.message}`);
-      }
-      return null;
-    }
-  }
-  /**
-   * Release a distributed lock via PluginStorage
-   */
-  async releaseLock(lockOrMessageId) {
-    const storage = this.getStorage();
-    let lock = null;
-    if (lockOrMessageId && typeof lockOrMessageId === "object") {
-      lock = lockOrMessageId;
-    } else {
-      const lockName = this._lockNameForMessage(lockOrMessageId);
-      lock = this.messageLocks.get(lockName) || null;
-    }
-    if (!lock) {
-      return;
-    }
-    try {
-      await storage.releaseLock(lock);
-    } catch (error) {
-      if (this.config.verbose) {
-        console.log(`[releaseLock] Failed to release lock '${lock.name}': ${error.message}`);
-      }
-    } finally {
-      if (lock?.name) {
-        this.messageLocks.delete(lock.name);
-      }
-    }
-  }
-  /**
-   * Clean up stale locks - NO LONGER NEEDED
-   * TTL handles automatic expiration, no manual cleanup required
-   */
-  async cleanupStaleLocks() {
-    return;
-  }
-  async attemptClaim(msg) {
-    const now = Date.now();
-    const lock = await this.acquireLock(msg.id);
-    if (!lock) {
-      return null;
-    }
-    try {
-      if (this.processedCache.has(msg.id)) {
-        if (this.config.verbose) {
-          console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
-        }
-        return null;
-      }
-      this.processedCache.set(msg.id, Date.now());
-    } finally {
-      await this.releaseLock(lock);
-    }
-    const [okGet, errGet, msgWithETag] = await tryFn(
-      () => this.queueResource.get(msg.id)
-    );
-    if (!okGet || !msgWithETag) {
-      this.processedCache.delete(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
-      }
-      return null;
-    }
-    if (msgWithETag.status !== "pending" || msgWithETag.visibleAt > now) {
-      this.processedCache.delete(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Message ${msg.id} not claimable: status=${msgWithETag.status}, visibleAt=${msgWithETag.visibleAt}, now=${now}`);
-      }
-      return null;
-    }
-    if (this.config.verbose) {
-      console.log(`[attemptClaim] Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`);
-    }
-    const [ok, err, result] = await tryFn(
-      () => this.queueResource.updateConditional(msgWithETag.id, {
-        status: "processing",
-        claimedBy: this.workerId,
-        claimedAt: now,
-        visibleAt: now + this.config.visibilityTimeout,
-        attempts: msgWithETag.attempts + 1
-      }, {
-        ifMatch: msgWithETag._etag
-        // ← ATOMIC CLAIM using ETag!
-      })
-    );
-    if (!ok || !result.success) {
-      this.processedCache.delete(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Failed to claim ${msg.id}: ${err?.message || result.error}`);
-      }
-      return null;
-    }
-    if (this.config.verbose) {
-      console.log(`[attemptClaim] Successfully claimed ${msg.id}`);
-    }
-    const [okRecord, errRecord, record] = await tryFn(
-      () => this.targetResource.get(msgWithETag.originalId)
-    );
-    if (!okRecord) {
-      await this.failMessage(msgWithETag.id, "Original record not found");
-      return null;
-    }
-    return {
-      queueId: msgWithETag.id,
-      record,
-      attempts: msgWithETag.attempts + 1,
-      maxAttempts: msgWithETag.maxAttempts
-    };
-  }
-  async processMessage(message, handler) {
-    const startTime = Date.now();
-    try {
-      const result = await handler(message.record, {
-        queueId: message.queueId,
-        attempts: message.attempts,
-        workerId: this.workerId
-      });
-      await this.completeMessage(message.queueId, result);
-      const duration = Date.now() - startTime;
-      this.emit("plg:s3-queue:message-completed", {
-        queueId: message.queueId,
-        originalId: message.record.id,
-        duration,
-        attempts: message.attempts
-      });
-      if (this.config.onComplete) {
-        await this.config.onComplete(message.record, result);
-      }
-    } catch (error) {
-      const shouldRetry = message.attempts < message.maxAttempts;
-      if (shouldRetry) {
-        await this.retryMessage(message.queueId, message.attempts, error.message);
-        this.emit("plg:s3-queue:message-retry", {
-          queueId: message.queueId,
-          originalId: message.record.id,
-          attempts: message.attempts,
-          error: error.message
-        });
-      } else {
-        await this.moveToDeadLetter(message.queueId, message.record, error.message);
-        this.emit("plg:s3-queue:message-dead", {
-          queueId: message.queueId,
-          originalId: message.record.id,
-          error: error.message
-        });
-      }
-      if (this.config.onError) {
-        await this.config.onError(error, message.record);
-      }
-    }
-  }
-  async completeMessage(queueId, result) {
-    await this.queueResource.update(queueId, {
-      status: "completed",
-      completedAt: Date.now(),
-      result
-    });
-  }
-  async failMessage(queueId, error) {
-    await this.queueResource.update(queueId, {
-      status: "failed",
-      error
-    });
-  }
-  async retryMessage(queueId, attempts, error) {
-    const backoff = Math.min(Math.pow(2, attempts) * 1e3, 3e4);
-    await this.queueResource.update(queueId, {
-      status: "pending",
-      visibleAt: Date.now() + backoff,
-      error
-    });
-    this.processedCache.delete(queueId);
-  }
-  async moveToDeadLetter(queueId, record, error) {
-    if (this.config.deadLetterResource && this.deadLetterResourceObj) {
-      const msg = await this.queueResource.get(queueId);
-      await this.deadLetterResourceObj.insert({
-        id: idGenerator(),
-        originalId: record.id,
-        queueId,
-        data: record,
-        error,
-        attempts: msg.attempts,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString()
-      });
-    }
-    await this.queueResource.update(queueId, {
-      status: "dead",
-      error
-    });
-  }
-  async getStats() {
-    const [ok, err, allMessages] = await tryFn(
-      () => this.queueResource.list()
-    );
-    if (!ok) {
-      if (this.config.verbose) {
-        console.warn("[S3QueuePlugin] Failed to get stats:", err.message);
-      }
-      return null;
-    }
-    const stats = {
-      total: allMessages.length,
-      pending: 0,
-      processing: 0,
-      completed: 0,
-      failed: 0,
-      dead: 0
-    };
-    for (const msg of allMessages) {
-      if (stats[msg.status] !== void 0) {
-        stats[msg.status]++;
-      }
-    }
-    return stats;
-  }
-  async createDeadLetterResource() {
-    if (!this.config.deadLetterResource) return;
-    const resourceName = this.config.deadLetterResource;
-    const [ok, err] = await tryFn(
-      () => this.database.createResource({
-        name: resourceName,
-        attributes: {
-          id: "string|required",
-          originalId: "string|required",
-          queueId: "string|required",
-          data: "json|required",
-          error: "string|required",
-          attempts: "number|required",
-          createdAt: "string|required"
-        },
-        behavior: "body-overflow",
-        timestamps: true
-      })
-    );
-    if (ok) {
-      this.deadLetterResourceObj = this.database.resources[resourceName];
-    } else {
-      this.deadLetterResourceObj = this.database.resources[resourceName];
-      if (!this.deadLetterResourceObj) {
-        throw err;
-      }
-    }
-    this.deadLetterResourceName = this.deadLetterResourceObj.name;
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
     }
   }
 }
@@ -41915,7 +56469,7 @@ class StateMachinePlugin extends Plugin {
   constructor(options = {}) {
     super();
     const resourceNamesOption = options.resourceNames || {};
-    this.resourceNames = resolveResourceNames("state_machine", {
+    this._resourceDescriptors = {
       transitionLog: {
         defaultName: "plg_state_transitions",
         override: resourceNamesOption.transitionLog || options.transitionLogResource
@@ -41924,7 +56478,8 @@ class StateMachinePlugin extends Plugin {
         defaultName: "plg_entity_states",
         override: resourceNamesOption.states || options.stateResource
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
     this.config = {
       stateMachines: options.stateMachines || {},
       actions: options.actions || {},
@@ -41958,6 +56513,18 @@ class StateMachinePlugin extends Plugin {
     this.schedulerPlugin = null;
     this._pendingEventHandlers = /* @__PURE__ */ new Set();
     this._validateConfiguration();
+  }
+  _resolveResourceNames() {
+    return resolveResourceNames("state_machine", this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    this.resourceNames = this._resolveResourceNames();
+    if (this.config) {
+      this.config.transitionLogResource = this.resourceNames.transitionLog;
+      this.config.stateResource = this.resourceNames.states;
+    }
   }
   /**
    * Wait for all pending event handlers to complete
@@ -43038,17 +57605,30 @@ class StateMachinePlugin extends Plugin {
   }
 }
 
-class TfStateError extends Error {
+class TfStateError extends PluginError {
   constructor(message, context = {}) {
-    super(message);
+    const merged = {
+      pluginName: context.pluginName || "TfStatePlugin",
+      operation: context.operation || "unknown",
+      statusCode: context.statusCode ?? 500,
+      retriable: context.retriable ?? false,
+      suggestion: context.suggestion ?? "Verify Terraform/OpenTofu configuration and state storage before retrying.",
+      ...context
+    };
+    super(message, merged);
     this.name = "TfStateError";
-    this.context = context;
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 class InvalidStateFileError extends TfStateError {
   constructor(filePath, reason, context = {}) {
-    super(`Invalid Tfstate file "${filePath}": ${reason}`, context);
+    super(`Invalid Tfstate file "${filePath}": ${reason}`, {
+      statusCode: context.statusCode ?? 422,
+      retriable: false,
+      suggestion: context.suggestion ?? "Validate Terraform state integrity or re-run terraform state pull.",
+      filePath,
+      reason,
+      ...context
+    });
     this.name = "InvalidStateFileError";
     this.filePath = filePath;
     this.reason = reason;
@@ -43058,7 +57638,14 @@ class UnsupportedStateVersionError extends TfStateError {
   constructor(version, supportedVersions, context = {}) {
     super(
       `Tfstate version ${version} is not supported. Supported versions: ${supportedVersions.join(", ")}`,
-      context
+      {
+        statusCode: context.statusCode ?? 400,
+        retriable: false,
+        suggestion: context.suggestion ?? `Upgrade/downgrade Terraform state to one of the supported versions: ${supportedVersions.join(", ")}.`,
+        version,
+        supportedVersions,
+        ...context
+      }
     );
     this.name = "UnsupportedStateVersionError";
     this.version = version;
@@ -43067,7 +57654,13 @@ class UnsupportedStateVersionError extends TfStateError {
 }
 class StateFileNotFoundError extends TfStateError {
   constructor(filePath, context = {}) {
-    super(`Tfstate file not found: ${filePath}`, context);
+    super(`Tfstate file not found: ${filePath}`, {
+      statusCode: context.statusCode ?? 404,
+      retriable: false,
+      suggestion: context.suggestion ?? "Ensure the state file exists at the configured path/bucket.",
+      filePath,
+      ...context
+    });
     this.name = "StateFileNotFoundError";
     this.filePath = filePath;
   }
@@ -43076,7 +57669,13 @@ class ResourceExtractionError extends TfStateError {
   constructor(resourceAddress, originalError, context = {}) {
     super(
       `Failed to extract resource "${resourceAddress}": ${originalError.message}`,
-      context
+      {
+        retriable: context.retriable ?? false,
+        suggestion: context.suggestion ?? "Check resource address and state structure; rerun extraction after fixing the state.",
+        resourceAddress,
+        originalError,
+        ...context
+      }
     );
     this.name = "ResourceExtractionError";
     this.resourceAddress = resourceAddress;
@@ -43087,7 +57686,14 @@ class StateDiffError extends TfStateError {
   constructor(oldSerial, newSerial, originalError, context = {}) {
     super(
       `Failed to calculate diff between state serials ${oldSerial} and ${newSerial}: ${originalError.message}`,
-      context
+      {
+        retriable: context.retriable ?? true,
+        suggestion: context.suggestion ?? "Refresh the latest state snapshots and retry the diff operation.",
+        oldSerial,
+        newSerial,
+        originalError,
+        ...context
+      }
     );
     this.name = "StateDiffError";
     this.oldSerial = oldSerial;
@@ -43097,7 +57703,13 @@ class StateDiffError extends TfStateError {
 }
 class FileWatchError extends TfStateError {
   constructor(path, originalError, context = {}) {
-    super(`Failed to watch path "${path}": ${originalError.message}`, context);
+    super(`Failed to watch path "${path}": ${originalError.message}`, {
+      retriable: context.retriable ?? true,
+      suggestion: context.suggestion ?? "Verify filesystem permissions and that the watch path exists.",
+      path,
+      originalError,
+      ...context
+    });
     this.name = "FileWatchError";
     this.path = path;
     this.originalError = originalError;
@@ -43114,14 +57726,24 @@ class TfStateDriver {
    * Called during plugin installation
    */
   async initialize() {
-    throw new Error("Driver must implement initialize()");
+    throw new TfStateError("Driver must implement initialize()", {
+      operation: "initialize",
+      statusCode: 501,
+      retriable: false,
+      suggestion: "Extend TfStateDriver and implement initialize() to configure backend connections."
+    });
   }
   /**
    * List all state files matching the selector
    * @returns {Promise<Array>} Array of state file metadata { path, lastModified, size }
    */
   async listStateFiles() {
-    throw new Error("Driver must implement listStateFiles()");
+    throw new TfStateError("Driver must implement listStateFiles()", {
+      operation: "listStateFiles",
+      statusCode: 501,
+      retriable: false,
+      suggestion: "Override listStateFiles() to return available Terraform state metadata."
+    });
   }
   /**
    * Read a state file content
@@ -43129,7 +57751,13 @@ class TfStateDriver {
    * @returns {Promise<Object>} Parsed state file content
    */
   async readStateFile(path) {
-    throw new Error("Driver must implement readStateFile()");
+    throw new TfStateError("Driver must implement readStateFile()", {
+      operation: "readStateFile",
+      statusCode: 501,
+      retriable: false,
+      suggestion: "Override readStateFile(path) to load and parse the Terraform state JSON.",
+      path
+    });
   }
   /**
    * Get state file metadata
@@ -43137,7 +57765,13 @@ class TfStateDriver {
    * @returns {Promise<Object>} Metadata { path, lastModified, size, etag }
    */
   async getStateFileMetadata(path) {
-    throw new Error("Driver must implement getStateFileMetadata()");
+    throw new TfStateError("Driver must implement getStateFileMetadata()", {
+      operation: "getStateFileMetadata",
+      statusCode: 501,
+      retriable: false,
+      suggestion: "Override getStateFileMetadata(path) to return lastModified, size, and ETag information.",
+      path
+    });
   }
   /**
    * Check if a state file has been modified since last check
@@ -43190,7 +57824,13 @@ class S3TfStateDriver extends TfStateDriver {
     try {
       const url = new URL(connectionString);
       if (url.protocol !== "s3:") {
-        throw new Error("Connection string must use s3:// protocol");
+        throw new TfStateError("Connection string must use s3:// protocol", {
+          operation: "parseConnectionString",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Use format s3://accessKey:secretKey@bucket/prefix?region=us-east-1",
+          connectionString
+        });
       }
       const credentials = {};
       if (url.username) {
@@ -43209,7 +57849,14 @@ class S3TfStateDriver extends TfStateDriver {
         region
       };
     } catch (error) {
-      throw new Error(`Invalid S3 connection string: ${error.message}`);
+      throw new TfStateError("Invalid S3 connection string", {
+        operation: "parseConnectionString",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Ensure the connection string follows s3://accessKey:secretKey@bucket/prefix?region=REGION.",
+        connectionString,
+        original: error
+      });
     }
   }
   /**
@@ -43236,7 +57883,14 @@ class S3TfStateDriver extends TfStateDriver {
       });
     });
     if (!ok) {
-      throw new Error(`Failed to list S3 objects: ${err.message}`);
+      throw new TfStateError("Failed to list Terraform state objects from S3", {
+        operation: "listStateFiles",
+        retriable: false,
+        suggestion: "Validate S3 permissions (s3:ListBucket) and prefix configuration.",
+        bucket,
+        prefix,
+        original: err
+      });
     }
     const objects = data.Contents || [];
     const stateFiles = objects.filter((obj) => {
@@ -43262,13 +57916,34 @@ class S3TfStateDriver extends TfStateDriver {
       });
     });
     if (!ok) {
-      throw new Error(`Failed to read state file ${path}: ${err.message}`);
+      if (err?.$metadata?.httpStatusCode === 404) {
+        throw new StateFileNotFoundError(path, {
+          operation: "readStateFile",
+          retriable: false,
+          suggestion: "Ensure the state file exists in S3 and the IAM role can access it.",
+          bucket,
+          original: err
+        });
+      }
+      throw new TfStateError(`Failed to read state file ${path}`, {
+        operation: "readStateFile",
+        retriable: false,
+        suggestion: "Verify S3 permissions (s3:GetObject) and network connectivity.",
+        bucket,
+        path,
+        original: err
+      });
     }
     try {
       const content = data.Body.toString("utf-8");
       return JSON.parse(content);
     } catch (parseError) {
-      throw new Error(`Failed to parse state file ${path}: ${parseError.message}`);
+      throw new InvalidStateFileError(path, parseError.message, {
+        operation: "readStateFile",
+        retriable: false,
+        suggestion: "Check if the state file contains valid JSON exported by Terraform.",
+        original: parseError
+      });
     }
   }
   /**
@@ -43283,7 +57958,23 @@ class S3TfStateDriver extends TfStateDriver {
       });
     });
     if (!ok) {
-      throw new Error(`Failed to get metadata for ${path}: ${err.message}`);
+      if (err?.$metadata?.httpStatusCode === 404) {
+        throw new StateFileNotFoundError(path, {
+          operation: "getStateFileMetadata",
+          retriable: false,
+          suggestion: "Ensure the state file exists in S3 and the IAM role can access it.",
+          bucket,
+          original: err
+        });
+      }
+      throw new TfStateError(`Failed to get metadata for ${path}`, {
+        operation: "getStateFileMetadata",
+        retriable: false,
+        suggestion: "Verify S3 permissions (s3:HeadObject) and bucket configuration.",
+        bucket,
+        path,
+        original: err
+      });
     }
     return {
       path,
@@ -43324,10 +58015,23 @@ class FilesystemTfStateDriver extends TfStateDriver {
     try {
       const stats = await fs.stat(this.basePath);
       if (!stats.isDirectory()) {
-        throw new Error(`Base path is not a directory: ${this.basePath}`);
+        throw new TfStateError(`Base path is not a directory: ${this.basePath}`, {
+          operation: "initialize",
+          statusCode: 400,
+          retriable: false,
+          suggestion: "Update the TfState filesystem driver configuration to point to a directory containing .tfstate files.",
+          basePath: this.basePath
+        });
       }
     } catch (error) {
-      throw new Error(`Invalid base path: ${this.basePath} - ${error.message}`);
+      throw new TfStateError(`Invalid base path: ${this.basePath}`, {
+        operation: "initialize",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Ensure the basePath exists and is readable by the current process.",
+        basePath: this.basePath,
+        original: error
+      });
     }
   }
   /**
@@ -43357,7 +58061,15 @@ class FilesystemTfStateDriver extends TfStateDriver {
       );
       return stateFiles;
     } catch (error) {
-      throw new Error(`Failed to list state files: ${error.message}`);
+      throw new TfStateError("Failed to list Terraform state files", {
+        operation: "listStateFiles",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Verify filesystem permissions and glob selector pattern.",
+        selector: this.selector,
+        basePath: this.basePath,
+        original: error
+      });
     }
   }
   /**
@@ -43370,9 +58082,20 @@ class FilesystemTfStateDriver extends TfStateDriver {
       return JSON.parse(content);
     } catch (error) {
       if (error.code === "ENOENT") {
-        throw new Error(`State file not found: ${path$1}`);
+        throw new StateFileNotFoundError(path$1, {
+          operation: "readStateFile",
+          retriable: false,
+          suggestion: "Ensure the Terraform state file exists at the specified path.",
+          original: error
+        });
       }
-      throw new Error(`Failed to read state file ${path$1}: ${error.message}`);
+      throw new TfStateError(`Failed to read state file ${path$1}`, {
+        operation: "readStateFile",
+        retriable: false,
+        suggestion: "Validate file permissions and state file contents (must be valid JSON).",
+        path: path$1,
+        original: error
+      });
     }
   }
   /**
@@ -43391,9 +58114,20 @@ class FilesystemTfStateDriver extends TfStateDriver {
       };
     } catch (error) {
       if (error.code === "ENOENT") {
-        throw new Error(`State file not found: ${path$1}`);
+        throw new StateFileNotFoundError(path$1, {
+          operation: "getStateFileMetadata",
+          retriable: false,
+          suggestion: "Ensure the Terraform state file exists at the specified path.",
+          original: error
+        });
       }
-      throw new Error(`Failed to get metadata for ${path$1}: ${error.message}`);
+      throw new TfStateError(`Failed to get metadata for ${path$1}`, {
+        operation: "getStateFileMetadata",
+        retriable: false,
+        suggestion: "Check filesystem permissions and path configuration for TfStatePlugin.",
+        path: path$1,
+        original: error
+      });
     }
   }
   /**
@@ -43419,22 +58153,29 @@ class TfStatePlugin extends Plugin {
     this.driverConfig = config.config || {};
     const resourcesConfig = config.resources || {};
     const resourceNamesOption = config.resourceNames || {};
-    this.resourceName = resolveResourceName("tfstate", {
-      defaultName: "plg_tfstate_resources",
-      override: resourceNamesOption.resources || resourcesConfig.resources || config.resourceName
-    });
-    this.stateFilesName = resolveResourceName("tfstate", {
-      defaultName: "plg_tfstate_state_files",
-      override: resourceNamesOption.stateFiles || resourcesConfig.stateFiles || config.stateFilesName
-    });
-    this.diffsName = resolveResourceName("tfstate", {
-      defaultName: "plg_tfstate_state_diffs",
-      override: resourceNamesOption.diffs || resourcesConfig.diffs || config.diffsName
-    });
-    this.lineagesName = resolveResourceName("tfstate", {
-      defaultName: "plg_tfstate_lineages",
-      override: resourceNamesOption.lineages || resourcesConfig.lineages
-    });
+    this._resourceDescriptors = {
+      resources: {
+        defaultName: "plg_tfstate_resources",
+        override: resourceNamesOption.resources || resourcesConfig.resources || config.resourceName
+      },
+      stateFiles: {
+        defaultName: "plg_tfstate_state_files",
+        override: resourceNamesOption.stateFiles || resourcesConfig.stateFiles || config.stateFilesName
+      },
+      diffs: {
+        defaultName: "plg_tfstate_state_diffs",
+        override: resourceNamesOption.diffs || resourcesConfig.diffs || config.diffsName
+      },
+      lineages: {
+        defaultName: "plg_tfstate_lineages",
+        override: resourceNamesOption.lineages || resourcesConfig.lineages
+      }
+    };
+    const resolvedNames = this._resolveResourceNames();
+    this.resourceName = resolvedNames.resources;
+    this.stateFilesName = resolvedNames.stateFiles;
+    this.diffsName = resolvedNames.diffs;
+    this.lineagesName = resolvedNames.lineages;
     const monitor = config.monitor || {};
     this.monitorEnabled = monitor.enabled || false;
     this.monitorCron = monitor.cron || "*/5 * * * *";
@@ -43465,6 +58206,18 @@ class TfStatePlugin extends Plugin {
       partitionCacheHits: 0,
       partitionQueriesOptimized: 0
     };
+  }
+  _resolveResourceNames() {
+    return resolveResourceNames("tfstate", this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  onNamespaceChanged() {
+    const names = this._resolveResourceNames();
+    this.resourceName = names.resources;
+    this.stateFilesName = names.stateFiles;
+    this.diffsName = names.diffs;
+    this.lineagesName = names.lineages;
   }
   /**
    * Install the plugin
@@ -45316,547 +60069,6 @@ class TfStatePlugin extends Plugin {
   }
 }
 
-const ONE_HOUR_SEC = 3600;
-const ONE_DAY_SEC = 86400;
-const THIRTY_DAYS_SEC = 2592e3;
-const TEN_SECONDS_MS = 1e4;
-const ONE_MINUTE_MS = 6e4;
-const TEN_MINUTES_MS = 6e5;
-const ONE_HOUR_MS = 36e5;
-const ONE_DAY_MS = 864e5;
-const ONE_WEEK_MS = 6048e5;
-const SECONDS_TO_MS = 1e3;
-const GRANULARITIES = {
-  minute: {
-    threshold: ONE_HOUR_SEC,
-    // TTL < 1 hour
-    interval: TEN_SECONDS_MS,
-    // Check every 10 seconds
-    cohortsToCheck: 3,
-    // Check last 3 minutes
-    cohortFormat: (date) => date.toISOString().substring(0, 16)
-    // '2024-10-25T14:30'
-  },
-  hour: {
-    threshold: ONE_DAY_SEC,
-    // TTL < 24 hours
-    interval: TEN_MINUTES_MS,
-    // Check every 10 minutes
-    cohortsToCheck: 2,
-    // Check last 2 hours
-    cohortFormat: (date) => date.toISOString().substring(0, 13)
-    // '2024-10-25T14'
-  },
-  day: {
-    threshold: THIRTY_DAYS_SEC,
-    // TTL < 30 days
-    interval: ONE_HOUR_MS,
-    // Check every 1 hour
-    cohortsToCheck: 2,
-    // Check last 2 days
-    cohortFormat: (date) => date.toISOString().substring(0, 10)
-    // '2024-10-25'
-  },
-  week: {
-    threshold: Infinity,
-    // TTL >= 30 days
-    interval: ONE_DAY_MS,
-    // Check every 24 hours
-    cohortsToCheck: 2,
-    // Check last 2 weeks
-    cohortFormat: (date) => {
-      const year = date.getUTCFullYear();
-      const week = getWeekNumber(date);
-      return `${year}-W${String(week).padStart(2, "0")}`;
-    }
-  }
-};
-function getWeekNumber(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - yearStart) / ONE_DAY_MS + 1) / 7);
-}
-function detectGranularity(ttl) {
-  if (!ttl) return "day";
-  if (ttl < GRANULARITIES.minute.threshold) return "minute";
-  if (ttl < GRANULARITIES.hour.threshold) return "hour";
-  if (ttl < GRANULARITIES.day.threshold) return "day";
-  return "week";
-}
-function getExpiredCohorts(granularity, count) {
-  const config = GRANULARITIES[granularity];
-  const cohorts = [];
-  const now = /* @__PURE__ */ new Date();
-  for (let i = 0; i < count; i++) {
-    let checkDate;
-    switch (granularity) {
-      case "minute":
-        checkDate = new Date(now.getTime() - i * ONE_MINUTE_MS);
-        break;
-      case "hour":
-        checkDate = new Date(now.getTime() - i * ONE_HOUR_MS);
-        break;
-      case "day":
-        checkDate = new Date(now.getTime() - i * ONE_DAY_MS);
-        break;
-      case "week":
-        checkDate = new Date(now.getTime() - i * ONE_WEEK_MS);
-        break;
-    }
-    cohorts.push(config.cohortFormat(checkDate));
-  }
-  return cohorts;
-}
-class TTLPlugin extends Plugin {
-  constructor(config = {}) {
-    super(config);
-    this.verbose = config.verbose !== void 0 ? config.verbose : false;
-    this.resources = config.resources || {};
-    this.batchSize = config.batchSize || 100;
-    this.stats = {
-      totalScans: 0,
-      totalExpired: 0,
-      totalDeleted: 0,
-      totalArchived: 0,
-      totalSoftDeleted: 0,
-      totalCallbacks: 0,
-      totalErrors: 0,
-      lastScanAt: null,
-      lastScanDuration: 0
-    };
-    this.intervals = [];
-    this.isRunning = false;
-    const resourceNamesOption = config.resourceNames || {};
-    this.expirationIndex = null;
-    this.indexResourceName = resolveResourceName("ttl", {
-      defaultName: "plg_ttl_expiration_index",
-      override: resourceNamesOption.index || config.indexResourceName
-    });
-  }
-  /**
-   * Install the plugin
-   */
-  async install(database) {
-    await super.install(database);
-    for (const [resourceName, config] of Object.entries(this.resources)) {
-      this._validateResourceConfig(resourceName, config);
-    }
-    await this._createExpirationIndex();
-    for (const [resourceName, config] of Object.entries(this.resources)) {
-      this._setupResourceHooks(resourceName, config);
-    }
-    this._startIntervals();
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
-    }
-    this.emit("db:plugin:installed", {
-      plugin: "TTLPlugin",
-      resources: Object.keys(this.resources)
-    });
-  }
-  /**
-   * Validate resource configuration
-   */
-  _validateResourceConfig(resourceName, config) {
-    if (!config.ttl && !config.field) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" must have either "ttl" (seconds) or "field" (timestamp field name)`
-      );
-    }
-    const validStrategies = ["soft-delete", "hard-delete", "archive", "callback"];
-    if (!config.onExpire || !validStrategies.includes(config.onExpire)) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" must have an "onExpire" value. Valid options: ${validStrategies.join(", ")}`
-      );
-    }
-    if (config.onExpire === "soft-delete" && !config.deleteField) {
-      config.deleteField = "deletedat";
-    }
-    if (config.onExpire === "archive" && !config.archiveResource) {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" with onExpire="archive" must have an "archiveResource" specified`
-      );
-    }
-    if (config.onExpire === "callback" && typeof config.callback !== "function") {
-      throw new Error(
-        `[TTLPlugin] Resource "${resourceName}" with onExpire="callback" must have a "callback" function`
-      );
-    }
-    if (!config.field) {
-      config.field = "_createdAt";
-    }
-    if (config.field === "_createdAt" && this.database) {
-      const resource = this.database.resources[resourceName];
-      if (resource && resource.$schema.timestamps === false) {
-        console.warn(
-          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
-        );
-      }
-    }
-    config.granularity = detectGranularity(config.ttl);
-  }
-  /**
-   * Create expiration index (plugin resource)
-   */
-  async _createExpirationIndex() {
-    this.expirationIndex = await this.database.createResource({
-      name: this.indexResourceName,
-      attributes: {
-        resourceName: "string|required",
-        recordId: "string|required",
-        expiresAtCohort: "string|required",
-        expiresAtTimestamp: "number|required",
-        // Exact expiration timestamp for precise checking
-        granularity: "string|required",
-        createdAt: "number"
-      },
-      partitions: {
-        byExpiresAtCohort: {
-          fields: { expiresAtCohort: "string" }
-        }
-      },
-      asyncPartitions: false
-      // Sync partitions for deterministic behavior
-    });
-    if (this.verbose) {
-      console.log("[TTLPlugin] Created expiration index with partition");
-    }
-  }
-  /**
-   * Setup hooks for a resource
-   */
-  _setupResourceHooks(resourceName, config) {
-    if (!this.database.resources[resourceName]) {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
-      }
-      return;
-    }
-    const resource = this.database.resources[resourceName];
-    if (typeof resource.insert !== "function" || typeof resource.delete !== "function") {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
-      }
-      return;
-    }
-    this.addMiddleware(resource, "insert", async (next, data, options) => {
-      const result = await next(data, options);
-      await this._addToIndex(resourceName, result, config);
-      return result;
-    });
-    this.addMiddleware(resource, "delete", async (next, id, options) => {
-      const result = await next(id, options);
-      await this._removeFromIndex(resourceName, id);
-      return result;
-    });
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
-    }
-  }
-  /**
-   * Add record to expiration index
-   */
-  async _addToIndex(resourceName, record, config) {
-    try {
-      let baseTime = record[config.field];
-      if (!baseTime && config.field === "_createdAt") {
-        baseTime = Date.now();
-      }
-      if (!baseTime) {
-        if (this.verbose) {
-          console.warn(
-            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
-          );
-        }
-        return;
-      }
-      const baseTimestamp = typeof baseTime === "number" ? baseTime : new Date(baseTime).getTime();
-      const expiresAt = config.ttl ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS) : new Date(baseTimestamp);
-      const cohortConfig = GRANULARITIES[config.granularity];
-      const cohort = cohortConfig.cohortFormat(expiresAt);
-      const indexId = `${resourceName}:${record.id}`;
-      await this.expirationIndex.insert({
-        id: indexId,
-        resourceName,
-        recordId: record.id,
-        expiresAtCohort: cohort,
-        expiresAtTimestamp: expiresAt.getTime(),
-        // Store exact timestamp for precise checking
-        granularity: config.granularity,
-        createdAt: Date.now()
-      });
-      if (this.verbose) {
-        console.log(
-          `[TTLPlugin] Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
-        );
-      }
-    } catch (error) {
-      console.error(`[TTLPlugin] Error adding to index:`, error);
-      this.stats.totalErrors++;
-    }
-  }
-  /**
-   * Remove record from expiration index (O(1) using deterministic ID)
-   */
-  async _removeFromIndex(resourceName, recordId) {
-    try {
-      const indexId = `${resourceName}:${recordId}`;
-      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
-      if (this.verbose && ok) {
-        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
-      }
-      if (!ok && err?.code !== "NoSuchKey") {
-        throw err;
-      }
-    } catch (error) {
-      console.error(`[TTLPlugin] Error removing from index:`, error);
-    }
-  }
-  /**
-   * Start interval-based cleanup for each granularity
-   */
-  _startIntervals() {
-    const byGranularity = {
-      minute: [],
-      hour: [],
-      day: [],
-      week: []
-    };
-    for (const [name, config] of Object.entries(this.resources)) {
-      byGranularity[config.granularity].push({ name, config });
-    }
-    for (const [granularity, resources] of Object.entries(byGranularity)) {
-      if (resources.length === 0) continue;
-      const granularityConfig = GRANULARITIES[granularity];
-      const handle = setInterval(
-        () => this._cleanupGranularity(granularity, resources),
-        granularityConfig.interval
-      );
-      this.intervals.push(handle);
-      if (this.verbose) {
-        console.log(
-          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) for ${resources.length} resources`
-        );
-      }
-    }
-    this.isRunning = true;
-  }
-  /**
-   * Stop all intervals
-   */
-  _stopIntervals() {
-    for (const handle of this.intervals) {
-      clearInterval(handle);
-    }
-    this.intervals = [];
-    this.isRunning = false;
-    if (this.verbose) {
-      console.log("[TTLPlugin] Stopped all intervals");
-    }
-  }
-  /**
-   * Cleanup expired records for a specific granularity
-   */
-  async _cleanupGranularity(granularity, resources) {
-    const startTime = Date.now();
-    this.stats.totalScans++;
-    try {
-      const granularityConfig = GRANULARITIES[granularity];
-      const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
-      if (this.verbose) {
-        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
-      }
-      for (const cohort of cohorts) {
-        const expired = await this.expirationIndex.listPartition({
-          partition: "byExpiresAtCohort",
-          partitionValues: { expiresAtCohort: cohort }
-        });
-        const resourceNames = new Set(resources.map((r) => r.name));
-        const filtered = expired.filter((e) => resourceNames.has(e.resourceName));
-        if (this.verbose && filtered.length > 0) {
-          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
-        }
-        for (let i = 0; i < filtered.length; i += this.batchSize) {
-          const batch = filtered.slice(i, i + this.batchSize);
-          for (const entry of batch) {
-            const config = this.resources[entry.resourceName];
-            await this._processExpiredEntry(entry, config);
-          }
-        }
-      }
-      this.stats.lastScanAt = (/* @__PURE__ */ new Date()).toISOString();
-      this.stats.lastScanDuration = Date.now() - startTime;
-      this.emit("plg:ttl:scan-completed", {
-        granularity,
-        duration: this.stats.lastScanDuration,
-        cohorts
-      });
-    } catch (error) {
-      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
-      this.stats.totalErrors++;
-      this.emit("plg:ttl:cleanup-error", { granularity, error });
-    }
-  }
-  /**
-   * Process a single expired index entry
-   */
-  async _processExpiredEntry(entry, config) {
-    try {
-      if (!this.database.resources[entry.resourceName]) {
-        if (this.verbose) {
-          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
-        }
-        return;
-      }
-      const resource = this.database.resources[entry.resourceName];
-      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
-      if (!ok || !record) {
-        await this.expirationIndex.delete(entry.id);
-        return;
-      }
-      if (entry.expiresAtTimestamp && Date.now() < entry.expiresAtTimestamp) {
-        return;
-      }
-      switch (config.onExpire) {
-        case "soft-delete":
-          await this._softDelete(resource, record, config);
-          this.stats.totalSoftDeleted++;
-          break;
-        case "hard-delete":
-          await this._hardDelete(resource, record);
-          this.stats.totalDeleted++;
-          break;
-        case "archive":
-          await this._archive(resource, record, config);
-          this.stats.totalArchived++;
-          this.stats.totalDeleted++;
-          break;
-        case "callback":
-          const shouldDelete = await config.callback(record, resource);
-          this.stats.totalCallbacks++;
-          if (shouldDelete) {
-            await this._hardDelete(resource, record);
-            this.stats.totalDeleted++;
-          }
-          break;
-      }
-      await this.expirationIndex.delete(entry.id);
-      this.stats.totalExpired++;
-      this.emit("plg:ttl:record-expired", { resource: entry.resourceName, record });
-    } catch (error) {
-      console.error(`[TTLPlugin] Error processing expired entry:`, error);
-      this.stats.totalErrors++;
-    }
-  }
-  /**
-   * Soft delete: Mark record as deleted
-   */
-  async _softDelete(resource, record, config) {
-    const deleteField = config.deleteField || "deletedat";
-    const updates = {
-      [deleteField]: (/* @__PURE__ */ new Date()).toISOString(),
-      isdeleted: "true"
-      // Add isdeleted field for partition compatibility
-    };
-    await resource.update(record.id, updates);
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
-    }
-  }
-  /**
-   * Hard delete: Remove record from S3
-   */
-  async _hardDelete(resource, record) {
-    await resource.delete(record.id);
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
-    }
-  }
-  /**
-   * Archive: Copy to another resource then delete
-   */
-  async _archive(resource, record, config) {
-    if (!this.database.resources[config.archiveResource]) {
-      throw new Error(`Archive resource "${config.archiveResource}" not found`);
-    }
-    const archiveResource = this.database.resources[config.archiveResource];
-    const archiveData = {};
-    for (const [key, value] of Object.entries(record)) {
-      if (!key.startsWith("_")) {
-        archiveData[key] = value;
-      }
-    }
-    archiveData.archivedAt = (/* @__PURE__ */ new Date()).toISOString();
-    archiveData.archivedFrom = resource.name;
-    archiveData.originalId = record.id;
-    if (!config.keepOriginalId) {
-      delete archiveData.id;
-    }
-    await archiveResource.insert(archiveData);
-    await resource.delete(record.id);
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
-    }
-  }
-  /**
-   * Manual cleanup of a specific resource
-   */
-  async cleanupResource(resourceName) {
-    const config = this.resources[resourceName];
-    if (!config) {
-      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
-    }
-    const granularity = config.granularity;
-    await this._cleanupGranularity(granularity, [{ name: resourceName, config }]);
-    return {
-      resource: resourceName,
-      granularity
-    };
-  }
-  /**
-   * Manual cleanup of all resources
-   */
-  async runCleanup() {
-    const byGranularity = {
-      minute: [],
-      hour: [],
-      day: [],
-      week: []
-    };
-    for (const [name, config] of Object.entries(this.resources)) {
-      byGranularity[config.granularity].push({ name, config });
-    }
-    for (const [granularity, resources] of Object.entries(byGranularity)) {
-      if (resources.length > 0) {
-        await this._cleanupGranularity(granularity, resources);
-      }
-    }
-  }
-  /**
-   * Get plugin statistics
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      resources: Object.keys(this.resources).length,
-      isRunning: this.isRunning,
-      intervals: this.intervals.length
-    };
-  }
-  /**
-   * Uninstall the plugin
-   */
-  async uninstall() {
-    this._stopIntervals();
-    await super.uninstall();
-    if (this.verbose) {
-      console.log("[TTLPlugin] Uninstalled");
-    }
-  }
-}
-
 function cosineDistance(a, b) {
   if (a.length !== b.length) {
     throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
@@ -47037,15 +61249,26 @@ class MemoryStorage {
     if (!this.enforceLimits) return;
     const metadataSize = this._calculateMetadataSize(metadata);
     if (metadataSize > this.metadataLimit) {
-      throw new Error(
-        `Metadata size (${metadataSize} bytes) exceeds limit of ${this.metadataLimit} bytes`
-      );
+      throw new MetadataLimitError("Metadata limit exceeded in memory storage", {
+        bucket: this.bucket,
+        totalSize: metadataSize,
+        effectiveLimit: this.metadataLimit,
+        operation: "put",
+        retriable: false,
+        suggestion: "Reduce metadata size or disable enforceLimits in MemoryClient configuration."
+      });
     }
     const bodySize = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body || "", "utf8");
     if (bodySize > this.maxObjectSize) {
-      throw new Error(
-        `Object size (${bodySize} bytes) exceeds limit of ${this.maxObjectSize} bytes`
-      );
+      throw new ResourceError("Object size exceeds in-memory limit", {
+        bucket: this.bucket,
+        operation: "put",
+        size: bodySize,
+        maxObjectSize: this.maxObjectSize,
+        statusCode: 413,
+        retriable: false,
+        suggestion: "Store smaller objects or increase maxObjectSize when instantiating MemoryClient."
+      });
     }
   }
   /**
@@ -47056,34 +61279,28 @@ class MemoryStorage {
     const existing = this.objects.get(key);
     if (ifMatch !== void 0) {
       if (!existing || existing.etag !== ifMatch) {
-        const error = new Error(`Precondition failed: ETag mismatch for key "${key}"`);
-        error.name = "PreconditionFailed";
-        error.code = "PreconditionFailed";
-        error.statusCode = 412;
-        error.$metadata = {
-          httpStatusCode: 412,
-          requestId: "memory-" + Date.now(),
-          attempts: 1,
-          totalRetryDelay: 0
-        };
-        throw error;
+        throw new ResourceError(`Precondition failed: ETag mismatch for key "${key}"`, {
+          bucket: this.bucket,
+          key,
+          code: "PreconditionFailed",
+          statusCode: 412,
+          retriable: false,
+          suggestion: "Fetch the latest object and retry with the current ETag in options.ifMatch."
+        });
       }
     }
     if (ifNoneMatch !== void 0) {
       const targetValue = existing ? existing.etag : null;
       const shouldFail = ifNoneMatch === "*" && existing || ifNoneMatch !== "*" && existing && targetValue === ifNoneMatch;
       if (shouldFail) {
-        const error = new Error(`Precondition failed: object already exists for key "${key}"`);
-        error.name = "PreconditionFailed";
-        error.code = "PreconditionFailed";
-        error.statusCode = 412;
-        error.$metadata = {
-          httpStatusCode: 412,
-          requestId: "memory-" + Date.now(),
-          attempts: 1,
-          totalRetryDelay: 0
-        };
-        throw error;
+        throw new ResourceError(`Precondition failed: object already exists for key "${key}"`, {
+          bucket: this.bucket,
+          key,
+          code: "PreconditionFailed",
+          statusCode: 412,
+          retriable: false,
+          suggestion: 'Use ifNoneMatch: "*" only when the object should not exist or remove the conditional header.'
+        });
       }
     }
     const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || "");
@@ -47121,15 +61338,14 @@ class MemoryStorage {
   async get(key) {
     const obj = this.objects.get(key);
     if (!obj) {
-      const error = new Error(`Object not found: ${key}`);
-      error.name = "NoSuchKey";
-      error.$metadata = {
-        httpStatusCode: 404,
-        requestId: "memory-" + Date.now(),
-        attempts: 1,
-        totalRetryDelay: 0
-      };
-      throw error;
+      throw new ResourceError(`Object not found: ${key}`, {
+        bucket: this.bucket,
+        key,
+        code: "NoSuchKey",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Ensure the key exists before attempting to read it."
+      });
     }
     if (this.verbose) {
       console.log(`[MemoryStorage] GET ${key} (${obj.size} bytes)`);
@@ -47151,15 +61367,14 @@ class MemoryStorage {
   async head(key) {
     const obj = this.objects.get(key);
     if (!obj) {
-      const error = new Error(`Object not found: ${key}`);
-      error.name = "NoSuchKey";
-      error.$metadata = {
-        httpStatusCode: 404,
-        requestId: "memory-" + Date.now(),
-        attempts: 1,
-        totalRetryDelay: 0
-      };
-      throw error;
+      throw new ResourceError(`Object not found: ${key}`, {
+        bucket: this.bucket,
+        key,
+        code: "NoSuchKey",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Ensure the key exists before attempting to read it."
+      });
     }
     if (this.verbose) {
       console.log(`[MemoryStorage] HEAD ${key}`);
@@ -47179,9 +61394,14 @@ class MemoryStorage {
   async copy(from, to, { metadata, metadataDirective, contentType }) {
     const source = this.objects.get(from);
     if (!source) {
-      const error = new Error(`Source object not found: ${from}`);
-      error.name = "NoSuchKey";
-      throw error;
+      throw new ResourceError(`Source object not found: ${from}`, {
+        bucket: this.bucket,
+        key: from,
+        code: "NoSuchKey",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Copy requires an existing source object. Verify the source key before retrying."
+      });
     }
     let finalMetadata = { ...source.metadata };
     if (metadataDirective === "REPLACE" && metadata) {
@@ -47324,7 +61544,11 @@ class MemoryStorage {
    */
   restore(snapshot) {
     if (!snapshot || !snapshot.objects) {
-      throw new Error("Invalid snapshot format");
+      throw new ValidationError("Invalid snapshot format", {
+        field: "snapshot",
+        retriable: false,
+        suggestion: "Provide the snapshot returned by MemoryStorage.snapshot() before calling restore()."
+      });
     }
     this.objects.clear();
     for (const [key, obj] of Object.entries(snapshot.objects)) {
@@ -47349,13 +61573,24 @@ class MemoryStorage {
   async saveToDisk(customPath) {
     const path = customPath || this.persistPath;
     if (!path) {
-      throw new Error("No persist path configured");
+      throw new ValidationError("No persist path configured", {
+        field: "persistPath",
+        retriable: false,
+        suggestion: "Provide a persistPath when creating MemoryClient or pass a custom path to saveToDisk()."
+      });
     }
     const snapshot = this.snapshot();
     const json = JSON.stringify(snapshot, null, 2);
     const [ok, err] = await tryFn(() => fs.writeFile(path, json, "utf-8"));
     if (!ok) {
-      throw new Error(`Failed to save to disk: ${err.message}`);
+      throw new ResourceError(`Failed to save to disk: ${err.message}`, {
+        bucket: this.bucket,
+        operation: "saveToDisk",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Check filesystem permissions and available disk space, then retry.",
+        original: err
+      });
     }
     if (this.verbose) {
       console.log(`[MemoryStorage] Saved ${this.objects.size} objects to ${path}`);
@@ -47368,11 +61603,22 @@ class MemoryStorage {
   async loadFromDisk(customPath) {
     const path = customPath || this.persistPath;
     if (!path) {
-      throw new Error("No persist path configured");
+      throw new ValidationError("No persist path configured", {
+        field: "persistPath",
+        retriable: false,
+        suggestion: "Provide a persistPath when creating MemoryClient or pass a custom path to loadFromDisk()."
+      });
     }
     const [ok, err, json] = await tryFn(() => fs.readFile(path, "utf-8"));
     if (!ok) {
-      throw new Error(`Failed to load from disk: ${err.message}`);
+      throw new ResourceError(`Failed to load from disk: ${err.message}`, {
+        bucket: this.bucket,
+        operation: "loadFromDisk",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Verify the file exists and is readable, then retry.",
+        original: err
+      });
     }
     const snapshot = JSON.parse(json);
     this.restore(snapshot);
@@ -47483,12 +61729,20 @@ class MemoryClient extends EventEmitter {
           response = await this._handleListObjects(input);
           break;
         default:
-          throw new Error(`Unsupported command: ${commandName}`);
+          throw new DatabaseError(`Unsupported command: ${commandName}`, {
+            operation: "sendCommand",
+            statusCode: 400,
+            retriable: false,
+            suggestion: "Use one of the supported commands: PutObject, GetObject, HeadObject, CopyObject, DeleteObject, DeleteObjects, or ListObjectsV2."
+          });
       }
       this.emit("cl:response", commandName, response, input);
       this.emit("command.response", commandName, response, input);
       return response;
     } catch (error) {
+      if (error instanceof BaseError) {
+        throw error;
+      }
       const mappedError = mapAwsError(error, {
         bucket: this.bucket,
         key: input.Key,
@@ -48404,7 +62658,13 @@ class Factory {
     for (const traitName of traits) {
       const trait = this.traits.get(traitName);
       if (!trait) {
-        throw new Error(`Trait '${traitName}' not found in factory '${this.resourceName}'`);
+        throw new ValidationError(`Trait '${traitName}' not found in factory '${this.resourceName}'`, {
+          field: "trait",
+          value: traitName,
+          resourceName: this.resourceName,
+          retriable: false,
+          suggestion: `Define the trait with Factory.define('${this.resourceName}').trait('${traitName}', ...) before using it.`
+        });
       }
       const traitAttrs = typeof trait === "function" ? await trait({ seq, factory: this }) : trait;
       attributes = { ...attributes, ...traitAttrs };
@@ -48426,7 +62686,11 @@ class Factory {
   async create(overrides = {}, options = {}) {
     const { database = Factory._database } = options;
     if (!database) {
-      throw new Error("Database not set. Use Factory.setDatabase(db) or pass database option");
+      throw new ValidationError("Database not set for factory", {
+        field: "database",
+        retriable: false,
+        suggestion: "Call Factory.setDatabase(db) globally or pass { database } when invoking create()."
+      });
     }
     let attributes = await this.build(overrides, options);
     for (const callback of this.beforeCreateCallbacks) {
@@ -48434,7 +62698,12 @@ class Factory {
     }
     const resource = database.resources[this.resourceName];
     if (!resource) {
-      throw new Error(`Resource '${this.resourceName}' not found in database`);
+      throw new ValidationError(`Resource '${this.resourceName}' not found in database`, {
+        field: "resourceName",
+        value: this.resourceName,
+        retriable: false,
+        suggestion: `Ensure the resource is created in the database before using Factory '${this.resourceName}'.`
+      });
     }
     let created = await resource.insert(attributes);
     for (const callback of this.afterCreateCallbacks) {
@@ -48534,7 +62803,12 @@ class Seeder {
       this.log(`Seeding ${count} ${resourceName}...`);
       const factory = Factory.get(resourceName);
       if (!factory) {
-        throw new Error(`Factory for '${resourceName}' not found. Define it with Factory.define()`);
+        throw new ValidationError(`Factory for '${resourceName}' not found`, {
+          field: "resourceName",
+          value: resourceName,
+          retriable: false,
+          suggestion: `Register a factory with Factory.define('${resourceName}', ...) before seeding.`
+        });
       }
       created[resourceName] = await factory.createMany(count, {}, { database: this.database });
       this.log(`\u2705 Created ${count} ${resourceName}`);
@@ -48822,7 +63096,13 @@ class SessionManager {
     this.config = { ...DEFAULT_CONFIG, ...options.config };
     this.cleanupTimer = null;
     if (!this.sessionResource) {
-      throw new Error("SessionManager requires a sessionResource");
+      throw new PluginError("SessionManager requires a sessionResource", {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Pass { sessionResource } when initializing IdentityPlugin or SessionManager."
+      });
     }
     if (this.config.enableCleanup) {
       this._startCleanup();
@@ -48841,7 +63121,13 @@ class SessionManager {
   async createSession(data) {
     const { userId, metadata = {}, ipAddress, userAgent, duration } = data;
     if (!userId) {
-      throw new Error("userId is required to create a session");
+      throw new PluginError("userId is required to create a session", {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.createSession",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide data.userId when calling createSession()."
+      });
     }
     generateSessionId();
     const expiresAt = calculateExpiration(duration || this.config.sessionExpiry);
@@ -48857,7 +63143,14 @@ class SessionManager {
       () => this.sessionResource.insert(sessionData)
     );
     if (!ok) {
-      throw new Error(`Failed to create session: ${err.message}`);
+      throw new PluginError(`Failed to create session: ${err.message}`, {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.createSession",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Check session resource permissions and database connectivity.",
+        original: err
+      });
     }
     return {
       sessionId: session.id,
@@ -48909,11 +63202,24 @@ class SessionManager {
    */
   async updateSession(sessionId, metadata) {
     if (!sessionId) {
-      throw new Error("sessionId is required");
+      throw new PluginError("sessionId is required", {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.updateSession",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide a sessionId when calling updateSession()."
+      });
     }
     const session = await this.getSession(sessionId);
     if (!session) {
-      throw new Error("Session not found");
+      throw new PluginError("Session not found", {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.updateSession",
+        statusCode: 404,
+        retriable: false,
+        suggestion: "Ensure the session exists before updating metadata.",
+        sessionId
+      });
     }
     const updatedMetadata = { ...session.metadata, ...metadata };
     const [ok, err, updated] = await tryFn(
@@ -48922,7 +63228,14 @@ class SessionManager {
       })
     );
     if (!ok) {
-      throw new Error(`Failed to update session: ${err.message}`);
+      throw new PluginError(`Failed to update session: ${err.message}`, {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.updateSession",
+        statusCode: 500,
+        retriable: false,
+        suggestion: "Check session resource permissions and database connectivity.",
+        original: err
+      });
     }
     return updated;
   }
@@ -50292,561 +64605,54 @@ var server = /*#__PURE__*/Object.freeze({
   IdentityServer: IdentityServer
 });
 
-class StealthManager {
-  constructor(plugin) {
-    this.plugin = plugin;
-    this.config = plugin.config.stealth || {};
-    this.timingProfiles = {
-      "very-slow": { min: 5e3, max: 15e3, jitter: 2e3 },
-      "slow": { min: 3e3, max: 8e3, jitter: 1500 },
-      "normal": { min: 1e3, max: 5e3, jitter: 1e3 },
-      "fast": { min: 500, max: 2e3, jitter: 500 }
+class PuppeteerError extends PluginError {
+  constructor(message, details = {}) {
+    const merged = {
+      pluginName: details.pluginName || "PuppeteerPlugin",
+      operation: details.operation || "unknown",
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Review PuppeteerPlugin configuration (proxies, sessions, scripts) and retry.",
+      ...details
     };
-    this.geoData = {
-      "US": { timezones: ["America/New_York", "America/Chicago", "America/Los_Angeles"], languages: ["en-US"] },
-      "BR": { timezones: ["America/Sao_Paulo"], languages: ["pt-BR", "en-US"] },
-      "GB": { timezones: ["Europe/London"], languages: ["en-GB", "en-US"] },
-      "DE": { timezones: ["Europe/Berlin"], languages: ["de-DE", "en-US"] },
-      "FR": { timezones: ["Europe/Paris"], languages: ["fr-FR", "en-US"] },
-      "JP": { timezones: ["Asia/Tokyo"], languages: ["ja-JP", "en-US"] },
-      "CN": { timezones: ["Asia/Shanghai"], languages: ["zh-CN", "en-US"] }
-    };
+    super(message, merged);
+    this.name = "PuppeteerError";
   }
-  /**
-   * Create a stealth-optimized persona profile
-   * Ensures all fingerprint components are consistent
-   */
-  async createStealthProfile(options = {}) {
-    const {
-      proxy = null,
-      country = null,
-      // Target country (if known from proxy)
-      timingProfile = "normal",
-      screenResolution = null
-    } = options;
-    const geoProfile = this._selectGeoProfile(country);
-    const userAgent = this._generateConsistentUserAgent();
-    const viewport = this._generateConsistentViewport(screenResolution);
-    const profile = {
-      // Core identity
-      userAgent,
-      viewport,
-      timezone: geoProfile.timezone,
-      language: geoProfile.language,
-      // Consistency markers
-      acceptLanguage: `${geoProfile.language},en;q=0.9`,
-      acceptEncoding: "gzip, deflate, br",
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      // Platform consistency
-      platform: this._getPlatformFromUA(userAgent),
-      hardwareConcurrency: this._getHardwareConcurrency(userAgent),
-      deviceMemory: this._getDeviceMemory(userAgent),
-      // Timing behavior
-      timingProfile: this.timingProfiles[timingProfile],
-      // Proxy binding
-      proxyId: proxy?.id || null,
-      proxyCountry: country,
-      // Behavioral markers
-      behavioral: {
-        typingSpeed: { min: 100, max: 300 },
-        // ms per character
-        mouseMovements: true,
-        scrollBehavior: "smooth",
-        clickDelay: { min: 200, max: 800 }
-      }
-    };
-    return profile;
-  }
-  /**
-   * Select geo profile (timezone + language) based on country
-   * @private
-   */
-  _selectGeoProfile(country) {
-    if (country && this.geoData[country]) {
-      const data = this.geoData[country];
-      const timezone = data.timezones[Math.floor(Math.random() * data.timezones.length)];
-      const language = data.languages[0];
-      return { timezone, language };
-    }
-    return {
-      timezone: "America/New_York",
-      language: "en-US"
-    };
-  }
-  /**
-   * Generate consistent user agent (avoid churn)
-   * @private
-   */
-  _generateConsistentUserAgent() {
-    const stableUserAgents = [
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ];
-    return stableUserAgents[Math.floor(Math.random() * stableUserAgents.length)];
-  }
-  /**
-   * Generate viewport consistent with screen resolution
-   * @private
-   */
-  _generateConsistentViewport(screenResolution) {
-    const commonResolutions = [
-      { width: 1920, height: 1080, deviceScaleFactor: 1 },
-      // Full HD
-      { width: 1680, height: 1050, deviceScaleFactor: 1 },
-      // WSXGA+
-      { width: 1440, height: 900, deviceScaleFactor: 1 },
-      // WXGA+
-      { width: 1366, height: 768, deviceScaleFactor: 1 },
-      // HD
-      { width: 2560, height: 1440, deviceScaleFactor: 1 }
-      // QHD
-    ];
-    if (screenResolution) {
-      return screenResolution;
-    }
-    return commonResolutions[Math.floor(Math.random() * commonResolutions.length)];
-  }
-  /**
-   * Get platform from user agent
-   * @private
-   */
-  _getPlatformFromUA(userAgent) {
-    if (userAgent.includes("Windows")) return "Win32";
-    if (userAgent.includes("Mac")) return "MacIntel";
-    if (userAgent.includes("Linux")) return "Linux x86_64";
-    return "Win32";
-  }
-  /**
-   * Get hardware concurrency (CPU cores) from user agent
-   * @private
-   */
-  _getHardwareConcurrency(userAgent) {
-    return [4, 6, 8][Math.floor(Math.random() * 3)];
-  }
-  /**
-   * Get device memory from user agent
-   * @private
-   */
-  _getDeviceMemory(userAgent) {
-    return [4, 8, 16][Math.floor(Math.random() * 3)];
-  }
-  /**
-   * Apply stealth profile to page
-   * Overrides navigator properties to match profile
-   */
-  async applyStealthProfile(page, profile) {
-    await page.emulateTimezone(profile.timezone);
-    await page.evaluateOnNewDocument((profile2) => {
-      Object.defineProperty(navigator, "platform", {
-        get: () => profile2.platform
-      });
-      Object.defineProperty(navigator, "hardwareConcurrency", {
-        get: () => profile2.hardwareConcurrency
-      });
-      Object.defineProperty(navigator, "deviceMemory", {
-        get: () => profile2.deviceMemory
-      });
-      Object.defineProperty(navigator, "languages", {
-        get: () => [profile2.language, "en"]
-      });
-      Object.defineProperty(navigator, "webdriver", {
-        get: () => false
-      });
-      if (!window.chrome) {
-        window.chrome = {
-          runtime: {}
-        };
-      }
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => parameters.name === "notifications" ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);
-    }, profile);
-    await page.setExtraHTTPHeaders({
-      "Accept-Language": profile.acceptLanguage,
-      "Accept-Encoding": profile.acceptEncoding,
-      "Accept": profile.accept
+}
+class BrowserPoolError extends PuppeteerError {
+  constructor(message, details = {}) {
+    super(message, {
+      code: "BROWSER_POOL_ERROR",
+      retriable: details.retriable ?? true,
+      suggestion: details.suggestion ?? "Verify browser instances are healthy and increase pool size or restart browsers.",
+      docs: details.docs || "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/puppeteer.md#browser-pool",
+      ...details
     });
-  }
-  /**
-   * Execute JS challenges automatically
-   * Simulates human JS execution
-   */
-  async executeJSChallenges(page) {
-    try {
-      await page.waitForFunction(() => document.readyState === "complete", {
-        timeout: 1e4
-      });
-      await page.evaluate(() => {
-        if (!document.cookie.includes("js_ok")) {
-          document.cookie = "js_ok=1; path=/";
-        }
-        if (window.__JS_CHALLENGE_INIT) {
-          window.__JS_CHALLENGE_INIT();
-        }
-        window.dispatchEvent(new Event("load"));
-        document.dispatchEvent(new Event("DOMContentLoaded"));
-      });
-      await this._loadPageResources(page);
-      await page.evaluate(async () => {
-        try {
-          const response = await fetch("/.js-challenge", {
-            method: "GET",
-            credentials: "include"
-          });
-          if (response.ok) {
-            const data = await response.json();
-            if (data.token) {
-              window.__JS_CHALLENGE_TOKEN = data.token;
-            }
-          }
-        } catch (err) {
-        }
-      });
-    } catch (err) {
-      this.plugin.emit("stealth.jsChallengeWarning", {
-        error: err.message
-      });
-    }
-  }
-  /**
-   * Load page resources to simulate real browser
-   * @private
-   */
-  async _loadPageResources(page) {
-    try {
-      await page.evaluate(() => {
-        const images = Array.from(document.querySelectorAll("img"));
-        images.forEach((img) => {
-          if (!img.complete) {
-            img.dispatchEvent(new Event("load"));
-          }
-        });
-      });
-      await page.evaluateHandle(() => document.fonts.ready);
-    } catch (err) {
-    }
-  }
-  /**
-   * Add human-like delay between actions
-   * Uses timing profile from persona
-   */
-  async humanDelay(profile, action = "default") {
-    const timing = profile.timingProfile;
-    const baseDelay = timing.min + Math.random() * (timing.max - timing.min);
-    const jitter = (Math.random() - 0.5) * timing.jitter;
-    const totalDelay = Math.max(100, baseDelay + jitter);
-    await this._delay(totalDelay);
-  }
-  /**
-   * Simulate human typing with profile-specific speed
-   */
-  async humanType(page, selector, text, profile) {
-    const element = await page.$(selector);
-    if (!element) {
-      throw new Error(`Element not found: ${selector}`);
-    }
-    await element.click();
-    for (const char of text) {
-      await page.keyboard.type(char);
-      const { min, max } = profile.behavioral.typingSpeed;
-      const charDelay = min + Math.random() * (max - min);
-      await this._delay(charDelay);
-      if ([".", ",", "!", "?"].includes(char)) {
-        await this._delay(200 + Math.random() * 300);
-      }
-    }
-  }
-  /**
-   * Simulate realistic request pacing
-   * Prevents rate limiting / velocity detection
-   */
-  async paceRequests(persona, requestCount) {
-    const maxRequestsPerMinute = 30;
-    const minDelayMs = 60 * 1e3 / maxRequestsPerMinute;
-    const jitter = minDelayMs * (0.5 + Math.random() * 0.5);
-    const totalDelay = minDelayMs + jitter;
-    await this._delay(totalDelay);
-    persona.metadata.lastRequestTime = Date.now();
-  }
-  /**
-   * Check if persona should "rest" (cooldown)
-   * Prevents velocity/concurrent use detection
-   */
-  shouldRest(persona) {
-    const now = Date.now();
-    const lastUsed = persona.metadata.lastUsed || 0;
-    const timeSinceLastUse = now - lastUsed;
-    if (timeSinceLastUse < 5e3) {
-      return true;
-    }
-    const requestsInLastMinute = persona.metadata.recentRequests || 0;
-    if (requestsInLastMinute > 20) {
-      return true;
-    }
-    return false;
-  }
-  /**
-   * Simulate mouse movements and scrolling
-   * Generates behavioral fingerprint
-   */
-  async simulateHumanBehavior(page, profile) {
-    try {
-      const scrollDistance = Math.floor(Math.random() * 500) + 200;
-      await page.evaluate((distance) => {
-        window.scrollBy({
-          top: distance,
-          behavior: "smooth"
-        });
-      }, scrollDistance);
-      await this._delay(1e3 + Math.random() * 1e3);
-      if (page._cursor) {
-        try {
-          const viewport = await page.viewport();
-          const x = Math.floor(Math.random() * viewport.width);
-          const y = Math.floor(Math.random() * viewport.height);
-          await page._cursor.move({ x, y });
-          await this._delay(500);
-        } catch (err) {
-        }
-      }
-      const elements = await page.$$("a, button, input");
-      if (elements.length > 0) {
-        const randomElement = elements[Math.floor(Math.random() * elements.length)];
-        await randomElement.hover().catch(() => {
-        });
-        await this._delay(300 + Math.random() * 500);
-      }
-    } catch (err) {
-    }
-  }
-  /**
-   * Validate persona consistency before use
-   * Ensures no fingerprint leakage
-   */
-  validatePersonaConsistency(persona, currentContext) {
-    const warnings = [];
-    if (persona.proxyId && currentContext.proxyId !== persona.proxyId) {
-      warnings.push({
-        type: "PROXY_MISMATCH",
-        message: `Persona ${persona.personaId} bound to ${persona.proxyId} but using ${currentContext.proxyId}`,
-        severity: "HIGH"
-      });
-    }
-    if (currentContext.userAgent && currentContext.userAgent !== persona.userAgent) {
-      warnings.push({
-        type: "UA_MISMATCH",
-        message: "User agent changed",
-        severity: "HIGH"
-      });
-    }
-    if (currentContext.viewport) {
-      if (currentContext.viewport.width !== persona.viewport.width || currentContext.viewport.height !== persona.viewport.height) {
-        warnings.push({
-          type: "VIEWPORT_MISMATCH",
-          message: "Viewport changed",
-          severity: "MEDIUM"
-        });
-      }
-    }
-    if (this.shouldRest(persona)) {
-      warnings.push({
-        type: "HIGH_VELOCITY",
-        message: "Persona used too frequently",
-        severity: "MEDIUM"
-      });
-    }
-    return warnings;
-  }
-  /**
-   * Generate realistic browsing session
-   * Visits pages with human-like patterns
-   */
-  async generateBrowsingSession(page, profile, urls) {
-    for (let i = 0; i < urls.length; i++) {
-      const url = urls[i];
-      await page.goto(url, { waitUntil: "networkidle2" });
-      await this.executeJSChallenges(page);
-      await this.simulateHumanBehavior(page, profile);
-      await this.humanDelay(profile);
-      if (i > 0 && Math.random() < 0.1) {
-        await page.goBack();
-        await this._delay(1e3);
-        await page.goForward();
-      }
-    }
-  }
-  /**
-   * Delay helper
-   * @private
-   */
-  async _delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    this.name = "BrowserPoolError";
   }
 }
-
-var stealthManager = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  StealthManager: StealthManager
-});
-
-function sanitizeLabel(value) {
-  if (typeof value !== "string") {
-    value = String(value);
+class CookieManagerError extends PuppeteerError {
+  constructor(message, details = {}) {
+    super(message, {
+      code: "COOKIE_MANAGER_ERROR",
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion ?? "Check cookie storage configuration and ensure persona sessions are valid.",
+      ...details
+    });
+    this.name = "CookieManagerError";
   }
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
 }
-function sanitizeMetricName(name) {
-  let sanitized = name.replace(/[^a-zA-Z0-9_]/g, "_");
-  if (/^\d/.test(sanitized)) {
-    sanitized = "_" + sanitized;
+class NavigationError extends PuppeteerError {
+  constructor(message, details = {}) {
+    super(message, {
+      code: "NAVIGATION_ERROR",
+      retriable: details.retriable ?? true,
+      suggestion: details.suggestion ?? "Validate target URLs, network access, and waitFor options before retrying.",
+      ...details
+    });
+    this.name = "NavigationError";
   }
-  return sanitized;
 }
-function formatLabels(labels) {
-  if (!labels || Object.keys(labels).length === 0) {
-    return "";
-  }
-  const labelPairs = Object.entries(labels).map(([key, value]) => `${key}="${sanitizeLabel(value)}"`).join(",");
-  return `{${labelPairs}}`;
-}
-function formatMetric(name, type, help, values) {
-  const lines = [];
-  lines.push(`# HELP ${name} ${help}`);
-  lines.push(`# TYPE ${name} ${type}`);
-  for (const { labels, value } of values) {
-    const labelsStr = formatLabels(labels);
-    lines.push(`${name}${labelsStr} ${value}`);
-  }
-  return lines.join("\n");
-}
-function formatPrometheusMetrics(metricsPlugin) {
-  const lines = [];
-  const metrics = metricsPlugin.metrics;
-  const operationsTotalValues = [];
-  for (const [operation, data] of Object.entries(metrics.operations)) {
-    if (data.count > 0) {
-      operationsTotalValues.push({
-        labels: { operation, resource: "_global" },
-        value: data.count
-      });
-    }
-  }
-  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
-    for (const [operation, data] of Object.entries(operations)) {
-      if (data.count > 0) {
-        operationsTotalValues.push({
-          labels: { operation, resource: sanitizeMetricName(resourceName) },
-          value: data.count
-        });
-      }
-    }
-  }
-  if (operationsTotalValues.length > 0) {
-    lines.push(formatMetric(
-      "s3db_operations_total",
-      "counter",
-      "Total number of operations by type and resource",
-      operationsTotalValues
-    ));
-    lines.push("");
-  }
-  const durationValues = [];
-  for (const [operation, data] of Object.entries(metrics.operations)) {
-    if (data.count > 0) {
-      const avgSeconds = data.totalTime / data.count / 1e3;
-      durationValues.push({
-        labels: { operation, resource: "_global" },
-        value: avgSeconds.toFixed(6)
-      });
-    }
-  }
-  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
-    for (const [operation, data] of Object.entries(operations)) {
-      if (data.count > 0) {
-        const avgSeconds = data.totalTime / data.count / 1e3;
-        durationValues.push({
-          labels: { operation, resource: sanitizeMetricName(resourceName) },
-          value: avgSeconds.toFixed(6)
-        });
-      }
-    }
-  }
-  if (durationValues.length > 0) {
-    lines.push(formatMetric(
-      "s3db_operation_duration_seconds",
-      "gauge",
-      "Average operation duration in seconds",
-      durationValues
-    ));
-    lines.push("");
-  }
-  const errorsValues = [];
-  for (const [operation, data] of Object.entries(metrics.operations)) {
-    if (data.errors > 0) {
-      errorsValues.push({
-        labels: { operation, resource: "_global" },
-        value: data.errors
-      });
-    }
-  }
-  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
-    for (const [operation, data] of Object.entries(operations)) {
-      if (data.errors > 0) {
-        errorsValues.push({
-          labels: { operation, resource: sanitizeMetricName(resourceName) },
-          value: data.errors
-        });
-      }
-    }
-  }
-  if (errorsValues.length > 0) {
-    lines.push(formatMetric(
-      "s3db_operation_errors_total",
-      "counter",
-      "Total number of operation errors",
-      errorsValues
-    ));
-    lines.push("");
-  }
-  const startTime = new Date(metrics.startTime);
-  const uptimeSeconds = (Date.now() - startTime.getTime()) / 1e3;
-  lines.push(formatMetric(
-    "s3db_uptime_seconds",
-    "gauge",
-    "Process uptime in seconds",
-    [{ labels: {}, value: uptimeSeconds.toFixed(2) }]
-  ));
-  lines.push("");
-  const resourcesCount = Object.keys(metrics.resources).length;
-  lines.push(formatMetric(
-    "s3db_resources_total",
-    "gauge",
-    "Total number of tracked resources",
-    [{ labels: {}, value: resourcesCount }]
-  ));
-  lines.push("");
-  const nodeVersion = process.version || "unknown";
-  const s3dbVersion = "1.0.0";
-  lines.push(formatMetric(
-    "s3db_info",
-    "gauge",
-    "Build and runtime information",
-    [{
-      labels: {
-        version: s3dbVersion,
-        node_version: nodeVersion
-      },
-      value: 1
-    }]
-  ));
-  return lines.join("\n") + "\n";
-}
-
-var prometheusFormatter = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  formatPrometheusMetrics: formatPrometheusMetrics
-});
 
 class ProxyManager {
   constructor(plugin) {
@@ -50953,11 +64759,23 @@ class ProxyManager {
       const proxyId = this.sessionProxyMap.get(sessionId);
       const proxy = this.proxies.find((p) => p.id === proxyId);
       if (!proxy) {
-        throw new Error(`Proxy ${proxyId} bound to session ${sessionId} not found in pool`);
+        throw new BrowserPoolError(`Proxy ${proxyId} bound to session ${sessionId} not found in pool`, {
+          operation: "getProxyForSession",
+          retriable: false,
+          suggestion: "Ensure proxies remain registered while sessions are active.",
+          proxyId,
+          sessionId
+        });
       }
       const stats = this.proxyStats.get(proxyId);
-      if (!stats.healthy) {
-        throw new Error(`Proxy ${proxyId} bound to session ${sessionId} is unhealthy. Cannot use session.`);
+      if (!stats || !stats.healthy) {
+        throw new BrowserPoolError(`Proxy ${proxyId} bound to session ${sessionId} is unhealthy`, {
+          operation: "getProxyForSession",
+          retriable: true,
+          suggestion: "Rebind the session to a healthy proxy or refresh the proxy pool.",
+          proxyId,
+          sessionId
+        });
       }
       return proxy;
     }
@@ -50982,10 +64800,15 @@ class ProxyManager {
   _selectProxy() {
     const healthyProxies = this.proxies.filter((proxy) => {
       const stats = this.proxyStats.get(proxy.id);
-      return stats.healthy;
+      return stats ? stats.healthy : false;
     });
     if (healthyProxies.length === 0) {
-      throw new Error("No healthy proxies available");
+      throw new BrowserPoolError("No healthy proxies available", {
+        operation: "_selectProxy",
+        retriable: true,
+        suggestion: "Add healthy proxies to the configuration or allow existing proxies to recover.",
+        available: this.proxies.length
+      });
     }
     let selectedProxy;
     switch (this.selectionStrategy) {
@@ -51335,7 +65158,11 @@ class CookieManager {
    */
   async farmCookies(sessionId) {
     if (!this.config.farming.enabled || !this.config.farming.warmup.enabled) {
-      throw new Error("Cookie farming is not enabled");
+      throw new CookieManagerError("Cookie farming is not enabled", {
+        operation: "farmCookies",
+        retriable: false,
+        suggestion: "Enable config.farming.enabled and config.farming.warmup.enabled to farm cookies."
+      });
     }
     const warmupConfig = this.config.farming.warmup;
     const pages = [...warmupConfig.pages];
@@ -51383,7 +65210,11 @@ class CookieManager {
    */
   async getBestCookie(options = {}) {
     if (!this.config.farming.enabled || !this.config.farming.reputation.enabled) {
-      throw new Error("Cookie farming and reputation must be enabled");
+      throw new CookieManagerError("Cookie farming reputation must be enabled to select best cookies", {
+        operation: "getBestCookie",
+        retriable: false,
+        suggestion: "Enable config.farming.reputation.enabled before calling getBestCookie()."
+      });
     }
     const candidates = Array.from(this.cookiePool.values()).filter((session) => {
       if (session.reputation.successRate < this.config.farming.reputation.retireThreshold) {
@@ -52803,7 +66634,11 @@ class NetworkMonitor {
    */
   async getSessionStats(sessionId) {
     if (!this.sessionsResource) {
-      throw new Error("Network monitoring persistence not enabled");
+      throw new PuppeteerError("Network monitoring persistence not enabled", {
+        operation: "getSessionStats",
+        retriable: false,
+        suggestion: "Enable persistence in NetworkMonitor configuration to query stored stats."
+      });
     }
     const session = await this.sessionsResource.get(sessionId);
     return session;
@@ -52816,7 +66651,11 @@ class NetworkMonitor {
    */
   async getSessionRequests(sessionId, filters = {}) {
     if (!this.requestsResource) {
-      throw new Error("Network monitoring persistence not enabled");
+      throw new PuppeteerError("Network monitoring persistence not enabled", {
+        operation: "getSessionRequests",
+        retriable: false,
+        suggestion: "Enable persistence in NetworkMonitor configuration to query stored requests."
+      });
     }
     return await this.requestsResource.listPartition("bySession", { sessionId }, filters);
   }
@@ -52827,7 +66666,11 @@ class NetworkMonitor {
    */
   async getSessionErrors(sessionId) {
     if (!this.errorsResource) {
-      throw new Error("Network monitoring persistence not enabled");
+      throw new PuppeteerError("Network monitoring persistence not enabled", {
+        operation: "getSessionErrors",
+        retriable: false,
+        suggestion: "Enable persistence in NetworkMonitor configuration to query stored errors."
+      });
     }
     return await this.errorsResource.listPartition("bySession", { sessionId });
   }
@@ -53386,7 +67229,11 @@ class ConsoleMonitor {
    */
   async getSessionStats(sessionId) {
     if (!this.sessionsResource) {
-      throw new Error("Console monitoring persistence not enabled");
+      throw new PuppeteerError("Console monitoring persistence not enabled", {
+        operation: "getSessionStats",
+        retriable: false,
+        suggestion: "Enable persistence in ConsoleMonitor configuration to query stored sessions."
+      });
     }
     return await this.sessionsResource.get(sessionId);
   }
@@ -53398,7 +67245,11 @@ class ConsoleMonitor {
    */
   async getSessionMessages(sessionId, filters = {}) {
     if (!this.messagesResource) {
-      throw new Error("Console monitoring persistence not enabled");
+      throw new PuppeteerError("Console monitoring persistence not enabled", {
+        operation: "getSessionMessages",
+        retriable: false,
+        suggestion: "Enable persistence in ConsoleMonitor configuration to query stored messages."
+      });
     }
     return await this.messagesResource.listPartition("bySession", { sessionId }, filters);
   }
@@ -53409,7 +67260,11 @@ class ConsoleMonitor {
    */
   async getSessionErrors(sessionId) {
     if (!this.errorsResource) {
-      throw new Error("Console monitoring persistence not enabled");
+      throw new PuppeteerError("Console monitoring persistence not enabled", {
+        operation: "getSessionErrors",
+        retriable: false,
+        suggestion: "Enable persistence in ConsoleMonitor configuration to query stored errors."
+      });
     }
     return await this.errorsResource.listPartition("bySession", { sessionId });
   }
@@ -53420,7 +67275,11 @@ class ConsoleMonitor {
    */
   async getErrorsByType(errorType) {
     if (!this.errorsResource) {
-      throw new Error("Console monitoring persistence not enabled");
+      throw new PuppeteerError("Console monitoring persistence not enabled", {
+        operation: "getErrorsByType",
+        retriable: false,
+        suggestion: "Enable persistence in ConsoleMonitor configuration to query stored errors."
+      });
     }
     return await this.errorsResource.listPartition("byErrorType", { errorType });
   }
@@ -53429,6 +67288,844 @@ class ConsoleMonitor {
 var consoleMonitor = /*#__PURE__*/Object.freeze({
   __proto__: null,
   ConsoleMonitor: ConsoleMonitor
+});
+
+class StealthManager {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.stealth || {};
+    this.timingProfiles = {
+      "very-slow": { min: 5e3, max: 15e3, jitter: 2e3 },
+      "slow": { min: 3e3, max: 8e3, jitter: 1500 },
+      "normal": { min: 1e3, max: 5e3, jitter: 1e3 },
+      "fast": { min: 500, max: 2e3, jitter: 500 }
+    };
+    this.geoData = {
+      "US": { timezones: ["America/New_York", "America/Chicago", "America/Los_Angeles"], languages: ["en-US"] },
+      "BR": { timezones: ["America/Sao_Paulo"], languages: ["pt-BR", "en-US"] },
+      "GB": { timezones: ["Europe/London"], languages: ["en-GB", "en-US"] },
+      "DE": { timezones: ["Europe/Berlin"], languages: ["de-DE", "en-US"] },
+      "FR": { timezones: ["Europe/Paris"], languages: ["fr-FR", "en-US"] },
+      "JP": { timezones: ["Asia/Tokyo"], languages: ["ja-JP", "en-US"] },
+      "CN": { timezones: ["Asia/Shanghai"], languages: ["zh-CN", "en-US"] }
+    };
+  }
+  /**
+   * Create a stealth-optimized persona profile
+   * Ensures all fingerprint components are consistent
+   */
+  async createStealthProfile(options = {}) {
+    const {
+      proxy = null,
+      country = null,
+      // Target country (if known from proxy)
+      timingProfile = "normal",
+      screenResolution = null
+    } = options;
+    const geoProfile = this._selectGeoProfile(country);
+    const userAgent = this._generateConsistentUserAgent();
+    const viewport = this._generateConsistentViewport(screenResolution);
+    const profile = {
+      // Core identity
+      userAgent,
+      viewport,
+      timezone: geoProfile.timezone,
+      language: geoProfile.language,
+      // Consistency markers
+      acceptLanguage: `${geoProfile.language},en;q=0.9`,
+      acceptEncoding: "gzip, deflate, br",
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      // Platform consistency
+      platform: this._getPlatformFromUA(userAgent),
+      hardwareConcurrency: this._getHardwareConcurrency(userAgent),
+      deviceMemory: this._getDeviceMemory(userAgent),
+      // Timing behavior
+      timingProfile: this.timingProfiles[timingProfile],
+      // Proxy binding
+      proxyId: proxy?.id || null,
+      proxyCountry: country,
+      // Behavioral markers
+      behavioral: {
+        typingSpeed: { min: 100, max: 300 },
+        // ms per character
+        mouseMovements: true,
+        scrollBehavior: "smooth",
+        clickDelay: { min: 200, max: 800 }
+      }
+    };
+    return profile;
+  }
+  /**
+   * Select geo profile (timezone + language) based on country
+   * @private
+   */
+  _selectGeoProfile(country) {
+    if (country && this.geoData[country]) {
+      const data = this.geoData[country];
+      const timezone = data.timezones[Math.floor(Math.random() * data.timezones.length)];
+      const language = data.languages[0];
+      return { timezone, language };
+    }
+    return {
+      timezone: "America/New_York",
+      language: "en-US"
+    };
+  }
+  /**
+   * Generate consistent user agent (avoid churn)
+   * @private
+   */
+  _generateConsistentUserAgent() {
+    const stableUserAgents = [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ];
+    return stableUserAgents[Math.floor(Math.random() * stableUserAgents.length)];
+  }
+  /**
+   * Generate viewport consistent with screen resolution
+   * @private
+   */
+  _generateConsistentViewport(screenResolution) {
+    const commonResolutions = [
+      { width: 1920, height: 1080, deviceScaleFactor: 1 },
+      // Full HD
+      { width: 1680, height: 1050, deviceScaleFactor: 1 },
+      // WSXGA+
+      { width: 1440, height: 900, deviceScaleFactor: 1 },
+      // WXGA+
+      { width: 1366, height: 768, deviceScaleFactor: 1 },
+      // HD
+      { width: 2560, height: 1440, deviceScaleFactor: 1 }
+      // QHD
+    ];
+    if (screenResolution) {
+      return screenResolution;
+    }
+    return commonResolutions[Math.floor(Math.random() * commonResolutions.length)];
+  }
+  /**
+   * Get platform from user agent
+   * @private
+   */
+  _getPlatformFromUA(userAgent) {
+    if (userAgent.includes("Windows")) return "Win32";
+    if (userAgent.includes("Mac")) return "MacIntel";
+    if (userAgent.includes("Linux")) return "Linux x86_64";
+    return "Win32";
+  }
+  /**
+   * Get hardware concurrency (CPU cores) from user agent
+   * @private
+   */
+  _getHardwareConcurrency(userAgent) {
+    return [4, 6, 8][Math.floor(Math.random() * 3)];
+  }
+  /**
+   * Get device memory from user agent
+   * @private
+   */
+  _getDeviceMemory(userAgent) {
+    return [4, 8, 16][Math.floor(Math.random() * 3)];
+  }
+  /**
+   * Apply stealth profile to page
+   * Overrides navigator properties to match profile
+   */
+  async applyStealthProfile(page, profile) {
+    await page.emulateTimezone(profile.timezone);
+    await page.evaluateOnNewDocument((profile2) => {
+      Object.defineProperty(navigator, "platform", {
+        get: () => profile2.platform
+      });
+      Object.defineProperty(navigator, "hardwareConcurrency", {
+        get: () => profile2.hardwareConcurrency
+      });
+      Object.defineProperty(navigator, "deviceMemory", {
+        get: () => profile2.deviceMemory
+      });
+      Object.defineProperty(navigator, "languages", {
+        get: () => [profile2.language, "en"]
+      });
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => false
+      });
+      if (!window.chrome) {
+        window.chrome = {
+          runtime: {}
+        };
+      }
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => parameters.name === "notifications" ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);
+    }, profile);
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": profile.acceptLanguage,
+      "Accept-Encoding": profile.acceptEncoding,
+      "Accept": profile.accept
+    });
+  }
+  /**
+   * Execute JS challenges automatically
+   * Simulates human JS execution
+   */
+  async executeJSChallenges(page) {
+    try {
+      await page.waitForFunction(() => document.readyState === "complete", {
+        timeout: 1e4
+      });
+      await page.evaluate(() => {
+        if (!document.cookie.includes("js_ok")) {
+          document.cookie = "js_ok=1; path=/";
+        }
+        if (window.__JS_CHALLENGE_INIT) {
+          window.__JS_CHALLENGE_INIT();
+        }
+        window.dispatchEvent(new Event("load"));
+        document.dispatchEvent(new Event("DOMContentLoaded"));
+      });
+      await this._loadPageResources(page);
+      await page.evaluate(async () => {
+        try {
+          const response = await fetch("/.js-challenge", {
+            method: "GET",
+            credentials: "include"
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.token) {
+              window.__JS_CHALLENGE_TOKEN = data.token;
+            }
+          }
+        } catch (err) {
+        }
+      });
+    } catch (err) {
+      this.plugin.emit("stealth.jsChallengeWarning", {
+        error: err.message
+      });
+    }
+  }
+  /**
+   * Load page resources to simulate real browser
+   * @private
+   */
+  async _loadPageResources(page) {
+    try {
+      await page.evaluate(() => {
+        const images = Array.from(document.querySelectorAll("img"));
+        images.forEach((img) => {
+          if (!img.complete) {
+            img.dispatchEvent(new Event("load"));
+          }
+        });
+      });
+      await page.evaluateHandle(() => document.fonts.ready);
+    } catch (err) {
+    }
+  }
+  /**
+   * Add human-like delay between actions
+   * Uses timing profile from persona
+   */
+  async humanDelay(profile, action = "default") {
+    const timing = profile.timingProfile;
+    const baseDelay = timing.min + Math.random() * (timing.max - timing.min);
+    const jitter = (Math.random() - 0.5) * timing.jitter;
+    const totalDelay = Math.max(100, baseDelay + jitter);
+    await this._delay(totalDelay);
+  }
+  /**
+   * Simulate human typing with profile-specific speed
+   */
+  async humanType(page, selector, text, profile) {
+    const element = await page.$(selector);
+    if (!element) {
+      throw new NavigationError(`Element not found: ${selector}`, {
+        operation: "humanType",
+        retriable: false,
+        suggestion: "Verify the selector exists on the target page before invoking humanType.",
+        selector
+      });
+    }
+    await element.click();
+    for (const char of text) {
+      await page.keyboard.type(char);
+      const { min, max } = profile.behavioral.typingSpeed;
+      const charDelay = min + Math.random() * (max - min);
+      await this._delay(charDelay);
+      if ([".", ",", "!", "?"].includes(char)) {
+        await this._delay(200 + Math.random() * 300);
+      }
+    }
+  }
+  /**
+   * Simulate realistic request pacing
+   * Prevents rate limiting / velocity detection
+   */
+  async paceRequests(persona, requestCount) {
+    const maxRequestsPerMinute = 30;
+    const minDelayMs = 60 * 1e3 / maxRequestsPerMinute;
+    const jitter = minDelayMs * (0.5 + Math.random() * 0.5);
+    const totalDelay = minDelayMs + jitter;
+    await this._delay(totalDelay);
+    persona.metadata.lastRequestTime = Date.now();
+  }
+  /**
+   * Check if persona should "rest" (cooldown)
+   * Prevents velocity/concurrent use detection
+   */
+  shouldRest(persona) {
+    const now = Date.now();
+    const lastUsed = persona.metadata.lastUsed || 0;
+    const timeSinceLastUse = now - lastUsed;
+    if (timeSinceLastUse < 5e3) {
+      return true;
+    }
+    const requestsInLastMinute = persona.metadata.recentRequests || 0;
+    if (requestsInLastMinute > 20) {
+      return true;
+    }
+    return false;
+  }
+  /**
+   * Simulate mouse movements and scrolling
+   * Generates behavioral fingerprint
+   */
+  async simulateHumanBehavior(page, profile) {
+    try {
+      const scrollDistance = Math.floor(Math.random() * 500) + 200;
+      await page.evaluate((distance) => {
+        window.scrollBy({
+          top: distance,
+          behavior: "smooth"
+        });
+      }, scrollDistance);
+      await this._delay(1e3 + Math.random() * 1e3);
+      if (page._cursor) {
+        try {
+          const viewport = await page.viewport();
+          const x = Math.floor(Math.random() * viewport.width);
+          const y = Math.floor(Math.random() * viewport.height);
+          await page._cursor.move({ x, y });
+          await this._delay(500);
+        } catch (err) {
+        }
+      }
+      const elements = await page.$$("a, button, input");
+      if (elements.length > 0) {
+        const randomElement = elements[Math.floor(Math.random() * elements.length)];
+        await randomElement.hover().catch(() => {
+        });
+        await this._delay(300 + Math.random() * 500);
+      }
+    } catch (err) {
+    }
+  }
+  /**
+   * Validate persona consistency before use
+   * Ensures no fingerprint leakage
+   */
+  validatePersonaConsistency(persona, currentContext) {
+    const warnings = [];
+    if (persona.proxyId && currentContext.proxyId !== persona.proxyId) {
+      warnings.push({
+        type: "PROXY_MISMATCH",
+        message: `Persona ${persona.personaId} bound to ${persona.proxyId} but using ${currentContext.proxyId}`,
+        severity: "HIGH"
+      });
+    }
+    if (currentContext.userAgent && currentContext.userAgent !== persona.userAgent) {
+      warnings.push({
+        type: "UA_MISMATCH",
+        message: "User agent changed",
+        severity: "HIGH"
+      });
+    }
+    if (currentContext.viewport) {
+      if (currentContext.viewport.width !== persona.viewport.width || currentContext.viewport.height !== persona.viewport.height) {
+        warnings.push({
+          type: "VIEWPORT_MISMATCH",
+          message: "Viewport changed",
+          severity: "MEDIUM"
+        });
+      }
+    }
+    if (this.shouldRest(persona)) {
+      warnings.push({
+        type: "HIGH_VELOCITY",
+        message: "Persona used too frequently",
+        severity: "MEDIUM"
+      });
+    }
+    return warnings;
+  }
+  /**
+   * Generate realistic browsing session
+   * Visits pages with human-like patterns
+   */
+  async generateBrowsingSession(page, profile, urls) {
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      await page.goto(url, { waitUntil: "networkidle2" });
+      await this.executeJSChallenges(page);
+      await this.simulateHumanBehavior(page, profile);
+      await this.humanDelay(profile);
+      if (i > 0 && Math.random() < 0.1) {
+        await page.goBack();
+        await this._delay(1e3);
+        await page.goForward();
+      }
+    }
+  }
+  /**
+   * Delay helper
+   * @private
+   */
+  async _delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+var stealthManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  StealthManager: StealthManager
+});
+
+function sanitizeLabel(value) {
+  if (typeof value !== "string") {
+    value = String(value);
+  }
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+}
+function sanitizeMetricName(name) {
+  let sanitized = name.replace(/[^a-zA-Z0-9_]/g, "_");
+  if (/^\d/.test(sanitized)) {
+    sanitized = "_" + sanitized;
+  }
+  return sanitized;
+}
+function formatLabels(labels) {
+  if (!labels || Object.keys(labels).length === 0) {
+    return "";
+  }
+  const labelPairs = Object.entries(labels).map(([key, value]) => `${key}="${sanitizeLabel(value)}"`).join(",");
+  return `{${labelPairs}}`;
+}
+function formatMetric(name, type, help, values) {
+  const lines = [];
+  lines.push(`# HELP ${name} ${help}`);
+  lines.push(`# TYPE ${name} ${type}`);
+  for (const { labels, value } of values) {
+    const labelsStr = formatLabels(labels);
+    lines.push(`${name}${labelsStr} ${value}`);
+  }
+  return lines.join("\n");
+}
+function formatPrometheusMetrics(metricsPlugin) {
+  const lines = [];
+  const metrics = metricsPlugin.metrics;
+  const operationsTotalValues = [];
+  for (const [operation, data] of Object.entries(metrics.operations)) {
+    if (data.count > 0) {
+      operationsTotalValues.push({
+        labels: { operation, resource: "_global" },
+        value: data.count
+      });
+    }
+  }
+  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
+    for (const [operation, data] of Object.entries(operations)) {
+      if (data.count > 0) {
+        operationsTotalValues.push({
+          labels: { operation, resource: sanitizeMetricName(resourceName) },
+          value: data.count
+        });
+      }
+    }
+  }
+  if (operationsTotalValues.length > 0) {
+    lines.push(formatMetric(
+      "s3db_operations_total",
+      "counter",
+      "Total number of operations by type and resource",
+      operationsTotalValues
+    ));
+    lines.push("");
+  }
+  const durationValues = [];
+  for (const [operation, data] of Object.entries(metrics.operations)) {
+    if (data.count > 0) {
+      const avgSeconds = data.totalTime / data.count / 1e3;
+      durationValues.push({
+        labels: { operation, resource: "_global" },
+        value: avgSeconds.toFixed(6)
+      });
+    }
+  }
+  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
+    for (const [operation, data] of Object.entries(operations)) {
+      if (data.count > 0) {
+        const avgSeconds = data.totalTime / data.count / 1e3;
+        durationValues.push({
+          labels: { operation, resource: sanitizeMetricName(resourceName) },
+          value: avgSeconds.toFixed(6)
+        });
+      }
+    }
+  }
+  if (durationValues.length > 0) {
+    lines.push(formatMetric(
+      "s3db_operation_duration_seconds",
+      "gauge",
+      "Average operation duration in seconds",
+      durationValues
+    ));
+    lines.push("");
+  }
+  const errorsValues = [];
+  for (const [operation, data] of Object.entries(metrics.operations)) {
+    if (data.errors > 0) {
+      errorsValues.push({
+        labels: { operation, resource: "_global" },
+        value: data.errors
+      });
+    }
+  }
+  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
+    for (const [operation, data] of Object.entries(operations)) {
+      if (data.errors > 0) {
+        errorsValues.push({
+          labels: { operation, resource: sanitizeMetricName(resourceName) },
+          value: data.errors
+        });
+      }
+    }
+  }
+  if (errorsValues.length > 0) {
+    lines.push(formatMetric(
+      "s3db_operation_errors_total",
+      "counter",
+      "Total number of operation errors",
+      errorsValues
+    ));
+    lines.push("");
+  }
+  const startTime = new Date(metrics.startTime);
+  const uptimeSeconds = (Date.now() - startTime.getTime()) / 1e3;
+  lines.push(formatMetric(
+    "s3db_uptime_seconds",
+    "gauge",
+    "Process uptime in seconds",
+    [{ labels: {}, value: uptimeSeconds.toFixed(2) }]
+  ));
+  lines.push("");
+  const resourcesCount = Object.keys(metrics.resources).length;
+  lines.push(formatMetric(
+    "s3db_resources_total",
+    "gauge",
+    "Total number of tracked resources",
+    [{ labels: {}, value: resourcesCount }]
+  ));
+  lines.push("");
+  const nodeVersion = process.version || "unknown";
+  const s3dbVersion = "1.0.0";
+  lines.push(formatMetric(
+    "s3db_info",
+    "gauge",
+    "Build and runtime information",
+    [{
+      labels: {
+        version: s3dbVersion,
+        node_version: nodeVersion
+      },
+      value: 1
+    }]
+  ));
+  return lines.join("\n") + "\n";
+}
+
+var prometheusFormatter = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  formatPrometheusMetrics: formatPrometheusMetrics
+});
+
+const RESOURCE_TYPE_MAP = {
+  // AWS
+  "aws.ec2.instance": "aws_instance",
+  "aws.s3.bucket": "aws_s3_bucket",
+  "aws.rds.instance": "aws_db_instance",
+  "aws.dynamodb.table": "aws_dynamodb_table",
+  "aws.lambda.function": "aws_lambda_function",
+  "aws.vpc.vpc": "aws_vpc",
+  "aws.vpc.subnet": "aws_subnet",
+  "aws.vpc.securitygroup": "aws_security_group",
+  "aws.vpc.routetable": "aws_route_table",
+  "aws.vpc.internetgateway": "aws_internet_gateway",
+  "aws.vpc.natgateway": "aws_nat_gateway",
+  "aws.elb.loadbalancer": "aws_elb",
+  "aws.elbv2.loadbalancer": "aws_lb",
+  "aws.elbv2.targetgroup": "aws_lb_target_group",
+  "aws.iam.user": "aws_iam_user",
+  "aws.iam.role": "aws_iam_role",
+  "aws.iam.policy": "aws_iam_policy",
+  "aws.kms.key": "aws_kms_key",
+  "aws.secretsmanager.secret": "aws_secretsmanager_secret",
+  "aws.ecs.cluster": "aws_ecs_cluster",
+  "aws.ecs.service": "aws_ecs_service",
+  "aws.ecs.taskdefinition": "aws_ecs_task_definition",
+  "aws.eks.cluster": "aws_eks_cluster",
+  "aws.eks.nodegroup": "aws_eks_node_group",
+  "aws.ecr.repository": "aws_ecr_repository",
+  "aws.route53.hostedzone": "aws_route53_zone",
+  "aws.cloudfront.distribution": "aws_cloudfront_distribution",
+  "aws.sqs.queue": "aws_sqs_queue",
+  "aws.sns.topic": "aws_sns_topic",
+  "aws.kinesis.stream": "aws_kinesis_stream",
+  "aws.ebs.volume": "aws_ebs_volume",
+  "aws.ebs.snapshot": "aws_ebs_snapshot",
+  "aws.efs.filesystem": "aws_efs_file_system",
+  "aws.elasticache.cluster": "aws_elasticache_cluster",
+  // GCP
+  "gcp.compute.instance": "google_compute_instance",
+  "gcp.storage.bucket": "google_storage_bucket",
+  "gcp.sql.instance": "google_sql_database_instance",
+  "gcp.gke.cluster": "google_container_cluster",
+  "gcp.compute.network": "google_compute_network",
+  "gcp.compute.subnetwork": "google_compute_subnetwork",
+  "gcp.compute.firewall": "google_compute_firewall",
+  "gcp.bigquery.dataset": "google_bigquery_dataset",
+  "gcp.pubsub.topic": "google_pubsub_topic",
+  "gcp.pubsub.subscription": "google_pubsub_subscription",
+  "gcp.functions.function": "google_cloudfunctions_function",
+  "gcp.run.service": "google_cloud_run_service",
+  "gcp.iam.serviceaccount": "google_service_account",
+  "gcp.kms.keyring": "google_kms_key_ring",
+  "gcp.secretmanager.secret": "google_secret_manager_secret",
+  // Azure
+  "azure.vm": "azurerm_virtual_machine",
+  "azure.vm.vmss": "azurerm_virtual_machine_scale_set",
+  "azure.storage.account": "azurerm_storage_account",
+  "azure.sql.server": "azurerm_sql_server",
+  "azure.sql.database": "azurerm_sql_database",
+  "azure.aks.cluster": "azurerm_kubernetes_cluster",
+  "azure.network.vnet": "azurerm_virtual_network",
+  "azure.network.subnet": "azurerm_subnet",
+  "azure.network.nsg": "azurerm_network_security_group",
+  "azure.network.loadbalancer": "azurerm_lb",
+  "azure.network.publicip": "azurerm_public_ip",
+  "azure.containerregistry": "azurerm_container_registry",
+  "azure.cosmosdb.account": "azurerm_cosmosdb_account",
+  "azure.identity.userassigned": "azurerm_user_assigned_identity",
+  "azure.dns.zone": "azurerm_dns_zone",
+  // DigitalOcean
+  "do.droplet": "digitalocean_droplet",
+  "do.kubernetes.cluster": "digitalocean_kubernetes_cluster",
+  "do.volume": "digitalocean_volume",
+  "do.loadbalancer": "digitalocean_loadbalancer",
+  "do.firewall": "digitalocean_firewall",
+  "do.vpc": "digitalocean_vpc",
+  "do.spaces.bucket": "digitalocean_spaces_bucket",
+  "do.database.cluster": "digitalocean_database_cluster",
+  "do.domain": "digitalocean_domain",
+  "do.cdn": "digitalocean_cdn",
+  "do.registry": "digitalocean_container_registry",
+  // Alibaba Cloud
+  "alibaba.ecs.instance": "alicloud_instance",
+  "alibaba.oss.bucket": "alicloud_oss_bucket",
+  "alibaba.rds.instance": "alicloud_db_instance",
+  "alibaba.ack.cluster": "alicloud_cs_kubernetes",
+  "alibaba.vpc.vpc": "alicloud_vpc",
+  "alibaba.vpc.vswitch": "alicloud_vswitch",
+  "alibaba.slb.loadbalancer": "alicloud_slb",
+  "alibaba.redis.instance": "alicloud_kvstore_instance",
+  "alibaba.cdn.distribution": "alicloud_cdn_domain",
+  "alibaba.dns.domain": "alicloud_dns",
+  "alibaba.ecs.securitygroup": "alicloud_security_group",
+  "alibaba.ecs.snapshot": "alicloud_snapshot",
+  "alibaba.ess.scalinggroup": "alicloud_ess_scaling_group",
+  "alibaba.ess.scalingconfiguration": "alicloud_ess_scaling_configuration",
+  "alibaba.natgateway": "alicloud_nat_gateway",
+  "alibaba.acr.repository": "alicloud_cr_repo",
+  // Linode
+  "linode.compute.instance": "linode_instance",
+  "linode.lke.cluster": "linode_lke_cluster",
+  "linode.volume": "linode_volume",
+  "linode.nodebalancer": "linode_nodebalancer",
+  "linode.firewall": "linode_firewall",
+  "linode.domain": "linode_domain",
+  "linode.objectstorage.bucket": "linode_object_storage_bucket",
+  "linode.database": "linode_database_mysql",
+  // or postgresql, mongodb
+  // Hetzner
+  "hetzner.server": "hetzner_server",
+  "hetzner.volume": "hetzner_volume",
+  "hetzner.network": "hetzner_network",
+  "hetzner.loadbalancer": "hetzner_load_balancer",
+  "hetzner.firewall": "hetzner_firewall",
+  "hetzner.floatingip": "hetzner_floating_ip",
+  "hetzner.primaryip": "hetzner_primary_ip",
+  "hetzner.sshkey": "hetzner_ssh_key",
+  "hetzner.placementgroup": "hetzner_placement_group",
+  // Vultr
+  "vultr.instance": "vultr_instance",
+  "vultr.kubernetes.cluster": "vultr_kubernetes",
+  "vultr.blockstorage": "vultr_block_storage",
+  "vultr.loadbalancer": "vultr_load_balancer",
+  "vultr.firewall.group": "vultr_firewall_group",
+  "vultr.vpc": "vultr_vpc",
+  "vultr.objectstorage": "vultr_object_storage",
+  "vultr.database": "vultr_database",
+  // Oracle Cloud
+  "oci.compute.instance": "oci_core_instance",
+  "oci.objectstorage.bucket": "oci_objectstorage_bucket",
+  "oci.database.autonomousdatabase": "oci_database_autonomous_database",
+  "oci.database.dbsystem": "oci_database_db_system",
+  "oci.kubernetes.cluster": "oci_containerengine_cluster",
+  "oci.vcn": "oci_core_vcn",
+  "oci.vcn.subnet": "oci_core_subnet",
+  "oci.compute.volume": "oci_core_volume",
+  "oci.filestorage.filesystem": "oci_file_storage_file_system",
+  "oci.loadbalancer": "oci_load_balancer",
+  "oci.dns.zone": "oci_dns_zone",
+  // Cloudflare
+  "cloudflare.workers.script": "cloudflare_worker_script",
+  "cloudflare.r2.bucket": "cloudflare_r2_bucket",
+  "cloudflare.pages.project": "cloudflare_pages_project",
+  "cloudflare.d1.database": "cloudflare_d1_database",
+  "cloudflare.kv.namespace": "cloudflare_workers_kv_namespace",
+  "cloudflare.durable-objects.namespace": "cloudflare_workers_durable_object_namespace",
+  "cloudflare.zone": "cloudflare_zone",
+  "cloudflare.dns.record": "cloudflare_record",
+  "cloudflare.loadbalancer": "cloudflare_load_balancer",
+  "cloudflare.ssl.certificate": "cloudflare_origin_ca_certificate",
+  "cloudflare.waf.ruleset": "cloudflare_ruleset",
+  "cloudflare.access.application": "cloudflare_access_application",
+  "cloudflare.access.policy": "cloudflare_access_policy",
+  // MongoDB Atlas
+  "mongodb-atlas.project": "mongodbatlas_project",
+  "mongodb-atlas.cluster": "mongodbatlas_cluster",
+  "mongodb-atlas.serverless": "mongodbatlas_serverless_instance",
+  "mongodb-atlas.user": "mongodbatlas_database_user",
+  "mongodb-atlas.accesslist": "mongodbatlas_project_ip_access_list",
+  "mongodb-atlas.backup": "mongodbatlas_cloud_backup_snapshot",
+  "mongodb-atlas.alert": "mongodbatlas_alert_configuration",
+  "mongodb-atlas.datalake": "mongodbatlas_data_lake",
+  "mongodb-atlas.search.index": "mongodbatlas_search_index",
+  "mongodb-atlas.customrole": "mongodbatlas_custom_db_role",
+  "mongodb-atlas.event": "mongodbatlas_event_trigger"
+};
+function getProviderConfig(resourceType) {
+  const provider = resourceType.split(".")[0];
+  const providerMap = {
+    "aws": "registry.terraform.io/hashicorp/aws",
+    "gcp": "registry.terraform.io/hashicorp/google",
+    "azure": "registry.terraform.io/hashicorp/azurerm",
+    "do": "registry.terraform.io/digitalocean/digitalocean",
+    "alibaba": "registry.terraform.io/aliyun/alicloud",
+    "linode": "registry.terraform.io/linode/linode",
+    "hetzner": "registry.terraform.io/hetznercloud/hetzner",
+    "vultr": "registry.terraform.io/vultr/vultr",
+    "oci": "registry.terraform.io/hashicorp/oci",
+    "oracle": "registry.terraform.io/hashicorp/oci",
+    "cloudflare": "registry.terraform.io/cloudflare/cloudflare",
+    "mongodb-atlas": "registry.terraform.io/mongodb/mongodbatlas"
+  };
+  return providerMap[provider] || `registry.terraform.io/hashicorp/${provider}`;
+}
+function convertToTerraformResource(resource) {
+  const { resourceType, resourceId, configuration } = resource;
+  const tfType = RESOURCE_TYPE_MAP[resourceType];
+  if (!tfType) {
+    return null;
+  }
+  const resourceName = sanitizeResourceName(resourceId);
+  const providerFqn = getProviderConfig(resourceType);
+  return {
+    mode: "managed",
+    type: tfType,
+    name: resourceName,
+    provider: providerFqn,
+    instances: [
+      {
+        schema_version: 0,
+        attributes: configuration || {},
+        private: "bnVsbA==",
+        // base64("null")
+        dependencies: []
+      }
+    ]
+  };
+}
+function sanitizeResourceName(resourceId) {
+  let name = String(resourceId).toLowerCase().replace(/[^a-z0-9_-]/g, "_").replace(/^[^a-z]+/, "").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  if (!name || !/^[a-z]/.test(name)) {
+    name = `resource_${name}`;
+  }
+  return name.slice(0, 64) || "resource";
+}
+function exportToTerraformState(snapshots, options = {}) {
+  const {
+    terraformVersion = "1.5.0",
+    lineage = generateLineage(),
+    serial = 1,
+    outputs = {},
+    resourceTypes = [],
+    providers = []
+  } = options;
+  let filteredSnapshots = snapshots;
+  if (resourceTypes.length > 0) {
+    filteredSnapshots = filteredSnapshots.filter(
+      (s) => resourceTypes.includes(s.resourceType)
+    );
+  }
+  if (providers.length > 0) {
+    filteredSnapshots = filteredSnapshots.filter((s) => {
+      const provider = s.resourceType.split(".")[0];
+      return providers.includes(provider);
+    });
+  }
+  const tfResources = [];
+  const skipped = [];
+  for (const snapshot of filteredSnapshots) {
+    const tfResource = convertToTerraformResource(snapshot);
+    if (tfResource) {
+      tfResources.push(tfResource);
+    } else {
+      skipped.push(snapshot.resourceType);
+    }
+  }
+  const state = {
+    version: 4,
+    terraform_version: terraformVersion,
+    serial,
+    lineage,
+    outputs,
+    resources: tfResources
+  };
+  return {
+    state,
+    stats: {
+      total: snapshots.length,
+      converted: tfResources.length,
+      skipped: skipped.length,
+      skippedTypes: [...new Set(skipped)]
+    }
+  };
+}
+function generateLineage() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === "x" ? r : r & 3 | 8;
+    return v.toString(16);
+  });
+}
+
+var terraformExporter = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  convertToTerraformResource: convertToTerraformResource,
+  exportToTerraformState: exportToTerraformState
 });
 
 function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
@@ -58459,9 +73156,13 @@ exports.AnalyticsNotEnabledError = AnalyticsNotEnabledError;
 exports.ApiPlugin = ApiPlugin;
 exports.AuditPlugin = AuditPlugin;
 exports.AuthenticationError = AuthenticationError;
+exports.AwsInventoryDriver = AwsInventoryDriver;
+exports.AwsMockDriver = AwsMockDriver;
+exports.AzureMockDriver = AzureMockDriver;
 exports.BACKUP_DRIVERS = BACKUP_DRIVERS;
 exports.BackupPlugin = BackupPlugin;
 exports.BaseBackupDriver = BaseBackupDriver;
+exports.BaseCloudDriver = BaseCloudDriver;
 exports.BaseError = BaseError;
 exports.BaseReplicator = BaseReplicator;
 exports.BehaviorError = BehaviorError;
@@ -58470,14 +73171,17 @@ exports.CONSUMER_DRIVERS = CONSUMER_DRIVERS;
 exports.Cache = Cache;
 exports.CachePlugin = CachePlugin;
 exports.Client = S3Client;
+exports.CloudInventoryPlugin = CloudInventoryPlugin;
 exports.ConnectionString = ConnectionString;
 exports.ConnectionStringError = ConnectionStringError;
 exports.CookieFarmPlugin = CookieFarmPlugin;
+exports.CookieFarmSuitePlugin = CookieFarmSuitePlugin;
 exports.CostsPlugin = CostsPlugin;
 exports.CryptoError = CryptoError;
 exports.DEFAULT_BEHAVIOR = DEFAULT_BEHAVIOR;
 exports.Database = Database;
 exports.DatabaseError = DatabaseError;
+exports.DigitalOceanMockDriver = DigitalOceanMockDriver;
 exports.DynamoDBReplicator = DynamoDBReplicator;
 exports.EncryptionError = EncryptionError;
 exports.ErrorMap = ErrorMap;
@@ -58486,8 +73190,10 @@ exports.Factory = Factory;
 exports.FilesystemBackupDriver = FilesystemBackupDriver;
 exports.FilesystemCache = FilesystemCache;
 exports.FullTextPlugin = FullTextPlugin;
+exports.GcpMockDriver = GcpMockDriver;
 exports.GeoPlugin = GeoPlugin;
 exports.IdentityPlugin = IdentityPlugin;
+exports.ImporterPlugin = ImporterPlugin;
 exports.InvalidResourceItem = InvalidResourceItem;
 exports.MLPlugin = MLPlugin;
 exports.MemoryCache = MemoryCache;
@@ -58502,6 +73208,7 @@ exports.MySQLReplicator = MySQLReplicator;
 exports.NoSuchBucket = NoSuchBucket;
 exports.NoSuchKey = NoSuchKey;
 exports.NotFound = NotFound;
+exports.OracleMockDriver = OracleMockDriver;
 exports.PartitionAwareFilesystemCache = PartitionAwareFilesystemCache;
 exports.PartitionDriverError = PartitionDriverError;
 exports.PartitionError = PartitionError;
@@ -58536,17 +73243,20 @@ exports.SchedulerPlugin = SchedulerPlugin;
 exports.Schema = Schema;
 exports.SchemaError = SchemaError;
 exports.Seeder = Seeder;
+exports.SpiderSuitePlugin = SpiderSuitePlugin;
 exports.SqsConsumer = SqsConsumer;
 exports.SqsReplicator = SqsReplicator;
 exports.StateMachinePlugin = StateMachinePlugin;
 exports.StreamError = StreamError;
 exports.TTLPlugin = TTLPlugin;
 exports.TfStatePlugin = TfStatePlugin;
+exports.Transformers = Transformers;
 exports.TursoReplicator = TursoReplicator;
 exports.UnknownError = UnknownError;
 exports.ValidationError = ValidationError;
 exports.Validator = Validator;
 exports.VectorPlugin = VectorPlugin;
+exports.VultrMockDriver = VultrMockDriver;
 exports.WebhookReplicator = WebhookReplicator;
 exports.behaviors = behaviors;
 exports.calculateAttributeNamesSize = calculateAttributeNamesSize;
@@ -58558,6 +73268,7 @@ exports.calculateUTF8Bytes = calculateUTF8Bytes;
 exports.clearUTF8Memory = clearUTF8Memory;
 exports.compactHash = compactHash;
 exports.createBackupDriver = createBackupDriver;
+exports.createCloudDriver = createCloudDriver;
 exports.createConsumer = createConsumer;
 exports.createCustomGenerator = createCustomGenerator;
 exports.createReplicator = createReplicator;
@@ -58583,16 +73294,19 @@ exports.hashPasswordSync = hashPasswordSync;
 exports.idGenerator = idGenerator;
 exports.initializeNanoid = initializeNanoid;
 exports.isBcryptHash = isBcryptHash;
+exports.listCloudDrivers = listCloudDrivers;
 exports.mapAwsError = mapAwsError;
 exports.md5 = md5;
 exports.passwordGenerator = passwordGenerator;
 exports.printTypes = printTypes;
+exports.registerCloudDriver = registerCloudDriver;
 exports.sha256 = sha256;
 exports.streamToString = streamToString;
 exports.transformValue = transformValue;
 exports.tryFn = tryFn;
 exports.tryFnSync = tryFnSync;
 exports.validateBackupConfig = validateBackupConfig;
+exports.validateCloudDefinition = validateCloudDefinition;
 exports.validateReplicatorConfig = validateReplicatorConfig;
 exports.verifyPassword = verifyPassword$1;
 //# sourceMappingURL=s3db.cjs.map

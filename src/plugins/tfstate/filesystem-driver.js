@@ -6,8 +6,9 @@
  */
 import { TfStateDriver } from './base-driver.js';
 import { readFile, stat } from 'fs/promises';
-import { join, relative } from 'path';
+import { join } from 'path';
 import { glob } from 'glob';
+import { TfStateError, StateFileNotFoundError } from './errors.js';
 
 export class FilesystemTfStateDriver extends TfStateDriver {
   constructor(config = {}) {
@@ -23,10 +24,23 @@ export class FilesystemTfStateDriver extends TfStateDriver {
     try {
       const stats = await stat(this.basePath);
       if (!stats.isDirectory()) {
-        throw new Error(`Base path is not a directory: ${this.basePath}`);
+        throw new TfStateError(`Base path is not a directory: ${this.basePath}`, {
+          operation: 'initialize',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Update the TfState filesystem driver configuration to point to a directory containing .tfstate files.',
+          basePath: this.basePath
+        });
       }
     } catch (error) {
-      throw new Error(`Invalid base path: ${this.basePath} - ${error.message}`);
+      throw new TfStateError(`Invalid base path: ${this.basePath}`, {
+        operation: 'initialize',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Ensure the basePath exists and is readable by the current process.',
+        basePath: this.basePath,
+        original: error
+      });
     }
   }
 
@@ -60,7 +74,15 @@ export class FilesystemTfStateDriver extends TfStateDriver {
 
       return stateFiles;
     } catch (error) {
-      throw new Error(`Failed to list state files: ${error.message}`);
+      throw new TfStateError('Failed to list Terraform state files', {
+        operation: 'listStateFiles',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Verify filesystem permissions and glob selector pattern.',
+        selector: this.selector,
+        basePath: this.basePath,
+        original: error
+      });
     }
   }
 
@@ -77,9 +99,20 @@ export class FilesystemTfStateDriver extends TfStateDriver {
       return JSON.parse(content);
     } catch (error) {
       if (error.code === 'ENOENT') {
-        throw new Error(`State file not found: ${path}`);
+        throw new StateFileNotFoundError(path, {
+          operation: 'readStateFile',
+          retriable: false,
+          suggestion: 'Ensure the Terraform state file exists at the specified path.',
+          original: error
+        });
       }
-      throw new Error(`Failed to read state file ${path}: ${error.message}`);
+      throw new TfStateError(`Failed to read state file ${path}`, {
+        operation: 'readStateFile',
+        retriable: false,
+        suggestion: 'Validate file permissions and state file contents (must be valid JSON).',
+        path,
+        original: error
+      });
     }
   }
 
@@ -103,9 +136,20 @@ export class FilesystemTfStateDriver extends TfStateDriver {
       };
     } catch (error) {
       if (error.code === 'ENOENT') {
-        throw new Error(`State file not found: ${path}`);
+        throw new StateFileNotFoundError(path, {
+          operation: 'getStateFileMetadata',
+          retriable: false,
+          suggestion: 'Ensure the Terraform state file exists at the specified path.',
+          original: error
+        });
       }
-      throw new Error(`Failed to get metadata for ${path}: ${error.message}`);
+      throw new TfStateError(`Failed to get metadata for ${path}`, {
+        operation: 'getStateFileMetadata',
+        retriable: false,
+        suggestion: 'Check filesystem permissions and path configuration for TfStatePlugin.',
+        path,
+        original: error
+      });
     }
   }
 

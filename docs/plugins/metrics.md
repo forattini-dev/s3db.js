@@ -9,6 +9,8 @@
 await db.usePlugin(new MetricsPlugin({ enabled: true }));  // Automatic collection!
 ```
 
+> 🧩 **Namespaces**: Provide `namespace: 'observability'` (or a custom alias in `db.usePlugin`) to run multiple MetricsPlugin instances. Internal resources (metrics/errors/performance) will be renamed automatically (e.g., `plg_observability_metrics`).
+
 **Main features:**
 - ✅ Operation timing (avg/min/max)
 - ✅ Resource usage patterns

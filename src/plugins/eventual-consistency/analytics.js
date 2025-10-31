@@ -5,6 +5,7 @@
 
 import tryFn from "../../concerns/try-fn.js";
 import { groupByCohort, ensureCohortHours } from "./utils.js";
+import { PluginError, AnalyticsNotEnabledError } from '../../errors.js';
 
 /**
  * Update analytics with consolidated transactions
@@ -20,13 +21,19 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
   // CRITICAL VALIDATION: Ensure field is set in config
   // This can be undefined due to race conditions when multiple handlers share config
   if (!config.field) {
-    throw new Error(
-      `[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()!\n` +
-      `This indicates a race condition in the plugin where multiple handlers are sharing the same config object.\n` +
-      `Config: ${JSON.stringify({ resource: config.resource, field: config.field })}\n` +
-      `Transactions count: ${transactions.length}\n` +
-      `AnalyticsResource: ${analyticsResource?.name || 'unknown'}`
-    );
+    throw new PluginError('config.field is undefined in updateAnalytics()', {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'updateAnalytics',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Ensure each field handler uses its own configuration object when invoking analytics updates.',
+      context: {
+        resource: config.resource,
+        field: config.field,
+        transactions: transactions.length,
+        analyticsResource: analyticsResource?.name || 'unknown'
+      }
+    });
   }
 
   if (config.verbose) {
@@ -93,9 +100,16 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
       }
     );
     // Re-throw to prevent silent failures
-    throw new Error(
-      `Analytics update failed for ${config.resource}.${config.field}: ${error.message}`
-    );
+    throw new PluginError(`Analytics update failed for ${config.resource}.${config.field}: ${error.message}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'updateAnalytics',
+      statusCode: 500,
+      retriable: true,
+      suggestion: 'Check the console logs above for the failing transaction and fix the reducer or analytics configuration.',
+      resource: config.resource,
+      field: config.field,
+      original: error
+    });
   }
 }
 
@@ -447,16 +461,31 @@ export async function getAnalytics(resourceName, field, options, fieldHandlers) 
   // Get handler for this resource/field combination
   const resourceHandlers = fieldHandlers.get(resourceName);
   if (!resourceHandlers) {
-    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    throw new PluginError(`No eventual consistency configured for resource: ${resourceName}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getAnalytics',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Ensure the resource is registered under EventualConsistencyPlugin resources.',
+      resourceName
+    });
   }
 
   const handler = resourceHandlers.get(field);
   if (!handler) {
-    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    throw new PluginError(`No eventual consistency configured for field: ${resourceName}.${field}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getAnalytics',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Add the field to EventualConsistencyPlugin resources configuration.',
+      resourceName,
+      field
+    });
   }
 
   if (!handler.analyticsResource) {
-    throw new Error('Analytics not enabled for this plugin');
+    throw new AnalyticsNotEnabledError({ resourceName, field, pluginName: 'EventualConsistencyPlugin' });
   }
 
   const { period = 'day', date, startDate, endDate, month, year, breakdown = false, recordId } = options;
@@ -898,16 +927,39 @@ export async function getTopRecords(resourceName, field, options, fieldHandlers)
   // Get handler for this resource/field combination
   const resourceHandlers = fieldHandlers.get(resourceName);
   if (!resourceHandlers) {
-    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    throw new PluginError(`No eventual consistency configured for resource: ${resourceName}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getTopRecords',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Add the resource to EventualConsistencyPlugin resources configuration.',
+      resourceName
+    });
   }
 
   const handler = resourceHandlers.get(field);
   if (!handler) {
-    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    throw new PluginError(`No eventual consistency configured for field: ${resourceName}.${field}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getTopRecords',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Ensure the field is configured for eventual consistency before querying analytics.',
+      resourceName,
+      field
+    });
   }
 
   if (!handler.transactionResource) {
-    throw new Error('Transaction resource not initialized');
+    throw new PluginError('Transaction resource not initialized', {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getTopRecords',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Verify plugin installation completed successfully and transaction resources were created.',
+      resourceName,
+      field
+    });
   }
 
   const { period = 'day', date, metric = 'transactionCount', limit = 10 } = options;
@@ -1254,16 +1306,39 @@ export async function getRawEvents(resourceName, field, options, fieldHandlers) 
   // Get handler for this resource/field combination
   const resourceHandlers = fieldHandlers.get(resourceName);
   if (!resourceHandlers) {
-    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    throw new PluginError(`No eventual consistency configured for resource: ${resourceName}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getRawEvents',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Add the resource under EventualConsistencyPlugin configuration to retrieve raw events.',
+      resourceName
+    });
   }
 
   const handler = resourceHandlers.get(field);
   if (!handler) {
-    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    throw new PluginError(`No eventual consistency configured for field: ${resourceName}.${field}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getRawEvents',
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Ensure the field is included in EventualConsistencyPlugin configuration.',
+      resourceName,
+      field
+    });
   }
 
   if (!handler.transactionResource) {
-    throw new Error('Transaction resource not initialized');
+    throw new PluginError('Transaction resource not initialized', {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'getRawEvents',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Verify plugin installation completed successfully and transaction resources were created.',
+      resourceName,
+      field
+    });
   }
 
   const {

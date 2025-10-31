@@ -445,10 +445,17 @@ export class Database extends EventEmitter {
       const plugins = this.pluginList.map(p => isFunction(p) ? new p(this) : p)
 
       const installProms = plugins.map(async (plugin) => {
-        await plugin.install(db)
+        const pluginName = this._getPluginName(plugin);
+
+        if (typeof plugin.setInstanceName === 'function') {
+          plugin.setInstanceName(pluginName);
+        } else {
+          plugin.instanceName = pluginName;
+        }
+
+        await plugin.install(db);
 
         // Register the plugin
-        const pluginName = this._getPluginName(plugin);
         this.pluginRegistry[pluginName] = plugin;
       });
 
@@ -477,6 +484,12 @@ export class Database extends EventEmitter {
 
   async usePlugin(plugin, name = null) {
     const pluginName = this._getPluginName(plugin, name);
+
+    if (typeof plugin.setInstanceName === 'function') {
+      plugin.setInstanceName(pluginName);
+    } else {
+      plugin.instanceName = pluginName;
+    }
 
     // Register the plugin
     this.plugins[pluginName] = plugin;

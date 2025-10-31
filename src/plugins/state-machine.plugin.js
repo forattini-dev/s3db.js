@@ -105,7 +105,7 @@ export class StateMachinePlugin extends Plugin {
 
     const resourceNamesOption = options.resourceNames || {};
 
-    this.resourceNames = resolveResourceNames('state_machine', {
+    this._resourceDescriptors = {
       transitionLog: {
         defaultName: 'plg_state_transitions',
         override: resourceNamesOption.transitionLog || options.transitionLogResource
@@ -114,7 +114,8 @@ export class StateMachinePlugin extends Plugin {
         defaultName: 'plg_entity_states',
         override: resourceNamesOption.states || options.stateResource
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
 
     this.config = {
       stateMachines: options.stateMachines || {},
@@ -150,6 +151,20 @@ export class StateMachinePlugin extends Plugin {
     this._pendingEventHandlers = new Set();
 
     this._validateConfiguration();
+  }
+
+  _resolveResourceNames() {
+    return resolveResourceNames('state_machine', this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.resourceNames = this._resolveResourceNames();
+    if (this.config) {
+      this.config.transitionLogResource = this.resourceNames.transitionLog;
+      this.config.stateResource = this.resourceNames.states;
+    }
   }
 
   /**

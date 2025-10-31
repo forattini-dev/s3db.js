@@ -28,6 +28,8 @@
 | **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
 | **[🔄 Replicator](./replicator.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator.md) |
 | **[🔒 S3Queue](./s3-queue.md)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue.md) |
+| **[🕷️ Spider Suite](./spider-suite.md)** | Crawling bundle (Puppeteer + S3 queue + TTL) | Web scraping pipelines, sitemap refresh, link audits | [→](./spider-suite.md) |
+| **[🍪 Cookie Farm Suite](./cookie-farm-suite.md)** | Persona farming bundle (Cookie Farm + Puppeteer + Queue) | Anti-bot personas, warmup workflows, session rotation | [→](./cookie-farm-suite.md) |
 | **[⏰ Scheduler](./scheduler.md)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler.md) |
 | **[🤖 State Machine](./state-machine.md)** | Finite state machine workflows | Business processes, automation | [→](./state-machine.md) |
 | **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
@@ -144,6 +146,7 @@ class MyPlugin extends Plugin {
 
 **Lifecycle Stages:**
 
+
 1. **Construction**: Plugin instance created with configuration
 2. **Registration**: Plugin added to database via `usePlugin()` or constructor
 3. **Install**: `onInstall()` called when database is connected
@@ -163,6 +166,25 @@ class MyPlugin extends Plugin {
    - Remove hooks and method wrappers
    - Cleanup internal state
    - Optionally purge all data from S3 (`purgeData: true`)
+
+### Namespaces & Multi-instance
+
+All plugins can be installed more than once—just provide a unique namespace or alias. The base `Plugin` class slugifies the namespace and automatically scopes:
+
+- PluginStorage keys (e.g., `plugin=cache--analytics/...`)
+- Internal resources (`plg_namespace_plugin_*`)
+- Resource helpers exposed by plugins (cache drivers, key resolvers, etc.)
+
+```javascript
+await db.usePlugin(new CachePlugin({ driver: 'memory', namespace: 'hot-path' }), 'cacheHot');
+await db.usePlugin(new CachePlugin({ driver: 's3', namespace: 'analytics' }), 'cacheCold');
+
+const users = db.resources.users;
+const hotCache = users.getCacheDriver('cache--hot-path'); // namespaced driver
+const coldKey = await users.getCacheKeyResolver('cache--analytics')({ action: 'list' });
+```
+
+> 🔁 Passing a custom alias to `db.usePlugin(plugin, 'alias')` auto-derives the namespace when you omit it.
 
 ### Plugin Cleanup and Uninstall
 
@@ -1283,7 +1305,7 @@ try {
   await this.consolidateUserData('user123');
 } finally {
   // Always release lock
-  await storage.releaseLock('consolidate:user123');
+  await storage.releaseLock(lock);
 }
 
 // Check if locked
@@ -1590,13 +1612,18 @@ if (lock) {
 }
 ```
 
-##### `releaseLock(lockName)`
+##### `releaseLock(lock)`
 
-Release a distributed lock:
+Release a distributed lock using the handle returned by `acquireLock`:
 
 ```javascript
-await storage.releaseLock('process:task1');
+await storage.releaseLock(lock);
 ```
+
+> **Note:** If you only have the lock name, you must also provide the token:
+> ```javascript
+> await storage.releaseLock('process:task1', lock.token);
+> ```
 
 ##### `isLocked(lockName)`
 
@@ -2021,7 +2048,7 @@ describe('MyPlugin with PluginStorage', () => {
     expect(lock2).toBe(null);
 
     // Release lock
-    await storage.releaseLock('task1');
+    await storage.releaseLock(lock1);
 
     // Now should be able to acquire
     const lock3 = await storage.acquireLock('task1', { ttl: 5 });

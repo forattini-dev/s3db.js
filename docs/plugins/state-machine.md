@@ -34,6 +34,8 @@ await db.usePlugin(new StateMachinePlugin({ stateMachines: { order: { initialSta
 await db.stateMachine('order').send('order-123', 'PAY');
 ```
 
+> 🧩 **Namespaces**: Set `namespace: 'fulfillment'` (or pass an alias to `db.usePlugin`) when running multiple StateMachinePlugin instances. Transition/audit resources will be emitted as `plg_fulfillment_state_transitions`, etc.
+
 **Main features:**
 - ✅ Well-defined states and transitions
 - ✅ Guard functions (conditional validation)

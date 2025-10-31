@@ -243,7 +243,7 @@ export class PuppeteerPlugin extends Plugin {
     };
 
     const resourceNamesOption = options.resourceNames || {};
-    this.resourceNames = resolveResourceNames('puppeteer', {
+    this._resourceDescriptors = {
       cookies: {
         defaultName: 'plg_puppeteer_cookies',
         override: resourceNamesOption.cookies || options.cookies?.storage?.resource
@@ -272,7 +272,8 @@ export class PuppeteerPlugin extends Plugin {
         defaultName: 'plg_puppeteer_network_errors',
         override: resourceNamesOption.networkErrors
       }
-    });
+    };
+    this.resourceNames = this._resolveResourceNames();
 
     this.config.cookies.storage.resource = this.resourceNames.cookies;
 
@@ -295,6 +296,19 @@ export class PuppeteerPlugin extends Plugin {
         setting: 'pool.reuseTab',
         message: 'pool.reuseTab is not supported yet and will be ignored.'
       });
+    }
+  }
+
+  _resolveResourceNames() {
+    return resolveResourceNames('puppeteer', this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.resourceNames = this._resolveResourceNames();
+    if (this.config?.cookies?.storage) {
+      this.config.cookies.storage.resource = this.resourceNames.cookies;
     }
   }
 

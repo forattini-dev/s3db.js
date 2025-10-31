@@ -6,6 +6,7 @@
 import { idGenerator } from "../../concerns/id.js";
 import tryFn from "../../concerns/try-fn.js";
 import { getCohortInfo, resolveFieldAndPlugin } from "./utils.js";
+import { PluginError } from '../../errors.js';
 
 /**
  * Add helper methods to resources
@@ -155,17 +156,27 @@ export function addHelperMethods(resource, plugin, config) {
   // Signature: consolidate(id, field)
   resource.consolidate = async (id, field) => {
     if (!field) {
-      throw new Error(`Field parameter is required: consolidate(id, field)`);
+      throw new PluginError('Field parameter is required: consolidate(id, field)', {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resource.consolidate',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Invoke consolidate with both id and field parameters.'
+      });
     }
 
     const handler = resource._eventualConsistencyPlugins[field];
 
     if (!handler) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
-      throw new Error(
-        `No eventual consistency plugin found for field "${field}". ` +
-        `Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resource.consolidate',
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field
+      });
     }
 
     return await plugin._consolidateWithHandler(handler, id);
@@ -178,10 +189,14 @@ export function addHelperMethods(resource, plugin, config) {
 
     if (!handler) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
-      throw new Error(
-        `No eventual consistency plugin found for field "${field}". ` +
-        `Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resource.getConsolidatedValue',
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field
+      });
     }
 
     return await plugin._getConsolidatedValueWithHandler(handler, id, options);
@@ -191,17 +206,27 @@ export function addHelperMethods(resource, plugin, config) {
   // Signature: recalculate(id, field)
   resource.recalculate = async (id, field) => {
     if (!field) {
-      throw new Error(`Field parameter is required: recalculate(id, field)`);
+      throw new PluginError('Field parameter is required: recalculate(id, field)', {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resource.recalculate',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Invoke recalculate with both id and field parameters.'
+      });
     }
 
     const handler = resource._eventualConsistencyPlugins[field];
 
     if (!handler) {
       const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
-      throw new Error(
-        `No eventual consistency plugin found for field "${field}". ` +
-        `Available fields: ${availableFields}`
-      );
+      throw new PluginError(`No eventual consistency plugin found for field "${field}"`, {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'resource.recalculate',
+        statusCode: 404,
+        retriable: false,
+        suggestion: `Available fields: ${availableFields}`,
+        field
+      });
     }
 
     return await plugin._recalculateWithHandler(handler, id);

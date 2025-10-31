@@ -43,6 +43,8 @@ console.log(`Modified: ${diff.summary.modifiedCount}`);
 console.log(`Deleted: ${diff.summary.deletedCount}`);
 ```
 
+> 🧩 **Namespaces**: Use `namespace: 'infra'` (or pass an alias to `db.usePlugin`) to run multiple TfStatePlugin instances. Inventory, state files, diffs, and lineage resources will be emitted as `plg_infra_tfstate_*`.
+
 **Key Features:**
 - ✅ **Flexible import**: Local files, S3, glob patterns
 - ✅ **Intelligent queries**: Partitions by type, provider, serial

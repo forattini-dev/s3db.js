@@ -313,10 +313,11 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import { pipeline } from 'stream/promises';
 import zlib from 'node:zlib';
+import { PluginError } from '../../errors.js';
 
 /**
  * Base Importer Driver Interface
- */
+  */
 class ImporterDriver extends EventEmitter {
   constructor(config) {
     super();
@@ -330,7 +331,13 @@ class ImporterDriver extends EventEmitter {
    * @returns {AsyncIterator<Object>} - Async iterator of records
    */
   async *parse(filePath, options) {
-    throw new Error('parse() must be implemented by driver');
+    throw new PluginError('Importer driver must implement parse()', {
+      pluginName: 'ImporterPlugin',
+      operation: 'driver.parse',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Ensure custom importer drivers override parse(filePath, options).'
+    });
   }
 
   /**
@@ -398,10 +405,23 @@ class JSONImportDriver extends ImporterDriver {
                   yield record;
                 }
               } else {
-                throw new Error('JSON file must contain an array of objects');
+                throw new PluginError('JSON import expects an array of objects', {
+                  pluginName: 'ImporterPlugin',
+                  operation: 'JSONImportDriver.parse',
+                  statusCode: 400,
+                  retriable: false,
+                  suggestion: 'Ensure the JSON file contains an array at the root (e.g., [ {...}, {...} ]).'
+                });
               }
             } catch (error) {
-              throw new Error(`Failed to parse JSON array: ${error.message}`);
+              throw new PluginError(`Failed to parse JSON array: ${error.message}`, {
+                pluginName: 'ImporterPlugin',
+                operation: 'JSONImportDriver.parse',
+                statusCode: 400,
+                retriable: false,
+                suggestion: 'Validate JSON syntax; consider using jsonlint before importing.',
+                original: error
+              });
             }
             buffer = '';
             inArray = false;
@@ -424,10 +444,23 @@ class JSONImportDriver extends ImporterDriver {
                 yield record;
               }
             } else {
-              throw new Error('JSON file must contain an array of objects');
+              throw new PluginError('JSON import expects an array of objects', {
+                pluginName: 'ImporterPlugin',
+                operation: 'JSONImportDriver.parse',
+                statusCode: 400,
+                retriable: false,
+                suggestion: 'Ensure the JSON file contains an array at the root (e.g., [ {...}, {...} ]).'
+              });
             }
           } catch (error) {
-            throw new Error(`Failed to parse JSON array: ${error.message}`);
+            throw new PluginError(`Failed to parse JSON array: ${error.message}`, {
+              pluginName: 'ImporterPlugin',
+              operation: 'JSONImportDriver.parse',
+              statusCode: 400,
+              retriable: false,
+              suggestion: 'Validate JSON syntax; consider using jsonlint before importing.',
+              original: error
+            });
           }
           buffer = '';
           inArray = false;
@@ -457,7 +490,14 @@ class JSONImportDriver extends ImporterDriver {
   async validate(filePath) {
     // Check file exists and has .json/.jsonl/.ndjson extension (or .gz compressed)
     if (!fs.existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`);
+      throw new PluginError(`File not found: ${filePath}`, {
+        pluginName: 'ImporterPlugin',
+        operation: 'JSONImportDriver.validate',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Verify the file path before importing or ensure the file is accessible to the process.',
+        filePath
+      });
     }
 
     // Handle .gz extension by checking the extension before .gz
@@ -466,17 +506,38 @@ class JSONImportDriver extends ImporterDriver {
       // Check format before .gz (e.g., .jsonl.gz -> .jsonl)
       const parts = lowerPath.split('.');
       if (parts.length < 3) {
-        throw new Error(`Invalid file extension for JSON driver: .gz without format extension`);
+        throw new PluginError('Invalid file extension for JSON driver: .gz without format extension', {
+          pluginName: 'ImporterPlugin',
+          operation: 'JSONImportDriver.validate',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Rename the file to include the format before .gz (e.g., data.json.gz).',
+          filePath
+        });
       }
       const formatExt = parts[parts.length - 2];
       if (!['json', 'jsonl', 'ndjson'].includes(formatExt)) {
-        throw new Error(`Invalid file extension for JSON driver: .${formatExt}.gz (expected .json.gz, .jsonl.gz, or .ndjson.gz)`);
+        throw new PluginError(`Invalid file extension for JSON driver: .${formatExt}.gz (expected .json.gz, .jsonl.gz, or .ndjson.gz)`, {
+          pluginName: 'ImporterPlugin',
+          operation: 'JSONImportDriver.validate',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Use supported extensions (.json, .jsonl, .ndjson) before .gz compression.',
+          filePath
+        });
       }
     } else {
       // Regular non-compressed file
       const ext = lowerPath.split('.').pop();
       if (!['json', 'jsonl', 'ndjson'].includes(ext)) {
-        throw new Error(`Invalid file extension for JSON driver: .${ext}`);
+        throw new PluginError(`Invalid file extension for JSON driver: .${ext}`, {
+          pluginName: 'ImporterPlugin',
+          operation: 'JSONImportDriver.validate',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Rename the file to use .json, .jsonl, or .ndjson extensions.',
+          filePath
+        });
       }
     }
 
@@ -639,7 +700,14 @@ class CSVImportDriver extends ImporterDriver {
   async validate(filePath) {
     // Check file exists and has .csv/.tsv extension (or .gz compressed)
     if (!fs.existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`);
+      throw new PluginError(`File not found: ${filePath}`, {
+        pluginName: 'ImporterPlugin',
+        operation: 'CSVImportDriver.validate',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Verify the CSV file path or download it locally before importing.',
+        filePath
+      });
     }
 
     // Handle .gz extension by checking the extension before .gz
@@ -648,17 +716,38 @@ class CSVImportDriver extends ImporterDriver {
       // Check format before .gz (e.g., .csv.gz -> .csv)
       const parts = lowerPath.split('.');
       if (parts.length < 3) {
-        throw new Error(`Invalid file extension for CSV driver: .gz without format extension`);
+        throw new PluginError('Invalid file extension for CSV driver: .gz without format extension', {
+          pluginName: 'ImporterPlugin',
+          operation: 'CSVImportDriver.validate',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Rename the file to include .csv or .tsv before .gz (e.g., data.csv.gz).',
+          filePath
+        });
       }
       const formatExt = parts[parts.length - 2];
       if (!['csv', 'tsv', 'txt'].includes(formatExt)) {
-        throw new Error(`Invalid file extension for CSV driver: .${formatExt}.gz (expected .csv.gz or .tsv.gz)`);
+        throw new PluginError(`Invalid file extension for CSV driver: .${formatExt}.gz (expected .csv.gz or .tsv.gz)`, {
+          pluginName: 'ImporterPlugin',
+          operation: 'CSVImportDriver.validate',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Use supported extensions (.csv, .tsv, .txt) before gzip compression.',
+          filePath
+        });
       }
     } else {
       // Regular non-compressed file
       const ext = lowerPath.split('.').pop();
       if (!['csv', 'tsv', 'txt'].includes(ext)) {
-        throw new Error(`Invalid file extension for CSV driver: .${ext}`);
+        throw new PluginError(`Invalid file extension for CSV driver: .${ext}`, {
+          pluginName: 'ImporterPlugin',
+          operation: 'CSVImportDriver.validate',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Rename the file to use .csv, .tsv, or .txt extensions.',
+          filePath
+        });
       }
     }
 
@@ -672,7 +761,13 @@ class CSVImportDriver extends ImporterDriver {
 class ParquetImportDriver extends ImporterDriver {
   async *parse(filePath, options = {}) {
     // TODO: Implement Parquet parsing
-    throw new Error('ParquetImportDriver not yet implemented');
+    throw new PluginError('ParquetImportDriver not yet implemented', {
+      pluginName: 'ImporterPlugin',
+      operation: 'ParquetImportDriver.parse',
+      statusCode: 501,
+      retriable: false,
+      suggestion: 'Parquet import support is under development. Convert data to CSV/JSON or implement a custom driver.'
+    });
   }
 }
 
@@ -682,7 +777,13 @@ class ParquetImportDriver extends ImporterDriver {
 class ExcelImportDriver extends ImporterDriver {
   async *parse(filePath, options = {}) {
     // TODO: Implement Excel parsing
-    throw new Error('ExcelImportDriver not yet implemented');
+    throw new PluginError('ExcelImportDriver not yet implemented', {
+      pluginName: 'ImporterPlugin',
+      operation: 'ExcelImportDriver.parse',
+      statusCode: 501,
+      retriable: false,
+      suggestion: 'Convert Excel files to CSV/JSON or implement a custom Excel driver before importing.'
+    });
   }
 }
 
@@ -745,11 +846,26 @@ export class ImporterPlugin extends Plugin {
         this.resource = await this.resource;
       }
     } catch (error) {
-      throw new Error(`Resource "${this.resourceName}" not found`);
+      throw new PluginError(`Resource "${this.resourceName}" not found`, {
+        pluginName: 'ImporterPlugin',
+        operation: 'onInstall',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Create the target resource before running ImporterPlugin or update the configuration.',
+        resourceName: this.resourceName,
+        original: error
+      });
     }
 
     if (!this.resource) {
-      throw new Error(`Resource "${this.resourceName}" not found`);
+      throw new PluginError(`Resource "${this.resourceName}" not found`, {
+        pluginName: 'ImporterPlugin',
+        operation: 'onInstall',
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Create the target resource before running ImporterPlugin or update the configuration.',
+        resourceName: this.resourceName
+      });
     }
 
     // Initialize driver based on format
@@ -782,7 +898,14 @@ export class ImporterPlugin extends Plugin {
       case 'xlsx':
         return new ExcelImportDriver(this.driverConfig);
       default:
-        throw new Error(`Unsupported format: ${format}`);
+        throw new PluginError(`Unsupported import format: ${format}`, {
+          pluginName: 'ImporterPlugin',
+          operation: '_createDriver',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Use one of the supported formats: json, jsonl, ndjson, csv, tsv, parquet, excel.',
+          format
+        });
     }
   }
 
@@ -828,7 +951,17 @@ export class ImporterPlugin extends Plugin {
               record: mapped
             });
           }
-          if (!this.continueOnError) throw new Error('Validation failed');
+          if (!this.continueOnError) {
+            throw new PluginError('Validation failed', {
+              pluginName: 'ImporterPlugin',
+              operation: 'import',
+              statusCode: 422,
+              retriable: false,
+              suggestion: 'Fix the invalid record or enable continueOnError to skip bad rows.',
+              row: this.stats.totalProcessed,
+              record: mapped
+            });
+          }
           continue;
         }
 

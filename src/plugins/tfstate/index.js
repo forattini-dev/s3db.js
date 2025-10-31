@@ -249,7 +249,7 @@ import { Plugin } from '../plugin.class.js';
 import tryFn from '../../concerns/try-fn.js';
 import requirePluginDependency from '../concerns/plugin-dependencies.js';
 import { idGenerator } from '../../concerns/id.js';
-import { resolveResourceName } from '../concerns/resource-names.js';
+import { resolveResourceNames } from '../concerns/resource-names.js';
 import {
   TfStateError,
   InvalidStateFileError,
@@ -274,22 +274,29 @@ export class TfStatePlugin extends Plugin {
     // Resource names
     const resourcesConfig = config.resources || {};
     const resourceNamesOption = config.resourceNames || {};
-    this.resourceName = resolveResourceName('tfstate', {
-      defaultName: 'plg_tfstate_resources',
-      override: resourceNamesOption.resources || resourcesConfig.resources || config.resourceName
-    });
-    this.stateFilesName = resolveResourceName('tfstate', {
-      defaultName: 'plg_tfstate_state_files',
-      override: resourceNamesOption.stateFiles || resourcesConfig.stateFiles || config.stateFilesName
-    });
-    this.diffsName = resolveResourceName('tfstate', {
-      defaultName: 'plg_tfstate_state_diffs',
-      override: resourceNamesOption.diffs || resourcesConfig.diffs || config.diffsName
-    });
-    this.lineagesName = resolveResourceName('tfstate', {
-      defaultName: 'plg_tfstate_lineages',
-      override: resourceNamesOption.lineages || resourcesConfig.lineages
-    });
+    this._resourceDescriptors = {
+      resources: {
+        defaultName: 'plg_tfstate_resources',
+        override: resourceNamesOption.resources || resourcesConfig.resources || config.resourceName
+      },
+      stateFiles: {
+        defaultName: 'plg_tfstate_state_files',
+        override: resourceNamesOption.stateFiles || resourcesConfig.stateFiles || config.stateFilesName
+      },
+      diffs: {
+        defaultName: 'plg_tfstate_state_diffs',
+        override: resourceNamesOption.diffs || resourcesConfig.diffs || config.diffsName
+      },
+      lineages: {
+        defaultName: 'plg_tfstate_lineages',
+        override: resourceNamesOption.lineages || resourcesConfig.lineages
+      }
+    };
+    const resolvedNames = this._resolveResourceNames();
+    this.resourceName = resolvedNames.resources;
+    this.stateFilesName = resolvedNames.stateFiles;
+    this.diffsName = resolvedNames.diffs;
+    this.lineagesName = resolvedNames.lineages;
 
     // Monitoring configuration
     const monitor = config.monitor || {};
@@ -336,6 +343,20 @@ export class TfStatePlugin extends Plugin {
       partitionCacheHits: 0,
       partitionQueriesOptimized: 0
     };
+  }
+
+  _resolveResourceNames() {
+    return resolveResourceNames('tfstate', this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    const names = this._resolveResourceNames();
+    this.resourceName = names.resources;
+    this.stateFilesName = names.stateFiles;
+    this.diffsName = names.diffs;
+    this.lineagesName = names.lineages;
   }
 
   /**

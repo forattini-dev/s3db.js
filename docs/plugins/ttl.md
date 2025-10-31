@@ -9,6 +9,8 @@
 plugins: [new TTLPlugin({ resources: { sessions: { ttl: 86400, onExpire: 'soft-delete' } } })]
 ```
 
+> 🧩 **Namespaces**: Provide `namespace: 'sessions'` (or an alias via `db.usePlugin`) when running multiple TTLPlugin instances. The expiration index resource becomes `plg_sessions_ttl_expiration_index`.
+
 **Key features:**
 - ✅ **O(1) cleanup via partition-based expiration index**
 - ✅ **Zero full scans** - indexes records by expiration cohorts

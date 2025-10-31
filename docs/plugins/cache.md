@@ -393,6 +393,36 @@ console.log(`Cache limit: ${(memStats.maxMemoryPercent * 100).toFixed(1)}%`);
 //         Cache limit: 10.0%
 ```
 
+### Multi-instance namespaces
+
+Need distinct cache layers for separate workloads? Install the plugin multiple times with the `namespace` option (or a custom alias in `db.usePlugin`) to isolate drivers, PluginStorage keys, and generated resource prefixes:
+
+```javascript
+await db.usePlugin(new CachePlugin({
+  driver: 'memory',
+  namespace: 'hot-path',
+  ttl: 5_000
+}), 'cacheHot');
+
+await db.usePlugin(new CachePlugin({
+  driver: 's3',
+  namespace: 'analytics',
+  ttl: 60_000
+}), 'cacheCold');
+
+const users = db.resources.users;
+const hotDriver = users.getCacheDriver('cache--hot-path');
+const coldDriver = users.getCacheDriver('cache--analytics');
+
+const analyticsKey = await users.getCacheKeyResolver('cache--analytics')({ action: 'list' });
+const cached = await coldDriver.get(analyticsKey);
+```
+
+- The **first** installed instance remains available as `resource.cache` for backwards compatibility.
+- Additional drivers live in `resource.cacheInstances`. Retrieve them with `resource.getCacheDriver(<slug>)` and `resource.getCacheKeyResolver(<slug>)`.
+- Namespaces slugify into resource prefixes (`plg_cache--analytics_*`) and PluginStorage keys (`plugin=cache--analytics/...`).
+- Passing a second argument to `db.usePlugin(plugin, 'cacheSecondary')` auto-derives the namespace when you omit it.
+
 ### Example 2: Filesystem Cache (Persistent, Local)
 
 Best for production with single server:

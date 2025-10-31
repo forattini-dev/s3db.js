@@ -19,6 +19,7 @@
  * - Security monitoring (CSP violations)
  */
 import tryFn from '../../concerns/try-fn.js';
+import { PuppeteerError } from '../puppeteer.errors.js';
 
 export class ConsoleMonitor {
   constructor(plugin) {
@@ -662,7 +663,11 @@ export class ConsoleMonitor {
    */
   async getSessionStats(sessionId) {
     if (!this.sessionsResource) {
-      throw new Error('Console monitoring persistence not enabled');
+      throw new PuppeteerError('Console monitoring persistence not enabled', {
+        operation: 'getSessionStats',
+        retriable: false,
+        suggestion: 'Enable persistence in ConsoleMonitor configuration to query stored sessions.'
+      });
     }
 
     return await this.sessionsResource.get(sessionId);
@@ -676,7 +681,11 @@ export class ConsoleMonitor {
    */
   async getSessionMessages(sessionId, filters = {}) {
     if (!this.messagesResource) {
-      throw new Error('Console monitoring persistence not enabled');
+      throw new PuppeteerError('Console monitoring persistence not enabled', {
+        operation: 'getSessionMessages',
+        retriable: false,
+        suggestion: 'Enable persistence in ConsoleMonitor configuration to query stored messages.'
+      });
     }
 
     return await this.messagesResource.listPartition('bySession', { sessionId }, filters);
@@ -689,7 +698,11 @@ export class ConsoleMonitor {
    */
   async getSessionErrors(sessionId) {
     if (!this.errorsResource) {
-      throw new Error('Console monitoring persistence not enabled');
+      throw new PuppeteerError('Console monitoring persistence not enabled', {
+        operation: 'getSessionErrors',
+        retriable: false,
+        suggestion: 'Enable persistence in ConsoleMonitor configuration to query stored errors.'
+      });
     }
 
     return await this.errorsResource.listPartition('bySession', { sessionId });
@@ -702,7 +715,11 @@ export class ConsoleMonitor {
    */
   async getErrorsByType(errorType) {
     if (!this.errorsResource) {
-      throw new Error('Console monitoring persistence not enabled');
+      throw new PuppeteerError('Console monitoring persistence not enabled', {
+        operation: 'getErrorsByType',
+        retriable: false,
+        suggestion: 'Enable persistence in ConsoleMonitor configuration to query stored errors.'
+      });
     }
 
     return await this.errorsResource.listPartition('byErrorType', { errorType });

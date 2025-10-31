@@ -22,6 +22,8 @@
  * - JS execution: load resources, execute challenges
  * - Geographic coherence: proxy geo + timezone + language match
  */
+import { NavigationError } from '../puppeteer.errors.js';
+
 export class StealthManager {
   constructor(plugin) {
     this.plugin = plugin;
@@ -350,7 +352,12 @@ export class StealthManager {
   async humanType(page, selector, text, profile) {
     const element = await page.$(selector);
     if (!element) {
-      throw new Error(`Element not found: ${selector}`);
+      throw new NavigationError(`Element not found: ${selector}`, {
+        operation: 'humanType',
+        retriable: false,
+        suggestion: 'Verify the selector exists on the target page before invoking humanType.',
+        selector
+      });
     }
 
     await element.click();

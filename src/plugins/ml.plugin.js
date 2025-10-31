@@ -284,7 +284,13 @@ export class MLPlugin extends Plugin {
           const mlPlugin = resource.database?._mlPlugin;
 
           if (!mlPlugin) {
-            throw new Error('MLPlugin not installed');
+            throw new MLError('MLPlugin is not installed on this database instance', {
+              pluginName: 'MLPlugin',
+              operation: 'Resource.ml accessor',
+              statusCode: 400,
+              retriable: false,
+              suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.ml.* methods.'
+            });
           }
 
           return {
@@ -437,7 +443,13 @@ export class MLPlugin extends Plugin {
       Resource.prototype.predict = async function(input, targetAttribute) {
         const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
-          throw new Error('MLPlugin not installed');
+          throw new MLError('MLPlugin is not installed on this database instance', {
+            pluginName: 'MLPlugin',
+            operation: 'Resource.predict',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.predict().' 
+          });
         }
 
         return await mlPlugin._resourcePredict(this.name, input, targetAttribute);
@@ -449,7 +461,13 @@ export class MLPlugin extends Plugin {
       Resource.prototype.trainModel = async function(targetAttribute, options = {}) {
         const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
-          throw new Error('MLPlugin not installed');
+          throw new MLError('MLPlugin is not installed on this database instance', {
+            pluginName: 'MLPlugin',
+            operation: 'Resource.trainModel',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.trainModel().' 
+          });
         }
 
         return await mlPlugin._resourceTrainModel(this.name, targetAttribute, options);
@@ -461,7 +479,13 @@ export class MLPlugin extends Plugin {
       Resource.prototype.listModels = function() {
         const mlPlugin = this.database?._mlPlugin;
         if (!mlPlugin) {
-          throw new Error('MLPlugin not installed');
+          throw new MLError('MLPlugin is not installed on this database instance', {
+            pluginName: 'MLPlugin',
+            operation: 'Resource.listModels',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.listModels().'
+          });
         }
 
         return mlPlugin._resourceListModels(this.name);

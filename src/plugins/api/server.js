@@ -68,6 +68,7 @@ export class ApiServer {
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024, // 10MB default
       rootHandler: options.rootHandler, // Custom handler for root path, if not provided redirects to /docs
       versionPrefix: options.versionPrefix, // Global version prefix config
+      namespace: options.namespace || null,
       apiInfo: {
         title: options.apiTitle || 's3db.js API',
         version: options.apiVersion || '1.0.0',
@@ -110,6 +111,7 @@ export class ApiServer {
     if (this.options.failban?.enabled) {
       this.failban = new FailbanManager({
         database: this.options.database,
+        namespace: this.options.namespace,
         enabled: true,
         maxViolations: this.options.failban.maxViolations || 3,
         violationWindow: this.options.failban.violationWindow || 3600000,

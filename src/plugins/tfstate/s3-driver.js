@@ -6,6 +6,7 @@
 import { TfStateDriver } from './base-driver.js';
 import { S3Client } from '../../clients/s3-client.class.js';
 import tryFn from '../../concerns/try-fn.js';
+import { TfStateError, InvalidStateFileError, StateFileNotFoundError } from './errors.js';
 
 export class S3TfStateDriver extends TfStateDriver {
   constructor(config = {}) {
@@ -36,7 +37,13 @@ export class S3TfStateDriver extends TfStateDriver {
       const url = new URL(connectionString);
 
       if (url.protocol !== 's3:') {
-        throw new Error('Connection string must use s3:// protocol');
+        throw new TfStateError('Connection string must use s3:// protocol', {
+          operation: 'parseConnectionString',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Use format s3://accessKey:secretKey@bucket/prefix?region=us-east-1',
+          connectionString
+        });
       }
 
       const credentials = {};
@@ -61,7 +68,14 @@ export class S3TfStateDriver extends TfStateDriver {
         region
       };
     } catch (error) {
-      throw new Error(`Invalid S3 connection string: ${error.message}`);
+      throw new TfStateError('Invalid S3 connection string', {
+        operation: 'parseConnectionString',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Ensure the connection string follows s3://accessKey:secretKey@bucket/prefix?region=REGION.',
+        connectionString,
+        original: error
+      });
     }
   }
 
@@ -95,7 +109,14 @@ export class S3TfStateDriver extends TfStateDriver {
     });
 
     if (!ok) {
-      throw new Error(`Failed to list S3 objects: ${err.message}`);
+      throw new TfStateError('Failed to list Terraform state objects from S3', {
+        operation: 'listStateFiles',
+        retriable: false,
+        suggestion: 'Validate S3 permissions (s3:ListBucket) and prefix configuration.',
+        bucket,
+        prefix,
+        original: err
+      });
     }
 
     const objects = data.Contents || [];
@@ -133,14 +154,35 @@ export class S3TfStateDriver extends TfStateDriver {
     });
 
     if (!ok) {
-      throw new Error(`Failed to read state file ${path}: ${err.message}`);
+      if (err?.$metadata?.httpStatusCode === 404) {
+        throw new StateFileNotFoundError(path, {
+          operation: 'readStateFile',
+          retriable: false,
+          suggestion: 'Ensure the state file exists in S3 and the IAM role can access it.',
+          bucket,
+          original: err
+        });
+      }
+      throw new TfStateError(`Failed to read state file ${path}`, {
+        operation: 'readStateFile',
+        retriable: false,
+        suggestion: 'Verify S3 permissions (s3:GetObject) and network connectivity.',
+        bucket,
+        path,
+        original: err
+      });
     }
 
     try {
       const content = data.Body.toString('utf-8');
       return JSON.parse(content);
     } catch (parseError) {
-      throw new Error(`Failed to parse state file ${path}: ${parseError.message}`);
+      throw new InvalidStateFileError(path, parseError.message, {
+        operation: 'readStateFile',
+        retriable: false,
+        suggestion: 'Check if the state file contains valid JSON exported by Terraform.',
+        original: parseError
+      });
     }
   }
 
@@ -158,7 +200,23 @@ export class S3TfStateDriver extends TfStateDriver {
     });
 
     if (!ok) {
-      throw new Error(`Failed to get metadata for ${path}: ${err.message}`);
+      if (err?.$metadata?.httpStatusCode === 404) {
+        throw new StateFileNotFoundError(path, {
+          operation: 'getStateFileMetadata',
+          retriable: false,
+          suggestion: 'Ensure the state file exists in S3 and the IAM role can access it.',
+          bucket,
+          original: err
+        });
+      }
+      throw new TfStateError(`Failed to get metadata for ${path}`, {
+        operation: 'getStateFileMetadata',
+        retriable: false,
+        suggestion: 'Verify S3 permissions (s3:HeadObject) and bucket configuration.',
+        bucket,
+        path,
+        original: err
+      });
     }
 
     return {

@@ -9,6 +9,8 @@ Automatic tracking of **all** database operations (insert/update/delete) with co
 await db.usePlugin(new AuditPlugin());  // Done! All operations are now logged
 ```
 
+> 🧩 **Namespaces**: Use `namespace: 'compliance'` (or pass an alias via `db.usePlugin`) when you need separate audit trails. The log resource becomes `plg_compliance_audits`.
+
 **Key features:**
 - ✅ Automatic logging of insert/update/delete/deleteMany
 - ✅ Stores before/after data (optional)

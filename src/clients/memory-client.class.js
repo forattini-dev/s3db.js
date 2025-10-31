@@ -20,7 +20,7 @@ import { PromisePool } from '@supercharge/promise-pool';
 import tryFn from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js';
-import { mapAwsError } from '../errors.js';
+import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
 import { MemoryStorage } from './memory-storage.class.js';
 
 /**
@@ -103,7 +103,12 @@ export class MemoryClient extends EventEmitter {
           response = await this._handleListObjects(input);
           break;
         default:
-          throw new Error(`Unsupported command: ${commandName}`);
+          throw new DatabaseError(`Unsupported command: ${commandName}`, {
+            operation: 'sendCommand',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Use one of the supported commands: PutObject, GetObject, HeadObject, CopyObject, DeleteObject, DeleteObjects, or ListObjectsV2.'
+          });
       }
 
       this.emit('cl:response', commandName, response, input);
@@ -111,6 +116,9 @@ export class MemoryClient extends EventEmitter {
       return response;
 
     } catch (error) {
+      if (error instanceof BaseError) {
+        throw error;
+      }
       // Map errors to AWS SDK format
       const mappedError = mapAwsError(error, {
         bucket: this.bucket,

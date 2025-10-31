@@ -10,6 +10,8 @@
 await db.use(new ApiPlugin({ port: 3000 }));  // That's it!
 ```
 
+> 🧩 **Namespaces**: Provide `namespace: 'public-api'` (or pass an alias to `db.usePlugin`) to isolate this plugin's internal resources—Failban bans/violations will be stored under `plg_public-api_*`.
+
 **You get instantly:**
 - ✅ Auto-generated REST endpoints (GET/POST/PUT/PATCH/DELETE)
 - ✅ Interactive Swagger UI at `/docs`

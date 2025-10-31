@@ -12,6 +12,8 @@
  * - Session-proxy immutable binding
  * - Proxy authentication support
  */
+import { BrowserPoolError } from '../puppeteer.errors.js';
+
 export class ProxyManager {
   constructor(plugin) {
     this.plugin = plugin;
@@ -143,13 +145,25 @@ export class ProxyManager {
       const proxy = this.proxies.find(p => p.id === proxyId);
 
       if (!proxy) {
-        throw new Error(`Proxy ${proxyId} bound to session ${sessionId} not found in pool`);
+        throw new BrowserPoolError(`Proxy ${proxyId} bound to session ${sessionId} not found in pool`, {
+          operation: 'getProxyForSession',
+          retriable: false,
+          suggestion: 'Ensure proxies remain registered while sessions are active.',
+          proxyId,
+          sessionId
+        });
       }
 
       // Verify proxy is still healthy
       const stats = this.proxyStats.get(proxyId);
-      if (!stats.healthy) {
-        throw new Error(`Proxy ${proxyId} bound to session ${sessionId} is unhealthy. Cannot use session.`);
+      if (!stats || !stats.healthy) {
+        throw new BrowserPoolError(`Proxy ${proxyId} bound to session ${sessionId} is unhealthy`, {
+          operation: 'getProxyForSession',
+          retriable: true,
+          suggestion: 'Rebind the session to a healthy proxy or refresh the proxy pool.',
+          proxyId,
+          sessionId
+        });
       }
 
       return proxy;
@@ -184,11 +198,16 @@ export class ProxyManager {
     // Filter healthy proxies only
     const healthyProxies = this.proxies.filter(proxy => {
       const stats = this.proxyStats.get(proxy.id);
-      return stats.healthy;
+      return stats ? stats.healthy : false;
     });
 
     if (healthyProxies.length === 0) {
-      throw new Error('No healthy proxies available');
+      throw new BrowserPoolError('No healthy proxies available', {
+        operation: '_selectProxy',
+        retriable: true,
+        suggestion: 'Add healthy proxies to the configuration or allow existing proxies to recover.',
+        available: this.proxies.length
+      });
     }
 
     let selectedProxy;

@@ -434,16 +434,27 @@ export class AuditPlugin extends Plugin {
     super(options);
     const resourceNames = options.resourceNames || {};
     this.auditResource = null;
-    this.auditResourceName = resolveResourceName('audit', {
+    this._auditResourceDescriptor = {
       defaultName: 'plg_audits',
       override: resourceNames.audit || options.resourceName
-    });
+    };
+    this.auditResourceName = this._resolveAuditResourceName();
     this.config = {
       includeData: options.includeData !== false,
       includePartitions: options.includePartitions !== false,
       maxDataSize: options.maxDataSize || 10000,
       ...options
     };
+  }
+
+  _resolveAuditResourceName() {
+    return resolveResourceName('audit', this._auditResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.auditResourceName = this._resolveAuditResourceName();
   }
 
   async onInstall() {

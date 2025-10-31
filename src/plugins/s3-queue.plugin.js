@@ -2,6 +2,7 @@ import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
+import { QueueError } from "./queue.errors.js";
 
 /**
  * S3QueuePlugin - Distributed Queue System with ETag-based Atomicity
@@ -67,7 +68,13 @@ export class S3QueuePlugin extends Plugin {
 
     const resourceNamesOption = options.resourceNames || {};
     if (!options.resource) {
-      throw new Error('S3QueuePlugin requires "resource" option');
+      throw new QueueError('S3QueuePlugin requires "resource" option', {
+        pluginName: 'S3QueuePlugin',
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the target resource name: new S3QueuePlugin({ resource: "orders", ... }).'
+      });
     }
 
     this.config = {
@@ -85,18 +92,23 @@ export class S3QueuePlugin extends Plugin {
       ...options
     };
 
-    this.queueResourceName = resolveResourceName('s3queue', {
+    this._queueResourceDescriptor = {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
       override: resourceNamesOption.queue || options.queueResource
-    });
+    };
+    this.queueResourceName = this._resolveQueueResourceName();
     this.config.queueResourceName = this.queueResourceName;
 
-    this.deadLetterResourceName = this.config.deadLetterResource
-      ? resolveResourceName('s3queue', {
-          defaultName: `plg_s3queue_${this.config.resource}_dead`,
-          override: resourceNamesOption.deadLetter || this.config.deadLetterResource
-        })
-      : null;
+    if (this.config.deadLetterResource) {
+      this._deadLetterDescriptor = {
+        defaultName: `plg_s3queue_${this.config.resource}_dead`,
+        override: resourceNamesOption.deadLetter || this.config.deadLetterResource
+      };
+    } else {
+      this._deadLetterDescriptor = null;
+    }
+
+    this.deadLetterResourceName = this._resolveDeadLetterResourceName();
     this.config.deadLetterResource = this.deadLetterResourceName;
 
     this.queueResource = null;       // Resource: <resource>_queue
@@ -114,11 +126,39 @@ export class S3QueuePlugin extends Plugin {
     this.messageLocks = new Map();
   }
 
+  _resolveQueueResourceName() {
+    return resolveResourceName('s3queue', this._queueResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  _resolveDeadLetterResourceName() {
+    if (!this._deadLetterDescriptor) return null;
+    return resolveResourceName('s3queue', this._deadLetterDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.queueResourceName = this._resolveQueueResourceName();
+    this.config.queueResourceName = this.queueResourceName;
+    this.deadLetterResourceName = this._resolveDeadLetterResourceName();
+    this.config.deadLetterResource = this.deadLetterResourceName;
+  }
+
   async onInstall() {
     // Get target resource
     this.targetResource = this.database.resources[this.config.resource];
     if (!this.targetResource) {
-      throw new Error(`S3QueuePlugin: resource '${this.config.resource}' not found`);
+      throw new QueueError(`Resource '${this.config.resource}' not found`, {
+        pluginName: 'S3QueuePlugin',
+        operation: 'onInstall',
+        resourceName: this.config.resource,
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Create the resource before installing S3QueuePlugin or update the plugin configuration.',
+        availableResources: Object.keys(this.database.resources || {})
+      });
     }
 
     // Create queue metadata resource
@@ -155,7 +195,15 @@ export class S3QueuePlugin extends Plugin {
     } else {
       this.queueResource = this.database.resources[queueName];
       if (!this.queueResource) {
-        throw new Error(`Failed to create queue resource: ${err?.message}`);
+        throw new QueueError(`Failed to create queue resource: ${err?.message}`, {
+          pluginName: 'S3QueuePlugin',
+          operation: 'createQueueResource',
+          queueName,
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Check database permissions and ensure createResource() was successful.',
+          original: err
+        });
       }
     }
     this.queueResourceName = this.queueResource.name;
@@ -253,7 +301,14 @@ export class S3QueuePlugin extends Plugin {
 
     const messageHandler = handler || this.config.onMessage;
     if (!messageHandler) {
-      throw new Error('S3QueuePlugin: onMessage handler required');
+      throw new QueueError('onMessage handler required', {
+        pluginName: 'S3QueuePlugin',
+        operation: 'startProcessing',
+        queueName: this.queueResourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass a handler: resource.startProcessing(async msg => {...}) or configure onMessage in plugin options.'
+      });
     }
 
     this.isRunning = true;

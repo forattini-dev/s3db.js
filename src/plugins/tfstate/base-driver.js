@@ -1,3 +1,5 @@
+import { TfStateError } from './errors.js';
+
 /**
  * Base Driver Class for TfState Plugin
  *
@@ -14,7 +16,12 @@ export class TfStateDriver {
    * Called during plugin installation
    */
   async initialize() {
-    throw new Error('Driver must implement initialize()');
+    throw new TfStateError('Driver must implement initialize()', {
+      operation: 'initialize',
+      statusCode: 501,
+      retriable: false,
+      suggestion: 'Extend TfStateDriver and implement initialize() to configure backend connections.'
+    });
   }
 
   /**
@@ -22,7 +29,12 @@ export class TfStateDriver {
    * @returns {Promise<Array>} Array of state file metadata { path, lastModified, size }
    */
   async listStateFiles() {
-    throw new Error('Driver must implement listStateFiles()');
+    throw new TfStateError('Driver must implement listStateFiles()', {
+      operation: 'listStateFiles',
+      statusCode: 501,
+      retriable: false,
+      suggestion: 'Override listStateFiles() to return available Terraform state metadata.'
+    });
   }
 
   /**
@@ -31,7 +43,13 @@ export class TfStateDriver {
    * @returns {Promise<Object>} Parsed state file content
    */
   async readStateFile(path) {
-    throw new Error('Driver must implement readStateFile()');
+    throw new TfStateError('Driver must implement readStateFile()', {
+      operation: 'readStateFile',
+      statusCode: 501,
+      retriable: false,
+      suggestion: 'Override readStateFile(path) to load and parse the Terraform state JSON.',
+      path
+    });
   }
 
   /**
@@ -40,7 +58,13 @@ export class TfStateDriver {
    * @returns {Promise<Object>} Metadata { path, lastModified, size, etag }
    */
   async getStateFileMetadata(path) {
-    throw new Error('Driver must implement getStateFileMetadata()');
+    throw new TfStateError('Driver must implement getStateFileMetadata()', {
+      operation: 'getStateFileMetadata',
+      statusCode: 501,
+      retriable: false,
+      suggestion: 'Override getStateFileMetadata(path) to return lastModified, size, and ETag information.',
+      path
+    });
   }
 
   /**

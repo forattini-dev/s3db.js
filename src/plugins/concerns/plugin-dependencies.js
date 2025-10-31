@@ -175,6 +175,56 @@ export const PLUGIN_DEPENDENCIES = {
         npmUrl: 'https://www.npmjs.com/package/@tensorflow/tfjs-node'
       }
     }
+  },
+  'puppeteer': {
+    name: 'Puppeteer Suite',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/puppeteer/README.md',
+    dependencies: {
+      'puppeteer-extra': {
+        version: '^3.3.4',
+        description: 'Headless Chrome automation toolkit',
+        installCommand: 'pnpm add puppeteer-extra',
+        npmUrl: 'https://www.npmjs.com/package/puppeteer-extra'
+      },
+      'puppeteer-extra-plugin-stealth': {
+        version: '^2.11.2',
+        description: 'Stealth plugin to evade bot detection',
+        installCommand: 'pnpm add puppeteer-extra-plugin-stealth',
+        npmUrl: 'https://www.npmjs.com/package/puppeteer-extra-plugin-stealth'
+      },
+      'user-agents': {
+        version: '^2.0.0',
+        description: 'Randomized user agent generator',
+        installCommand: 'pnpm add user-agents',
+        npmUrl: 'https://www.npmjs.com/package/user-agents'
+      },
+      'ghost-cursor': {
+        version: '^1.4.1',
+        description: 'Human-like mouse movement generator',
+        installCommand: 'pnpm add ghost-cursor',
+        npmUrl: 'https://www.npmjs.com/package/ghost-cursor'
+      }
+    }
+  },
+  'puppeteer-extra': {
+    name: 'puppeteer-extra',
+    docsUrl: 'https://github.com/berstend/puppeteer-extra',
+    dependencies: {}
+  },
+  'puppeteer-extra-plugin-stealth': {
+    name: 'puppeteer-extra-plugin-stealth',
+    docsUrl: 'https://github.com/berstend/puppeteer-extra/tree/master/packages/puppeteer-extra-plugin-stealth',
+    dependencies: {}
+  },
+  'user-agents': {
+    name: 'user-agents',
+    docsUrl: 'https://github.com/intoli/user-agents',
+    dependencies: {}
+  },
+  'ghost-cursor': {
+    name: 'ghost-cursor',
+    docsUrl: 'https://github.com/Xetera/ghost-cursor',
+    dependencies: {}
   }
 };
 
@@ -268,6 +318,10 @@ export async function requirePluginDependency(pluginId, options = {}) {
     );
     if (throwOnError) throw error;
     return { valid: false, missing: [], incompatible: [], messages: [error.message] };
+  }
+
+  if (process?.env?.S3DB_SKIP_PLUGIN_DEP_CHECK === '1') {
+    return { valid: true, missing: [], incompatible: [], messages: [] };
   }
 
   const missing = [];

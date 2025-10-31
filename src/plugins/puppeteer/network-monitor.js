@@ -23,6 +23,7 @@
  * - A/B testing (compare network behavior)
  */
 import tryFn from '../../concerns/try-fn.js';
+import { PuppeteerError } from '../puppeteer.errors.js';
 
 export class NetworkMonitor {
   constructor(plugin) {
@@ -764,7 +765,11 @@ export class NetworkMonitor {
    */
   async getSessionStats(sessionId) {
     if (!this.sessionsResource) {
-      throw new Error('Network monitoring persistence not enabled');
+      throw new PuppeteerError('Network monitoring persistence not enabled', {
+        operation: 'getSessionStats',
+        retriable: false,
+        suggestion: 'Enable persistence in NetworkMonitor configuration to query stored stats.'
+      });
     }
 
     const session = await this.sessionsResource.get(sessionId);
@@ -779,7 +784,11 @@ export class NetworkMonitor {
    */
   async getSessionRequests(sessionId, filters = {}) {
     if (!this.requestsResource) {
-      throw new Error('Network monitoring persistence not enabled');
+      throw new PuppeteerError('Network monitoring persistence not enabled', {
+        operation: 'getSessionRequests',
+        retriable: false,
+        suggestion: 'Enable persistence in NetworkMonitor configuration to query stored requests.'
+      });
     }
 
     // Use partition for fast lookup
@@ -793,7 +802,11 @@ export class NetworkMonitor {
    */
   async getSessionErrors(sessionId) {
     if (!this.errorsResource) {
-      throw new Error('Network monitoring persistence not enabled');
+      throw new PuppeteerError('Network monitoring persistence not enabled', {
+        operation: 'getSessionErrors',
+        retriable: false,
+        suggestion: 'Enable persistence in NetworkMonitor configuration to query stored errors.'
+      });
     }
 
     return await this.errorsResource.listPartition('bySession', { sessionId });

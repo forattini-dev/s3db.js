@@ -133,11 +133,12 @@ export class ApiPlugin extends Plugin {
     super(options);
 
     const resourceNamesOption = options.resourceNames || {};
-    const normalizedAuth = normalizeAuthConfig(options.auth);
-    this.usersResourceName = resolveResourceName('api', {
+    this._usersResourceDescriptor = {
       defaultName: 'plg_api_users',
       override: resourceNamesOption.authUsers || options.auth?.resource
-    });
+    };
+    const normalizedAuth = normalizeAuthConfig(options.auth);
+    this.usersResourceName = this._resolveUsersResourceName();
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;
 
@@ -964,6 +965,7 @@ export class ApiPlugin extends Plugin {
       port: this.config.port,
       host: this.config.host,
       database: this.database,
+      namespace: this.namespace,
       versionPrefix: this.config.versionPrefix,
       resources: this.config.resources,
       routes: this.config.routes,
@@ -997,10 +999,24 @@ export class ApiPlugin extends Plugin {
 
     if (this.server) {
       await this.server.stop();
-      this.server = null;
     }
+    this.server = null;
+  }
 
-    this.emit('plugin.stopped');
+  _resolveUsersResourceName() {
+    return resolveResourceName('api', this._usersResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.usersResourceName = this._resolveUsersResourceName();
+    if (this.config?.auth) {
+      this.config.auth.resource = this.usersResourceName;
+    }
+    if (this.server?.failban) {
+      this.server.failban.setNamespace(this.namespace);
+    }
   }
 
   /**

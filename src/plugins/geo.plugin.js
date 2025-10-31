@@ -1,5 +1,6 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { PluginError } from "../errors.js";
 
 /**
  * GeoPlugin - Geospatial Queries and Location-Based Features
@@ -137,9 +138,14 @@ export class GeoPlugin extends Plugin {
 
     // Validate configuration
     if (!config.latField || !config.lonField) {
-      throw new Error(
-        `[GeoPlugin] Resource "${resourceName}" must have "latField" and "lonField" configured`
-      );
+      throw new PluginError(`[GeoPlugin] Resource "${resourceName}" must have "latField" and "lonField" configured`, {
+        pluginName: 'GeoPlugin',
+        operation: 'setupResource',
+        resourceName,
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Update GeoPlugin configuration with { latField: "...", lonField: "..." } for the resource.'
+      });
     }
 
     if (!config.precision || config.precision < 1 || config.precision > 12) {
@@ -327,7 +333,14 @@ export class GeoPlugin extends Plugin {
      */
     resource.findNearby = async function({ lat, lon, radius = 10, limit = 100 }) {
       if (lat === undefined || lon === undefined) {
-        throw new Error('lat and lon are required for findNearby');
+        throw new PluginError('Latitude and longitude are required for findNearby()', {
+          pluginName: 'GeoPlugin',
+          operation: 'findNearby',
+          resourceName: resource.name,
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Call findNearby({ lat, lon, radius }) with both coordinates.'
+        });
       }
 
       const longitude = lon; // Alias for internal use
@@ -430,7 +443,14 @@ export class GeoPlugin extends Plugin {
      */
     resource.findInBounds = async function({ north, south, east, west, limit = 100 }) {
       if (north === undefined || south === undefined || east === undefined || west === undefined) {
-        throw new Error('north, south, east, west are required for findInBounds');
+        throw new PluginError('Bounding box requires north, south, east, west coordinates', {
+          pluginName: 'GeoPlugin',
+          operation: 'findInBounds',
+          resourceName: resource.name,
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Call findInBounds({ north, south, east, west }) with all four boundaries.'
+        });
       }
 
       let allRecords = [];
@@ -536,13 +556,30 @@ export class GeoPlugin extends Plugin {
         ]);
       } catch (err) {
         if (err.name === 'NoSuchKey' || err.message?.includes('No such key')) {
-          throw new Error('One or both records not found');
+          throw new PluginError('One or both records not found for distance calculation', {
+            pluginName: 'GeoPlugin',
+            operation: 'getDistance',
+            resourceName: resource.name,
+            statusCode: 404,
+            retriable: false,
+            suggestion: 'Ensure both record IDs exist before calling getDistance().',
+            ids: [id1, id2],
+            original: err
+          });
         }
         throw err;
       }
 
       if (!record1 || !record2) {
-        throw new Error('One or both records not found');
+        throw new PluginError('One or both records not found for distance calculation', {
+          pluginName: 'GeoPlugin',
+          operation: 'getDistance',
+          resourceName: resource.name,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Ensure both record IDs exist before calling getDistance().',
+          ids: [id1, id2]
+        });
       }
 
       const lat1 = record1[config.latField];
@@ -551,7 +588,15 @@ export class GeoPlugin extends Plugin {
       const lon2 = record2[config.lonField];
 
       if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined) {
-        throw new Error('One or both records missing coordinates');
+        throw new PluginError('One or both records are missing coordinates', {
+          pluginName: 'GeoPlugin',
+          operation: 'getDistance',
+          resourceName: resource.name,
+          statusCode: 422,
+          retriable: false,
+          suggestion: `Check that both records contain ${config.latField} and ${config.lonField} before using geospatial helpers.`,
+          ids: [id1, id2]
+        });
       }
 
       const distance = plugin.calculateDistance(lat1, lon1, lat2, lon2);
@@ -635,7 +680,14 @@ export class GeoPlugin extends Plugin {
       const idx = this.base32.indexOf(chr);
 
       if (idx === -1) {
-        throw new Error(`Invalid geohash character: ${chr}`);
+        throw new PluginError(`Invalid geohash character: ${chr}`, {
+          pluginName: 'GeoPlugin',
+          operation: 'decodeGeohash',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Ensure geohash strings use the base32 alphabet 0123456789bcdefghjkmnpqrstuvwxyz.',
+          geohash
+        });
       }
 
       for (let n = 4; n >= 0; n--) {

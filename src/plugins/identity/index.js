@@ -53,29 +53,30 @@ export class IdentityPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    const internalResourceOverrides = options.resourceNames || options.internalResources || {};
-    this.internalResourceNames = resolveResourceNames('identity', {
+    this._internalResourceOverrides = options.resourceNames || options.internalResources || {};
+    this._internalResourceDescriptors = {
       oauthKeys: {
         defaultName: 'plg_identity_oauth_keys',
-        override: internalResourceOverrides.oauthKeys
+        override: this._internalResourceOverrides.oauthKeys
       },
       authCodes: {
         defaultName: 'plg_identity_auth_codes',
-        override: internalResourceOverrides.authCodes
+        override: this._internalResourceOverrides.authCodes
       },
       sessions: {
         defaultName: 'plg_identity_sessions',
-        override: internalResourceOverrides.sessions
+        override: this._internalResourceOverrides.sessions
       },
       passwordResetTokens: {
         defaultName: 'plg_identity_password_reset_tokens',
-        override: internalResourceOverrides.passwordResetTokens
+        override: this._internalResourceOverrides.passwordResetTokens
       },
       mfaDevices: {
         defaultName: 'plg_identity_mfa_devices',
-        override: internalResourceOverrides.mfaDevices
+        override: this._internalResourceOverrides.mfaDevices
       }
-    });
+    };
+    this.internalResourceNames = this._resolveInternalResourceNames();
 
     // Validate required resources configuration
     const resourcesValidation = validateResourcesConfig(options.resources);
@@ -423,6 +424,19 @@ export class IdentityPlugin extends Plugin {
 
     // Rate limiters
     this.rateLimiters = this._createRateLimiters();
+  }
+
+  _resolveInternalResourceNames() {
+    return resolveResourceNames('identity', this._internalResourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.internalResourceNames = this._resolveInternalResourceNames();
+    if (this.config) {
+      this.config.resourceNames = this.internalResourceNames;
+    }
   }
 
   /**

@@ -183,9 +183,30 @@ export class EncryptionError extends S3dbError {
 // Resource not found error
 export class ResourceNotFound extends S3dbError {
   constructor({ bucket, resourceName, id, original, ...rest }) {
-    if (typeof id !== 'string') throw new Error('id must be a string');
-    if (typeof bucket !== 'string') throw new Error('bucket must be a string');
-    if (typeof resourceName !== 'string') throw new Error('resourceName must be a string');
+    if (typeof id !== 'string') {
+      throw new ValidationError('ResourceNotFound requires id to be a string', {
+        field: 'id',
+        value: id,
+        retriable: false,
+        suggestion: 'Provide the resource id as a string when constructing ResourceNotFound.'
+      });
+    }
+    if (typeof bucket !== 'string') {
+      throw new ValidationError('ResourceNotFound requires bucket to be a string', {
+        field: 'bucket',
+        value: bucket,
+        retriable: false,
+        suggestion: 'Provide the bucket name as a string when constructing ResourceNotFound.'
+      });
+    }
+    if (typeof resourceName !== 'string') {
+      throw new ValidationError('ResourceNotFound requires resourceName to be a string', {
+        field: 'resourceName',
+        value: resourceName,
+        retriable: false,
+        suggestion: 'Provide the resource name as a string when constructing ResourceNotFound.'
+      });
+    }
     super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
       bucket,
       resourceName,
@@ -201,7 +222,14 @@ export class ResourceNotFound extends S3dbError {
 
 export class NoSuchBucket extends S3dbError {
   constructor({ bucket, original, ...rest }) {
-    if (typeof bucket !== 'string') throw new Error('bucket must be a string');
+    if (typeof bucket !== 'string') {
+      throw new ValidationError('NoSuchBucket requires bucket to be a string', {
+        field: 'bucket',
+        value: bucket,
+        retriable: false,
+        suggestion: 'Provide the bucket name as a string when constructing NoSuchBucket.'
+      });
+    }
     super(`Bucket does not exists [bucket:${bucket}]`, {
       bucket,
       original,
@@ -215,9 +243,30 @@ export class NoSuchBucket extends S3dbError {
 
 export class NoSuchKey extends S3dbError {
   constructor({ bucket, key, resourceName, id, original, ...rest }) {
-    if (typeof key !== 'string') throw new Error('key must be a string');
-    if (typeof bucket !== 'string') throw new Error('bucket must be a string');
-    if (id !== undefined && typeof id !== 'string') throw new Error('id must be a string');
+    if (typeof key !== 'string') {
+      throw new ValidationError('NoSuchKey requires key to be a string', {
+        field: 'key',
+        value: key,
+        retriable: false,
+        suggestion: 'Provide the object key as a string when constructing NoSuchKey.'
+      });
+    }
+    if (typeof bucket !== 'string') {
+      throw new ValidationError('NoSuchKey requires bucket to be a string', {
+        field: 'bucket',
+        value: bucket,
+        retriable: false,
+        suggestion: 'Provide the bucket name as a string when constructing NoSuchKey.'
+      });
+    }
+    if (id !== undefined && typeof id !== 'string') {
+      throw new ValidationError('NoSuchKey requires id to be a string when provided', {
+        field: 'id',
+        value: id,
+        retriable: false,
+        suggestion: 'Provide the resource id as a string when including it in NoSuchKey.'
+      });
+    }
     super(`No such key: ${key} [bucket:${bucket}]`, {
       bucket,
       key,
@@ -236,8 +285,22 @@ export class NoSuchKey extends S3dbError {
 
 export class NotFound extends S3dbError {
   constructor({ bucket, key, resourceName, id, original, ...rest }) {
-    if (typeof key !== 'string') throw new Error('key must be a string');
-    if (typeof bucket !== 'string') throw new Error('bucket must be a string');
+    if (typeof key !== 'string') {
+      throw new ValidationError('NotFound requires key to be a string', {
+        field: 'key',
+        value: key,
+        retriable: false,
+        suggestion: 'Provide the object key as a string when constructing NotFound.'
+      });
+    }
+    if (typeof bucket !== 'string') {
+      throw new ValidationError('NotFound requires bucket to be a string', {
+        field: 'bucket',
+        value: bucket,
+        retriable: false,
+        suggestion: 'Provide the bucket name as a string when constructing NotFound.'
+      });
+    }
     super(`Not found: ${key} [bucket:${bucket}]`, {
       bucket,
       key,
@@ -256,7 +319,14 @@ export class NotFound extends S3dbError {
 
 export class MissingMetadata extends S3dbError {
   constructor({ bucket, original, ...rest }) {
-    if (typeof bucket !== 'string') throw new Error('bucket must be a string');
+    if (typeof bucket !== 'string') {
+      throw new ValidationError('MissingMetadata requires bucket to be a string', {
+        field: 'bucket',
+        value: bucket,
+        retriable: false,
+        suggestion: 'Provide the bucket name as a string when constructing MissingMetadata.'
+      });
+    }
     super(`Missing metadata for bucket [bucket:${bucket}]`, {
       bucket,
       original,
@@ -278,8 +348,22 @@ export class InvalidResourceItem extends S3dbError {
     original,
     ...rest
   }) {
-    if (typeof bucket !== 'string') throw new Error('bucket must be a string');
-    if (typeof resourceName !== 'string') throw new Error('resourceName must be a string');
+    if (typeof bucket !== 'string') {
+      throw new ValidationError('InvalidResourceItem requires bucket to be a string', {
+        field: 'bucket',
+        value: bucket,
+        retriable: false,
+        suggestion: 'Provide the bucket name as a string when constructing InvalidResourceItem.'
+      });
+    }
+    if (typeof resourceName !== 'string') {
+      throw new ValidationError('InvalidResourceItem requires resourceName to be a string', {
+        field: 'resourceName',
+        value: resourceName,
+        retriable: false,
+        suggestion: 'Provide the resource name as a string when constructing InvalidResourceItem.'
+      });
+    }
     super(
       message || `Validation error: This item is not valid. Resource=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`,
       {

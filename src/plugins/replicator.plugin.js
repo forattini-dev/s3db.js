@@ -169,10 +169,12 @@ export class ReplicatorPlugin extends Plugin {
       timeout: options.timeout || 30000,
       verbose: options.verbose || false
     };
-    this.logResourceName = resolveResourceName('replicator', {
+    this._logResourceDescriptor = {
       defaultName: 'plg_replicator_logs',
       override: resourceNamesOption.log || options.replicatorLogResource
-    });
+    };
+    this.logResourceName = this._resolveLogResourceName();
+    this.config.logResourceName = this.logResourceName;
 
     this.replicators = [];
     this.database = null;
@@ -185,6 +187,19 @@ export class ReplicatorPlugin extends Plugin {
     };
     this._afterCreateResourceHook = null;
     this.replicatorLog = null;
+  }
+
+  _resolveLogResourceName() {
+    return resolveResourceName('replicator', this._logResourceDescriptor, {
+      namespace: this.namespace
+    });
+  }
+
+  onNamespaceChanged() {
+    this.logResourceName = this._resolveLogResourceName();
+    if (this.config) {
+      this.config.logResourceName = this.logResourceName;
+    }
   }
 
   // Helper to filter out internal S3DB fields
