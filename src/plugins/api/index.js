@@ -994,4 +994,15 @@ export { OIDCClient } from './auth/oidc-client.js';
 export * from './concerns/guards-helpers.js';
 
 // Export template engine utilities
-export { setupTemplateEngine, ejsEngine, jsxEngine } from './utils/template-engine.js';
+export { setupTemplateEngine, ejsEngine, pugEngine, jsxEngine } from './utils/template-engine.js';
+
+// Export OpenGraph helper
+export { OpenGraphHelper } from './concerns/opengraph-helper.js';
+
+// Export state machines
+export {
+  NotificationStateMachine,
+  AttemptStateMachine,
+  createNotificationStateMachine,
+  createAttemptStateMachine
+} from './concerns/state-machine.js';
