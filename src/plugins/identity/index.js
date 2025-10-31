@@ -37,6 +37,7 @@ import {
   validateResourcesConfig,
   mergeResourceConfig
 } from './concerns/resource-schemas.js';
+import { RateLimiter } from './concerns/rate-limit.js';
 import { resolveResourceNames } from '../concerns/resource-names.js';
 
 /**
@@ -352,6 +353,23 @@ export class IdentityPlugin extends Plugin {
         }
       },
 
+      // Rate Limiting Configuration
+      rateLimit: {
+        enabled: options.rateLimit?.enabled !== false,
+        login: {
+          windowMs: options.rateLimit?.login?.windowMs || 60000,
+          max: options.rateLimit?.login?.max ?? 10
+        },
+        token: {
+          windowMs: options.rateLimit?.token?.windowMs || 60000,
+          max: options.rateLimit?.token?.max ?? 60
+        },
+        authorize: {
+          windowMs: options.rateLimit?.authorize?.windowMs || 60000,
+          max: options.rateLimit?.authorize?.max ?? 30
+        }
+      },
+
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -409,6 +427,9 @@ export class IdentityPlugin extends Plugin {
     this.usersResource = null;
     this.tenantsResource = null;
     this.clientsResource = null;
+
+    // Rate limiters
+    this.rateLimiters = this._createRateLimiters();
   }
 
   /**
@@ -420,6 +441,34 @@ export class IdentityPlugin extends Plugin {
       throwOnError: true,
       checkVersions: true
     });
+  }
+
+  /**
+   * Initialize rate limiters for sensitive endpoints
+   * @private
+   * @returns {Object<string, RateLimiter>}
+   */
+  _createRateLimiters() {
+    if (!this.config.rateLimit.enabled) {
+      return {};
+    }
+
+    const limiters = {};
+    const { login, token, authorize } = this.config.rateLimit;
+
+    if (login?.max > 0 && login?.windowMs > 0) {
+      limiters.login = new RateLimiter(login);
+    }
+
+    if (token?.max > 0 && token?.windowMs > 0) {
+      limiters.token = new RateLimiter(token);
+    }
+
+    if (authorize?.max > 0 && authorize?.windowMs > 0) {
+      limiters.authorize = new RateLimiter(authorize);
+    }
+
+    return limiters;
   }
 
   /**

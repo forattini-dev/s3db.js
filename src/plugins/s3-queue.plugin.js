@@ -1,6 +1,7 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
+import { resolveResourceName } from "./concerns/resource-names.js";
 
 /**
  * S3QueuePlugin - Distributed Queue System with ETag-based Atomicity
@@ -83,6 +84,22 @@ export class S3QueuePlugin extends Plugin {
       ...options
     };
 
+    this.queueResourceName = resolveResourceName('s3queue', {
+      defaultName: `plg_s3queue_${this.config.resource}_queue`,
+      override: options.queueResource
+    });
+    this.config.queueResourceName = this.queueResourceName;
+    this.legacyQueueResourceNames = [`${this.config.resource}_queue`];
+
+    this.deadLetterResourceName = this.config.deadLetterResource
+      ? resolveResourceName('s3queue', {
+          defaultName: `plg_s3queue_${this.config.resource}_dead`,
+          override: this.config.deadLetterResource
+        })
+      : null;
+    this.legacyDeadLetterResourceNames = this.config.deadLetterResource ? [this.config.deadLetterResource] : [];
+    this.config.deadLetterResource = this.deadLetterResourceName;
+
     this.queueResource = null;       // Resource: <resource>_queue
     this.targetResource = null;      // Resource original do usuário
     this.deadLetterResourceObj = null;
@@ -105,7 +122,7 @@ export class S3QueuePlugin extends Plugin {
     }
 
     // Create queue metadata resource
-    const queueName = `${this.config.resource}_queue`;
+    const queueName = this.queueResourceName;
     const [ok, err] = await tryFn(() =>
       this.database.createResource({
         name: queueName,
@@ -133,11 +150,15 @@ export class S3QueuePlugin extends Plugin {
       })
     );
 
-    if (!ok && !this.database.resources[queueName]) {
-      throw new Error(`Failed to create queue resource: ${err?.message}`);
+    if (ok) {
+      this.queueResource = this.database.resources[queueName] || this._findExistingResource([queueName]);
+    } else {
+      this.queueResource = this._findExistingResource([queueName, ...this.legacyQueueResourceNames]);
+      if (!this.queueResource) {
+        throw new Error(`Failed to create queue resource: ${err?.message}`);
+      }
     }
-
-    this.queueResource = this.database.resources[queueName];
+    this.queueResourceName = this.queueResource?.name || queueName;
 
     // Locks are now managed by PluginStorage with TTL - no Resource needed
     // Lock acquisition is handled via storage.acquireLock() with automatic expiration
@@ -616,6 +637,17 @@ export class S3QueuePlugin extends Plugin {
     // Note: message already in cache from attemptClaim()
   }
 
+  _findExistingResource(candidateNames) {
+    for (const name of candidateNames) {
+      if (!name) continue;
+      const resource = this.database.resources[name];
+      if (resource) {
+        return resource;
+      }
+    }
+    return null;
+  }
+
   async getStats() {
     const [ok, err, allMessages] = await tryFn(() =>
       this.queueResource.list()
@@ -647,9 +679,12 @@ export class S3QueuePlugin extends Plugin {
   }
 
   async createDeadLetterResource() {
+    if (!this.config.deadLetterResource) return;
+
+    const resourceName = this.config.deadLetterResource;
     const [ok, err] = await tryFn(() =>
       this.database.createResource({
-        name: this.config.deadLetterResource,
+        name: resourceName,
         attributes: {
           id: 'string|required',
           originalId: 'string|required',
@@ -664,12 +699,19 @@ export class S3QueuePlugin extends Plugin {
       })
     );
 
-    if (ok || this.database.resources[this.config.deadLetterResource]) {
-      this.deadLetterResourceObj = this.database.resources[this.config.deadLetterResource];
+    if (ok) {
+      this.deadLetterResourceObj = this.database.resources[resourceName] || this._findExistingResource([resourceName]);
+    } else {
+      this.deadLetterResourceObj = this._findExistingResource([resourceName, ...this.legacyDeadLetterResourceNames]);
+    }
 
+    if (this.deadLetterResourceObj) {
+      this.deadLetterResourceName = this.deadLetterResourceObj.name;
       if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Dead letter queue created: ${this.config.deadLetterResource}`);
+        console.log(`[S3QueuePlugin] Dead letter queue created: ${this.deadLetterResourceName}`);
       }
+    } else if (err && this.config.verbose) {
+      console.warn('[S3QueuePlugin] Failed to create dead letter resource:', err.message);
     }
   }
 }

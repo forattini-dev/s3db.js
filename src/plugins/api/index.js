@@ -64,7 +64,8 @@ function normalizeAuthConfig(authOptions = {}) {
     priorities: authOptions.priorities || {},
     resource: authOptions.resource,
     usernameField: authOptions.usernameField || 'email',
-    passwordField: authOptions.passwordField || 'password'
+    passwordField: authOptions.passwordField || 'password',
+    createResource: authOptions.createResource !== false
   };
 
   const seen = new Set();
@@ -427,6 +428,7 @@ export class ApiPlugin extends Plugin {
         );
       }
       this.usersResource = existingResource;
+      this.config.auth.resource = existingResource.name;
       if (this.config.verbose) {
         console.log(`[API Plugin] Using existing ${existingResource.name} resource for authentication`);
       }
@@ -435,6 +437,7 @@ export class ApiPlugin extends Plugin {
 
     if (existingResource) {
       this.usersResource = existingResource;
+      this.config.auth.resource = existingResource.name;
       if (this.config.verbose) {
         console.log(`[API Plugin] Reusing existing ${existingResource.name} resource for authentication`);
       }
@@ -469,6 +472,7 @@ export class ApiPlugin extends Plugin {
     }
 
     this.usersResource = resource;
+    this.config.auth.resource = resource.name;
     if (this.config.verbose) {
       console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
     }
@@ -628,17 +632,17 @@ export class ApiPlugin extends Plugin {
         ? keyGenerator(c)
         : c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || 'unknown';
 
-      // Get or create request count
-      if (!requests.has(key)) {
-        requests.set(key, { count: 0, resetAt: Date.now() + windowMs });
+      let record = requests.get(key);
+
+      // Reset expired records to prevent unbounded memory growth
+      if (record && Date.now() > record.resetAt) {
+        requests.delete(key);
+        record = null;
       }
 
-      const record = requests.get(key);
-
-      // Reset if window expired
-      if (Date.now() > record.resetAt) {
-        record.count = 0;
-        record.resetAt = Date.now() + windowMs;
+      if (!record) {
+        record = { count: 0, resetAt: Date.now() + windowMs };
+        requests.set(key, record);
       }
 
       // Check limit
@@ -742,14 +746,15 @@ export class ApiPlugin extends Plugin {
         return;
       }
 
-      // Skip if already compressed
-      if (c.res.headers.has('content-encoding')) {
+      // Skip if already compressed or body consumed
+      if (c.res.headers.has('content-encoding') || c.res.bodyUsed) {
         return;
       }
 
       // Skip if content-type should not be compressed
       const contentType = c.res.headers.get('content-type') || '';
-      if (skipContentTypes.some(type => contentType.startsWith(type))) {
+      const isTextLike = contentType.startsWith('text/') || contentType.includes('json');
+      if (skipContentTypes.some(type => contentType.startsWith(type)) || !isTextLike) {
         return;
       }
 

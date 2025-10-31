@@ -180,6 +180,21 @@ export class PuppeteerPlugin extends Plugin {
         ...options.networkMonitor
       },
 
+      // Console Monitoring
+      consoleMonitor: {
+        enabled: false,                  // Disabled by default
+        persist: false,                  // Save to S3DB
+        filters: {
+          levels: null,                  // ['error', 'warning'] or null for all
+          excludePatterns: [],           // Regex patterns to exclude
+          includeStackTraces: true,
+          includeSourceLocation: true,
+          captureNetwork: false,         // Also capture network errors
+          ...options.consoleMonitor?.filters
+        },
+        ...options.consoleMonitor
+      },
+
       // Screenshot & Recording
       screenshot: {
         fullPage: false,
@@ -243,6 +258,7 @@ export class PuppeteerPlugin extends Plugin {
     this.proxyManager = null;
     this.performanceManager = null;
     this.networkMonitor = null;
+    this.consoleMonitor = null;
     this.initialized = false;
 
     if (this.config.pool.reuseTab) {
@@ -297,6 +313,11 @@ export class PuppeteerPlugin extends Plugin {
     // Initialize network monitor
     if (this.config.networkMonitor.enabled) {
       await this._initializeNetworkMonitor();
+    }
+
+    // Initialize console monitor
+    if (this.config.consoleMonitor.enabled) {
+      await this._initializeConsoleMonitor();
     }
 
     // Pre-warm browser pool if enabled
@@ -445,6 +466,22 @@ export class PuppeteerPlugin extends Plugin {
     }
 
     this.emit('puppeteer.networkMonitor.initialized');
+  }
+
+  /**
+   * Initialize console monitor
+   * @private
+   */
+  async _initializeConsoleMonitor() {
+    const { ConsoleMonitor } = await import('./puppeteer/console-monitor.js');
+    this.consoleMonitor = new ConsoleMonitor(this);
+
+    // Initialize S3DB resources if persistence enabled
+    if (this.config.consoleMonitor.persist) {
+      await this.consoleMonitor.initialize();
+    }
+
+    this.emit('puppeteer.consoleMonitor.initialized');
   }
 
   /**

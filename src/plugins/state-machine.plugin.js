@@ -1,5 +1,6 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { resolveResourceNames } from "./concerns/resource-names.js";
 import { StateMachineError } from "./state-machine.errors.js";
 import { ErrorClassifier } from "../concerns/error-classifier.js";
 
@@ -128,6 +129,23 @@ export class StateMachinePlugin extends Plugin {
       enableEventTriggers: options.enableEventTriggers !== false,
       triggerCheckInterval: options.triggerCheckInterval || 60000 // Check triggers every 60s by default
     };
+
+    this.resourceNames = resolveResourceNames('state_machine', {
+      transitionLog: {
+        defaultName: 'plg_state_transitions',
+        override: options.transitionLogResource
+      },
+      states: {
+        defaultName: 'plg_entity_states',
+        override: options.stateResource
+      }
+    });
+    this.legacyResourceNames = {
+      transitionLog: 'plg_state_transitions',
+      states: 'plg_entity_states'
+    };
+    this.config.transitionLogResource = this.resourceNames.transitionLog;
+    this.config.stateResource = this.resourceNames.states;
 
     this.database = null;
     this.machines = new Map();

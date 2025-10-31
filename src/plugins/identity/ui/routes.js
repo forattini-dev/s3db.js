@@ -25,6 +25,7 @@ import { generateAuthCode } from '../oidc-discovery.js';
 import { tryFn } from '../../../concerns/try-fn.js';
 import { sessionAuth, adminOnly } from './middleware.js';
 import { idGenerator } from '../../../concerns/id.js';
+import { createRedirectRateLimitMiddleware } from '../concerns/rate-limit.js';
 
 /**
  * Get page component (custom or default)
@@ -133,10 +134,24 @@ export function registerUIRoutes(app, plugin) {
     }));
   });
 
+  const getClientIp = (c) =>
+    c.get('clientIp') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    'unknown';
+
+  const buildRateLimitRedirect = (retryAfter) => {
+    const seconds = Math.max(retryAfter, 1);
+    const message = seconds > 60
+      ? `Too many login attempts. Please wait ${Math.ceil(seconds / 60)} minute(s) and try again.`
+      : `Too many login attempts. Please wait ${seconds} second(s) and try again.`;
+    return `/login?error=${encodeURIComponent(message)}`;
+  };
+
   // ============================================================================
   // POST /login - Handle login form submission
   // ============================================================================
-  app.post('/login', async (c) => {
+  const loginHandler = async (c) => {
     try {
       const body = await c.req.parseBody();
       const {
@@ -148,10 +163,7 @@ export function registerUIRoutes(app, plugin) {
         mfa_challenge
       } = body;
 
-      const clientIp = c.get('clientIp') ||
-                       c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
-                       c.req.header('x-real-ip') ||
-                       'unknown';
+      const clientIp = getClientIp(c);
       const userAgent = c.req.header('user-agent') || 'unknown';
 
       const usingChallenge = Boolean(mfa_challenge);
@@ -472,7 +484,19 @@ export function registerUIRoutes(app, plugin) {
       }
       return c.redirect(`/login?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
-  });
+  };
+
+  const loginLimiter = plugin.rateLimiters?.login;
+  if (loginLimiter) {
+    const loginRateMiddleware = createRedirectRateLimitMiddleware(
+      loginLimiter,
+      getClientIp,
+      buildRateLimitRedirect
+    );
+    app.post('/login', loginRateMiddleware, loginHandler);
+  } else {
+    app.post('/login', loginHandler);
+  }
 
   // ============================================================================
   // GET /login/mfa - Show MFA verification page (two-factor authentication)
@@ -620,9 +644,7 @@ export function registerUIRoutes(app, plugin) {
       }
 
       // Get request metadata
-      const ipAddress = c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
-                        c.req.header('x-real-ip') ||
-                        'unknown';
+      const ipAddress = getClientIp(c);
 
       const initialActive = !config.registration.requireEmailVerification;
       const userRecord = {

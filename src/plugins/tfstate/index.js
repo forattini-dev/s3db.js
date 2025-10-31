@@ -249,6 +249,7 @@ import { Plugin } from '../plugin.class.js';
 import tryFn from '../../concerns/try-fn.js';
 import requirePluginDependency from '../concerns/plugin-dependencies.js';
 import { idGenerator } from '../../concerns/id.js';
+import { resolveResourceName } from '../concerns/resource-names.js';
 import {
   TfStateError,
   InvalidStateFileError,
@@ -272,9 +273,28 @@ export class TfStatePlugin extends Plugin {
 
     // Resource names
     const resources = config.resources || {};
-    this.resourceName = resources.resources || config.resourceName || 'plg_tfstate_resources';
-    this.stateFilesName = resources.stateFiles || config.stateFilesName || 'plg_tfstate_state_files';
-    this.diffsName = resources.diffs || config.diffsName || 'plg_tfstate_state_diffs';
+    this.resourceName = resolveResourceName('tfstate', {
+      defaultName: 'plg_tfstate_resources',
+      override: resources.resources || config.resourceName
+    });
+    this.stateFilesName = resolveResourceName('tfstate', {
+      defaultName: 'plg_tfstate_state_files',
+      override: resources.stateFiles || config.stateFilesName
+    });
+    this.diffsName = resolveResourceName('tfstate', {
+      defaultName: 'plg_tfstate_state_diffs',
+      override: resources.diffs || config.diffsName
+    });
+    this.lineagesName = resolveResourceName('tfstate', {
+      defaultName: 'plg_tfstate_lineages',
+      override: resources.lineages
+    });
+    this.legacyResourceNames = {
+      resources: ['plg_tfstate_resources'],
+      stateFiles: ['plg_tfstate_state_files'],
+      diffs: ['plg_tfstate_state_diffs'],
+      lineages: ['plg_tfstate_lineages']
+    };
 
     // Monitoring configuration
     const monitor = config.monitor || {};
@@ -355,7 +375,6 @@ export class TfStatePlugin extends Plugin {
 
     // Resource 0: Terraform Lineages (Master tracking resource)
     // NEW: Tracks unique Tfstate lineages for efficient diff tracking
-    this.lineagesName = 'plg_tfstate_lineages';
     this.lineagesResource = await this.database.createResource({
       name: this.lineagesName,
       attributes: {

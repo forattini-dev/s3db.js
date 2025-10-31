@@ -12,6 +12,7 @@ import {
   createLoggingMiddleware
 } from '../shared/middlewares/index.js';
 import { idGenerator } from '../../concerns/id.js';
+import { createJsonRateLimitMiddleware } from './concerns/rate-limit.js';
 
 /**
  * Create Express-style response adapter for Hono context
@@ -183,10 +184,7 @@ export class IdentityServer {
     // Global ban check middleware
     this.app.use('*', async (c, next) => {
       // Extract IP address
-      const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
-                 c.req.header('x-real-ip') ||
-                 c.env?.ip ||
-                 'unknown';
+      const ip = this._extractClientIp(c);
 
       // Store IP in context for later use
       c.set('clientIp', ip);
@@ -262,6 +260,30 @@ export class IdentityServer {
     if (this.options.verbose) {
       console.log('[Identity Server] Failban middleware enabled (global ban check)');
     }
+  }
+
+  /**
+   * Extract client IP from request
+   * @param {import('hono').Context} c
+   * @returns {string}
+   * @private
+   */
+  _extractClientIp(c) {
+    return c.get('clientIp') ||
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('x-real-ip') ||
+      c.env?.ip ||
+      'unknown';
+  }
+
+  /**
+   * Create rate limit middleware for API endpoints
+   * @param {RateLimiter} limiter
+   * @returns {Function}
+   * @private
+   */
+  _createRateLimitMiddleware(limiter) {
+    return createJsonRateLimitMiddleware(limiter, (c) => this._extractClientIp(c));
   }
 
   /**
@@ -378,68 +400,50 @@ export class IdentityServer {
       return;
     }
 
-    // OIDC Discovery endpoint
-    this.app.get('/.well-known/openid-configuration', async (c) => {
+    const rateLimiters = this.options.identityPlugin?.rateLimiters || {};
+    const wrap = (handler) => async (c) => {
       const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.discoveryHandler(req, res);
-    });
+      return await handler.call(oauth2Server, req, res);
+    };
+
+    // OIDC Discovery endpoint
+    this.app.get('/.well-known/openid-configuration', wrap(oauth2Server.discoveryHandler));
 
     // JWKS (JSON Web Key Set) endpoint
-    this.app.get('/.well-known/jwks.json', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.jwksHandler(req, res);
-    });
+    this.app.get('/.well-known/jwks.json', wrap(oauth2Server.jwksHandler));
 
     // OAuth2 Token endpoint
-    this.app.post('/oauth/token', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.tokenHandler(req, res);
-    });
+    const tokenHandler = wrap(oauth2Server.tokenHandler);
+    if (rateLimiters.token) {
+      this.app.post('/oauth/token', this._createRateLimitMiddleware(rateLimiters.token), tokenHandler);
+    } else {
+      this.app.post('/oauth/token', tokenHandler);
+    }
 
     // OIDC UserInfo endpoint
-    this.app.get('/oauth/userinfo', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.userinfoHandler(req, res);
-    });
+    this.app.get('/oauth/userinfo', wrap(oauth2Server.userinfoHandler));
 
     // Token introspection endpoint
-    this.app.post('/oauth/introspect', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.introspectHandler(req, res);
-    });
+    this.app.post('/oauth/introspect', wrap(oauth2Server.introspectHandler));
 
-    // Authorization endpoint (GET for user consent UI)
-    this.app.get('/oauth/authorize', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizeHandler(req, res);
-    });
-
-    // Authorization endpoint (POST for processing login)
-    this.app.post('/oauth/authorize', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizePostHandler(req, res);
-    });
+    // Authorization endpoints
+    const authorizeGet = wrap(oauth2Server.authorizeHandler);
+    const authorizePost = wrap(oauth2Server.authorizePostHandler);
+    if (rateLimiters.authorize) {
+      const middleware = this._createRateLimitMiddleware(rateLimiters.authorize);
+      this.app.get('/oauth/authorize', middleware, authorizeGet);
+      this.app.post('/oauth/authorize', middleware, authorizePost);
+    } else {
+      this.app.get('/oauth/authorize', authorizeGet);
+      this.app.post('/oauth/authorize', authorizePost);
+    }
 
     // Client registration endpoint
-    this.app.post('/oauth/register', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.registerClientHandler(req, res);
-    });
+    this.app.post('/oauth/register', wrap(oauth2Server.registerClientHandler));
 
     // Token revocation endpoint
-    this.app.post('/oauth/revoke', async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.revokeHandler(req, res);
-    });
+    this.app.post('/oauth/revoke', wrap(oauth2Server.revokeHandler));
 
     if (this.options.verbose) {
       console.log('[Identity Server] Mounted OAuth2/OIDC routes:');
