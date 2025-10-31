@@ -206,7 +206,7 @@ export class PuppeteerPlugin extends Plugin {
 
     // Internal state
     this.browserPool = [];
-    this.tabPool = new Map(); // browserIndex -> [pages]
+    this.tabPool = new Map(); // Browser instance -> Set<Page>
     this.userAgentGenerator = null;
     this.ghostCursor = null;
     this.cookieManager = null;
@@ -242,14 +242,14 @@ export class PuppeteerPlugin extends Plugin {
     // Import dependencies
     await this._importDependencies();
 
-    // Initialize proxy manager
-    if (this.config.proxy.enabled) {
-      await this._initializeProxyManager();
-    }
-
     // Initialize cookie manager
     if (this.config.cookies.enabled) {
       await this._initializeCookieManager();
+    }
+
+    // Initialize proxy manager (requires cookie storage for binding restore)
+    if (this.config.proxy.enabled) {
+      await this._initializeProxyManager();
     }
 
     // Pre-warm browser pool if enabled
@@ -383,7 +383,10 @@ export class PuppeteerPlugin extends Plugin {
    * @returns {Promise<Browser>}
    */
   async _createBrowser(proxy = null) {
-    const launchOptions = { ...this.config.launch };
+    const launchOptions = {
+      ...this.config.launch,
+      args: [...(this.config.launch.args || [])]
+    };
 
     // Add proxy args if provided
     if (proxy && this.proxyManager) {
@@ -399,17 +402,16 @@ export class PuppeteerPlugin extends Plugin {
     // Only add to pool if no specific proxy (shared browser)
     if (!proxy && this.config.pool.enabled) {
       this.browserPool.push(browser);
-      this.tabPool.set(this.browserPool.length - 1, []);
+      this.tabPool.set(browser, new Set());
 
       browser.on('disconnected', () => {
         const index = this.browserPool.indexOf(browser);
         if (index > -1) {
           this.browserPool.splice(index, 1);
-          this.tabPool.delete(index);
         }
+        this.tabPool.delete(browser);
       });
     }
-
     return browser;
   }
 
@@ -426,10 +428,10 @@ export class PuppeteerPlugin extends Plugin {
     }
     if (this.config.pool.enabled) {
       // Find browser with available capacity
-      for (let i = 0; i < this.browserPool.length; i++) {
-        const tabs = this.tabPool.get(i) || [];
-        if (tabs.length < this.config.pool.maxTabsPerBrowser) {
-          return this.browserPool[i];
+      for (const browser of this.browserPool) {
+        const tabs = this.tabPool.get(browser);
+        if (!tabs || tabs.size < this.config.pool.maxTabsPerBrowser) {
+          return browser;
         }
       }
 
@@ -439,18 +441,18 @@ export class PuppeteerPlugin extends Plugin {
       }
 
       // Use least loaded browser
-      let minIndex = 0;
-      let minTabs = this.tabPool.get(0)?.length || 0;
+      let targetBrowser = this.browserPool[0];
+      let minTabs = this.tabPool.get(targetBrowser)?.size || 0;
 
-      for (let i = 1; i < this.browserPool.length; i++) {
-        const tabs = this.tabPool.get(i)?.length || 0;
+      for (const browser of this.browserPool.slice(1)) {
+        const tabs = this.tabPool.get(browser)?.size || 0;
         if (tabs < minTabs) {
-          minIndex = i;
+          targetBrowser = browser;
           minTabs = tabs;
         }
       }
 
-      return this.browserPool[minIndex];
+      return targetBrowser;
     } else {
       // No pooling - create new browser every time
       return await this._createBrowser();
@@ -562,6 +564,14 @@ export class PuppeteerPlugin extends Plugin {
     // Get browser (with proxy if needed)
     const browser = await this._getBrowser(proxy);
     const page = await browser.newPage();
+    const isPooledBrowser = !proxy && this.config.pool.enabled;
+
+    if (isPooledBrowser) {
+      const tabs = this.tabPool.get(browser);
+      if (tabs) {
+        tabs.add(page);
+      }
+    }
 
     // Authenticate proxy if needed
     if (proxy && this.proxyManager) {
@@ -634,15 +644,6 @@ export class PuppeteerPlugin extends Plugin {
     // Add human behavior methods
     if (this.config.humanBehavior.enabled) {
       this._attachHumanBehaviorMethods(page);
-    }
-
-    // Save cookies if session tracking
-    if (useSession && this.cookieManager) {
-      page.on('close', async () => {
-        await this.cookieManager.saveSession(page, useSession, {
-          success: navigationSuccess
-        });
-      });
     }
 
     this.emit('puppeteer.navigate', {

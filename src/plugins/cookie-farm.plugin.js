@@ -96,11 +96,24 @@ export class CookieFarmPlugin extends Plugin {
         format: 'json', // 'json' | 'csv'
         includeCredentials: false, // Mask proxy credentials
         ...options.export
+      },
+
+      // Stealth mode (anti-detection)
+      stealth: {
+        enabled: true,
+        timingProfile: 'normal', // 'very-slow' | 'slow' | 'normal' | 'fast'
+        consistentFingerprint: true, // Maintain consistent fingerprint per persona
+        executeJSChallenges: true, // Auto-solve JS challenges
+        humanBehavior: true, // Simulate mouse/scroll/typing
+        requestPacing: true, // Throttle requests to avoid rate limits
+        geoConsistency: true, // Match timezone/language to proxy geo
+        ...options.stealth
       }
     };
 
     // Internal state
     this.puppeteerPlugin = null;
+    this.stealthManager = null;
     this.personaPool = new Map(); // personaId -> persona object
     this.initialized = false;
   }
@@ -134,6 +147,13 @@ export class CookieFarmPlugin extends Plugin {
   async onStart() {
     if (this.initialized) return;
 
+    // Initialize StealthManager if enabled
+    if (this.config.stealth.enabled) {
+      const { StealthManager } = await import('./puppeteer/stealth-manager.js');
+      this.stealthManager = new StealthManager(this);
+      this.emit('cookieFarm.stealthEnabled');
+    }
+
     // Load existing personas from storage
     await this._loadPersonaPool();
 
@@ -148,7 +168,8 @@ export class CookieFarmPlugin extends Plugin {
 
     this.initialized = true;
     this.emit('cookieFarm.started', {
-      personaCount: this.personaPool.size
+      personaCount: this.personaPool.size,
+      stealthEnabled: this.config.stealth.enabled
     });
   }
 
