@@ -43,8 +43,10 @@ Access at: http://localhost:4000/login
 - OAuth2 client management
 - Session monitoring
 
-✅ **White-Label UI**
-- 30+ theme customization options
+✅ **100% White-Label UI**
+- 30+ theme customization options (colors, fonts, logos)
+- **Custom CSS injection** - Poder total para customização
+- Tailwind 4 CDN - Classes utilitárias prontas
 - Custom page overrides
 - Responsive design
 - Social media integration
@@ -64,6 +66,7 @@ Access at: http://localhost:4000/login
 
 - **[Complete Documentation](../../../docs/plugins/identity-plugin.md)** - Full guide with all features
 - **[Configuration Reference](../../../docs/plugins/identity-config-reference.md)** - All configuration options
+- **[White-Label Guide](../../../docs/plugins/identity/WHITELABEL.md)** - 🎨 Complete branding customization guide
 - **[Examples Index](../../../docs/plugins/identity-examples.md)** - Example code and use cases
 
 ## Examples
