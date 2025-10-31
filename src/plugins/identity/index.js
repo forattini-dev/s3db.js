@@ -472,10 +472,13 @@ export class IdentityPlugin extends Plugin {
    * @private
    */
   async _createOAuth2Resources() {
+    const names = this.internalResourceNames;
+    const legacyNames = this.legacyInternalResourceNames;
+
     // 1. OAuth Keys Resource (RSA keys for token signing)
     const [okKeys, errKeys, keysResource] = await tryFn(() =>
       this.database.createResource({
-        name: 'plg_oauth_keys',
+        name: names.oauthKeys,
         attributes: {
           kid: 'string|required',
           publicKey: 'string|required',
@@ -494,12 +497,12 @@ export class IdentityPlugin extends Plugin {
     if (okKeys) {
       this.oauth2KeysResource = keysResource;
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Created plg_oauth_keys resource');
+        console.log(`[Identity Plugin] Created ${names.oauthKeys} resource`);
       }
-    } else if (this.database.resources.plg_oauth_keys) {
-      this.oauth2KeysResource = this.database.resources.plg_oauth_keys;
+    } else if (this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys]) {
+      this.oauth2KeysResource = this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys];
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Using existing plg_oauth_keys resource');
+        console.log(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
       }
     } else {
       throw errKeys;
@@ -508,7 +511,7 @@ export class IdentityPlugin extends Plugin {
     // 2. OAuth Authorization Codes Resource (authorization_code flow)
     const [okCodes, errCodes, codesResource] = await tryFn(() =>
       this.database.createResource({
-        name: 'plg_auth_codes',
+        name: names.authCodes,
         attributes: {
           code: 'string|required',
           clientId: 'string|required',
@@ -530,12 +533,12 @@ export class IdentityPlugin extends Plugin {
     if (okCodes) {
       this.oauth2AuthCodesResource = codesResource;
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Created plg_auth_codes resource');
+        console.log(`[Identity Plugin] Created ${names.authCodes} resource`);
       }
-    } else if (this.database.resources.plg_auth_codes) {
-      this.oauth2AuthCodesResource = this.database.resources.plg_auth_codes;
+    } else if (this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes]) {
+      this.oauth2AuthCodesResource = this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes];
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Using existing plg_auth_codes resource');
+        console.log(`[Identity Plugin] Using existing ${names.authCodes} resource`);
       }
     } else {
       throw errCodes;
@@ -544,7 +547,7 @@ export class IdentityPlugin extends Plugin {
     // 3. Sessions Resource (user sessions for UI/admin)
     const [okSessions, errSessions, sessionsResource] = await tryFn(() =>
       this.database.createResource({
-        name: 'plg_sessions',
+        name: names.sessions,
         attributes: {
           userId: 'string|required',
           expiresAt: 'string|required',
@@ -562,12 +565,12 @@ export class IdentityPlugin extends Plugin {
     if (okSessions) {
       this.sessionsResource = sessionsResource;
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Created plg_sessions resource');
+        console.log(`[Identity Plugin] Created ${names.sessions} resource`);
       }
-    } else if (this.database.resources.plg_sessions) {
-      this.sessionsResource = this.database.resources.plg_sessions;
+    } else if (this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions]) {
+      this.sessionsResource = this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions];
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Using existing plg_sessions resource');
+        console.log(`[Identity Plugin] Using existing ${names.sessions} resource`);
       }
     } else {
       throw errSessions;
@@ -576,7 +579,7 @@ export class IdentityPlugin extends Plugin {
     // 4. Password Reset Tokens Resource (for password reset flow)
     const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn(() =>
       this.database.createResource({
-        name: 'plg_password_reset_tokens',
+        name: names.passwordResetTokens,
         attributes: {
           userId: 'string|required',
           token: 'string|required',
@@ -593,12 +596,12 @@ export class IdentityPlugin extends Plugin {
     if (okResetTokens) {
       this.passwordResetTokensResource = resetTokensResource;
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Created plg_password_reset_tokens resource');
+        console.log(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
       }
-    } else if (this.database.resources.plg_password_reset_tokens) {
-      this.passwordResetTokensResource = this.database.resources.plg_password_reset_tokens;
+    } else if (this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens]) {
+      this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens];
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Using existing plg_password_reset_tokens resource');
+        console.log(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
       }
     } else {
       throw errResetTokens;
@@ -608,7 +611,7 @@ export class IdentityPlugin extends Plugin {
     if (this.config.mfa.enabled) {
       const [okMFA, errMFA, mfaResource] = await tryFn(() =>
         this.database.createResource({
-          name: 'plg_mfa_devices',
+          name: names.mfaDevices,
           attributes: {
             userId: 'string|required',
             type: 'string|required',              // 'totp', 'sms', 'email'
@@ -634,15 +637,15 @@ export class IdentityPlugin extends Plugin {
       if (okMFA) {
         this.mfaDevicesResource = mfaResource;
         if (this.config.verbose) {
-          console.log('[Identity Plugin] Created plg_mfa_devices resource');
+          console.log(`[Identity Plugin] Created ${names.mfaDevices} resource`);
         }
-      } else if (this.database.resources.plg_mfa_devices) {
-        this.mfaDevicesResource = this.database.resources.plg_mfa_devices;
+      } else if (this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices]) {
+        this.mfaDevicesResource = this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices];
         if (this.config.verbose) {
-          console.log('[Identity Plugin] Using existing plg_mfa_devices resource');
+          console.log(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
         }
       } else {
-        console.warn('[Identity Plugin] MFA enabled but failed to create plg_mfa_devices resource:', errMFA?.message);
+        console.warn(`[Identity Plugin] MFA enabled but failed to create ${names.mfaDevices} resource:`, errMFA?.message);
       }
     }
   }
@@ -1053,7 +1056,19 @@ export class IdentityPlugin extends Plugin {
 
     // Optionally delete OAuth2 resources
     if (purgeData) {
-      const resourcesToDelete = ['plg_oauth_keys', 'plg_oauth_clients', 'plg_auth_codes'];
+      const resourcesToDelete = new Set([
+        this.internalResourceNames.oauthKeys,
+        this.internalResourceNames.authCodes,
+        this.internalResourceNames.sessions,
+        this.internalResourceNames.passwordResetTokens,
+        this.internalResourceNames.mfaDevices,
+        this.legacyInternalResourceNames.oauthKeys,
+        this.legacyInternalResourceNames.authCodes,
+        this.legacyInternalResourceNames.sessions,
+        this.legacyInternalResourceNames.passwordResetTokens,
+        this.legacyInternalResourceNames.mfaDevices,
+        'plg_oauth_clients'
+      ]);
 
       for (const resourceName of resourcesToDelete) {
         const [ok] = await tryFn(() => this.database.deleteResource(resourceName));

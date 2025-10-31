@@ -37,6 +37,7 @@ import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
 import { ApiServer } from './server.js';
 import { idGenerator } from '../../concerns/id.js';
+import { resolveResourceName } from '../concerns/resource-names.js';
 
 const AUTH_DRIVER_KEYS = ['jwt', 'apiKey', 'basic', 'oidc', 'oauth2'];
 
@@ -131,6 +132,12 @@ export class ApiPlugin extends Plugin {
     super(options);
 
     const normalizedAuth = normalizeAuthConfig(options.auth);
+    this.usersResourceName = resolveResourceName('api', {
+      defaultName: 'plg_api_users',
+      override: normalizedAuth.resource
+    });
+    this.legacyUsersResourceNames = ['plg_users'];
+    normalizedAuth.resource = this.usersResourceName;
 
     this.config = {
       // Server configuration
@@ -412,7 +419,7 @@ export class ApiPlugin extends Plugin {
   async _createUsersResource() {
     const [ok, err, resource] = await tryFn(() =>
       this.database.createResource({
-        name: 'plg_users',
+        name: this.usersResourceName,
         attributes: {
           id: 'string|required',
           username: 'string|required|minlength:3',
@@ -436,16 +443,24 @@ export class ApiPlugin extends Plugin {
     if (ok) {
       this.usersResource = resource;
       if (this.config.verbose) {
-        console.log('[API Plugin] Created plg_users resource for authentication');
-      }
-    } else if (this.database.resources.plg_users) {
-      // Resource already exists
-      this.usersResource = this.database.resources.plg_users;
-      if (this.config.verbose) {
-        console.log('[API Plugin] Using existing plg_users resource');
+        console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
       }
     } else {
-      throw err;
+      const existing =
+        this.database.resources[this.usersResourceName] ||
+        this.legacyUsersResourceNames
+          .map((name) => this.database.resources[name])
+          .find(Boolean);
+
+      // Resource already exists
+      if (existing) {
+        this.usersResource = existing;
+        if (this.config.verbose) {
+          console.log(`[API Plugin] Using existing ${existing.name} resource`);
+        }
+      } else {
+        throw err;
+      }
     }
   }
   /**
