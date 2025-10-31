@@ -47268,9 +47268,9 @@ var html = (strings, ...values) => {
   return buffer.length === 1 ? "callbacks" in buffer ? raw(resolveCallbackSync(raw(buffer[0], buffer.callbacks))) : raw(buffer[0]) : stringBufferToString(buffer, buffer.callbacks);
 };
 
-var __freeze$1 = Object.freeze;
-var __defProp$1 = Object.defineProperty;
-var __template$1 = (cooked, raw) => __freeze$1(__defProp$1(cooked, "raw", { value: __freeze$1(cooked.slice()) }));
+var __freeze$4 = Object.freeze;
+var __defProp$4 = Object.defineProperty;
+var __template$4 = (cooked, raw) => __freeze$4(__defProp$4(cooked, "raw", { value: __freeze$4(cooked.slice()) }));
 const __filename$1 = url.fileURLToPath((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (_documentCurrentScript && _documentCurrentScript.tagName.toUpperCase() === 'SCRIPT' && _documentCurrentScript.src || new URL('s3db.cjs', document.baseURI).href)));
 const __dirname$1 = path.dirname(__filename$1);
 const cssPath = path.join(__dirname$1, "../styles/main.css");
@@ -47298,7 +47298,7 @@ function hexToRgba(hex, alpha = 1) {
   }
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
-var _a$1;
+var _a$4;
 function BaseLayout(props) {
   const {
     title = "Identity Provider",
@@ -47398,7 +47398,7 @@ function BaseLayout(props) {
       ` : ""}
     </div>
   ` : "";
-  return html(_a$1 || (_a$1 = __template$1(['<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">\n  <meta http-equiv="x-ua-compatible" content="ie=edge">\n  <meta name="description" content="', '">\n  <title>', " - ", "</title>\n\n  ", `
+  return html(_a$4 || (_a$4 = __template$4(['<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">\n  <meta http-equiv="x-ua-compatible" content="ie=edge">\n  <meta name="description" content="', '">\n  <title>', " - ", "</title>\n\n  ", `
 
   <script>
     window.tailwind = window.tailwind || {};
@@ -48564,10 +48564,10 @@ function AdminClientsPage(props = {}) {
   });
 }
 
-var __freeze = Object.freeze;
-var __defProp = Object.defineProperty;
-var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(cooked.slice()) }));
-var _a;
+var __freeze$3 = Object.freeze;
+var __defProp$3 = Object.defineProperty;
+var __template$3 = (cooked, raw) => __freeze$3(__defProp$3(cooked, "raw", { value: __freeze$3(cooked.slice()) }));
+var _a$3;
 function AdminClientFormPage(props = {}) {
   const {
     client = null,
@@ -48608,7 +48608,7 @@ function AdminClientFormPage(props = {}) {
     "inline-flex items-center justify-center rounded-2xl border border-red-400/40 bg-red-500/10",
     "px-4 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/15 focus:outline-none focus:ring-2 focus:ring-red-400/40"
   ].join(" ");
-  const content = html(_a || (_a = __template(['\n    <section class="mx-auto w-full max-w-4xl space-y-8 text-slate-100">\n      <header>\n        <a href="/admin/clients" class="text-sm font-semibold text-primary transition hover:text-white">\n          \u2190 Back to Clients\n        </a>\n        <h1 class="mt-3 text-3xl font-semibold text-white md:text-4xl">\n          ', ' OAuth2 Client\n        </h1>\n        <p class="mt-2 text-sm text-slate-300">\n          Configure redirect URIs, grant types, and scopes available for this client.\n        </p>\n      </header>\n\n      <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-8 shadow-xl shadow-black/30 backdrop-blur">\n        <form method="POST" action="', '" class="space-y-6">\n          <div class="space-y-2">\n            <label for="name" class="text-sm font-semibold text-slate-200">Client Name</label>\n            <input\n              type="text"\n              class="', " ", '"\n              id="name"\n              name="name"\n              value="', '"\n              required\n              autofocus\n              placeholder="My Application"\n            />\n            <p class="text-xs text-slate-400">A friendly name for this OAuth2 client</p>\n            ', '\n          </div>\n\n          <div class="space-y-3">\n            <label class="text-sm font-semibold text-slate-200">Redirect URIs</label>\n            <div id="redirect-uris-container" class="space-y-2">\n              ', '\n            </div>\n            <button type="button" class="', '" onclick="addRedirectUri()">\n              + Add Another URI\n            </button>\n            <p class="text-xs text-slate-400">\n              Where users will be redirected after authorization.\n            </p>\n          </div>\n\n          <div class="space-y-2">\n            <label class="text-sm font-semibold text-slate-200">Grant Types</label>\n            <div class="grid gap-2 sm:grid-cols-2">\n              ', '\n            </div>\n            <p class="text-xs text-slate-400">OAuth2 grant types this client can use.</p>\n          </div>\n\n          <div class="space-y-2">\n            <label class="text-sm font-semibold text-slate-200">Allowed Scopes</label>\n            <div class="grid gap-2 sm:grid-cols-2">\n              ', '\n            </div>\n            <p class="text-xs text-slate-400">Scopes this client is allowed to request.</p>\n          </div>\n\n          <label class="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200">\n            <input\n              type="checkbox"\n              class="', ' mt-1"\n              id="active"\n              name="active"\n              value="1"\n              ', '\n            />\n            <span>\n              <strong class="text-white">Active</strong>\n              <br>\n              Client can authenticate and receive tokens.\n            </span>\n          </label>\n\n          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-start">\n            <button type="submit" class="', ' sm:w-auto" style="box-shadow: 0 18px 45px var(--color-primary-glow);">\n              ', '\n            </button>\n            <a href="/admin/clients" class="', '">\n              Cancel\n            </a>\n          </div>\n        </form>\n      </div>\n\n      ', "\n    </section>\n\n    <script>\n      const redirectInputClasses = ", ";\n      const dangerButtonClasses = ", ";\n\n      function addRedirectUri() {\n        const container = document.getElementById('redirect-uris-container');\n        const wrapper = document.createElement('div');\n        wrapper.className = 'flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3';\n\n        const input = document.createElement('input');\n        input.type = 'url';\n        input.name = 'redirectUris[]';\n        input.required = true;\n        input.placeholder = 'https://example.com/callback';\n        input.className = redirectInputClasses;\n\n        const button = document.createElement('button');\n        button.type = 'button';\n        button.className = dangerButtonClasses + ' shrink-0';\n        button.textContent = '\u2715';\n        button.addEventListener('click', () => wrapper.remove());\n\n        wrapper.appendChild(input);\n        wrapper.appendChild(button);\n        container.appendChild(wrapper);\n      }\n    <\/script>\n  "])), isEditMode ? "Edit" : "Create", isEditMode ? `/admin/clients/${client.id}/update` : "/admin/clients/create", inputClasses, error ? "border-red-400/60 focus:border-red-400 focus:ring-red-400/40" : "", clientData.name, error ? html`<p class="text-xs text-red-200">${error}</p>` : "", (Array.isArray(clientData.redirectUris) ? clientData.redirectUris : [""]).map((uri, index) => html`
+  const content = html(_a$3 || (_a$3 = __template$3(['\n    <section class="mx-auto w-full max-w-4xl space-y-8 text-slate-100">\n      <header>\n        <a href="/admin/clients" class="text-sm font-semibold text-primary transition hover:text-white">\n          \u2190 Back to Clients\n        </a>\n        <h1 class="mt-3 text-3xl font-semibold text-white md:text-4xl">\n          ', ' OAuth2 Client\n        </h1>\n        <p class="mt-2 text-sm text-slate-300">\n          Configure redirect URIs, grant types, and scopes available for this client.\n        </p>\n      </header>\n\n      <div class="rounded-3xl border border-white/10 bg-white/[0.05] p-8 shadow-xl shadow-black/30 backdrop-blur">\n        <form method="POST" action="', '" class="space-y-6">\n          <div class="space-y-2">\n            <label for="name" class="text-sm font-semibold text-slate-200">Client Name</label>\n            <input\n              type="text"\n              class="', " ", '"\n              id="name"\n              name="name"\n              value="', '"\n              required\n              autofocus\n              placeholder="My Application"\n            />\n            <p class="text-xs text-slate-400">A friendly name for this OAuth2 client</p>\n            ', '\n          </div>\n\n          <div class="space-y-3">\n            <label class="text-sm font-semibold text-slate-200">Redirect URIs</label>\n            <div id="redirect-uris-container" class="space-y-2">\n              ', '\n            </div>\n            <button type="button" class="', '" onclick="addRedirectUri()">\n              + Add Another URI\n            </button>\n            <p class="text-xs text-slate-400">\n              Where users will be redirected after authorization.\n            </p>\n          </div>\n\n          <div class="space-y-2">\n            <label class="text-sm font-semibold text-slate-200">Grant Types</label>\n            <div class="grid gap-2 sm:grid-cols-2">\n              ', '\n            </div>\n            <p class="text-xs text-slate-400">OAuth2 grant types this client can use.</p>\n          </div>\n\n          <div class="space-y-2">\n            <label class="text-sm font-semibold text-slate-200">Allowed Scopes</label>\n            <div class="grid gap-2 sm:grid-cols-2">\n              ', '\n            </div>\n            <p class="text-xs text-slate-400">Scopes this client is allowed to request.</p>\n          </div>\n\n          <label class="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200">\n            <input\n              type="checkbox"\n              class="', ' mt-1"\n              id="active"\n              name="active"\n              value="1"\n              ', '\n            />\n            <span>\n              <strong class="text-white">Active</strong>\n              <br>\n              Client can authenticate and receive tokens.\n            </span>\n          </label>\n\n          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-start">\n            <button type="submit" class="', ' sm:w-auto" style="box-shadow: 0 18px 45px var(--color-primary-glow);">\n              ', '\n            </button>\n            <a href="/admin/clients" class="', '">\n              Cancel\n            </a>\n          </div>\n        </form>\n      </div>\n\n      ', "\n    </section>\n\n    <script>\n      const redirectInputClasses = ", ";\n      const dangerButtonClasses = ", ";\n\n      function addRedirectUri() {\n        const container = document.getElementById('redirect-uris-container');\n        const wrapper = document.createElement('div');\n        wrapper.className = 'flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3';\n\n        const input = document.createElement('input');\n        input.type = 'url';\n        input.name = 'redirectUris[]';\n        input.required = true;\n        input.placeholder = 'https://example.com/callback';\n        input.className = redirectInputClasses;\n\n        const button = document.createElement('button');\n        button.type = 'button';\n        button.className = dangerButtonClasses + ' shrink-0';\n        button.textContent = '\u2715';\n        button.addEventListener('click', () => wrapper.remove());\n\n        wrapper.appendChild(input);\n        wrapper.appendChild(button);\n        container.appendChild(wrapper);\n      }\n    <\/script>\n  "])), isEditMode ? "Edit" : "Create", isEditMode ? `/admin/clients/${client.id}/update` : "/admin/clients/create", inputClasses, error ? "border-red-400/60 focus:border-red-400 focus:ring-red-400/40" : "", clientData.name, error ? html`<p class="text-xs text-red-200">${error}</p>` : "", (Array.isArray(clientData.redirectUris) ? clientData.redirectUris : [""]).map((uri, index) => html`
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
                   <input
                     type="url"
@@ -49526,6 +49526,444 @@ function VerifyEmailPage(props = {}) {
   });
 }
 
+var __freeze$2 = Object.freeze;
+var __defProp$2 = Object.defineProperty;
+var __template$2 = (cooked, raw) => __freeze$2(__defProp$2(cooked, "raw", { value: __freeze$2(cooked.slice()) }));
+var _a$2;
+function MFAVerificationPage(props = {}) {
+  const { error = null, token, remember = "", config = {} } = props;
+  let userData = { email: "", password: "" };
+  try {
+    userData = JSON.parse(token);
+  } catch (err) {
+  }
+  const content = html(_a$2 || (_a$2 = __template$2(['\n    <section class="identity-login">\n      <!-- Left panel with branding -->\n      <aside class="identity-login__panel">\n        <div class="identity-login__panel-content">\n          <div class="identity-login__brand">\n            ', '\n            <span class="identity-login__badge">\n              Identity\n            </span>\n          </div>\n\n          <div class="identity-login__panel-main">\n            <h1 class="identity-login__panel-title">\u{1F510} Two-Factor Authentication</h1>\n            <p class="identity-login__panel-text">\n              An extra layer of security to keep your account safe.\n            </p>\n          </div>\n        </div>\n\n        <footer class="identity-login__panel-footer">\n          ', '\n        </footer>\n      </aside>\n\n      <!-- Right form area -->\n      <div class="identity-login__form">\n        <header class="identity-login__form-header">\n          <h2>Verify Your Identity</h2>\n          <p>Enter the 6-digit code from your authenticator app.</p>\n        </header>\n\n        ', '\n\n        <!-- TOTP Token Form -->\n        <form method="POST" action="/login" class="identity-login__form-body" id="mfa-form">\n          <input type="hidden" name="email" value="', '" />\n          <input type="hidden" name="password" value="', '" />\n          <input type="hidden" name="remember" value="', '" />\n\n          <div class="identity-login__group">\n            <label for="mfa_token">Verification Code</label>\n            <input\n              type="text"\n              class="identity-login__input text-center text-2xl tracking-widest"\n              id="mfa_token"\n              name="mfa_token"\n              pattern="[0-9]{6}"\n              maxlength="6"\n              inputmode="numeric"\n              autocomplete="one-time-code"\n              placeholder="000000"\n              required\n              autofocus\n            />\n            <p class="mt-2 text-sm text-slate-400">\n              The code refreshes every 30 seconds\n            </p>\n          </div>\n\n          <button type="submit" class="identity-login__submit">\n            Verify\n          </button>\n        </form>\n\n        <!-- Backup Code Link -->\n        <div class="identity-login__divider"><span>or</span></div>\n\n        <button\n          type="button"\n          onclick="showBackupCodeForm()"\n          class="w-full rounded-xl border border-slate-700/50 bg-slate-800/30 px-4 py-3 text-sm font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n        >\n          Lost your device? Use backup code\n        </button>\n\n        <!-- Backup Code Form (hidden by default) -->\n        <form method="POST" action="/login" class="identity-login__form-body mt-6 hidden" id="backup-code-form">\n          <input type="hidden" name="email" value="', '" />\n          <input type="hidden" name="password" value="', '" />\n          <input type="hidden" name="remember" value="', `" />
+
+          <div class="identity-login__group">
+            <label for="backup_code">Backup Code</label>
+            <input
+              type="text"
+              class="identity-login__input text-center uppercase tracking-wider"
+              id="backup_code"
+              name="backup_code"
+              maxlength="16"
+              autocomplete="off"
+              placeholder="XXXXXXXX"
+              style="text-transform: uppercase;"
+            />
+            <p class="mt-2 text-sm text-slate-400">
+              Enter one of your 8-character backup codes
+            </p>
+          </div>
+
+          <button type="submit" class="identity-login__submit">
+            Verify with Backup Code
+          </button>
+
+          <button
+            type="button"
+            onclick="showMFAForm()"
+            class="mt-3 w-full rounded-xl border border-slate-700/50 bg-transparent px-4 py-3 text-sm font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/30"
+          >
+            \u2190 Back to authenticator
+          </button>
+        </form>
+
+        <!-- Back to Login Link -->
+        <p class="identity-login__meta mt-6">
+          <a href="/login">\u2190 Back to login</a>
+        </p>
+      </div>
+    </section>
+
+    <script>
+      function showBackupCodeForm() {
+        document.getElementById('mfa-form').classList.add('hidden');
+        document.getElementById('backup-code-form').classList.remove('hidden');
+        document.getElementById('backup_code').focus();
+      }
+
+      function showMFAForm() {
+        document.getElementById('mfa-form').classList.remove('hidden');
+        document.getElementById('backup-code-form').classList.add('hidden');
+        document.getElementById('mfa_token').focus();
+      }
+    <\/script>
+  `])), config.logoUrl ? html`
+              <img src="${config.logoUrl}" alt="${config.title || "Identity Logo"}" class="identity-login__brand-logo" />
+            ` : "", config.footerText || `\xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ${config.legalName || config.companyName || "S3DB Corp"} \u2022 All rights reserved`, error ? html`
+          <div class="identity-login__alert identity-login__alert--error">
+            ${error}
+          </div>
+        ` : "", userData.email, userData.password, remember, userData.email, userData.password, remember);
+  return BaseLayout({
+    title: "Two-Factor Authentication",
+    content,
+    config,
+    error: null,
+    // Error shown in form
+    success: null
+  });
+}
+
+var __freeze$1 = Object.freeze;
+var __defProp$1 = Object.defineProperty;
+var __template$1 = (cooked, raw) => __freeze$1(__defProp$1(cooked, "raw", { value: __freeze$1(raw || cooked.slice()) }));
+var _a$1;
+function MFAEnrollmentPage(props = {}) {
+  const { qrCodeDataUrl, secret, backupCodes = [], config = {} } = props;
+  const content = html(_a$1 || (_a$1 = __template$1(['\n    <div class="mx-auto w-full max-w-2xl px-4 py-12">\n      <div class="rounded-3xl border border-slate-700/50 bg-slate-900/50 p-8 shadow-2xl backdrop-blur-xl md:p-12">\n        <!-- Header -->\n        <div class="mb-8 text-center">\n          <div class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 text-3xl shadow-lg shadow-blue-500/30">\n            \u{1F510}\n          </div>\n          <h1 class="mb-2 text-3xl font-bold text-white">\n            Enable Two-Factor Authentication\n          </h1>\n          <p class="text-slate-400">\n            Scan the QR code below with your authenticator app\n          </p>\n        </div>\n\n        <!-- QR Code Section -->\n        <div class="mb-8 rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">\n          <h2 class="mb-4 text-center text-lg font-semibold text-white">\n            Step 1: Scan QR Code\n          </h2>\n\n          <div class="mb-4 flex justify-center">\n            <div class="rounded-2xl border-4 border-white bg-white p-4">\n              <img src="', `" alt="QR Code" class="h-64 w-64" />
+            </div>
+          </div>
+
+          <p class="text-center text-sm text-slate-400">
+            Use Google Authenticator, Authy, Microsoft Authenticator,<br/>
+            1Password, or any TOTP-compatible app
+          </p>
+        </div>
+
+        <!-- Manual Entry Section -->
+        <div class="mb-8 rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">
+          <h2 class="mb-3 text-center text-lg font-semibold text-white">
+            Can't scan? Enter manually
+          </h2>
+
+          <div class="rounded-xl bg-slate-900/50 px-4 py-3">
+            <code class="block text-center font-mono text-lg tracking-wider text-blue-400">
+              `, '\n            </code>\n          </div>\n\n          <p class="mt-3 text-center text-sm text-slate-400">\n            Copy this key into your authenticator app\n          </p>\n        </div>\n\n        <!-- Backup Codes Section -->\n        <div class="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">\n          <div class="mb-4 flex items-start gap-3">\n            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl">\n              \u26A0\uFE0F\n            </div>\n            <div>\n              <h2 class="mb-1 text-lg font-semibold text-amber-200">\n                Save These Backup Codes\n              </h2>\n              <p class="text-sm text-amber-300/80">\n                You can use these codes to access your account if you lose your authenticator device. Each code can only be used once.\n              </p>\n            </div>\n          </div>\n\n          <div class="mb-4 grid grid-cols-2 gap-3">\n            ', '\n          </div>\n\n          <button\n            type="button"\n            onclick="downloadBackupCodes()"\n            class="w-full rounded-xl border border-amber-500/50 bg-amber-500/20 px-4 py-3 font-medium text-amber-200 transition-all hover:border-amber-500/70 hover:bg-amber-500/30"\n          >\n            \u{1F4BE} Download Backup Codes\n          </button>\n        </div>\n\n        <!-- Verification Form -->\n        <form method="POST" action="/profile/mfa/enroll" class="space-y-4">\n          <input type="hidden" name="enrollment_secret" value="', '" />\n          <input type="hidden" name="enrollment_backup_codes" value="', '" />\n\n          <div>\n            <label for="token" class="mb-2 block text-center text-lg font-semibold text-white">\n              Step 2: Verify Setup\n            </label>\n            <p class="mb-3 text-center text-sm text-slate-400">\n              Enter the 6-digit code from your authenticator app\n            </p>\n            <input\n              type="text"\n              id="token"\n              name="token"\n              pattern="[0-9]{6}"\n              maxlength="6"\n              inputmode="numeric"\n              autocomplete="one-time-code"\n              placeholder="000000"\n              required\n              autofocus\n              class="w-full rounded-xl border border-slate-700/50 bg-slate-800/50 px-6 py-4 text-center text-2xl tracking-widest text-white placeholder-slate-500 outline-none transition-all focus:border-blue-500/50 focus:bg-slate-800/70 focus:ring-4 focus:ring-blue-500/20"\n            />\n          </div>\n\n          <div class="flex gap-3">\n            <button\n              type="submit"\n              class="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40"\n            >\n              \u2713 Verify and Enable MFA\n            </button>\n            <a\n              href="/profile"\n              class="flex items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n            >\n              Cancel\n            </a>\n          </div>\n        </form>\n\n        <!-- Help Text -->\n        <p class="mt-6 text-center text-sm text-slate-500">\n          Need help? Check our <a href="#" class="text-blue-400 hover:text-blue-300">MFA setup guide</a>\n        </p>\n      </div>\n    </div>\n\n    <script>\n      function downloadBackupCodes() {\n        const codes = ', ";\n        const title = '", "';\n        const text = 'MFA Backup Codes - ' + title + '\\n\\n' +\n                     'Generated: ' + new Date().toISOString() + '\\n\\n' +\n                     codes.join('\\n') + '\\n\\n' +\n                     '\u26A0\uFE0F  IMPORTANT:\\n' +\n                     '- Keep these codes in a safe place\\n' +\n                     '- Each code can only be used once\\n' +\n                     '- You can regenerate codes anytime from your profile\\n';\n\n        const blob = new Blob([text], { type: 'text/plain' });\n        const url = URL.createObjectURL(blob);\n        const a = document.createElement('a');\n        a.href = url;\n        a.download = 'mfa-backup-codes-' + new Date().toISOString().split('T')[0] + '.txt';\n        a.click();\n        URL.revokeObjectURL(url);\n      }\n    <\/script>\n  "], ['\n    <div class="mx-auto w-full max-w-2xl px-4 py-12">\n      <div class="rounded-3xl border border-slate-700/50 bg-slate-900/50 p-8 shadow-2xl backdrop-blur-xl md:p-12">\n        <!-- Header -->\n        <div class="mb-8 text-center">\n          <div class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 text-3xl shadow-lg shadow-blue-500/30">\n            \u{1F510}\n          </div>\n          <h1 class="mb-2 text-3xl font-bold text-white">\n            Enable Two-Factor Authentication\n          </h1>\n          <p class="text-slate-400">\n            Scan the QR code below with your authenticator app\n          </p>\n        </div>\n\n        <!-- QR Code Section -->\n        <div class="mb-8 rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">\n          <h2 class="mb-4 text-center text-lg font-semibold text-white">\n            Step 1: Scan QR Code\n          </h2>\n\n          <div class="mb-4 flex justify-center">\n            <div class="rounded-2xl border-4 border-white bg-white p-4">\n              <img src="', `" alt="QR Code" class="h-64 w-64" />
+            </div>
+          </div>
+
+          <p class="text-center text-sm text-slate-400">
+            Use Google Authenticator, Authy, Microsoft Authenticator,<br/>
+            1Password, or any TOTP-compatible app
+          </p>
+        </div>
+
+        <!-- Manual Entry Section -->
+        <div class="mb-8 rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">
+          <h2 class="mb-3 text-center text-lg font-semibold text-white">
+            Can't scan? Enter manually
+          </h2>
+
+          <div class="rounded-xl bg-slate-900/50 px-4 py-3">
+            <code class="block text-center font-mono text-lg tracking-wider text-blue-400">
+              `, '\n            </code>\n          </div>\n\n          <p class="mt-3 text-center text-sm text-slate-400">\n            Copy this key into your authenticator app\n          </p>\n        </div>\n\n        <!-- Backup Codes Section -->\n        <div class="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">\n          <div class="mb-4 flex items-start gap-3">\n            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl">\n              \u26A0\uFE0F\n            </div>\n            <div>\n              <h2 class="mb-1 text-lg font-semibold text-amber-200">\n                Save These Backup Codes\n              </h2>\n              <p class="text-sm text-amber-300/80">\n                You can use these codes to access your account if you lose your authenticator device. Each code can only be used once.\n              </p>\n            </div>\n          </div>\n\n          <div class="mb-4 grid grid-cols-2 gap-3">\n            ', '\n          </div>\n\n          <button\n            type="button"\n            onclick="downloadBackupCodes()"\n            class="w-full rounded-xl border border-amber-500/50 bg-amber-500/20 px-4 py-3 font-medium text-amber-200 transition-all hover:border-amber-500/70 hover:bg-amber-500/30"\n          >\n            \u{1F4BE} Download Backup Codes\n          </button>\n        </div>\n\n        <!-- Verification Form -->\n        <form method="POST" action="/profile/mfa/enroll" class="space-y-4">\n          <input type="hidden" name="enrollment_secret" value="', '" />\n          <input type="hidden" name="enrollment_backup_codes" value="', '" />\n\n          <div>\n            <label for="token" class="mb-2 block text-center text-lg font-semibold text-white">\n              Step 2: Verify Setup\n            </label>\n            <p class="mb-3 text-center text-sm text-slate-400">\n              Enter the 6-digit code from your authenticator app\n            </p>\n            <input\n              type="text"\n              id="token"\n              name="token"\n              pattern="[0-9]{6}"\n              maxlength="6"\n              inputmode="numeric"\n              autocomplete="one-time-code"\n              placeholder="000000"\n              required\n              autofocus\n              class="w-full rounded-xl border border-slate-700/50 bg-slate-800/50 px-6 py-4 text-center text-2xl tracking-widest text-white placeholder-slate-500 outline-none transition-all focus:border-blue-500/50 focus:bg-slate-800/70 focus:ring-4 focus:ring-blue-500/20"\n            />\n          </div>\n\n          <div class="flex gap-3">\n            <button\n              type="submit"\n              class="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40"\n            >\n              \u2713 Verify and Enable MFA\n            </button>\n            <a\n              href="/profile"\n              class="flex items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n            >\n              Cancel\n            </a>\n          </div>\n        </form>\n\n        <!-- Help Text -->\n        <p class="mt-6 text-center text-sm text-slate-500">\n          Need help? Check our <a href="#" class="text-blue-400 hover:text-blue-300">MFA setup guide</a>\n        </p>\n      </div>\n    </div>\n\n    <script>\n      function downloadBackupCodes() {\n        const codes = ', ";\n        const title = '", "';\n        const text = 'MFA Backup Codes - ' + title + '\\\\n\\\\n' +\n                     'Generated: ' + new Date().toISOString() + '\\\\n\\\\n' +\n                     codes.join('\\\\n') + '\\\\n\\\\n' +\n                     '\u26A0\uFE0F  IMPORTANT:\\\\n' +\n                     '- Keep these codes in a safe place\\\\n' +\n                     '- Each code can only be used once\\\\n' +\n                     '- You can regenerate codes anytime from your profile\\\\n';\n\n        const blob = new Blob([text], { type: 'text/plain' });\n        const url = URL.createObjectURL(blob);\n        const a = document.createElement('a');\n        a.href = url;\n        a.download = 'mfa-backup-codes-' + new Date().toISOString().split('T')[0] + '.txt';\n        a.click();\n        URL.revokeObjectURL(url);\n      }\n    <\/script>\n  "])), qrCodeDataUrl, secret, backupCodes.map((code) => html`
+              <div class="rounded-lg bg-slate-900/50 px-4 py-2 text-center">
+                <code class="font-mono text-sm text-slate-200">${code}</code>
+              </div>
+            `), secret, JSON.stringify(backupCodes), JSON.stringify(backupCodes), config.title || "S3DB Identity");
+  return BaseLayout({
+    title: "Enable Two-Factor Authentication",
+    content,
+    config,
+    error: null,
+    success: null
+  });
+}
+
+var __freeze = Object.freeze;
+var __defProp = Object.defineProperty;
+var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
+var _a;
+function MFABackupCodesPage(props = {}) {
+  const { backupCodes = [], config = {} } = props;
+  const content = html(_a || (_a = __template([`
+    <div class="mx-auto w-full max-w-2xl px-4 py-12">
+      <div class="rounded-3xl border border-slate-700/50 bg-slate-900/50 p-8 shadow-2xl backdrop-blur-xl md:p-12">
+        <!-- Header -->
+        <div class="mb-8 text-center">
+          <div class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-3xl shadow-lg shadow-emerald-500/30">
+            \u2705
+          </div>
+          <h1 class="mb-2 text-3xl font-bold text-white">
+            New Backup Codes Generated
+          </h1>
+          <p class="text-slate-400">
+            Your old backup codes have been invalidated
+          </p>
+        </div>
+
+        <!-- Warning Section -->
+        <div class="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">
+          <div class="flex items-start gap-3">
+            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl">
+              \u26A0\uFE0F
+            </div>
+            <div>
+              <h2 class="mb-1 text-lg font-semibold text-amber-200">
+                Important: Save These Codes
+              </h2>
+              <p class="text-sm text-amber-300/80">
+                These codes replace your previous backup codes. Save them in a secure location now - you won't be able to see them again.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Backup Codes Grid -->
+        <div class="mb-8 rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">
+          <h2 class="mb-4 text-center text-lg font-semibold text-white">
+            Your New Backup Codes
+          </h2>
+
+          <div class="mb-6 grid grid-cols-2 gap-3">
+            `, '\n          </div>\n\n          <div class="space-y-3">\n            <button\n              type="button"\n              onclick="downloadBackupCodes()"\n              class="w-full rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40"\n            >\n              \u{1F4BE} Download Backup Codes\n            </button>\n\n            <button\n              type="button"\n              onclick="copyAllCodes()"\n              class="w-full rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n              id="copy-button"\n            >\n              \u{1F4CB} Copy to Clipboard\n            </button>\n          </div>\n        </div>\n\n        <!-- Instructions -->\n        <div class="mb-8 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-6">\n          <h3 class="mb-3 text-lg font-semibold text-blue-200">\n            How to Use Backup Codes\n          </h3>\n          <ul class="space-y-2 text-sm text-blue-300/80">\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>Each code can only be used once for login</span>\n            </li>\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>Use them if you lose access to your authenticator app</span>\n            </li>\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>Store them in a secure password manager like 1Password</span>\n            </li>\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>You can regenerate codes anytime from your profile</span>\n            </li>\n          </ul>\n        </div>\n\n        <!-- Actions -->\n        <div class="flex gap-3">\n          <a\n            href="/profile"\n            class="flex-1 rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 text-center font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n          >\n            \u2190 Back to Profile\n          </a>\n        </div>\n\n        <!-- Footer Warning -->\n        <div class="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">\n          <p class="text-center text-sm text-red-300">\n            \u26A0\uFE0F Your previous backup codes are no longer valid\n          </p>\n        </div>\n      </div>\n    </div>\n\n    <script>\n      const codes = ', ";\n      const title = '", "';\n\n      function downloadBackupCodes() {\n        const text = 'MFA Backup Codes - ' + title + '\\n\\n' +\n                     'Generated: ' + new Date().toISOString() + '\\n\\n' +\n                     codes.join('\\n') + '\\n\\n' +\n                     '\u26A0\uFE0F  IMPORTANT:\\n' +\n                     '- Keep these codes in a safe place\\n' +\n                     '- Each code can only be used once\\n' +\n                     '- Previous backup codes are now invalid\\n' +\n                     '- You can regenerate codes anytime from your profile\\n';\n\n        const blob = new Blob([text], { type: 'text/plain' });\n        const url = URL.createObjectURL(blob);\n        const a = document.createElement('a');\n        a.href = url;\n        a.download = 'mfa-backup-codes-' + new Date().toISOString().split('T')[0] + '.txt';\n        a.click();\n        URL.revokeObjectURL(url);\n      }\n\n      function copyAllCodes() {\n        const text = codes.join('\\n');\n        navigator.clipboard.writeText(text).then(() => {\n          const button = document.getElementById('copy-button');\n          const originalText = button.innerHTML;\n          button.innerHTML = '\u2713 Copied to Clipboard!';\n          button.classList.add('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-300');\n          setTimeout(() => {\n            button.innerHTML = originalText;\n            button.classList.remove('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-300');\n          }, 2000);\n        }).catch(err => {\n          alert('Failed to copy codes. Please download them instead.');\n        });\n      }\n    <\/script>\n  "], [`
+    <div class="mx-auto w-full max-w-2xl px-4 py-12">
+      <div class="rounded-3xl border border-slate-700/50 bg-slate-900/50 p-8 shadow-2xl backdrop-blur-xl md:p-12">
+        <!-- Header -->
+        <div class="mb-8 text-center">
+          <div class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-3xl shadow-lg shadow-emerald-500/30">
+            \u2705
+          </div>
+          <h1 class="mb-2 text-3xl font-bold text-white">
+            New Backup Codes Generated
+          </h1>
+          <p class="text-slate-400">
+            Your old backup codes have been invalidated
+          </p>
+        </div>
+
+        <!-- Warning Section -->
+        <div class="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">
+          <div class="flex items-start gap-3">
+            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl">
+              \u26A0\uFE0F
+            </div>
+            <div>
+              <h2 class="mb-1 text-lg font-semibold text-amber-200">
+                Important: Save These Codes
+              </h2>
+              <p class="text-sm text-amber-300/80">
+                These codes replace your previous backup codes. Save them in a secure location now - you won't be able to see them again.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Backup Codes Grid -->
+        <div class="mb-8 rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">
+          <h2 class="mb-4 text-center text-lg font-semibold text-white">
+            Your New Backup Codes
+          </h2>
+
+          <div class="mb-6 grid grid-cols-2 gap-3">
+            `, '\n          </div>\n\n          <div class="space-y-3">\n            <button\n              type="button"\n              onclick="downloadBackupCodes()"\n              class="w-full rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40"\n            >\n              \u{1F4BE} Download Backup Codes\n            </button>\n\n            <button\n              type="button"\n              onclick="copyAllCodes()"\n              class="w-full rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n              id="copy-button"\n            >\n              \u{1F4CB} Copy to Clipboard\n            </button>\n          </div>\n        </div>\n\n        <!-- Instructions -->\n        <div class="mb-8 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-6">\n          <h3 class="mb-3 text-lg font-semibold text-blue-200">\n            How to Use Backup Codes\n          </h3>\n          <ul class="space-y-2 text-sm text-blue-300/80">\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>Each code can only be used once for login</span>\n            </li>\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>Use them if you lose access to your authenticator app</span>\n            </li>\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>Store them in a secure password manager like 1Password</span>\n            </li>\n            <li class="flex items-start gap-2">\n              <span class="mt-0.5 flex-shrink-0">\u2022</span>\n              <span>You can regenerate codes anytime from your profile</span>\n            </li>\n          </ul>\n        </div>\n\n        <!-- Actions -->\n        <div class="flex gap-3">\n          <a\n            href="/profile"\n            class="flex-1 rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 text-center font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"\n          >\n            \u2190 Back to Profile\n          </a>\n        </div>\n\n        <!-- Footer Warning -->\n        <div class="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">\n          <p class="text-center text-sm text-red-300">\n            \u26A0\uFE0F Your previous backup codes are no longer valid\n          </p>\n        </div>\n      </div>\n    </div>\n\n    <script>\n      const codes = ', ";\n      const title = '", "';\n\n      function downloadBackupCodes() {\n        const text = 'MFA Backup Codes - ' + title + '\\\\n\\\\n' +\n                     'Generated: ' + new Date().toISOString() + '\\\\n\\\\n' +\n                     codes.join('\\\\n') + '\\\\n\\\\n' +\n                     '\u26A0\uFE0F  IMPORTANT:\\\\n' +\n                     '- Keep these codes in a safe place\\\\n' +\n                     '- Each code can only be used once\\\\n' +\n                     '- Previous backup codes are now invalid\\\\n' +\n                     '- You can regenerate codes anytime from your profile\\\\n';\n\n        const blob = new Blob([text], { type: 'text/plain' });\n        const url = URL.createObjectURL(blob);\n        const a = document.createElement('a');\n        a.href = url;\n        a.download = 'mfa-backup-codes-' + new Date().toISOString().split('T')[0] + '.txt';\n        a.click();\n        URL.revokeObjectURL(url);\n      }\n\n      function copyAllCodes() {\n        const text = codes.join('\\\\n');\n        navigator.clipboard.writeText(text).then(() => {\n          const button = document.getElementById('copy-button');\n          const originalText = button.innerHTML;\n          button.innerHTML = '\u2713 Copied to Clipboard!';\n          button.classList.add('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-300');\n          setTimeout(() => {\n            button.innerHTML = originalText;\n            button.classList.remove('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-300');\n          }, 2000);\n        }).catch(err => {\n          alert('Failed to copy codes. Please download them instead.');\n        });\n      }\n    <\/script>\n  "])), backupCodes.map((code) => html`
+              <div class="rounded-lg bg-slate-900/50 px-4 py-3 text-center">
+                <code class="font-mono text-base text-slate-200">${code}</code>
+              </div>
+            `), JSON.stringify(backupCodes), config.title || "S3DB Identity");
+  return BaseLayout({
+    title: "New Backup Codes Generated",
+    content,
+    config,
+    error: null,
+    success: null
+  });
+}
+
+function OAuthErrorPage(props = {}) {
+  const {
+    error = "server_error",
+    errorDescription = "An error occurred during OAuth authorization.",
+    errorUri = null,
+    config = {}
+  } = props;
+  const errorInfo = {
+    invalid_request: {
+      icon: "\u26A0\uFE0F",
+      title: "Invalid Request",
+      color: "amber"
+    },
+    unauthorized_client: {
+      icon: "\u{1F6AB}",
+      title: "Unauthorized Client",
+      color: "red"
+    },
+    access_denied: {
+      icon: "\u{1F512}",
+      title: "Access Denied",
+      color: "red"
+    },
+    unsupported_response_type: {
+      icon: "\u274C",
+      title: "Unsupported Response Type",
+      color: "orange"
+    },
+    invalid_scope: {
+      icon: "\u26D4",
+      title: "Invalid Scope",
+      color: "red"
+    },
+    server_error: {
+      icon: "\u{1F4A5}",
+      title: "Server Error",
+      color: "red"
+    },
+    temporarily_unavailable: {
+      icon: "\u23F8\uFE0F",
+      title: "Temporarily Unavailable",
+      color: "yellow"
+    },
+    invalid_client: {
+      icon: "\u{1F511}",
+      title: "Invalid Client",
+      color: "red"
+    },
+    invalid_grant: {
+      icon: "\u26A0\uFE0F",
+      title: "Invalid Grant",
+      color: "amber"
+    }
+  };
+  const info = errorInfo[error] || errorInfo.server_error;
+  const content = html`
+    <div class="mx-auto w-full max-w-2xl px-4 py-12">
+      <div class="rounded-3xl border border-slate-700/50 bg-slate-900/50 p-8 shadow-2xl backdrop-blur-xl md:p-12">
+        <!-- Error Icon & Title -->
+        <div class="mb-8 text-center">
+          <div class="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-red-500/20 text-4xl shadow-lg shadow-red-500/30">
+            ${info.icon}
+          </div>
+          <h1 class="mb-2 text-3xl font-bold text-white">
+            ${info.title}
+          </h1>
+          <p class="text-lg text-slate-400">
+            OAuth Authorization Error
+          </p>
+        </div>
+
+        <!-- Error Details -->
+        <div class="mb-8 space-y-4">
+          <!-- Error Code -->
+          <div class="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">
+            <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Error Code
+            </h2>
+            <code class="block rounded-lg bg-slate-900/50 px-4 py-3 font-mono text-red-400">
+              ${error}
+            </code>
+          </div>
+
+          <!-- Error Description -->
+          ${errorDescription ? html`
+            <div class="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-6">
+              <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
+                Description
+              </h2>
+              <p class="text-slate-200">
+                ${errorDescription}
+              </p>
+            </div>
+          ` : ""}
+
+          <!-- Common Causes -->
+          <div class="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-6">
+            <h2 class="mb-3 text-lg font-semibold text-blue-200">
+              Common Causes
+            </h2>
+            <ul class="space-y-2 text-sm text-blue-300/80">
+              ${error === "invalid_request" ? html`
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Missing required parameters (client_id, redirect_uri, etc.)</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Malformed request parameters</span>
+                </li>
+              ` : ""}
+              ${error === "unauthorized_client" || error === "invalid_client" ? html`
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Client ID not found or inactive</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Invalid client credentials</span>
+                </li>
+              ` : ""}
+              ${error === "invalid_scope" ? html`
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Requested scopes not allowed for this client</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Unknown or unsupported scope requested</span>
+                </li>
+              ` : ""}
+              ${error === "access_denied" ? html`
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>User denied authorization request</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Insufficient permissions for requested scopes</span>
+                </li>
+              ` : ""}
+              ${error === "server_error" ? html`
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Internal server error occurred</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-0.5 flex-shrink-0">•</span>
+                  <span>Temporary service disruption</span>
+                </li>
+              ` : ""}
+            </ul>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="space-y-3">
+          ${errorUri ? html`
+            <a
+              href="${errorUri}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40"
+            >
+              📖 View Documentation
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          ` : ""}
+
+          <a
+            href="/login"
+            class="flex w-full items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-3.5 font-medium text-slate-300 transition-all hover:border-slate-600/50 hover:bg-slate-800/50"
+          >
+            ← Back to Login
+          </a>
+        </div>
+
+        <!-- Help Section -->
+        ${config.supportEmail ? html`
+          <div class="mt-8 rounded-xl border border-slate-700/30 bg-slate-800/20 px-6 py-4 text-center">
+            <p class="text-sm text-slate-400">
+              Need help?
+              <a href="mailto:${config.supportEmail}" class="font-medium text-blue-400 hover:text-blue-300">
+                Contact Support
+              </a>
+            </p>
+          </div>
+        ` : ""}
+      </div>
+    </div>
+  `;
+  return BaseLayout({
+    title: `OAuth Error: ${info.title}`,
+    content,
+    config,
+    error: null,
+    success: null
+  });
+}
+
 const DEFAULT_PASSWORD_POLICY = {
   minLength: 8,
   maxLength: 128,
@@ -49886,93 +50324,13 @@ function registerUIRoutes(app, plugin) {
       if (tokenAge > 3e5) {
         return c.redirect(`/login?error=${encodeURIComponent("MFA session expired. Please login again.")}`);
       }
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Two-Factor Authentication - ${config.ui.title}</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 400px; margin: 0 auto; background: ${config.ui.backgroundLight}; }
-            .container { background: white; padding: 2rem; border-radius: ${config.ui.borderRadius}; box-shadow: ${config.ui.boxShadow}; }
-            h1 { color: ${config.ui.primaryColor}; text-align: center; margin-bottom: 1.5rem; }
-            .error { background: #f8d7da; color: #721c24; padding: 0.75rem; border-radius: ${config.ui.borderRadius}; margin-bottom: 1rem; }
-            label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
-            input { padding: 0.75rem; border: 1px solid ${config.ui.borderColor}; border-radius: ${config.ui.borderRadius}; width: 100%; box-sizing: border-box; font-size: 1.2rem; letter-spacing: 0.2em; text-align: center; }
-            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; width: 100%; margin-top: 1rem; font-size: 1rem; }
-            button:hover { opacity: 0.9; }
-            .backup-link { text-align: center; margin-top: 1rem; }
-            .backup-link a { color: ${config.ui.primaryColor}; text-decoration: none; }
-            .backup-link a:hover { text-decoration: underline; }
-            .back-link { text-align: center; margin-top: 1rem; color: ${config.ui.textMuted}; }
-            .back-link a { color: ${config.ui.secondaryColor}; text-decoration: none; }
-            #backup-code-form { display: none; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>\u{1F510} Two-Factor Authentication</h1>
-
-            ${error ? `<div class="error">${decodeURIComponent(error)}</div>` : ""}
-
-            <p style="text-align: center; color: ${config.ui.textMuted}; margin-bottom: 1.5rem;">
-              Enter the 6-digit code from your authenticator app to continue.
-            </p>
-
-            <form method="POST" action="/login" id="mfa-form">
-              <input type="hidden" name="email" value="${userData.email}" />
-              <input type="hidden" name="password" value="${userData.password}" />
-              <input type="hidden" name="remember" value="${remember || ""}" />
-
-              <label for="mfa_token">Verification Code:</label>
-              <input type="text" id="mfa_token" name="mfa_token" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="off" />
-
-              <button type="submit">\u2713 Verify</button>
-            </form>
-
-            <div class="backup-link">
-              <a href="#" onclick="showBackupCodeForm(); return false;">Lost your device? Use backup code</a>
-            </div>
-
-            <form method="POST" action="/login" id="backup-code-form">
-              <input type="hidden" name="email" value="${userData.email}" />
-              <input type="hidden" name="password" value="${userData.password}" />
-              <input type="hidden" name="remember" value="${remember || ""}" />
-
-              <label for="backup_code">Backup Code:</label>
-              <input type="text" id="backup_code" name="backup_code" maxlength="16" required autocomplete="off" style="text-transform: uppercase;" />
-
-              <button type="submit">\u2713 Verify with Backup Code</button>
-
-              <div style="text-align: center; margin-top: 1rem;">
-                <a href="#" onclick="showMFAForm(); return false;" style="color: ${config.ui.secondaryColor};">\u2190 Back to authenticator</a>
-              </div>
-            </form>
-
-            <div class="back-link">
-              <a href="/login">\u2190 Back to login</a>
-            </div>
-          </div>
-
-          <script>
-            function showBackupCodeForm() {
-              document.getElementById('mfa-form').style.display = 'none';
-              document.getElementById('backup-code-form').style.display = 'block';
-              document.getElementById('backup_code').focus();
-              document.querySelector('.backup-link').style.display = 'none';
-            }
-
-            function showMFAForm() {
-              document.getElementById('mfa-form').style.display = 'block';
-              document.getElementById('backup-code-form').style.display = 'none';
-              document.getElementById('mfa_token').focus();
-              document.querySelector('.backup-link').style.display = 'block';
-            }
-          <\/script>
-        </body>
-        </html>
-      `);
+      const mfaToken = JSON.stringify({ email: userData.email, password: userData.password });
+      return c.html(MFAVerificationPage({
+        error: error ? decodeURIComponent(error) : null,
+        token: mfaToken,
+        remember: remember || "",
+        config: uiConfig
+      }));
     } catch (error) {
       if (config.verbose) {
         console.error("[Identity Plugin] MFA verification page error:", error);
@@ -50494,80 +50852,12 @@ function registerUIRoutes(app, plugin) {
       const enrollment = plugin.mfaManager.generateEnrollment(userData.email);
       const qrCodeDataUrl = await plugin.mfaManager.generateQRCodeDataURL(enrollment.qrCodeUrl);
       c.set("mfaEnrollment", enrollment);
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Enable MFA - ${config.ui.title}</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 600px; margin: 0 auto; }
-            h1 { color: ${config.ui.primaryColor}; }
-            .qr-code { text-align: center; margin: 2rem 0; }
-            .qr-code img { border: 2px solid ${config.ui.borderColor}; padding: 1rem; }
-            .secret { background: ${config.ui.backgroundLight}; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 1rem 0; }
-            .backup-codes { background: #fff3cd; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 2rem 0; }
-            .backup-codes-list { font-family: monospace; columns: 2; }
-            input { padding: 0.5rem; border: 1px solid ${config.ui.borderColor}; border-radius: ${config.ui.borderRadius}; width: 100%; margin: 0.5rem 0; }
-            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; }
-            button:hover { opacity: 0.9; }
-            .cancel-btn { background: ${config.ui.secondaryColor}; margin-left: 0.5rem; }
-          </style>
-        </head>
-        <body>
-          <h1>Enable Two-Factor Authentication</h1>
-
-          <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, 1Password, etc.):</p>
-
-          <div class="qr-code">
-            <img src="${qrCodeDataUrl}" alt="QR Code" />
-          </div>
-
-          <div class="secret">
-            <strong>Manual Entry Key:</strong><br/>
-            <code>${enrollment.secret}</code><br/>
-            <small>Use this if you can't scan the QR code</small>
-          </div>
-
-          <div class="backup-codes">
-            <strong>\u26A0\uFE0F Save these backup codes!</strong>
-            <p>You can use these codes to access your account if you lose your authenticator device. Each code can only be used once.</p>
-            <div class="backup-codes-list">
-              ${enrollment.backupCodes.map((code) => `<div>${code}</div>`).join("")}
-            </div>
-            <button onclick="downloadBackupCodes()">\u{1F4BE} Download Backup Codes</button>
-          </div>
-
-          <form method="POST" action="/profile/mfa/enroll">
-            <label>Enter the 6-digit code from your authenticator app to verify:</label>
-            <input type="text" name="token" pattern="[0-9]{6}" maxlength="6" required autofocus />
-
-            <input type="hidden" name="enrollment_secret" value="${enrollment.secret}" />
-            <input type="hidden" name="enrollment_backup_codes" value="${JSON.stringify(enrollment.backupCodes)}" />
-
-            <div style="margin-top: 1rem;">
-              <button type="submit">\u2713 Verify and Enable MFA</button>
-              <a href="/profile"><button type="button" class="cancel-btn">Cancel</button></a>
-            </div>
-          </form>
-
-          <script>
-            function downloadBackupCodes() {
-              const codes = ${JSON.stringify(enrollment.backupCodes)};
-              const text = 'MFA Backup Codes - ${config.ui.title}\\n\\n' + codes.join('\\n') + '\\n\\nKeep these codes safe!';
-              const blob = new Blob([text], { type: 'text/plain' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'mfa-backup-codes.txt';
-              a.click();
-              URL.revokeObjectURL(url);
-            }
-          <\/script>
-        </body>
-        </html>
-      `);
+      return c.html(MFAEnrollmentPage({
+        qrCodeDataUrl,
+        secret: enrollment.secret,
+        backupCodes: enrollment.backupCodes,
+        config: uiConfig
+      }));
     } catch (error) {
       if (config.verbose) {
         console.error("[Identity Plugin] MFA enrollment page error:", error);
@@ -50695,53 +50985,10 @@ function registerUIRoutes(app, plugin) {
         }
         return c.redirect(`/profile?error=${encodeURIComponent("Failed to regenerate backup codes. Please try again.")}`);
       }
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>New Backup Codes - ${config.ui.title}</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: ${config.ui.fontFamily}; padding: 2rem; max-width: 600px; margin: 0 auto; }
-            h1 { color: ${config.ui.primaryColor}; }
-            .backup-codes { background: #fff3cd; padding: 1rem; border-radius: ${config.ui.borderRadius}; margin: 2rem 0; }
-            .backup-codes-list { font-family: monospace; columns: 2; }
-            button { padding: 0.75rem 1.5rem; background: ${config.ui.primaryColor}; color: white; border: none; border-radius: ${config.ui.borderRadius}; cursor: pointer; margin-right: 0.5rem; }
-            button:hover { opacity: 0.9; }
-            .back-btn { background: ${config.ui.secondaryColor}; }
-          </style>
-        </head>
-        <body>
-          <h1>New Backup Codes Generated</h1>
-
-          <div class="backup-codes">
-            <strong>\u26A0\uFE0F Save these new backup codes!</strong>
-            <p>Your old backup codes have been invalidated. Save these new codes in a safe place.</p>
-            <div class="backup-codes-list">
-              ${backupCodes.map((code) => `<div>${code}</div>`).join("")}
-            </div>
-          </div>
-
-          <button onclick="downloadBackupCodes()">\u{1F4BE} Download Backup Codes</button>
-          <a href="/profile"><button class="back-btn">Back to Profile</button></a>
-
-          <script>
-            function downloadBackupCodes() {
-              const codes = ${JSON.stringify(backupCodes)};
-              const text = 'MFA Backup Codes - ${config.ui.title}\\n\\n' + codes.join('\\n') + '\\n\\nKeep these codes safe!';
-              const blob = new Blob([text], { type: 'text/plain' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'mfa-backup-codes.txt';
-              a.click();
-              URL.revokeObjectURL(url);
-            }
-          <\/script>
-        </body>
-        </html>
-      `);
+      return c.html(MFABackupCodesPage({
+        backupCodes,
+        config: uiConfig
+      }));
     } catch (error) {
       if (config.verbose) {
         console.error("[Identity Plugin] MFA backup codes error:", error);
@@ -51326,14 +51573,11 @@ function registerUIRoutes(app, plugin) {
     } = query;
     try {
       if (!response_type || !client_id || !redirect_uri) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Invalid Request</h1>
-              <p>response_type, client_id, and redirect_uri are required</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: "invalid_request",
+          errorDescription: "Missing required parameters: response_type, client_id, and redirect_uri are required",
+          config: uiConfig
+        }), 400);
       }
       const user = c.get("user");
       if (!user) {
@@ -51344,35 +51588,26 @@ function registerUIRoutes(app, plugin) {
         () => plugin.oauth2ClientsResource.query({ clientId: client_id })
       );
       if (!okClient || !clients || clients.length === 0) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Invalid Client</h1>
-              <p>Client not found</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: "invalid_client",
+          errorDescription: "Client not found",
+          config: uiConfig
+        }), 400);
       }
       const client = clients[0];
       if (client.active === false) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Client Inactive</h1>
-              <p>This client is not currently active</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: "unauthorized_client",
+          errorDescription: "This client is not currently active",
+          config: uiConfig
+        }), 400);
       }
       if (!client.redirectUris || !client.redirectUris.includes(redirect_uri)) {
-        return c.html(`
-          <html>
-            <body>
-              <h1>Invalid Redirect URI</h1>
-              <p>The redirect_uri does not match any registered URIs for this client</p>
-            </body>
-          </html>
-        `, 400);
+        return c.html(OAuthErrorPage({
+          error: "invalid_request",
+          errorDescription: "The redirect_uri does not match any registered URIs for this client",
+          config: uiConfig
+        }), 400);
       }
       const requestedScopes = scope ? scope.split(" ") : [];
       if (requestedScopes.length > 0) {
@@ -51380,14 +51615,11 @@ function registerUIRoutes(app, plugin) {
           (s) => !client.allowedScopes || !client.allowedScopes.includes(s)
         );
         if (invalidScopes.length > 0) {
-          return c.html(`
-            <html>
-              <body>
-                <h1>Invalid Scopes</h1>
-                <p>Invalid scopes: ${invalidScopes.join(", ")}</p>
-              </body>
-            </html>
-          `, 400);
+          return c.html(OAuthErrorPage({
+            error: "invalid_scope",
+            errorDescription: `Invalid scopes: ${invalidScopes.join(", ")}`,
+            config: uiConfig
+          }), 400);
         }
       }
       const PageComponent = getPageComponent(customPages, "consent", ConsentPage);
@@ -51404,14 +51636,11 @@ function registerUIRoutes(app, plugin) {
       }));
     } catch (error) {
       console.error("[Identity Plugin] OAuth authorize error:", error);
-      return c.html(`
-        <html>
-          <body>
-            <h1>Server Error</h1>
-            <p>An error occurred while processing your request</p>
-          </body>
-        </html>
-      `, 500);
+      return c.html(OAuthErrorPage({
+        error: "server_error",
+        errorDescription: "An error occurred while processing your request",
+        config: uiConfig
+      }), 500);
     }
   });
   app.post("/oauth/consent", sessionAuth(sessionManager, { required: true }), async (c) => {
@@ -51458,14 +51687,11 @@ function registerUIRoutes(app, plugin) {
       );
       if (!okCode) {
         console.error("[Identity Plugin] Failed to store auth code:", errCode);
-        return c.html(`
-          <html>
-            <body>
-              <h1>Server Error</h1>
-              <p>Failed to generate authorization code</p>
-            </body>
-          </html>
-        `, 500);
+        return c.html(OAuthErrorPage({
+          error: "server_error",
+          errorDescription: "Failed to generate authorization code",
+          config: uiConfig
+        }), 500);
       }
       if (trust_application === "1") {
       }

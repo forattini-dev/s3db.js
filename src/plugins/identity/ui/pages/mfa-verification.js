@@ -10,13 +10,21 @@ import { BaseLayout } from '../layouts/base.js';
  * Render MFA verification page
  * @param {Object} props - Page properties
  * @param {string} [props.error] - Error message
- * @param {string} props.token - Temporary auth token
+ * @param {string} props.token - JSON string with {email, password}
  * @param {string} [props.remember] - Remember me flag
  * @param {Object} [props.config] - UI configuration
  * @returns {string} HTML string
  */
 export function MFAVerificationPage(props = {}) {
   const { error = null, token, remember = '', config = {} } = props;
+
+  // Parse token to get email/password
+  let userData = { email: '', password: '' };
+  try {
+    userData = JSON.parse(token);
+  } catch (err) {
+    // Fallback to empty values
+  }
 
   const content = html`
     <section class="identity-login">
@@ -60,7 +68,8 @@ export function MFAVerificationPage(props = {}) {
 
         <!-- TOTP Token Form -->
         <form method="POST" action="/login" class="identity-login__form-body" id="mfa-form">
-          <input type="hidden" name="token" value="${token}" />
+          <input type="hidden" name="email" value="${userData.email}" />
+          <input type="hidden" name="password" value="${userData.password}" />
           <input type="hidden" name="remember" value="${remember}" />
 
           <div class="identity-login__group">
@@ -101,7 +110,8 @@ export function MFAVerificationPage(props = {}) {
 
         <!-- Backup Code Form (hidden by default) -->
         <form method="POST" action="/login" class="identity-login__form-body mt-6 hidden" id="backup-code-form">
-          <input type="hidden" name="token" value="${token}" />
+          <input type="hidden" name="email" value="${userData.email}" />
+          <input type="hidden" name="password" value="${userData.password}" />
           <input type="hidden" name="remember" value="${remember}" />
 
           <div class="identity-login__group">
