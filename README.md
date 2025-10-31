@@ -106,6 +106,18 @@
 
 ---
 
+## 📚 Documentation Quick Links
+
+> **Core Concepts:** [Schema Validation](./docs/schema.md) • [Client API](./docs/client.md) • [Fastest Validator](./docs/fastest-validator.md)
+
+> **Plugins:** [API Plugin](./docs/plugins/api.md) • [Identity Plugin](./docs/plugins/identity.md) • [All Plugins](#-plugins)
+
+> **Integrations:** [MCP Server](./docs/mcp.md) • [Model Context Protocol](./docs/mcp.md)
+
+> **Advanced:** [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
+
+---
+
 ## 🚀 Quick Start
 
 Get up and running in less than 5 minutes!
@@ -1271,34 +1283,77 @@ orders.useMiddleware('updated', async (ctx, next) => {
 
 ## 🔌 Plugins
 
-Extend s3db.js with powerful plugins for caching, monitoring, replication, relationships, and more.
+> **Quick Jump:** [🌐 API](#-api) | [🔐 Identity](#-identity) | [⚡ Performance](#-performance) | [📊 Data](#-data) | [🔧 DevOps](#-devops) | [🤖 ML/AI](#-mlai)
 
-### Available Plugins
+Extend s3db.js with powerful plugins. All plugins are optional and can be installed independently.
 
-| Plugin | Description | Dependencies |
-|--------|-------------|--------------|
-| [**APIPlugin**](./docs/plugins/api.md) | Auto-generated REST API with OpenAPI, path-based auth, template engine | `ejs` (optional) |
-| [**AuditPlugin**](./docs/plugins/audit.md) | Complete audit trail for all operations | None |
-| [**BackupPlugin**](./docs/plugins/backup.md) | Multi-destination backup system for data protection | None |
-| [**CachePlugin**](./docs/plugins/cache.md) | Memory/S3/filesystem caching with compression | None |
-| [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) | Multi-cloud inventory with versioning & diffs | None |
-| [**CostsPlugin**](./docs/plugins/costs.md) | AWS cost tracking and optimization | None |
-| [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) | Eventually consistent counters and analytics | None |
-| [**FullTextPlugin**](./docs/plugins/fulltext.md) | Full-text search with indexing | None |
-| [**GeoPlugin**](./docs/plugins/geo.md) | Geospatial queries and distance calculations | None |
-| [**IdentityPlugin**](./docs/plugins/identity.md) | OAuth2/OIDC authentication with MFA and whitelabel UI | None |
-| [**ImporterPlugin**](./docs/plugins/importer.md) | Multi-format data import (JSON, CSV, bulk migrations) | None |
-| [**MetricsPlugin**](./docs/plugins/metrics.md) | Performance monitoring and Prometheus export | None |
-| [**MLPlugin**](./docs/plugins/ml-plugin.md) | Machine learning model management and inference | None |
-| [**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) | Process RabbitMQ/SQS messages for event-driven architecture | `@aws-sdk/client-sqs`, `amqplib` |
-| [**RelationPlugin**](./docs/plugins/relation.md) | ORM-like relationships (10-100x faster queries) | None |
-| [**ReplicatorPlugin**](./docs/plugins/replicator.md) | Real-time replication to BigQuery, PostgreSQL, SQS | `pg`, `@google-cloud/bigquery`, `@aws-sdk/client-sqs` |
-| [**S3QueuePlugin**](./docs/plugins/s3-queue.md) | Distributed queue with zero race conditions | None |
-| [**SchedulerPlugin**](./docs/plugins/scheduler.md) | Cron-based job scheduling for maintenance tasks | `node-cron` |
-| [**StateMachinePlugin**](./docs/plugins/state-machine.md) | Finite state machine workflows for business processes | None |
-| [**TfstatePlugin**](./docs/plugins/tfstate.md) | Track Terraform infrastructure changes | `node-cron` |
-| [**TTLPlugin**](./docs/plugins/ttl.md) | Auto-cleanup expired records (O(1) partition-based) | None |
-| [**VectorPlugin**](./docs/plugins/vector.md) | Vector similarity search (cosine, euclidean) for RAG & ML | None |
+### 🌐 API & Auth
+
+[**APIPlugin**](./docs/plugins/api.md) • [**IdentityPlugin**](./docs/plugins/identity.md)
+
+**APIPlugin** - Transform s3db.js into production-ready REST API with OpenAPI, multi-auth (JWT/OIDC/Basic/API Key), rate limiting, and template engines.
+
+**IdentityPlugin** - Complete OAuth2/OIDC server with MFA, whitelabel UI, and enterprise SSO.
+
+### ⚡ Performance
+
+[**CachePlugin**](./docs/plugins/cache.md) • [**TTLPlugin**](./docs/plugins/ttl.md) • [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) • [**MetricsPlugin**](./docs/plugins/metrics.md)
+
+**CachePlugin** - Memory/S3/filesystem caching with compression and automatic invalidation.
+
+**TTLPlugin** - Auto-cleanup expired records with O(1) partition-based deletion.
+
+**EventualConsistencyPlugin** - Eventually consistent counters and high-performance analytics.
+
+**MetricsPlugin** - Performance monitoring with Prometheus export.
+
+### 📊 Data & Replication
+
+[**ReplicatorPlugin**](./docs/plugins/replicator.md) • [**ImporterPlugin**](./docs/plugins/importer.md) • [**BackupPlugin**](./docs/plugins/backup.md) • [**AuditPlugin**](./docs/plugins/audit.md)
+
+**ReplicatorPlugin** - Real-time replication to BigQuery, PostgreSQL, MySQL, Turso, PlanetScale, and SQS.
+
+**ImporterPlugin** - Multi-format data import (JSON, CSV, bulk migrations).
+
+**BackupPlugin** - Multi-destination backup system for disaster recovery.
+
+**AuditPlugin** - Complete audit trail for compliance and security.
+
+### 🔧 DevOps & Automation
+
+[**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) • [**SchedulerPlugin**](./docs/plugins/scheduler.md) • [**TfstatePlugin**](./docs/plugins/tfstate.md) • [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) • [**CostsPlugin**](./docs/plugins/costs.md)
+
+**QueueConsumerPlugin** - Process RabbitMQ/SQS messages for event-driven architectures.
+
+**SchedulerPlugin** - Cron-based job scheduling for maintenance tasks.
+
+**TfstatePlugin** - Track Terraform infrastructure changes and drift detection.
+
+**CloudInventoryPlugin** - Multi-cloud inventory with versioning and diff tracking.
+
+**CostsPlugin** - AWS cost tracking and optimization insights.
+
+### 🤖 ML/AI & Advanced Features
+
+[**MLPlugin**](./docs/plugins/ml-plugin.md) • [**VectorPlugin**](./docs/plugins/vector.md) • [**FullTextPlugin**](./docs/plugins/fulltext.md) • [**GeoPlugin**](./docs/plugins/geo.md)
+
+**MLPlugin** - Machine learning model management and inference pipelines.
+
+**VectorPlugin** - Vector similarity search (cosine, euclidean) for RAG and ML applications.
+
+**FullTextPlugin** - Full-text search with tokenization and indexing.
+
+**GeoPlugin** - Geospatial queries and distance calculations.
+
+### 🔗 Other Plugins
+
+[**RelationPlugin**](./docs/plugins/relation.md) • [**StateMachinePlugin**](./docs/plugins/state-machine.md) • [**S3QueuePlugin**](./docs/plugins/s3-queue.md)
+
+**RelationPlugin** - ORM-like relationships with join optimization (10-100x faster queries).
+
+**StateMachinePlugin** - Finite state machine workflows for business processes.
+
+**S3QueuePlugin** - Distributed queue with zero race conditions using S3.
 
 ### Plugin Installation
 
