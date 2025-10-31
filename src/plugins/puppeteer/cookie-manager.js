@@ -106,6 +106,7 @@ export class CookieManager {
       cookies: [],
       userAgent: page._userAgent,
       viewport: page._viewport,
+      proxyId: page._proxyId || null, // IMMUTABLE: Proxy binding
       reputation: {
         successCount: 0,
         failCount: 0,

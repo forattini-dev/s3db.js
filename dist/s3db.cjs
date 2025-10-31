@@ -3863,6 +3863,405 @@ function createAuthRoutes(authResource, config = {}) {
   return app;
 }
 
+class RouteContext {
+  /**
+   * Create RouteContext
+   * @param {Object} honoContext - Hono context (c)
+   * @param {Object} database - s3db.js Database instance
+   * @param {Object} resource - Current resource (for resource-level routes)
+   * @param {Object} plugins - Plugin instances
+   */
+  constructor(honoContext, database, resource = null, plugins = {}) {
+    this.c = honoContext;
+    this.db = database;
+    this.database = database;
+    this._currentResource = resource;
+    this.plugins = plugins;
+    this.resources = this._createResourcesProxy();
+    this.validator = this._createValidator();
+    this.resource = resource;
+  }
+  /**
+   * Create Proxy for easy resource access
+   * @private
+   */
+  _createResourcesProxy() {
+    return new Proxy({}, {
+      get: (target, prop) => {
+        if (this.database.resources[prop]) {
+          return this.database.resources[prop];
+        }
+        const available = Object.keys(this.database.resources);
+        throw new Error(
+          `Resource "${prop}" not found. Available resources: ${available.join(", ")}`
+        );
+      },
+      // List available resources (for debugging)
+      ownKeys: () => {
+        return Object.keys(this.database.resources);
+      },
+      // Make resources enumerable
+      getOwnPropertyDescriptor: (target, prop) => {
+        if (this.database.resources[prop]) {
+          return {
+            enumerable: true,
+            configurable: true
+          };
+        }
+        return void 0;
+      }
+    });
+  }
+  /**
+   * Create validator helper
+   * @private
+   */
+  _createValidator() {
+    const ctx = this;
+    return {
+      /**
+       * Validate data against resource schema
+       * @param {string|Object} resourceOrData - Resource name or data object
+       * @param {Object} data - Data to validate (if first param is resource name)
+       * @returns {Object} { valid: boolean, errors?: Array }
+       */
+      validate(resourceOrData, data = null) {
+        let resource;
+        let dataToValidate;
+        if (typeof resourceOrData === "object" && data === null) {
+          if (!ctx._currentResource) {
+            throw new Error('validator.validate(data) requires a current resource. Use validator.validate("resourceName", data) instead.');
+          }
+          resource = ctx._currentResource;
+          dataToValidate = resourceOrData;
+        } else if (typeof resourceOrData === "string" && data !== null) {
+          resource = ctx.resources[resourceOrData];
+          dataToValidate = data;
+        } else {
+          throw new Error('Invalid arguments. Use validator.validate(data) or validator.validate("resourceName", data)');
+        }
+        const validation = resource.schema.validate(dataToValidate);
+        if (validation === true) {
+          return { valid: true };
+        } else {
+          return {
+            valid: false,
+            errors: Array.isArray(validation) ? validation : [validation]
+          };
+        }
+      },
+      /**
+       * Validate and throw if invalid
+       * @param {string|Object} resourceOrData - Resource name or data object
+       * @param {Object} data - Data to validate
+       * @throws {Error} Validation error with details
+       */
+      validateOrThrow(resourceOrData, data = null) {
+        const result = this.validate(resourceOrData, data);
+        if (!result.valid) {
+          const error = new Error("Validation failed");
+          error.code = "VALIDATION_ERROR";
+          error.errors = result.errors;
+          error.status = 400;
+          throw error;
+        }
+      },
+      /**
+       * Validate request body against resource schema
+       * @param {string} resourceName - Resource name (optional if current resource exists)
+       * @returns {Promise<Object>} { valid: boolean, data?: Object, errors?: Array }
+       */
+      async validateBody(resourceName = null) {
+        const body = await ctx.c.req.json();
+        if (resourceName) {
+          const result = this.validate(resourceName, body);
+          return { ...result, data: body };
+        } else {
+          const result = this.validate(body);
+          return { ...result, data: body };
+        }
+      }
+    };
+  }
+  // ============================================
+  // Request Helpers (proxy to Hono context)
+  // ============================================
+  /**
+   * Get path parameter
+   * @param {string} name - Parameter name
+   * @returns {string} Parameter value
+   */
+  param(name) {
+    return this.c.req.param(name);
+  }
+  /**
+   * Get all path parameters
+   * @returns {Object} All parameters
+   */
+  params() {
+    return this.c.req.param();
+  }
+  /**
+   * Get query parameter
+   * @param {string} name - Query parameter name
+   * @returns {string|undefined} Query value
+   */
+  query(name) {
+    return this.c.req.query(name);
+  }
+  /**
+   * Get all query parameters
+   * @returns {Object} All query parameters
+   */
+  queries() {
+    return this.c.req.query();
+  }
+  /**
+   * Get request header
+   * @param {string} name - Header name
+   * @returns {string|undefined} Header value
+   */
+  header(name) {
+    return this.c.req.header(name);
+  }
+  /**
+   * Parse JSON body
+   * @returns {Promise<Object>} Parsed body
+   */
+  async json() {
+    return await this.c.req.json();
+  }
+  /**
+   * Get request body as text
+   * @returns {Promise<string>} Body text
+   */
+  async text() {
+    return await this.c.req.text();
+  }
+  /**
+   * Get request body as FormData
+   * @returns {Promise<FormData>} FormData
+   */
+  async formData() {
+    return await this.c.req.formData();
+  }
+  // ============================================
+  // Response Helpers (shortcuts)
+  // ============================================
+  /**
+   * Send JSON response
+   * @param {Object} data - Response data
+   * @param {number} status - HTTP status code
+   * @returns {Response} Hono response
+   */
+  json(data, status = 200) {
+    return this.c.json(data, status);
+  }
+  /**
+   * Send success response
+   * @param {Object} data - Response data
+   * @param {number} status - HTTP status code
+   * @returns {Response} Success response
+   */
+  success(data, status = 200) {
+    return this.c.json({
+      success: true,
+      data
+    }, status);
+  }
+  /**
+   * Send error response
+   * @param {string} message - Error message
+   * @param {number} status - HTTP status code
+   * @returns {Response} Error response
+   */
+  error(message, status = 400) {
+    return this.c.json({
+      success: false,
+      error: {
+        message,
+        code: "ERROR",
+        status
+      }
+    }, status);
+  }
+  /**
+   * Send 404 Not Found
+   * @param {string} message - Optional message
+   * @returns {Response} 404 response
+   */
+  notFound(message = "Not found") {
+    return this.c.json({
+      success: false,
+      error: {
+        message,
+        code: "NOT_FOUND",
+        status: 404
+      }
+    }, 404);
+  }
+  /**
+   * Send 401 Unauthorized
+   * @param {string} message - Optional message
+   * @returns {Response} 401 response
+   */
+  unauthorized(message = "Unauthorized") {
+    return this.c.json({
+      success: false,
+      error: {
+        message,
+        code: "UNAUTHORIZED",
+        status: 401
+      }
+    }, 401);
+  }
+  /**
+   * Send 403 Forbidden
+   * @param {string} message - Optional message
+   * @returns {Response} 403 response
+   */
+  forbidden(message = "Forbidden") {
+    return this.c.json({
+      success: false,
+      error: {
+        message,
+        code: "FORBIDDEN",
+        status: 403
+      }
+    }, 403);
+  }
+  /**
+   * Send HTML response
+   * @param {string} html - HTML content
+   * @param {number} status - HTTP status code
+   * @returns {Response} HTML response
+   */
+  html(html, status = 200) {
+    return this.c.html(html, status);
+  }
+  /**
+   * Redirect to URL
+   * @param {string} url - Target URL
+   * @param {number} status - HTTP status code (default 302)
+   * @returns {Response} Redirect response
+   */
+  redirect(url, status = 302) {
+    return this.c.redirect(url, status);
+  }
+  /**
+   * Render template (if template engine is configured)
+   * @param {string|JSX.Element} template - Template name or JSX element
+   * @param {Object} data - Data to pass to template
+   * @param {Object} options - Render options
+   * @returns {Promise<Response>} Rendered HTML response
+   */
+  async render(template, data = {}, options = {}) {
+    if (!this.c.render) {
+      throw new Error(
+        'Template engine not configured. Use ApiPlugin with templates: { engine: "ejs" | "pug" | "jsx" }'
+      );
+    }
+    return await this.c.render(template, data, options);
+  }
+  // ============================================
+  // Context Helpers
+  // ============================================
+  /**
+   * Get authenticated user (if auth is enabled)
+   * @returns {Object|null} User object
+   */
+  get user() {
+    return this.c.get("user") || null;
+  }
+  /**
+   * Get session (if session tracking enabled)
+   * @returns {Object|null} Session object
+   */
+  get session() {
+    return this.c.get("session") || null;
+  }
+  /**
+   * Get session ID (if session tracking enabled)
+   * @returns {string|null} Session ID
+   */
+  get sessionId() {
+    return this.c.get("sessionId") || null;
+  }
+  /**
+   * Get request ID (if request ID tracking enabled)
+   * @returns {string|null} Request ID
+   */
+  get requestId() {
+    return this.c.get("requestId") || null;
+  }
+  /**
+   * Check if user is authenticated
+   * @returns {boolean} True if authenticated
+   */
+  get isAuthenticated() {
+    return !!this.user;
+  }
+  /**
+   * Check if user has scope
+   * @param {string} scope - Scope to check
+   * @returns {boolean} True if user has scope
+   */
+  hasScope(scope) {
+    return this.user?.scopes?.includes(scope) || false;
+  }
+  /**
+   * Check if user has any of the scopes
+   * @param {Array<string>} scopes - Scopes to check
+   * @returns {boolean} True if user has any scope
+   */
+  hasAnyScope(...scopes) {
+    return scopes.some((scope) => this.hasScope(scope));
+  }
+  /**
+   * Check if user has all scopes
+   * @param {Array<string>} scopes - Scopes to check
+   * @returns {boolean} True if user has all scopes
+   */
+  hasAllScopes(...scopes) {
+    return scopes.every((scope) => this.hasScope(scope));
+  }
+  /**
+   * Require authentication (throw if not authenticated)
+   * @throws {Error} If not authenticated
+   */
+  requireAuth() {
+    if (!this.isAuthenticated) {
+      throw Object.assign(
+        new Error("Authentication required"),
+        { status: 401, code: "UNAUTHORIZED" }
+      );
+    }
+  }
+  /**
+   * Require scope (throw if not authorized)
+   * @param {string} scope - Required scope
+   * @throws {Error} If scope missing
+   */
+  requireScope(scope) {
+    this.requireAuth();
+    if (!this.hasScope(scope)) {
+      throw Object.assign(
+        new Error(`Scope required: ${scope}`),
+        { status: 403, code: "FORBIDDEN" }
+      );
+    }
+  }
+}
+function withContext(handler, options = {}) {
+  return async (c) => {
+    const legacyContext = c.get("customRouteContext") || {};
+    const { database, resource, plugins = {} } = legacyContext;
+    const currentResource = options.resource || resource || null;
+    const ctx = new RouteContext(c, database, currentResource, plugins);
+    return await handler(c, ctx);
+  };
+}
+
 function parseRouteKey(key) {
   const match = key.match(/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i);
   if (!match) {
@@ -3873,20 +4272,26 @@ function parseRouteKey(key) {
     path: match[2]
   };
 }
-function mountCustomRoutes(app, routes, context = {}, verbose = false) {
+function mountCustomRoutes(app, routes, context = {}, verbose = false, options = {}) {
   if (!routes || typeof routes !== "object") {
     return;
   }
+  const { autoWrap = true } = options;
   for (const [key, handler] of Object.entries(routes)) {
     try {
       const { method, path } = parseRouteKey(key);
       const wrappedHandler = asyncHandler(async (c) => {
         c.set("customRouteContext", context);
-        return await handler(c);
+        if (autoWrap && handler.length === 2) {
+          return await withContext(handler, { resource: context.resource })(c);
+        } else {
+          return await handler(c);
+        }
       });
       app.on(method, path, wrappedHandler);
       if (verbose) {
-        console.log(`[Custom Routes] Mounted ${method} ${path}`);
+        const contextType = autoWrap && handler.length === 2 ? "(enhanced)" : "(legacy)";
+        console.log(`[Custom Routes] Mounted ${method} ${path} ${contextType}`);
       }
     } catch (err) {
       console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
@@ -29863,6 +30268,21 @@ class PuppeteerPlugin extends Plugin {
       // Proxy Support
       proxy: {
         enabled: false,
+        list: [],
+        // Array of proxy URLs or objects
+        selectionStrategy: "round-robin",
+        // 'round-robin' | 'random' | 'least-used' | 'best-performance'
+        bypassList: [],
+        // Domains to bypass proxy
+        healthCheck: {
+          enabled: true,
+          interval: 3e5,
+          // 5 minutes
+          testUrl: "https://www.google.com",
+          timeout: 1e4,
+          successRateThreshold: 0.3
+        },
+        // Legacy single proxy support (deprecated)
         server: null,
         username: null,
         password: null,
@@ -29890,6 +30310,7 @@ class PuppeteerPlugin extends Plugin {
     this.userAgentGenerator = null;
     this.ghostCursor = null;
     this.cookieManager = null;
+    this.proxyManager = null;
     this.initialized = false;
   }
   /**
@@ -29912,6 +30333,9 @@ class PuppeteerPlugin extends Plugin {
   async onStart() {
     if (this.initialized) return;
     await this._importDependencies();
+    if (this.config.proxy.enabled) {
+      await this._initializeProxyManager();
+    }
     if (this.config.cookies.enabled) {
       await this._initializeCookieManager();
     }
@@ -29970,6 +30394,8 @@ class PuppeteerPlugin extends Plugin {
           cookies: "array|required",
           userAgent: "string",
           viewport: "object",
+          proxyId: "string|optional",
+          // IMMUTABLE: Proxy binding
           reputation: {
             successCount: "number",
             failCount: "number",
@@ -29987,6 +30413,15 @@ class PuppeteerPlugin extends Plugin {
         behavior: "body-only"
       });
     }
+  }
+  /**
+   * Initialize proxy manager
+   * @private
+   */
+  async _initializeProxyManager() {
+    const { ProxyManager } = await Promise.resolve().then(function () { return proxyManager; });
+    this.proxyManager = new ProxyManager(this);
+    await this.proxyManager.initialize();
   }
   /**
    * Initialize cookie manager
@@ -30011,31 +30446,41 @@ class PuppeteerPlugin extends Plugin {
   /**
    * Create a new browser instance
    * @private
+   * @param {Object} proxy - Optional proxy configuration
    * @returns {Promise<Browser>}
    */
-  async _createBrowser() {
+  async _createBrowser(proxy = null) {
     const launchOptions = { ...this.config.launch };
-    if (this.config.proxy.enabled && this.config.proxy.server) {
+    if (proxy && this.proxyManager) {
+      const proxyArgs = this.proxyManager.getProxyLaunchArgs(proxy);
+      launchOptions.args.push(...proxyArgs);
+    } else if (this.config.proxy.enabled && this.config.proxy.server) {
       launchOptions.args.push(`--proxy-server=${this.config.proxy.server}`);
     }
     const browser = await this.puppeteer.launch(launchOptions);
-    this.browserPool.push(browser);
-    this.tabPool.set(this.browserPool.length - 1, []);
-    browser.on("disconnected", () => {
-      const index = this.browserPool.indexOf(browser);
-      if (index > -1) {
-        this.browserPool.splice(index, 1);
-        this.tabPool.delete(index);
-      }
-    });
+    if (!proxy && this.config.pool.enabled) {
+      this.browserPool.push(browser);
+      this.tabPool.set(this.browserPool.length - 1, []);
+      browser.on("disconnected", () => {
+        const index = this.browserPool.indexOf(browser);
+        if (index > -1) {
+          this.browserPool.splice(index, 1);
+          this.tabPool.delete(index);
+        }
+      });
+    }
     return browser;
   }
   /**
    * Get or create a browser instance
    * @private
+   * @param {Object} proxy - Optional proxy configuration
    * @returns {Promise<Browser>}
    */
-  async _getBrowser() {
+  async _getBrowser(proxy = null) {
+    if (proxy) {
+      return await this._createBrowser(proxy);
+    }
     if (this.config.pool.enabled) {
       for (let i = 0; i < this.browserPool.length; i++) {
         const tabs = this.tabPool.get(i) || [];
@@ -30140,8 +30585,17 @@ class PuppeteerPlugin extends Plugin {
       waitUntil = "networkidle2",
       timeout = 3e4
     } = options;
-    const browser = await this._getBrowser();
+    let proxy = null;
+    let proxyId = null;
+    if (useSession && this.proxyManager) {
+      proxy = this.proxyManager.getProxyForSession(useSession, true);
+      proxyId = proxy?.id || null;
+    }
+    const browser = await this._getBrowser(proxy);
     const page = await browser.newPage();
+    if (proxy && this.proxyManager) {
+      await this.proxyManager.authenticateProxy(page, proxy);
+    }
     const viewport = this._generateViewport();
     await page.setViewport(viewport);
     const userAgent = this._generateUserAgent();
@@ -30165,7 +30619,19 @@ class PuppeteerPlugin extends Plugin {
     if (this.config.humanBehavior.enabled && this.config.humanBehavior.mouse.enabled) {
       cursor = this.createGhostCursor(page);
     }
-    await page.goto(url, { waitUntil, timeout });
+    let navigationSuccess = false;
+    try {
+      await page.goto(url, { waitUntil, timeout });
+      navigationSuccess = true;
+      if (proxyId && this.proxyManager) {
+        this.proxyManager.recordProxyUsage(proxyId, true);
+      }
+    } catch (err) {
+      if (proxyId && this.proxyManager) {
+        this.proxyManager.recordProxyUsage(proxyId, false);
+      }
+      throw err;
+    }
     if (screenshot) {
       const screenshotBuffer = await page.screenshot(this.config.screenshot);
       page._screenshot = screenshotBuffer;
@@ -30173,15 +30639,24 @@ class PuppeteerPlugin extends Plugin {
     page._cursor = cursor;
     page._userAgent = userAgent;
     page._viewport = viewport;
+    page._proxyId = proxyId;
     if (this.config.humanBehavior.enabled) {
       this._attachHumanBehaviorMethods(page);
     }
     if (useSession && this.cookieManager) {
       page.on("close", async () => {
-        await this.cookieManager.saveSession(page, useSession);
+        await this.cookieManager.saveSession(page, useSession, {
+          success: navigationSuccess
+        });
       });
     }
-    this.emit("puppeteer.navigate", { url, userAgent, viewport });
+    this.emit("puppeteer.navigate", {
+      url,
+      userAgent,
+      viewport,
+      proxyId,
+      sessionId: useSession
+    });
     return page;
   }
   /**
@@ -30304,6 +30779,36 @@ class PuppeteerPlugin extends Plugin {
       throw new Error("Cookie manager not initialized");
     }
     return await this.cookieManager.getStats();
+  }
+  /**
+   * Get proxy pool statistics
+   * @returns {Array}
+   */
+  getProxyStats() {
+    if (!this.proxyManager) {
+      throw new Error("Proxy manager not initialized");
+    }
+    return this.proxyManager.getProxyStats();
+  }
+  /**
+   * Get session-proxy bindings
+   * @returns {Array}
+   */
+  getSessionProxyBindings() {
+    if (!this.proxyManager) {
+      throw new Error("Proxy manager not initialized");
+    }
+    return this.proxyManager.getSessionBindings();
+  }
+  /**
+   * Check health of all proxies
+   * @returns {Promise<Object>}
+   */
+  async checkProxyHealth() {
+    if (!this.proxyManager) {
+      throw new Error("Proxy manager not initialized");
+    }
+    return await this.proxyManager.checkAllProxies();
   }
 }
 
@@ -47551,6 +48056,365 @@ var prometheusFormatter = /*#__PURE__*/Object.freeze({
   formatPrometheusMetrics: formatPrometheusMetrics
 });
 
+class ProxyManager {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.proxy;
+    this.storage = null;
+    this.proxies = [];
+    this.proxyStats = /* @__PURE__ */ new Map();
+    this.sessionProxyMap = /* @__PURE__ */ new Map();
+    this.selectionStrategy = this.config.selectionStrategy || "round-robin";
+    this.currentProxyIndex = 0;
+  }
+  /**
+   * Initialize proxy manager
+   */
+  async initialize() {
+    if (this.config.enabled && this.config.list && this.config.list.length > 0) {
+      this.proxies = this.config.list.map((proxy, index) => ({
+        id: `proxy_${index}`,
+        ...this._parseProxy(proxy)
+      }));
+      for (const proxy of this.proxies) {
+        this.proxyStats.set(proxy.id, {
+          requests: 0,
+          failures: 0,
+          successRate: 1,
+          lastUsed: 0,
+          healthy: true,
+          createdAt: Date.now()
+        });
+      }
+      this.plugin.emit("proxyManager.initialized", {
+        count: this.proxies.length,
+        strategy: this.selectionStrategy
+      });
+    }
+    if (this.plugin.cookieManager && this.plugin.cookieManager.storage) {
+      await this._loadSessionProxyBindings();
+    }
+  }
+  /**
+   * Parse proxy string or object
+   * @private
+   */
+  _parseProxy(proxy) {
+    if (typeof proxy === "string") {
+      const url = new URL(proxy);
+      return {
+        protocol: url.protocol.replace(":", ""),
+        host: url.hostname,
+        port: parseInt(url.port) || (url.protocol === "https:" ? 443 : 80),
+        username: url.username || null,
+        password: url.password || null,
+        url: proxy
+      };
+    } else {
+      const protocol = proxy.protocol || "http";
+      const host = proxy.host;
+      const port = proxy.port || (protocol === "https" ? 443 : 80);
+      const username = proxy.username || null;
+      const password = proxy.password || null;
+      let url = `${protocol}://`;
+      if (username && password) {
+        url += `${username}:${password}@`;
+      }
+      url += `${host}:${port}`;
+      return {
+        protocol,
+        host,
+        port,
+        username,
+        password,
+        url
+      };
+    }
+  }
+  /**
+   * Load session-proxy bindings from storage
+   * @private
+   */
+  async _loadSessionProxyBindings() {
+    const storage = this.plugin.cookieManager.storage;
+    const sessions = await storage.list({ limit: 1e3 });
+    for (const session of sessions) {
+      if (session.proxyId) {
+        this.sessionProxyMap.set(session.sessionId, session.proxyId);
+      }
+    }
+    this.plugin.emit("proxyManager.bindingsLoaded", {
+      count: this.sessionProxyMap.size
+    });
+  }
+  /**
+   * Get proxy for a session (respecting immutable binding)
+   * @param {string} sessionId - Session identifier
+   * @param {boolean} createIfMissing - Create new binding if session is new
+   * @returns {Object|null} - Proxy config or null
+   */
+  getProxyForSession(sessionId, createIfMissing = true) {
+    if (!this.config.enabled || this.proxies.length === 0) {
+      return null;
+    }
+    if (this.sessionProxyMap.has(sessionId)) {
+      const proxyId = this.sessionProxyMap.get(sessionId);
+      const proxy = this.proxies.find((p) => p.id === proxyId);
+      if (!proxy) {
+        throw new Error(`Proxy ${proxyId} bound to session ${sessionId} not found in pool`);
+      }
+      const stats = this.proxyStats.get(proxyId);
+      if (!stats.healthy) {
+        throw new Error(`Proxy ${proxyId} bound to session ${sessionId} is unhealthy. Cannot use session.`);
+      }
+      return proxy;
+    }
+    if (createIfMissing) {
+      const proxy = this._selectProxy();
+      if (proxy) {
+        this.sessionProxyMap.set(sessionId, proxy.id);
+        this.plugin.emit("proxyManager.sessionBound", {
+          sessionId,
+          proxyId: proxy.id,
+          proxyUrl: this._maskProxyUrl(proxy.url)
+        });
+        return proxy;
+      }
+    }
+    return null;
+  }
+  /**
+   * Select proxy based on strategy
+   * @private
+   */
+  _selectProxy() {
+    const healthyProxies = this.proxies.filter((proxy) => {
+      const stats = this.proxyStats.get(proxy.id);
+      return stats.healthy;
+    });
+    if (healthyProxies.length === 0) {
+      throw new Error("No healthy proxies available");
+    }
+    let selectedProxy;
+    switch (this.selectionStrategy) {
+      case "round-robin":
+        selectedProxy = healthyProxies[this.currentProxyIndex % healthyProxies.length];
+        this.currentProxyIndex++;
+        break;
+      case "random":
+        selectedProxy = healthyProxies[Math.floor(Math.random() * healthyProxies.length)];
+        break;
+      case "least-used":
+        selectedProxy = healthyProxies.reduce((min, proxy) => {
+          const proxyStats = this.proxyStats.get(proxy.id);
+          const minStats = this.proxyStats.get(min.id);
+          return proxyStats.requests < minStats.requests ? proxy : min;
+        });
+        break;
+      case "best-performance":
+        selectedProxy = healthyProxies.reduce((best, proxy) => {
+          const proxyStats = this.proxyStats.get(proxy.id);
+          const bestStats = this.proxyStats.get(best.id);
+          return proxyStats.successRate > bestStats.successRate ? proxy : best;
+        });
+        break;
+      default:
+        selectedProxy = healthyProxies[0];
+    }
+    return selectedProxy;
+  }
+  /**
+   * Record proxy usage
+   * @param {string} proxyId - Proxy identifier
+   * @param {boolean} success - Whether request succeeded
+   */
+  recordProxyUsage(proxyId, success = true) {
+    const stats = this.proxyStats.get(proxyId);
+    if (!stats) return;
+    stats.requests++;
+    stats.lastUsed = Date.now();
+    if (success) {
+      stats.successRate = stats.successRate * 0.9 + 0.1;
+    } else {
+      stats.failures++;
+      stats.successRate = stats.successRate * 0.9;
+      const threshold = this.config.healthCheck?.successRateThreshold || 0.3;
+      if (stats.successRate < threshold) {
+        stats.healthy = false;
+        this.plugin.emit("proxyManager.proxyUnhealthy", {
+          proxyId,
+          successRate: stats.successRate
+        });
+      }
+    }
+  }
+  /**
+   * Get proxy statistics
+   * @returns {Array}
+   */
+  getProxyStats() {
+    return this.proxies.map((proxy) => {
+      const stats = this.proxyStats.get(proxy.id);
+      return {
+        proxyId: proxy.id,
+        url: this._maskProxyUrl(proxy.url),
+        ...stats,
+        boundSessions: Array.from(this.sessionProxyMap.entries()).filter(([_, proxyId]) => proxyId === proxy.id).length
+      };
+    });
+  }
+  /**
+   * Get session-proxy bindings
+   * @returns {Array}
+   */
+  getSessionBindings() {
+    return Array.from(this.sessionProxyMap.entries()).map(([sessionId, proxyId]) => {
+      const proxy = this.proxies.find((p) => p.id === proxyId);
+      return {
+        sessionId,
+        proxyId,
+        proxyUrl: proxy ? this._maskProxyUrl(proxy.url) : "unknown"
+      };
+    });
+  }
+  /**
+   * Verify session-proxy binding integrity
+   * @param {string} sessionId - Session identifier
+   * @param {string} proxyId - Proxy identifier
+   * @returns {boolean}
+   */
+  verifyBinding(sessionId, proxyId) {
+    if (!this.sessionProxyMap.has(sessionId)) {
+      return false;
+    }
+    const boundProxyId = this.sessionProxyMap.get(sessionId);
+    return boundProxyId === proxyId;
+  }
+  /**
+   * Get proxy config for browser launch
+   * @param {Object} proxy - Proxy object
+   * @returns {Object} - Puppeteer proxy config
+   */
+  getProxyLaunchArgs(proxy) {
+    if (!proxy) return [];
+    const args = [`--proxy-server=${proxy.url}`];
+    if (this.config.bypassList && this.config.bypassList.length > 0) {
+      args.push(`--proxy-bypass-list=${this.config.bypassList.join(";")}`);
+    }
+    return args;
+  }
+  /**
+   * Authenticate proxy on page
+   * @param {Page} page - Puppeteer page
+   * @param {Object} proxy - Proxy object
+   */
+  async authenticateProxy(page, proxy) {
+    if (proxy.username && proxy.password) {
+      await page.authenticate({
+        username: proxy.username,
+        password: proxy.password
+      });
+    }
+  }
+  /**
+   * Check proxy health
+   * @param {string} proxyId - Proxy identifier
+   * @returns {Promise<boolean>}
+   */
+  async checkProxyHealth(proxyId) {
+    const proxy = this.proxies.find((p) => p.id === proxyId);
+    if (!proxy) return false;
+    const stats = this.proxyStats.get(proxyId);
+    if (!stats) return false;
+    try {
+      const browser = await this.plugin.puppeteer.launch({
+        ...this.plugin.config.launch,
+        args: [
+          ...this.plugin.config.launch.args,
+          ...this.getProxyLaunchArgs(proxy)
+        ]
+      });
+      const page = await browser.newPage();
+      await this.authenticateProxy(page, proxy);
+      const testUrl = this.config.healthCheck?.testUrl || "https://www.google.com";
+      const timeout = this.config.healthCheck?.timeout || 1e4;
+      await page.goto(testUrl, { timeout });
+      await browser.close();
+      stats.healthy = true;
+      stats.successRate = Math.min(stats.successRate + 0.1, 1);
+      this.plugin.emit("proxyManager.healthCheckPassed", {
+        proxyId,
+        url: this._maskProxyUrl(proxy.url)
+      });
+      return true;
+    } catch (err) {
+      stats.healthy = false;
+      stats.failures++;
+      this.plugin.emit("proxyManager.healthCheckFailed", {
+        proxyId,
+        url: this._maskProxyUrl(proxy.url),
+        error: err.message
+      });
+      return false;
+    }
+  }
+  /**
+   * Run health checks on all proxies
+   * @returns {Promise<Object>}
+   */
+  async checkAllProxies() {
+    const results = {
+      total: this.proxies.length,
+      healthy: 0,
+      unhealthy: 0,
+      checks: []
+    };
+    for (const proxy of this.proxies) {
+      const isHealthy = await this.checkProxyHealth(proxy.id);
+      results.checks.push({
+        proxyId: proxy.id,
+        url: this._maskProxyUrl(proxy.url),
+        healthy: isHealthy
+      });
+      if (isHealthy) {
+        results.healthy++;
+      } else {
+        results.unhealthy++;
+      }
+    }
+    return results;
+  }
+  /**
+   * Mask proxy URL for logging (hide credentials)
+   * @private
+   */
+  _maskProxyUrl(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.username) {
+        return `${parsed.protocol}//${parsed.username}:***@${parsed.host}`;
+      }
+      return url;
+    } catch {
+      return url;
+    }
+  }
+  /**
+   * Remove session-proxy binding (only for cleanup/testing)
+   * WARNING: This breaks immutability! Only use when deleting sessions.
+   * @param {string} sessionId - Session identifier
+   */
+  _removeBinding(sessionId) {
+    this.sessionProxyMap.delete(sessionId);
+    this.plugin.emit("proxyManager.bindingRemoved", { sessionId });
+  }
+}
+
+var proxyManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  ProxyManager: ProxyManager
+});
+
 class CookieManager {
   constructor(plugin) {
     this.plugin = plugin;
@@ -47626,6 +48490,8 @@ class CookieManager {
       cookies: [],
       userAgent: page._userAgent,
       viewport: page._viewport,
+      proxyId: page._proxyId || null,
+      // IMMUTABLE: Proxy binding
       reputation: {
         successCount: 0,
         failCount: 0,

@@ -6,6 +6,7 @@
  */
 
 import { asyncHandler } from './error-handler.js';
+import { withContext, autoWrapHandler } from '../concerns/route-context.js';
 
 /**
  * Parse route definition from key
@@ -31,11 +32,15 @@ export function parseRouteKey(key) {
  * @param {Object} routes - Routes object { 'METHOD /path': handler }
  * @param {Object} context - Context to pass to handlers (resource, database, etc.)
  * @param {boolean} verbose - Enable verbose logging
+ * @param {Object} options - Additional options
+ * @param {boolean} options.autoWrap - Auto-wrap handlers with enhanced context (default: true)
  */
-export function mountCustomRoutes(app, routes, context = {}, verbose = false) {
+export function mountCustomRoutes(app, routes, context = {}, verbose = false, options = {}) {
   if (!routes || typeof routes !== 'object') {
     return;
   }
+
+  const { autoWrap = true } = options;
 
   for (const [key, handler] of Object.entries(routes)) {
     try {
@@ -43,18 +48,25 @@ export function mountCustomRoutes(app, routes, context = {}, verbose = false) {
 
       // Wrap handler with async error handler and context
       const wrappedHandler = asyncHandler(async (c) => {
-        // Inject context into Hono context
+        // Inject legacy context into Hono context (for backward compatibility)
         c.set('customRouteContext', context);
 
-        // Call user handler with Hono context
-        return await handler(c);
+        // Auto-wrap handler if enabled and handler expects 2 arguments (c, ctx)
+        if (autoWrap && handler.length === 2) {
+          // Handler expects (c, ctx) - wrap it with enhanced context
+          return await withContext(handler, { resource: context.resource })(c);
+        } else {
+          // Handler expects only (c) - use legacy behavior
+          return await handler(c);
+        }
       });
 
       // Mount route
       app.on(method, path, wrappedHandler);
 
       if (verbose) {
-        console.log(`[Custom Routes] Mounted ${method} ${path}`);
+        const contextType = (autoWrap && handler.length === 2) ? '(enhanced)' : '(legacy)';
+        console.log(`[Custom Routes] Mounted ${method} ${path} ${contextType}`);
       }
     } catch (err) {
       console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
