@@ -9784,6 +9784,47 @@ class ApiServer {
   }
 }
 
+const PREFIX = "plg_";
+function sanitizeName(name) {
+  if (!name || typeof name !== "string") {
+    throw new Error("[resource-names] Resource name must be a non-empty string");
+  }
+  return name.trim();
+}
+function ensurePlgPrefix(name) {
+  const sanitized = sanitizeName(name);
+  if (sanitized.startsWith(PREFIX)) {
+    return sanitized;
+  }
+  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
+}
+function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}) {
+  if (!defaultName && !override && !suffix) {
+    throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
+  }
+  if (override) {
+    return ensurePlgPrefix(override);
+  }
+  if (defaultName) {
+    return defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
+  }
+  if (!suffix) {
+    throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
+  }
+  return ensurePlgPrefix(`${pluginKey}_${suffix}`);
+}
+function resolveResourceNames(pluginKey, descriptors = {}) {
+  const result = {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (typeof descriptor === "string") {
+      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor });
+      continue;
+    }
+    result[key] = resolveResourceName(pluginKey, descriptor);
+  }
+  return result;
+}
+
 const AUTH_DRIVER_KEYS = ["jwt", "apiKey", "basic", "oidc", "oauth2"];
 function normalizeAuthConfig(authOptions = {}) {
   if (!authOptions) {
@@ -9857,6 +9898,12 @@ class ApiPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     const normalizedAuth = normalizeAuthConfig(options.auth);
+    this.usersResourceName = resolveResourceName("api", {
+      defaultName: "plg_api_users",
+      override: normalizedAuth.resource
+    });
+    this.legacyUsersResourceNames = ["plg_users"];
+    normalizedAuth.resource = this.usersResourceName;
     this.config = {
       // Server configuration
       port: options.port || 3e3,
@@ -10103,7 +10150,7 @@ class ApiPlugin extends Plugin {
   async _createUsersResource() {
     const [ok, err, resource] = await tryFn(
       () => this.database.createResource({
-        name: "plg_users",
+        name: this.usersResourceName,
         attributes: {
           id: "string|required",
           username: "string|required|minlength:3",
@@ -10128,15 +10175,18 @@ class ApiPlugin extends Plugin {
     if (ok) {
       this.usersResource = resource;
       if (this.config.verbose) {
-        console.log("[API Plugin] Created plg_users resource for authentication");
-      }
-    } else if (this.database.resources.plg_users) {
-      this.usersResource = this.database.resources.plg_users;
-      if (this.config.verbose) {
-        console.log("[API Plugin] Using existing plg_users resource");
+        console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
       }
     } else {
-      throw err;
+      const existing = this.database.resources[this.usersResourceName] || this.legacyUsersResourceNames.map((name) => this.database.resources[name]).find(Boolean);
+      if (existing) {
+        this.usersResource = existing;
+        if (this.config.verbose) {
+          console.log(`[API Plugin] Using existing ${existing.name} resource`);
+        }
+      } else {
+        throw err;
+      }
     }
   }
   /**
@@ -11950,47 +12000,6 @@ function validateResourcesConfig$1(resourcesConfig) {
   };
 }
 
-const PREFIX = "plg_";
-function sanitizeName(name) {
-  if (!name || typeof name !== "string") {
-    throw new Error("[resource-names] Resource name must be a non-empty string");
-  }
-  return name.trim();
-}
-function ensurePlgPrefix(name) {
-  const sanitized = sanitizeName(name);
-  if (sanitized.startsWith(PREFIX)) {
-    return sanitized;
-  }
-  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
-}
-function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}) {
-  if (!defaultName && !override && !suffix) {
-    throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
-  }
-  if (override) {
-    return ensurePlgPrefix(override);
-  }
-  if (defaultName) {
-    return defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
-  }
-  if (!suffix) {
-    throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
-  }
-  return ensurePlgPrefix(`${pluginKey}_${suffix}`);
-}
-function resolveResourceNames(pluginKey, descriptors = {}) {
-  const result = {};
-  for (const [key, descriptor] of Object.entries(descriptors)) {
-    if (typeof descriptor === "string") {
-      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor });
-      continue;
-    }
-    result[key] = resolveResourceName(pluginKey, descriptor);
-  }
-  return result;
-}
-
 class IdentityPlugin extends Plugin {
   /**
    * Create Identity Provider Plugin instance
@@ -12427,9 +12436,11 @@ class IdentityPlugin extends Plugin {
    * @private
    */
   async _createOAuth2Resources() {
+    const names = this.internalResourceNames;
+    const legacyNames = this.legacyInternalResourceNames;
     const [okKeys, errKeys, keysResource] = await tryFn(
       () => this.database.createResource({
-        name: "plg_oauth_keys",
+        name: names.oauthKeys,
         attributes: {
           kid: "string|required",
           publicKey: "string|required",
@@ -12447,19 +12458,19 @@ class IdentityPlugin extends Plugin {
     if (okKeys) {
       this.oauth2KeysResource = keysResource;
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Created plg_oauth_keys resource");
+        console.log(`[Identity Plugin] Created ${names.oauthKeys} resource`);
       }
-    } else if (this.database.resources.plg_oauth_keys) {
-      this.oauth2KeysResource = this.database.resources.plg_oauth_keys;
+    } else if (this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys]) {
+      this.oauth2KeysResource = this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys];
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Using existing plg_oauth_keys resource");
+        console.log(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
       }
     } else {
       throw errKeys;
     }
     const [okCodes, errCodes, codesResource] = await tryFn(
       () => this.database.createResource({
-        name: "plg_auth_codes",
+        name: names.authCodes,
         attributes: {
           code: "string|required",
           clientId: "string|required",
@@ -12482,19 +12493,19 @@ class IdentityPlugin extends Plugin {
     if (okCodes) {
       this.oauth2AuthCodesResource = codesResource;
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Created plg_auth_codes resource");
+        console.log(`[Identity Plugin] Created ${names.authCodes} resource`);
       }
-    } else if (this.database.resources.plg_auth_codes) {
-      this.oauth2AuthCodesResource = this.database.resources.plg_auth_codes;
+    } else if (this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes]) {
+      this.oauth2AuthCodesResource = this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes];
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Using existing plg_auth_codes resource");
+        console.log(`[Identity Plugin] Using existing ${names.authCodes} resource`);
       }
     } else {
       throw errCodes;
     }
     const [okSessions, errSessions, sessionsResource] = await tryFn(
       () => this.database.createResource({
-        name: "plg_sessions",
+        name: names.sessions,
         attributes: {
           userId: "string|required",
           expiresAt: "string|required",
@@ -12511,19 +12522,19 @@ class IdentityPlugin extends Plugin {
     if (okSessions) {
       this.sessionsResource = sessionsResource;
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Created plg_sessions resource");
+        console.log(`[Identity Plugin] Created ${names.sessions} resource`);
       }
-    } else if (this.database.resources.plg_sessions) {
-      this.sessionsResource = this.database.resources.plg_sessions;
+    } else if (this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions]) {
+      this.sessionsResource = this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions];
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Using existing plg_sessions resource");
+        console.log(`[Identity Plugin] Using existing ${names.sessions} resource`);
       }
     } else {
       throw errSessions;
     }
     const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn(
       () => this.database.createResource({
-        name: "plg_password_reset_tokens",
+        name: names.passwordResetTokens,
         attributes: {
           userId: "string|required",
           token: "string|required",
@@ -12539,12 +12550,12 @@ class IdentityPlugin extends Plugin {
     if (okResetTokens) {
       this.passwordResetTokensResource = resetTokensResource;
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Created plg_password_reset_tokens resource");
+        console.log(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
       }
-    } else if (this.database.resources.plg_password_reset_tokens) {
-      this.passwordResetTokensResource = this.database.resources.plg_password_reset_tokens;
+    } else if (this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens]) {
+      this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens];
       if (this.config.verbose) {
-        console.log("[Identity Plugin] Using existing plg_password_reset_tokens resource");
+        console.log(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
       }
     } else {
       throw errResetTokens;
@@ -12552,7 +12563,7 @@ class IdentityPlugin extends Plugin {
     if (this.config.mfa.enabled) {
       const [okMFA, errMFA, mfaResource] = await tryFn(
         () => this.database.createResource({
-          name: "plg_mfa_devices",
+          name: names.mfaDevices,
           attributes: {
             userId: "string|required",
             type: "string|required",
@@ -12581,15 +12592,15 @@ class IdentityPlugin extends Plugin {
       if (okMFA) {
         this.mfaDevicesResource = mfaResource;
         if (this.config.verbose) {
-          console.log("[Identity Plugin] Created plg_mfa_devices resource");
+          console.log(`[Identity Plugin] Created ${names.mfaDevices} resource`);
         }
-      } else if (this.database.resources.plg_mfa_devices) {
-        this.mfaDevicesResource = this.database.resources.plg_mfa_devices;
+      } else if (this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices]) {
+        this.mfaDevicesResource = this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices];
         if (this.config.verbose) {
-          console.log("[Identity Plugin] Using existing plg_mfa_devices resource");
+          console.log(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
         }
       } else {
-        console.warn("[Identity Plugin] MFA enabled but failed to create plg_mfa_devices resource:", errMFA?.message);
+        console.warn(`[Identity Plugin] MFA enabled but failed to create ${names.mfaDevices} resource:`, errMFA?.message);
       }
     }
   }
@@ -12926,7 +12937,19 @@ class IdentityPlugin extends Plugin {
     const { purgeData = false } = options;
     await this.onStop();
     if (purgeData) {
-      const resourcesToDelete = ["plg_oauth_keys", "plg_oauth_clients", "plg_auth_codes"];
+      const resourcesToDelete = /* @__PURE__ */ new Set([
+        this.internalResourceNames.oauthKeys,
+        this.internalResourceNames.authCodes,
+        this.internalResourceNames.sessions,
+        this.internalResourceNames.passwordResetTokens,
+        this.internalResourceNames.mfaDevices,
+        this.legacyInternalResourceNames.oauthKeys,
+        this.legacyInternalResourceNames.authCodes,
+        this.legacyInternalResourceNames.sessions,
+        this.legacyInternalResourceNames.passwordResetTokens,
+        this.legacyInternalResourceNames.mfaDevices,
+        "plg_oauth_clients"
+      ]);
       for (const resourceName of resourcesToDelete) {
         const [ok] = await tryFn(() => this.database.deleteResource(resourceName));
         if (ok && this.config.verbose) {
