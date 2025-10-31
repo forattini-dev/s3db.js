@@ -9960,7 +9960,8 @@ function normalizeAuthConfig(authOptions = {}) {
     priorities: authOptions.priorities || {},
     resource: authOptions.resource,
     usernameField: authOptions.usernameField || "email",
-    passwordField: authOptions.passwordField || "password"
+    passwordField: authOptions.passwordField || "password",
+    createResource: authOptions.createResource !== false
   };
   const seen = /* @__PURE__ */ new Set();
   const addDriver = (name, driverConfig = {}) => {
@@ -10269,6 +10270,7 @@ class ApiPlugin extends Plugin {
         );
       }
       this.usersResource = existingResource;
+      this.config.auth.resource = existingResource.name;
       if (this.config.verbose) {
         console.log(`[API Plugin] Using existing ${existingResource.name} resource for authentication`);
       }
@@ -10276,6 +10278,7 @@ class ApiPlugin extends Plugin {
     }
     if (existingResource) {
       this.usersResource = existingResource;
+      this.config.auth.resource = existingResource.name;
       if (this.config.verbose) {
         console.log(`[API Plugin] Reusing existing ${existingResource.name} resource for authentication`);
       }
@@ -10307,6 +10310,7 @@ class ApiPlugin extends Plugin {
       throw err;
     }
     this.usersResource = resource;
+    this.config.auth.resource = resource.name;
     if (this.config.verbose) {
       console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
     }
@@ -10420,13 +10424,14 @@ class ApiPlugin extends Plugin {
     const { windowMs, maxRequests, keyGenerator } = this.config.rateLimit;
     return async (c, next) => {
       const key = keyGenerator ? keyGenerator(c) : c.req.header("x-forwarded-for") || c.req.header("cf-connecting-ip") || "unknown";
-      if (!requests.has(key)) {
-        requests.set(key, { count: 0, resetAt: Date.now() + windowMs });
+      let record = requests.get(key);
+      if (record && Date.now() > record.resetAt) {
+        requests.delete(key);
+        record = null;
       }
-      const record = requests.get(key);
-      if (Date.now() > record.resetAt) {
-        record.count = 0;
-        record.resetAt = Date.now() + windowMs;
+      if (!record) {
+        record = { count: 0, resetAt: Date.now() + windowMs };
+        requests.set(key, record);
       }
       if (record.count >= maxRequests) {
         const retryAfter = Math.ceil((record.resetAt - Date.now()) / 1e3);
@@ -10504,11 +10509,12 @@ class ApiPlugin extends Plugin {
       if (!c.res || !c.res.body) {
         return;
       }
-      if (c.res.headers.has("content-encoding")) {
+      if (c.res.headers.has("content-encoding") || c.res.bodyUsed) {
         return;
       }
       const contentType = c.res.headers.get("content-type") || "";
-      if (skipContentTypes.some((type) => contentType.startsWith(type))) {
+      const isTextLike = contentType.startsWith("text/") || contentType.includes("json");
+      if (skipContentTypes.some((type) => contentType.startsWith(type)) || !isTextLike) {
         return;
       }
       const acceptEncoding = c.req.header("accept-encoding") || "";
@@ -10820,8 +10826,9 @@ function getKidFromToken(token) {
 class KeyManager {
   constructor(keyResource) {
     this.keyResource = keyResource;
-    this.currentKey = null;
-    this.keys = /* @__PURE__ */ new Map();
+    this.keysByPurpose = /* @__PURE__ */ new Map();
+    this.currentKeys = /* @__PURE__ */ new Map();
+    this.keysByKid = /* @__PURE__ */ new Map();
   }
   /**
    * Initialize key manager - load or generate keys
@@ -10830,30 +10837,29 @@ class KeyManager {
     const existingKeys = await this.keyResource.list();
     if (existingKeys.length > 0) {
       for (const keyRecord of existingKeys) {
-        this.keys.set(keyRecord.kid, {
-          publicKey: keyRecord.publicKey,
-          privateKey: keyRecord.privateKey,
-          kid: keyRecord.kid,
-          createdAt: keyRecord.createdAt,
-          active: keyRecord.active
+        this._storeKeyRecord({
+          ...keyRecord,
+          purpose: keyRecord.purpose || "oauth"
         });
-        if (keyRecord.active) {
-          this.currentKey = keyRecord;
-        }
       }
     }
-    if (!this.currentKey) {
-      await this.rotateKey();
+    if (!this.currentKeys.get("oauth")) {
+      await this.rotateKey("oauth");
     }
   }
   /**
    * Rotate keys - generate new key pair
    */
-  async rotateKey() {
+  async rotateKey(purpose = "oauth") {
+    const normalizedPurpose = this._normalizePurpose(purpose);
     const keyPair = generateKeyPair();
-    const oldKeys = await this.keyResource.query({ active: true });
+    const oldKeys = await this.keyResource.query({ active: true, purpose: normalizedPurpose });
     for (const oldKey of oldKeys) {
       await this.keyResource.update(oldKey.id, { active: false });
+      const stored = this.keysByKid.get(oldKey.kid);
+      if (stored) {
+        stored.active = false;
+      }
     }
     const keyRecord = await this.keyResource.insert({
       kid: keyPair.kid,
@@ -10862,29 +10868,50 @@ class KeyManager {
       algorithm: keyPair.algorithm,
       use: keyPair.use,
       active: true,
-      createdAt: keyPair.createdAt
+      createdAt: keyPair.createdAt,
+      purpose: normalizedPurpose
     });
-    this.currentKey = keyRecord;
-    this.keys.set(keyRecord.kid, keyRecord);
+    this._storeKeyRecord(keyRecord);
     return keyRecord;
   }
   /**
    * Get current active key
    */
-  getCurrentKey() {
-    return this.currentKey;
+  getCurrentKey(purpose = "oauth") {
+    return this.currentKeys.get(this._normalizePurpose(purpose)) || null;
   }
   /**
    * Get key by kid
    */
   getKey(kid) {
-    return this.keys.get(kid);
+    return this.keysByKid.get(kid) || null;
+  }
+  /**
+   * Ensure a purpose has an active key
+   * @param {string} purpose
+   * @returns {Promise<Object>}
+   */
+  async ensurePurpose(purpose = "oauth") {
+    const normalizedPurpose = this._normalizePurpose(purpose);
+    const current = this.currentKeys.get(normalizedPurpose);
+    if (current) {
+      return current;
+    }
+    const [active] = await this.keyResource.query({ purpose: normalizedPurpose, active: true });
+    if (active) {
+      this._storeKeyRecord({
+        ...active,
+        purpose: active.purpose || normalizedPurpose
+      });
+      return this.currentKeys.get(normalizedPurpose);
+    }
+    return await this.rotateKey(normalizedPurpose);
   }
   /**
    * Get all public keys in JWKS format
    */
   async getJWKS() {
-    const keys = Array.from(this.keys.values()).map((key) => ({
+    const keys = Array.from(this.keysByKid.values()).filter((key) => key.active).map((key) => ({
       kty: "RSA",
       use: "sig",
       alg: "RS256",
@@ -10896,14 +10923,16 @@ class KeyManager {
   /**
    * Create JWT with current active key
    */
-  createToken(payload, expiresIn = "15m") {
-    if (!this.currentKey) {
-      throw new Error("No active key available");
+  createToken(payload, expiresIn = "15m", purpose = "oauth") {
+    const normalizedPurpose = this._normalizePurpose(purpose);
+    const activeKey = this.currentKeys.get(normalizedPurpose);
+    if (!activeKey) {
+      throw new Error(`No active key available for purpose "${normalizedPurpose}"`);
     }
     return createRS256Token(
       payload,
-      this.currentKey.privateKey,
-      this.currentKey.kid,
+      activeKey.privateKey,
+      activeKey.kid,
       expiresIn
     );
   }
@@ -10920,6 +10949,40 @@ class KeyManager {
       return null;
     }
     return verifyRS256Token(token, key.publicKey);
+  }
+  /**
+   * Normalize purpose name
+   * @param {string} purpose
+   * @returns {string}
+   * @private
+   */
+  _normalizePurpose(purpose) {
+    return typeof purpose === "string" && purpose.trim().length > 0 ? purpose.trim() : "oauth";
+  }
+  /**
+   * Store key record in caches
+   * @param {Object} record
+   * @private
+   */
+  _storeKeyRecord(record) {
+    const purpose = this._normalizePurpose(record.purpose);
+    const entry = {
+      publicKey: record.publicKey,
+      privateKey: record.privateKey,
+      kid: record.kid,
+      createdAt: record.createdAt,
+      active: record.active,
+      purpose,
+      id: record.id
+    };
+    if (!this.keysByPurpose.has(purpose)) {
+      this.keysByPurpose.set(purpose, /* @__PURE__ */ new Map());
+    }
+    this.keysByPurpose.get(purpose).set(entry.kid, entry);
+    this.keysByKid.set(entry.kid, entry);
+    if (entry.active) {
+      this.currentKeys.set(purpose, entry);
+    }
   }
 }
 
@@ -12135,6 +12198,101 @@ function validateResourcesConfig$1(resourcesConfig) {
   };
 }
 
+class RateLimiter {
+  /**
+   * @param {Object} options
+   * @param {number} options.windowMs - Window size in milliseconds
+   * @param {number} options.max - Maximum number of hits allowed per window
+   */
+  constructor(options = {}) {
+    this.windowMs = options.windowMs ?? 6e4;
+    this.max = options.max ?? 10;
+    this.buckets = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Consume a token for the given key
+   * @param {string} key - Identifier (usually IP address)
+   * @returns {{allowed: boolean, remaining: number, retryAfter: number}}
+   */
+  consume(key) {
+    if (!this.enabled()) {
+      return { allowed: true, remaining: Infinity, retryAfter: 0 };
+    }
+    const now = Date.now();
+    const bucket = this.buckets.get(key);
+    if (!bucket || bucket.expiresAt <= now) {
+      const expiresAt = now + this.windowMs;
+      this.buckets.set(key, { count: 1, expiresAt });
+      this._prune(now);
+      return {
+        allowed: true,
+        remaining: Math.max(this.max - 1, 0),
+        retryAfter: 0
+      };
+    }
+    if (bucket.count < this.max) {
+      bucket.count += 1;
+      this._prune(now);
+      return {
+        allowed: true,
+        remaining: Math.max(this.max - bucket.count, 0),
+        retryAfter: 0
+      };
+    }
+    const retryAfterMs = bucket.expiresAt - now;
+    return {
+      allowed: false,
+      remaining: 0,
+      retryAfter: Math.max(Math.ceil(retryAfterMs / 1e3), 1)
+    };
+  }
+  /**
+   * Whether the limiter is active
+   * @returns {boolean}
+   */
+  enabled() {
+    return this.max > 0 && this.windowMs > 0;
+  }
+  /**
+   * Periodically remove expired buckets
+   * @private
+   */
+  _prune(now) {
+    if (this.buckets.size > 5e3) {
+      for (const [key, bucket] of this.buckets.entries()) {
+        if (bucket.expiresAt <= now) {
+          this.buckets.delete(key);
+        }
+      }
+    }
+  }
+}
+function createJsonRateLimitMiddleware(limiter, getKey) {
+  return async (c, next) => {
+    const key = getKey(c);
+    const result = limiter.consume(key);
+    if (result.allowed) {
+      return await next();
+    }
+    c.header("Retry-After", String(result.retryAfter));
+    return c.json({
+      error: "too_many_requests",
+      error_description: `Too many requests. Try again in ${result.retryAfter} seconds.`
+    }, 429);
+  };
+}
+function createRedirectRateLimitMiddleware(limiter, getKey, buildRedirectUrl) {
+  return async (c, next) => {
+    const key = getKey(c);
+    const result = limiter.consume(key);
+    if (result.allowed) {
+      return await next();
+    }
+    const url = buildRedirectUrl(result.retryAfter);
+    return c.redirect(url, 302);
+  };
+}
+
 class IdentityPlugin extends Plugin {
   /**
    * Create Identity Provider Plugin instance
@@ -12466,6 +12624,22 @@ class IdentityPlugin extends Plugin {
           // Block IPs with unknown country
         }
       },
+      // Rate Limiting Configuration
+      rateLimit: {
+        enabled: options.rateLimit?.enabled !== false,
+        login: {
+          windowMs: options.rateLimit?.login?.windowMs || 6e4,
+          max: options.rateLimit?.login?.max ?? 10
+        },
+        token: {
+          windowMs: options.rateLimit?.token?.windowMs || 6e4,
+          max: options.rateLimit?.token?.max ?? 60
+        },
+        authorize: {
+          windowMs: options.rateLimit?.authorize?.windowMs || 6e4,
+          max: options.rateLimit?.authorize?.max ?? 30
+        }
+      },
       // Features (MVP - Phase 1)
       features: {
         // Endpoints (can be disabled individually)
@@ -12530,6 +12704,7 @@ class IdentityPlugin extends Plugin {
     this.usersResource = null;
     this.tenantsResource = null;
     this.clientsResource = null;
+    this.rateLimiters = this._createRateLimiters();
   }
   /**
    * Validate plugin dependencies
@@ -12540,6 +12715,28 @@ class IdentityPlugin extends Plugin {
       throwOnError: true,
       checkVersions: true
     });
+  }
+  /**
+   * Initialize rate limiters for sensitive endpoints
+   * @private
+   * @returns {Object<string, RateLimiter>}
+   */
+  _createRateLimiters() {
+    if (!this.config.rateLimit.enabled) {
+      return {};
+    }
+    const limiters = {};
+    const { login, token, authorize } = this.config.rateLimit;
+    if (login?.max > 0 && login?.windowMs > 0) {
+      limiters.login = new RateLimiter(login);
+    }
+    if (token?.max > 0 && token?.windowMs > 0) {
+      limiters.token = new RateLimiter(token);
+    }
+    if (authorize?.max > 0 && authorize?.windowMs > 0) {
+      limiters.authorize = new RateLimiter(authorize);
+    }
+    return limiters;
   }
   /**
    * Install plugin
@@ -31269,6 +31466,25 @@ class PuppeteerPlugin extends Plugin {
         },
         ...options.networkMonitor
       },
+      // Console Monitoring
+      consoleMonitor: {
+        enabled: false,
+        // Disabled by default
+        persist: false,
+        // Save to S3DB
+        filters: {
+          levels: null,
+          // ['error', 'warning'] or null for all
+          excludePatterns: [],
+          // Regex patterns to exclude
+          includeStackTraces: true,
+          includeSourceLocation: true,
+          captureNetwork: false,
+          // Also capture network errors
+          ...options.consoleMonitor?.filters
+        },
+        ...options.consoleMonitor
+      },
       // Screenshot & Recording
       screenshot: {
         fullPage: false,
@@ -31330,6 +31546,7 @@ class PuppeteerPlugin extends Plugin {
     this.proxyManager = null;
     this.performanceManager = null;
     this.networkMonitor = null;
+    this.consoleMonitor = null;
     this.initialized = false;
     if (this.config.pool.reuseTab) {
       this.emit("puppeteer.configWarning", {
@@ -31367,6 +31584,9 @@ class PuppeteerPlugin extends Plugin {
     await this._initializePerformanceManager();
     if (this.config.networkMonitor.enabled) {
       await this._initializeNetworkMonitor();
+    }
+    if (this.config.consoleMonitor.enabled) {
+      await this._initializeConsoleMonitor();
     }
     if (this.config.pool.enabled) {
       await this._warmupBrowserPool();
@@ -31491,6 +31711,18 @@ class PuppeteerPlugin extends Plugin {
       await this.networkMonitor.initialize();
     }
     this.emit("puppeteer.networkMonitor.initialized");
+  }
+  /**
+   * Initialize console monitor
+   * @private
+   */
+  async _initializeConsoleMonitor() {
+    const { ConsoleMonitor } = await Promise.resolve().then(function () { return consoleMonitor; });
+    this.consoleMonitor = new ConsoleMonitor(this);
+    if (this.config.consoleMonitor.persist) {
+      await this.consoleMonitor.initialize();
+    }
+    this.emit("puppeteer.consoleMonitor.initialized");
   }
   /**
    * Warmup browser pool
@@ -39692,6 +39924,18 @@ class S3QueuePlugin extends Plugin {
       verbose: options.verbose || false,
       ...options
     };
+    this.queueResourceName = resolveResourceName("s3queue", {
+      defaultName: `plg_s3queue_${this.config.resource}_queue`,
+      override: options.queueResource
+    });
+    this.config.queueResourceName = this.queueResourceName;
+    this.legacyQueueResourceNames = [`${this.config.resource}_queue`];
+    this.deadLetterResourceName = this.config.deadLetterResource ? resolveResourceName("s3queue", {
+      defaultName: `plg_s3queue_${this.config.resource}_dead`,
+      override: this.config.deadLetterResource
+    }) : null;
+    this.legacyDeadLetterResourceNames = this.config.deadLetterResource ? [this.config.deadLetterResource] : [];
+    this.config.deadLetterResource = this.deadLetterResourceName;
     this.queueResource = null;
     this.targetResource = null;
     this.deadLetterResourceObj = null;
@@ -39707,7 +39951,7 @@ class S3QueuePlugin extends Plugin {
     if (!this.targetResource) {
       throw new Error(`S3QueuePlugin: resource '${this.config.resource}' not found`);
     }
-    const queueName = `${this.config.resource}_queue`;
+    const queueName = this.queueResourceName;
     const [ok, err] = await tryFn(
       () => this.database.createResource({
         name: queueName,
@@ -39739,10 +39983,15 @@ class S3QueuePlugin extends Plugin {
         }
       })
     );
-    if (!ok && !this.database.resources[queueName]) {
-      throw new Error(`Failed to create queue resource: ${err?.message}`);
+    if (ok) {
+      this.queueResource = this.database.resources[queueName] || this._findExistingResource([queueName]);
+    } else {
+      this.queueResource = this._findExistingResource([queueName, ...this.legacyQueueResourceNames]);
+      if (!this.queueResource) {
+        throw new Error(`Failed to create queue resource: ${err?.message}`);
+      }
     }
-    this.queueResource = this.database.resources[queueName];
+    this.queueResourceName = this.queueResource?.name || queueName;
     this.addHelperMethods();
     if (this.config.deadLetterResource) {
       await this.createDeadLetterResource();
@@ -40075,6 +40324,16 @@ class S3QueuePlugin extends Plugin {
       error
     });
   }
+  _findExistingResource(candidateNames) {
+    for (const name of candidateNames) {
+      if (!name) continue;
+      const resource = this.database.resources[name];
+      if (resource) {
+        return resource;
+      }
+    }
+    return null;
+  }
   async getStats() {
     const [ok, err, allMessages] = await tryFn(
       () => this.queueResource.list()
@@ -40101,9 +40360,11 @@ class S3QueuePlugin extends Plugin {
     return stats;
   }
   async createDeadLetterResource() {
+    if (!this.config.deadLetterResource) return;
+    const resourceName = this.config.deadLetterResource;
     const [ok, err] = await tryFn(
       () => this.database.createResource({
-        name: this.config.deadLetterResource,
+        name: resourceName,
         attributes: {
           id: "string|required",
           originalId: "string|required",
@@ -40117,11 +40378,18 @@ class S3QueuePlugin extends Plugin {
         timestamps: true
       })
     );
-    if (ok || this.database.resources[this.config.deadLetterResource]) {
-      this.deadLetterResourceObj = this.database.resources[this.config.deadLetterResource];
+    if (ok) {
+      this.deadLetterResourceObj = this.database.resources[resourceName] || this._findExistingResource([resourceName]);
+    } else {
+      this.deadLetterResourceObj = this._findExistingResource([resourceName, ...this.legacyDeadLetterResourceNames]);
+    }
+    if (this.deadLetterResourceObj) {
+      this.deadLetterResourceName = this.deadLetterResourceObj.name;
       if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Dead letter queue created: ${this.config.deadLetterResource}`);
+        console.log(`[S3QueuePlugin] Dead letter queue created: ${this.deadLetterResourceName}`);
       }
+    } else if (err && this.config.verbose) {
+      console.warn("[S3QueuePlugin] Failed to create dead letter resource:", err.message);
     }
   }
 }
@@ -40987,6 +41255,22 @@ class StateMachinePlugin extends Plugin {
       triggerCheckInterval: options.triggerCheckInterval || 6e4
       // Check triggers every 60s by default
     };
+    this.resourceNames = resolveResourceNames("state_machine", {
+      transitionLog: {
+        defaultName: "plg_state_transitions",
+        override: options.transitionLogResource
+      },
+      states: {
+        defaultName: "plg_entity_states",
+        override: options.stateResource
+      }
+    });
+    this.legacyResourceNames = {
+      transitionLog: "plg_state_transitions",
+      states: "plg_entity_states"
+    };
+    this.config.transitionLogResource = this.resourceNames.transitionLog;
+    this.config.stateResource = this.resourceNames.states;
     this.database = null;
     this.machines = /* @__PURE__ */ new Map();
     this.triggerIntervals = [];
@@ -42452,9 +42736,28 @@ class TfStatePlugin extends Plugin {
     this.driverType = config.driver || null;
     this.driverConfig = config.config || {};
     const resources = config.resources || {};
-    this.resourceName = resources.resources || config.resourceName || "plg_tfstate_resources";
-    this.stateFilesName = resources.stateFiles || config.stateFilesName || "plg_tfstate_state_files";
-    this.diffsName = resources.diffs || config.diffsName || "plg_tfstate_state_diffs";
+    this.resourceName = resolveResourceName("tfstate", {
+      defaultName: "plg_tfstate_resources",
+      override: resources.resources || config.resourceName
+    });
+    this.stateFilesName = resolveResourceName("tfstate", {
+      defaultName: "plg_tfstate_state_files",
+      override: resources.stateFiles || config.stateFilesName
+    });
+    this.diffsName = resolveResourceName("tfstate", {
+      defaultName: "plg_tfstate_state_diffs",
+      override: resources.diffs || config.diffsName
+    });
+    this.lineagesName = resolveResourceName("tfstate", {
+      defaultName: "plg_tfstate_lineages",
+      override: resources.lineages
+    });
+    this.legacyResourceNames = {
+      resources: ["plg_tfstate_resources"],
+      stateFiles: ["plg_tfstate_state_files"],
+      diffs: ["plg_tfstate_state_diffs"],
+      lineages: ["plg_tfstate_lineages"]
+    };
     const monitor = config.monitor || {};
     this.monitorEnabled = monitor.enabled || false;
     this.monitorCron = monitor.cron || "*/5 * * * *";
@@ -42510,7 +42813,6 @@ class TfStatePlugin extends Plugin {
         console.log(`[TfStatePlugin] Driver initialized successfully`);
       }
     }
-    this.lineagesName = "plg_tfstate_lineages";
     this.lineagesResource = await this.database.createResource({
       name: this.lineagesName,
       attributes: {
@@ -48932,7 +49234,7 @@ class IdentityServer {
   _setupFailbanMiddleware() {
     const { failbanManager } = this.options;
     this.app.use("*", async (c, next) => {
-      const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || c.env?.ip || "unknown";
+      const ip = this._extractClientIp(c);
       c.set("clientIp", ip);
       if (failbanManager.isBlacklisted(ip)) {
         c.header("X-Ban-Status", "blacklisted");
@@ -48989,6 +49291,24 @@ class IdentityServer {
     if (this.options.verbose) {
       console.log("[Identity Server] Failban middleware enabled (global ban check)");
     }
+  }
+  /**
+   * Extract client IP from request
+   * @param {import('hono').Context} c
+   * @returns {string}
+   * @private
+   */
+  _extractClientIp(c) {
+    return c.get("clientIp") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || c.env?.ip || "unknown";
+  }
+  /**
+   * Create rate limit middleware for API endpoints
+   * @param {RateLimiter} limiter
+   * @returns {Function}
+   * @private
+   */
+  _createRateLimitMiddleware(limiter) {
+    return createJsonRateLimitMiddleware(limiter, (c) => this._extractClientIp(c));
   }
   /**
    * Setup all routes
@@ -49076,51 +49396,34 @@ class IdentityServer {
       console.error("[Identity Server] OAuth2 Server not provided");
       return;
     }
-    this.app.get("/.well-known/openid-configuration", async (c) => {
+    const rateLimiters = this.options.identityPlugin?.rateLimiters || {};
+    const wrap = (handler) => async (c) => {
       const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
-      return await oauth2Server.discoveryHandler(req, res);
-    });
-    this.app.get("/.well-known/jwks.json", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.jwksHandler(req, res);
-    });
-    this.app.post("/oauth/token", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.tokenHandler(req, res);
-    });
-    this.app.get("/oauth/userinfo", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.userinfoHandler(req, res);
-    });
-    this.app.post("/oauth/introspect", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.introspectHandler(req, res);
-    });
-    this.app.get("/oauth/authorize", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizeHandler(req, res);
-    });
-    this.app.post("/oauth/authorize", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.authorizePostHandler(req, res);
-    });
-    this.app.post("/oauth/register", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.registerClientHandler(req, res);
-    });
-    this.app.post("/oauth/revoke", async (c) => {
-      const req = await createExpressStyleRequest(c);
-      const res = createExpressStyleResponse(c);
-      return await oauth2Server.revokeHandler(req, res);
-    });
+      return await handler.call(oauth2Server, req, res);
+    };
+    this.app.get("/.well-known/openid-configuration", wrap(oauth2Server.discoveryHandler));
+    this.app.get("/.well-known/jwks.json", wrap(oauth2Server.jwksHandler));
+    const tokenHandler = wrap(oauth2Server.tokenHandler);
+    if (rateLimiters.token) {
+      this.app.post("/oauth/token", this._createRateLimitMiddleware(rateLimiters.token), tokenHandler);
+    } else {
+      this.app.post("/oauth/token", tokenHandler);
+    }
+    this.app.get("/oauth/userinfo", wrap(oauth2Server.userinfoHandler));
+    this.app.post("/oauth/introspect", wrap(oauth2Server.introspectHandler));
+    const authorizeGet = wrap(oauth2Server.authorizeHandler);
+    const authorizePost = wrap(oauth2Server.authorizePostHandler);
+    if (rateLimiters.authorize) {
+      const middleware = this._createRateLimitMiddleware(rateLimiters.authorize);
+      this.app.get("/oauth/authorize", middleware, authorizeGet);
+      this.app.post("/oauth/authorize", middleware, authorizePost);
+    } else {
+      this.app.get("/oauth/authorize", authorizeGet);
+      this.app.post("/oauth/authorize", authorizePost);
+    }
+    this.app.post("/oauth/register", wrap(oauth2Server.registerClientHandler));
+    this.app.post("/oauth/revoke", wrap(oauth2Server.revokeHandler));
     if (this.options.verbose) {
       console.log("[Identity Server] Mounted OAuth2/OIDC routes:");
       console.log("[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)");
@@ -51791,6 +52094,589 @@ class NetworkMonitor {
 var networkMonitor = /*#__PURE__*/Object.freeze({
   __proto__: null,
   NetworkMonitor: NetworkMonitor
+});
+
+class ConsoleMonitor {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.consoleMonitor || {
+      enabled: false,
+      persist: false,
+      filters: {
+        levels: null,
+        // ['error', 'warning'] or null for all
+        excludePatterns: [],
+        // Regex patterns to exclude
+        includeStackTraces: true,
+        includeSourceLocation: true,
+        captureNetwork: false
+        // Also capture network errors from console
+      }
+    };
+    this.sessionsResource = null;
+    this.messagesResource = null;
+    this.errorsResource = null;
+    this.messageTypes = {
+      "log": "log",
+      "debug": "debug",
+      "info": "info",
+      "error": "error",
+      "warning": "warning",
+      "warn": "warning",
+      // Alias
+      "dir": "dir",
+      "dirxml": "dirxml",
+      "table": "table",
+      "trace": "trace",
+      "clear": "clear",
+      "startGroup": "group",
+      "startGroupCollapsed": "groupCollapsed",
+      "endGroup": "groupEnd",
+      "assert": "assert",
+      "profile": "profile",
+      "profileEnd": "profileEnd",
+      "count": "count",
+      "timeEnd": "timeEnd",
+      "verbose": "verbose"
+    };
+  }
+  /**
+   * Initialize console monitoring resources
+   */
+  async initialize() {
+    if (!this.config.persist) {
+      return;
+    }
+    this.sessionsResource = await this.plugin.database.createResource({
+      name: "console_sessions",
+      attributes: {
+        sessionId: "string|required",
+        url: "string|required",
+        domain: "string|required",
+        date: "string|required",
+        // YYYY-MM-DD
+        startTime: "number|required",
+        endTime: "number",
+        duration: "number",
+        // Statistics
+        totalMessages: "number",
+        errorCount: "number",
+        warningCount: "number",
+        logCount: "number",
+        infoCount: "number",
+        debugCount: "number",
+        // By type breakdown
+        byType: "object",
+        // { error: 5, warning: 3, log: 20 }
+        // User agent
+        userAgent: "string"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        byUrl: { fields: { url: "string" } },
+        byDate: { fields: { date: "string" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }).catch(async (err) => {
+      if (err.name === "ResourceAlreadyExistsError") {
+        return await this.plugin.database.getResource("console_sessions");
+      }
+      throw err;
+    });
+    this.messagesResource = await this.plugin.database.createResource({
+      name: "console_messages",
+      attributes: {
+        messageId: "string|required",
+        sessionId: "string|required",
+        timestamp: "number|required",
+        date: "string|required",
+        // Message details
+        type: "string|required",
+        // error, warning, log, info, debug, etc.
+        text: "string|required",
+        args: "array",
+        // Console.log arguments
+        // Source location
+        source: "object",
+        // { url, lineNumber, columnNumber }
+        // Stack trace (for errors)
+        stackTrace: "object",
+        // Context
+        url: "string",
+        // Page URL when message occurred
+        domain: "string"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        bySession: { fields: { sessionId: "string" } },
+        byType: { fields: { type: "string" } },
+        byDate: { fields: { date: "string" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }).catch(async (err) => {
+      if (err.name === "ResourceAlreadyExistsError") {
+        return await this.plugin.database.getResource("console_messages");
+      }
+      throw err;
+    });
+    this.errorsResource = await this.plugin.database.createResource({
+      name: "console_errors",
+      attributes: {
+        errorId: "string|required",
+        sessionId: "string|required",
+        messageId: "string|required",
+        timestamp: "number|required",
+        date: "string|required",
+        // Error details
+        errorType: "string",
+        // TypeError, ReferenceError, etc.
+        message: "string|required",
+        stackTrace: "object",
+        // Source location
+        url: "string",
+        // Script URL
+        lineNumber: "number",
+        columnNumber: "number",
+        // Context
+        pageUrl: "string",
+        // Page URL when error occurred
+        domain: "string",
+        // Classification
+        isUncaught: "boolean",
+        isPromiseRejection: "boolean",
+        isNetworkError: "boolean",
+        isSyntaxError: "boolean"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        bySession: { fields: { sessionId: "string" } },
+        byErrorType: { fields: { errorType: "string" } },
+        byDate: { fields: { date: "string" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }).catch(async (err) => {
+      if (err.name === "ResourceAlreadyExistsError") {
+        return await this.plugin.database.getResource("console_errors");
+      }
+      throw err;
+    });
+    this.plugin.emit("consoleMonitor.initialized", {
+      persist: this.config.persist
+    });
+  }
+  /**
+   * Start monitoring console messages for a page
+   * @param {Page} page - Puppeteer page
+   * @param {Object} options - Monitoring options
+   * @returns {Object} Session object
+   */
+  async startMonitoring(page, options = {}) {
+    const {
+      sessionId = `console_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      persist = this.config.persist,
+      filters = this.config.filters
+    } = options;
+    const session = {
+      sessionId,
+      url: page.url(),
+      domain: this._extractDomain(page.url()),
+      date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      startTime: Date.now(),
+      endTime: null,
+      duration: null,
+      // Tracked data
+      messages: [],
+      errors: [],
+      exceptions: [],
+      promiseRejections: [],
+      // Statistics
+      stats: {
+        totalMessages: 0,
+        errorCount: 0,
+        warningCount: 0,
+        logCount: 0,
+        infoCount: 0,
+        debugCount: 0,
+        byType: {}
+      }
+    };
+    const consoleHandler = (msg) => {
+      const type = this.messageTypes[msg.type()] || msg.type();
+      if (filters.levels && !filters.levels.includes(type)) {
+        return;
+      }
+      const text = msg.text();
+      if (filters.excludePatterns && filters.excludePatterns.length > 0) {
+        for (const pattern of filters.excludePatterns) {
+          if (new RegExp(pattern).test(text)) {
+            return;
+          }
+        }
+      }
+      const message = {
+        messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now(),
+        type,
+        text,
+        args: msg.args().length > 0 ? msg.args().map((arg) => this._serializeArg(arg)) : [],
+        url: page.url()
+      };
+      if (filters.includeSourceLocation && msg.location()) {
+        message.source = {
+          url: msg.location().url,
+          lineNumber: msg.location().lineNumber,
+          columnNumber: msg.location().columnNumber
+        };
+      }
+      if (filters.includeStackTraces && (type === "error" || type === "warning")) {
+        message.stackTrace = msg.stackTrace();
+      }
+      session.messages.push(message);
+      session.stats.totalMessages++;
+      if (!session.stats.byType[type]) {
+        session.stats.byType[type] = 0;
+      }
+      session.stats.byType[type]++;
+      switch (type) {
+        case "error":
+          session.stats.errorCount++;
+          session.errors.push(message);
+          break;
+        case "warning":
+          session.stats.warningCount++;
+          break;
+        case "log":
+          session.stats.logCount++;
+          break;
+        case "info":
+          session.stats.infoCount++;
+          break;
+        case "debug":
+          session.stats.debugCount++;
+          break;
+      }
+    };
+    const pageErrorHandler = (error) => {
+      const errorData = {
+        errorId: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now(),
+        errorType: error.name || "Error",
+        message: error.message,
+        stack: error.stack,
+        isUncaught: true,
+        url: page.url()
+      };
+      session.exceptions.push(errorData);
+      session.stats.errorCount++;
+      session.messages.push({
+        messageId: errorData.errorId,
+        timestamp: errorData.timestamp,
+        type: "error",
+        text: `Uncaught: ${error.message}`,
+        stackTrace: error.stack,
+        url: page.url()
+      });
+    };
+    const pageerrorHandler = (error) => {
+      const errorData = {
+        errorId: `rejection_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now(),
+        errorType: "UnhandledPromiseRejection",
+        message: error.message || String(error),
+        stack: error.stack,
+        isPromiseRejection: true,
+        url: page.url()
+      };
+      session.promiseRejections.push(errorData);
+      session.stats.errorCount++;
+      session.messages.push({
+        messageId: errorData.errorId,
+        timestamp: errorData.timestamp,
+        type: "error",
+        text: `Unhandled Promise Rejection: ${errorData.message}`,
+        stackTrace: error.stack,
+        url: page.url()
+      });
+    };
+    page.on("console", consoleHandler);
+    page.on("pageerror", pageErrorHandler);
+    page.on("pageerror", pageerrorHandler);
+    session._handlers = {
+      console: consoleHandler,
+      pageerror: pageErrorHandler,
+      pageerror2: pageerrorHandler
+    };
+    session._page = page;
+    session._persist = persist;
+    this.plugin.emit("consoleMonitor.sessionStarted", {
+      sessionId,
+      url: page.url()
+    });
+    return session;
+  }
+  /**
+   * Stop monitoring and optionally persist data
+   * @param {Object} session - Session object from startMonitoring
+   * @param {Object} options - Stop options
+   * @returns {Object} Final session data
+   */
+  async stopMonitoring(session, options = {}) {
+    const { persist = session._persist } = options;
+    session.endTime = Date.now();
+    session.duration = session.endTime - session.startTime;
+    if (session._page && session._handlers) {
+      session._page.off("console", session._handlers.console);
+      session._page.off("pageerror", session._handlers.pageerror);
+      session._page.off("pageerror", session._handlers.pageerror2);
+    }
+    if (persist && this.sessionsResource) {
+      try {
+        await this._persistSession(session);
+      } catch (err) {
+        this.plugin.emit("consoleMonitor.persistFailed", {
+          sessionId: session.sessionId,
+          error: err.message
+        });
+      }
+    }
+    this.plugin.emit("consoleMonitor.sessionStopped", {
+      sessionId: session.sessionId,
+      duration: session.duration,
+      totalMessages: session.stats.totalMessages,
+      errorCount: session.stats.errorCount
+    });
+    delete session._handlers;
+    delete session._page;
+    return session;
+  }
+  /**
+   * Persist session data to S3DB
+   * @private
+   */
+  async _persistSession(session) {
+    const startPersist = Date.now();
+    await this.sessionsResource.insert({
+      sessionId: session.sessionId,
+      url: session.url,
+      domain: session.domain,
+      date: session.date,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      duration: session.duration,
+      totalMessages: session.stats.totalMessages,
+      errorCount: session.stats.errorCount,
+      warningCount: session.stats.warningCount,
+      logCount: session.stats.logCount,
+      infoCount: session.stats.infoCount,
+      debugCount: session.stats.debugCount,
+      byType: session.stats.byType,
+      userAgent: session._page?._userAgent || null
+    });
+    if (session.messages.length > 0) {
+      for (const msg of session.messages) {
+        await this.messagesResource.insert({
+          messageId: msg.messageId,
+          sessionId: session.sessionId,
+          timestamp: msg.timestamp,
+          date: session.date,
+          type: msg.type,
+          text: msg.text,
+          args: msg.args,
+          source: msg.source || null,
+          stackTrace: msg.stackTrace || null,
+          url: msg.url,
+          domain: this._extractDomain(msg.url)
+        });
+      }
+    }
+    const allErrors = [
+      ...session.exceptions.map((e) => ({ ...e, isUncaught: true })),
+      ...session.promiseRejections.map((e) => ({ ...e, isPromiseRejection: true }))
+    ];
+    if (allErrors.length > 0) {
+      for (const error of allErrors) {
+        const errorType = this._extractErrorType(error.message);
+        const sourceLocation = this._parseStackTrace(error.stack);
+        await this.errorsResource.insert({
+          errorId: error.errorId,
+          sessionId: session.sessionId,
+          messageId: error.errorId,
+          timestamp: error.timestamp,
+          date: session.date,
+          errorType: error.errorType || errorType,
+          message: error.message,
+          stackTrace: this._formatStackTrace(error.stack),
+          url: sourceLocation?.url || null,
+          lineNumber: sourceLocation?.lineNumber || null,
+          columnNumber: sourceLocation?.columnNumber || null,
+          pageUrl: error.url,
+          domain: this._extractDomain(error.url),
+          isUncaught: error.isUncaught || false,
+          isPromiseRejection: error.isPromiseRejection || false,
+          isNetworkError: this._isNetworkError(error.message),
+          isSyntaxError: errorType === "SyntaxError"
+        });
+      }
+    }
+    const persistDuration = Date.now() - startPersist;
+    this.plugin.emit("consoleMonitor.persisted", {
+      sessionId: session.sessionId,
+      messages: session.messages.length,
+      errors: allErrors.length,
+      duration: persistDuration
+    });
+  }
+  /**
+   * Extract domain from URL
+   * @private
+   */
+  _extractDomain(url) {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "unknown";
+    }
+  }
+  /**
+   * Serialize console.log argument
+   * @private
+   */
+  _serializeArg(arg) {
+    try {
+      return arg.toString();
+    } catch {
+      return "[Object]";
+    }
+  }
+  /**
+   * Extract error type from message
+   * @private
+   */
+  _extractErrorType(message) {
+    const errorTypes = [
+      "TypeError",
+      "ReferenceError",
+      "SyntaxError",
+      "RangeError",
+      "URIError",
+      "EvalError",
+      "SecurityError",
+      "NetworkError"
+    ];
+    for (const type of errorTypes) {
+      if (message.includes(type)) {
+        return type;
+      }
+    }
+    return "Error";
+  }
+  /**
+   * Parse stack trace to extract source location
+   * @private
+   */
+  _parseStackTrace(stack) {
+    if (!stack) return null;
+    try {
+      const lines = stack.split("\n");
+      const firstLine = lines[0] || "";
+      const match = firstLine.match(/at\s+(.+?):(\d+):(\d+)/) || firstLine.match(/(.+?):(\d+):(\d+)/) || firstLine.match(/@(.+?):(\d+):(\d+)/);
+      if (match) {
+        return {
+          url: match[1],
+          lineNumber: parseInt(match[2], 10),
+          columnNumber: parseInt(match[3], 10)
+        };
+      }
+    } catch {
+    }
+    return null;
+  }
+  /**
+   * Format stack trace for storage
+   * @private
+   */
+  _formatStackTrace(stack) {
+    if (!stack) return null;
+    try {
+      const lines = stack.split("\n").slice(0, 10);
+      return {
+        raw: stack.substring(0, 2e3),
+        // Limit to 2KB
+        frames: lines.map((line) => line.trim())
+      };
+    } catch {
+      return { raw: stack.substring(0, 2e3) };
+    }
+  }
+  /**
+   * Check if error is network-related
+   * @private
+   */
+  _isNetworkError(message) {
+    const networkKeywords = [
+      "net::ERR_",
+      "NetworkError",
+      "Failed to fetch",
+      "fetch failed",
+      "XMLHttpRequest",
+      "CORS",
+      "Network request failed"
+    ];
+    return networkKeywords.some((keyword) => message.includes(keyword));
+  }
+  /**
+   * Get session statistics
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object>} Statistics
+   */
+  async getSessionStats(sessionId) {
+    if (!this.sessionsResource) {
+      throw new Error("Console monitoring persistence not enabled");
+    }
+    return await this.sessionsResource.get(sessionId);
+  }
+  /**
+   * Query messages for a session
+   * @param {string} sessionId - Session ID
+   * @param {Object} filters - Query filters
+   * @returns {Promise<Array>} Messages
+   */
+  async getSessionMessages(sessionId, filters = {}) {
+    if (!this.messagesResource) {
+      throw new Error("Console monitoring persistence not enabled");
+    }
+    return await this.messagesResource.listPartition("bySession", { sessionId }, filters);
+  }
+  /**
+   * Query errors for a session
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Array>} Errors
+   */
+  async getSessionErrors(sessionId) {
+    if (!this.errorsResource) {
+      throw new Error("Console monitoring persistence not enabled");
+    }
+    return await this.errorsResource.listPartition("bySession", { sessionId });
+  }
+  /**
+   * Query all errors by type
+   * @param {string} errorType - Error type
+   * @returns {Promise<Array>} Errors
+   */
+  async getErrorsByType(errorType) {
+    if (!this.errorsResource) {
+      throw new Error("Console monitoring persistence not enabled");
+    }
+    return await this.errorsResource.listPartition("byErrorType", { errorType });
+  }
+}
+
+var consoleMonitor = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  ConsoleMonitor: ConsoleMonitor
 });
 
 function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
@@ -54945,7 +55831,13 @@ function registerUIRoutes(app, plugin) {
       config: uiConfig
     }));
   });
-  app.post("/login", async (c) => {
+  const getClientIp = (c) => c.get("clientIp") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
+  const buildRateLimitRedirect = (retryAfter) => {
+    const seconds = Math.max(retryAfter, 1);
+    const message = seconds > 60 ? `Too many login attempts. Please wait ${Math.ceil(seconds / 60)} minute(s) and try again.` : `Too many login attempts. Please wait ${seconds} second(s) and try again.`;
+    return `/login?error=${encodeURIComponent(message)}`;
+  };
+  const loginHandler = async (c) => {
     try {
       const body = await c.req.parseBody();
       const {
@@ -54956,7 +55848,7 @@ function registerUIRoutes(app, plugin) {
         backup_code,
         mfa_challenge
       } = body;
-      const clientIp = c.get("clientIp") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
+      const clientIp = getClientIp(c);
       const userAgent = c.req.header("user-agent") || "unknown";
       const usingChallenge = Boolean(mfa_challenge);
       let normalizedEmail = email ? email.toLowerCase().trim() : "";
@@ -55219,7 +56111,18 @@ function registerUIRoutes(app, plugin) {
       }
       return c.redirect(`/login?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
-  });
+  };
+  const loginLimiter = plugin.rateLimiters?.login;
+  if (loginLimiter) {
+    const loginRateMiddleware = createRedirectRateLimitMiddleware(
+      loginLimiter,
+      getClientIp,
+      buildRateLimitRedirect
+    );
+    app.post("/login", loginRateMiddleware, loginHandler);
+  } else {
+    app.post("/login", loginHandler);
+  }
   app.get("/login/mfa", async (c) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/login?error=${encodeURIComponent("MFA is not enabled on this server")}`);
@@ -55320,7 +56223,7 @@ function registerUIRoutes(app, plugin) {
       if (okCheck && existingUsers && existingUsers.length > 0) {
         return c.redirect(`/register?error=${encodeURIComponent("An account with this email already exists")}&name=${encodeURIComponent(name)}`);
       }
-      const ipAddress = c.req.header("x-forwarded-for")?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
+      const ipAddress = getClientIp(c);
       const initialActive = !config.registration.requireEmailVerification;
       const userRecord = {
         email: normalizedEmail,

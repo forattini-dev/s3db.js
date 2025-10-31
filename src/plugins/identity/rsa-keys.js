@@ -185,8 +185,9 @@ import { createPublicKey } from 'crypto';
 export class KeyManager {
   constructor(keyResource) {
     this.keyResource = keyResource;
-    this.currentKey = null;
-    this.keys = new Map(); // kid → key
+    this.keysByPurpose = new Map(); // purpose -> Map(kid -> key)
+    this.currentKeys = new Map();   // purpose -> active key
+    this.keysByKid = new Map();     // kid -> key
   }
 
   /**
@@ -199,36 +200,34 @@ export class KeyManager {
     if (existingKeys.length > 0) {
       // Load keys into memory
       for (const keyRecord of existingKeys) {
-        this.keys.set(keyRecord.kid, {
-          publicKey: keyRecord.publicKey,
-          privateKey: keyRecord.privateKey,
-          kid: keyRecord.kid,
-          createdAt: keyRecord.createdAt,
-          active: keyRecord.active
+        this._storeKeyRecord({
+          ...keyRecord,
+          purpose: keyRecord.purpose || 'oauth'
         });
-
-        if (keyRecord.active) {
-          this.currentKey = keyRecord;
-        }
       }
     }
 
     // If no active key, generate one
-    if (!this.currentKey) {
-      await this.rotateKey();
+    if (!this.currentKeys.get('oauth')) {
+      await this.rotateKey('oauth');
     }
   }
 
   /**
    * Rotate keys - generate new key pair
    */
-  async rotateKey() {
+  async rotateKey(purpose = 'oauth') {
+    const normalizedPurpose = this._normalizePurpose(purpose);
     const keyPair = generateKeyPair();
 
     // Mark old keys as inactive
-    const oldKeys = await this.keyResource.query({ active: true });
+    const oldKeys = await this.keyResource.query({ active: true, purpose: normalizedPurpose });
     for (const oldKey of oldKeys) {
       await this.keyResource.update(oldKey.id, { active: false });
+      const stored = this.keysByKid.get(oldKey.kid);
+      if (stored) {
+        stored.active = false;
+      }
     }
 
     // Store new key
@@ -239,11 +238,11 @@ export class KeyManager {
       algorithm: keyPair.algorithm,
       use: keyPair.use,
       active: true,
-      createdAt: keyPair.createdAt
+      createdAt: keyPair.createdAt,
+      purpose: normalizedPurpose
     });
 
-    this.currentKey = keyRecord;
-    this.keys.set(keyRecord.kid, keyRecord);
+    this._storeKeyRecord(keyRecord);
 
     return keyRecord;
   }
@@ -251,22 +250,50 @@ export class KeyManager {
   /**
    * Get current active key
    */
-  getCurrentKey() {
-    return this.currentKey;
+  getCurrentKey(purpose = 'oauth') {
+    return this.currentKeys.get(this._normalizePurpose(purpose)) || null;
   }
 
   /**
    * Get key by kid
    */
   getKey(kid) {
-    return this.keys.get(kid);
+    return this.keysByKid.get(kid) || null;
+  }
+
+  /**
+   * Ensure a purpose has an active key
+   * @param {string} purpose
+   * @returns {Promise<Object>}
+   */
+  async ensurePurpose(purpose = 'oauth') {
+    const normalizedPurpose = this._normalizePurpose(purpose);
+    const current = this.currentKeys.get(normalizedPurpose);
+
+    if (current) {
+      return current;
+    }
+
+    // Try to find active key in storage
+    const [active] = await this.keyResource.query({ purpose: normalizedPurpose, active: true });
+    if (active) {
+      this._storeKeyRecord({
+        ...active,
+        purpose: active.purpose || normalizedPurpose
+      });
+      return this.currentKeys.get(normalizedPurpose);
+    }
+
+    return await this.rotateKey(normalizedPurpose);
   }
 
   /**
    * Get all public keys in JWKS format
    */
   async getJWKS() {
-    const keys = Array.from(this.keys.values()).map(key => ({
+    const keys = Array.from(this.keysByKid.values())
+      .filter(key => key.active)
+      .map(key => ({
       kty: 'RSA',
       use: 'sig',
       alg: 'RS256',
@@ -280,15 +307,18 @@ export class KeyManager {
   /**
    * Create JWT with current active key
    */
-  createToken(payload, expiresIn = '15m') {
-    if (!this.currentKey) {
-      throw new Error('No active key available');
+  createToken(payload, expiresIn = '15m', purpose = 'oauth') {
+    const normalizedPurpose = this._normalizePurpose(purpose);
+    const activeKey = this.currentKeys.get(normalizedPurpose);
+
+    if (!activeKey) {
+      throw new Error(`No active key available for purpose "${normalizedPurpose}"`);
     }
 
     return createRS256Token(
       payload,
-      this.currentKey.privateKey,
-      this.currentKey.kid,
+      activeKey.privateKey,
+      activeKey.kid,
       expiresIn
     );
   }
@@ -310,6 +340,47 @@ export class KeyManager {
     }
 
     return verifyRS256Token(token, key.publicKey);
+  }
+
+  /**
+   * Normalize purpose name
+   * @param {string} purpose
+   * @returns {string}
+   * @private
+   */
+  _normalizePurpose(purpose) {
+    return typeof purpose === 'string' && purpose.trim().length > 0
+      ? purpose.trim()
+      : 'oauth';
+  }
+
+  /**
+   * Store key record in caches
+   * @param {Object} record
+   * @private
+   */
+  _storeKeyRecord(record) {
+    const purpose = this._normalizePurpose(record.purpose);
+    const entry = {
+      publicKey: record.publicKey,
+      privateKey: record.privateKey,
+      kid: record.kid,
+      createdAt: record.createdAt,
+      active: record.active,
+      purpose,
+      id: record.id
+    };
+
+    if (!this.keysByPurpose.has(purpose)) {
+      this.keysByPurpose.set(purpose, new Map());
+    }
+
+    this.keysByPurpose.get(purpose).set(entry.kid, entry);
+    this.keysByKid.set(entry.kid, entry);
+
+    if (entry.active) {
+      this.currentKeys.set(purpose, entry);
+    }
   }
 }
 
