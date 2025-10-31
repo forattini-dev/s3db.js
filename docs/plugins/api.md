@@ -1,146 +1,51 @@
 # 🌐 API Plugin
 
-> **Production-ready REST API with zero boilerplate** - Transform s3db.js resources into enterprise-grade APIs with authentication, observability, security, and auto-scaling.
-
-> **Quick Jump:** [🚀 Quick Start](#-quick-start) | [🔥 New Features](#-whats-new-in-v2) | [📖 Guides](#-detailed-documentation) | [⚙️ Config](#-configuration-reference) | [🎯 Real-World Examples](#-real-world-examples) | [❓ FAQ](#-faq)
-
-## ⚡ TLDR
-
-**Transform s3db.js resources into production-ready REST APIs** in one line:
+**Transform s3db.js into a production-ready REST API in one line of code.**
 
 ```javascript
-await db.use(new ApiPlugin({ port: 3000 }));  // That's it! 🎉
+await db.use(new ApiPlugin({ port: 3000 }));  // 🎉
 ```
 
-**What you get:**
-- ✅ **Auto-generated REST endpoints** - CRUD for all resources
-- ✅ **Enterprise security** - Rate limiting, failban, CORS, CSP headers
-- ✅ **Observability** - Metrics, events, distributed tracing, health checks
-- ✅ **Multiple auth methods** - JWT, Basic, OIDC/Azure AD, API Keys
-- ✅ **Zero-downtime deploys** - Graceful shutdown, health probes
-- ✅ **Interactive docs** - Auto-generated Swagger UI at `/docs`
-
-**Generated endpoints:**
-```
-GET     /users           → List/query users
-GET     /users/:id       → Get user by ID
-POST    /users           → Create user
-PUT     /users/:id       → Update user (full)
-PATCH   /users/:id       → Update user (partial)
-DELETE  /users/:id       → Delete user
-
-GET     /health          → Health check (Kubernetes-ready)
-GET     /metrics         → Prometheus-compatible metrics
-GET     /docs            → Interactive Swagger UI
-```
-
----
-
-## 🔥 What's New in v2.0
-
-### Security & Protection 🛡️
-
-- **🚨 Failban** - fail2ban-style automatic IP banning (internal feature)
-  - Ban after N violations (rate limit, auth failures)
-  - TTL-based auto-unban using S3DB partitions
-  - IP Whitelist/Blacklist support
-  - **🌍 GeoIP Country Blocking** - Block/allow by country (MaxMind GeoLite2)
-  - Admin endpoints for ban management
-
-- **⏱️ Advanced Rate Limiting** - Per-driver rate limiting with sliding windows
-  - Different limits per auth method (OIDC: 5/15min, JWT: 20/5min, API Key: 100/1min)
-  - Skip successful requests option
-  - Retry-After headers
-  - Auto-cleanup
-
-- **🔒 Security Headers** - Production-grade security
-  - Content-Security-Policy (CSP)
-  - HTTP Strict-Transport-Security (HSTS)
-  - X-Frame-Options, X-Content-Type-Options
-  - Permissions-Policy
-
-### Observability & Monitoring 📊
-
-- **📈 Metrics Collector** - Real-time API metrics
-  - Request counts, durations (p50/p95/p99), RPS
-  - Auth success/failure rates
-  - Resource operations tracking
-  - Top paths, error rates
-  - `/metrics` endpoint (Prometheus-compatible)
-
-- **🎯 Event Hooks System** - React to API events
-  - `user:created`, `user:login`
-  - `auth:success`, `auth:failure`
-  - `resource:created`, `resource:updated`, `resource:deleted`
-  - `request:start`, `request:end`, `request:error`
-  - Wildcard support (`resource:*`)
-
-- **🔍 Request ID Tracking** - Distributed tracing
-  - X-Request-ID header correlation
-  - Auto-generation or pass-through
-  - Included in all logs and events
-
-- **🏥 Extensible Health Checks** - Custom readiness checks
-  - Built-in: S3DB connection check
-  - Custom: Add database, cache, external API checks
-  - Timeout handling, optional checks
-  - Kubernetes liveness/readiness probes
-
-### Performance & Reliability 🚀
-
-- **♻️ Graceful Shutdown** - Zero-downtime deploys
-  - SIGTERM/SIGINT handling
-  - In-flight request tracking
-  - Configurable timeout
-  - Reject new requests during shutdown
-
-- **🍪 Session Tracking** - Analytics-grade session management
-  - Encrypted cookies (AES-256-GCM)
-  - Optional S3DB persistence
-  - IP, User-Agent, Referer tracking
-  - Auto-update on each request
-
-- **🎭 Content Negotiation** - Smart response handling
-  - HTML requests → Redirect to login
-  - JSON requests → 401 with details
-  - Based on Accept header
-
-### Developer Experience 🛠️
-
-- **🛡️ Guard Helpers** - Declarative authorization
-  - `requireScopes(['admin'])` - Check user scopes
-  - `requireRole('admin')` - Check user role
-  - `requireOwnership()` - Check record ownership
-  - `requireTenant()` - Multi-tenancy check
-  - `anyOf(...guards)` - OR logic
-  - `allOf(...guards)` - AND logic
-
----
-
-## 📑 Table of Contents
-
-- [Quick Start](#-quick-start)
-- [Real-World Examples](#-real-world-examples)
-- [📖 Detailed Documentation](#-detailed-documentation)
-- [Security Features](#-security-features)
-- [Observability Features](#-observability-features)
-- [Configuration Reference](#-configuration-reference)
-- [API Endpoints](#-api-endpoints)
-- [Best Practices](#-best-practices)
-- [FAQ](#-faq)
-
----
-
-## 🚀 Quick Start
-
-### Installation
+**You get:** Auto-generated CRUD endpoints • Enterprise auth • Rate limiting • Metrics • Health checks • Swagger docs
 
 ```bash
-# Install required dependencies
+# Quick start
 pnpm add hono @hono/node-server @hono/swagger-ui jose
+
+# Your API is ready
+GET  /users     → List users      GET  /health     → Health check
+POST /users     → Create user     GET  /metrics    → Prometheus metrics
+GET  /users/:id → Get user        GET  /docs       → Interactive Swagger UI
 ```
 
-### Basic Usage
+---
+
+## 📚 Documentation Hub
+
+**Core Guides** - Essential features and setup:
+
+| Guide | What's Inside | When to Read |
+|-------|---------------|--------------|
+| **[🔐 Authentication](./api/authentication.md)** | JWT, OAuth2/OIDC, API Keys, Basic Auth | Setting up user authentication |
+| **[🛡️ Guards & Authorization](./api/guards.md)** | Row-level security, multi-tenancy, RBAC | Controlling access to data |
+| **[🔒 Security](./api/security.md)** | Failban, rate limiting, GeoIP blocking, CSP headers | Protecting your API |
+| **[📊 Observability](./api/observability.md)** | Metrics, events, tracing, health checks | Monitoring production APIs |
+| **[📦 Static Files](./api/static-files.md)** | Serve SPAs (React/Vue/Angular) and assets | Building full-stack apps |
+| **[🚀 Deployment](./api/deployment.md)** | Docker, Kubernetes, zero-downtime deploys | Going to production |
+
+**Advanced Topics**:
+
+| Topic | What You'll Learn |
+|-------|-------------------|
+| **[Authorization Patterns](./api/authorization-patterns.md)** | Granular scopes, ABAC, hierarchical permissions |
+| **[Guard Design](./api/guards-design.md)** | Framework-agnostic declarative authorization |
+| **[Configuration Deep Dive](./api/configuration.md)** | All configuration options explained |
+
+---
+
+## ⚡ Quick Wins
+
+### 30-Second API
 
 ```javascript
 import { Database, ApiPlugin } from 's3db.js';
@@ -148,200 +53,172 @@ import { Database, ApiPlugin } from 's3db.js';
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
 
-// Create resource
-const users = await db.createResource({
+await db.createResource({
   name: 'users',
-  attributes: {
-    email: 'string|required|email',
-    name: 'string|required',
-    role: 'string|default:user'
-  }
+  attributes: { email: 'string|required|email', name: 'string|required' }
 });
 
-// Add API Plugin - that's it!
+await db.use(new ApiPlugin({ port: 3000 }));
+// ✨ API running at http://localhost:3000
+```
+
+### Add Authentication (JWT)
+
+```javascript
 await db.use(new ApiPlugin({
   port: 3000,
-  verbose: true
+  auth: {
+    resource: 'users',
+    drivers: {
+      jwt: { secret: process.env.JWT_SECRET }
+    },
+    pathRules: [
+      { path: '/api/**', methods: ['jwt'], required: true }
+    ]
+  }
 }));
+```
 
-// Server running at http://localhost:3000
-// GET http://localhost:3000/users
-// View docs at http://localhost:3000/docs
+### Add OAuth2/OIDC (Azure AD, Google, Keycloak)
+
+```javascript
+auth: {
+  drivers: {
+    oidc: {
+      issuer: 'https://login.microsoftonline.com/{tenant}/v2.0',
+      clientId: process.env.AZURE_CLIENT_ID,
+      clientSecret: process.env.AZURE_CLIENT_SECRET,
+      redirectUri: 'http://localhost:3000/auth/callback'
+    }
+  }
+}
+```
+
+### Production-Ready Stack
+
+```javascript
+await db.use(new ApiPlugin({
+  port: 3000,
+
+  // 🔒 Security
+  security: { enabled: true },
+  cors: { enabled: true },
+  failban: { enabled: true, maxViolations: 3 },
+
+  // 📊 Observability
+  metrics: { enabled: true },
+  events: { enabled: true },
+  requestId: { enabled: true },
+
+  // 🏥 Health
+  health: {
+    readiness: {
+      checks: [
+        { name: 'database', check: async () => ({ healthy: true }) }
+      ]
+    }
+  }
+}));
 ```
 
 ---
 
 ## 🎯 Real-World Examples
 
-### 1. 📊 Analytics & Tracking Platform
+### 1. Multi-Tenant SaaS with Row-Level Security
 
-**Scenario:** You need to track events, sessions, and user behavior with real-time analytics.
-
-```javascript
-import { ApiPlugin, TTLPlugin } from 's3db.js';
-
-// Event tracking with TTL (auto-cleanup old events)
-const events = await db.createResource({
-  name: 'events',
-  attributes: {
-    sessionId: 'string|required',
-    type: 'string|required',
-    path: 'string',
-    referrer: 'string',
-    timestamp: 'string|required',
-    expiresAt: 'string|required'  // TTL field
-  },
-  partitions: {
-    bySession: { fields: { sessionId: 'string' } },
-    byExpiry: { fields: { expiresAtCohort: 'string' } }  // TTL partition
-  }
-});
-
-// Sessions with encrypted cookies
-const sessions = await db.createResource({
-  name: 'sessions',
-  attributes: {
-    fingerprint: 'string',
-    ip: 'string',
-    userAgent: 'string',
-    country: 'string',
-    firstSeen: 'string',
-    lastSeen: 'string'
-  }
-});
-
-// Setup API with session tracking + events
-await db.use(new TTLPlugin({
-  resources: {
-    events: { enabled: true, field: 'expiresAt' }
-  }
-}));
-
-await db.use(new ApiPlugin({
-  port: 3000,
-
-  // Session tracking (encrypted cookies)
-  sessionTracking: {
-    enabled: true,
-    resource: 'sessions',
-    cookieName: 'session_id',
-    passphrase: process.env.SESSION_SECRET,
-    updateOnRequest: true,
-    enrichSession: async ({ session, context }) => ({
-      // Enrich with custom data
-      country: context.req.header('cf-ipcountry'),  // Cloudflare
-      fingerprint: context.req.header('x-visitor-id')  // FingerprintJS
-    })
-  },
-
-  // Event hooks for analytics
-  events: { enabled: true },
-
-  // Metrics for dashboards
-  metrics: {
-    enabled: true,
-    maxPathsTracked: 200
-  }
-}));
-
-// Listen to events for real-time processing
-apiPlugin.events.on('request:end', async (data) => {
-  // Record event
-  await events.insert({
-    sessionId: data.sessionId,
-    type: 'pageview',
-    path: data.path,
-    timestamp: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 30*24*60*60*1000).toISOString()  // 30 days
-  });
-});
-
-// Endpoints:
-// POST /track     → Custom tracking endpoint
-// GET  /metrics   → Real-time metrics (RPS, p95 latency, etc.)
-// GET  /sessions  → View sessions
-// GET  /events    → Query events
-```
-
-**Key Features:**
-- ✅ Encrypted session cookies with visitor tracking
-- ✅ Event tracking with auto-cleanup (TTL)
-- ✅ Real-time metrics (`/metrics` endpoint)
-- ✅ Event hooks for custom processing
-
----
-
-### 2. 🔗 URL Shortener Service
-
-**Scenario:** Build a production URL shortener with analytics, QR codes, and expiration.
+Perfect tenant isolation with O(1) partition lookups:
 
 ```javascript
-// URLs resource with TTL support
-const urls = await db.createResource({
-  name: 'urls',
+import { requireTenant, requireScopes } from 's3db.js/plugins/api/concerns/guards-helpers';
+
+const projects = await db.createResource({
+  name: 'projects',
   attributes: {
-    shortId: 'string|required',  // e.g., "abc123"
-    target: 'string|required',    // Original URL
-    userId: 'string|required',
-    title: 'string',
-    expiresAt: 'string',
-    metadata: {
-      qrCode: 'string',           // Base64 QR code
-      ogImage: 'string',          // Open Graph image
-      ogTitle: 'string',
-      ogDescription: 'string'
-    }
+    tenantId: 'string|required',
+    name: 'string|required',
+    ownerId: 'string|required'
   },
   partitions: {
-    byUser: { fields: { userId: 'string' } }
+    byTenant: { fields: { tenantId: 'string' } }
   },
   guard: {
     list: (ctx) => {
-      // Users only see their own URLs
-      ctx.setPartition('byUser', { userId: ctx.user.sub });
+      // O(1) tenant isolation
+      ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
       return true;
     },
     create: (ctx) => {
-      // Auto-inject userId
-      ctx.body.userId = ctx.user.sub;
+      // Auto-inject tenant
+      ctx.body.tenantId = ctx.user.tenantId;
+      ctx.body.ownerId = ctx.user.sub;
       return true;
+    },
+    update: (ctx, record) => {
+      // Only owner or admin can edit
+      return ctx.user.scopes?.includes('admin') || record.ownerId === ctx.user.sub;
     }
   }
 });
+```
 
-// Click tracking
-const clicks = await db.createResource({
-  name: 'clicks',
-  attributes: {
-    shortId: 'string|required',
-    timestamp: 'string|required',
-    ip: 'string',
-    userAgent: 'string',
-    referrer: 'string',
-    country: 'string'
+**Key wins:** Zero SQL, O(1) lookups, impossible to leak tenant data, auto-injection of user context.
+
+**[→ See complete multi-tenant example](./api/guards.md#multi-tenancy-patterns)**
+
+---
+
+### 2. Analytics Platform with Session Tracking
+
+Track every visitor with encrypted cookies and real-time metrics:
+
+```javascript
+await db.use(new ApiPlugin({
+  sessionTracking: {
+    enabled: true,
+    resource: 'sessions',
+    passphrase: process.env.SESSION_SECRET,
+    updateOnRequest: true,
+    enrichSession: async ({ context }) => ({
+      country: context.req.header('cf-ipcountry'),
+      fingerprint: context.req.header('x-visitor-id')
+    })
   },
-  partitions: {
-    byShortId: { fields: { shortId: 'string' } }
-  }
+
+  metrics: { enabled: true },
+  events: { enabled: true }
+}));
+
+// React to events
+apiPlugin.events.on('request:end', async (data) => {
+  await events.insert({
+    sessionId: data.sessionId,
+    path: data.path,
+    duration: data.duration,
+    timestamp: new Date().toISOString()
+  });
 });
 
-await db.use(new ApiPlugin({
-  port: 3000,
+// Real-time metrics at /metrics
+// p50/p95/p99 latency, RPS, error rates, top paths
+```
 
-  // OIDC for admin dashboard
+**Key wins:** Encrypted sessions, real-time metrics, event-driven analytics, automatic tracking.
+
+**[→ See complete analytics example](./api/observability.md#session-tracking)**
+
+---
+
+### 3. URL Shortener with GeoIP Blocking
+
+Public redirects, admin dashboard, automatic abuse prevention:
+
+```javascript
+await db.use(new ApiPlugin({
   auth: {
-    resource: 'users',
     drivers: {
-      oidc: {
-        issuer: process.env.OIDC_ISSUER,
-        clientId: process.env.OIDC_CLIENT_ID,
-        clientSecret: process.env.OIDC_CLIENT_SECRET,
-        redirectUri: 'http://localhost:3000/auth/callback'
-      },
-      basic: {
-        usernameField: 'email',
-        passwordField: 'apiToken'
-      }
+      oidc: { /* Azure AD for admin */ },
+      basic: { /* API tokens for programmatic access */ }
     },
     pathRules: [
       { path: '/admin/**', methods: ['oidc'], required: true },
@@ -350,1095 +227,343 @@ await db.use(new ApiPlugin({
     ]
   },
 
-  // Session tracking for analytics
-  sessionTracking: {
-    enabled: true,
-    resource: 'sessions',
-    passphrase: process.env.SESSION_SECRET
-  },
-
-  // Rate limiting to prevent abuse
   failban: {
     enabled: true,
     maxViolations: 10,
-    violationWindow: 3600000,  // 1 hour
-    banDuration: 86400000      // 24 hours
+    banDuration: 86400000,  // 24h
+    geo: {
+      enabled: true,
+      databasePath: './GeoLite2-Country.mmdb',
+      blockedCountries: ['CN', 'RU']  // Block by country
+    }
   },
 
-  // Metrics for monitoring
-  metrics: { enabled: true },
-  events: { enabled: true },
-
-  // Custom routes for redirects and QR codes
   routes: {
     '/r/:id': {
       GET: async (c) => {
-        const id = c.req.param('id');
-        const url = await urls.get(id);
-
-        if (!url) {
-          return c.notFound();
-        }
+        const url = await urls.get(c.req.param('id'));
+        if (!url) return c.notFound();
 
         // Track click asynchronously
-        const sessionId = c.get('sessionId');
         clicks.insert({
-          shortId: id,
-          timestamp: new Date().toISOString(),
+          shortId: url.id,
           ip: c.req.header('x-forwarded-for'),
-          userAgent: c.req.header('user-agent'),
-          referrer: c.req.header('referer')
-        }).catch(console.error);
+          country: c.req.header('cf-ipcountry')
+        });
 
-        // Redirect
         return c.redirect(url.target, 302);
       }
-    },
-
-    '/qr/:id': {
-      GET: async (c) => {
-        const id = c.req.param('id');
-        const url = await urls.get(id);
-
-        if (!url || !url.metadata?.qrCode) {
-          return c.notFound();
-        }
-
-        // Return QR code image
-        const qrBuffer = Buffer.from(url.metadata.qrCode, 'base64');
-        return c.body(qrBuffer, 200, { 'Content-Type': 'image/png' });
-      }
     }
   }
 }));
-
-// Event listeners for notifications
-apiPlugin.events.on('resource:created', async (data) => {
-  if (data.resource === 'urls') {
-    // Send notification that URL was created
-    console.log(`New URL created: ${data.id}`);
-  }
-});
-
-// Endpoints:
-// GET  /r/:id          → Redirect (public)
-// GET  /qr/:id         → QR code image (public)
-// GET  /api/urls       → List URLs (API token)
-// POST /api/urls       → Create URL (API token)
-// GET  /admin          → Admin dashboard (OIDC)
-// GET  /metrics        → Metrics (protected)
 ```
 
-**Key Features:**
-- ✅ Public redirects with analytics
-- ✅ QR code generation
-- ✅ Dual auth (OIDC for dashboard, Basic for API)
-- ✅ Automatic banning of abusive IPs
-- ✅ Session tracking for visitor analytics
+**Key wins:** Dual auth, GeoIP blocking, automatic IP banning, public + protected routes.
+
+**[→ See complete URL shortener example](./api/authentication.md#path-based-authentication)**
 
 ---
 
-### 3. 🏢 Multi-Tenant SaaS Platform
+### 4. E-commerce with Inventory Management
 
-**Scenario:** Build a SaaS where each tenant's data is completely isolated.
-
-```javascript
-import { requireTenant, requireScopes, anyOf } from 's3db.js/plugins/api/concerns/guards-helpers';
-
-// Projects (tenant-isolated)
-const projects = await db.createResource({
-  name: 'projects',
-  attributes: {
-    tenantId: 'string|required',
-    name: 'string|required',
-    ownerId: 'string|required',
-    status: 'string|default:active'
-  },
-  partitions: {
-    byTenant: { fields: { tenantId: 'string' } }
-  },
-  guard: {
-    '*': (ctx) => {
-      // Extract tenant from JWT
-      ctx.tenantId = ctx.user.tenantId || ctx.user.tid;
-      return !!ctx.tenantId;
-    },
-    list: (ctx) => {
-      // O(1) tenant isolation via partition
-      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
-      return true;
-    },
-    create: (ctx) => {
-      // Auto-inject tenantId and ownerId
-      ctx.body.tenantId = ctx.tenantId;
-      ctx.body.ownerId = ctx.user.sub;
-      return true;
-    },
-    update: anyOf(
-      requireScopes(['admin']),         // Admins can edit anything
-      (ctx, record) => record.ownerId === ctx.user.sub  // Owners can edit their own
-    ),
-    delete: requireScopes(['admin'])  // Only admins can delete
-  }
-});
-
-// Users (multi-tenant with role-based access)
-const users = await db.createResource({
-  name: 'users',
-  attributes: {
-    email: 'string|required|email',
-    name: 'string|required',
-    tenantId: 'string|required',
-    role: 'string|default:member',    // member, admin
-    scopes: 'array|default:["read"]'  // read, write, admin
-  },
-  partitions: {
-    byTenant: { fields: { tenantId: 'string' } }
-  }
-});
-
-await db.use(new ApiPlugin({
-  port: 3000,
-
-  // JWT authentication with tenant claims
-  auth: {
-    resource: 'users',
-    drivers: {
-      jwt: {
-        secret: process.env.JWT_SECRET,
-        audience: 'api.myapp.com'
-      }
-    },
-    pathRules: [
-      { path: '/api/**', methods: ['jwt'], required: true }
-    ]
-  },
-
-  // Security
-  security: {
-    enabled: true,
-    headers: {
-      csp: "default-src 'self'",
-      hsts: { maxAge: 31536000, includeSubDomains: true }
-    }
-  },
-
-  // Rate limiting per tenant
-  failban: {
-    enabled: true,
-    maxViolations: 5,
-    violationWindow: 900000,   // 15 min
-    banDuration: 3600000       // 1 hour
-  },
-
-  // Observability
-  requestId: { enabled: true },
-  metrics: { enabled: true },
-  events: { enabled: true }
-}));
-
-// Monitor tenant activity
-apiPlugin.events.on('resource:created', (data) => {
-  const tenantId = data.user?.tenantId;
-  console.log(`Tenant ${tenantId} created ${data.resource}`);
-});
-
-// Endpoints:
-// GET  /api/projects     → List tenant's projects (O(1) via partition)
-// POST /api/projects     → Create project (auto-inject tenantId)
-// GET  /api/users        → List tenant's users
-// GET  /metrics          → Tenant-specific metrics
-```
-
-**Key Features:**
-- ✅ O(1) tenant isolation via partitions
-- ✅ Declarative guards with helper functions
-- ✅ Auto-injection of tenantId/userId
-- ✅ Role-based access control (RBAC)
-- ✅ Comprehensive audit trail via events
-
----
-
-### 4. 🛒 E-commerce API with Inventory Management
-
-**Scenario:** Build an e-commerce backend with real-time inventory tracking.
+Real-time stock tracking with event-driven updates:
 
 ```javascript
-import { requireOwnership, requireScopes, anyOf } from 's3db.js/plugins/api/concerns/guards-helpers';
-
-// Products (public read, admin write)
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    sku: 'string|required',
-    name: 'string|required',
-    price: 'number|required|min:0',
-    stock: 'number|required|min:0',
-    category: 'string|required'
-  },
-  partitions: {
-    byCategory: { fields: { category: 'string' } }
-  }
-});
-
-// Orders (user-specific with guards)
 const orders = await db.createResource({
   name: 'orders',
   attributes: {
     userId: 'string|required',
     items: 'array|required',
-    total: 'number|required',
-    status: 'string|default:pending',
-    shippingAddress: {
-      street: 'string|required',
-      city: 'string|required',
-      zip: 'string|required'
-    }
+    total: 'number|required'
   },
   partitions: {
-    byUser: { fields: { userId: 'string' } },
-    byStatus: { fields: { status: 'string' } }
+    byUser: { fields: { userId: 'string' } }
   },
   guard: {
     list: (ctx) => {
       // Users see only their orders, admins see all
-      if (ctx.user.scopes?.includes('admin')) {
-        return true;
+      if (!ctx.user.scopes?.includes('admin')) {
+        ctx.setPartition('byUser', { userId: ctx.user.sub });
       }
-      ctx.setPartition('byUser', { userId: ctx.user.sub });
       return true;
     },
-    get: anyOf(
-      requireScopes(['admin']),
-      requireOwnership('userId')
-    ),
     create: (ctx) => {
-      // Auto-inject userId
       ctx.body.userId = ctx.user.sub;
       return true;
-    },
-    update: requireScopes(['admin']),  // Only admins can change orders
-    delete: requireScopes(['admin'])
+    }
   }
 });
 
-await db.use(new ApiPlugin({
-  port: 3000,
-
-  // JWT + API Key authentication
-  auth: {
-    resource: 'users',
-    drivers: {
-      jwt: {
-        secret: process.env.JWT_SECRET
-      },
-      apikey: {
-        headerName: 'X-API-Key',
-        field: 'apiKey'
-      }
-    },
-    pathRules: [
-      { path: '/products', methods: [], required: false },      // Public
-      { path: '/api/products', methods: ['jwt'], required: true },  // Admin
-      { path: '/api/orders', methods: ['jwt', 'apikey'], required: true }
-    ]
-  },
-
-  // Rate limiting
-  failban: {
-    enabled: true,
-    maxViolations: 20,
-    violationWindow: 3600000,
-    banDuration: 86400000,
-    whitelist: ['10.0.0.0/8']  // Internal IPs
-  },
-
-  // Observability
-  requestId: { enabled: true },
-  metrics: { enabled: true },
-  events: { enabled: true },
-
-  // Custom routes for checkout flow
-  routes: {
-    '/api/checkout': {
-      POST: async (c) => {
-        const { items } = await c.req.json();
-
-        // Validate stock availability
-        for (const item of items) {
-          const product = await products.get(item.sku);
-          if (!product || product.stock < item.quantity) {
-            return c.json({ error: 'Insufficient stock' }, 400);
-          }
-        }
-
-        // Calculate total
-        const total = items.reduce((sum, item) => {
-          const product = products.get(item.sku);
-          return sum + (product.price * item.quantity);
-        }, 0);
-
-        // Create order
-        const order = await orders.insert({
-          userId: c.get('user').sub,
-          items,
-          total,
-          status: 'pending'
-        });
-
-        // Update inventory (in event listener)
-        apiPlugin.events.emit('order:created', { order, items });
-
-        return c.json({ success: true, orderId: order.id });
-      }
+// Event-driven inventory
+apiPlugin.events.on('resource:created', async ({ resource, item }) => {
+  if (resource === 'orders') {
+    // Decrease stock for each item
+    for (const orderItem of item.items) {
+      const product = await products.get(orderItem.sku);
+      await products.update(orderItem.sku, {
+        stock: product.stock - orderItem.quantity
+      });
     }
   }
-}));
-
-// Event listeners for inventory management
-apiPlugin.events.on('order:created', async ({ order, items }) => {
-  // Decrease stock
-  for (const item of items) {
-    const product = await products.get(item.sku);
-    await products.update(item.sku, {
-      stock: product.stock - item.quantity
-    });
-  }
-
-  // Send confirmation email (via external service)
-  // await emailService.send({ to: order.userId, template: 'order-confirmation' });
 });
-
-// Endpoints:
-// GET  /products           → List products (public)
-// GET  /api/products       → Manage products (admin)
-// POST /api/checkout       → Create order with stock validation
-// GET  /api/orders         → List user's orders
-// GET  /metrics            → API metrics
 ```
 
-**Key Features:**
-- ✅ Public product catalog with O(1) category filtering
-- ✅ User-specific order management
-- ✅ Real-time inventory tracking via events
-- ✅ Automatic IP banning for abuse prevention
-- ✅ Dual auth (JWT for users, API keys for integrations)
+**Key wins:** User isolation, admin override, event-driven inventory, automatic stock updates.
+
+**[→ See complete e-commerce example](./api/guards.md#e-commerce-patterns)**
 
 ---
 
-## 📖 Detailed Documentation
+## 🔥 Killer Features
 
-### Core Topics
+### Failban with GeoIP Blocking
 
-- **[Authentication](./api/authentication.md)** - Complete authentication guide
-  - JWT, Basic Auth, API Keys
-  - OAuth2 + OpenID Connect (Azure AD, Keycloak)
-  - Path-Based Authentication
-  - Rate Limiting per Driver
-
-- **[Guards (Authorization)](./api/guards.md)** - Declarative authorization
-  - Row-Level Security (RLS)
-  - Multi-Tenancy
-  - Guard Helpers (requireScopes, requireOwnership, anyOf, allOf)
-  - Framework Integration
-
-- **[Security](./api/security.md)** - Enterprise security features
-  - Failban Plugin (fail2ban-style)
-  - Security Headers (CSP, HSTS)
-  - Rate Limiting
-  - CORS Configuration
-
-- **[Observability](./api/observability.md)** - Monitoring and tracing
-  - Metrics Collector (`/metrics`)
-  - Event Hooks System
-  - Request ID Tracking
-  - Health Checks (Kubernetes-ready)
-
-- **[Static Files](./api/static-files.md)** - Serve files and SPAs
-  - Filesystem Driver
-  - S3 Driver
-  - SPA Support (React, Vue, Angular)
-
-- **[Deployment](./api/deployment.md)** - Production deployment
-  - Docker Setup
-  - Kubernetes Manifests
-  - Zero-Downtime Deploys
-  - Prometheus Monitoring
-
----
-
-## 🛡️ Security Features
-
-### 1. Failban (NEW!)
-
-Automatic IP banning for security violations with GeoIP country blocking (internal feature, not a separate plugin):
+Automatically ban abusive IPs and block by country:
 
 ```javascript
-await db.use(new ApiPlugin({
-  failban: {
+failban: {
+  enabled: true,
+  maxViolations: 3,        // Ban after 3 strikes
+  violationWindow: 3600000, // Within 1 hour
+  banDuration: 86400000,   // Ban for 24 hours
+  geo: {
     enabled: true,
-    maxViolations: 3,           // Ban after 3 violations
-    violationWindow: 3600000,   // Within 1 hour
-    banDuration: 86400000,      // Ban for 24 hours
-    whitelist: ['127.0.0.1'],   // Never ban (IPs)
-    blacklist: [],              // Always ban (IPs)
-    persistViolations: true,    // Track in S3DB
-
-    // GeoIP Country Blocking (NEW!)
-    geo: {
-      enabled: true,
-      databasePath: '/path/to/GeoLite2-Country.mmdb',  // MaxMind database
-      allowedCountries: ['BR', 'US', 'CA'],  // ISO 3166-1 alpha-2
-      blockedCountries: ['CN', 'RU'],        // Block these countries
-      blockUnknown: false,                   // Block IPs with unknown country
-      cacheResults: true                     // Cache GeoIP lookups (10k limit)
-    }
-  }
-}));
-
-// Admin endpoints:
-// GET    /admin/security/bans         → List active bans
-// GET    /admin/security/bans/:ip     → Get ban details
-// POST   /admin/security/bans         → Manually ban IP
-// DELETE /admin/security/bans/:ip     → Unban IP
-// GET    /admin/security/stats        → Ban statistics
-```
-
-**How it works:**
-1. Request arrives → GeoIP lookup (if enabled)
-2. Country blocked? → Return 403 with `X-Country-Code` header
-3. IP blacklisted? → Return 403 permanently
-4. Rate limit exceeded → Violation recorded
-5. Auth failure → Violation recorded
-6. After N violations → IP automatically banned
-7. TTLPlugin auto-unbans after duration
-8. Events emitted: `security:banned`, `security:unbanned`, `security:violation`, `security:country_blocked`
-
-**GeoIP Setup:**
-```bash
-# Download MaxMind GeoLite2 (free)
-wget https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb
-
-# Install peer dependency
-npm install @maxmind/geoip2-node
-```
-
-**Response headers:**
-- `X-Ban-Status`: `country_blocked` | `blacklisted` | `banned`
-- `X-Ban-Reason`: Reason for block
-- `X-Country-Code`: ISO 3166-1 alpha-2 country code
-- `Retry-After`: Seconds until unban (for temporary bans)
-
-### 2. Rate Limiting per Driver
-
-Different limits for different auth methods:
-
-```javascript
-auth: {
-  drivers: {
-    oidc: {
-      // ... config
-      rateLimit: {
-        enabled: true,
-        windowMs: 900000,          // 15 minutes
-        maxAttempts: 5,            // 5 attempts
-        skipSuccessfulRequests: true  // Only count failures
-      }
-    },
-    jwt: {
-      // ... config
-      rateLimit: {
-        windowMs: 300000,          // 5 minutes
-        maxAttempts: 20
-      }
-    },
-    apikey: {
-      // ... config
-      rateLimit: {
-        windowMs: 60000,           // 1 minute
-        maxAttempts: 100
-      }
-    }
+    databasePath: './GeoLite2-Country.mmdb',
+    allowedCountries: ['US', 'BR', 'CA'],  // Whitelist
+    blockedCountries: ['CN', 'RU'],        // Blacklist
+    blockUnknown: false
   }
 }
 ```
 
-### 3. Security Headers
-
-Production-grade HTTP security headers:
-
-```javascript
-security: {
-  enabled: true,
-  headers: {
-    csp: "default-src 'self'; script-src 'self' 'unsafe-inline'",
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-      preload: true
-    },
-    xFrameOptions: 'DENY',
-    xContentTypeOptions: 'nosniff',
-    referrerPolicy: 'strict-origin-when-cross-origin',
-    permissionsPolicy: 'geolocation=(), microphone=(), camera=()'
-  }
-}
-```
-
-### 4. CORS with Preflight Cache
-
-```javascript
-cors: {
-  enabled: true,
-  origin: ['https://app.example.com'],
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
-  exposeHeaders: ['X-Request-ID', 'X-Total-Count'],
-  credentials: true,
-  maxAge: 86400  // 24 hour preflight cache
-}
-```
+**[→ Deep dive: Security features](./api/security.md#failban)**
 
 ---
 
-## 📊 Observability Features
+### Real-Time Metrics
 
-### 1. Metrics Collector (NEW!)
+Production-grade observability at `/metrics`:
 
-Real-time API metrics at `/metrics`:
-
-```javascript
-metrics: {
-  enabled: true,
-  maxPathsTracked: 100,    // Limit memory usage
-  resetInterval: 300000    // Reset every 5 minutes
-}
-
-// Visit http://localhost:3000/metrics for:
-```
-
-**Metrics included:**
 ```json
 {
-  "uptime": {
-    "milliseconds": 3600000,
-    "seconds": 3600,
-    "formatted": "1h 0m 0s"
-  },
   "requests": {
     "total": 12543,
     "rps": "3.48",
-    "byMethod": { "GET": 10234, "POST": 2309 },
-    "byStatus": { "2xx": 11891, "4xx": 543, "5xx": 109 },
-    "topPaths": [
-      {
-        "path": "/api/users",
-        "count": 5432,
-        "avgDuration": "45.32",
-        "errors": 12,
-        "errorRate": "0.22%"
-      }
-    ],
-    "duration": {
-      "p50": 23,
-      "p95": 156,
-      "p99": 342,
-      "avg": "45.67"
-    }
+    "duration": { "p50": 23, "p95": 156, "p99": 342 }
   },
   "auth": {
-    "total": 234,
-    "success": 221,
-    "failure": 13,
     "successRate": "94.44%",
-    "byMethod": {
-      "oidc": { "success": 145, "failure": 3 },
-      "jwt": { "success": 76, "failure": 10 }
-    }
+    "byMethod": { "oidc": 145, "jwt": 76 }
   },
   "resources": {
-    "total": 2309,
     "created": 543,
     "updated": 1234,
-    "deleted": 532,
-    "byResource": {
-      "users": { "created": 123, "updated": 456, "deleted": 78 }
-    }
-  },
-  "users": {
-    "logins": 145,
-    "newUsers": 23
-  },
-  "errors": {
-    "total": 109,
-    "rate": "0.87%",
-    "byType": { "request": 87, "database": 22 }
+    "deleted": 532
   }
 }
 ```
 
-### 2. Event Hooks System (NEW!)
+**[→ Deep dive: Observability](./api/observability.md#metrics)**
 
-React to API events in real-time:
+---
+
+### Event Hooks
+
+React to everything happening in your API:
 
 ```javascript
 events: { enabled: true }
 
-// Listen to events
 apiPlugin.events.on('user:created', (data) => {
-  console.log('New user:', data.user);
-  // Send welcome email, etc.
+  // Send welcome email
 });
 
 apiPlugin.events.on('auth:failure', (data) => {
-  console.log('Auth failed:', data.ip, data.path);
   // Alert security team
 });
 
 apiPlugin.events.on('resource:*', (data) => {
-  console.log('Resource event:', data.event, data.resource);
-  // Replicate to BigQuery, SQS, etc.
+  // Replicate to BigQuery
 });
 
 apiPlugin.events.on('request:end', (data) => {
   if (data.duration > 1000) {
-    console.warn('Slow request:', data.path, data.duration);
+    // Log slow requests
   }
 });
 ```
 
-**Available events:**
-- `user:created` - New user created via OIDC
-- `user:login` - User logged in
-- `auth:success` - Authentication succeeded
-- `auth:failure` - Authentication failed
-- `resource:created` - Resource record created
-- `resource:updated` - Resource record updated
-- `resource:deleted` - Resource record deleted
-- `request:start` - Request started
-- `request:end` - Request ended
-- `request:error` - Request errored
-- `security:banned` - IP banned
-- `security:unbanned` - IP unbanned
-- `security:violation` - Security violation detected
+**Available events:** `user:created`, `user:login`, `auth:success`, `auth:failure`, `resource:*`, `request:*`, `security:*`
 
-### 3. Request ID Tracking (NEW!)
-
-Distributed tracing with X-Request-ID:
-
-```javascript
-requestId: {
-  enabled: true,
-  headerName: 'X-Request-ID',     // Header name
-  generator: () => generateId(),  // Custom ID generator
-  includeInResponse: true         // Add to response headers
-}
-```
-
-**Usage:**
-- Pass `X-Request-ID` from client → Preserved throughout request
-- No ID provided → Auto-generated
-- Included in all logs and events
-- Correlate requests across services
-
-### 4. Session Tracking (NEW!)
-
-Analytics-grade session management:
-
-```javascript
-sessionTracking: {
-  enabled: true,
-  resource: 'sessions',
-  cookieName: 'session_id',
-  cookieMaxAge: 2592000000,       // 30 days
-  passphrase: process.env.SESSION_SECRET,
-  updateOnRequest: true,          // Update lastSeenAt on each request
-  enrichSession: async ({ session, context }) => ({
-    // Custom enrichment
-    country: context.req.header('cf-ipcountry'),
-    fingerprint: context.req.header('x-visitor-id')
-  })
-}
-
-// Access in routes:
-const sessionId = c.get('sessionId');
-const session = c.get('session');
-```
-
-**Features:**
-- AES-256-GCM encrypted cookies
-- Optional S3DB persistence
-- Auto-update on each request
-- IP, User-Agent, Referer tracking
-- Custom enrichment function
-
-### 5. Extensible Health Checks (NEW!)
-
-Kubernetes-ready with custom checks:
-
-```javascript
-health: {
-  liveness: {
-    // Always returns 200 OK (is process alive?)
-  },
-  readiness: {
-    timeout: 5000,
-    checks: [
-      {
-        name: 'redis',
-        check: async () => {
-          const ping = await redis.ping();
-          return { healthy: ping === 'PONG' };
-        },
-        optional: false
-      },
-      {
-        name: 'external_api',
-        check: async () => {
-          const response = await fetch('https://api.example.com/health');
-          return { healthy: response.ok };
-        },
-        optional: true  // Don't fail readiness if this fails
-      }
-    ]
-  }
-}
-```
-
-**Endpoints:**
-- `GET /health/live` - Liveness probe (Kubernetes)
-- `GET /health/ready` - Readiness probe (Kubernetes)
-- `GET /health` - Generic health check
-
-### 6. Graceful Shutdown (NEW!)
-
-Zero-downtime deployments:
-
-```javascript
-// Automatic SIGTERM/SIGINT handling
-
-// How it works:
-// 1. SIGTERM received
-// 2. Stop accepting new requests (returns 503)
-// 3. Wait for in-flight requests to finish (max 30s)
-// 4. Close HTTP server
-// 5. Exit process
-
-// Kubernetes readiness probe will remove pod from service
-// No dropped requests!
-```
+**[→ Deep dive: Event system](./api/observability.md#events)**
 
 ---
 
-## ⚙️ Configuration Reference
+### Guard Helpers
 
-### Complete Configuration Example
+Declarative authorization with zero boilerplate:
+
+```javascript
+import {
+  requireScopes,
+  requireRole,
+  requireOwnership,
+  requireTenant,
+  anyOf,
+  allOf
+} from 's3db.js/plugins/api/concerns/guards-helpers';
+
+guard: {
+  list: requireTenant(),  // Automatic tenant isolation
+
+  update: anyOf(
+    requireScopes(['admin']),
+    requireOwnership('userId')
+  ),
+
+  delete: allOf(
+    requireRole('admin'),
+    requireScopes(['delete:all'])
+  )
+}
+```
+
+**[→ Deep dive: Guards](./api/guards.md)**
+
+---
+
+## ⚙️ Configuration
+
+### Minimal (Development)
 
 ```javascript
 await db.use(new ApiPlugin({
-  // Server
   port: 3000,
-  host: '0.0.0.0',
-  verbose: true,
-
-  // Security
-  security: {
-    enabled: true,
-    headers: {
-      csp: "default-src 'self'",
-      hsts: { maxAge: 31536000, includeSubDomains: true }
-    }
-  },
-
-  cors: {
-    enabled: true,
-    origin: ['https://app.example.com'],
-    credentials: true,
-    maxAge: 86400
-  },
-
-  failban: {
-    enabled: true,
-    maxViolations: 3,
-    violationWindow: 3600000,
-    banDuration: 86400000,
-    whitelist: ['127.0.0.1'],
-    blacklist: [],
-    persistViolations: true,
-    geo: {
-      enabled: true,
-      databasePath: '/path/to/GeoLite2-Country.mmdb',
-      allowedCountries: ['BR', 'US', 'CA'],
-      blockedCountries: [],
-      blockUnknown: false,
-      cacheResults: true
-    }
-  },
-
-  // Authentication
-  auth: {
-    resource: 'users',
-    drivers: {
-      oidc: {
-        issuer: process.env.OIDC_ISSUER,
-        clientId: process.env.OIDC_CLIENT_ID,
-        clientSecret: process.env.OIDC_CLIENT_SECRET,
-        redirectUri: 'http://localhost:3000/auth/callback',
-        rateLimit: {
-          enabled: true,
-          maxAttempts: 5,
-          windowMs: 900000
-        }
-      },
-      jwt: {
-        secret: process.env.JWT_SECRET,
-        expiresIn: '7d'
-      }
-    },
-    pathRules: [
-      { path: '/admin/**', methods: ['oidc'], required: true },
-      { path: '/api/**', methods: ['jwt'], required: true },
-      { path: '/**', required: false }
-    ]
-  },
-
-  // Observability
-  requestId: { enabled: true },
-
-  sessionTracking: {
-    enabled: true,
-    resource: 'sessions',
-    passphrase: process.env.SESSION_SECRET,
-    updateOnRequest: true
-  },
-
-  events: { enabled: true },
-
-  metrics: {
-    enabled: true,
-    maxPathsTracked: 100,
-    resetInterval: 300000
-  },
-
-  health: {
-    readiness: {
-      timeout: 5000,
-      checks: [
-        {
-          name: 'database',
-          check: async () => ({ healthy: true })
-        }
-      ]
-    }
-  },
-
-  // Resources
-  resources: {
-    users: {
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-      validation: true
-    }
-  },
-
-  // Custom routes
-  routes: {
-    '/custom': {
-      GET: async (c) => c.json({ custom: true })
-    }
-  },
-
-  // Static files
-  static: [
-    {
-      driver: 'filesystem',
-      path: '/app',
-      root: './build',
-      config: { fallback: 'index.html' }
-    }
-  ]
+  verbose: true
 }));
 ```
 
+### Production-Ready
+
+```javascript
+await db.use(new ApiPlugin({
+  port: process.env.PORT || 3000,
+
+  // 🔐 Authentication
+  auth: {
+    resource: 'users',
+    drivers: {
+      oidc: { issuer: process.env.OIDC_ISSUER, ... },
+      jwt: { secret: process.env.JWT_SECRET }
+    },
+    pathRules: [
+      { path: '/admin/**', methods: ['oidc'], required: true },
+      { path: '/api/**', methods: ['jwt'], required: true }
+    ]
+  },
+
+  // 🛡️ Security
+  security: { enabled: true },
+  cors: { enabled: true, origin: ['https://app.example.com'] },
+  failban: {
+    enabled: true,
+    maxViolations: 3,
+    geo: {
+      enabled: true,
+      allowedCountries: ['US', 'BR', 'CA']
+    }
+  },
+
+  // 📊 Observability
+  requestId: { enabled: true },
+  metrics: { enabled: true },
+  events: { enabled: true },
+  sessionTracking: {
+    enabled: true,
+    resource: 'sessions',
+    passphrase: process.env.SESSION_SECRET
+  },
+
+  // 🏥 Health Checks
+  health: {
+    readiness: {
+      checks: [
+        { name: 'database', check: async () => ({ healthy: true }) }
+      ]
+    }
+  }
+}));
+```
+
+**[→ See all configuration options](./api/configuration.md)**
+
 ---
 
-## 🎯 API Endpoints
+## 🚀 Endpoints
 
-### Resource Endpoints
+### Auto-Generated (Per Resource)
 
 ```bash
-GET     /{resource}           # List/query
-GET     /{resource}/:id       # Get by ID
-POST    /{resource}           # Create
-PUT     /{resource}/:id       # Update (full)
-PATCH   /{resource}/:id       # Update (partial)
-DELETE  /{resource}/:id       # Delete
-HEAD    /{resource}           # Count
-OPTIONS /{resource}           # Metadata
+GET     /{resource}        # List/query (with filters)
+GET     /{resource}/:id    # Get by ID
+POST    /{resource}        # Create
+PUT     /{resource}/:id    # Update (full)
+PATCH   /{resource}/:id    # Update (partial)
+DELETE  /{resource}/:id    # Delete
+HEAD    /{resource}        # Count
+OPTIONS /{resource}        # Metadata
 ```
 
 ### System Endpoints
 
 ```bash
-GET     /                     # API information
-GET     /docs                 # Swagger UI
-GET     /openapi.json         # OpenAPI spec
-GET     /health               # Generic health
-GET     /health/live          # Liveness probe
-GET     /health/ready         # Readiness probe
-GET     /metrics              # Metrics (if enabled)
+GET     /                  # API information
+GET     /docs              # Interactive Swagger UI
+GET     /openapi.json      # OpenAPI 3.0 spec
+GET     /health            # Health check
+GET     /health/live       # Kubernetes liveness probe
+GET     /health/ready      # Kubernetes readiness probe
+GET     /metrics           # Prometheus metrics (if enabled)
 ```
 
-### Admin Endpoints (if failban enabled)
+### Admin Endpoints (If Failban Enabled)
 
 ```bash
-GET     /admin/security/bans         # List bans
-GET     /admin/security/bans/:ip     # Get ban
-POST    /admin/security/bans         # Ban IP
-DELETE  /admin/security/bans/:ip     # Unban IP
-GET     /admin/security/stats        # Statistics
+GET     /admin/security/bans       # List active bans
+GET     /admin/security/bans/:ip   # Ban details
+POST    /admin/security/bans       # Manual ban
+DELETE  /admin/security/bans/:ip   # Unban
+GET     /admin/security/stats      # Statistics
 ```
 
 ---
 
-## 🏆 Best Practices
+## ❓ Common Questions
 
-### 1. Use Environment Variables
+<details>
+<summary><strong>How do I protect against brute force attacks?</strong></summary>
 
-```javascript
-new ApiPlugin({
-  port: process.env.PORT || 3000,
-  auth: {
-    drivers: {
-      oidc: {
-        issuer: process.env.OIDC_ISSUER,
-        clientSecret: process.env.OIDC_CLIENT_SECRET
-      }
-    }
-  },
-  sessionTracking: {
-    passphrase: process.env.SESSION_SECRET
-  }
-})
-```
+Enable failban with rate limiting:
 
-### 2. Enable All Production Features
-
-```javascript
-new ApiPlugin({
-  // Security
-  security: { enabled: true },
-  cors: { enabled: true },
-  failban: { enabled: true },
-
-  // Observability
-  requestId: { enabled: true },
-  metrics: { enabled: true },
-  events: { enabled: true },
-  sessionTracking: { enabled: true },
-
-  // Health checks
-  health: {
-    readiness: {
-      checks: [/* your checks */]
-    }
-  }
-})
-```
-
-### 3. Use Guards for Authorization
-
-```javascript
-import { requireScopes, anyOf, requireOwnership } from 's3db.js/plugins/api/concerns/guards-helpers';
-
-guard: {
-  update: anyOf(
-    requireScopes(['admin']),
-    requireOwnership()
-  ),
-  delete: requireScopes(['admin'])
-}
-```
-
-### 4. Monitor with Events
-
-```javascript
-apiPlugin.events.on('request:error', (data) => {
-  // Send to error tracking service
-  errorTracker.report(data.error);
-});
-
-apiPlugin.events.on('security:banned', (data) => {
-  // Alert security team
-  slack.send(`IP banned: ${data.ip}`);
-});
-```
-
-### 5. Use Partitions for Performance
-
-```javascript
-partitions: {
-  byTenant: { fields: { tenantId: 'string' } },
-  byStatus: { fields: { status: 'string' } }
-}
-
-// O(1) lookups instead of O(n) scans
-```
-
----
-
-## ❓ FAQ
-
-**Q: Is this production-ready?**
-
-A: Yes! Includes enterprise features:
-- ✅ Automatic IP banning (failban)
-- ✅ Rate limiting per auth driver
-- ✅ Security headers (CSP, HSTS)
-- ✅ Distributed tracing (Request ID)
-- ✅ Real-time metrics
-- ✅ Event hooks for integrations
-- ✅ Graceful shutdown
-- ✅ Health probes (Kubernetes)
-- ✅ Session tracking
-
-**Q: How do I protect against brute force attacks?**
-
-A: Use failban + rate limiting:
 ```javascript
 failban: {
   enabled: true,
   maxViolations: 3,
+  violationWindow: 3600000,
   banDuration: 86400000
 }
 ```
 
-After 3 violations (rate limit, auth failures), IP is automatically banned for 24 hours.
+After 3 violations (rate limit exceeded, auth failures), IP is automatically banned for 24 hours.
 
-**Q: How do I track user sessions?**
+**[→ Learn more: Security](./api/security.md#failban)**
+</details>
 
-A: Use session tracking:
-```javascript
-sessionTracking: {
-  enabled: true,
-  resource: 'sessions',
-  passphrase: process.env.SESSION_SECRET
-}
-```
+<details>
+<summary><strong>How do I implement multi-tenancy?</strong></summary>
 
-**Q: How do I monitor API performance?**
+Use guards with partitions for O(1) tenant isolation:
 
-A: Use metrics + events:
-```javascript
-metrics: { enabled: true },
-events: { enabled: true }
-
-// Visit /metrics for real-time stats
-// Listen to events for custom processing
-```
-
-**Q: How do I implement multi-tenancy?**
-
-A: Use guards + partitions:
 ```javascript
 guard: {
   '*': (ctx) => {
@@ -1452,14 +577,19 @@ guard: {
 }
 ```
 
-**Q: Can I use this with Azure AD?**
+**[→ Learn more: Guards](./api/guards.md#multi-tenancy)**
+</details>
 
-A: Yes! Use OIDC driver:
+<details>
+<summary><strong>Can I use this with Azure AD / Google / Keycloak?</strong></summary>
+
+Yes! Use the OIDC driver:
+
 ```javascript
 auth: {
   drivers: {
     oidc: {
-      issuer: 'https://login.microsoftonline.com/{tenantId}/v2.0',
+      issuer: 'https://login.microsoftonline.com/{tenant}/v2.0',
       clientId: process.env.AZURE_CLIENT_ID,
       clientSecret: process.env.AZURE_CLIENT_SECRET
     }
@@ -1467,16 +597,90 @@ auth: {
 }
 ```
 
+**[→ Learn more: Authentication](./api/authentication.md#oidc)**
+</details>
+
+<details>
+<summary><strong>How do I monitor API performance?</strong></summary>
+
+Enable metrics and events:
+
+```javascript
+metrics: { enabled: true },
+events: { enabled: true }
+```
+
+Visit `/metrics` for real-time performance data (p50/p95/p99 latency, RPS, error rates). Listen to events for custom processing.
+
+**[→ Learn more: Observability](./api/observability.md)**
+</details>
+
+<details>
+<summary><strong>How do I serve a React/Vue/Angular app?</strong></summary>
+
+Use the static files feature:
+
+```javascript
+static: [{
+  driver: 'filesystem',
+  path: '/app',
+  root: './build',
+  config: { fallback: 'index.html' }  // SPA support
+}]
+```
+
+**[→ Learn more: Static Files](./api/static-files.md)**
+</details>
+
+<details>
+<summary><strong>Is this production-ready?</strong></summary>
+
+Yes! Includes:
+- ✅ Automatic IP banning (failban with GeoIP)
+- ✅ Rate limiting per auth driver
+- ✅ Security headers (CSP, HSTS, etc.)
+- ✅ Distributed tracing (Request ID)
+- ✅ Real-time metrics & events
+- ✅ Graceful shutdown
+- ✅ Kubernetes health probes
+- ✅ Session tracking
+
+**[→ See deployment guide](./api/deployment.md)**
+</details>
+
 ---
 
-## 🔗 See Also
+## 🎓 Learning Path
 
-- [Authentication](./api/authentication.md)
-- [Guards (Authorization)](./api/guards.md)
-- [Security Features](./api/security.md)
-- [Observability](./api/observability.md)
-- [Deployment](./api/deployment.md)
+**Beginner** → Start here:
+1. [Quick Start](#-quick-wins) - Get your first API running
+2. [Authentication](./api/authentication.md) - Add user auth
+3. [Guards](./api/guards.md) - Control data access
+
+**Intermediate** → Level up:
+4. [Security](./api/security.md) - Protect your API
+5. [Observability](./api/observability.md) - Monitor production
+6. [Static Files](./api/static-files.md) - Serve your frontend
+
+**Advanced** → Master it:
+7. [Deployment](./api/deployment.md) - Kubernetes & Docker
+8. [Authorization Patterns](./api/authorization-patterns.md) - Advanced RBAC
+9. [Configuration](./api/configuration.md) - Fine-tune everything
 
 ---
 
-> **🎉 Ready to build?** Start with the [Quick Start](#-quick-start) or explore [Real-World Examples](#-real-world-examples)!
+## 🔗 Next Steps
+
+**Ready to build?** Pick a starting point:
+
+- 🚀 **[Quick Start](#-quick-wins)** - Get running in 30 seconds
+- 🔐 **[Authentication Guide](./api/authentication.md)** - Add user login
+- 🛡️ **[Guards Tutorial](./api/guards.md)** - Secure your data
+- 🎯 **[Real-World Examples](#-real-world-examples)** - Copy-paste solutions
+- 🚀 **[Deployment Guide](./api/deployment.md)** - Go to production
+
+**Need help?** Check the [FAQ](#-common-questions) or explore the [Documentation Hub](#-documentation-hub).
+
+---
+
+> **💡 Pro Tip:** This plugin transforms s3db.js resources into REST APIs with zero boilerplate. Start simple, add features as you need them. All features are opt-in!
