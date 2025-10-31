@@ -53,7 +53,7 @@ export class IdentityPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    const internalResourceOverrides = options.internalResources || {};
+    const internalResourceOverrides = options.resourceNames || {};
     this.internalResourceNames = resolveResourceNames('identity', {
       oauthKeys: {
         defaultName: 'plg_identity_oauth_keys',
@@ -76,13 +76,6 @@ export class IdentityPlugin extends Plugin {
         override: internalResourceOverrides.mfaDevices
       }
     });
-    this.legacyInternalResourceNames = {
-      oauthKeys: 'plg_oauth_keys',
-      authCodes: 'plg_auth_codes',
-      sessions: 'plg_sessions',
-      passwordResetTokens: 'plg_password_reset_tokens',
-      mfaDevices: 'plg_mfa_devices'
-    };
 
     // Validate required resources configuration
     const resourcesValidation = validateResourcesConfig(options.resources);
@@ -145,7 +138,7 @@ export class IdentityPlugin extends Plugin {
         }
       },
 
-      internalResources: this.internalResourceNames,
+      resourceNames: this.internalResourceNames,
 
       // CORS configuration
       cors: {
@@ -522,7 +515,6 @@ export class IdentityPlugin extends Plugin {
    */
   async _createOAuth2Resources() {
     const names = this.internalResourceNames;
-    const legacyNames = this.legacyInternalResourceNames;
 
     // 1. OAuth Keys Resource (RSA keys for token signing)
     const [okKeys, errKeys, keysResource] = await tryFn(() =>
@@ -548,8 +540,8 @@ export class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.oauthKeys} resource`);
       }
-    } else if (this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys]) {
-      this.oauth2KeysResource = this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys];
+    } else if (this.database.resources[names.oauthKeys]) {
+      this.oauth2KeysResource = this.database.resources[names.oauthKeys];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
       }
@@ -584,8 +576,8 @@ export class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.authCodes} resource`);
       }
-    } else if (this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes]) {
-      this.oauth2AuthCodesResource = this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes];
+    } else if (this.database.resources[names.authCodes]) {
+      this.oauth2AuthCodesResource = this.database.resources[names.authCodes];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.authCodes} resource`);
       }
@@ -616,8 +608,8 @@ export class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.sessions} resource`);
       }
-    } else if (this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions]) {
-      this.sessionsResource = this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions];
+    } else if (this.database.resources[names.sessions]) {
+      this.sessionsResource = this.database.resources[names.sessions];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.sessions} resource`);
       }
@@ -647,8 +639,8 @@ export class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
       }
-    } else if (this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens]) {
-      this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens];
+    } else if (this.database.resources[names.passwordResetTokens]) {
+      this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
       }
@@ -688,8 +680,8 @@ export class IdentityPlugin extends Plugin {
         if (this.config.verbose) {
           console.log(`[Identity Plugin] Created ${names.mfaDevices} resource`);
         }
-      } else if (this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices]) {
-        this.mfaDevicesResource = this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices];
+      } else if (this.database.resources[names.mfaDevices]) {
+        this.mfaDevicesResource = this.database.resources[names.mfaDevices];
         if (this.config.verbose) {
           console.log(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
         }
@@ -1111,11 +1103,6 @@ export class IdentityPlugin extends Plugin {
         this.internalResourceNames.sessions,
         this.internalResourceNames.passwordResetTokens,
         this.internalResourceNames.mfaDevices,
-        this.legacyInternalResourceNames.oauthKeys,
-        this.legacyInternalResourceNames.authCodes,
-        this.legacyInternalResourceNames.sessions,
-        this.legacyInternalResourceNames.passwordResetTokens,
-        this.legacyInternalResourceNames.mfaDevices,
         'plg_oauth_clients'
       ]);
 

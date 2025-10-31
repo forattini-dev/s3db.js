@@ -132,12 +132,12 @@ export class ApiPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    const resourceNamesOption = options.resourceNames || {};
     const normalizedAuth = normalizeAuthConfig(options.auth);
     this.usersResourceName = resolveResourceName('api', {
       defaultName: 'plg_api_users',
-      override: options.auth?.resource
+      override: resourceNamesOption.authUsers
     });
-    this.legacyUsersResourceNames = ['plg_api_users', 'plg_users', 'users'];
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;
 
@@ -479,8 +479,22 @@ export class ApiPlugin extends Plugin {
   }
 
   _findExistingUsersResource() {
-    const candidates = new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
+    const candidates = new Set([this.usersResourceName]);
+
+    const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
+    if (identityPlugin) {
+      const identityNames = [
+        identityPlugin.usersResource?.name,
+        identityPlugin.config?.resources?.users?.mergedConfig?.name,
+        identityPlugin.config?.resources?.users?.userConfig?.name
+      ].filter(Boolean);
+      for (const name of identityNames) {
+        candidates.add(name);
+      }
+    }
+
     for (const name of candidates) {
+      if (!name) continue;
       const resource = this.database.resources?.[name];
       if (resource) {
         return resource;
@@ -1000,12 +1014,9 @@ export class ApiPlugin extends Plugin {
 
     // Optionally delete users resource
     if (purgeData && this.usersResource) {
-      const candidates = new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
-      for (const candidate of candidates) {
-        const [ok] = await tryFn(() => this.database.deleteResource(candidate));
-        if (ok && this.config.verbose) {
-          console.log(`[API Plugin] Deleted ${candidate} resource`);
-        }
+      const [ok] = await tryFn(() => this.database.deleteResource(this.usersResourceName));
+      if (ok && this.config.verbose) {
+        console.log(`[API Plugin] Deleted ${this.usersResourceName} resource`);
       }
     }
 

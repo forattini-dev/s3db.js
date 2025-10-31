@@ -158,10 +158,10 @@ export class ReplicatorPlugin extends Plugin {
       }
     }
     
+    const resourceNamesOption = options.resourceNames || {};
     this.config = {
       replicators: options.replicators || [],
       logErrors: options.logErrors !== false,
-      replicatorLogResource: options.replicatorLogResource || 'replicator_log',
       persistReplicatorLog: options.persistReplicatorLog || false,
       enabled: options.enabled !== false,
       batchSize: options.batchSize || 100,
@@ -169,11 +169,10 @@ export class ReplicatorPlugin extends Plugin {
       timeout: options.timeout || 30000,
       verbose: options.verbose || false
     };
-    this.config.replicatorLogResource = resolveResourceName('replicator', {
+    this.logResourceName = resolveResourceName('replicator', {
       defaultName: 'plg_replicator_logs',
-      override: options.replicatorLogResource
+      override: resourceNamesOption.log
     });
-    this.legacyReplicatorLogNames = ['plg_replicator_logs', 'replicator_log'];
 
     this.replicators = [];
     this.database = null;
@@ -186,24 +185,6 @@ export class ReplicatorPlugin extends Plugin {
     };
     this._afterCreateResourceHook = null;
     this.replicatorLog = null;
-  }
-
-  _getLogResourceCandidates() {
-    return Array.from(new Set([this.config.replicatorLogResource, ...this.legacyReplicatorLogNames].filter(Boolean)));
-  }
-
-  _isLogResourceName(name) {
-    return this._getLogResourceCandidates().includes(name);
-  }
-
-  _getExistingLogResource() {
-    for (const candidate of this._getLogResourceCandidates()) {
-      const resource = this.database?.resources?.[candidate];
-      if (resource) {
-        return resource;
-      }
-    }
-    return null;
   }
 
   // Helper to filter out internal S3DB fields
@@ -227,7 +208,7 @@ export class ReplicatorPlugin extends Plugin {
 
   installEventListeners(resource, database, plugin) {
     if (!resource || this.eventListenersInstalled.has(resource.name) ||
-        this._isLogResourceName(resource.name)) {
+        resource.name === this.logResourceName) {
       return;
     }
 
@@ -293,7 +274,7 @@ export class ReplicatorPlugin extends Plugin {
   async onInstall() {
     // Create replicator log resource if enabled
     if (this.config.persistReplicatorLog) {
-      const logResourceName = this.config.replicatorLogResource;
+      const logResourceName = this.logResourceName;
       const [ok, err, logResource] = await tryFn(() => this.database.createResource({
         name: logResourceName,
         attributes: {
@@ -308,14 +289,15 @@ export class ReplicatorPlugin extends Plugin {
       }));
 
       if (ok) {
-        this.replicatorLogResource = logResource;
+        this.replicatorLog = logResource;
       } else {
-        this.replicatorLogResource = this._getExistingLogResource();
-        if (!this.replicatorLogResource && this.config.verbose) {
-          console.warn('[ReplicatorPlugin] Failed to create replicator log resource:', err?.message);
+        const existing = this.database.resources[logResourceName];
+        if (existing) {
+          this.replicatorLog = existing;
+        } else {
+          throw err;
         }
       }
-      this.replicatorLog = this.replicatorLogResource || this.replicatorLog || this._getExistingLogResource();
     }
 
     // Initialize replicators
@@ -326,7 +308,7 @@ export class ReplicatorPlugin extends Plugin {
 
     // Install event listeners for existing resources
     for (const resource of Object.values(this.database.resources)) {
-      if (!this._isLogResourceName(resource.name)) {
+      if (resource.name !== this.logResourceName) {
         this.installEventListeners(resource, this.database, this);
       }
     }
@@ -339,7 +321,7 @@ export class ReplicatorPlugin extends Plugin {
   installDatabaseHooks() {
     // Store hook reference for later removal
     this._afterCreateResourceHook = (resource) => {
-      if (!this._isLogResourceName(resource.name)) {
+      if (resource.name !== this.logResourceName) {
         this.installEventListeners(resource, this.database, this);
       }
     };
@@ -413,9 +395,8 @@ export class ReplicatorPlugin extends Plugin {
 
   async logError(replicator, resourceName, operation, recordId, data, error) {
     const [ok, logError] = await tryFn(async () => {
-      const logResource = this.replicatorLogResource || this._getExistingLogResource();
-      if (logResource) {
-        await logResource.insert({
+      if (this.replicatorLog) {
+        await this.replicatorLog.insert({
           replicator: replicator.name || replicator.id,
           resourceName,
           operation,
@@ -576,7 +557,7 @@ export class ReplicatorPlugin extends Plugin {
 
   async logReplicator(item) {
     // Always use the saved reference
-    const logRes = this.replicatorLog || this.replicatorLogResource || this._getExistingLogResource();
+    const logRes = this.replicatorLog;
     if (!logRes) {
       this.emit('plg:replicator:log-failed', { error: 'replicator log resource not found', item });
       return;
@@ -716,7 +697,7 @@ export class ReplicatorPlugin extends Plugin {
     this.stats.lastSync = new Date().toISOString();
 
     for (const resourceName in this.database.resources) {
-      if (this._isLogResourceName(resourceName)) continue;
+      if (resourceName === this.logResourceName) continue;
 
       if (replicator.shouldReplicateResource(resourceName)) {
         this.emit('plg:replicator:sync-resource', { resourceName, replicatorId });

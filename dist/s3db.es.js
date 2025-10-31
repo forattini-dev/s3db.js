@@ -6264,16 +6264,43 @@ function createAuthDriverRateLimiter(driver, config = {}) {
 }
 
 async function getOrCreateUser(usersResource, claims, config) {
-  const userId = claims.email || claims.preferred_username || claims.sub;
-  if (!userId) {
-    throw new Error("Cannot extract user ID from OIDC claims (no email/preferred_username/sub)");
+  const {
+    autoCreateUser = true,
+    userIdClaim = "sub",
+    fallbackIdClaims = ["email", "preferred_username"],
+    lookupFields = ["email", "preferred_username"]
+  } = config;
+  const candidateIds = [];
+  if (userIdClaim && claims[userIdClaim]) {
+    candidateIds.push(String(claims[userIdClaim]));
+  }
+  for (const field of fallbackIdClaims) {
+    if (!field || field === userIdClaim) continue;
+    const value = claims[field];
+    if (value) {
+      candidateIds.push(String(value));
+    }
   }
   let user = null;
-  let userExists = false;
-  try {
-    user = await usersResource.get(userId);
-    userExists = true;
-  } catch (err) {
+  for (const candidate of candidateIds) {
+    try {
+      user = await usersResource.get(candidate);
+      break;
+    } catch (_) {
+    }
+  }
+  if (!user) {
+    const fields = Array.isArray(lookupFields) ? lookupFields : [lookupFields];
+    for (const field of fields) {
+      if (!field) continue;
+      const value = claims[field];
+      if (!value) continue;
+      const results = await usersResource.query({ [field]: value }, { limit: 1 });
+      if (results.length > 0) {
+        user = results[0];
+        break;
+      }
+    }
   }
   const now = (/* @__PURE__ */ new Date()).toISOString();
   if (user) {
@@ -6320,11 +6347,18 @@ async function getOrCreateUser(usersResource, claims, config) {
     user = await usersResource.update(userId, updates);
     return { user, created: false };
   }
+  if (!autoCreateUser) {
+    return { user: null, created: false };
+  }
+  const newUserId = candidateIds[0];
+  if (!newUserId) {
+    throw new Error("Cannot determine user ID from OIDC claims");
+  }
   const newUser = {
-    id: userId,
-    email: claims.email || userId,
-    username: claims.preferred_username || claims.email || userId,
-    name: claims.name || claims.email || userId,
+    id: newUserId,
+    email: claims.email || newUserId,
+    username: claims.preferred_username || claims.email || newUserId,
+    name: claims.name || claims.email || newUserId,
     picture: claims.picture || null,
     role: config.defaultRole || "user",
     scopes: config.defaultScopes || ["openid", "profile", "email"],
@@ -6404,6 +6438,9 @@ function createOIDCHandler(config, app, usersResource, events = null) {
     postLogoutRedirect: "/",
     idpLogout: true,
     autoCreateUser: true,
+    userIdClaim: "sub",
+    fallbackIdClaims: ["email", "preferred_username"],
+    lookupFields: ["email", "preferred_username"],
     autoRefreshTokens: true,
     refreshThreshold: 3e5,
     // 5 minutes before expiry
@@ -6540,11 +6577,17 @@ function createOIDCHandler(config, app, usersResource, events = null) {
       }
       let user = null;
       let userCreated = false;
-      if (autoCreateUser && usersResource) {
+      if (usersResource) {
         try {
           const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
           user = result.user;
           userCreated = result.created;
+          if (!user) {
+            return c.json({
+              error: "User not provisioned",
+              message: "User does not exist in configured auth resource"
+            }, 403);
+          }
           if (events) {
             if (userCreated) {
               events.emitUserEvent("created", {
@@ -7881,7 +7924,7 @@ function resolveResourceNames(pluginKey, descriptors = {}) {
 
 class FailbanManager {
   constructor(options = {}) {
-    const resourceOverrides = options.resources || {};
+    const resourceOverrides = options.resourceNames || {};
     this.resourceNames = resolveResourceNames("api_failban", {
       bans: {
         defaultName: "plg_api_failban_bans",
@@ -7892,10 +7935,6 @@ class FailbanManager {
         override: resourceOverrides.violations
       }
     });
-    this.legacyResourceNames = {
-      bans: "_api_failban_bans",
-      violations: "_api_failban_violations"
-    };
     this.options = {
       enabled: options.enabled !== false,
       database: options.database,
@@ -7966,15 +8005,11 @@ class FailbanManager {
    */
   async _createBansResource() {
     const resourceName = this.resourceNames.bans;
-    const candidates = [resourceName, this.legacyResourceNames.bans];
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      try {
-        return await this.database.getResource(candidate);
-      } catch (err) {
-      }
+    try {
+      return await this.database.getResource(resourceName);
+    } catch (err) {
     }
-    const resource = await this.database.createResource({
+    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
       name: resourceName,
       attributes: {
         ip: "string|required",
@@ -7995,7 +8030,14 @@ class FailbanManager {
           fields: { expiresAtCohort: "string" }
         }
       }
-    });
+    }));
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (existing) {
+        return existing;
+      }
+      throw createErr;
+    }
     const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
     if (ttlPlugin) {
       ttlPlugin.options.resources = ttlPlugin.options.resources || {};
@@ -8017,15 +8059,11 @@ class FailbanManager {
    */
   async _createViolationsResource() {
     const resourceName = this.resourceNames.violations;
-    const candidates = [resourceName, this.legacyResourceNames.violations];
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      try {
-        return await this.database.getResource(candidate);
-      } catch (err) {
-      }
+    try {
+      return await this.database.getResource(resourceName);
+    } catch (err) {
     }
-    return await this.database.createResource({
+    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
       name: resourceName,
       attributes: {
         ip: "string|required",
@@ -8041,7 +8079,15 @@ class FailbanManager {
           fields: { ip: "string" }
         }
       }
-    });
+    }));
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (existing) {
+        return existing;
+      }
+      throw createErr;
+    }
+    return resource;
   }
   /**
    * Load existing bans into memory cache
@@ -10005,12 +10051,12 @@ class ApiPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
+    const resourceNamesOption = options.resourceNames || {};
     const normalizedAuth = normalizeAuthConfig(options.auth);
     this.usersResourceName = resolveResourceName("api", {
       defaultName: "plg_api_users",
-      override: options.auth?.resource
+      override: resourceNamesOption.authUsers
     });
-    this.legacyUsersResourceNames = ["plg_api_users", "plg_users", "users"];
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;
     this.config = {
@@ -10311,8 +10357,20 @@ class ApiPlugin extends Plugin {
     }
   }
   _findExistingUsersResource() {
-    const candidates = /* @__PURE__ */ new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
+    const candidates = /* @__PURE__ */ new Set([this.usersResourceName]);
+    const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
+    if (identityPlugin) {
+      const identityNames = [
+        identityPlugin.usersResource?.name,
+        identityPlugin.config?.resources?.users?.mergedConfig?.name,
+        identityPlugin.config?.resources?.users?.userConfig?.name
+      ].filter(Boolean);
+      for (const name of identityNames) {
+        candidates.add(name);
+      }
+    }
     for (const name of candidates) {
+      if (!name) continue;
       const resource = this.database.resources?.[name];
       if (resource) {
         return resource;
@@ -10687,12 +10745,9 @@ class ApiPlugin extends Plugin {
     const { purgeData = false } = options;
     await this.onStop();
     if (purgeData && this.usersResource) {
-      const candidates = /* @__PURE__ */ new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
-      for (const candidate of candidates) {
-        const [ok] = await tryFn(() => this.database.deleteResource(candidate));
-        if (ok && this.config.verbose) {
-          console.log(`[API Plugin] Deleted ${candidate} resource`);
-        }
+      const [ok] = await tryFn(() => this.database.deleteResource(this.usersResourceName));
+      if (ok && this.config.verbose) {
+        console.log(`[API Plugin] Deleted ${this.usersResourceName} resource`);
       }
     }
     if (this.config.verbose) {
@@ -12295,7 +12350,7 @@ class IdentityPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
-    const internalResourceOverrides = options.internalResources || {};
+    const internalResourceOverrides = options.resourceNames || {};
     this.internalResourceNames = resolveResourceNames("identity", {
       oauthKeys: {
         defaultName: "plg_identity_oauth_keys",
@@ -12318,13 +12373,6 @@ class IdentityPlugin extends Plugin {
         override: internalResourceOverrides.mfaDevices
       }
     });
-    this.legacyInternalResourceNames = {
-      oauthKeys: "plg_oauth_keys",
-      authCodes: "plg_auth_codes",
-      sessions: "plg_sessions",
-      passwordResetTokens: "plg_password_reset_tokens",
-      mfaDevices: "plg_mfa_devices"
-    };
     const resourcesValidation = validateResourcesConfig$1(options.resources);
     if (!resourcesValidation.valid) {
       throw new Error(
@@ -12379,7 +12427,7 @@ class IdentityPlugin extends Plugin {
           mergedConfig: null
         }
       },
-      internalResources: this.internalResourceNames,
+      resourceNames: this.internalResourceNames,
       // CORS configuration
       cors: {
         enabled: options.cors?.enabled !== false,
@@ -12764,7 +12812,6 @@ class IdentityPlugin extends Plugin {
    */
   async _createOAuth2Resources() {
     const names = this.internalResourceNames;
-    const legacyNames = this.legacyInternalResourceNames;
     const [okKeys, errKeys, keysResource] = await tryFn(
       () => this.database.createResource({
         name: names.oauthKeys,
@@ -12787,8 +12834,8 @@ class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.oauthKeys} resource`);
       }
-    } else if (this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys]) {
-      this.oauth2KeysResource = this.database.resources[names.oauthKeys] || this.database.resources[legacyNames.oauthKeys];
+    } else if (this.database.resources[names.oauthKeys]) {
+      this.oauth2KeysResource = this.database.resources[names.oauthKeys];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
       }
@@ -12822,8 +12869,8 @@ class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.authCodes} resource`);
       }
-    } else if (this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes]) {
-      this.oauth2AuthCodesResource = this.database.resources[names.authCodes] || this.database.resources[legacyNames.authCodes];
+    } else if (this.database.resources[names.authCodes]) {
+      this.oauth2AuthCodesResource = this.database.resources[names.authCodes];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.authCodes} resource`);
       }
@@ -12851,8 +12898,8 @@ class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.sessions} resource`);
       }
-    } else if (this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions]) {
-      this.sessionsResource = this.database.resources[names.sessions] || this.database.resources[legacyNames.sessions];
+    } else if (this.database.resources[names.sessions]) {
+      this.sessionsResource = this.database.resources[names.sessions];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.sessions} resource`);
       }
@@ -12879,8 +12926,8 @@ class IdentityPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
       }
-    } else if (this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens]) {
-      this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens] || this.database.resources[legacyNames.passwordResetTokens];
+    } else if (this.database.resources[names.passwordResetTokens]) {
+      this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens];
       if (this.config.verbose) {
         console.log(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
       }
@@ -12921,8 +12968,8 @@ class IdentityPlugin extends Plugin {
         if (this.config.verbose) {
           console.log(`[Identity Plugin] Created ${names.mfaDevices} resource`);
         }
-      } else if (this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices]) {
-        this.mfaDevicesResource = this.database.resources[names.mfaDevices] || this.database.resources[legacyNames.mfaDevices];
+      } else if (this.database.resources[names.mfaDevices]) {
+        this.mfaDevicesResource = this.database.resources[names.mfaDevices];
         if (this.config.verbose) {
           console.log(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
         }
@@ -13270,11 +13317,6 @@ class IdentityPlugin extends Plugin {
         this.internalResourceNames.sessions,
         this.internalResourceNames.passwordResetTokens,
         this.internalResourceNames.mfaDevices,
-        this.legacyInternalResourceNames.oauthKeys,
-        this.legacyInternalResourceNames.authCodes,
-        this.legacyInternalResourceNames.sessions,
-        this.legacyInternalResourceNames.passwordResetTokens,
-        this.legacyInternalResourceNames.mfaDevices,
         "plg_oauth_clients"
       ]);
       for (const resourceName of resourcesToDelete) {
@@ -13307,10 +13349,11 @@ class IdentityPlugin extends Plugin {
 class AuditPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+    const resourceNames = options.resourceNames || {};
     this.auditResource = null;
     this.auditResourceName = resolveResourceName("audit", {
       defaultName: "plg_audits",
-      override: options.resourceName
+      override: resourceNames.audit
     });
     this.config = {
       includeData: options.includeData !== false,
@@ -17316,15 +17359,8 @@ class CookieFarmPlugin extends Plugin {
     };
     this.config.storage.resource = resolveResourceName("cookiefarm", {
       defaultName: "plg_cookie_farm_personas",
-      override: resourceNamesOption.personas || options.storage?.resource
+      override: resourceNamesOption.personas
     });
-    this.legacyStorageResourceNames = ["cookie_farm_personas"];
-    if (options.storage?.resource) {
-      this.legacyStorageResourceNames.push(options.storage.resource);
-    }
-    if (resourceNamesOption.personas) {
-      this.legacyStorageResourceNames.push(resourceNamesOption.personas);
-    }
     this.puppeteerPlugin = null;
     this.stealthManager = null;
     this.personaPool = /* @__PURE__ */ new Map();
@@ -17391,16 +17427,8 @@ class CookieFarmPlugin extends Plugin {
     const resourceName = this.config.storage.resource;
     try {
       await this.database.getResource(resourceName);
+      return;
     } catch (err) {
-      for (const legacyName of this.legacyStorageResourceNames) {
-        if (!legacyName) continue;
-        try {
-          const legacyResource = await this.database.getResource(legacyName);
-          this.config.storage.resource = legacyName;
-          return legacyResource;
-        } catch (legacyErr) {
-        }
-      }
       await this.database.createResource({
         name: resourceName,
         attributes: {
@@ -21134,7 +21162,13 @@ class FullTextPlugin extends Plugin {
       },
       behavior: "body-overflow"
     }));
-    this.indexResource = ok ? indexResource : this.database.resources[this.indexResourceName] || this.database.resources.fulltext_indexes;
+    if (ok) {
+      this.indexResource = indexResource;
+    } else if (this.database.resources[this.indexResourceName]) {
+      this.indexResource = this.database.resources[this.indexResourceName];
+    } else {
+      throw err;
+    }
     await this.loadIndexes();
     this.installDatabaseHooks();
     this.installIndexingHooks();
@@ -22122,7 +22156,7 @@ class GeoPlugin extends Plugin {
 class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
-    const resourceOverrides = options.resources || {};
+    const resourceOverrides = options.resourceNames || {};
     this.resourceNames = resolveResourceNames("metrics", {
       metrics: {
         defaultName: "plg_metrics",
@@ -22137,11 +22171,6 @@ class MetricsPlugin extends Plugin {
         override: resourceOverrides.performance
       }
     });
-    this.legacyResourceNames = {
-      metrics: "plg_metrics",
-      errors: "plg_error_logs",
-      performance: "plg_performance_logs"
-    };
     this.config = {
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
@@ -22205,7 +22234,7 @@ class MetricsPlugin extends Plugin {
         },
         behavior: "body-overflow"
       }));
-      this.metricsResource = ok1 ? metricsResource : this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics];
+      this.metricsResource = ok1 ? metricsResource : this.database.resources[this.resourceNames.metrics];
       const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
         name: this.resourceNames.errors,
         attributes: {
@@ -22223,7 +22252,7 @@ class MetricsPlugin extends Plugin {
         },
         behavior: "body-overflow"
       }));
-      this.errorsResource = ok2 ? errorsResource : this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors];
+      this.errorsResource = ok2 ? errorsResource : this.database.resources[this.resourceNames.errors];
       const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
         name: this.resourceNames.performance,
         attributes: {
@@ -22241,12 +22270,12 @@ class MetricsPlugin extends Plugin {
         },
         behavior: "body-overflow"
       }));
-      this.performanceResource = ok3 ? performanceResource : this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance];
+      this.performanceResource = ok3 ? performanceResource : this.database.resources[this.resourceNames.performance];
     });
     if (!ok) {
-      this.metricsResource = this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics];
-      this.errorsResource = this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors];
-      this.performanceResource = this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance];
+      this.metricsResource = this.database.resources[this.resourceNames.metrics];
+      this.errorsResource = this.database.resources[this.resourceNames.errors];
+      this.performanceResource = this.database.resources[this.resourceNames.performance];
     }
     this.installDatabaseHooks();
     this.installMetricsHooks();
@@ -22284,7 +22313,7 @@ class MetricsPlugin extends Plugin {
     this.database.removeHook("afterCreateResource", this.installResourceHooks.bind(this));
   }
   isInternalResource(resourceName) {
-    return Object.values(this.resourceNames).includes(resourceName) || Object.values(this.legacyResourceNames).includes(resourceName);
+    return Object.values(this.resourceNames).includes(resourceName);
   }
   installMetricsHooks() {
     for (const resource of Object.values(this.database.resources)) {
@@ -25086,6 +25115,7 @@ ${errorDetails}`,
       strictPartitions,
       createdBy
     };
+    this.$schema = cloneDeep(config);
     this.hooks = {
       // Insert hooks
       beforeInsert: [],
@@ -31534,15 +31564,8 @@ class PuppeteerPlugin extends Plugin {
     };
     this.config.cookies.storage.resource = resolveResourceName("puppeteer", {
       defaultName: "plg_puppeteer_cookies",
-      override: options.cookies?.storage?.resource
+      override: resourceNamesOption.cookies
     });
-    this.legacyCookieStorageNames = ["puppeteer_cookies"];
-    if (options.cookies?.storage?.resource) {
-      this.legacyCookieStorageNames.push(options.cookies.storage.resource);
-    }
-    if (resourceNamesOption.cookies) {
-      this.legacyCookieStorageNames.push(resourceNamesOption.cookies);
-    }
     this.browserPool = [];
     this.tabPool = /* @__PURE__ */ new Map();
     this.browserIdleTimers = /* @__PURE__ */ new Map();
@@ -31643,54 +31666,46 @@ class PuppeteerPlugin extends Plugin {
     const resourceName = this.config.cookies.storage.resource;
     try {
       await this.database.getResource(resourceName);
+      return;
     } catch (err) {
-      for (const legacyName of this.legacyCookieStorageNames) {
-        if (!legacyName) continue;
-        try {
-          const legacyResource = await this.database.getResource(legacyName);
-          this.config.cookies.storage.resource = legacyName;
-          return legacyResource;
-        } catch (legacyErr) {
-        }
-      }
-      await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          sessionId: "string|required",
-          cookies: "array|required",
-          userAgent: "string",
-          viewport: "object",
-          proxyId: "string|optional",
-          // IMMUTABLE: Proxy binding
-          domain: "string",
-          // Main domain for cookies
-          date: "string",
-          // YYYY-MM-DD for temporal partitioning
-          reputation: {
-            successCount: "number",
-            failCount: "number",
-            successRate: "number",
-            lastUsed: "number"
-          },
-          metadata: {
-            createdAt: "number",
-            expiresAt: "number",
-            requestCount: "number",
-            age: "number"
-          }
-        },
-        timestamps: true,
-        behavior: "body-only",
-        partitions: {
-          byProxy: { fields: { proxyId: "string" } },
-          // Query cookies for a proxy
-          byDate: { fields: { date: "string" } },
-          // Query by date (for rotation)
-          byDomain: { fields: { domain: "string" } }
-          // Query cookies for a domain
-        }
-      });
     }
+    await this.database.createResource({
+      name: resourceName,
+      attributes: {
+        sessionId: "string|required",
+        cookies: "array|required",
+        userAgent: "string",
+        viewport: "object",
+        proxyId: "string|optional",
+        // IMMUTABLE: Proxy binding
+        domain: "string",
+        // Main domain for cookies
+        date: "string",
+        // YYYY-MM-DD for temporal partitioning
+        reputation: {
+          successCount: "number",
+          failCount: "number",
+          successRate: "number",
+          lastUsed: "number"
+        },
+        metadata: {
+          createdAt: "number",
+          expiresAt: "number",
+          requestCount: "number",
+          age: "number"
+        }
+      },
+      timestamps: true,
+      behavior: "body-only",
+      partitions: {
+        byProxy: { fields: { proxyId: "string" } },
+        // Query cookies for a proxy
+        byDate: { fields: { date: "string" } },
+        // Query by date (for rotation)
+        byDomain: { fields: { domain: "string" } }
+        // Query cookies for a domain
+      }
+    });
   }
   /**
    * Initialize proxy manager
@@ -39399,10 +39414,10 @@ class ReplicatorPlugin extends Plugin {
         });
       }
     }
+    const resourceNamesOption = options.resourceNames || {};
     this.config = {
       replicators: options.replicators || [],
       logErrors: options.logErrors !== false,
-      replicatorLogResource: options.replicatorLogResource || "replicator_log",
       persistReplicatorLog: options.persistReplicatorLog || false,
       enabled: options.enabled !== false,
       batchSize: options.batchSize || 100,
@@ -39410,11 +39425,10 @@ class ReplicatorPlugin extends Plugin {
       timeout: options.timeout || 3e4,
       verbose: options.verbose || false
     };
-    this.config.replicatorLogResource = resolveResourceName("replicator", {
+    this.logResourceName = resolveResourceName("replicator", {
       defaultName: "plg_replicator_logs",
-      override: options.replicatorLogResource
+      override: resourceNamesOption.log
     });
-    this.legacyReplicatorLogNames = ["plg_replicator_logs", "replicator_log"];
     this.replicators = [];
     this.database = null;
     this.eventListenersInstalled = /* @__PURE__ */ new Set();
@@ -39426,21 +39440,6 @@ class ReplicatorPlugin extends Plugin {
     };
     this._afterCreateResourceHook = null;
     this.replicatorLog = null;
-  }
-  _getLogResourceCandidates() {
-    return Array.from(new Set([this.config.replicatorLogResource, ...this.legacyReplicatorLogNames].filter(Boolean)));
-  }
-  _isLogResourceName(name) {
-    return this._getLogResourceCandidates().includes(name);
-  }
-  _getExistingLogResource() {
-    for (const candidate of this._getLogResourceCandidates()) {
-      const resource = this.database?.resources?.[candidate];
-      if (resource) {
-        return resource;
-      }
-    }
-    return null;
   }
   // Helper to filter out internal S3DB fields
   filterInternalFields(obj) {
@@ -39458,7 +39457,7 @@ class ReplicatorPlugin extends Plugin {
     return ok ? completeRecord : data;
   }
   installEventListeners(resource, database, plugin) {
-    if (!resource || this.eventListenersInstalled.has(resource.name) || this._isLogResourceName(resource.name)) {
+    if (!resource || this.eventListenersInstalled.has(resource.name) || resource.name === this.logResourceName) {
       return;
     }
     const insertHandler = async (data) => {
@@ -39509,7 +39508,7 @@ class ReplicatorPlugin extends Plugin {
   }
   async onInstall() {
     if (this.config.persistReplicatorLog) {
-      const logResourceName = this.config.replicatorLogResource;
+      const logResourceName = this.logResourceName;
       const [ok, err, logResource] = await tryFn(() => this.database.createResource({
         name: logResourceName,
         attributes: {
@@ -39523,19 +39522,20 @@ class ReplicatorPlugin extends Plugin {
         behavior: "truncate-data"
       }));
       if (ok) {
-        this.replicatorLogResource = logResource;
+        this.replicatorLog = logResource;
       } else {
-        this.replicatorLogResource = this._getExistingLogResource();
-        if (!this.replicatorLogResource && this.config.verbose) {
-          console.warn("[ReplicatorPlugin] Failed to create replicator log resource:", err?.message);
+        const existing = this.database.resources[logResourceName];
+        if (existing) {
+          this.replicatorLog = existing;
+        } else {
+          throw err;
         }
       }
-      this.replicatorLog = this.replicatorLogResource || this.replicatorLog || this._getExistingLogResource();
     }
     await this.initializeReplicators(this.database);
     this.installDatabaseHooks();
     for (const resource of Object.values(this.database.resources)) {
-      if (!this._isLogResourceName(resource.name)) {
+      if (resource.name !== this.logResourceName) {
         this.installEventListeners(resource, this.database, this);
       }
     }
@@ -39544,7 +39544,7 @@ class ReplicatorPlugin extends Plugin {
   }
   installDatabaseHooks() {
     this._afterCreateResourceHook = (resource) => {
-      if (!this._isLogResourceName(resource.name)) {
+      if (resource.name !== this.logResourceName) {
         this.installEventListeners(resource, this.database, this);
       }
     };
@@ -39601,9 +39601,8 @@ class ReplicatorPlugin extends Plugin {
   }
   async logError(replicator, resourceName, operation, recordId, data, error) {
     const [ok, logError] = await tryFn(async () => {
-      const logResource = this.replicatorLogResource || this._getExistingLogResource();
-      if (logResource) {
-        await logResource.insert({
+      if (this.replicatorLog) {
+        await this.replicatorLog.insert({
           replicator: replicator.name || replicator.id,
           resourceName,
           operation,
@@ -39736,7 +39735,7 @@ class ReplicatorPlugin extends Plugin {
     return Promise.allSettled(promises);
   }
   async logReplicator(item) {
-    const logRes = this.replicatorLog || this.replicatorLogResource || this._getExistingLogResource();
+    const logRes = this.replicatorLog;
     if (!logRes) {
       this.emit("plg:replicator:log-failed", { error: "replicator log resource not found", item });
       return;
@@ -39850,7 +39849,7 @@ class ReplicatorPlugin extends Plugin {
     }
     this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
     for (const resourceName in this.database.resources) {
-      if (this._isLogResourceName(resourceName)) continue;
+      if (resourceName === this.logResourceName) continue;
       if (replicator.shouldReplicateResource(resourceName)) {
         this.emit("plg:replicator:sync-resource", { resourceName, replicatorId });
         const resource = this.database.resources[resourceName];
@@ -39924,6 +39923,7 @@ class ReplicatorPlugin extends Plugin {
 class S3QueuePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+    const resourceNamesOption = options.resourceNames || {};
     if (!options.resource) {
       throw new Error('S3QueuePlugin requires "resource" option');
     }
@@ -39945,15 +39945,13 @@ class S3QueuePlugin extends Plugin {
     };
     this.queueResourceName = resolveResourceName("s3queue", {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
-      override: options.queueResource
+      override: resourceNamesOption.queue
     });
     this.config.queueResourceName = this.queueResourceName;
-    this.legacyQueueResourceNames = [`${this.config.resource}_queue`];
     this.deadLetterResourceName = this.config.deadLetterResource ? resolveResourceName("s3queue", {
       defaultName: `plg_s3queue_${this.config.resource}_dead`,
-      override: this.config.deadLetterResource
+      override: resourceNamesOption.deadLetter
     }) : null;
-    this.legacyDeadLetterResourceNames = this.config.deadLetterResource ? [this.config.deadLetterResource] : [];
     this.config.deadLetterResource = this.deadLetterResourceName;
     this.queueResource = null;
     this.targetResource = null;
@@ -40003,14 +40001,14 @@ class S3QueuePlugin extends Plugin {
       })
     );
     if (ok) {
-      this.queueResource = this.database.resources[queueName] || this._findExistingResource([queueName]);
+      this.queueResource = this.database.resources[queueName];
     } else {
-      this.queueResource = this._findExistingResource([queueName, ...this.legacyQueueResourceNames]);
+      this.queueResource = this.database.resources[queueName];
       if (!this.queueResource) {
         throw new Error(`Failed to create queue resource: ${err?.message}`);
       }
     }
-    this.queueResourceName = this.queueResource?.name || queueName;
+    this.queueResourceName = this.queueResource.name;
     this.addHelperMethods();
     if (this.config.deadLetterResource) {
       await this.createDeadLetterResource();
@@ -40343,16 +40341,6 @@ class S3QueuePlugin extends Plugin {
       error
     });
   }
-  _findExistingResource(candidateNames) {
-    for (const name of candidateNames) {
-      if (!name) continue;
-      const resource = this.database.resources[name];
-      if (resource) {
-        return resource;
-      }
-    }
-    return null;
-  }
   async getStats() {
     const [ok, err, allMessages] = await tryFn(
       () => this.queueResource.list()
@@ -40398,17 +40386,16 @@ class S3QueuePlugin extends Plugin {
       })
     );
     if (ok) {
-      this.deadLetterResourceObj = this.database.resources[resourceName] || this._findExistingResource([resourceName]);
+      this.deadLetterResourceObj = this.database.resources[resourceName];
     } else {
-      this.deadLetterResourceObj = this._findExistingResource([resourceName, ...this.legacyDeadLetterResourceNames]);
-    }
-    if (this.deadLetterResourceObj) {
-      this.deadLetterResourceName = this.deadLetterResourceObj.name;
-      if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Dead letter queue created: ${this.deadLetterResourceName}`);
+      this.deadLetterResourceObj = this.database.resources[resourceName];
+      if (!this.deadLetterResourceObj) {
+        throw err;
       }
-    } else if (err && this.config.verbose) {
-      console.warn("[S3QueuePlugin] Failed to create dead letter resource:", err.message);
+    }
+    this.deadLetterResourceName = this.deadLetterResourceObj.name;
+    if (this.config.verbose) {
+      console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
     }
   }
 }
@@ -41247,13 +41234,24 @@ class ErrorClassifier {
 class StateMachinePlugin extends Plugin {
   constructor(options = {}) {
     super();
+    const resourceNamesOption = options.resourceNames || {};
+    this.resourceNames = resolveResourceNames("state_machine", {
+      transitionLog: {
+        defaultName: "plg_state_transitions",
+        override: resourceNamesOption.transitionLog
+      },
+      states: {
+        defaultName: "plg_entity_states",
+        override: resourceNamesOption.states
+      }
+    });
     this.config = {
       stateMachines: options.stateMachines || {},
       actions: options.actions || {},
       guards: options.guards || {},
       persistTransitions: options.persistTransitions !== false,
-      transitionLogResource: options.transitionLogResource || "plg_state_transitions",
-      stateResource: options.stateResource || "plg_entity_states",
+      transitionLogResource: this.resourceNames.transitionLog,
+      stateResource: this.resourceNames.states,
       retryAttempts: options.retryAttempts || 3,
       retryDelay: options.retryDelay || 100,
       verbose: options.verbose || false,
@@ -41274,22 +41272,6 @@ class StateMachinePlugin extends Plugin {
       triggerCheckInterval: options.triggerCheckInterval || 6e4
       // Check triggers every 60s by default
     };
-    this.resourceNames = resolveResourceNames("state_machine", {
-      transitionLog: {
-        defaultName: "plg_state_transitions",
-        override: options.transitionLogResource
-      },
-      states: {
-        defaultName: "plg_entity_states",
-        override: options.stateResource
-      }
-    });
-    this.legacyResourceNames = {
-      transitionLog: "plg_state_transitions",
-      states: "plg_entity_states"
-    };
-    this.config.transitionLogResource = this.resourceNames.transitionLog;
-    this.config.stateResource = this.resourceNames.states;
     this.database = null;
     this.machines = /* @__PURE__ */ new Map();
     this.triggerIntervals = [];
@@ -42754,29 +42736,23 @@ class TfStatePlugin extends Plugin {
     super(config);
     this.driverType = config.driver || null;
     this.driverConfig = config.config || {};
-    const resources = config.resources || {};
+    const resourceNamesOption = config.resourceNames || {};
     this.resourceName = resolveResourceName("tfstate", {
       defaultName: "plg_tfstate_resources",
-      override: resources.resources || config.resourceName
+      override: resourceNamesOption.resources
     });
     this.stateFilesName = resolveResourceName("tfstate", {
       defaultName: "plg_tfstate_state_files",
-      override: resources.stateFiles || config.stateFilesName
+      override: resourceNamesOption.stateFiles
     });
     this.diffsName = resolveResourceName("tfstate", {
       defaultName: "plg_tfstate_state_diffs",
-      override: resources.diffs || config.diffsName
+      override: resourceNamesOption.diffs
     });
     this.lineagesName = resolveResourceName("tfstate", {
       defaultName: "plg_tfstate_lineages",
-      override: resources.lineages
+      override: resourceNamesOption.lineages
     });
-    this.legacyResourceNames = {
-      resources: ["plg_tfstate_resources"],
-      stateFiles: ["plg_tfstate_state_files"],
-      diffs: ["plg_tfstate_state_diffs"],
-      lineages: ["plg_tfstate_lineages"]
-    };
     const monitor = config.monitor || {};
     this.monitorEnabled = monitor.enabled || false;
     this.monitorCron = monitor.cron || "*/5 * * * *";
@@ -42832,118 +42808,119 @@ class TfStatePlugin extends Plugin {
         console.log(`[TfStatePlugin] Driver initialized successfully`);
       }
     }
-    this.lineagesResource = await this.database.createResource({
-      name: this.lineagesName,
-      attributes: {
-        id: "string|required",
-        // = lineage UUID from Tfstate
-        latestSerial: "number",
-        // Track latest for quick access
-        latestStateId: "string",
-        // FK to stateFilesResource
-        totalStates: "number",
-        // Counter
-        firstImportedAt: "number",
-        lastImportedAt: "number",
-        metadata: "json"
-        // Custom tags, project info, etc.
-      },
-      timestamps: true,
-      asyncPartitions: this.asyncPartitions,
-      // Configurable async partitions
-      partitions: {},
-      // No partitions - simple tracking resource
-      createdBy: "TfStatePlugin"
-    });
-    this.stateFilesResource = await this.database.createResource({
-      name: this.stateFilesName,
-      attributes: {
-        id: "string|required",
-        lineageId: "string|required",
-        // NEW: FK to lineages (= lineage UUID)
-        sourceFile: "string|required",
-        // Full path or s3:// URI
-        serial: "number|required",
-        lineage: "string|required",
-        // Denormalized for queries
-        terraformVersion: "string",
-        stateVersion: "number|required",
-        resourceCount: "number",
-        sha256Hash: "string|required",
-        // SHA256 hash for deduplication
-        importedAt: "number|required"
-      },
-      timestamps: true,
-      asyncPartitions: this.asyncPartitions,
-      // Configurable async partitions
-      partitions: {
-        byLineage: { fields: { lineageId: "string" } },
-        // NEW: Primary lookup
-        byLineageSerial: { fields: { lineageId: "string", serial: "number" } },
-        // NEW: Composite key
-        bySourceFile: { fields: { sourceFile: "string" } },
-        // Legacy support
-        bySerial: { fields: { serial: "number" } },
-        bySha256: { fields: { sha256Hash: "string" } }
-      },
-      createdBy: "TfStatePlugin"
-    });
-    this.resource = await this.database.createResource({
-      name: this.resourceName,
-      attributes: {
-        id: "string|required",
-        stateFileId: "string|required",
-        // FK to stateFilesResource
-        lineageId: "string|required",
-        // NEW: FK to lineages
-        // Denormalized fields for fast queries
-        stateSerial: "number|required",
-        sourceFile: "string|required",
-        // Resource data
-        resourceType: "string|required",
-        resourceName: "string|required",
-        resourceAddress: "string|required",
-        providerName: "string|required",
-        mode: "string",
-        // managed or data
-        attributes: "json",
-        dependencies: "array",
-        importedAt: "number|required"
-      },
-      timestamps: true,
-      asyncPartitions: this.asyncPartitions,
-      // Configurable async partitions
-      partitions: {
-        byLineageSerial: { fields: { lineageId: "string", stateSerial: "number" } },
-        // NEW: Efficient diff queries
-        byLineage: { fields: { lineageId: "string" } },
-        // NEW: All resources for lineage
-        byType: { fields: { resourceType: "string" } },
-        byProvider: { fields: { providerName: "string" } },
-        bySerial: { fields: { stateSerial: "number" } },
-        bySourceFile: { fields: { sourceFile: "string" } },
-        // Legacy support
-        byProviderAndType: { fields: { providerName: "string", resourceType: "string" } },
-        byLineageType: { fields: { lineageId: "string", resourceType: "string" } }
-        // NEW: Type queries per lineage
-      },
-      createdBy: "TfStatePlugin"
-    });
+    {
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+        name: this.lineagesName,
+        attributes: {
+          id: "string|required",
+          latestSerial: "number",
+          latestStateId: "string",
+          totalStates: "number",
+          firstImportedAt: "number",
+          lastImportedAt: "number",
+          metadata: "json"
+        },
+        timestamps: true,
+        asyncPartitions: this.asyncPartitions,
+        partitions: {},
+        createdBy: "TfStatePlugin"
+      }));
+      if (created) {
+        this.lineagesResource = resource;
+      } else {
+        this.lineagesResource = this.database.resources?.[this.lineagesName];
+        if (!this.lineagesResource) {
+          throw createErr;
+        }
+      }
+    }
+    {
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+        name: this.stateFilesName,
+        attributes: {
+          id: "string|required",
+          lineageId: "string|required",
+          sourceFile: "string|required",
+          serial: "number|required",
+          lineage: "string|required",
+          terraformVersion: "string",
+          stateVersion: "number|required",
+          resourceCount: "number",
+          sha256Hash: "string|required",
+          importedAt: "number|required"
+        },
+        timestamps: true,
+        asyncPartitions: this.asyncPartitions,
+        partitions: {
+          byLineage: { fields: { lineageId: "string" } },
+          byLineageSerial: { fields: { lineageId: "string", serial: "number" } },
+          bySourceFile: { fields: { sourceFile: "string" } },
+          bySerial: { fields: { serial: "number" } },
+          bySha256: { fields: { sha256Hash: "string" } }
+        },
+        createdBy: "TfStatePlugin"
+      }));
+      if (created) {
+        this.stateFilesResource = resource;
+      } else {
+        this.stateFilesResource = this.database.resources?.[this.stateFilesName];
+        if (!this.stateFilesResource) {
+          throw createErr;
+        }
+      }
+    }
+    {
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+        name: this.resourceName,
+        attributes: {
+          id: "string|required",
+          stateFileId: "string|required",
+          lineageId: "string|required",
+          stateSerial: "number|required",
+          sourceFile: "string|required",
+          resourceType: "string|required",
+          resourceName: "string|required",
+          resourceAddress: "string|required",
+          providerName: "string|required",
+          mode: "string",
+          attributes: "json",
+          dependencies: "array",
+          importedAt: "number|required"
+        },
+        timestamps: true,
+        asyncPartitions: this.asyncPartitions,
+        partitions: {
+          byLineageSerial: { fields: { lineageId: "string", stateSerial: "number" } },
+          byLineage: { fields: { lineageId: "string" } },
+          byType: { fields: { resourceType: "string" } },
+          byProvider: { fields: { providerName: "string" } },
+          bySerial: { fields: { stateSerial: "number" } },
+          bySourceFile: { fields: { sourceFile: "string" } },
+          byProviderAndType: { fields: { providerName: "string", resourceType: "string" } },
+          byLineageType: { fields: { lineageId: "string", resourceType: "string" } }
+        },
+        createdBy: "TfStatePlugin"
+      }));
+      if (created) {
+        this.resource = resource;
+      } else {
+        this.resource = this.database.resources?.[this.resourceName];
+        if (!this.resource) {
+          throw createErr;
+        }
+      }
+    }
     if (this.trackDiffs) {
-      this.diffsResource = await this.database.createResource({
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
         name: this.diffsName,
         attributes: {
           id: "string|required",
           lineageId: "string|required",
-          // NEW: FK to lineages
           oldSerial: "number|required",
           newSerial: "number|required",
           oldStateId: "string",
-          // NEW: FK to stateFilesResource
           newStateId: "string|required",
-          // NEW: FK to stateFilesResource
           calculatedAt: "number|required",
-          // Summary statistics
           summary: {
             type: "object",
             props: {
@@ -42952,7 +42929,6 @@ class TfStatePlugin extends Plugin {
               deletedCount: "number"
             }
           },
-          // Detailed changes
           changes: {
             type: "object",
             props: {
@@ -42963,20 +42939,24 @@ class TfStatePlugin extends Plugin {
           }
         },
         behavior: "body-only",
-        // Force all data to body for reliable nested object handling
         timestamps: true,
         asyncPartitions: this.asyncPartitions,
-        // Configurable async partitions
         partitions: {
           byLineage: { fields: { lineageId: "string" } },
-          // NEW: All diffs for lineage
           byLineageNewSerial: { fields: { lineageId: "string", newSerial: "number" } },
-          // NEW: Specific version lookup
           byNewSerial: { fields: { newSerial: "number" } },
           byOldSerial: { fields: { oldSerial: "number" } }
         },
         createdBy: "TfStatePlugin"
-      });
+      }));
+      if (created) {
+        this.diffsResource = resource;
+      } else {
+        this.diffsResource = this.database.resources?.[this.diffsName];
+        if (!this.diffsResource) {
+          throw createErr;
+        }
+      }
     }
     if (this.verbose) {
       const resourcesCreated = [this.lineagesName, this.stateFilesName, this.resourceName];
@@ -44769,7 +44749,7 @@ class TTLPlugin extends Plugin {
     this.expirationIndex = null;
     this.indexResourceName = resolveResourceName("ttl", {
       defaultName: "plg_ttl_expiration_index",
-      override: config.indexResourceName
+      override: resourceNamesOption.index
     });
   }
   /**

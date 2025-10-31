@@ -107,20 +107,49 @@ export function validateOidcConfig(config) {
  * @returns {Promise<{user: Object, created: boolean}>} User object and creation status
  */
 async function getOrCreateUser(usersResource, claims, config) {
-  const userId = claims.email || claims.preferred_username || claims.sub;
+  const {
+    autoCreateUser = true,
+    userIdClaim = 'sub',
+    fallbackIdClaims = ['email', 'preferred_username'],
+    lookupFields = ['email', 'preferred_username']
+  } = config;
 
-  if (!userId) {
-    throw new Error('Cannot extract user ID from OIDC claims (no email/preferred_username/sub)');
+  const candidateIds = [];
+  if (userIdClaim && claims[userIdClaim]) {
+    candidateIds.push(String(claims[userIdClaim]));
+  }
+  for (const field of fallbackIdClaims) {
+    if (!field || field === userIdClaim) continue;
+    const value = claims[field];
+    if (value) {
+      candidateIds.push(String(value));
+    }
   }
 
-  // Try to get existing user
   let user = null;
-  let userExists = false;
-  try {
-    user = await usersResource.get(userId);
-    userExists = true;
-  } catch (err) {
-    // User not found, will create below
+  // Try direct lookups by id
+  for (const candidate of candidateIds) {
+    try {
+      user = await usersResource.get(candidate);
+      break;
+    } catch (_) {
+      // Not found, continue with next candidate
+    }
+  }
+
+  // Fallback: query by lookup fields
+  if (!user) {
+    const fields = Array.isArray(lookupFields) ? lookupFields : [lookupFields];
+    for (const field of fields) {
+      if (!field) continue;
+      const value = claims[field];
+      if (!value) continue;
+      const results = await usersResource.query({ [field]: value }, { limit: 1 });
+      if (results.length > 0) {
+        user = results[0];
+        break;
+      }
+    }
   }
 
   const now = new Date().toISOString();
@@ -180,12 +209,22 @@ async function getOrCreateUser(usersResource, claims, config) {
     return { user, created: false };
   }
 
-  // Create new user
+  if (!autoCreateUser) {
+    return { user: null, created: false };
+  }
+
+  // Determine ID for new user
+  const newUserId = candidateIds[0];
+
+  if (!newUserId) {
+    throw new Error('Cannot determine user ID from OIDC claims');
+  }
+
   const newUser = {
-    id: userId,
-    email: claims.email || userId,
-    username: claims.preferred_username || claims.email || userId,
-    name: claims.name || claims.email || userId,
+    id: newUserId,
+    email: claims.email || newUserId,
+    username: claims.preferred_username || claims.email || newUserId,
+    name: claims.name || claims.email || newUserId,
     picture: claims.picture || null,
     role: config.defaultRole || 'user',
     scopes: config.defaultScopes || ['openid', 'profile', 'email'],
@@ -279,6 +318,9 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     postLogoutRedirect: '/',
     idpLogout: true,
     autoCreateUser: true,
+    userIdClaim: 'sub',
+    fallbackIdClaims: ['email', 'preferred_username'],
+    lookupFields: ['email', 'preferred_username'],
     autoRefreshTokens: true,
     refreshThreshold: 300000, // 5 minutes before expiry
     cookieSecure: process.env.NODE_ENV === 'production',
@@ -477,11 +519,18 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       // Auto-create/update user
       let user = null;
       let userCreated = false;
-      if (autoCreateUser && usersResource) {
+      if (usersResource) {
         try {
           const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
           user = result.user;
           userCreated = result.created;
+
+          if (!user) {
+            return c.json({
+              error: 'User not provisioned',
+              message: 'User does not exist in configured auth resource'
+            }, 403);
+          }
 
           // Emit user events
           if (events) {

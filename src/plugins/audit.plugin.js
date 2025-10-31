@@ -432,10 +432,11 @@ import { resolveResourceName } from "./concerns/resource-names.js";
 export class AuditPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+    const resourceNames = options.resourceNames || {};
     this.auditResource = null;
     this.auditResourceName = resolveResourceName('audit', {
       defaultName: 'plg_audits',
-      override: options.resourceName
+      override: resourceNames.audit
     });
     this.config = {
       includeData: options.includeData !== false,

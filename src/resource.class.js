@@ -191,6 +191,11 @@ export class Resource extends AsyncEventEmitter {
       createdBy,
     };
 
+    // Store raw schema definition (accessible as resource.$schema)
+    // This is the LITERAL object passed to createResource()
+    // Useful for plugins, documentation, and introspection
+    this.$schema = cloneDeep(config);
+
     // Initialize hooks system - expanded to cover ALL methods
     this.hooks = {
       // Insert hooks

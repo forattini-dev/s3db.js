@@ -32,11 +32,12 @@
  */
 
 import { requirePluginDependency } from '../../concerns/plugin-dependencies.js';
+import tryFn from '../../../concerns/try-fn.js';
 import { resolveResourceNames } from '../../concerns/resource-names.js';
 
 export class FailbanManager {
   constructor(options = {}) {
-    const resourceOverrides = options.resources || {};
+    const resourceOverrides = options.resourceNames || {};
     this.resourceNames = resolveResourceNames('api_failban', {
       bans: {
         defaultName: 'plg_api_failban_bans',
@@ -47,10 +48,6 @@ export class FailbanManager {
         override: resourceOverrides.violations
       }
     });
-    this.legacyResourceNames = {
-      bans: '_api_failban_bans',
-      violations: '_api_failban_violations'
-    };
 
     this.options = {
       enabled: options.enabled !== false,
@@ -138,18 +135,13 @@ export class FailbanManager {
    */
   async _createBansResource() {
     const resourceName = this.resourceNames.bans;
-    const candidates = [resourceName, this.legacyResourceNames.bans];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      try {
-        return await this.database.getResource(candidate);
-      } catch (err) {
-        // Continue trying candidates
-      }
+    try {
+      return await this.database.getResource(resourceName);
+    } catch (err) {
+      // fall through
     }
 
-    const resource = await this.database.createResource({
+    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
       name: resourceName,
       attributes: {
         ip: 'string|required',
@@ -170,7 +162,15 @@ export class FailbanManager {
           fields: { expiresAtCohort: 'string' }
         }
       }
-    });
+    }));
+
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (existing) {
+        return existing;
+      }
+      throw createErr;
+    }
 
     // Apply TTL plugin to this resource
     const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
@@ -197,18 +197,13 @@ export class FailbanManager {
    */
   async _createViolationsResource() {
     const resourceName = this.resourceNames.violations;
-    const candidates = [resourceName, this.legacyResourceNames.violations];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      try {
-        return await this.database.getResource(candidate);
-      } catch (err) {
-        // Continue
-      }
+    try {
+      return await this.database.getResource(resourceName);
+    } catch (err) {
+      // fall through
     }
 
-    return await this.database.createResource({
+    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
       name: resourceName,
       attributes: {
         ip: 'string|required',
@@ -224,7 +219,17 @@ export class FailbanManager {
           fields: { ip: 'string' }
         }
       }
-    });
+    }));
+
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (existing) {
+        return existing;
+      }
+      throw createErr;
+    }
+
+    return resource;
   }
 
   /**
