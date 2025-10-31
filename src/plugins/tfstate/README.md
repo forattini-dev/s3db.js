@@ -1,42 +1,42 @@
 # TfState Plugin - Internal Development Guide
 
-Este documento é o guia interno de desenvolvimento do TfState Plugin.
+This document is the internal development guide for the TfState Plugin.
 
 ---
 
-## 📋 Arquitetura Geral
+## 📋 General Architecture
 
-### Filosofia
+### Philosophy
 
-O TfState Plugin transforma states do Terraform (arquivos `.tfstate`) em dados consultáveis no s3db.
+The TfState Plugin transforms Terraform states (`.tfstate` files) into queryable data in s3db.
 
-**Princípios:**
-- ✅ **Simplicidade**: API clara e direta
-- ✅ **Performance**: Partitions para queries rápidas (sync mode)
-- ✅ **Flexibilidade**: Suporta local files, S3, glob patterns
-- ✅ **Rastreabilidade**: Diff tracking entre versões
-- ✅ **Deduplicação**: SHA256 hash para evitar re-imports
+**Principles:**
+- ✅ **Simplicity**: Clear and direct API
+- ✅ **Performance**: Partitions for fast queries (sync mode)
+- ✅ **Flexibility**: Supports local files, S3, glob patterns
+- ✅ **Traceability**: Diff tracking between versions
+- ✅ **Deduplication**: SHA256 hash to avoid re-imports
 
 ---
 
-## 🗄️ Os 3 Resources
+## 🗄️ The 3 Resources
 
 ### 1. State Files Resource (`plg_tfstate_states`)
 
-Armazena metadados sobre cada `.tfstate` importado.
+Stores metadata about each imported `.tfstate`.
 
-**Schema Completo:**
+**Complete Schema:**
 ```javascript
 {
-  id: 'string|required',                    // nanoid gerado
+  id: 'string|required',                    // generated nanoid
   sourceFile: 'string|required',            // 'prod/terraform.tfstate'
-  serial: 'number|required',                // Serial do state
+  serial: 'number|required',                // State serial
   lineage: 'string',                        // Terraform lineage
   terraformVersion: 'string',               // e.g. '1.5.0'
-  resourceCount: 'number',                  // Quantos recursos
-  sha256Hash: 'string|required',            // Para dedup
+  resourceCount: 'number',                  // How many resources
+  sha256Hash: 'string|required',            // For dedup
   importedAt: 'number|required',            // timestamp
-  stateVersion: 'number'                    // 3 ou 4
+  stateVersion: 'number'                    // 3 or 4
 }
 ```
 
@@ -47,18 +47,18 @@ Armazena metadados sobre cada `.tfstate` importado.
   bySerial: { fields: { serial: 'number' } }
 }
 
-asyncPartitions: false  // Sync para queries imediatas
+asyncPartitions: false  // Sync for immediate queries
 ```
 
-**Queries Comuns:**
+**Common Queries:**
 ```javascript
-// Buscar última versão de um state
+// Fetch latest version of a state
 const latest = await stateFilesResource.listPartition({
   partition: 'bySourceFile',
   partitionValues: { sourceFile: 'prod/terraform.tfstate' }
 }).then(results => results.sort((a, b) => b.serial - a.serial)[0]);
 
-// Buscar serial específico
+// Fetch specific serial
 const v100 = await stateFilesResource.listPartition({
   partition: 'bySerial',
   partitionValues: { serial: 100 }
@@ -69,34 +69,34 @@ const v100 = await stateFilesResource.listPartition({
 
 ### 2. Resources Resource (`plg_tfstate_resources`)
 
-O resource principal contendo todos os recursos de infraestrutura extraídos dos states.
+The main resource containing all infrastructure resources extracted from states.
 
-**Schema Completo:**
+**Complete Schema:**
 ```javascript
 {
-  id: 'string|required',                    // nanoid gerado
-  stateFileId: 'string|required',           // FK para states resource
+  id: 'string|required',                    // generated nanoid
+  stateFileId: 'string|required',           // FK to states resource
 
-  // Denormalized para queries
-  stateSerial: 'number|required',           // De qual versão veio
-  sourceFile: 'string|required',            // De qual arquivo veio
+  // Denormalized for queries
+  stateSerial: 'number|required',           // Which version it came from
+  sourceFile: 'string|required',            // Which file it came from
 
-  // Identidade do recurso
+  // Resource identity
   resourceType: 'string|required',          // 'aws_instance'
   resourceName: 'string|required',          // 'web_server'
   resourceAddress: 'string|required',       // 'aws_instance.web_server'
   providerName: 'string|required',          // 'aws', 'google', 'azure', etc
 
-  // Dados do recurso
-  mode: 'string',                           // 'managed' ou 'data'
-  attributes: 'json',                       // Atributos completos do recurso
-  dependencies: 'array',                    // Lista de dependências
+  // Resource data
+  mode: 'string',                           // 'managed' or 'data'
+  attributes: 'json',                       // Complete resource attributes
+  dependencies: 'array',                    // Dependency list
 
   importedAt: 'number|required'             // timestamp
 }
 ```
 
-**Partitions (crítico para performance!):**
+**Partitions (critical for performance!):**
 ```javascript
 {
   byType: {
@@ -119,7 +119,7 @@ O resource principal contendo todos os recursos de infraestrutura extraídos dos
   }
 }
 
-asyncPartitions: false  // IMPORTANTE: Sync para queries imediatas!
+asyncPartitions: false  // IMPORTANT: Sync for immediate queries!
 ```
 
 **Provider Detection Logic:**
@@ -146,21 +146,21 @@ function detectProvider(resourceType) {
 }
 ```
 
-**Queries Comuns:**
+**Common Queries:**
 ```javascript
-// Query por tipo (usa partition - O(1))
+// Query by type (uses partition - O(1))
 const ec2 = await resource.listPartition({
   partition: 'byType',
   partitionValues: { resourceType: 'aws_instance' }
 });
 
-// Query por provider (usa partition - O(1))
+// Query by provider (uses partition - O(1))
 const awsResources = await resource.listPartition({
   partition: 'byProvider',
   partitionValues: { providerName: 'aws' }
 });
 
-// Query por provider + tipo (partition combinada - O(1))
+// Query by provider + type (combined partition - O(1))
 const awsRds = await resource.listPartition({
   partition: 'byProviderAndType',
   partitionValues: {
@@ -174,22 +174,22 @@ const awsRds = await resource.listPartition({
 
 ### 3. Diffs Resource (`plg_tfstate_diffs`)
 
-Rastreia mudanças entre versões de states.
+Tracks changes between state versions.
 
-**Schema Completo:**
+**Complete Schema:**
 ```javascript
 {
-  id: 'string|required',                    // nanoid gerado
-  sourceFile: 'string|required',            // Qual state
-  oldSerial: 'number|required',             // Versão antiga
-  newSerial: 'number|required',             // Versão nova
+  id: 'string|required',                    // generated nanoid
+  sourceFile: 'string|required',            // Which state
+  oldSerial: 'number|required',             // Old version
+  newSerial: 'number|required',             // New version
 
   summary: {
     type: 'object',
     props: {
-      addedCount: 'number',                 // Quantos adicionados
-      modifiedCount: 'number',              // Quantos modificados
-      deletedCount: 'number'                // Quantos deletados
+      addedCount: 'number',                 // How many added
+      modifiedCount: 'number',              // How many modified
+      deletedCount: 'number'                // How many deleted
     }
   },
 
@@ -220,7 +220,7 @@ Rastreia mudanças entre versões de states.
   }
 }
 
-asyncPartitions: false  // Sync para queries imediatas
+asyncPartitions: false  // Sync for immediate queries
 ```
 
 **Diff Calculation Logic:**
@@ -234,7 +234,7 @@ async function calculateDiff(oldState, newState) {
   const deleted = [];
   const modified = [];
 
-  // Detectar adicionados
+  // Detect added
   for (const [address, resource] of Object.entries(newResources)) {
     if (!oldResources[address]) {
       added.push({
@@ -246,7 +246,7 @@ async function calculateDiff(oldState, newState) {
     }
   }
 
-  // Detectar deletados
+  // Detect deleted
   for (const [address, resource] of Object.entries(oldResources)) {
     if (!newResources[address]) {
       deleted.push({
@@ -258,7 +258,7 @@ async function calculateDiff(oldState, newState) {
     }
   }
 
-  // Detectar modificados
+  // Detect modified
   for (const [address, newResource] of Object.entries(newResources)) {
     const oldResource = oldResources[address];
     if (oldResource) {
@@ -291,7 +291,7 @@ async function calculateDiff(oldState, newState) {
 function detectChanges(oldAttrs, newAttrs, path = '') {
   const changes = [];
 
-  // Comparar cada campo
+  // Compare each field
   const allKeys = new Set([...Object.keys(oldAttrs), ...Object.keys(newAttrs)]);
 
   for (const key of allKeys) {
@@ -314,43 +314,43 @@ function detectChanges(oldAttrs, newAttrs, path = '') {
 
 ---
 
-## 🔧 Métodos Principais
+## 🔧 Main Methods
 
 ### Import Flow
 
 ```
 importState(filePath)
   ↓
-  1. Ler arquivo do filesystem
-  2. Parsear JSON
-  3. Calcular SHA256
-  4. Verificar se já existe (dedup)
-  5. Se novo:
-     - Criar record em stateFilesResource
-     - Extrair recursos
-     - Criar records em resource
-     - Se tem versão anterior:
-       - Calcular diff
-       - Criar record em diffsResource
+  1. Read file from filesystem
+  2. Parse JSON
+  3. Calculate SHA256
+  4. Check if already exists (dedup)
+  5. If new:
+     - Create record in stateFilesResource
+     - Extract resources
+     - Create records in resource
+     - If previous version exists:
+       - Calculate diff
+       - Create record in diffsResource
 ```
 
-**Código:**
+**Code:**
 ```javascript
 async importState(filePath, options = {}) {
-  // 1. Ler e parsear
+  // 1. Read and parse
   const content = await fs.readFile(filePath, 'utf8');
   const state = JSON.parse(content);
 
   // 2. SHA256
   const sha256Hash = crypto.createHash('sha256').update(content).digest('hex');
 
-  // 3. Verificar se já existe
+  // 3. Check if already exists
   const existing = await this.stateFilesResource.query({ sha256Hash });
   if (existing.length > 0) {
     return { alreadyImported: true, stateFileId: existing[0].id };
   }
 
-  // 4. Criar state file record
+  // 4. Create state file record
   const sourceFile = options.sourceFile || path.basename(filePath);
   const stateFileRecord = await this.stateFilesResource.insert({
     sourceFile,
@@ -363,10 +363,10 @@ async importState(filePath, options = {}) {
     stateVersion: state.version
   });
 
-  // 5. Extrair e inserir recursos
+  // 5. Extract and insert resources
   const extractedResources = await this._extractResources(state, stateFileRecord.id);
 
-  // 6. Calcular diff se houver versão anterior
+  // 6. Calculate diff if previous version exists
   if (this.trackDiffs) {
     await this._maybeCalculateDiff(sourceFile, state.serial);
   }
@@ -386,12 +386,12 @@ async _extractResources(state, stateFileId) {
   const extracted = [];
 
   for (const resource of resources) {
-    // Aplicar filtros
+    // Apply filters
     if (!this._shouldIncludeResource(resource)) {
       continue;
     }
 
-    // Processar cada instance do recurso
+    // Process each resource instance
     for (const instance of resource.instances || []) {
       const providerName = this._detectProvider(resource.type);
 
@@ -418,14 +418,14 @@ async _extractResources(state, stateFileId) {
 }
 
 _shouldIncludeResource(resource) {
-  // Filtro por tipo
+  // Filter by type
   if (this.filters?.types && this.filters.types.length > 0) {
     if (!this.filters.types.includes(resource.type)) {
       return false;
     }
   }
 
-  // Filtro por provider
+  // Filter by provider
   if (this.filters?.providers && this.filters.providers.length > 0) {
     const provider = this._detectProvider(resource.type);
     if (!this.filters.providers.includes(provider)) {
@@ -433,7 +433,7 @@ _shouldIncludeResource(resource) {
     }
   }
 
-  // Filtro de exclusão
+  // Exclusion filter
   if (this.filters?.exclude && this.filters.exclude.length > 0) {
     for (const pattern of this.filters.exclude) {
       if (this._matchesPattern(resource.type, pattern)) {
@@ -470,24 +470,24 @@ _detectProvider(resourceType) {
 
 ```javascript
 async _maybeCalculateDiff(sourceFile, newSerial) {
-  // Buscar versão anterior
+  // Fetch previous version
   const previousStates = await this.stateFilesResource.listPartition({
     partition: 'bySourceFile',
     partitionValues: { sourceFile }
   });
 
   if (previousStates.length < 2) {
-    return; // Primeira versão, sem diff
+    return; // First version, no diff
   }
 
-  // Ordenar por serial
+  // Sort by serial
   previousStates.sort((a, b) => b.serial - a.serial);
 
   const newState = previousStates[0];
   const oldState = previousStates[1];
 
   if (newState.serial === newSerial) {
-    // Buscar recursos de ambas as versões
+    // Fetch resources from both versions
     const newResources = await this.resource.listPartition({
       partition: 'bySerial',
       partitionValues: { stateSerial: newState.serial }
@@ -498,10 +498,10 @@ async _maybeCalculateDiff(sourceFile, newSerial) {
       partitionValues: { stateSerial: oldState.serial }
     });
 
-    // Calcular diff
+    // Calculate diff
     const diff = this._calculateDiff(oldResources, newResources);
 
-    // Salvar diff
+    // Save diff
     await this.diffsResource.insert({
       sourceFile,
       oldSerial: oldState.serial,
@@ -518,7 +518,7 @@ async _maybeCalculateDiff(sourceFile, newSerial) {
 
 ## 🎯 Query Helpers
 
-Métodos convenientes que usam partitions para queries rápidas:
+Convenient methods that use partitions for fast queries:
 
 ```javascript
 async getResourcesByType(type) {
@@ -563,7 +563,7 @@ async getLatestDiff(sourceFile) {
 
   if (diffs.length === 0) return null;
 
-  // Ordenar por calculatedAt desc
+  // Sort by calculatedAt desc
   diffs.sort((a, b) => b.calculatedAt - a.calculatedAt);
   return diffs[0];
 }
@@ -640,33 +640,33 @@ async getStatsByType() {
 
 ## ⚡ Performance Considerations
 
-### 1. Partitions em Sync Mode
+### 1. Partitions in Sync Mode
 
-**CRÍTICO**: Todas as 3 resources usam `asyncPartitions: false`.
+**CRITICAL**: All 3 resources use `asyncPartitions: false`.
 
-**Por quê?**
-- Queries precisam ser imediatas após o import
-- Partitions async criam race conditions
-- Diff tracking requer dados imediatos
+**Why?**
+- Queries need to be immediate after import
+- Async partitions create race conditions
+- Diff tracking requires immediate data
 
 **Trade-off:**
-- Insert é um pouco mais lento (mas ainda rápido)
-- Queries são O(1) usando partitions
+- Insert is slightly slower (but still fast)
+- Queries are O(1) using partitions
 
-### 2. Denormalização
+### 2. Denormalization
 
-Os campos `stateSerial` e `sourceFile` são denormalizados no resources resource para permitir queries rápidas sem joins.
+Fields `stateSerial` and `sourceFile` are denormalized in the resources resource to enable fast queries without joins.
 
 ### 3. SHA256 Deduplication
 
-Antes de importar, sempre verificamos se o SHA256 já existe. Isso evita re-imports desnecessários.
+Before importing, we always check if SHA256 already exists. This avoids unnecessary re-imports.
 
 ### 4. Batch Operations
 
-Para glob imports, processamos em paralelo mas com limite:
+For glob imports, we process in parallel but with limit:
 
 ```javascript
-const concurrency = 5;  // Max 5 imports simultâneos
+const concurrency = 5;  // Max 5 simultaneous imports
 await PromisePool
   .withConcurrency(concurrency)
   .for(files)
@@ -679,62 +679,62 @@ await PromisePool
 
 ### 1. Unit Tests
 
-Testar métodos isolados:
-- `_detectProvider()` → Detecção correta de providers
-- `_shouldIncludeResource()` → Filtros funcionando
-- `_calculateDiff()` → Diff calculation correto
+Test isolated methods:
+- `_detectProvider()` → Correct provider detection
+- `_shouldIncludeResource()` → Filters working
+- `_calculateDiff()` → Correct diff calculation
 
 ### 2. Integration Tests
 
-Testar fluxos completos:
-- Import → Verificar resources criados
-- Import 2x → Verificar dedup funciona
-- Import v1 + v2 → Verificar diff criado
+Test complete flows:
+- Import → Verify resources created
+- Import 2x → Verify dedup works
+- Import v1 + v2 → Verify diff created
 
 ### 3. Partition Tests
 
-Testar queries usando partitions:
-- `getResourcesByType()` → Deve usar partition
-- `getResourcesByProvider()` → Deve usar partition
-- `getResourcesByProviderAndType()` → Deve usar partition combinada
+Test queries using partitions:
+- `getResourcesByType()` → Should use partition
+- `getResourcesByProvider()` → Should use partition
+- `getResourcesByProviderAndType()` → Should use combined partition
 
 ### 4. Performance Tests
 
-Verificar que partitions são rápidas:
+Verify partitions are fast:
 - Import 1000 resources
-- Query por tipo → Deve ser < 100ms
+- Query by type → Should be < 100ms
 
 ---
 
 ## 🐛 Common Issues
 
-### Issue: Partitions retornam vazio
+### Issue: Partitions return empty
 
-**Causa**: `asyncPartitions: true` (default)
+**Cause**: `asyncPartitions: true` (default)
 
-**Solução**: Sempre usar `asyncPartitions: false` nos 3 resources
+**Solution**: Always use `asyncPartitions: false` in all 3 resources
 
-### Issue: Diff não está sendo criado
+### Issue: Diff not being created
 
-**Causa**: `trackDiffs: false` ou primeira versão do state
+**Cause**: `trackDiffs: false` or first version of state
 
-**Solução**: Verificar que `trackDiffs: true` e que há pelo menos 2 versões do state
+**Solution**: Verify that `trackDiffs: true` and there are at least 2 versions of the state
 
-### Issue: Provider detection errado
+### Issue: Wrong provider detection
 
-**Causa**: Provider não está no `providerMap`
+**Cause**: Provider not in `providerMap`
 
-**Solução**: Adicionar provider ao map em `_detectProvider()`
+**Solution**: Add provider to map in `_detectProvider()`
 
 ---
 
 ## 🚀 Future Enhancements
 
-1. **Partial imports**: Importar apenas recursos modificados
-2. **Compression**: Comprimir `attributes` JSON para economizar espaço
-3. **Resource relationships**: Mapear dependências entre recursos
-4. **Cost estimation**: Integrar com pricing APIs
-5. **Compliance checks**: Validar recursos contra políticas
+1. **Partial imports**: Import only modified resources
+2. **Compression**: Compress `attributes` JSON to save space
+3. **Resource relationships**: Map dependencies between resources
+4. **Cost estimation**: Integrate with pricing APIs
+5. **Compliance checks**: Validate resources against policies
 
 ---
 

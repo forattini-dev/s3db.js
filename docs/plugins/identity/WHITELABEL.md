@@ -1,58 +1,58 @@
 # Identity Plugin - White-Label Configuration
 
-O **Identity Plugin** é 100% **white-label**, permitindo que você personalize completamente a aparência, branding e comportamento do servidor de identidade para sua empresa ou cliente.
+The **Identity Plugin** is 100% **white-label**, allowing you to completely customize the appearance, branding, and behavior of the identity server for your company or client.
 
-## 🎨 Capacidades de Customização
+## 🎨 Customization Capabilities
 
-### 1. Branding Completo
-
-```javascript
-ui: {
-  // Identidade Visual
-  title: 'Sua Empresa Identity',
-  companyName: 'Sua Empresa',
-  tagline: 'Seu slogan aqui',
-
-  // Logos e Ícones
-  logoUrl: 'https://suaempresa.com/logo.svg',
-  favicon: 'https://suaempresa.com/favicon.ico',
-
-  // Rodapé
-  footerText: 'Texto customizado do rodapé',
-  supportEmail: 'suporte@suaempresa.com',
-  privacyUrl: '/privacidade',
-  termsUrl: '/termos'
-}
-```
-
-### 2. Paleta de Cores Completa
-
-Todas as cores são customizáveis via CSS variables:
+### 1. Complete Branding
 
 ```javascript
 ui: {
-  // Cores Principais
-  primaryColor: '#0066CC',      // Botões, links, headers
-  secondaryColor: '#6c757d',    // Elementos secundários
+  // Visual Identity
+  title: 'Your Company Identity',
+  companyName: 'Your Company',
+  tagline: 'Your tagline here',
 
-  // Cores de Status
-  successColor: '#28a745',      // Mensagens de sucesso
-  dangerColor: '#dc3545',       // Erros e alertas
-  warningColor: '#ffc107',      // Avisos
-  infoColor: '#17a2b8',         // Informações
+  // Logos and Icons
+  logoUrl: 'https://yourcompany.com/logo.svg',
+  favicon: 'https://yourcompany.com/favicon.ico',
 
-  // Cores de Texto
-  textColor: '#212529',         // Texto principal
-  textMuted: '#6c757d',         // Texto secundário
-
-  // Cores de Fundo
-  backgroundColor: '#ffffff',    // Fundo principal
-  backgroundLight: '#f8f9fa',   // Fundo de cards/seções
-  borderColor: '#dee2e6'        // Bordas
+  // Footer
+  footerText: 'Custom footer text',
+  supportEmail: 'support@yourcompany.com',
+  privacyUrl: '/privacy',
+  termsUrl: '/terms'
 }
 ```
 
-### 3. Tipografia Personalizada
+### 2. Complete Color Palette
+
+All colors are customizable via CSS variables:
+
+```javascript
+ui: {
+  // Primary Colors
+  primaryColor: '#0066CC',      // Buttons, links, headers
+  secondaryColor: '#6c757d',    // Secondary elements
+
+  // Status Colors
+  successColor: '#28a745',      // Success messages
+  dangerColor: '#dc3545',       // Errors and alerts
+  warningColor: '#ffc107',      // Warnings
+  infoColor: '#17a2b8',         // Information
+
+  // Text Colors
+  textColor: '#212529',         // Main text
+  textMuted: '#6c757d',         // Secondary text
+
+  // Background Colors
+  backgroundColor: '#ffffff',    // Main background
+  backgroundLight: '#f8f9fa',   // Card/section background
+  borderColor: '#dee2e6'        // Borders
+}
+```
+
+### 3. Custom Typography
 
 ```javascript
 ui: {
@@ -61,7 +61,7 @@ ui: {
 }
 ```
 
-**Fontes Google:**
+**Google Fonts:**
 ```javascript
 ui: {
   customCSS: `
@@ -70,16 +70,16 @@ ui: {
 }
 ```
 
-### 4. CSS Customizado (Poder Total!)
+### 4. Custom CSS (Total Power!)
 
-Você pode injetar **qualquer CSS** personalizado:
+You can inject **any custom CSS**:
 
 ```javascript
 ui: {
   customCSS: `
-    /* Seu CSS aqui */
+    /* Your CSS here */
 
-    /* Botões customizados */
+    /* Custom buttons */
     .btn-primary {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       border: none;
@@ -91,14 +91,14 @@ ui: {
       box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
     }
 
-    /* Cards com efeito glassmorphism */
+    /* Cards with glassmorphism effect */
     .card {
       background: rgba(255, 255, 255, 0.1);
       backdrop-filter: blur(10px);
       border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
-    /* Animações personalizadas */
+    /* Custom animations */
     @keyframes fadeInUp {
       from {
         opacity: 0;
@@ -114,7 +114,7 @@ ui: {
       animation: fadeInUp 0.6s ease-out;
     }
 
-    /* Temas escuros */
+    /* Dark themes */
     @media (prefers-color-scheme: dark) {
       :root {
         --color-bg: #1a1a2e;
@@ -125,34 +125,34 @@ ui: {
 }
 ```
 
-### 5. Layout e Design
+### 5. Layout and Design
 
 ```javascript
 ui: {
-  borderRadius: '0.5rem',       // Cantos arredondados
-  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'  // Sombras
+  borderRadius: '0.5rem',       // Rounded corners
+  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'  // Shadows
 }
 ```
 
-### 6. Links Sociais
+### 6. Social Links
 
 ```javascript
 ui: {
   socialLinks: {
-    github: 'https://github.com/suaempresa',
-    twitter: 'https://twitter.com/suaempresa',
-    linkedin: 'https://linkedin.com/company/suaempresa',
-    facebook: 'https://facebook.com/suaempresa',
-    instagram: 'https://instagram.com/suaempresa'
+    github: 'https://github.com/yourcompany',
+    twitter: 'https://twitter.com/yourcompany',
+    linkedin: 'https://linkedin.com/company/yourcompany',
+    facebook: 'https://facebook.com/yourcompany',
+    instagram: 'https://instagram.com/yourcompany'
   }
 }
 ```
 
-## 📐 Arquitetura CSS
+## 📐 CSS Architecture
 
 ### CSS Variables (`:root`)
 
-O BaseLayout injeta todas as configurações como CSS variables:
+BaseLayout injects all configurations as CSS variables:
 
 ```css
 :root {
@@ -180,13 +180,13 @@ O BaseLayout injeta todas as configurações como CSS variables:
 
 ### Tailwind 4 CDN
 
-Todas as páginas usam **Tailwind 4 via CDN** (`@tailwindcss/browser@4`):
+All pages use **Tailwind 4 via CDN** (`@tailwindcss/browser@4`):
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 ```
 
-**Configuração Tailwind:**
+**Tailwind Configuration:**
 ```javascript
 window.tailwind.config = {
   darkMode: 'class',
@@ -206,21 +206,21 @@ window.tailwind.config = {
 };
 ```
 
-### Ordem de Carregamento CSS
+### CSS Loading Order
 
-1. **CSS Variables** (`:root`) - Configurações do plugin
-2. **main.css** - Estilos base do Identity Plugin
-3. **customCSS** - Seu CSS customizado (sobrescreve tudo)
+1. **CSS Variables** (`:root`) - Plugin configurations
+2. **main.css** - Identity Plugin base styles
+3. **customCSS** - Your custom CSS (overrides everything)
 
 ```html
 <style>:root { /* variables */ }</style>
 <style>/* main.css */</style>
-<style>/* customCSS aqui */</style>
+<style>/* customCSS here */</style>
 ```
 
-## 🎯 Casos de Uso
+## 🎯 Use Cases
 
-### Empresa B2B SaaS
+### B2B SaaS Company
 
 ```javascript
 ui: {
@@ -247,7 +247,7 @@ ui: {
   secondaryColor: '#34495E',
   fontFamily: "'Roboto', sans-serif",
   customCSS: `
-    /* Tema bancário profissional */
+    /* Professional banking theme */
     body {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
@@ -269,7 +269,7 @@ ui: {
   successColor: '#4CAF50',
   fontFamily: "'Montserrat', sans-serif",
   customCSS: `
-    /* Tema vibrante de e-commerce */
+    /* Vibrant e-commerce theme */
     .btn-primary {
       background: linear-gradient(45deg, #E91E63, #F06292);
       text-transform: uppercase;
@@ -285,7 +285,7 @@ ui: {
 }
 ```
 
-### Healthcare/Medicina
+### Healthcare/Medical
 
 ```javascript
 ui: {
@@ -296,7 +296,7 @@ ui: {
   dangerColor: '#E53935',
   fontFamily: "'Open Sans', sans-serif",
   customCSS: `
-    /* Tema clean e profissional para saúde */
+    /* Clean and professional healthcare theme */
     body {
       background: #FAFAFA;
     }
@@ -315,56 +315,56 @@ ui: {
 }
 ```
 
-## 🚀 Exemplo Completo
+## 🚀 Complete Example
 
-Veja o exemplo completo em:
+See the complete example at:
 ```
 docs/examples/e85-identity-whitelabel.js
 ```
 
-Execute:
+Run:
 ```bash
 node docs/examples/e85-identity-whitelabel.js
 ```
 
-## 📝 Notas Importantes
+## 📝 Important Notes
 
-### ✅ O que você PODE fazer:
+### ✅ What you CAN do:
 
-- ✅ Mudar todas as cores
-- ✅ Usar qualquer fonte (Google Fonts, Adobe Fonts, etc.)
-- ✅ Injetar qualquer CSS personalizado
-- ✅ Customizar logos e favicons
-- ✅ Adicionar animações CSS
-- ✅ Implementar dark mode
-- ✅ Usar frameworks CSS via CDN (desde que não conflitem com Tailwind)
-- ✅ Sobrescrever qualquer estilo do Identity Plugin
+- ✅ Change all colors
+- ✅ Use any font (Google Fonts, Adobe Fonts, etc.)
+- ✅ Inject any custom CSS
+- ✅ Customize logos and favicons
+- ✅ Add CSS animations
+- ✅ Implement dark mode
+- ✅ Use CSS frameworks via CDN (as long as they don't conflict with Tailwind)
+- ✅ Override any Identity Plugin style
 
-### ⚠️ Limitações:
+### ⚠️ Limitations:
 
-- ⚠️ Não é possível mudar a estrutura HTML das páginas (apenas CSS)
-- ⚠️ Tailwind 4 CDN é obrigatório (mas você pode usar outras libraries via customCSS)
-- ⚠️ Logos devem ser servidos via URL (não suporta base64 inline por performance)
+- ⚠️ Cannot change HTML structure of pages (only CSS)
+- ⚠️ Tailwind 4 CDN is mandatory (but you can use other libraries via customCSS)
+- ⚠️ Logos must be served via URL (doesn't support inline base64 for performance)
 
-### 💡 Dicas:
+### 💡 Tips:
 
-1. **Use CSS Variables**: Elas são reativas e funcionam com Tailwind
-2. **Teste Responsividade**: Sempre teste em mobile/tablet/desktop
-3. **Performance**: Evite importar muitas fontes (máximo 2-3 pesos)
-4. **Dark Mode**: Use `@media (prefers-color-scheme: dark)` no customCSS
-5. **Acessibilidade**: Mantenha contraste adequado (WCAG AA: 4.5:1)
+1. **Use CSS Variables**: They are reactive and work with Tailwind
+2. **Test Responsiveness**: Always test on mobile/tablet/desktop
+3. **Performance**: Avoid importing many fonts (maximum 2-3 weights)
+4. **Dark Mode**: Use `@media (prefers-color-scheme: dark)` in customCSS
+5. **Accessibility**: Maintain adequate contrast (WCAG AA: 4.5:1)
 
-## 🎨 Ferramentas Úteis
+## 🎨 Useful Tools
 
-- **Coolors**: https://coolors.co/ (paletas de cores)
+- **Coolors**: https://coolors.co/ (color palettes)
 - **Google Fonts**: https://fonts.google.com/
 - **CSS Gradient**: https://cssgradient.io/
 - **Shadow Generator**: https://shadows.brumm.af/
 - **Color Contrast Checker**: https://webaim.org/resources/contrastchecker/
 
-## 📚 Referências
+## 📚 References
 
-- `src/plugins/identity/ui/layouts/base.js` - Implementação do BaseLayout
-- `src/plugins/identity/ui/styles/main.css` - Estilos base
-- `docs/examples/e85-identity-whitelabel.js` - Exemplo completo
+- `src/plugins/identity/ui/layouts/base.js` - BaseLayout implementation
+- `src/plugins/identity/ui/styles/main.css` - Base styles
+- `docs/examples/e85-identity-whitelabel.js` - Complete example
 - Tailwind 4 Docs: https://tailwindcss.com/docs

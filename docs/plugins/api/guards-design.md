@@ -1,12 +1,12 @@
 # Resource Guards - Design Proposal
 
-Sistema de guards declarativos embutidos no resource para autorização automática.
+Declarative guard system built into resources for automatic authorization.
 
-## 🎯 Objetivo
+## 🎯 Objective
 
-**Problema atual**: Repetir middleware em cada rota
+**Current problem**: Repeating middleware on every route
 ```javascript
-// ❌ Repetitivo - mesma lógica em N rotas
+// ❌ Repetitive - same logic in N routes
 apiPlugin.addRoute({
   path: '/api/orders',
   middleware: [requireTenant(), requireScope('orders:read:own')],
@@ -19,18 +19,18 @@ apiPlugin.addRoute({
   handler: async (req, res) => { ... }
 });
 
-// Repetido para get, list, update, delete...
+// Repeated for get, list, update, delete...
 ```
 
-**Solução proposta**: Guard declarativo no resource
+**Proposed solution**: Declarative guard on resource
 ```javascript
-// ✅ Declarativo - define uma vez no resource
+// ✅ Declarative - define once on resource
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: { ... },
   guard: {
     list: (req, user) => {
-      // RLS automático via partition
+      // Automatic RLS via partition
       req.partitionName = 'byUser';
       req.partitionValues = { userId: user.id };
       return true;
@@ -39,85 +39,85 @@ const ordersResource = await db.createResource({
   }
 });
 
-// Rotas automaticamente protegidas!
+// Routes automatically protected!
 ```
 
 ---
 
 ## 📋 API Design
 
-### 1. Guard Simples (Role/Scope Check)
+### 1. Simple Guard (Role/Scope Check)
 
 ```javascript
-// Apenas roles/scopes (string array)
-guard: ['admin']                    // Só admin pode tudo
-guard: ['admin', 'manager']         // Admin OU manager
-guard: ['orders:read:own']          // Scope específico
+// Only roles/scopes (string array)
+guard: ['admin']                    // Only admin can do everything
+guard: ['admin', 'manager']         // Admin OR manager
+guard: ['orders:read:own']          // Specific scope
 ```
 
-**Comportamento**:
-- Verifica se user tem algum dos roles/scopes
-- Aplica para TODAS as operações (list, get, insert, update, delete, patch)
-- Retorna 403 se não tem permissão
+**Behavior**:
+- Checks if user has any of the roles/scopes
+- Applies to ALL operations (list, get, insert, update, delete, patch)
+- Returns 403 if no permission
 
 ---
 
-### 2. Guard por Operação
+### 2. Guard per Operation
 
 ```javascript
 guard: {
-  // Operações CRUD
-  list: ['admin'],                              // Só admin lista
-  get: true,                                     // Todos podem ler
-  insert: ['user'],                              // Qualquer user cria
-  update: (req, user) => req.params.userId === user.id,  // Só dono
-  patch: (req, user) => req.params.userId === user.id,   // Só dono
-  delete: ['admin'],                             // Só admin deleta
-  replace: ['admin']                             // Só admin replace
+  // CRUD operations
+  list: ['admin'],                              // Only admin lists
+  get: true,                                     // Everyone can read
+  insert: ['user'],                              // Any user creates
+  update: (req, user) => req.params.userId === user.id,  // Only owner
+  patch: (req, user) => req.params.userId === user.id,   // Only owner
+  delete: ['admin'],                             // Only admin deletes
+  replace: ['admin']                             // Only admin replace
 }
 ```
 
-**Tipos aceitos**:
-- `string[]` - Lista de roles/scopes
-- `boolean` - `true` permite todos, `false` bloqueia todos
-- `function` - Função customizada retorna `true/false` ou Promise
+**Accepted types**:
+- `string[]` - List of roles/scopes
+- `boolean` - `true` allows all, `false` blocks all
+- `function` - Custom function returns `true/false` or Promise
 
 ---
 
-### 3. Guard com Wildcard (DRY)
+### 3. Guard with Wildcard (DRY)
 
 ```javascript
 guard: {
   '*': (req, user) => {
-    // Aplica para TODAS as operações
+    // Applies to ALL operations
     req.tenantId = user.tenantId;
     return true;
   },
-  delete: ['admin']  // Override específico para delete
+  delete: ['admin']  // Specific override for delete
 }
 ```
 
-**Precedência**:
-1. Guard específico (delete, update, etc)
-2. Guard wildcard (`*`)
-3. Sem guard = permite tudo
+**Precedence**:
+1. Specific guard (delete, update, etc)
+2. Wildcard guard (`*`)
+3. No guard = allows everything
 
 ---
 
-### 4. Guard com RLS Automático (Partitions!)
+### 4. Guard with Automatic RLS (Partitions!)
 
 ```javascript
 guard: {
-  // Lista apenas próprios registros via partition (O(1)!)
+  // List only own records via partition (O(1)!)
   list: (ctx) => {
-    // Framework-agnostic! Funciona com Express, Hono, Fastify
+    // Framework-agnostic! Works with Express, Hono, Fastify
     ctx.setPartition('byUser', { userId: ctx.user.id });
     return true;
   },
 
-  // Get/Update/Delete verificam ownership
+  // Get/Update/Delete check ownership
   get: async (ctx, resource) => {
-    // resource = record atual (já buscado)
+    // resource = current record (already fetched)
     return resource.userId === ctx.user.id;
   },
 
@@ -126,26 +126,26 @@ guard: {
   },
 
   delete: async (ctx, resource) => {
-    // Só dono OU admin pode deletar
+    // Only owner OR admin can delete
     const roles = ctx.user.roles || [];
     return resource.userId === ctx.user.id || roles.includes('admin');
   }
 }
 ```
 
-**Vantagens**:
-- ✅ RLS automático via partitions
-- ✅ O(1) lookup ao invés de O(n) scan
-- ✅ Guard acessa o resource atual (para get/update/delete)
-- ✅ Pode ser async (ex: buscar dados adicionais)
+**Advantages**:
+- ✅ Automatic RLS via partitions
+- ✅ O(1) lookup instead of O(n) scan
+- ✅ Guard accesses current resource (for get/update/delete)
+- ✅ Can be async (e.g., fetch additional data)
 
 ---
 
-### 5. Guard Multi-Tenant Automático
+### 5. Automatic Multi-Tenant Guard
 
 ```javascript
 guard: {
-  // TODAS as operações forçam tenantId
+  // ALL operations force tenantId
   '*': (ctx) => {
     const tenantId = ctx.user.tenantId || ctx.user.tid;
 
@@ -153,15 +153,15 @@ guard: {
       throw new Error('Tenant ID missing');
     }
 
-    // Força tenant em TODAS as operações
+    // Force tenant in ALL operations
     ctx.tenantId = tenantId;
     ctx.userId = ctx.user.id || ctx.user.sub;
 
-    // Partition será aplicado automaticamente
+    // Partition will be applied automatically
     return true;
   },
 
-  // List força partition por tenant
+  // List forces partition by tenant
   list: (ctx) => {
     ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
     return true;
@@ -169,14 +169,14 @@ guard: {
 }
 ```
 
-**Resultado**:
-- Tenant isolation automático
-- IMPOSSÍVEL acessar dados de outro tenant
-- Zero código extra nas rotas
+**Result**:
+- Automatic tenant isolation
+- IMPOSSIBLE to access another tenant's data
+- Zero extra code in routes
 
 ---
 
-### 6. Guard com ABAC (Attribute-Based)
+### 6. Guard with ABAC (Attribute-Based)
 
 ```javascript
 guard: {
@@ -184,7 +184,7 @@ guard: {
     // Business hours check
     const hour = new Date().getHours();
     if (hour < 9 || hour >= 18) {
-      return false;  // Fora do horário comercial
+      return false;  // Outside business hours
     }
 
     // Ownership check
@@ -194,19 +194,19 @@ guard: {
 
     // Amount limit check
     if (req.body.total > 10000 && !user.roles.includes('manager')) {
-      return false;  // Precisa ser manager para valores altos
+      return false;  // Need manager for high values
     }
 
     return true;
   },
 
   delete: async (req, user, resource) => {
-    // Só pode deletar se status = 'draft'
+    // Can only delete if status = 'draft'
     if (resource.status !== 'draft') {
       return false;
     }
 
-    // E ser o dono OU admin
+    // And be the owner OR admin
     return resource.userId === user.id || user.roles.includes('admin');
   }
 }
@@ -216,12 +216,12 @@ guard: {
 
 ## 🌐 Framework Adapters (Express, Hono, Fastify)
 
-Guards são **framework-agnostic**! Basta criar um adapter para cada framework:
+Guards are **framework-agnostic**! Just create an adapter for each framework:
 
 ### Express Adapter
 
 ```javascript
-// Middleware que cria GuardContext do Express req
+// Middleware that creates GuardContext from Express req
 function createExpressContext(req) {
   return {
     user: req.user,
@@ -230,18 +230,18 @@ function createExpressContext(req) {
     query: req.query || {},
     headers: req.headers || {},
 
-    // Helper para set partition
+    // Helper to set partition
     setPartition(name, values) {
       this.partitionName = name;
       this.partitionValues = values;
     },
 
-    // Framework raw (para casos avançados)
+    // Framework raw (for advanced cases)
     raw: { req }
   };
 }
 
-// Uso
+// Usage
 const context = createExpressContext(req);
 const allowed = await resource.executeGuard('list', context);
 ```
@@ -249,7 +249,7 @@ const allowed = await resource.executeGuard('list', context);
 ### Hono Adapter
 
 ```javascript
-// Middleware que cria GuardContext do Hono Context
+// Middleware that creates GuardContext from Hono Context
 function createHonoContext(c) {
   return {
     user: c.get('user'),  // User from middleware
@@ -258,7 +258,7 @@ function createHonoContext(c) {
     query: c.req.query(),
     headers: Object.fromEntries(c.req.raw.headers.entries()),
 
-    // Helper para set partition
+    // Helper to set partition
     setPartition(name, values) {
       this.partitionName = name;
       this.partitionValues = values;
@@ -269,7 +269,7 @@ function createHonoContext(c) {
   };
 }
 
-// Uso
+// Usage
 const context = await createHonoContext(c);
 const allowed = await resource.executeGuard('list', context);
 ```
@@ -277,7 +277,7 @@ const allowed = await resource.executeGuard('list', context);
 ### Fastify Adapter
 
 ```javascript
-// Middleware que cria GuardContext do Fastify request
+// Middleware that creates GuardContext from Fastify request
 function createFastifyContext(request) {
   return {
     user: request.user,
@@ -286,7 +286,7 @@ function createFastifyContext(request) {
     query: request.query || {},
     headers: request.headers || {},
 
-    // Helper para set partition
+    // Helper to set partition
     setPartition(name, values) {
       this.partitionName = name;
       this.partitionValues = values;
@@ -297,19 +297,19 @@ function createFastifyContext(request) {
   };
 }
 
-// Uso
+// Usage
 const context = createFastifyContext(request);
 const allowed = await resource.executeGuard('list', context);
 ```
 
 ---
 
-## 🔧 Integração com API Plugin
+## 🔧 Integration with API Plugin
 
-### Opção A: Guard no Resource (Recomendado)
+### Option A: Guard on Resource (Recommended)
 
 ```javascript
-// 1. Define guard no resource
+// 1. Define guard on resource
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: {
@@ -332,25 +332,25 @@ const ordersResource = await db.createResource({
   }
 });
 
-// 2. API Plugin usa guards automaticamente
+// 2. API Plugin uses guards automatically
 await db.use(apiPlugin);
 
-// Rotas AUTO-GERADAS e AUTO-PROTEGIDAS!
-// GET  /api/orders         → list guard aplicado
-// GET  /api/orders/:id     → get guard aplicado
-// POST /api/orders         → insert guard aplicado
-// PATCH /api/orders/:id    → update guard aplicado
-// DELETE /api/orders/:id   → delete guard aplicado
+// Routes AUTO-GENERATED and AUTO-PROTECTED!
+// GET  /api/orders         → list guard applied
+// GET  /api/orders/:id     → get guard applied
+// POST /api/orders         → insert guard applied
+// PATCH /api/orders/:id    → update guard applied
+// DELETE /api/orders/:id   → delete guard applied
 ```
 
-**Vantagem**: Zero configuração extra, guards aplicados automaticamente!
+**Advantage**: Zero extra configuration, guards applied automatically!
 
 ---
 
-### Opção B: Guard Override por Rota
+### Option B: Guard Override per Route
 
 ```javascript
-// Guard padrão no resource
+// Default guard on resource
 const ordersResource = await db.createResource({
   name: 'orders',
   guard: {
@@ -359,26 +359,26 @@ const ordersResource = await db.createResource({
   }
 });
 
-// Override guard em rota específica
+// Override guard on specific route
 apiPlugin.addRoute({
   path: '/api/orders/:id',
   method: 'DELETE',
   guard: (req, user) => {
-    // Custom guard só para esta rota
+    // Custom guard only for this route
     return user.roles.includes('super-admin');
   },
   handler: async (req, res) => { ... }
 });
 ```
 
-**Vantagem**: Flexibilidade para casos especiais
+**Advantage**: Flexibility for special cases
 
 ---
 
-## 🚀 Signature da Guard Function (Framework-Agnostic!)
+## 🚀 Guard Function Signature (Framework-Agnostic!)
 
 ```typescript
-// Guard context - funciona com Express, Hono, Fastify, etc!
+// Guard context - works with Express, Hono, Fastify, etc!
 type GuardContext = {
   user: JWTPayload;                    // Decoded token
   params: Record<string, string>;      // Route params (:id, etc)
@@ -401,11 +401,11 @@ type GuardContext = {
 
 type GuardFunction = (
   context: GuardContext,  // Framework-agnostic context
-  resource?: Resource     // Resource atual (para get/update/delete)
+  resource?: Resource     // Current resource (for get/update/delete)
 ) => boolean | Promise<boolean>;
 
 type GuardConfig = {
-  // Por operação
+  // Per operation
   list?: GuardFunction | string[] | boolean;
   get?: GuardFunction | string[] | boolean;
   insert?: GuardFunction | string[] | boolean;
@@ -423,13 +423,13 @@ interface ResourceOptions {
   name: string;
   attributes: object;
   partitions?: object;
-  guard?: GuardConfig | string[];  // Simple ou completo
+  guard?: GuardConfig | string[];  // Simple or complete
 }
 ```
 
 ---
 
-## 📦 Implementação no Resource
+## 📦 Implementation in Resource
 
 ### resource.class.js
 
@@ -442,12 +442,12 @@ class Resource {
   }
 
   /**
-   * Normaliza guard config
+   * Normalize guard config
    */
   _normalizeGuard(guard) {
     if (!guard) return null;
 
-    // String array simples → aplica para tudo
+    // Simple string array → apply to everything
     if (Array.isArray(guard)) {
       return { '*': guard };
     }
@@ -456,43 +456,43 @@ class Resource {
   }
 
   /**
-   * Executa guard para operação
+   * Execute guard for operation
    */
   async executeGuard(operation, req, user, resource = null) {
-    if (!this.guard) return true;  // Sem guard = permite
+    if (!this.guard) return true;  // No guard = allow
 
-    // 1. Tenta guard específico
+    // 1. Try specific guard
     let guardFn = this.guard[operation];
 
-    // 2. Fallback para wildcard
+    // 2. Fallback to wildcard
     if (!guardFn) {
       guardFn = this.guard['*'];
     }
 
-    // 3. Sem guard = permite
+    // 3. No guard = allow
     if (!guardFn) return true;
 
-    // 4. Boolean simples
+    // 4. Simple boolean
     if (typeof guardFn === 'boolean') {
       return guardFn;
     }
 
-    // 5. Array de roles/scopes
+    // 5. Array of roles/scopes
     if (Array.isArray(guardFn)) {
       return this._checkRolesScopes(guardFn, user);
     }
 
-    // 6. Função customizada
+    // 6. Custom function
     if (typeof guardFn === 'function') {
       const result = await guardFn(req, user, resource);
-      return result === true;  // Força boolean
+      return result === true;  // Force boolean
     }
 
-    return false;  // Default: bloqueia
+    return false;  // Default: block
   }
 
   /**
-   * Verifica roles/scopes
+   * Check roles/scopes
    */
   _checkRolesScopes(requiredRolesScopes, user) {
     // User scopes
@@ -512,7 +512,7 @@ class Resource {
   }
 
   /**
-   * Wrapper para list com guard
+   * Wrapper for list with guard
    */
   async list(options = {}, context = {}) {
     // Execute guard
@@ -523,7 +523,7 @@ class Resource {
         throw new Error('Forbidden: Guard denied access');
       }
 
-      // Guard pode ter modificado req (partition, etc)
+      // Guard may have modified req (partition, etc)
       if (context.req.partitionName) {
         return this.listPartition(
           context.req.partitionName,
@@ -538,22 +538,22 @@ class Resource {
   }
 
   /**
-   * Wrapper para get com guard
+   * Wrapper for get with guard
    */
   async get(id, options = {}, context = {}) {
-    // Busca resource primeiro
+    // Fetch resource first
     const resource = await this._originalGet(id, options);
 
     if (!resource) {
       return null;
     }
 
-    // Execute guard (com acesso ao resource)
+    // Execute guard (with access to resource)
     if (context.req && context.user) {
       const allowed = await this.executeGuard('get', context.req, context.user, resource);
 
       if (!allowed) {
-        // Retorna null ao invés de erro (404 ao invés de 403)
+        // Return null instead of error (404 instead of 403)
         return null;
       }
     }
@@ -562,10 +562,10 @@ class Resource {
   }
 
   /**
-   * Wrapper para update com guard
+   * Wrapper for update with guard
    */
   async update(id, data, options = {}, context = {}) {
-    // Busca resource atual
+    // Fetch current resource
     const resource = await this._originalGet(id, options);
 
     if (!resource) {
@@ -585,20 +585,20 @@ class Resource {
     return this._originalUpdate(id, data, options);
   }
 
-  // Similar para insert, patch, delete, replace...
+  // Similar for insert, patch, delete, replace...
 }
 ```
 
 ---
 
-## 🔌 Integração com API Plugin
+## 🔌 Integration with API Plugin
 
 ### api.plugin.js
 
 ```javascript
 class ApiPlugin {
   /**
-   * Auto-gera rotas para resource com guards
+   * Auto-generate routes for resource with guards
    */
   async addResource(resource, options = {}) {
     const basePath = options.basePath || `/api/${resource.name}`;
@@ -721,9 +721,9 @@ class ApiPlugin {
 
 ---
 
-## 🎯 Exemplos Práticos
+## 🎯 Practical Examples
 
-### Exemplo 1: Multi-Tenant SaaS
+### Example 1: Multi-Tenant SaaS
 
 ```javascript
 const ordersResource = await db.createResource({
@@ -738,7 +738,7 @@ const ordersResource = await db.createResource({
     byTenantUser: { fields: { tenantId: 'string', userId: 'string' } }
   },
   guard: {
-    // TODAS as operações forçam tenant isolation
+    // ALL operations force tenant isolation
     '*': (req, user) => {
       const tenantId = user.tenantId || user.tid;
       if (!tenantId) throw new Error('Tenant ID missing');
@@ -748,7 +748,7 @@ const ordersResource = await db.createResource({
       return true;
     },
 
-    // List usa partition dupla (tenant + user)
+    // List uses double partition (tenant + user)
     list: (req, user) => {
       req.partitionName = 'byTenantUser';
       req.partitionValues = {
@@ -758,14 +758,14 @@ const ordersResource = await db.createResource({
       return true;
     },
 
-    // Insert força tenantId e userId do token
+    // Insert forces tenantId and userId from token
     insert: (req, user) => {
       req.body.tenantId = user.tenantId;
       req.body.userId = user.id;
       return true;
     },
 
-    // Update/Delete verificam ownership
+    // Update/Delete check ownership
     update: (req, user, resource) => {
       return resource.userId === user.id && resource.tenantId === user.tenantId;
     },
@@ -776,34 +776,34 @@ const ordersResource = await db.createResource({
   }
 });
 
-// Auto-gera rotas protegidas!
+// Auto-generate protected routes!
 apiPlugin.addResource(ordersResource);
 
-// ✅ Pronto! Multi-tenancy + RLS automático em 30 linhas!
+// ✅ Done! Multi-tenancy + automatic RLS in 30 lines!
 ```
 
 ---
 
-### Exemplo 2: Admin Override
+### Example 2: Admin Override
 
 ```javascript
 const usersResource = await db.createResource({
   name: 'users',
   attributes: { email: 'string', role: 'string' },
   guard: {
-    // Usuários normais só veem próprio perfil
+    // Normal users only see own profile
     get: (req, user, resource) => resource.id === user.id,
 
-    // Só admin pode listar todos
+    // Only admin can list all
     list: ['admin'],
 
-    // Ninguém pode criar (exceto signup public)
+    // Nobody can create (except public signup)
     insert: false,
 
-    // Só pode editar próprio perfil
+    // Can only edit own profile
     update: (req, user, resource) => resource.id === user.id,
 
-    // Só admin deleta
+    // Only admin deletes
     delete: ['admin']
   }
 });
@@ -811,7 +811,7 @@ const usersResource = await db.createResource({
 
 ---
 
-### Exemplo 3: ABAC com Business Rules
+### Example 3: ABAC with Business Rules
 
 ```javascript
 const expensesResource = await db.createResource({
@@ -834,13 +834,13 @@ const expensesResource = await db.createResource({
 
       // 2. Status check
       if (resource.status !== 'draft') {
-        return false;  // Só pode editar draft
+        return false;  // Can only edit draft
       }
 
       // 3. Amount limit
       const newAmount = req.body.amount || resource.amount;
       if (newAmount > 1000 && !user.roles.includes('manager')) {
-        return false;  // Manager aprova valores altos
+        return false;  // Manager approves high values
       }
 
       // 4. Business hours
@@ -857,49 +857,49 @@ const expensesResource = await db.createResource({
 
 ---
 
-## ✅ Vantagens
+## ✅ Advantages
 
-1. **Declarativo** - Guard definido uma vez no resource
-2. **DRY** - Não repete middleware em N rotas
-3. **Automático** - API Plugin aplica guards automaticamente
-4. **Integrado com Partitions** - RLS automático O(1)
-5. **Flexível** - Simples (string[]) ou complexo (function)
-6. **Type-safe** - TypeScript pode tipar guards
-7. **Testável** - Guard é função pura (fácil testar)
+1. **Declarative** - Guard defined once on resource
+2. **DRY** - Don't repeat middleware on N routes
+3. **Automatic** - API Plugin applies guards automatically
+4. **Integrated with Partitions** - Automatic RLS O(1)
+5. **Flexible** - Simple (string[]) or complex (function)
+6. **Type-safe** - TypeScript can type guards
+7. **Testable** - Guard is pure function (easy to test)
 
 ---
 
 ## ⚠️ Trade-offs
 
-### Vantagens sobre Middleware Manual
-- ✅ Menos código repetido
-- ✅ Guard vive com o schema (melhor DX)
-- ✅ Auto-documentado
-- ✅ Mais difícil esquecer proteção
+### Advantages over Manual Middleware
+- ✅ Less repeated code
+- ✅ Guard lives with schema (better DX)
+- ✅ Self-documented
+- ✅ Harder to forget protection
 
-### Desvantagens
-- ❌ Menos explícito que middleware por rota
-- ❌ Guard function pode ficar complexa
-- ❌ Debugging pode ser mais difícil
+### Disadvantages
+- ❌ Less explicit than middleware per route
+- ❌ Guard function can become complex
+- ❌ Debugging can be more difficult
 
-### Quando usar Guards vs Middleware
+### When to use Guards vs Middleware
 
-**Use Guards quando**:
-- Autorização é consistente (ex: multi-tenant, RLS)
-- Quer auto-gerar rotas CRUD
-- Precisa de DRY máximo
+**Use Guards when**:
+- Authorization is consistent (e.g., multi-tenant, RLS)
+- Want to auto-generate CRUD routes
+- Need maximum DRY
 
-**Use Middleware quando**:
-- Lógica muito específica por rota
-- Precisa de controle fino
-- Debugging é crítico
+**Use Middleware when**:
+- Very specific logic per route
+- Need fine-grained control
+- Debugging is critical
 
-**Use Ambos!**:
+**Use Both!**:
 ```javascript
-// Guard padrão no resource
+// Default guard on resource
 guard: { list: (req, user) => { ... } }
 
-// Override por rota quando necessário
+// Override per route when necessary
 apiPlugin.addRoute({
   path: '/special',
   middleware: [customMiddleware],  // Override guard
@@ -909,29 +909,29 @@ apiPlugin.addRoute({
 
 ---
 
-## 🚀 Próximos Passos
+## 🚀 Next Steps
 
-1. **Implementar `executeGuard()` no Resource**
-2. **Adicionar context parameter** em list/get/update/etc
-3. **Atualizar API Plugin** para usar guards
-4. **Criar testes** para guards
-5. **Documentar** patterns de guards
-6. **Exemplo completo** (e65-guards-complete.js)
+1. **Implement `executeGuard()` in Resource**
+2. **Add context parameter** in list/get/update/etc
+3. **Update API Plugin** to use guards
+4. **Create tests** for guards
+5. **Document** guard patterns
+6. **Complete example** (e65-guards-complete.js)
 
 ---
 
-## 📝 Notas de Implementação
+## 📝 Implementation Notes
 
 ### Backward Compatibility
 
 ```javascript
-// Sem guard - funciona como antes
+// Without guard - works as before
 const resource = await db.createResource({
   name: 'products',
   attributes: { ... }
 });
 
-// Com guard - nova funcionalidade
+// With guard - new functionality
 const resource = await db.createResource({
   name: 'orders',
   attributes: { ... },
@@ -941,23 +941,23 @@ const resource = await db.createResource({
 
 ### Performance
 
-- Guards executam ANTES de buscar dados (list/insert)
-- Guards executam DEPOIS de buscar dados (get/update/delete) - para acessar resource
-- Usar partitions em guards = O(1) performance!
+- Guards execute BEFORE fetching data (list/insert)
+- Guards execute AFTER fetching data (get/update/delete) - to access resource
+- Using partitions in guards = O(1) performance!
 
 ### Error Handling
 
 ```javascript
-// Guard retorna false → 403 Forbidden
+// Guard returns false → 403 Forbidden
 guard: (req, user) => false;
 
-// Guard lança erro → 500 Internal Server Error
+// Guard throws error → 500 Internal Server Error
 guard: (req, user) => { throw new Error('Custom error'); };
 
-// Guard retorna null/undefined → Bloqueia (403)
-guard: (req, user) => {};  // Implicitamente false
+// Guard returns null/undefined → Blocks (403)
+guard: (req, user) => {};  // Implicitly false
 ```
 
 ---
 
-**🎉 Guards = Autorização Declarativa + RLS Automático via Partitions!**
+**🎉 Guards = Declarative Authorization + Automatic RLS via Partitions!**
