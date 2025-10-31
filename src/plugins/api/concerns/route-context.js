@@ -464,6 +464,64 @@ export class RouteContext {
       );
     }
   }
+
+  // ============================================
+  // Partition Helpers (for Guards)
+  // ============================================
+
+  /**
+   * Set partition filter for current query (used by guards for tenant isolation)
+   * @param {string} partitionName - Partition name (e.g., 'byUserId')
+   * @param {Object} partitionFields - Partition field values (e.g., { userId: 'user123' })
+   * @returns {void}
+   *
+   * @example
+   * // In guard:
+   * users.guard = {
+   *   list: (ctx) => {
+   *     if (ctx.user.scopes?.includes('preset:admin')) {
+   *       return true; // Admin sees everything
+   *     }
+   *
+   *     // Regular user sees only their data (O(1) via partition)
+   *     ctx.setPartition('byUserId', { userId: ctx.user.id });
+   *     return true;
+   *   }
+   * };
+   */
+  setPartition(partitionName, partitionFields) {
+    if (!this._partitionFilters) {
+      this._partitionFilters = [];
+    }
+
+    this._partitionFilters.push({ partitionName, partitionFields });
+  }
+
+  /**
+   * Get partition filters set by guards
+   * @returns {Array} Partition filters
+   * @internal
+   */
+  getPartitionFilters() {
+    return this._partitionFilters || [];
+  }
+
+  /**
+   * Clear partition filters
+   * @returns {void}
+   * @internal
+   */
+  clearPartitionFilters() {
+    this._partitionFilters = [];
+  }
+
+  /**
+   * Check if partition filters are set
+   * @returns {boolean} True if partition filters exist
+   */
+  hasPartitionFilters() {
+    return this._partitionFilters && this._partitionFilters.length > 0;
+  }
 }
 
 /**

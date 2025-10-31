@@ -1,5 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
+import { resolveResourceName } from './concerns/resource-names.js';
 
 /**
  * CookieFarmPlugin - Persona Factory for Professional Web Scraping
@@ -111,6 +112,12 @@ export class CookieFarmPlugin extends Plugin {
       }
     };
 
+    this.config.storage.resource = resolveResourceName('cookiefarm', {
+      defaultName: 'plg_cookie_farm_personas',
+      override: options.storage?.resource
+    });
+    this.legacyStorageResourceNames = ['cookie_farm_personas'];
+
     // Internal state
     this.puppeteerPlugin = null;
     this.stealthManager = null;
@@ -199,6 +206,17 @@ export class CookieFarmPlugin extends Plugin {
     try {
       await this.database.getResource(resourceName);
     } catch (err) {
+      for (const legacyName of this.legacyStorageResourceNames) {
+        if (!legacyName) continue;
+        try {
+          const legacyResource = await this.database.getResource(legacyName);
+          this.config.storage.resource = legacyName;
+          return legacyResource;
+        } catch (legacyErr) {
+          // Continue checking other legacy names
+        }
+      }
+
       // Create resource if it doesn't exist
       await this.database.createResource({
         name: resourceName,

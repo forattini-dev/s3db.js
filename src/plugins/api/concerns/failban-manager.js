@@ -32,9 +32,26 @@
  */
 
 import { requirePluginDependency } from '../../concerns/plugin-dependencies.js';
+import { resolveResourceNames } from '../../concerns/resource-names.js';
 
 export class FailbanManager {
   constructor(options = {}) {
+    const resourceOverrides = options.resources || {};
+    this.resourceNames = resolveResourceNames('api_failban', {
+      bans: {
+        defaultName: 'plg_api_failban_bans',
+        override: resourceOverrides.bans
+      },
+      violations: {
+        defaultName: 'plg_api_failban_violations',
+        override: resourceOverrides.violations
+      }
+    });
+    this.legacyResourceNames = {
+      bans: '_api_failban_bans',
+      violations: '_api_failban_violations'
+    };
+
     this.options = {
       enabled: options.enabled !== false,
       database: options.database,
@@ -52,7 +69,8 @@ export class FailbanManager {
         blockedCountries: options.geo?.blockedCountries || [],
         blockUnknown: options.geo?.blockUnknown || false,
         cacheResults: options.geo?.cacheResults !== false
-      }
+      },
+      resources: this.resourceNames
     };
 
     this.database = options.database;
@@ -119,52 +137,58 @@ export class FailbanManager {
    * @private
    */
   async _createBansResource() {
-    const resourceName = '_api_failban_bans';
+    const resourceName = this.resourceNames.bans;
+    const candidates = [resourceName, this.legacyResourceNames.bans];
 
-    try {
-      return await this.database.getResource(resourceName);
-    } catch (err) {
-      const resource = await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          ip: 'string|required',
-          reason: 'string',
-          violations: 'number',
-          bannedAt: 'string',
-          expiresAt: 'string|required',
-          metadata: {
-            userAgent: 'string',
-            path: 'string',
-            lastViolation: 'string'
-          }
-        },
-        behavior: 'body-overflow',
-        timestamps: true,
-        partitions: {
-          byExpiry: {
-            fields: { expiresAtCohort: 'string' }
-          }
-        }
-      });
-
-      // Apply TTL plugin to this resource
-      const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
-      if (ttlPlugin) {
-        ttlPlugin.options.resources = ttlPlugin.options.resources || {};
-        ttlPlugin.options.resources[resourceName] = {
-          enabled: true,
-          field: 'expiresAt'
-        };
-
-        if (this.options.verbose) {
-          console.log('[Failban] TTL configured for bans resource');
-        }
-      } else {
-        console.warn('[Failban] TTLPlugin not found - bans will not auto-expire from DB');
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        return await this.database.getResource(candidate);
+      } catch (err) {
+        // Continue trying candidates
       }
-
-      return resource;
     }
+
+    const resource = await this.database.createResource({
+      name: resourceName,
+      attributes: {
+        ip: 'string|required',
+        reason: 'string',
+        violations: 'number',
+        bannedAt: 'string',
+        expiresAt: 'string|required',
+        metadata: {
+          userAgent: 'string',
+          path: 'string',
+          lastViolation: 'string'
+        }
+      },
+      behavior: 'body-overflow',
+      timestamps: true,
+      partitions: {
+        byExpiry: {
+          fields: { expiresAtCohort: 'string' }
+        }
+      }
+    });
+
+    // Apply TTL plugin to this resource
+    const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
+    if (ttlPlugin) {
+      ttlPlugin.options.resources = ttlPlugin.options.resources || {};
+      ttlPlugin.options.resources[resourceName] = {
+        enabled: true,
+        field: 'expiresAt'
+      };
+
+      if (this.options.verbose) {
+        console.log(`[Failban] TTL configured for bans resource (${resourceName})`);
+      }
+    } else {
+      console.warn('[Failban] TTLPlugin not found - bans will not auto-expire from DB');
+    }
+
+    return resource;
   }
 
   /**
@@ -172,29 +196,35 @@ export class FailbanManager {
    * @private
    */
   async _createViolationsResource() {
-    const resourceName = '_api_failban_violations';
+    const resourceName = this.resourceNames.violations;
+    const candidates = [resourceName, this.legacyResourceNames.violations];
 
-    try {
-      return await this.database.getResource(resourceName);
-    } catch (err) {
-      return await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          ip: 'string|required',
-          timestamp: 'string|required',
-          type: 'string',
-          path: 'string',
-          userAgent: 'string'
-        },
-        behavior: 'body-overflow',
-        timestamps: true,
-        partitions: {
-          byIp: {
-            fields: { ip: 'string' }
-          }
-        }
-      });
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        return await this.database.getResource(candidate);
+      } catch (err) {
+        // Continue
+      }
     }
+
+    return await this.database.createResource({
+      name: resourceName,
+      attributes: {
+        ip: 'string|required',
+        timestamp: 'string|required',
+        type: 'string',
+        path: 'string',
+        userAgent: 'string'
+      },
+      behavior: 'body-overflow',
+      timestamps: true,
+      partitions: {
+        byIp: {
+          fields: { ip: 'string' }
+        }
+      }
+    });
   }
 
   /**

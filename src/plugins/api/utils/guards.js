@@ -3,20 +3,52 @@
  *
  * Guards determine if a user can perform an operation on a resource.
  * Supports: functions, scopes, roles, and combined logic.
+ *
+ * NEW: Guards can now receive full RouteContext for access to:
+ * - ctx.user, ctx.resources, ctx.param(), ctx.query()
+ * - ctx.setPartition() for tenant isolation
  */
 
 /**
- * Check if user passes guard
- * @param {Object} user - Authenticated user object
+ * Check if guard passes (NEW: supports RouteContext)
+ *
+ * @param {Object|RouteContext} ctxOrUser - RouteContext (new) or user object (legacy)
  * @param {Function|string|Array|Object|null} guard - Guard configuration
- * @param {Object} context - Additional context (data, resourceName, operation)
+ * @param {Object|null} recordOrContext - Record being accessed (update/delete) or legacy context
  * @returns {boolean} True if authorized
+ *
+ * @example
+ * // NEW: Guard with RouteContext
+ * users.guard = {
+ *   list: (ctx) => {
+ *     if (ctx.user.scopes?.includes('preset:admin')) return true;
+ *     ctx.setPartition('byUserId', { userId: ctx.user.id });
+ *     return true;
+ *   }
+ * };
+ *
+ * @example
+ * // LEGACY: Guard with user object (still works!)
+ * users.guard = {
+ *   list: (user, context) => {
+ *     return user.scopes?.includes('preset:admin');
+ *   }
+ * };
  */
-export function checkGuard(user, guard, context = {}) {
+export function checkGuard(ctxOrUser, guard, recordOrContext = null) {
   // No guard = public access
   if (!guard) {
     return true;
   }
+
+  // Detect if first param is RouteContext (has .user property and ._currentResource)
+  const isRouteContext = ctxOrUser && typeof ctxOrUser === 'object' &&
+                          ('user' in ctxOrUser || '_currentResource' in ctxOrUser);
+
+  const ctx = isRouteContext ? ctxOrUser : null;
+  const user = isRouteContext ? ctxOrUser.user : ctxOrUser;
+  const record = isRouteContext ? recordOrContext : null;
+  const legacyContext = isRouteContext ? {} : (recordOrContext || {});
 
   // No user = unauthorized (unless guard explicitly allows)
   if (!user && guard !== true) {
@@ -28,10 +60,23 @@ export function checkGuard(user, guard, context = {}) {
     return guard;
   }
 
-  // Guard is function: (user, context) => boolean
+  // Guard is function
   if (typeof guard === 'function') {
     try {
-      return guard(user, context);
+      // NEW: Pass RouteContext if available, else legacy (user, context) signature
+      if (ctx) {
+        // Detect guard signature: (ctx, record) or (ctx)
+        const guardLength = guard.length;
+
+        if (guardLength >= 2 && record !== null) {
+          return guard(ctx, record);  // (ctx, record) for update/delete
+        } else {
+          return guard(ctx);  // (ctx) for list/create
+        }
+      } else {
+        // LEGACY: (user, context) signature
+        return guard(user, legacyContext);
+      }
     } catch (err) {
       console.error('[Guards] Error executing guard function:', err);
       return false;
@@ -72,7 +117,11 @@ export function checkGuard(user, guard, context = {}) {
     // Check custom function
     if (guard.check && typeof guard.check === 'function') {
       try {
-        return guard.check(user, context);
+        if (ctx) {
+          return guard.check(ctx, record);
+        } else {
+          return guard.check(user, legacyContext);
+        }
       } catch (err) {
         console.error('[Guards] Error executing guard.check function:', err);
         return false;
@@ -169,22 +218,27 @@ export function getOperationGuard(guards, operation) {
 }
 
 /**
- * Create guard middleware for Hono
+ * Create guard middleware for Hono (NEW: with RouteContext)
  * @param {Object} guards - Guards configuration
  * @param {string} operation - Operation name
+ * @param {Object} options - Options { resource, database, plugins }
  * @returns {Function} Hono middleware
  */
-export function guardMiddleware(guards, operation) {
+export function guardMiddleware(guards, operation, options = {}) {
   return async (c, next) => {
-    const user = c.get('user');
+    // Import RouteContext dynamically to avoid circular dependency
+    const { RouteContext } = await import('../concerns/route-context.js');
+
+    const legacyContext = c.get('customRouteContext') || {};
+    const { database, resource, plugins = {} } = { ...legacyContext, ...options };
+
+    // Create RouteContext for guard
+    const ctx = new RouteContext(c, database, resource, plugins);
+
     const guard = getOperationGuard(guards, operation);
 
-    // Check guard
-    const authorized = checkGuard(user, guard, {
-      operation,
-      resourceName: c.req.param('resource'),
-      data: c.req.method !== 'GET' ? await c.req.json().catch(() => ({})) : {}
-    });
+    // Check guard (pass RouteContext)
+    const authorized = checkGuard(ctx, guard, null);
 
     if (!authorized) {
       return c.json({
@@ -194,11 +248,16 @@ export function guardMiddleware(guards, operation) {
           code: 'FORBIDDEN',
           details: {
             operation,
-            user: user ? { id: user.id, role: user.role } : null
+            user: ctx.user ? { id: ctx.user.id, role: ctx.user.role } : null
           }
         },
         _status: 403
       }, 403);
+    }
+
+    // Store partition filters in context for use by route handlers
+    if (ctx.hasPartitionFilters()) {
+      c.set('partitionFilters', ctx.getPartitionFilters());
     }
 
     await next();

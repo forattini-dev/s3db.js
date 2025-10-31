@@ -62,7 +62,7 @@ function normalizeAuthConfig(authOptions = {}) {
     pathAuth: authOptions.pathAuth,
     strategy: authOptions.strategy || 'any',
     priorities: authOptions.priorities || {},
-    resource: authOptions.resource || 'users',
+    resource: authOptions.resource,
     usernameField: authOptions.usernameField || 'email',
     passwordField: authOptions.passwordField || 'password'
   };
@@ -974,11 +974,12 @@ export class ApiPlugin extends Plugin {
 
     // Optionally delete users resource
     if (purgeData && this.usersResource) {
-      // Delete all users (plugin data cleanup happens automatically via base Plugin class)
-      const [ok] = await tryFn(() => this.database.deleteResource('plg_users'));
-
-      if (ok && this.config.verbose) {
-        console.log('[API Plugin] Deleted plg_users resource');
+      const candidates = new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
+      for (const candidate of candidates) {
+        const [ok] = await tryFn(() => this.database.deleteResource(candidate));
+        if (ok && this.config.verbose) {
+          console.log(`[API Plugin] Deleted ${candidate} resource`);
+        }
       }
     }
 
