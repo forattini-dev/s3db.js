@@ -79,15 +79,28 @@ await db.use(new ApiPlugin({
 }));
 ```
 
-### Add OAuth2/OIDC (Azure AD, Google, Keycloak)
+### Add OAuth2/OIDC (Works with Any Provider!)
+
+**Supports:** Azure AD • Google Workspace • Keycloak • Auth0 • Okta • AWS Cognito • Any OIDC provider
 
 ```javascript
 auth: {
   drivers: {
     oidc: {
+      // Azure AD
       issuer: 'https://login.microsoftonline.com/{tenant}/v2.0',
-      clientId: process.env.AZURE_CLIENT_ID,
-      clientSecret: process.env.AZURE_CLIENT_SECRET,
+
+      // Or Keycloak (self-hosted)
+      // issuer: 'https://keycloak.example.com/realms/myrealm',
+
+      // Or Google
+      // issuer: 'https://accounts.google.com',
+
+      // Or Auth0
+      // issuer: 'https://your-tenant.auth0.com',
+
+      clientId: process.env.OIDC_CLIENT_ID,
+      clientSecret: process.env.OIDC_CLIENT_SECRET,
       redirectUri: 'http://localhost:3000/auth/callback'
     }
   }
@@ -581,21 +594,38 @@ guard: {
 </details>
 
 <details>
-<summary><strong>Can I use this with Azure AD / Google / Keycloak?</strong></summary>
+<summary><strong>Can I use this with Azure AD / Google / Keycloak / Auth0?</strong></summary>
 
-Yes! Use the OIDC driver:
+**Yes! Works with any OAuth2/OIDC provider:**
+- ✅ **Enterprise:** Azure AD, Google Workspace, Okta
+- ✅ **Open Source:** Keycloak, Authentik, Authelia
+- ✅ **SaaS:** Auth0, AWS Cognito, FusionAuth
+- ✅ **Self-hosted:** Keycloak is production-ready and free!
 
 ```javascript
 auth: {
   drivers: {
     oidc: {
+      // Azure AD
       issuer: 'https://login.microsoftonline.com/{tenant}/v2.0',
-      clientId: process.env.AZURE_CLIENT_ID,
-      clientSecret: process.env.AZURE_CLIENT_SECRET
+
+      // Keycloak (open source, self-hosted)
+      // issuer: 'https://keycloak.example.com/realms/myrealm',
+
+      // Google Workspace
+      // issuer: 'https://accounts.google.com',
+
+      // Auth0
+      // issuer: 'https://your-tenant.auth0.com',
+
+      clientId: process.env.OIDC_CLIENT_ID,
+      clientSecret: process.env.OIDC_CLIENT_SECRET
     }
   }
 }
 ```
+
+**💡 Pro tip:** Keycloak is a great open-source alternative to Azure AD - fully self-hosted, free, and production-ready!
 
 **[→ Learn more: Authentication](./api/authentication.md#oidc)**
 </details>
