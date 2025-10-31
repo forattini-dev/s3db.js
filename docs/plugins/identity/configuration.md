@@ -33,6 +33,19 @@ const identityPlugin = new IdentityPlugin({
 });
 ```
 
+### Dependency Graph
+
+```mermaid
+flowchart TB
+  Identity[Identity Plugin]
+  Audit[Audit Plugin]
+  TTL[TTL Plugin]
+  Identity --> Audit
+  Identity -- optional --> TTL
+```
+
+Audit logging ships enabled by default, so the Identity plugin automatically installs a namespaced `AuditPlugin`. If you also install `TTLPlugin`, the built-in fail-ban manager piggybacks on it to expire IP bans without custom scripting.
+
 ---
 
 ## OAuth2/OIDC Options

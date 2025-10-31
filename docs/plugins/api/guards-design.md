@@ -527,7 +527,12 @@ class Resource {
       const allowed = await this.executeGuard('list', context.req, context.user);
 
       if (!allowed) {
-        throw new Error('Forbidden: Guard denied access');
+        throw new PluginError('Guard denied access to list operation', {
+          statusCode: 403,
+          retriable: false,
+          suggestion: 'Adjust guard logic or escalate permissions for the current user.',
+          metadata: { operation: 'list', userId: context.user.id }
+        });
       }
 
       // Guard may have modified req (partition, etc)
@@ -560,6 +565,13 @@ class Resource {
       const allowed = await this.executeGuard('get', context.req, context.user, resource);
 
       if (!allowed) {
+        const guardError = new PluginError('Guard denied access to resource', {
+          statusCode: 403,
+          retriable: false,
+          suggestion: 'Review guard conditions or user grants before retrying.',
+          metadata: { operation: 'get', id, userId: context.user.id }
+        });
+        context.guardError = guardError;
         // Return null instead of error (404 instead of 403)
         return null;
       }
@@ -576,7 +588,12 @@ class Resource {
     const resource = await this._originalGet(id, options);
 
     if (!resource) {
-      throw new Error('Resource not found');
+      throw new PluginError('Resource not found', {
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Ensure the record exists before calling update.',
+        metadata: { id }
+      });
     }
 
     // Execute guard
@@ -584,7 +601,12 @@ class Resource {
       const allowed = await this.executeGuard('update', context.req, context.user, resource);
 
       if (!allowed) {
-        throw new Error('Forbidden: Guard denied access');
+        throw new PluginError('Guard denied access to resource', {
+          statusCode: 403,
+          retriable: false,
+          suggestion: 'Review guard conditions or user grants before retrying.',
+          metadata: { operation: 'update', id, userId: context.user.id }
+        });
       }
     }
 
@@ -733,6 +755,8 @@ class ApiPlugin {
 ### Example 1: Multi-Tenant SaaS
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: {
@@ -748,7 +772,14 @@ const ordersResource = await db.createResource({
     // ALL operations force tenant isolation
     '*': (req, user) => {
       const tenantId = user.tenantId || user.tid;
-      if (!tenantId) throw new Error('Tenant ID missing');
+      if (!tenantId) {
+        throw new PluginError('Tenant ID missing for multi-tenant guard', {
+          statusCode: 401,
+          retriable: false,
+          suggestion: 'Authenticate with a tenant-scoped token.',
+          metadata: { userId: user.id }
+        });
+      }
 
       req.tenantId = tenantId;
       req.partitionValues = { tenantId };
@@ -959,7 +990,14 @@ const resource = await db.createResource({
 guard: (req, user) => false;
 
 // Guard throws error → 500 Internal Server Error
-guard: (req, user) => { throw new Error('Custom error'); };
+guard: (req, user) => {
+  throw new PluginError('Custom guard error', {
+    statusCode: 403,
+    retriable: false,
+    suggestion: 'Replace placeholder guard with domain rules before deploying.',
+    metadata: { userId: user.id }
+  });
+};
 
 // Guard returns null/undefined → Blocks (403)
 guard: (req, user) => {};  // Implicitly false

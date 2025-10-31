@@ -173,6 +173,7 @@ export default {
     'bcrypt',
     'express',
     'hono',
+    'ioredis',
     'jose',
     'node-cron',
     'nodemailer',

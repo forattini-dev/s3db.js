@@ -102,6 +102,8 @@ function hasPermission(userScope, requiredScope) {
 ### Pattern 1: Partition by User ID
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 // ========================================
 // 1. Create resource with partition by userId
 // ========================================
@@ -724,7 +726,12 @@ class PolicyEngine {
       const policy = this.policies.get(name);
 
       if (!policy) {
-        throw new Error(`Policy "${name}" not found`);
+        throw new PluginError(`Policy "${name}" not found`, {
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Register the policy with engine.register() before evaluation.',
+          metadata: { missingPolicy: name, availablePolicies: [...this.policies.keys()] }
+        });
       }
 
       const result = await policy.check(context);

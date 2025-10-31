@@ -781,8 +781,9 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     };
 
     plugin.database = {
-      resources: { test_log: mockLogResource }
+      resources: { plg_test_log: mockLogResource }
     };
+    plugin.replicatorLog = mockLogResource;
 
     const mockReplicator = { name: 'test-replicator', id: 'repl-1' };
     const error = new Error('Replication error');
@@ -811,8 +812,9 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     };
 
     plugin.database = {
-      resources: { test_log: mockLogResource }
+      resources: { plg_test_log: mockLogResource }
     };
+    plugin.replicatorLog = mockLogResource;
 
     const eventSpy = jest.spyOn(plugin, 'emit');
     const mockReplicator = { name: 'test-replicator' };

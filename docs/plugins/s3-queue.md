@@ -146,6 +146,8 @@ Each message gets a distributed lock during claim:
 └─────────────────────────────────────────────────┘
 ```
 
+> **Multi-pod ready:** the processed-cache markers live in PluginStorage, so every worker (even on different pods) sees the same “recently processed” view. Local memory is only used as a hot cache.
+
 ### 🛠 Automatic Recovery (Visibility TTL)
 
 Long-running handlers sometimes crash or die before completing. S3Queue continuously scans for messages stuck in the `processing` state with an expired `visibleAt` timestamp and automatically requeues them. If the message has already reached `maxAttempts`, it is moved to the dead letter queue instead.
@@ -162,6 +164,10 @@ new S3QueuePlugin({
 ```
 
 When a message is brought back to `pending`, the plugin emits `plg:s3-queue:message-recovered`.
+
+### 🚦 Adaptive Polling
+
+Workers gradually back off when the queue is empty. After each empty poll the delay doubles (up to `maxPollInterval`), dramatically reducing S3 chatter in multi-pod deployments. As soon as a message is claimed the interval resets to the base `pollInterval`.
 
 ### ⏱️ Visibility Timeout Pattern
 
@@ -841,9 +847,11 @@ new S3QueuePlugin({
   concurrency: 3,                 // Number of parallel workers
   pollInterval: 1000,             // Poll every 1 second
   pollBatchSize: 32,              // Max messages fetched per poll
+  maxPollInterval: 10000,         // Backoff ceiling when queue is idle
   visibilityTimeout: 30000,       // 30 seconds invisible time
   recoveryInterval: 5000,         // Scan for stalled messages every 5s
   recoveryBatchSize: 20,          // Max recovered per scan
+  processedCacheTTL: 30000,       // Deduplication cache TTL in ms
 
   // === Retries ===
   maxAttempts: 3,                 // Retry up to 3 times
@@ -866,8 +874,10 @@ new S3QueuePlugin({
 Key tuning knobs:
 
 - `pollBatchSize` – caps how many pending items each worker fetches per poll.
+- `maxPollInterval` – enables adaptive polling when the queue is empty.
 - `recoveryInterval` – controls how often the plugin scans for stalled messages.
 - `recoveryBatchSize` – limits how many stalled entries are recovered per sweep.
+- `processedCacheTTL` – how long dedup markers live across workers.
 
 ### Configuration Patterns
 
@@ -1495,6 +1505,14 @@ await tasks.extendQueueVisibility(queueId, 5 * 60 * 1000); // add 5 minutes
 ```
 
 Returns `true` when the update succeeds.
+
+#### `resource.clearQueueCache()`
+
+Clear the local in-memory deduplication cache (useful during debugging or when tuning `processedCacheTTL`).
+
+```javascript
+await tasks.clearQueueCache();
+```
 
 ### Handler Context
 
@@ -2147,10 +2165,10 @@ for (const entry of stuck) {
 **Solutions:**
 
 ```javascript
-// Solution 1: Clear cache periodically
+// Solution 1: Clear local cache periodically
 setInterval(() => {
-  queue.processedCache.clear();
-  console.log('Cache cleared');
+  queue.clearProcessedCache();
+  console.log('Local queue cache cleared');
 }, 3600000); // Every hour
 
 // Solution 2: Reduce concurrency
@@ -2160,7 +2178,13 @@ const queue = new S3QueuePlugin({
   onMessage: async (task) => { ... }
 });
 
-// Solution 3: Avoid keeping large objects in memory
+// Solution 3: Shorten processed cache TTL (default: 30s)
+const fastQueue = new S3QueuePlugin({
+  resource: 'low_latency',
+  processedCacheTTL: 15000
+});
+
+// Solution 4: Avoid keeping large objects in memory
 onMessage: async (task) => {
   // ❌ Don't do this
   const largeData = await loadLargeFile();
