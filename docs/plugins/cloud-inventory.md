@@ -115,11 +115,24 @@ const plugin = new CloudInventoryPlugin({
   lock: {
     ttl: 600,
     timeout: 5
+  },
+  terraform: {
+    enabled: true,
+    autoExport: true,
+    output: './terraform-discovered.tfstate', // or 's3://my-bucket/terraform.tfstate'
+    outputType: 'file', // or 's3' or 'custom'
+    filters: {
+      providers: ['aws'], // Only AWS resources
+      resourceTypes: [], // All resource types
+      cloudId: null // All clouds
+    },
+    terraformVersion: '1.6.0',
+    serial: 1
   }
 });
 
 await plugin.install(database);
-await plugin.syncAll(); // Trigger a manual crawl
+await plugin.syncAll(); // Trigger a manual crawl (+ auto-export if configured)
 ```
 
 ---
@@ -137,6 +150,15 @@ await plugin.syncAll(); // Trigger a manual crawl
 | `resources.versions` | `string` | Resource name that stores frozen configurations. |
 | `resources.changes` | `string` | Resource name that stores diffs between versions. |
 | `resources.clouds` | `string` | Resource name that stores per-cloud summaries. |
+| `terraform.enabled` | `boolean` | Enable Terraform auto-export. Default `false`. |
+| `terraform.autoExport` | `boolean` | Auto-export after each discovery. Default `false`. |
+| `terraform.output` | `string\|function` | Output path (file or S3 URL) or custom function. |
+| `terraform.outputType` | `'file'\|'s3'\|'custom'` | Output type. Default `'file'`. |
+| `terraform.filters.providers` | `Array<string>` | Filter by providers (e.g., `['aws', 'gcp']`). |
+| `terraform.filters.resourceTypes` | `Array<string>` | Filter by resource types (e.g., `['aws.ec2.instance']`). |
+| `terraform.filters.cloudId` | `string` | Filter by specific cloud ID. |
+| `terraform.terraformVersion` | `string` | Terraform version in state. Default `'1.5.0'`. |
+| `terraform.serial` | `number` | State serial number. Default `1`. |
 | `verbose` | `boolean` | When `true`, emits informational logs to `console`. Default `false`. |
 | `scheduled.enabled` | `boolean` | Enable a global cron job that triggers `syncAll()`. |
 | `scheduled.cron` | `string` | Cron expression used for the global job (required when `enabled` is true). |
@@ -410,6 +432,75 @@ await plugin.exportToTerraformStateToS3(
   { providers: ['aws'] }
 );
 ```
+
+### Auto-Export Configuration
+
+Configure automatic Terraform state export after each discovery:
+
+```javascript
+const plugin = new CloudInventoryPlugin({
+  clouds: [...],
+  terraform: {
+    enabled: true,
+    autoExport: true,
+    output: './terraform-discovered.tfstate',
+    outputType: 'file', // 'file', 's3', or 'custom'
+    filters: {
+      providers: ['aws'],           // Export only AWS resources
+      resourceTypes: [],            // Empty = all resource types
+      cloudId: null                 // null = all clouds
+    },
+    terraformVersion: '1.6.0',
+    serial: 1
+  }
+});
+
+// Now every syncCloud() or syncAll() will auto-export!
+await plugin.syncAll(); // Discovers + exports automatically
+```
+
+**Output Types:**
+
+1. **File Output** (`outputType: 'file'`):
+```javascript
+terraform: {
+  enabled: true,
+  autoExport: true,
+  output: './terraform-discovered.tfstate',
+  outputType: 'file'
+}
+```
+
+2. **S3 Output** (`outputType: 's3'`):
+```javascript
+terraform: {
+  enabled: true,
+  autoExport: true,
+  output: 's3://my-bucket/terraform/production.tfstate',
+  outputType: 's3'
+}
+```
+
+3. **Custom Function** (`outputType: 'custom'`):
+```javascript
+terraform: {
+  enabled: true,
+  autoExport: true,
+  output: async (stateData) => {
+    // Custom export logic
+    await sendToWebhook(stateData);
+    await uploadToCustomStorage(stateData);
+    return { custom: true };
+  },
+  outputType: 'custom'
+}
+```
+
+**Behavior:**
+- When `autoExport` is enabled, export runs **after each successful discovery**
+- Export failures are logged but don't fail the discovery operation
+- Use `filters` to control which resources get exported
+- `cloudId` filter allows per-cloud exports (useful with scheduled jobs)
 
 ### Supported Resource Mappings
 
