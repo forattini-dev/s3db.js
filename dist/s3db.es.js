@@ -11290,6 +11290,13 @@ const BASE_USER_ATTRIBUTES = {
   // Tenant the user belongs to
   // Status
   active: "boolean|default:true",
+  // Account Lockout (Brute Force Protection)
+  failedLoginAttempts: "number|default:0",
+  // Count of failed login attempts
+  lockedUntil: "string|optional",
+  // ISO timestamp when account unlocks
+  lastFailedLogin: "string|optional",
+  // ISO timestamp of last failed attempt
   // Metadata
   metadata: "object|optional"
 };
@@ -11633,7 +11640,46 @@ class IdentityPlugin extends Plugin {
           customFooter: options.email?.templates?.customFooter || null
         }
       },
-      // Failban Configuration (Brute Force Protection)
+      // Audit Configuration (Compliance & Security Logging)
+      audit: {
+        enabled: options.audit?.enabled !== false,
+        // Enable audit logging
+        includeData: options.audit?.includeData !== false,
+        // Store before/after data
+        includePartitions: options.audit?.includePartitions !== false,
+        // Track partition info
+        maxDataSize: options.audit?.maxDataSize || 1e4,
+        // Max bytes for data field
+        resources: options.audit?.resources || ["users", "plg_oauth_clients"],
+        // Resources to audit
+        events: options.audit?.events || [
+          // Custom events to audit
+          "login",
+          "logout",
+          "login_failed",
+          "account_locked",
+          "account_unlocked",
+          "ip_banned",
+          "ip_unbanned",
+          "password_reset_requested",
+          "password_changed",
+          "email_verified",
+          "user_created",
+          "user_deleted"
+        ]
+      },
+      // Account Lockout Configuration (Per-User Brute Force Protection)
+      accountLockout: {
+        enabled: options.accountLockout?.enabled !== false,
+        // Enable account lockout
+        maxAttempts: options.accountLockout?.maxAttempts || 5,
+        // Max failed attempts before lockout
+        lockoutDuration: options.accountLockout?.lockoutDuration || 9e5,
+        // Lockout duration (15 min)
+        resetOnSuccess: options.accountLockout?.resetOnSuccess !== false
+        // Reset counter on successful login
+      },
+      // Failban Configuration (IP-Based Brute Force Protection)
       failban: {
         enabled: options.failban?.enabled !== false,
         // Enable failban protection
@@ -11724,6 +11770,7 @@ class IdentityPlugin extends Plugin {
     this.sessionManager = null;
     this.emailService = null;
     this.failbanManager = null;
+    this.auditPlugin = null;
     this.oauth2KeysResource = null;
     this.oauth2AuthCodesResource = null;
     this.sessionsResource = null;
@@ -11761,6 +11808,7 @@ class IdentityPlugin extends Plugin {
     await this._initializeSessionManager();
     await this._initializeEmailService();
     await this._initializeFailbanManager();
+    await this._initializeAuditPlugin();
     if (this.config.verbose) {
       console.log("[Identity Plugin] Installed successfully");
     }
@@ -12088,6 +12136,54 @@ class IdentityPlugin extends Plugin {
     }
   }
   /**
+   * Initialize audit plugin
+   * @private
+   */
+  async _initializeAuditPlugin() {
+    if (!this.config.audit.enabled) {
+      if (this.config.verbose) {
+        console.log("[Identity Plugin] Audit logging disabled");
+      }
+      return;
+    }
+    const { AuditPlugin } = await Promise.resolve().then(function () { return audit_plugin; });
+    this.auditPlugin = new AuditPlugin({
+      includeData: this.config.audit.includeData,
+      includePartitions: this.config.audit.includePartitions,
+      maxDataSize: this.config.audit.maxDataSize,
+      resources: this.config.audit.resources
+    });
+    await this.database.usePlugin(this.auditPlugin);
+    if (this.config.verbose) {
+      console.log("[Identity Plugin] Audit Plugin initialized");
+      console.log(`[Identity Plugin] Auditing resources: ${this.config.audit.resources.join(", ")}`);
+      console.log(`[Identity Plugin] Include data: ${this.config.audit.includeData}`);
+      console.log(`[Identity Plugin] Max data size: ${this.config.audit.maxDataSize} bytes`);
+    }
+  }
+  /**
+   * Log custom audit event
+   * @param {string} event - Event name
+   * @param {Object} data - Event data
+   * @private
+   */
+  async _logAuditEvent(event, data = {}) {
+    if (!this.config.audit.enabled || !this.auditPlugin) {
+      return;
+    }
+    if (!this.config.audit.events.includes(event)) {
+      return;
+    }
+    try {
+      await this.auditPlugin.logCustomEvent(event, data);
+      if (this.config.verbose) {
+        console.log(`[Audit] ${event}:`, JSON.stringify(data));
+      }
+    } catch (error) {
+      console.error(`[Audit] Failed to log event ${event}:`, error.message);
+    }
+  }
+  /**
    * Start plugin
    */
   async onStart() {
@@ -12106,6 +12202,7 @@ class IdentityPlugin extends Plugin {
       identityPlugin: this,
       failbanManager: this.failbanManager,
       failbanConfig: this.config.failban,
+      accountLockoutConfig: this.config.accountLockout,
       cors: this.config.cors,
       security: this.config.security,
       logging: this.config.logging
@@ -12512,6 +12609,11 @@ class AuditPlugin extends Plugin {
     return deletedCount;
   }
 }
+
+var audit_plugin = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  AuditPlugin: AuditPlugin
+});
 
 class BackupError extends S3dbError {
   constructor(message, details = {}) {
@@ -48399,6 +48501,17 @@ function AdminUsersPage(props = {}) {
           </form>
         `);
       }
+      if (current.lockedUntil || current.failedLoginAttempts > 0) {
+        const isLocked = current.lockedUntil && new Date(current.lockedUntil) > /* @__PURE__ */ new Date();
+        const lockInfo = isLocked ? `Locked until ${new Date(current.lockedUntil).toLocaleString()}` : `${current.failedLoginAttempts} failed attempts`;
+        actions.push(html`
+          <form method="POST" action="/admin/users/${current.id}/unlock-account" onsubmit="return confirm('Unlock account for ${current.email}?\\n\\n${lockInfo}')">
+            <button type="submit" class="${successButtonClass}">
+              🔓 Unlock Account
+            </button>
+          </form>
+        `);
+      }
       actions.push(html`
         <form method="POST" action="/admin/users/${current.id}/reset-password" onsubmit="return confirm('Send password reset email to ${current.email}?')">
           <button type="submit" class="${secondaryButtonClass}">
@@ -49250,9 +49363,15 @@ function registerUIRoutes(app, plugin) {
   const { sessionManager, usersResource, config, failbanManager } = plugin;
   const customPages = config.ui.customPages || {};
   const failbanConfig = config.failban || {};
+  const accountLockoutConfig = config.accountLockout || {};
   const uiConfig = {
     ...config.ui,
     registrationEnabled: config.registration.enabled
+  };
+  const logAudit = async (event, data) => {
+    if (plugin._logAuditEvent) {
+      await plugin._logAuditEvent(event, data);
+    }
   };
   app.get("/", async (c) => {
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
@@ -49309,13 +49428,66 @@ function registerUIRoutes(app, plugin) {
             email
           });
         }
+        await logAudit("login_failed", {
+          email,
+          reason: "user_not_found",
+          ipAddress: clientIp,
+          userAgent: c.req.header("user-agent")
+        });
         return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email)}`);
       }
       const user = users[0];
+      if (accountLockoutConfig.enabled && user.lockedUntil) {
+        const now = Date.now();
+        const lockedUntilTime = new Date(user.lockedUntil).getTime();
+        if (lockedUntilTime > now) {
+          const remainingMinutes = Math.ceil((lockedUntilTime - now) / 6e4);
+          const message = `Your account has been locked due to too many failed login attempts. Please try again in ${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""} or contact support.`;
+          if (config.verbose) {
+            console.log(`[Account Lockout] User ${user.email} attempted login while locked (expires in ${remainingMinutes}m)`);
+          }
+          return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
+        } else {
+          await usersResource.update(user.id, {
+            lockedUntil: null,
+            failedLoginAttempts: 0,
+            lastFailedLogin: null
+          });
+          if (config.verbose) {
+            console.log(`[Account Lockout] Auto-unlocked user ${user.email} (lock expired)`);
+          }
+        }
+      }
       const [okVerify, errVerify, isValid] = await tryFn(
         () => verifyPassword(password, user.password)
       );
       if (!okVerify || !isValid) {
+        if (accountLockoutConfig.enabled) {
+          const failedAttempts = (user.failedLoginAttempts || 0) + 1;
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          if (failedAttempts >= accountLockoutConfig.maxAttempts) {
+            const lockoutUntil = new Date(Date.now() + accountLockoutConfig.lockoutDuration).toISOString();
+            await usersResource.update(user.id, {
+              failedLoginAttempts: failedAttempts,
+              lockedUntil: lockoutUntil,
+              lastFailedLogin: now
+            });
+            const lockoutMinutes = Math.ceil(accountLockoutConfig.lockoutDuration / 6e4);
+            const message = `Too many failed login attempts. Your account has been locked for ${lockoutMinutes} minutes. Please contact support if you need assistance.`;
+            if (config.verbose) {
+              console.log(`[Account Lockout] Locked user ${user.email} after ${failedAttempts} failed attempts (until ${lockoutUntil})`);
+            }
+            return c.redirect(`/login?error=${encodeURIComponent(message)}&email=${encodeURIComponent(email)}`);
+          } else {
+            await usersResource.update(user.id, {
+              failedLoginAttempts: failedAttempts,
+              lastFailedLogin: now
+            });
+            if (config.verbose) {
+              console.log(`[Account Lockout] User ${user.email} failed login attempt ${failedAttempts}/${accountLockoutConfig.maxAttempts}`);
+            }
+          }
+        }
         if (failbanManager && failbanConfig.endpoints.login) {
           await failbanManager.recordViolation(clientIp, "failed_login", {
             path: "/login",
@@ -49326,7 +49498,17 @@ function registerUIRoutes(app, plugin) {
         }
         return c.redirect(`/login?error=${encodeURIComponent("Invalid email or password")}&email=${encodeURIComponent(email)}`);
       }
-      if (failbanManager && failbanConfig.endpoints.login) {
+      if (accountLockoutConfig.enabled && accountLockoutConfig.resetOnSuccess) {
+        if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+          await usersResource.update(user.id, {
+            failedLoginAttempts: 0,
+            lockedUntil: null,
+            lastFailedLogin: null
+          });
+          if (config.verbose) {
+            console.log(`[Account Lockout] Reset counters for user ${user.email} after successful login`);
+          }
+        }
       }
       if (user.status !== "active") {
         const message = user.status === "suspended" ? "Your account has been suspended. Please contact support." : "Your account is inactive. Please verify your email or contact support.";
@@ -50329,6 +50511,38 @@ function registerUIRoutes(app, plugin) {
       return c.redirect(`/admin/users?success=${encodeURIComponent(`Password reset email sent to ${user.email}`)}`);
     } catch (error) {
       console.error("[Identity Plugin] Reset password error:", error);
+      return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
+    }
+  });
+  app.post("/admin/users/:id/unlock-account", adminOnly(sessionManager), async (c) => {
+    const userId = c.req.param("id");
+    const currentUser = c.get("user");
+    try {
+      const [okGet, errGet, user] = await tryFn(() => usersResource.get(userId));
+      if (!okGet || !user) {
+        console.error("[Identity Plugin] User not found:", userId);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User not found")}`);
+      }
+      if (!user.lockedUntil && !user.failedLoginAttempts) {
+        return c.redirect(`/admin/users?error=${encodeURIComponent("User account is not locked")}`);
+      }
+      const [okUpdate, errUpdate] = await tryFn(
+        () => usersResource.update(userId, {
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          lastFailedLogin: null
+        })
+      );
+      if (!okUpdate) {
+        console.error("[Identity Plugin] Failed to unlock account:", errUpdate);
+        return c.redirect(`/admin/users?error=${encodeURIComponent("Failed to unlock account")}`);
+      }
+      if (config.verbose) {
+        console.log(`[Account Lockout] Admin ${currentUser.email} manually unlocked user ${user.email}`);
+      }
+      return c.redirect(`/admin/users?success=${encodeURIComponent(`Account unlocked for ${user.email}`)}`);
+    } catch (error) {
+      console.error("[Identity Plugin] Unlock account error:", error);
       return c.redirect(`/admin/users?error=${encodeURIComponent("An error occurred. Please try again.")}`);
     }
   });
