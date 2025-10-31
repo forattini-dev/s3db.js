@@ -10,21 +10,22 @@ import { BaseLayout } from '../layouts/base.js';
  * Render MFA verification page
  * @param {Object} props - Page properties
  * @param {string} [props.error] - Error message
- * @param {string} props.token - JSON string with {email, password}
+ * @param {string} props.email - User email
  * @param {string} [props.remember] - Remember me flag
+ * @param {string} props.challenge - MFA challenge token
  * @param {Object} [props.config] - UI configuration
  * @returns {string} HTML string
  */
 export function MFAVerificationPage(props = {}) {
-  const { error = null, token, remember = '', config = {} } = props;
+  const {
+    error = null,
+    email = '',
+    remember = '0',
+    challenge,
+    config = {}
+  } = props;
 
-  // Parse token to get email/password
-  let userData = { email: '', password: '' };
-  try {
-    userData = JSON.parse(token);
-  } catch (err) {
-    // Fallback to empty values
-  }
+  const rememberValue = remember === '1' ? '1' : '0';
 
   const content = html`
     <section class="identity-login">
@@ -58,6 +59,7 @@ export function MFAVerificationPage(props = {}) {
         <header class="identity-login__form-header">
           <h2>Verify Your Identity</h2>
           <p>Enter the 6-digit code from your authenticator app.</p>
+          ${email ? html`<p class="identity-login__meta text-sm text-slate-400 mt-2">Signing in as <strong>${email}</strong></p>` : ''}
         </header>
 
         ${error ? html`
@@ -68,9 +70,6 @@ export function MFAVerificationPage(props = {}) {
 
         <!-- TOTP Token Form -->
         <form method="POST" action="/login" class="identity-login__form-body" id="mfa-form">
-          <input type="hidden" name="email" value="${userData.email}" />
-          <input type="hidden" name="password" value="${userData.password}" />
-          <input type="hidden" name="remember" value="${remember}" />
 
           <div class="identity-login__group">
             <label for="mfa_token">Verification Code</label>
@@ -91,6 +90,9 @@ export function MFAVerificationPage(props = {}) {
               The code refreshes every 30 seconds
             </p>
           </div>
+          <input type="hidden" name="email" value="${email}" />
+          <input type="hidden" name="remember" value="${rememberValue}" />
+          <input type="hidden" name="mfa_challenge" value="${challenge}" />
 
           <button type="submit" class="identity-login__submit">
             Verify
@@ -110,9 +112,9 @@ export function MFAVerificationPage(props = {}) {
 
         <!-- Backup Code Form (hidden by default) -->
         <form method="POST" action="/login" class="identity-login__form-body mt-6 hidden" id="backup-code-form">
-          <input type="hidden" name="email" value="${userData.email}" />
-          <input type="hidden" name="password" value="${userData.password}" />
-          <input type="hidden" name="remember" value="${remember}" />
+          <input type="hidden" name="email" value="${email}" />
+          <input type="hidden" name="remember" value="${rememberValue}" />
+          <input type="hidden" name="mfa_challenge" value="${challenge}" />
 
           <div class="identity-login__group">
             <label for="backup_code">Backup Code</label>

@@ -29,6 +29,19 @@
 
 ---
 
+## ⚙️ DX Helpers & Events (what's new)
+
+- `plugin.withSession(sessionId, handler, { url, ...navigateOptions })` wraps navigation + cleanup so you only focus on DOM actions.
+- Browsers spawned outside the pool (e.g., per-proxy) now auto close after the page finishes, preventing Chromium leaks.
+- Idle pooled browsers respect `pool.closeOnIdle`/`pool.idleTimeout`; when they retire you get `puppeteer.browserRetired`.
+- Extra observability hooks:
+  - `puppeteer.cookieSaveFailed` when session persistence fails.
+  - `puppeteer.withSession.start/finish/cleanupFailed` around helper usage.
+  - `puppeteer.configWarning` for ignored options (e.g., `pool.reuseTab`).
+  - `puppeteer.browserClosed` / `puppeteer.browserCloseFailed` for dedicated browsers.
+
+---
+
 ## 📦 Configuration Schema
 
 ```javascript

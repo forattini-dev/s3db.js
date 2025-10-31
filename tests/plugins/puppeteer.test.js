@@ -1,18 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { EventEmitter } from 'events';
-import { Database } from '../../src/database.class.js';
+import { createMockDatabase } from './helpers/mock-database.js';
+import * as dependencyModule from '../../src/plugins/concerns/plugin-dependencies.js';
 import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
+
+jest.spyOn(dependencyModule, 'requirePluginDependency').mockImplementation(() => {});
 
 describe('PuppeteerPlugin', () => {
   let db;
   let puppeteerPlugin;
 
   beforeAll(async () => {
-    db = new Database({
-      connectionString: 'http://test:test@localhost:4566/bucket',
-      paranoid: false
-    });
-
+    db = createMockDatabase();
     await db.connect();
   });
 
@@ -387,6 +386,38 @@ describe('PuppeteerPlugin', () => {
       );
       expect(fakeBrowser.close).toHaveBeenCalled();
     });
+
+    it('should close dedicated browser when pool disabled', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({
+        pool: { enabled: false },
+        cookies: { enabled: false },
+        performance: { blockResources: { enabled: false } },
+        humanBehavior: { enabled: false }
+      });
+
+      const fakeBrowser = new EventEmitter();
+      fakeBrowser.close = jest.fn().mockResolvedValue();
+
+      const page = new EventEmitter();
+      page.setViewport = jest.fn().mockResolvedValue();
+      page.setUserAgent = jest.fn().mockResolvedValue();
+      page.goto = jest.fn().mockResolvedValue();
+      page.setCookie = jest.fn().mockResolvedValue();
+      page.close = jest.fn().mockResolvedValue();
+      page.isClosed = jest.fn().mockReturnValue(false);
+      page.screenshot = jest.fn().mockResolvedValue();
+
+      fakeBrowser.newPage = jest.fn().mockResolvedValue(page);
+
+      puppeteerPlugin.puppeteer = {
+        launch: jest.fn().mockResolvedValue(fakeBrowser)
+      };
+
+      const resultPage = await puppeteerPlugin.navigate('https://example.com');
+      await resultPage.close();
+
+      expect(fakeBrowser.close).toHaveBeenCalled();
+    });
   });
 
   describe('Initialization Order', () => {
@@ -410,6 +441,68 @@ describe('PuppeteerPlugin', () => {
       await puppeteerPlugin.onStart();
 
       expect(order).toEqual(['cookie', 'proxy']);
+    });
+  });
+
+  describe('withSession helper', () => {
+    it('should navigate, run handler, and close page', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({ cookies: { enabled: false } });
+
+      const page = {
+        close: jest.fn().mockResolvedValue()
+      };
+
+      puppeteerPlugin.navigate = jest.fn().mockResolvedValue(page);
+
+      const events = [];
+      puppeteerPlugin.on('puppeteer.withSession.start', payload =>
+        events.push({ type: 'start', sessionId: payload.sessionId })
+      );
+      puppeteerPlugin.on('puppeteer.withSession.finish', payload =>
+        events.push({ type: 'finish', error: payload.error })
+      );
+
+      const result = await puppeteerPlugin.withSession(
+        'session-1',
+        async receivedPage => {
+          expect(receivedPage).toBe(page);
+          return 'ok';
+        },
+        { url: 'https://example.com', waitUntil: 'domcontentloaded' }
+      );
+
+      expect(result).toBe('ok');
+      expect(page.close).toHaveBeenCalled();
+      expect(puppeteerPlugin.navigate).toHaveBeenCalledWith(
+        'https://example.com',
+        expect.objectContaining({ useSession: 'session-1', waitUntil: 'domcontentloaded' })
+      );
+      expect(events).toEqual([
+        { type: 'start', sessionId: 'session-1' },
+        { type: 'finish', error: null }
+      ]);
+    });
+
+    it('should close page even when handler throws', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({ cookies: { enabled: false } });
+
+      const page = {
+        close: jest.fn().mockResolvedValue()
+      };
+
+      puppeteerPlugin.navigate = jest.fn().mockResolvedValue(page);
+
+      await expect(
+        puppeteerPlugin.withSession(
+          'session-err',
+          async () => {
+            throw new Error('handler failed');
+          },
+          { url: 'https://example.com' }
+        )
+      ).rejects.toThrow('handler failed');
+
+      expect(page.close).toHaveBeenCalled();
     });
   });
 });
