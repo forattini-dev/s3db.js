@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { EventEmitter } from 'events';
 import { Database } from '../../src/database.class.js';
 import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
 
@@ -266,6 +267,149 @@ describe('PuppeteerPlugin', () => {
       expect(() => puppeteerPlugin.getStorage()).toThrow(
         'Plugin must be installed before accessing storage'
       );
+    });
+  });
+
+  describe('Browser Management', () => {
+    it('should not mutate launch args when adding proxy flags', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({
+        pool: { enabled: false },
+        launch: { args: ['--existing-flag'] }
+      });
+
+      const fakeBrowser = new EventEmitter();
+      fakeBrowser.close = jest.fn().mockResolvedValue();
+
+      puppeteerPlugin.puppeteer = {
+        launch: jest.fn().mockResolvedValue(fakeBrowser)
+      };
+
+      puppeteerPlugin.proxyManager = {
+        getProxyLaunchArgs: jest.fn().mockReturnValue(['--proxy-server=http://proxy:8000'])
+      };
+
+      const originalArgs = [...puppeteerPlugin.config.launch.args];
+
+      await puppeteerPlugin._createBrowser({ id: 'proxy_1' });
+
+      const launchOptions = puppeteerPlugin.puppeteer.launch.mock.calls[0][0];
+      expect(launchOptions.args).toEqual(['--existing-flag', '--proxy-server=http://proxy:8000']);
+      expect(puppeteerPlugin.config.launch.args).toEqual(originalArgs);
+    });
+
+    it('should track pooled tabs and save cookies before closing', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({
+        performance: { blockResources: { enabled: false } },
+        humanBehavior: { enabled: false },
+        cookies: { enabled: true }
+      });
+
+      const fakeBrowser = new EventEmitter();
+      fakeBrowser.close = jest.fn().mockResolvedValue();
+
+      const page = new EventEmitter();
+      page.setViewport = jest.fn().mockResolvedValue();
+      page.setUserAgent = jest.fn().mockResolvedValue();
+      page.goto = jest.fn().mockResolvedValue();
+      page.setCookie = jest.fn().mockResolvedValue();
+      page.close = jest.fn().mockResolvedValue();
+      page.isClosed = jest.fn().mockReturnValue(false);
+      page.screenshot = jest.fn().mockResolvedValue();
+
+      fakeBrowser.newPage = jest.fn().mockResolvedValue(page);
+
+      puppeteerPlugin.puppeteer = {
+        launch: jest.fn().mockResolvedValue(fakeBrowser)
+      };
+
+      puppeteerPlugin.cookieManager = {
+        loadSession: jest.fn().mockResolvedValue(),
+        saveSession: jest.fn().mockResolvedValue()
+      };
+
+      const resultPage = await puppeteerPlugin.navigate('https://example.com', {
+        useSession: 'session-1'
+      });
+
+      const tabs = puppeteerPlugin.tabPool.get(fakeBrowser);
+      expect(tabs.has(page)).toBe(true);
+
+      await resultPage.close();
+
+      expect(puppeteerPlugin.cookieManager.saveSession).toHaveBeenCalledWith(
+        page,
+        'session-1',
+        expect.objectContaining({ success: true })
+      );
+      expect(tabs.has(page)).toBe(false);
+    });
+
+    it('should persist cookies for pooled pages during shutdown', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({
+        performance: { blockResources: { enabled: false } },
+        humanBehavior: { enabled: false },
+        cookies: { enabled: true }
+      });
+
+      const fakeBrowser = new EventEmitter();
+      fakeBrowser.close = jest.fn().mockResolvedValue();
+
+      const page = new EventEmitter();
+      page.setViewport = jest.fn().mockResolvedValue();
+      page.setUserAgent = jest.fn().mockResolvedValue();
+      page.goto = jest.fn().mockResolvedValue();
+      page.setCookie = jest.fn().mockResolvedValue();
+      page.close = jest.fn().mockResolvedValue();
+      page.isClosed = jest.fn().mockReturnValue(false);
+      page.screenshot = jest.fn().mockResolvedValue();
+
+      fakeBrowser.newPage = jest.fn().mockResolvedValue(page);
+
+      puppeteerPlugin.puppeteer = {
+        launch: jest.fn().mockResolvedValue(fakeBrowser)
+      };
+
+      puppeteerPlugin.cookieManager = {
+        loadSession: jest.fn().mockResolvedValue(),
+        saveSession: jest.fn().mockResolvedValue()
+      };
+
+      await puppeteerPlugin.navigate('https://example.com', {
+        useSession: 'session-2'
+      });
+
+      await puppeteerPlugin._closeBrowserPool();
+
+      expect(puppeteerPlugin.cookieManager.saveSession).toHaveBeenCalledWith(
+        page,
+        'session-2',
+        expect.objectContaining({ success: true })
+      );
+      expect(fakeBrowser.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('Initialization Order', () => {
+    it('initializes cookie manager before proxy manager', async () => {
+      puppeteerPlugin = new PuppeteerPlugin({
+        cookies: { enabled: true },
+        proxy: { enabled: true, list: ['http://proxy:8000'] },
+        pool: { enabled: false }
+      });
+
+      const order = [];
+
+      puppeteerPlugin._importDependencies = jest.fn();
+      puppeteerPlugin._initializeCookieManager = jest.fn().mockImplementation(async () => {
+        order.push('cookie');
+      });
+      puppeteerPlugin._initializeProxyManager = jest.fn().mockImplementation(async () => {
+        order.push('proxy');
+      });
+
+      await puppeteerPlugin.onStart();
+
+      expect(order).toEqual(['cookie', 'proxy']);
     });
   });
 });

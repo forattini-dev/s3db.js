@@ -40,6 +40,8 @@ import {
   generateClientId,
   generateClientSecret
 } from './oidc-discovery.js';
+import tryFn from '../../concerns/try-fn.js';
+import { verifyPassword } from './concerns/password.js';
 
 /**
  * OAuth2/OIDC Authorization Server
@@ -271,8 +273,16 @@ export class OAuth2Server {
     const authCode = authCodes[0];
 
     // Validate code expiration
-    const now = Math.floor(Date.now() / 1000);
-    if (authCode.expiresAt < now) {
+    const expiresAtMs = this.parseAuthCodeExpiry(authCode.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+      await this.authCodeResource.remove(authCode.id);
+      return res.status(400).json({
+        error: 'invalid_grant',
+        error_description: 'Authorization code is invalid'
+      });
+    }
+
+    if (expiresAtMs <= Date.now()) {
       await this.authCodeResource.remove(authCode.id);
       return res.status(400).json({
         error: 'invalid_grant',
@@ -812,9 +822,19 @@ export class OAuth2Server {
 
       const user = users[0];
 
-      // Verify password (assuming password is hashed with bcrypt or similar)
-      // In production, use proper password verification
-      if (user.password !== password) {
+      const [okVerify, errVerify, isValid] = await tryFn(() =>
+        verifyPassword(password, user.password)
+      );
+
+      if (!okVerify) {
+        console.error('[OAuth2Server] Password verification error:', errVerify);
+        return res.status(500).json({
+          error: 'server_error',
+          error_description: 'Authentication failed'
+        });
+      }
+
+      if (!isValid) {
         return res.status(401).json({
           error: 'access_denied',
           error_description: 'Invalid credentials'
@@ -1027,6 +1047,25 @@ export class OAuth2Server {
    */
   async rotateKeys() {
     return await this.keyManager.rotateKey();
+  }
+
+  /**
+   * Normalize authorization code expiry representation
+   * @param {string|number} value
+   * @returns {number} Expiry timestamp in milliseconds or NaN
+   */
+  parseAuthCodeExpiry(value) {
+    if (typeof value === 'number') {
+      // If stored as seconds, convert to milliseconds
+      return value > 1e12 ? value : value * 1000;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? NaN : parsed;
+    }
+
+    return NaN;
   }
 }
 

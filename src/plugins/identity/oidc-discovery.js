@@ -31,14 +31,14 @@ export function generateDiscoveryDocument(options = {}) {
 
   return {
     issuer: baseUrl,
-    authorization_endpoint: `${baseUrl}/auth/authorize`,
-    token_endpoint: `${baseUrl}/auth/token`,
-    userinfo_endpoint: `${baseUrl}/auth/userinfo`,
+    authorization_endpoint: `${baseUrl}/oauth/authorize`,
+    token_endpoint: `${baseUrl}/oauth/token`,
+    userinfo_endpoint: `${baseUrl}/oauth/userinfo`,
     jwks_uri: `${baseUrl}/.well-known/jwks.json`,
-    registration_endpoint: `${baseUrl}/auth/register`,
-    introspection_endpoint: `${baseUrl}/auth/introspect`,
-    revocation_endpoint: `${baseUrl}/auth/revoke`,
-    end_session_endpoint: `${baseUrl}/auth/logout`,
+    registration_endpoint: `${baseUrl}/oauth/register`,
+    introspection_endpoint: `${baseUrl}/oauth/introspect`,
+    revocation_endpoint: `${baseUrl}/oauth/revoke`,
+    end_session_endpoint: `${baseUrl}/logout`,
 
     // Supported features
     scopes_supported: scopes,
