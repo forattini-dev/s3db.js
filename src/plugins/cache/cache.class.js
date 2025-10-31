@@ -28,21 +28,21 @@ export class Cache extends EventEmitter {
   async set(key, data) {
     this.validateKey(key);
     await this._set(key, data);
-    this.emit("set", data);
+    this.emit("set", { key, value: data });
     return data
   }
 
   async get(key) {
     this.validateKey(key);
     const data = await this._get(key);
-    this.emit("fetched", data);
+    this.emit("fetched", { key, value: data });
     return data;
   }
 
   async del(key) {
     this.validateKey(key);
     const data = await this._del(key);
-    this.emit("deleted", data);
+    this.emit("deleted", { key, value: data });
     return data;
   }
 
@@ -52,7 +52,7 @@ export class Cache extends EventEmitter {
 
   async clear(prefix) {
     const data = await this._clear(prefix);
-    this.emit("clear", data);
+    this.emit("clear", { prefix, value: data });
     return data;
   }
 }

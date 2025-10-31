@@ -241,6 +241,21 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
       stats = await cachePlugin.getCacheStats();
       expect(stats.size).toBeGreaterThan(0);
     });
+
+    test('should expose partition stats and recommendations via resource helpers', async () => {
+      await users.count({ partition: 'byRegion', partitionValues: { region: 'US' } });
+      await users.count({ partition: 'byDepartment', partitionValues: { department: 'Engineering' } });
+
+      const partitionStats = await users.getPartitionCacheStats('byRegion');
+      expect(partitionStats).toBeDefined();
+      expect(partitionStats.totalFiles).toBeGreaterThanOrEqual(0);
+
+      const recommendations = await users.getCacheRecommendations();
+      expect(Array.isArray(recommendations)).toBe(true);
+
+      const warmed = await users.warmPartitionCache(['byRegion']);
+      expect(typeof warmed).toBe('number');
+    });
   });
 
   describe('Error Handling', () => {

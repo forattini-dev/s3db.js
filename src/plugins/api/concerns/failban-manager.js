@@ -37,7 +37,7 @@ import { resolveResourceNames } from '../../concerns/resource-names.js';
 
 export class FailbanManager {
   constructor(options = {}) {
-    const resourceOverrides = options.resourceNames || {};
+    const resourceOverrides = options.resourceNames || options.resources || {};
     this.resourceNames = resolveResourceNames('api_failban', {
       bans: {
         defaultName: 'plg_api_failban_bans',

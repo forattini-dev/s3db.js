@@ -1,5 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
+import tryFn from '../concerns/try-fn.js';
 import { resolveResourceName } from './concerns/resource-names.js';
 
 /**
@@ -114,7 +115,7 @@ export class CookieFarmPlugin extends Plugin {
 
     this.config.storage.resource = resolveResourceName('cookiefarm', {
       defaultName: 'plg_cookie_farm_personas',
-      override: resourceNamesOption.personas
+      override: resourceNamesOption.personas || options.storage?.resource
     });
 
     // Internal state
@@ -206,59 +207,69 @@ export class CookieFarmPlugin extends Plugin {
       await this.database.getResource(resourceName);
       return;
     } catch (err) {
-      // Create resource if it doesn't exist
-      await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          personaId: 'string|required',
-          sessionId: 'string|required',
-          proxyId: 'string|optional',
-          userAgent: 'string|required',
-          viewport: {
-            width: 'number|required',
-            height: 'number|required',
-            deviceScaleFactor: 'number'
-          },
-          cookies: 'array',
-          fingerprint: {
-            proxy: 'string',
-            userAgent: 'string',
-            viewport: 'string'
-          },
-          reputation: {
-            successCount: 'number',
-            failCount: 'number',
-            successRate: 'number',
-            totalRequests: 'number'
-          },
-          quality: {
-            score: 'number',
-            rating: 'string', // 'low' | 'medium' | 'high'
-            lastCalculated: 'number'
-          },
-          metadata: {
-            createdAt: 'number',
-            lastUsed: 'number',
-            expiresAt: 'number',
-            age: 'number',
-            warmupCompleted: 'boolean',
-            retired: 'boolean'
-          }
+      if (err?.name !== 'ResourceNotFoundError') {
+        throw err;
+      }
+    }
+
+    const [created, createErr] = await tryFn(() => this.database.createResource({
+      name: resourceName,
+      attributes: {
+        personaId: 'string|required',
+        sessionId: 'string|required',
+        proxyId: 'string|optional',
+        userAgent: 'string|required',
+        viewport: {
+          width: 'number|required',
+          height: 'number|required',
+          deviceScaleFactor: 'number'
         },
-        timestamps: true,
-        behavior: 'body-only',
-        partitions: {
-          byQuality: {
-            fields: { 'quality.rating': 'string' }
-          },
-          byProxy: {
-            fields: { proxyId: 'string' }
-          },
-          byRetirement: {
-            fields: { 'metadata.retired': 'boolean' }
-          }
+        cookies: 'array',
+        fingerprint: {
+          proxy: 'string',
+          userAgent: 'string',
+          viewport: 'string'
+        },
+        reputation: {
+          successCount: 'number',
+          failCount: 'number',
+          successRate: 'number',
+          totalRequests: 'number'
+        },
+        quality: {
+          score: 'number',
+          rating: 'string',
+          lastCalculated: 'number'
+        },
+        metadata: {
+          createdAt: 'number',
+          lastUsed: 'number',
+          expiresAt: 'number',
+          age: 'number',
+          warmupCompleted: 'boolean',
+          retired: 'boolean'
         }
-      });
+      },
+      timestamps: true,
+      behavior: 'body-only',
+      partitions: {
+        byQuality: {
+          fields: { 'quality.rating': 'string' }
+        },
+        byProxy: {
+          fields: { proxyId: 'string' }
+        },
+        byRetirement: {
+          fields: { 'metadata.retired': 'boolean' }
+        }
+      }
+    }));
+
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (!existing) {
+        throw createErr;
+      }
     }
   }
 

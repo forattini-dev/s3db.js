@@ -87,14 +87,14 @@ export class S3QueuePlugin extends Plugin {
 
     this.queueResourceName = resolveResourceName('s3queue', {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
-      override: resourceNamesOption.queue
+      override: resourceNamesOption.queue || options.queueResource
     });
     this.config.queueResourceName = this.queueResourceName;
 
     this.deadLetterResourceName = this.config.deadLetterResource
       ? resolveResourceName('s3queue', {
           defaultName: `plg_s3queue_${this.config.resource}_dead`,
-          override: resourceNamesOption.deadLetter
+          override: resourceNamesOption.deadLetter || this.config.deadLetterResource
         })
       : null;
     this.config.deadLetterResource = this.deadLetterResourceName;

@@ -53,7 +53,7 @@ export class IdentityPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    const internalResourceOverrides = options.resourceNames || {};
+    const internalResourceOverrides = options.resourceNames || options.internalResources || {};
     this.internalResourceNames = resolveResourceNames('identity', {
       oauthKeys: {
         defaultName: 'plg_identity_oauth_keys',

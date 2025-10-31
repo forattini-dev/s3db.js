@@ -171,7 +171,7 @@ export class ReplicatorPlugin extends Plugin {
     };
     this.logResourceName = resolveResourceName('replicator', {
       defaultName: 'plg_replicator_logs',
-      override: resourceNamesOption.log
+      override: resourceNamesOption.log || options.replicatorLogResource
     });
 
     this.replicators = [];

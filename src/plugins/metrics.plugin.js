@@ -580,7 +580,13 @@ import { resolveResourceNames } from "./concerns/resource-names.js";
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
-    const resourceOverrides = options.resourceNames || {};
+    const resourceNamesOption = options.resourceNames || {};
+    const legacyResourceOption = options.resources || {};
+    const resourceOverrides = {
+      metrics: resourceNamesOption.metrics ?? legacyResourceOption.metrics,
+      errors: resourceNamesOption.errors ?? legacyResourceOption.errors,
+      performance: resourceNamesOption.performance ?? legacyResourceOption.performance
+    };
     this.resourceNames = resolveResourceNames('metrics', {
       metrics: {
         defaultName: 'plg_metrics',

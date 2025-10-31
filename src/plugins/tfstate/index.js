@@ -272,22 +272,23 @@ export class TfStatePlugin extends Plugin {
     this.driverConfig = config.config || {};
 
     // Resource names
+    const resourcesConfig = config.resources || {};
     const resourceNamesOption = config.resourceNames || {};
     this.resourceName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_resources',
-      override: resourceNamesOption.resources
+      override: resourceNamesOption.resources || resourcesConfig.resources || config.resourceName
     });
     this.stateFilesName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_state_files',
-      override: resourceNamesOption.stateFiles
+      override: resourceNamesOption.stateFiles || resourcesConfig.stateFiles || config.stateFilesName
     });
     this.diffsName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_state_diffs',
-      override: resourceNamesOption.diffs
+      override: resourceNamesOption.diffs || resourcesConfig.diffs || config.diffsName
     });
     this.lineagesName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_lineages',
-      override: resourceNamesOption.lineages
+      override: resourceNamesOption.lineages || resourcesConfig.lineages
     });
 
     // Monitoring configuration

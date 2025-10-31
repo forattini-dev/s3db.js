@@ -136,7 +136,7 @@ export class ApiPlugin extends Plugin {
     const normalizedAuth = normalizeAuthConfig(options.auth);
     this.usersResourceName = resolveResourceName('api', {
       defaultName: 'plg_api_users',
-      override: resourceNamesOption.authUsers
+      override: resourceNamesOption.authUsers || options.auth?.resource
     });
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;

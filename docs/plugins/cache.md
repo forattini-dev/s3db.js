@@ -11,10 +11,10 @@ await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x faster!
 
 **Key features:**
 - ✅ Drivers: memory (LRU/FIFO), filesystem, S3
-- ✅ Configurable TTL + automatic invalidation
+- ✅ Configurable TTL (milliseconds) + automatic invalidation
 - ✅ Optional compression (gzip)
-- ✅ Hit/miss rate statistics
-- ✅ Partition-aware caching
+- ✅ Hit/miss/eviction statistics
+- ✅ Partition-aware caching with usage insights
 
 **Performance & Cost** (measured with Costs Plugin):
 ```javascript
@@ -150,6 +150,23 @@ new CachePlugin({
 
 **What you get:** 2-3x more data cached in same memory.
 
+### Level 3.5: Custom keys & serialization
+
+Fine-tune how keys and values are stored:
+
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    caseSensitive: false,        // "User:1" and "user:1" map to the same entry
+    serializer: (value) => Buffer.from(JSON.stringify(value)).toString('base64'),
+    deserializer: (raw) => JSON.parse(Buffer.from(raw, 'base64').toString('utf8'))
+  }
+});
+```
+
+**What you get:** Seamless integration with existing key conventions and custom payload formats.
+
 ### Level 4: Add Statistics & Monitoring
 
 Track cache effectiveness:
@@ -158,16 +175,18 @@ Track cache effectiveness:
 new CachePlugin({
   driver: 'memory',
   config: {
-    enableStats: true  // Track hits/misses
+    enableStats: true  // Track hits/misses/evictions
   }
 })
 
 // Check performance
 const stats = cachePlugin.driver.getStats();
-console.log(`Hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
-console.log(`Saved: ${stats.hits} S3 calls`);
-// Hit rate: 85.5%
-// Saved: 3,420 S3 calls ($1.37)
+console.log(`Hits: ${stats.hits}, Misses: ${stats.misses}`);
+console.log(`Evictions: ${stats.evictions}, Memory: ${stats.memoryUsageBytes} bytes`);
+
+if (!stats.enabled) {
+  console.warn('Enable statistics with config.enableStats = true');
+}
 ```
 
 **What you get:** Data-driven cache tuning.
@@ -197,7 +216,7 @@ For distributed systems, share cache across servers:
 ```javascript
 new CachePlugin({
   driver: 's3',
-  ttl: 3600000,  // 1 hour
+  ttl: 3600000,  // 1 hour (milliseconds)
   config: {
     keyPrefix: 'app-cache/',
     // Uses same S3 bucket as database
@@ -226,7 +245,10 @@ new CachePlugin({
 // 2. Monitor cache health
 setInterval(() => {
   const stats = cachePlugin.driver.getStats();
-  if (stats.hitRate < 0.7) {
+  if (!stats.enabled) return;
+  const total = stats.hits + stats.misses;
+  const hitRate = total > 0 ? stats.hits / total : 0;
+  if (hitRate < 0.7) {
     console.warn('Low hit rate, consider increasing TTL');
   }
 }, 60000);
@@ -257,7 +279,10 @@ setInterval(() => {
 | `maxMemoryBytes` | number | `0` | Maximum memory in bytes (0 = unlimited). **Cannot be used with maxMemoryPercent** |
 | `maxMemoryPercent` | number | `0` | Maximum memory as fraction 0...1 (e.g., 0.1 = 10%). **Cannot be used with maxMemoryBytes** |
 | `evictionPolicy` | string | `'lru'` | Eviction strategy: `'lru'` (least recently used) or `'fifo'` |
-| `enableStats` | boolean | `false` | Track cache hit/miss statistics |
+| `enableStats` | boolean | `false` | Track hits/misses/evictions (use `driver.getStats()`) |
+| `caseSensitive` | boolean | `true` | Treat keys as case-sensitive (`false` normalizes to lowercase) |
+| `serializer` | function | `JSON.stringify` | Serialize values before storage |
+| `deserializer` | function | `JSON.parse` | Deserialize values on read |
 | `enableCompression` | boolean | `false` | Compress cached values with gzip |
 | `compressionThreshold` | number | `1024` | Minimum size (bytes) to trigger compression |
 
