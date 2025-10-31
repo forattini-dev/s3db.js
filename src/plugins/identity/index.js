@@ -37,6 +37,7 @@ import {
   validateResourcesConfig,
   mergeResourceConfig
 } from './concerns/resource-schemas.js';
+import { resolveResourceNames } from '../concerns/resource-names.js';
 
 /**
  * Identity Provider Plugin class
@@ -50,6 +51,37 @@ export class IdentityPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
+
+    const internalResourceOverrides = options.internalResources || {};
+    this.internalResourceNames = resolveResourceNames('identity', {
+      oauthKeys: {
+        defaultName: 'plg_identity_oauth_keys',
+        override: internalResourceOverrides.oauthKeys
+      },
+      authCodes: {
+        defaultName: 'plg_identity_auth_codes',
+        override: internalResourceOverrides.authCodes
+      },
+      sessions: {
+        defaultName: 'plg_identity_sessions',
+        override: internalResourceOverrides.sessions
+      },
+      passwordResetTokens: {
+        defaultName: 'plg_identity_password_reset_tokens',
+        override: internalResourceOverrides.passwordResetTokens
+      },
+      mfaDevices: {
+        defaultName: 'plg_identity_mfa_devices',
+        override: internalResourceOverrides.mfaDevices
+      }
+    });
+    this.legacyInternalResourceNames = {
+      oauthKeys: 'plg_oauth_keys',
+      authCodes: 'plg_auth_codes',
+      sessions: 'plg_sessions',
+      passwordResetTokens: 'plg_password_reset_tokens',
+      mfaDevices: 'plg_mfa_devices'
+    };
 
     // Validate required resources configuration
     const resourcesValidation = validateResourcesConfig(options.resources);
@@ -111,6 +143,8 @@ export class IdentityPlugin extends Plugin {
           mergedConfig: null
         }
       },
+
+      internalResources: this.internalResourceNames,
 
       // CORS configuration
       cors: {

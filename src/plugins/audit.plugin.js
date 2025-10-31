@@ -427,11 +427,16 @@
 
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { resolveResourceName } from "./concerns/resource-names.js";
 
 export class AuditPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     this.auditResource = null;
+    this.auditResourceName = resolveResourceName('audit', {
+      defaultName: 'plg_audits',
+      override: options.resourceName
+    });
     this.config = {
       includeData: options.includeData !== false,
       includePartitions: options.includePartitions !== false,
@@ -443,7 +448,7 @@ export class AuditPlugin extends Plugin {
   async onInstall() {
     // Create audit resource
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
-      name: 'plg_audits',
+      name: this.auditResourceName,
       attributes: {
         id: 'string|required',
         resourceName: 'string|required',
@@ -464,19 +469,19 @@ export class AuditPlugin extends Plugin {
       },
       behavior: 'body-overflow'
     }));
-    this.auditResource = ok ? auditResource : (this.database.resources.plg_audits || null);
+    this.auditResource = ok ? auditResource : (this.database.resources[this.auditResourceName] || null);
     if (!ok && !this.auditResource) return;
 
     // Hook into database for new resources
     this.database.addHook('afterCreateResource', (context) => {
-      if (context.resource.name !== 'plg_audits') {
+      if (context.resource.name !== this.auditResourceName) {
         this.setupResourceAuditing(context.resource);
       }
     });
 
     // Setup existing resources
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== 'plg_audits') {
+      if (resource.name !== this.auditResourceName) {
         this.setupResourceAuditing(resource);
       }
     }

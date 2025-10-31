@@ -11955,6 +11955,47 @@ function validateResourcesConfig$1(resourcesConfig) {
   };
 }
 
+const PREFIX = "plg_";
+function sanitizeName(name) {
+  if (!name || typeof name !== "string") {
+    throw new Error("[resource-names] Resource name must be a non-empty string");
+  }
+  return name.trim();
+}
+function ensurePlgPrefix(name) {
+  const sanitized = sanitizeName(name);
+  if (sanitized.startsWith(PREFIX)) {
+    return sanitized;
+  }
+  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
+}
+function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}) {
+  if (!defaultName && !override && !suffix) {
+    throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
+  }
+  if (override) {
+    return ensurePlgPrefix(override);
+  }
+  if (defaultName) {
+    return defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
+  }
+  if (!suffix) {
+    throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
+  }
+  return ensurePlgPrefix(`${pluginKey}_${suffix}`);
+}
+function resolveResourceNames(pluginKey, descriptors = {}) {
+  const result = {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (typeof descriptor === "string") {
+      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor });
+      continue;
+    }
+    result[key] = resolveResourceName(pluginKey, descriptor);
+  }
+  return result;
+}
+
 class IdentityPlugin extends Plugin {
   /**
    * Create Identity Provider Plugin instance
@@ -11962,6 +12003,36 @@ class IdentityPlugin extends Plugin {
    */
   constructor(options = {}) {
     super(options);
+    const internalResourceOverrides = options.internalResources || {};
+    this.internalResourceNames = resolveResourceNames("identity", {
+      oauthKeys: {
+        defaultName: "plg_identity_oauth_keys",
+        override: internalResourceOverrides.oauthKeys
+      },
+      authCodes: {
+        defaultName: "plg_identity_auth_codes",
+        override: internalResourceOverrides.authCodes
+      },
+      sessions: {
+        defaultName: "plg_identity_sessions",
+        override: internalResourceOverrides.sessions
+      },
+      passwordResetTokens: {
+        defaultName: "plg_identity_password_reset_tokens",
+        override: internalResourceOverrides.passwordResetTokens
+      },
+      mfaDevices: {
+        defaultName: "plg_identity_mfa_devices",
+        override: internalResourceOverrides.mfaDevices
+      }
+    });
+    this.legacyInternalResourceNames = {
+      oauthKeys: "plg_oauth_keys",
+      authCodes: "plg_auth_codes",
+      sessions: "plg_sessions",
+      passwordResetTokens: "plg_password_reset_tokens",
+      mfaDevices: "plg_mfa_devices"
+    };
     const resourcesValidation = validateResourcesConfig$1(options.resources);
     if (!resourcesValidation.valid) {
       throw new Error(
@@ -12016,6 +12087,7 @@ class IdentityPlugin extends Plugin {
           mergedConfig: null
         }
       },
+      internalResources: this.internalResourceNames,
       // CORS configuration
       cors: {
         enabled: options.cors?.enabled !== false,
@@ -12891,6 +12963,10 @@ class AuditPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     this.auditResource = null;
+    this.auditResourceName = resolveResourceName("audit", {
+      defaultName: "plg_audits",
+      override: options.resourceName
+    });
     this.config = {
       includeData: options.includeData !== false,
       includePartitions: options.includePartitions !== false,
@@ -12900,7 +12976,7 @@ class AuditPlugin extends Plugin {
   }
   async onInstall() {
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
-      name: "plg_audits",
+      name: this.auditResourceName,
       attributes: {
         id: "string|required",
         resourceName: "string|required",
@@ -12922,15 +12998,15 @@ class AuditPlugin extends Plugin {
       },
       behavior: "body-overflow"
     }));
-    this.auditResource = ok ? auditResource : this.database.resources.plg_audits || null;
+    this.auditResource = ok ? auditResource : this.database.resources[this.auditResourceName] || null;
     if (!ok && !this.auditResource) return;
     this.database.addHook("afterCreateResource", (context) => {
-      if (context.resource.name !== "plg_audits") {
+      if (context.resource.name !== this.auditResourceName) {
         this.setupResourceAuditing(context.resource);
       }
     });
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== "plg_audits") {
+      if (resource.name !== this.auditResourceName) {
         this.setupResourceAuditing(resource);
       }
     }
@@ -20662,6 +20738,10 @@ class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super();
     this.indexResource = null;
+    this.indexResourceName = resolveResourceName("fulltext", {
+      defaultName: "plg_fulltext_indexes",
+      override: options.indexResource
+    });
     this.config = {
       minWordLength: options.minWordLength || 3,
       maxResults: options.maxResults || 100,
@@ -20673,7 +20753,7 @@ class FullTextPlugin extends Plugin {
   }
   async onInstall() {
     const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
-      name: "plg_fulltext_indexes",
+      name: this.indexResourceName,
       attributes: {
         id: "string|required",
         resourceName: "string|required",
@@ -20689,7 +20769,7 @@ class FullTextPlugin extends Plugin {
       },
       behavior: "body-overflow"
     }));
-    this.indexResource = ok ? indexResource : this.database.resources.fulltext_indexes;
+    this.indexResource = ok ? indexResource : this.database.resources[this.indexResourceName] || this.database.resources.fulltext_indexes;
     await this.loadIndexes();
     this.installDatabaseHooks();
     this.installIndexingHooks();
@@ -20699,6 +20779,9 @@ class FullTextPlugin extends Plugin {
   async stop() {
     await this.saveIndexes();
     this.removeDatabaseHooks();
+  }
+  isInternalResource(name) {
+    return name === this.indexResourceName || name === "plg_fulltext_indexes";
   }
   async loadIndexes() {
     if (!this.indexResource) return;
@@ -20767,7 +20850,7 @@ class FullTextPlugin extends Plugin {
   }
   installDatabaseHooks() {
     this.database.addHook("afterCreateResource", (resource) => {
-      if (resource.name !== "plg_fulltext_indexes") {
+      if (!this.isInternalResource(resource.name)) {
         this.installResourceHooks(resource);
       }
     });
@@ -20781,14 +20864,14 @@ class FullTextPlugin extends Plugin {
     }
     this.database.plugins.fulltext = this;
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name === "plg_fulltext_indexes") continue;
+      if (this.isInternalResource(resource.name)) continue;
       this.installResourceHooks(resource);
     }
     if (!this.database._fulltextProxyInstalled) {
       this.database._previousCreateResourceForFullText = this.database.createResource;
       this.database.createResource = async function(...args) {
         const resource = await this._previousCreateResourceForFullText(...args);
-        if (this.plugins?.fulltext && resource.name !== "plg_fulltext_indexes") {
+        if (this.plugins?.fulltext && !this.plugins.fulltext.isInternalResource(resource.name)) {
           this.plugins.fulltext.installResourceHooks(resource);
         }
         return resource;
@@ -20796,7 +20879,7 @@ class FullTextPlugin extends Plugin {
       this.database._fulltextProxyInstalled = true;
     }
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== "plg_fulltext_indexes") {
+      if (!this.isInternalResource(resource.name)) {
         this.installResourceHooks(resource);
       }
     }
@@ -21053,7 +21136,7 @@ class FullTextPlugin extends Plugin {
     return this._rebuildAllIndexesInternal();
   }
   async _rebuildAllIndexesInternal() {
-    const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "plg_fulltext_indexes");
+    const resourceNames = Object.keys(this.database.resources).filter((name) => !this.isInternalResource(name));
     for (const resourceName of resourceNames) {
       const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
     }
@@ -21674,6 +21757,26 @@ class GeoPlugin extends Plugin {
 class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
+    const resourceOverrides = options.resources || {};
+    this.resourceNames = resolveResourceNames("metrics", {
+      metrics: {
+        defaultName: "plg_metrics",
+        override: resourceOverrides.metrics
+      },
+      errors: {
+        defaultName: "plg_metrics_errors",
+        override: resourceOverrides.errors
+      },
+      performance: {
+        defaultName: "plg_metrics_performance",
+        override: resourceOverrides.performance
+      }
+    });
+    this.legacyResourceNames = {
+      metrics: "plg_metrics",
+      errors: "plg_error_logs",
+      performance: "plg_performance_logs"
+    };
     this.config = {
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
@@ -21716,7 +21819,7 @@ class MetricsPlugin extends Plugin {
     if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
     const [ok, err] = await tryFn(async () => {
       const [ok1, err1, metricsResource] = await tryFn(() => this.database.createResource({
-        name: "plg_metrics",
+        name: this.resourceNames.metrics,
         attributes: {
           id: "string|required",
           type: "string|required",
@@ -21737,9 +21840,9 @@ class MetricsPlugin extends Plugin {
         },
         behavior: "body-overflow"
       }));
-      this.metricsResource = ok1 ? metricsResource : this.database.resources.plg_metrics;
+      this.metricsResource = ok1 ? metricsResource : this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics];
       const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
-        name: "plg_error_logs",
+        name: this.resourceNames.errors,
         attributes: {
           id: "string|required",
           resourceName: "string|required",
@@ -21755,9 +21858,9 @@ class MetricsPlugin extends Plugin {
         },
         behavior: "body-overflow"
       }));
-      this.errorsResource = ok2 ? errorsResource : this.database.resources.plg_error_logs;
+      this.errorsResource = ok2 ? errorsResource : this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors];
       const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
-        name: "plg_performance_logs",
+        name: this.resourceNames.performance,
         attributes: {
           id: "string|required",
           resourceName: "string|required",
@@ -21773,12 +21876,12 @@ class MetricsPlugin extends Plugin {
         },
         behavior: "body-overflow"
       }));
-      this.performanceResource = ok3 ? performanceResource : this.database.resources.plg_performance_logs;
+      this.performanceResource = ok3 ? performanceResource : this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance];
     });
     if (!ok) {
-      this.metricsResource = this.database.resources.plg_metrics;
-      this.errorsResource = this.database.resources.plg_error_logs;
-      this.performanceResource = this.database.resources.plg_performance_logs;
+      this.metricsResource = this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics];
+      this.errorsResource = this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors];
+      this.performanceResource = this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance];
     }
     this.installDatabaseHooks();
     this.installMetricsHooks();
@@ -21807,7 +21910,7 @@ class MetricsPlugin extends Plugin {
   }
   installDatabaseHooks() {
     this.database.addHook("afterCreateResource", (resource) => {
-      if (resource.name !== "plg_metrics" && resource.name !== "plg_error_logs" && resource.name !== "plg_performance_logs") {
+      if (!this.isInternalResource(resource.name)) {
         this.installResourceHooks(resource);
       }
     });
@@ -21815,9 +21918,12 @@ class MetricsPlugin extends Plugin {
   removeDatabaseHooks() {
     this.database.removeHook("afterCreateResource", this.installResourceHooks.bind(this));
   }
+  isInternalResource(resourceName) {
+    return Object.values(this.resourceNames).includes(resourceName) || Object.values(this.legacyResourceNames).includes(resourceName);
+  }
   installMetricsHooks() {
     for (const resource of Object.values(this.database.resources)) {
-      if (["plg_metrics", "plg_error_logs", "plg_performance_logs"].includes(resource.name)) {
+      if (this.isInternalResource(resource.name)) {
         continue;
       }
       this.installResourceHooks(resource);
@@ -21825,7 +21931,7 @@ class MetricsPlugin extends Plugin {
     this.database._createResource = this.database.createResource;
     this.database.createResource = async function(...args) {
       const resource = await this._createResource(...args);
-      if (this.plugins?.metrics && !["plg_metrics", "plg_error_logs", "plg_performance_logs"].includes(resource.name)) {
+      if (this.plugins?.metrics && !this.plugins.metrics.isInternalResource(resource.name)) {
         this.plugins.metrics.installResourceHooks(resource);
       }
       return resource;
@@ -30967,6 +31073,35 @@ class PuppeteerPlugin extends Plugin {
         javascriptEnabled: true,
         ...options.performance
       },
+      // Network Monitoring (CDP)
+      networkMonitor: {
+        enabled: false,
+        // Disabled by default (adds overhead)
+        persist: false,
+        // Save to S3DB
+        filters: {
+          types: null,
+          // ['image', 'script'] or null for all
+          statuses: null,
+          // [404, 500] or null for all
+          minSize: null,
+          // Only requests >= size (bytes)
+          maxSize: null,
+          // Only requests <= size (bytes)
+          saveErrors: true,
+          // Always save failed requests
+          saveLargeAssets: true,
+          // Always save assets > 1MB
+          ...options.networkMonitor?.filters
+        },
+        compression: {
+          enabled: true,
+          threshold: 10240,
+          // Compress payloads > 10KB
+          ...options.networkMonitor?.compression
+        },
+        ...options.networkMonitor
+      },
       // Screenshot & Recording
       screenshot: {
         fullPage: false,
@@ -31022,6 +31157,7 @@ class PuppeteerPlugin extends Plugin {
     this.cookieManager = null;
     this.proxyManager = null;
     this.performanceManager = null;
+    this.networkMonitor = null;
     this.initialized = false;
     if (this.config.pool.reuseTab) {
       this.emit("puppeteer.configWarning", {
@@ -31057,6 +31193,9 @@ class PuppeteerPlugin extends Plugin {
       await this._initializeProxyManager();
     }
     await this._initializePerformanceManager();
+    if (this.config.networkMonitor.enabled) {
+      await this._initializeNetworkMonitor();
+    }
     if (this.config.pool.enabled) {
       await this._warmupBrowserPool();
     }
@@ -31159,6 +31298,18 @@ class PuppeteerPlugin extends Plugin {
     const { PerformanceManager } = await Promise.resolve().then(function () { return performanceManager; });
     this.performanceManager = new PerformanceManager(this);
     this.emit("puppeteer.performanceManager.initialized");
+  }
+  /**
+   * Initialize network monitor
+   * @private
+   */
+  async _initializeNetworkMonitor() {
+    const { NetworkMonitor } = await Promise.resolve().then(function () { return networkMonitor; });
+    this.networkMonitor = new NetworkMonitor(this);
+    if (this.config.networkMonitor.persist) {
+      await this.networkMonitor.initialize();
+    }
+    this.emit("puppeteer.networkMonitor.initialized");
   }
   /**
    * Warmup browser pool
@@ -44092,6 +44243,10 @@ class TTLPlugin extends Plugin {
     this.intervals = [];
     this.isRunning = false;
     this.expirationIndex = null;
+    this.indexResourceName = resolveResourceName("ttl", {
+      defaultName: "plg_ttl_expiration_index",
+      override: config.indexResourceName
+    });
   }
   /**
    * Install the plugin
@@ -44160,7 +44315,7 @@ class TTLPlugin extends Plugin {
    */
   async _createExpirationIndex() {
     this.expirationIndex = await this.database.createResource({
-      name: "plg_ttl_expiration_index",
+      name: this.indexResourceName,
       attributes: {
         resourceName: "string|required",
         recordId: "string|required",
@@ -50766,6 +50921,673 @@ class PerformanceManager {
 var performanceManager = /*#__PURE__*/Object.freeze({
   __proto__: null,
   PerformanceManager: PerformanceManager
+});
+
+class NetworkMonitor {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.networkMonitor || {
+      enabled: false,
+      persist: false,
+      filters: {
+        types: null,
+        // ['image', 'script', 'stylesheet'] or null for all
+        statuses: null,
+        // [404, 500] or null for all
+        minSize: null,
+        // Only requests >= this size (bytes)
+        maxSize: null,
+        // Only requests <= this size (bytes)
+        saveErrors: true,
+        // Always save failed requests
+        saveLargeAssets: true
+        // Always save assets > 1MB
+      },
+      compression: {
+        enabled: true,
+        threshold: 10240
+        // Compress payloads > 10KB
+      }
+    };
+    this.sessionsResource = null;
+    this.requestsResource = null;
+    this.errorsResource = null;
+    this.resourceTypes = {
+      "Document": "document",
+      "Stylesheet": "stylesheet",
+      "Image": "image",
+      "Media": "media",
+      "Font": "font",
+      "Script": "script",
+      "TextTrack": "texttrack",
+      "XHR": "xhr",
+      "Fetch": "fetch",
+      "EventSource": "eventsource",
+      "WebSocket": "websocket",
+      "Manifest": "manifest",
+      "SignedExchange": "signedexchange",
+      "Ping": "ping",
+      "CSPViolationReport": "cspviolation",
+      "Preflight": "preflight",
+      "Other": "other"
+    };
+  }
+  /**
+   * Initialize network monitoring resources
+   */
+  async initialize() {
+    if (!this.config.persist) {
+      return;
+    }
+    this.sessionsResource = await this.plugin.database.createResource({
+      name: "network_sessions",
+      attributes: {
+        sessionId: "string|required",
+        url: "string|required",
+        domain: "string|required",
+        date: "string|required",
+        // YYYY-MM-DD for partitioning
+        startTime: "number|required",
+        endTime: "number",
+        duration: "number",
+        // Summary statistics
+        totalRequests: "number",
+        successfulRequests: "number",
+        failedRequests: "number",
+        totalBytes: "number",
+        transferredBytes: "number",
+        cachedBytes: "number",
+        // By type
+        byType: "object",
+        // { image: { count, size }, script: {...} }
+        // Performance metrics
+        performance: "object",
+        // From PerformanceManager
+        // User agent
+        userAgent: "string"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        byUrl: { fields: { url: "string" } },
+        byDate: { fields: { date: "string" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }).catch(async (err) => {
+      if (err.name === "ResourceAlreadyExistsError") {
+        return await this.plugin.database.getResource("network_sessions");
+      }
+      throw err;
+    });
+    this.requestsResource = await this.plugin.database.createResource({
+      name: "network_requests",
+      attributes: {
+        requestId: "string|required",
+        sessionId: "string|required",
+        url: "string|required",
+        domain: "string|required",
+        path: "string",
+        // Type and categorization
+        type: "string|required",
+        // image, script, stylesheet, xhr, etc.
+        statusCode: "number",
+        statusText: "string",
+        method: "string",
+        // GET, POST, etc.
+        // Size information
+        size: "number",
+        // Total size (bytes)
+        transferredSize: "number",
+        // Bytes transferred (after compression)
+        resourceSize: "number",
+        // Uncompressed size
+        fromCache: "boolean",
+        // Timing information (ms)
+        timing: "object",
+        // { dns, tcp, ssl, request, response, total }
+        startTime: "number",
+        endTime: "number",
+        duration: "number",
+        // Headers (compressed if large)
+        requestHeaders: "object",
+        responseHeaders: "object",
+        // Compression
+        compression: "string",
+        // gzip, br (brotli), deflate, none
+        // Cache
+        cacheControl: "string",
+        expires: "string",
+        // Error information (if failed)
+        failed: "boolean",
+        errorText: "string",
+        blockedReason: "string",
+        // CSP, mixed-content, etc.
+        // Redirects
+        redirected: "boolean",
+        redirectUrl: "string",
+        // CDN detection
+        cdn: "string",
+        // cloudflare, cloudfront, fastly, etc.
+        cdnDetected: "boolean",
+        // Metadata
+        mimeType: "string",
+        priority: "string"
+        // VeryHigh, High, Medium, Low, VeryLow
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        bySession: { fields: { sessionId: "string" } },
+        byType: { fields: { type: "string" } },
+        byStatus: { fields: { statusCode: "number" } },
+        bySize: { fields: { size: "number" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }).catch(async (err) => {
+      if (err.name === "ResourceAlreadyExistsError") {
+        return await this.plugin.database.getResource("network_requests");
+      }
+      throw err;
+    });
+    this.errorsResource = await this.plugin.database.createResource({
+      name: "network_errors",
+      attributes: {
+        errorId: "string|required",
+        sessionId: "string|required",
+        requestId: "string|required",
+        url: "string|required",
+        domain: "string|required",
+        date: "string|required",
+        // YYYY-MM-DD
+        // Error details
+        errorType: "string|required",
+        // net::ERR_*, failed, timeout, blocked
+        errorText: "string",
+        statusCode: "number",
+        // Context
+        type: "string",
+        // Resource type
+        method: "string",
+        timing: "object",
+        // Additional info
+        blockedReason: "string",
+        consoleMessages: "array"
+        // Related console errors
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        bySession: { fields: { sessionId: "string" } },
+        byErrorType: { fields: { errorType: "string" } },
+        byDate: { fields: { date: "string" } },
+        byDomain: { fields: { domain: "string" } }
+      }
+    }).catch(async (err) => {
+      if (err.name === "ResourceAlreadyExistsError") {
+        return await this.plugin.database.getResource("network_errors");
+      }
+      throw err;
+    });
+    this.plugin.emit("networkMonitor.initialized", {
+      persist: this.config.persist
+    });
+  }
+  /**
+   * Start monitoring network activity for a page
+   * @param {Page} page - Puppeteer page
+   * @param {Object} options - Monitoring options
+   * @returns {Object} Session object with methods
+   */
+  async startMonitoring(page, options = {}) {
+    const {
+      sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      persist = this.config.persist,
+      filters = this.config.filters
+    } = options;
+    const session = {
+      sessionId,
+      url: page.url(),
+      domain: this._extractDomain(page.url()),
+      date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      startTime: Date.now(),
+      endTime: null,
+      duration: null,
+      // Tracked data
+      requests: /* @__PURE__ */ new Map(),
+      // requestId -> request data
+      responses: /* @__PURE__ */ new Map(),
+      // requestId -> response data
+      failures: [],
+      consoleMessages: [],
+      // Statistics
+      stats: {
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        totalBytes: 0,
+        transferredBytes: 0,
+        cachedBytes: 0,
+        byType: {}
+      }
+    };
+    const client = await page.target().createCDPSession();
+    await client.send("Network.enable");
+    client.on("Network.requestWillBeSent", (params) => {
+      const requestData = {
+        requestId: params.requestId,
+        url: params.request.url,
+        domain: this._extractDomain(params.request.url),
+        path: this._extractPath(params.request.url),
+        type: this.resourceTypes[params.type] || "other",
+        method: params.request.method,
+        requestHeaders: params.request.headers,
+        priority: params.request.initialPriority,
+        startTime: params.timestamp * 1e3,
+        // Convert to ms
+        redirected: !!params.redirectResponse,
+        redirectUrl: params.redirectResponse?.url || null
+      };
+      session.requests.set(params.requestId, requestData);
+      session.stats.totalRequests++;
+    });
+    client.on("Network.responseReceived", (params) => {
+      const responseData = {
+        requestId: params.requestId,
+        statusCode: params.response.status,
+        statusText: params.response.statusText,
+        mimeType: params.response.mimeType,
+        responseHeaders: params.response.headers,
+        fromCache: params.response.fromDiskCache || params.response.fromServiceWorker,
+        compression: this._detectCompression(params.response.headers),
+        cacheControl: params.response.headers["cache-control"] || params.response.headers["Cache-Control"],
+        expires: params.response.headers["expires"] || params.response.headers["Expires"],
+        timing: params.response.timing ? this._parseTiming(params.response.timing) : null,
+        cdn: this._detectCDN(params.response.headers),
+        cdnDetected: !!this._detectCDN(params.response.headers)
+      };
+      session.responses.set(params.requestId, responseData);
+    });
+    client.on("Network.loadingFinished", (params) => {
+      const request = session.requests.get(params.requestId);
+      const response = session.responses.get(params.requestId);
+      if (request && response) {
+        const endTime = params.timestamp * 1e3;
+        const duration = endTime - request.startTime;
+        const combined = {
+          ...request,
+          ...response,
+          endTime,
+          duration,
+          size: params.encodedDataLength,
+          transferredSize: params.encodedDataLength,
+          resourceSize: params.decodedBodyLength || params.encodedDataLength,
+          failed: false
+        };
+        if (this._passesFilters(combined, filters)) {
+          session.requests.set(params.requestId, combined);
+          session.stats.successfulRequests++;
+          session.stats.totalBytes += combined.resourceSize || 0;
+          session.stats.transferredBytes += combined.transferredSize || 0;
+          if (combined.fromCache) {
+            session.stats.cachedBytes += combined.resourceSize || 0;
+          }
+          const type = combined.type;
+          if (!session.stats.byType[type]) {
+            session.stats.byType[type] = { count: 0, size: 0, transferredSize: 0 };
+          }
+          session.stats.byType[type].count++;
+          session.stats.byType[type].size += combined.resourceSize || 0;
+          session.stats.byType[type].transferredSize += combined.transferredSize || 0;
+        } else {
+          session.requests.delete(params.requestId);
+        }
+      }
+    });
+    client.on("Network.loadingFailed", (params) => {
+      const request = session.requests.get(params.requestId);
+      if (request) {
+        const errorData = {
+          ...request,
+          failed: true,
+          errorText: params.errorText,
+          blockedReason: params.blockedReason,
+          endTime: params.timestamp * 1e3,
+          duration: params.timestamp * 1e3 - request.startTime
+        };
+        session.failures.push(errorData);
+        session.stats.failedRequests++;
+        if (!filters.saveErrors) {
+          session.requests.delete(params.requestId);
+        } else {
+          session.requests.set(params.requestId, errorData);
+        }
+      }
+    });
+    page.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") {
+        session.consoleMessages.push({
+          type: msg.type(),
+          text: msg.text(),
+          timestamp: Date.now()
+        });
+      }
+    });
+    session._cdpSession = client;
+    session._persist = persist;
+    session._page = page;
+    this.plugin.emit("networkMonitor.sessionStarted", {
+      sessionId,
+      url: page.url()
+    });
+    return session;
+  }
+  /**
+   * Stop monitoring and optionally persist data
+   * @param {Object} session - Session object from startMonitoring
+   * @param {Object} options - Stop options
+   * @returns {Object} Final session data
+   */
+  async stopMonitoring(session, options = {}) {
+    const {
+      persist = session._persist,
+      includePerformance = true
+    } = options;
+    session.endTime = Date.now();
+    session.duration = session.endTime - session.startTime;
+    if (includePerformance && this.plugin.performanceManager && session._page) {
+      try {
+        session.performance = await this.plugin.performanceManager.collectMetrics(session._page, {
+          waitForLoad: false,
+          collectResources: false,
+          // We already have this from CDP
+          collectMemory: true
+        });
+      } catch (err) {
+        this.plugin.emit("networkMonitor.performanceCollectionFailed", {
+          sessionId: session.sessionId,
+          error: err.message
+        });
+      }
+    }
+    if (session._cdpSession) {
+      try {
+        await session._cdpSession.send("Network.disable");
+        await session._cdpSession.detach();
+      } catch (err) {
+      }
+    }
+    const requestsArray = Array.from(session.requests.values());
+    if (persist && this.sessionsResource) {
+      try {
+        await this._persistSession(session, requestsArray);
+      } catch (err) {
+        this.plugin.emit("networkMonitor.persistFailed", {
+          sessionId: session.sessionId,
+          error: err.message
+        });
+      }
+    }
+    this.plugin.emit("networkMonitor.sessionStopped", {
+      sessionId: session.sessionId,
+      duration: session.duration,
+      totalRequests: session.stats.totalRequests,
+      failedRequests: session.stats.failedRequests
+    });
+    delete session._cdpSession;
+    delete session._page;
+    return {
+      ...session,
+      requests: requestsArray
+    };
+  }
+  /**
+   * Persist session data to S3DB
+   * @private
+   */
+  async _persistSession(session, requests) {
+    const startPersist = Date.now();
+    await this.sessionsResource.insert({
+      sessionId: session.sessionId,
+      url: session.url,
+      domain: session.domain,
+      date: session.date,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      duration: session.duration,
+      totalRequests: session.stats.totalRequests,
+      successfulRequests: session.stats.successfulRequests,
+      failedRequests: session.stats.failedRequests,
+      totalBytes: session.stats.totalBytes,
+      transferredBytes: session.stats.transferredBytes,
+      cachedBytes: session.stats.cachedBytes,
+      byType: session.stats.byType,
+      performance: session.performance ? {
+        score: session.performance.score,
+        lcp: session.performance.coreWebVitals.lcp,
+        cls: session.performance.coreWebVitals.cls,
+        fcp: session.performance.coreWebVitals.fcp
+      } : null,
+      userAgent: session._page?._userAgent || null
+    });
+    if (requests.length > 0) {
+      const requestInserts = requests.map((req) => ({
+        requestId: req.requestId,
+        sessionId: session.sessionId,
+        url: req.url,
+        domain: req.domain,
+        path: req.path,
+        type: req.type,
+        statusCode: req.statusCode,
+        statusText: req.statusText,
+        method: req.method,
+        size: req.resourceSize,
+        transferredSize: req.transferredSize,
+        resourceSize: req.resourceSize,
+        fromCache: req.fromCache,
+        timing: req.timing,
+        startTime: req.startTime,
+        endTime: req.endTime,
+        duration: req.duration,
+        requestHeaders: this._compressHeaders(req.requestHeaders),
+        responseHeaders: this._compressHeaders(req.responseHeaders),
+        compression: req.compression,
+        cacheControl: req.cacheControl,
+        expires: req.expires,
+        failed: req.failed,
+        errorText: req.errorText,
+        blockedReason: req.blockedReason,
+        redirected: req.redirected,
+        redirectUrl: req.redirectUrl,
+        cdn: req.cdn,
+        cdnDetected: req.cdnDetected,
+        mimeType: req.mimeType,
+        priority: req.priority
+      }));
+      for (const request of requestInserts) {
+        await this.requestsResource.insert(request);
+      }
+    }
+    if (session.failures.length > 0) {
+      for (const failure of session.failures) {
+        await this.errorsResource.insert({
+          errorId: `error_${failure.requestId}`,
+          sessionId: session.sessionId,
+          requestId: failure.requestId,
+          url: failure.url,
+          domain: failure.domain,
+          date: session.date,
+          errorType: this._categorizeError(failure.errorText),
+          errorText: failure.errorText,
+          statusCode: failure.statusCode,
+          type: failure.type,
+          method: failure.method,
+          timing: failure.timing,
+          blockedReason: failure.blockedReason,
+          consoleMessages: session.consoleMessages.filter((msg) => Math.abs(msg.timestamp - failure.endTime) < 1e3).map((msg) => msg.text)
+        });
+      }
+    }
+    const persistDuration = Date.now() - startPersist;
+    this.plugin.emit("networkMonitor.persisted", {
+      sessionId: session.sessionId,
+      requests: requests.length,
+      errors: session.failures.length,
+      duration: persistDuration
+    });
+  }
+  /**
+   * Check if request passes filters
+   * @private
+   */
+  _passesFilters(request, filters) {
+    if (filters.types && !filters.types.includes(request.type)) {
+      return false;
+    }
+    if (filters.statuses && !filters.statuses.includes(request.statusCode)) {
+      return false;
+    }
+    if (filters.minSize && (request.resourceSize || 0) < filters.minSize) {
+      return false;
+    }
+    if (filters.maxSize && (request.resourceSize || 0) > filters.maxSize) {
+      return false;
+    }
+    if (filters.saveLargeAssets && (request.resourceSize || 0) > 1024 * 1024) {
+      return true;
+    }
+    return true;
+  }
+  /**
+   * Extract domain from URL
+   * @private
+   */
+  _extractDomain(url) {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "unknown";
+    }
+  }
+  /**
+   * Extract path from URL
+   * @private
+   */
+  _extractPath(url) {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return "";
+    }
+  }
+  /**
+   * Detect compression algorithm
+   * @private
+   */
+  _detectCompression(headers) {
+    const encoding = headers["content-encoding"] || headers["Content-Encoding"] || "";
+    if (encoding.includes("br")) return "brotli";
+    if (encoding.includes("gzip")) return "gzip";
+    if (encoding.includes("deflate")) return "deflate";
+    return "none";
+  }
+  /**
+   * Detect CDN provider
+   * @private
+   */
+  _detectCDN(headers) {
+    const server = headers["server"] || headers["Server"] || "";
+    const via = headers["via"] || headers["Via"] || "";
+    const cfRay = headers["cf-ray"] || headers["CF-Ray"];
+    const xCache = headers["x-cache"] || headers["X-Cache"] || "";
+    if (cfRay || server.includes("cloudflare")) return "cloudflare";
+    if (xCache.includes("cloudfront") || headers["x-amz-cf-id"]) return "cloudfront";
+    if (server.includes("fastly") || via.includes("fastly")) return "fastly";
+    if (headers["x-akamai-transformed"] || headers["x-akamai-staging"]) return "akamai";
+    if (headers["x-cdn"] || headers["X-CDN"]) return headers["x-cdn"] || headers["X-CDN"];
+    return null;
+  }
+  /**
+   * Parse timing data
+   * @private
+   */
+  _parseTiming(timing) {
+    if (!timing) return null;
+    return {
+      dns: timing.dnsEnd - timing.dnsStart,
+      tcp: timing.connectEnd - timing.connectStart,
+      ssl: timing.sslEnd - timing.sslStart,
+      request: timing.sendEnd - timing.sendStart,
+      response: timing.receiveHeadersEnd - timing.sendEnd,
+      total: timing.receiveHeadersEnd
+    };
+  }
+  /**
+   * Compress headers (remove unnecessary data)
+   * @private
+   */
+  _compressHeaders(headers) {
+    if (!headers) return {};
+    const compressed = { ...headers };
+    const toRemove = ["cookie", "Cookie", "set-cookie", "Set-Cookie"];
+    toRemove.forEach((key) => delete compressed[key]);
+    return compressed;
+  }
+  /**
+   * Categorize error type
+   * @private
+   */
+  _categorizeError(errorText) {
+    if (!errorText) return "unknown";
+    if (errorText.includes("ERR_NAME_NOT_RESOLVED")) return "dns";
+    if (errorText.includes("ERR_CONNECTION")) return "connection";
+    if (errorText.includes("ERR_TIMED_OUT")) return "timeout";
+    if (errorText.includes("ERR_SSL")) return "ssl";
+    if (errorText.includes("ERR_CERT")) return "certificate";
+    if (errorText.includes("ERR_BLOCKED")) return "blocked";
+    if (errorText.includes("ERR_FAILED")) return "failed";
+    if (errorText.includes("ERR_ABORTED")) return "aborted";
+    return "other";
+  }
+  /**
+   * Get session statistics
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object>} Statistics
+   */
+  async getSessionStats(sessionId) {
+    if (!this.sessionsResource) {
+      throw new Error("Network monitoring persistence not enabled");
+    }
+    const session = await this.sessionsResource.get(sessionId);
+    return session;
+  }
+  /**
+   * Query requests for a session
+   * @param {string} sessionId - Session ID
+   * @param {Object} filters - Query filters
+   * @returns {Promise<Array>} Requests
+   */
+  async getSessionRequests(sessionId, filters = {}) {
+    if (!this.requestsResource) {
+      throw new Error("Network monitoring persistence not enabled");
+    }
+    return await this.requestsResource.listPartition("bySession", { sessionId }, filters);
+  }
+  /**
+   * Query errors for a session
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Array>} Errors
+   */
+  async getSessionErrors(sessionId) {
+    if (!this.errorsResource) {
+      throw new Error("Network monitoring persistence not enabled");
+    }
+    return await this.errorsResource.listPartition("bySession", { sessionId });
+  }
+}
+
+var networkMonitor = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  NetworkMonitor: NetworkMonitor
 });
 
 function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
