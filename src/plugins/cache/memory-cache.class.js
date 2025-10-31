@@ -458,11 +458,15 @@ export class MemoryCache extends Cache {
       return { enabled: false };
     }
 
+    const total = this.stats.hits + this.stats.misses;
+    const hitRate = total > 0 ? this.stats.hits / total : 0;
+
     return {
       ...this.stats,
       memoryUsageBytes: this.currentMemoryBytes,
       maxMemoryBytes: this.maxMemoryBytes,
-      evictedDueToMemory: this.evictedDueToMemory
+      evictedDueToMemory: this.evictedDueToMemory,
+      hitRate
     };
   }
 

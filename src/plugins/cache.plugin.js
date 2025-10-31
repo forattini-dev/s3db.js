@@ -562,10 +562,15 @@ export class CachePlugin extends Plugin {
   async getCacheStats() {
     if (!this.driver) return null;
     
+    const driverStats = typeof this.driver.getStats === 'function'
+      ? this.driver.getStats()
+      : null;
+
     return {
       size: await this.driver.size(),
       keys: await this.driver.keys(),
-      driver: this.driver.constructor.name
+      driver: this.driver.constructor.name,
+      stats: driverStats
     };
   }
 

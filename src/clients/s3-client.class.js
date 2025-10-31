@@ -116,7 +116,7 @@ export class S3Client extends EventEmitter {
     return response;
   }
 
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
     const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
 
@@ -140,10 +140,11 @@ export class S3Client extends EventEmitter {
       Body: body || Buffer.alloc(0),
     };
 
-    if (contentType !== undefined) options.ContentType = contentType
-    if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding
-    if (contentLength !== undefined) options.ContentLength = contentLength
-    if (ifMatch !== undefined) options.IfMatch = ifMatch
+    if (contentType !== undefined) options.ContentType = contentType;
+    if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding;
+    if (contentLength !== undefined) options.ContentLength = contentLength;
+    if (ifMatch !== undefined) options.IfMatch = ifMatch;
+    if (ifNoneMatch !== undefined) options.IfNoneMatch = ifNoneMatch;
 
     const [ok, err, response] = await tryFn(() => this.sendCommand(new PutObjectCommand(options)));
     this.emit('cl:PutObject', err || response, { key, metadata, contentType, body, contentEncoding, contentLength });

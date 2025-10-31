@@ -6,7 +6,7 @@ import jsonStableStringify from "json-stable-stringify";
 import { S3Client } from "./clients/s3-client.class.js";
 import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
-import { ResourceNotFound, DatabaseError } from "./errors.js";
+import { ResourceNotFound, DatabaseError, SchemaError } from "./errors.js";
 import { idGenerator } from "./concerns/id.js";
 import { streamToString } from "./stream/index.js";
 
@@ -1019,11 +1019,21 @@ export class Database extends EventEmitter {
 
     for (const fieldName of partitions) {
       if (typeof fieldName !== 'string') {
-        throw new Error(`Partition field must be a string, got ${typeof fieldName}`);
+        throw new SchemaError('Invalid partition field type', {
+          fieldName,
+          receivedType: typeof fieldName,
+          retriable: false,
+          suggestion: 'Use string field names when declaring partitions (e.g. ["status", "region"]).'
+        });
       }
 
       if (!attributes[fieldName]) {
-        throw new Error(`Partition field '${fieldName}' not found in attributes`);
+        throw new SchemaError(`Partition field '${fieldName}' not found in attributes`, {
+          fieldName,
+          availableFields: Object.keys(attributes),
+          retriable: false,
+          suggestion: 'Ensure the partition field exists in the resource attributes definition.'
+        });
       }
 
       // Generate partition name: byFieldName (capitalize first letter)

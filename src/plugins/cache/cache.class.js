@@ -55,6 +55,10 @@ export class Cache extends EventEmitter {
     this.emit("clear", { prefix, value: data });
     return data;
   }
+
+  stats() {
+    return typeof this.getStats === 'function' ? this.getStats() : {};
+  }
 }
 
 export default Cache

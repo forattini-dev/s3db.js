@@ -40,7 +40,7 @@ describe('ReplicatorPlugin - config parsing and validation', () => {
         { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
       ]
     });
-    expect(plugin.config.replicatorLogResource).toBe('custom_logs');
+    expect(plugin.logResourceName).toBe('plg_custom_logs');
   });
 });
 
@@ -155,7 +155,7 @@ describe('ReplicatorPlugin - listener installation', () => {
 
   test('does not install listeners for replicator log resource', () => {
     const resource = {
-      name: 'replicator_logs',
+      name: 'plg_replicator_logs',
       on: jest.fn(),
       database: {}
     };
@@ -167,7 +167,7 @@ describe('ReplicatorPlugin - listener installation', () => {
     });
     plugin.database = resource.database;
     plugin.installEventListeners(resource);
-    
+
     expect(resource.on).not.toHaveBeenCalled();
   });
 
@@ -731,10 +731,10 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     await plugin.install(mockDatabase);
 
     expect(mockDatabase.createResource).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'custom_log',
+      name: 'plg_custom_log',
       behavior: 'truncate-data'
     }));
-    expect(plugin.replicatorLogResource).toBe(mockLogResource);
+    expect(plugin.replicatorLog).toBe(mockLogResource);
   });
 
   test('setup with persistReplicatorLog uses existing resource on error', async () => {
@@ -744,9 +744,9 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
     });
 
-    const existingLog = { name: 'existing_log' };
+    const existingLog = { name: 'plg_existing_log' };
     const mockDatabase = {
-      resources: { existing_log: existingLog },
+      resources: { plg_existing_log: existingLog },
       createResource: jest.fn().mockRejectedValue(new Error('Already exists')),
       addHook: jest.fn()
     };
@@ -755,7 +755,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.install(mockDatabase);
 
-    expect(plugin.replicatorLogResource).toBe(existingLog);
+    expect(plugin.replicatorLog).toBe(existingLog);
   });
 
   test('retryWithBackoff exhausts all retries and throws', async () => {
@@ -1074,7 +1074,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     // Trigger the hook with log resource - should not install listeners
     const hook = mockDatabase.addHook.mock.calls[0][1];
-    hook({ name: 'test_log' });
+    hook({ name: 'plg_test_log' });
 
     expect(plugin.installEventListeners).not.toHaveBeenCalled();
 

@@ -24,10 +24,11 @@ await db.use(new IdentityPlugin({
 **You get instantly:**
 - ✅ **9 OAuth2/OIDC endpoints** (discovery, JWKS, token, authorize, userinfo, etc.)
 - ✅ **4 grant types** (authorization_code, client_credentials, refresh_token, PKCE)
-- ✅ **RS256 JWT signing** (asymmetric RSA keys)
+- ✅ **Purpose-scoped RSA keys** (separate signing and challenge keys)
 - ✅ **Built-in login UI** (HTML form for authorization_code flow)
 - ✅ **Enterprise features** (token revocation, dynamic client registration)
-- ✅ **Azure AD/Keycloak parity** (OIDC-compliant, works with any client)
+- ✅ **Adaptive rate limiting** (per login/token/authorize endpoint)
+- ✅ **Sanitized audit logging** (PII-safe event trails)
 
 **Works as:** Authorization Server (SSO) for your microservices ecosystem. Clients can be web apps, mobile apps, or other APIs.
 
@@ -151,6 +152,15 @@ await db.use(new IdentityPlugin({
 ```
 
 **What you get:** Full OAuth2/OIDC Authorization Server with discovery, JWKS, token endpoints, and built-in login UI.
+
+### Security defaults
+
+- 🔐 **Rate limiting on by default** for `/login`, `/oauth/token`, and `/oauth/authorize` (tune via `rateLimit` config)
+- 🔑 **Challenge tokens signed with dedicated RSA keys** (`purpose: 'challenge'`) so OAuth signing keys stay isolated
+- 🧼 **Audit events are automatically sanitized** (passwords/secrets removed before persistence)
+- ✅ **Startup validation** fails fast when SMTP, GeoIP or rate-limit configuration is inconsistent
+
+These guardrails ship out-of-the-box; tweak them as needed in the configuration guide.
 
 ---
 

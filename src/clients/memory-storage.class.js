@@ -77,15 +77,46 @@ export class MemoryStorage {
   /**
    * Store an object
    */
-  async put(key, { body, metadata, contentType, contentEncoding, contentLength, ifMatch }) {
+  async put(key, { body, metadata, contentType, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
     // Validate limits
     this._validateLimits(body, metadata);
 
     // Check ifMatch (conditional put)
+    const existing = this.objects.get(key);
     if (ifMatch !== undefined) {
-      const existing = this.objects.get(key);
-      if (existing && existing.etag !== ifMatch) {
-        throw new Error(`Precondition failed: ETag mismatch for key "${key}"`);
+      if (!existing || existing.etag !== ifMatch) {
+        const error = new Error(`Precondition failed: ETag mismatch for key "${key}"`);
+        error.name = 'PreconditionFailed';
+        error.code = 'PreconditionFailed';
+        error.statusCode = 412;
+        error.$metadata = {
+          httpStatusCode: 412,
+          requestId: 'memory-' + Date.now(),
+          attempts: 1,
+          totalRetryDelay: 0
+        };
+        throw error;
+      }
+    }
+
+    if (ifNoneMatch !== undefined) {
+      const targetValue = existing ? existing.etag : null;
+      const shouldFail =
+        (ifNoneMatch === '*' && existing) ||
+        (ifNoneMatch !== '*' && existing && targetValue === ifNoneMatch);
+
+      if (shouldFail) {
+        const error = new Error(`Precondition failed: object already exists for key "${key}"`);
+        error.name = 'PreconditionFailed';
+        error.code = 'PreconditionFailed';
+        error.statusCode = 412;
+        error.$metadata = {
+          httpStatusCode: 412,
+          requestId: 'memory-' + Date.now(),
+          attempts: 1,
+          totalRetryDelay: 0
+        };
+        throw error;
       }
     }
 

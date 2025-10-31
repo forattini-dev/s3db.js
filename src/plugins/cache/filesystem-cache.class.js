@@ -190,43 +190,47 @@ export class FilesystemCache extends Cache {
 
   async _set(key, data) {
     const filePath = this._getFilePath(key);
-    
+
     try {
       // Prepare data
       let serialized = JSON.stringify(data);
       const originalSize = Buffer.byteLength(serialized, this.encoding);
-      
+
       // Check size limit
       if (originalSize > this.maxFileSize) {
         throw new Error(`Cache data exceeds maximum file size: ${originalSize} > ${this.maxFileSize}`);
       }
-      
+
       let compressed = false;
       let finalData = serialized;
-      
+
       // Compress if enabled and over threshold
       if (this.enableCompression && originalSize >= this.compressionThreshold) {
         const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, this.encoding));
         finalData = compressedBuffer.toString('base64');
         compressed = true;
       }
-      
+
+      // Ensure directory exists before writing
+      const dir = path.dirname(filePath);
+      await this._ensureDirectory(dir);
+
       // Create backup if enabled
       if (this.enableBackup && await this._fileExists(filePath)) {
         const backupPath = filePath + this.backupSuffix;
         await this._copyFile(filePath, backupPath);
       }
-      
+
       // Acquire lock if enabled
       if (this.enableLocking) {
         await this._acquireLock(filePath);
       }
-      
+
       try {
         // Write data
-        await writeFile(filePath, finalData, { 
+        await writeFile(filePath, finalData, {
           encoding: compressed ? 'utf8' : this.encoding,
-          mode: this.fileMode 
+          mode: this.fileMode
         });
         
         // Write metadata if enabled

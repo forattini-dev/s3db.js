@@ -111,6 +111,7 @@ export class S3QueuePlugin extends Plugin {
     this.processedCache = new Map(); // queueId -> timestamp
     this.cacheCleanupInterval = null;
     this.lockCleanupInterval = null;
+    this.messageLocks = new Map();
   }
 
   async onInstall() {
@@ -372,40 +373,63 @@ export class S3QueuePlugin extends Plugin {
    * Acquire a distributed lock using PluginStorage TTL
    * This ensures only one worker can claim a message at a time
    */
+  _lockNameForMessage(messageId) {
+    return `msg-${messageId}`;
+  }
+
   async acquireLock(messageId) {
     const storage = this.getStorage();
-    const lockKey = `msg-${messageId}`;
+    const lockName = this._lockNameForMessage(messageId);
 
     try {
-      const lock = await storage.acquireLock(lockKey, {
+      const lock = await storage.acquireLock(lockName, {
         ttl: 5, // 5 seconds
         timeout: 0, // Don't wait if locked
         workerId: this.workerId
       });
 
-      return lock !== null;
+      if (lock) {
+        this.messageLocks.set(lock.name, lock);
+      }
+
+      return lock;
     } catch (error) {
       // On any error, skip this message
       if (this.config.verbose) {
         console.log(`[acquireLock] Error: ${error.message}`);
       }
-      return false;
+      return null;
     }
   }
 
   /**
    * Release a distributed lock via PluginStorage
    */
-  async releaseLock(messageId) {
+  async releaseLock(lockOrMessageId) {
     const storage = this.getStorage();
-    const lockKey = `msg-${messageId}`;
+    let lock = null;
+
+    if (lockOrMessageId && typeof lockOrMessageId === 'object') {
+      lock = lockOrMessageId;
+    } else {
+      const lockName = this._lockNameForMessage(lockOrMessageId);
+      lock = this.messageLocks.get(lockName) || null;
+    }
+
+    if (!lock) {
+      return;
+    }
 
     try {
-      await storage.releaseLock(lockKey);
+      await storage.releaseLock(lock);
     } catch (error) {
       // Ignore errors on release (lock may have expired or been cleaned up)
       if (this.config.verbose) {
-        console.log(`[releaseLock] Failed to release lock for ${messageId}: ${error.message}`);
+        console.log(`[releaseLock] Failed to release lock '${lock.name}': ${error.message}`);
+      }
+    } finally {
+      if (lock?.name) {
+        this.messageLocks.delete(lock.name);
       }
     }
   }
@@ -424,28 +448,28 @@ export class S3QueuePlugin extends Plugin {
 
     // Try to acquire distributed lock for cache check
     // This prevents race condition where multiple workers check cache simultaneously
-    const lockAcquired = await this.acquireLock(msg.id);
+    const lock = await this.acquireLock(msg.id);
 
-    if (!lockAcquired) {
+    if (!lock) {
       // Another worker is checking/claiming this message, skip it
       return null;
     }
 
-    // Check deduplication cache (protected by lock)
-    if (this.processedCache.has(msg.id)) {
-      await this.releaseLock(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
+    try {
+      // Check deduplication cache (protected by lock)
+      if (this.processedCache.has(msg.id)) {
+        if (this.config.verbose) {
+          console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
+        }
+        return null;
       }
-      return null;
+
+      // Add to cache immediately (while still holding lock)
+      // This prevents other workers from claiming this message
+      this.processedCache.set(msg.id, Date.now());
+    } finally {
+      await this.releaseLock(lock);
     }
-
-    // Add to cache immediately (while still holding lock)
-    // This prevents other workers from claiming this message
-    this.processedCache.set(msg.id, Date.now());
-
-    // Release lock now that cache is updated
-    await this.releaseLock(msg.id);
 
     // Fetch the message with ETag (query doesn't return _etag)
     const [okGet, errGet, msgWithETag] = await tryFn(() =>
