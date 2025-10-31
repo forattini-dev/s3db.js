@@ -267,11 +267,13 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
     await super._clear(prefix);
 
     if (!prefix) {
-      const [entriesOk, , entries] = await tryFn(() => readdir(this.directory, { withFileTypes: true }));
+      const [entriesOk, , entries] = await tryFn(() => readdir(this.directory));
       if (entriesOk && entries) {
         for (const entry of entries) {
-          if (entry.isDirectory() && entry.name.startsWith('resource=')) {
-            await rmdir(path.join(this.directory, entry.name), { recursive: true }).catch(() => {});
+          const entryPath = path.join(this.directory, entry);
+          const [statOk, , entryStat] = await tryFn(() => stat(entryPath));
+          if (statOk && entryStat.isDirectory() && entry.startsWith('resource=')) {
+            await rmdir(entryPath, { recursive: true }).catch(() => {});
           }
         }
       }

@@ -172,10 +172,11 @@ export class TTLPlugin extends Plugin {
     this.isRunning = false;
 
     // Expiration index (plugin storage)
+    const resourceNamesOption = config.resourceNames || {};
     this.expirationIndex = null;
     this.indexResourceName = resolveResourceName('ttl', {
       defaultName: 'plg_ttl_expiration_index',
-      override: resourceNamesOption.index
+      override: resourceNamesOption.index || config.indexResourceName
     });
   }
 

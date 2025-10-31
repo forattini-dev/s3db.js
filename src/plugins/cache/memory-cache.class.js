@@ -146,6 +146,9 @@ export class MemoryCache extends Cache {
     this.deserializer = typeof config.deserializer === 'function' ? config.deserializer : JSON.parse;
     this.enableStats = config.enableStats === true;
     this.evictionPolicy = (config.evictionPolicy || 'fifo').toLowerCase();
+    if (!['lru', 'fifo'].includes(this.evictionPolicy)) {
+      this.evictionPolicy = 'fifo';
+    }
     this.cache = {};
     this.meta = {};
     this.maxSize = config.maxSize !== undefined ? config.maxSize : 1000;
@@ -233,12 +236,6 @@ export class MemoryCache extends Cache {
   async _set(key, data) {
     const normalizedKey = this._normalizeKey(key);
 
-    // Prepare data for storage
-    let finalData = serialized;
-    let compressed = false;
-    let originalSize = 0;
-    let compressedSize = 0;
-
     // Serialize first (needed for both compression and memory limit checks)
     let serialized;
     try {
@@ -246,6 +243,12 @@ export class MemoryCache extends Cache {
     } catch (error) {
       throw new Error(`[MemoryCache] Failed to serialize data for key '${key}': ${error.message}`);
     }
+
+    // Prepare data for storage
+    let finalData = serialized;
+    let compressed = false;
+    let originalSize = 0;
+    let compressedSize = 0;
 
     if (typeof serialized !== 'string') {
       throw new Error('[MemoryCache] Serializer must return a string');
@@ -324,7 +327,8 @@ export class MemoryCache extends Cache {
       lastAccess: timestamp,
       compressed,
       originalSize,
-      compressedSize: itemSize
+      compressedSize: itemSize,
+      originalKey: key
     };
 
     // Update current memory usage
@@ -417,6 +421,7 @@ export class MemoryCache extends Cache {
       this.cache = {};
       this.meta = {};
       this.currentMemoryBytes = 0; // Reset memory counter
+      this.evictedDueToMemory = 0;
       if (this.enableStats) {
         this.stats = { hits: 0, misses: 0, sets: 0, deletes: 0, evictions: 0 };
       }
@@ -445,7 +450,20 @@ export class MemoryCache extends Cache {
   }
 
   async keys() {
-    return Object.keys(this.cache);
+    return Object.keys(this.cache).map(key => this.meta[key]?.originalKey || key);
+  }
+
+  getStats() {
+    if (!this.enableStats) {
+      return { enabled: false };
+    }
+
+    return {
+      ...this.stats,
+      memoryUsageBytes: this.currentMemoryBytes,
+      maxMemoryBytes: this.maxMemoryBytes,
+      evictedDueToMemory: this.evictedDueToMemory
+    };
   }
 
   /**

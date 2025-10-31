@@ -436,7 +436,7 @@ export class AuditPlugin extends Plugin {
     this.auditResource = null;
     this.auditResourceName = resolveResourceName('audit', {
       defaultName: 'plg_audits',
-      override: resourceNames.audit
+      override: resourceNames.audit || options.resourceName
     });
     this.config = {
       includeData: options.includeData !== false,

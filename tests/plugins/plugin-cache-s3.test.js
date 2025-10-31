@@ -293,4 +293,56 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
       expect(typeof driver.client.getAllKeys).toBe('function');
     });
   });
-}); 
+});
+
+describe('S3Cache driver unit behaviors', () => {
+  let db;
+  let driver;
+
+  beforeAll(async () => {
+    db = createDatabaseForTest('suite=plugins/cache-s3-driver');
+    await db.connect();
+  });
+
+  afterAll(async () => {
+    if (db) {
+      await db.disconnect();
+    }
+  });
+
+  afterEach(async () => {
+    if (driver) {
+      await driver._clear();
+    }
+  });
+
+  test('respects millisecond TTL by converting to seconds', async () => {
+    driver = new S3Cache({ client: db.client, keyPrefix: 'unit-ttl', ttl: 200 });
+
+    expect(driver.ttlSeconds).toBe(1);
+
+    await driver._set('ttl-key', { value: 42 });
+    let fetched = await driver._get('ttl-key');
+    expect(fetched).toEqual({ value: 42 });
+
+    await new Promise(resolve => setTimeout(resolve, 1100));
+
+    fetched = await driver._get('ttl-key');
+    expect(fetched).toBeNull();
+  });
+
+  test('clears only entries that match prefix', async () => {
+    driver = new S3Cache({ client: db.client, keyPrefix: 'unit-prefix', ttl: 0 });
+
+    await driver._set('group/a', { value: 'A' });
+    await driver._set('other/b', { value: 'B' });
+
+    await driver._clear('group');
+
+    const groupValue = await driver._get('group/a');
+    const otherValue = await driver._get('other/b');
+
+    expect(groupValue).toBeNull();
+    expect(otherValue).toEqual({ value: 'B' });
+  });
+});

@@ -1,6 +1,7 @@
 import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import { resolveResourceNames } from './concerns/resource-names.js';
+import tryFn from '../concerns/try-fn.js';
 
 /**
  * PuppeteerPlugin - Headless browser automation with anti-bot detection
@@ -245,7 +246,7 @@ export class PuppeteerPlugin extends Plugin {
     this.resourceNames = resolveResourceNames('puppeteer', {
       cookies: {
         defaultName: 'plg_puppeteer_cookies',
-        override: resourceNamesOption.cookies
+        override: resourceNamesOption.cookies || options.cookies?.storage?.resource
       },
       consoleSessions: {
         defaultName: 'plg_puppeteer_console_sessions',

@@ -908,4 +908,64 @@ describe('Cache Plugin - MemoryCache Driver', () => {
       expect(stats.size).toBe(0);
     });
   });
-}); 
+});
+
+describe('MemoryCache driver advanced behaviors', () => {
+  test('supports case-insensitive keys', async () => {
+    const cache = new MemoryCache({ caseSensitive: false, enableCompression: false });
+
+    await cache.set('User:1', { id: 1 });
+    const fetched = await cache.get('user:1');
+
+    expect(fetched).toEqual({ id: 1 });
+  });
+
+  test('supports custom serializer and deserializer', async () => {
+    const cache = new MemoryCache({
+      enableCompression: false,
+      serializer: (value) => Buffer.from(JSON.stringify(value)).toString('base64'),
+      deserializer: (value) => JSON.parse(Buffer.from(value, 'base64').toString('utf8'))
+    });
+
+    await cache.set('custom', { foo: 'bar' });
+    const fetched = await cache.get('custom');
+
+    expect(fetched).toEqual({ foo: 'bar' });
+  });
+
+  test('evicts least recently used entries when policy is LRU', async () => {
+    const cache = new MemoryCache({
+      maxSize: 2,
+      evictionPolicy: 'lru',
+      enableCompression: false,
+      enableStats: true
+    });
+
+    await cache.set('a', { value: 'A' });
+    await cache.set('b', { value: 'B' });
+    await cache.get('a'); // mark "a" as recently used
+    await cache.set('c', { value: 'C' }); // should evict "b"
+
+    const valueB = await cache.get('b');
+    const valueA = await cache.get('a');
+
+    expect(valueB).toBeNull();
+    expect(valueA).toEqual({ value: 'A' });
+
+    const stats = cache.getStats();
+    expect(stats.evictions).toBeGreaterThan(0);
+  });
+
+  test('respects ttl and records cache statistics', async () => {
+    const cache = new MemoryCache({ ttl: 50, enableCompression: false, enableStats: true });
+
+    await cache.set('temp', { value: 1 });
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    const fetched = await cache.get('temp');
+    expect(fetched).toBeNull();
+
+    const stats = cache.getStats();
+    expect(stats.misses).toBeGreaterThan(0);
+  });
+});

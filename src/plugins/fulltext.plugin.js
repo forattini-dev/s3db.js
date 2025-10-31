@@ -491,9 +491,10 @@ export class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super();
     this.indexResource = null;
+    const resourceNamesOption = options.resourceNames || {};
     this.indexResourceName = resolveResourceName('fulltext', {
       defaultName: 'plg_fulltext_indexes',
-      override: options.indexResource
+      override: resourceNamesOption.index || options.indexResource
     });
     this.config = {
       minWordLength: options.minWordLength || 3,

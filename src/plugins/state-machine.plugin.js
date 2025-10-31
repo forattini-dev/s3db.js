@@ -108,11 +108,11 @@ export class StateMachinePlugin extends Plugin {
     this.resourceNames = resolveResourceNames('state_machine', {
       transitionLog: {
         defaultName: 'plg_state_transitions',
-        override: resourceNamesOption.transitionLog
+        override: resourceNamesOption.transitionLog || options.transitionLogResource
       },
       states: {
         defaultName: 'plg_entity_states',
-        override: resourceNamesOption.states
+        override: resourceNamesOption.states || options.stateResource
       }
     });
 
