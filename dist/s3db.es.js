@@ -1,6 +1,7 @@
 import crypto, { createHash, createVerify, generateKeyPairSync, createPublicKey, createSign, randomUUID, randomBytes } from 'crypto';
 import EventEmitter, { EventEmitter as EventEmitter$1 } from 'events';
 import { Hono } from 'hono';
+import bcrypt from 'bcrypt';
 import { jwtVerify, createRemoteJWKSet, SignJWT } from 'jose';
 import fs$1, { readFile, mkdir, copyFile, unlink, stat, access, readdir, writeFile, rm, watch } from 'fs/promises';
 import path, { resolve, join, dirname } from 'path';
@@ -64,7 +65,6 @@ import { glob } from 'glob';
 import { gzip as gzip$1, brotliCompress } from 'zlib';
 import { promisify as promisify$1 } from 'util';
 import { fileURLToPath } from 'url';
-import bcrypt from 'bcrypt';
 import { randomFillSync } from 'node:crypto';
 
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -4345,8 +4345,30 @@ function createAuthRoutes(authResource, config = {}) {
     jwtSecret,
     jwtExpiresIn = "7d",
     passphrase = "secret",
-    allowRegistration = true
+    registration = {},
+    loginThrottle = {}
   } = config;
+  const registrationConfig = {
+    enabled: registration.enabled === true,
+    allowedFields: Array.isArray(registration.allowedFields) ? registration.allowedFields : [],
+    defaultRole: registration.defaultRole || "user"
+  };
+  const schemaAttributes = authResource.schema?.attributes || {};
+  const passwordAttribute = schemaAttributes?.[passwordField];
+  typeof passwordAttribute === "string" ? passwordAttribute.includes("password") : passwordAttribute?.type === "password";
+  const allowedRegistrationFields = /* @__PURE__ */ new Set([usernameField, passwordField]);
+  for (const field of registrationConfig.allowedFields) {
+    if (typeof field === "string" && field && field !== passwordField) {
+      allowedRegistrationFields.add(field);
+    }
+  }
+  ({
+    enabled: loginThrottle?.enabled !== false,
+    maxAttempts: loginThrottle?.maxAttempts ?? 5,
+    windowMs: loginThrottle?.windowMs ?? 6e4,
+    blockDurationMs: loginThrottle?.blockDurationMs ?? 3e5,
+    maxEntries: loginThrottle?.maxEntries ?? 1e4
+  });
   if (allowRegistration) {
     app.post("/register", asyncHandler(async (c) => {
       const data = await c.req.json();
@@ -10116,6 +10138,13 @@ class ApiServer {
   _setupAuthRoutes() {
     const { database, auth } = this.options;
     const { drivers, resource: resourceName, usernameField, passwordField } = auth;
+    const identityPlugin = database?.plugins?.identity || database?.plugins?.Identity;
+    if (identityPlugin) {
+      if (this.options.verbose) {
+        console.warn("[API Plugin] IdentityPlugin detected. Skipping built-in auth routes.");
+      }
+      return;
+    }
     const jwtDriver = drivers.find((d) => d.driver === "jwt");
     if (!jwtDriver) {
       return;
@@ -10126,6 +10155,19 @@ class ApiServer {
       return;
     }
     const driverConfig = jwtDriver.config || {};
+    const registrationConfig = {
+      enabled: driverConfig.allowRegistration === true || driverConfig.registration?.enabled === true || auth.registration?.enabled === true,
+      allowedFields: Array.isArray(driverConfig.registration?.allowedFields) ? driverConfig.registration.allowedFields : Array.isArray(auth.registration?.allowedFields) ? auth.registration.allowedFields : [],
+      defaultRole: driverConfig.registration?.defaultRole ?? auth.registration?.defaultRole ?? "user"
+    };
+    const driverLoginThrottle = driverConfig.loginThrottle || {};
+    const loginThrottleConfig = {
+      enabled: driverLoginThrottle.enabled ?? auth.loginThrottle?.enabled ?? true,
+      maxAttempts: driverLoginThrottle.maxAttempts || auth.loginThrottle?.maxAttempts || 5,
+      windowMs: driverLoginThrottle.windowMs || auth.loginThrottle?.windowMs || 6e4,
+      blockDurationMs: driverLoginThrottle.blockDurationMs || auth.loginThrottle?.blockDurationMs || 3e5,
+      maxEntries: driverLoginThrottle.maxEntries || auth.loginThrottle?.maxEntries || 1e4
+    };
     const authConfig = {
       driver: "jwt",
       usernameField,
@@ -10133,7 +10175,9 @@ class ApiServer {
       jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
       jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
       passphrase: driverConfig.passphrase || "secret",
-      allowRegistration: driverConfig.allowRegistration !== false
+      allowRegistration: registrationConfig.enabled,
+      registration: registrationConfig,
+      loginThrottle: loginThrottleConfig
     };
     const authApp = createAuthRoutes(authResource, authConfig);
     this.app.route("/auth", authApp);
@@ -11169,9 +11213,20 @@ class ApiPlugin extends Plugin {
    */
   async _createRateLimitMiddleware() {
     const requests = /* @__PURE__ */ new Map();
-    const { windowMs, maxRequests, keyGenerator } = this.config.rateLimit;
+    const { windowMs, maxRequests, keyGenerator, maxUniqueKeys } = this.config.rateLimit;
+    const getClientIp = (c) => {
+      const forwarded = c.req.header("x-forwarded-for");
+      if (forwarded) {
+        return forwarded.split(",")[0].trim();
+      }
+      const cfConnecting = c.req.header("cf-connecting-ip");
+      if (cfConnecting) {
+        return cfConnecting;
+      }
+      return c.req.raw?.socket?.remoteAddress || "unknown";
+    };
     return async (c, next) => {
-      const key = keyGenerator ? keyGenerator(c) : c.req.header("x-forwarded-for") || c.req.header("cf-connecting-ip") || "unknown";
+      const key = keyGenerator ? keyGenerator(c) : getClientIp(c) || "unknown";
       let record = requests.get(key);
       if (record && Date.now() > record.resetAt) {
         requests.delete(key);
@@ -11180,6 +11235,12 @@ class ApiPlugin extends Plugin {
       if (!record) {
         record = { count: 0, resetAt: Date.now() + windowMs };
         requests.set(key, record);
+        if (requests.size > maxUniqueKeys) {
+          const oldestKey = requests.keys().next().value;
+          if (oldestKey) {
+            requests.delete(oldestKey);
+          }
+        }
       }
       if (record.count >= maxRequests) {
         const retryAfter = Math.ceil((record.resetAt - Date.now()) / 1e3);
@@ -21376,26 +21437,35 @@ class S3QueuePlugin extends Plugin {
     });
   }
   async getStats() {
-    const [ok, err, allMessages] = await tryFn(
-      () => this.queueResource.list()
-    );
-    if (!ok) {
-      if (this.config.verbose) {
-        console.warn("[S3QueuePlugin] Failed to get stats:", err.message);
-      }
-      return null;
-    }
+    const statusKeys = ["pending", "processing", "completed", "failed", "dead"];
     const stats = {
-      total: allMessages.length,
+      total: 0,
       pending: 0,
       processing: 0,
       completed: 0,
       failed: 0,
       dead: 0
     };
-    for (const msg of allMessages) {
-      if (stats[msg.status] !== void 0) {
-        stats[msg.status]++;
+    const counts = await Promise.all(
+      statusKeys.map((status) => tryFn(() => this.queueResource.count({ status })))
+    );
+    let derivedTotal = 0;
+    counts.forEach(([ok, err, count], index) => {
+      const status = statusKeys[index];
+      if (ok) {
+        stats[status] = count || 0;
+        derivedTotal += count || 0;
+      } else if (this.config.verbose) {
+        console.warn(`[S3QueuePlugin] Failed to count status '${status}':`, err?.message);
+      }
+    });
+    const [totalOk, totalErr, totalCount] = await tryFn(() => this.queueResource.count());
+    if (totalOk) {
+      stats.total = totalCount || 0;
+    } else {
+      stats.total = derivedTotal;
+      if (this.config.verbose) {
+        console.warn("[S3QueuePlugin] Failed to count total messages:", totalErr?.message);
       }
     }
     return stats;
