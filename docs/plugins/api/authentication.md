@@ -97,17 +97,17 @@ await db.usePlugin(new ApiPlugin({
 # 1. Register new user
 curl -X POST http://localhost:3000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{
+-d '{
     "email": "john@example.com",
     "password": "secret123",
-    "role": "user"
+    "name": "John"
   }'
 
 # Response:
 # {
 #   "success": true,
 #   "data": {
-#     "user": { "id": "abc123", "email": "john@example.com", "role": "user" },
+#     "user": { "id": "abc123", "email": "john@example.com", "name": "John", "role": "user" },
 #     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 #   }
 # }
