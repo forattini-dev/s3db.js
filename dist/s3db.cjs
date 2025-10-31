@@ -13253,7 +13253,7 @@ function mergeResourceConfig$1(baseConfig, userConfig = {}, resourceType) {
   }
   return merged;
 }
-function validateResourcesConfig$2(resourcesConfig) {
+function validateResourcesConfig$1(resourcesConfig) {
   const errors = [];
   if (!resourcesConfig || typeof resourcesConfig !== "object") {
     errors.push('IdentityPlugin requires "resources" configuration object');
@@ -13293,7 +13293,7 @@ function validateResourcesConfig$2(resourcesConfig) {
 }
 
 function prepareResourceConfigs(resourcesOptions = {}) {
-  const resourcesValidation = validateResourcesConfig$2(resourcesOptions);
+  const resourcesValidation = validateResourcesConfig$1(resourcesOptions);
   if (!resourcesValidation.valid) {
     throw new Error(
       "IdentityPlugin configuration error:\n" + resourcesValidation.errors.join("\n")
@@ -13361,27 +13361,6 @@ class IdentityPlugin extends Plugin {
       }
     };
     this.internalResourceNames = this._resolveInternalResourceNames();
-    const resourcesValidation = validateResourcesConfig(options.resources);
-    if (!resourcesValidation.valid) {
-      throw new Error(
-        "IdentityPlugin configuration error:\n" + resourcesValidation.errors.join("\n")
-      );
-    }
-    mergeResourceConfig(
-      { attributes: BASE_USER_ATTRIBUTES },
-      options.resources.users,
-      "users"
-    );
-    mergeResourceConfig(
-      { attributes: BASE_TENANT_ATTRIBUTES },
-      options.resources.tenants,
-      "tenants"
-    );
-    mergeResourceConfig(
-      { attributes: BASE_CLIENT_ATTRIBUTES },
-      options.resources.clients,
-      "clients"
-    );
     const normalizedResources = prepareResourceConfigs(options.resources);
     this.config = {
       // Server configuration
@@ -22969,7 +22948,7 @@ function createConfig(options, detectedTimezone) {
     verbose: options.verbose || false
   };
 }
-function validateResourcesConfig$1(resources) {
+function validateResourcesConfig(resources) {
   if (!resources || typeof resources !== "object") {
     throw new PluginError("EventualConsistencyPlugin requires a 'resources' option", {
       pluginName: "EventualConsistencyPlugin",
@@ -25412,7 +25391,7 @@ async function onStop(fieldHandlers, emitFn) {
 class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    validateResourcesConfig$1(options.resources);
+    validateResourcesConfig(options.resources);
     const detectedTimezone = detectTimezone();
     const timezoneAutoDetected = !options.cohort?.timezone;
     this.config = createConfig(options, detectedTimezone);
