@@ -196,6 +196,10 @@ export class Resource extends AsyncEventEmitter {
     // Useful for plugins, documentation, and introspection
     this.$schema = cloneDeep(config);
 
+    // Add metadata timestamps
+    this.$schema._createdAt = Date.now();
+    this.$schema._updatedAt = Date.now();
+
     // Initialize hooks system - expanded to cover ALL methods
     this.hooks = {
       // Insert hooks

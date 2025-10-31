@@ -1801,7 +1801,13 @@ class PluginStorage {
    * @returns {Promise<void>}
    */
   async set(key, data, options = {}) {
-    const { ttl, behavior = "body-overflow", contentType = "application/json" } = options;
+    const {
+      ttl,
+      behavior = "body-overflow",
+      contentType = "application/json",
+      ifMatch,
+      ifNoneMatch
+    } = options;
     const dataToSave = { ...data };
     if (ttl && typeof ttl === "number" && ttl > 0) {
       dataToSave._expiresAt = Date.now() + ttl * 1e3;
@@ -25297,6 +25303,8 @@ ${errorDetails}`,
       createdBy
     };
     this.$schema = cloneDeep(config);
+    this.$schema._createdAt = Date.now();
+    this.$schema._updatedAt = Date.now();
     this.hooks = {
       // Insert hooks
       beforeInsert: [],

@@ -31,6 +31,7 @@
 import { metadataEncode, metadataDecode } from './metadata-encoding.js';
 import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
 import { tryFn } from './try-fn.js';
+import { idGenerator } from './id.js';
 import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
 
 const S3_METADATA_LIMIT = 2047; // AWS S3 metadata limit in bytes
@@ -92,7 +93,13 @@ export class PluginStorage {
    * @returns {Promise<void>}
    */
   async set(key, data, options = {}) {
-    const { ttl, behavior = 'body-overflow', contentType = 'application/json' } = options;
+    const {
+      ttl,
+      behavior = 'body-overflow',
+      contentType = 'application/json',
+      ifMatch,
+      ifNoneMatch
+    } = options;
 
     // Clone data to avoid mutating original
     const dataToSave = { ...data };
