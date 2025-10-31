@@ -1522,6 +1522,40 @@ If you need to use a custom driver, call `registerCloudDriver('aws', factory)` t
 
 ---
 
+## 🚨 Error Handling
+
+CloudInventoryPlugin now emits structured `PluginError` responses for common misconfigurations. Each error includes `statusCode`, `retriable`, and an English `suggestion` to help operators recover quickly.
+
+### Missing Resource Definitions
+
+- **Status**: `404`
+- **Message**: `No eventual consistency configured for resource` (when helper APIs are called for unknown clouds)
+- **Fix**: Ensure the resource or field is declared under `new CloudInventoryPlugin({ clouds: [...] })` before invoking analytics helpers.
+
+### Invalid Schedule Configuration
+
+- **Status**: `400`
+- **Message**: `Cloud "<id>" has an invalid scheduled configuration`
+- **Fix**: Supply a valid cron expression when `scheduled.enabled` is `true`. Example: `{ cron: '0 * * * *', timezone: 'UTC' }`.
+
+### Terraform Export Misconfiguration
+
+- **Status**: `400`/`500`
+- **Message** examples:
+  - `Invalid S3 URL format: s3://...`
+  - `Terraform output path not configured`
+- **Fix**: Provide `terraform.output` that matches the selected `outputType` (`file`, `s3`, or a custom function). The error’s `suggestion` field contains the exact formatting requirements.
+
+### Missing S3 Client
+
+- **Status**: `500`
+- **Message**: `S3 client not available. Database must use S3-compatible storage.`
+- **Fix**: Initialize the database with an S3-compatible client before calling `exportToTerraformStateToS3`.
+
+Refer to `error.toJson()` for complete context (command input, bucket/key, retry hints) whenever an operation fails.
+
+---
+
 ## Notes
 
 - The plugin ships with minimal defaults; feel free to rename the managed resources.

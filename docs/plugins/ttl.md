@@ -166,6 +166,14 @@ The **TTL (Time-To-Live) Plugin v2** automatically removes or archives expired r
 
 ## Configuration Options
 
+### Dependency Graph
+
+```mermaid
+flowchart TB
+  TTL[TTL Plugin]
+  TTL --> NoDeps((No plugin dependencies))
+```
+
 ### Plugin-Level Options
 
 ```javascript
@@ -519,6 +527,23 @@ const stats = ttlPlugin.getStats();
   resources: 3               // Number of configured resources
 }
 ```
+
+---
+
+## 🚨 Error Handling
+
+TTLPlugin now throws `PluginError` instances with structured metadata whenever configuration or runtime checks fail. Inspect `error.statusCode`, `error.retriable`, and `error.suggestion` to automate remediation.
+
+| Scenario | Status | Message | Suggested Fix |
+|----------|--------|---------|---------------|
+| Missing TTL or field | 400 | `Missing TTL configuration` | Provide `ttl` (relative) or `field` (absolute expiry) for every resource entry. |
+| Invalid `onExpire` strategy | 400 | `Invalid onExpire strategy` | Use one of `soft-delete`, `hard-delete`, `archive`, `callback`. |
+| Archive strategy without `archiveResource` | 400 | `Archive resource required` | Point `archiveResource` to a valid S3DB resource before enabling archives. |
+| Callback strategy without function | 400 | `Callback handler required` | Supply `callback: async (record, resource) => { ... }`. |
+| Manual cleanup on unknown resource | 404 | `Resource "X" not configured in TTLPlugin` | Run `cleanupResource` only for registered resources. |
+| Archive resource missing at runtime | 404 | `Archive resource "X" not found` | Ensure the archive resource exists and the plugin has permissions to access it. |
+
+Each error also includes `suggestion` text in English and, when relevant, the failing `resourceName`, `operation`, or size metrics (e.g., metadata overflow). Use `error.toJson()` for structured logging.
 
 #### `runCleanup()`
 

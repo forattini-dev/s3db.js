@@ -527,7 +527,7 @@ describe('ImporterPlugin', () => {
         format: 'unsupported'
       });
 
-      await expect(database.usePlugin(plugin)).rejects.toThrow('Unsupported format');
+      await expect(database.usePlugin(plugin)).rejects.toThrow('Unsupported import format: unsupported');
     });
 
     it('should throw error if file not found', async () => {

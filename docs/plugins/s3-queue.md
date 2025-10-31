@@ -103,7 +103,7 @@ Unlike traditional queues that guarantee "at-least-once" delivery, S3Queue achie
 │          Zero Duplication Architecture           │
 ├──────────────────────────────────────────────────┤
 │                                                   │
-│  Layer 1: Distributed Locks (S3 Resources)      │
+│  Layer 1: PluginStorage Locks                   │
 │            ↓ Prevents concurrent cache checks    │
 │                                                   │
 │  Layer 2: Deduplication Cache (In-Memory)        │
@@ -125,8 +125,8 @@ Each message gets a distributed lock during claim:
 // Worker A tries to claim message-123
 ┌─────────────────────────────────────────────────┐
 │ 1. Acquire lock for message-123                 │
-│    ├─ Create lock resource entry                │
-│    ├─ Check if lock exists (ETag check)         │
+│    ├─ Use PluginStorage (TTL-based lock)        │
+│    ├─ Check if lock exists (token check)        │
 │    └─ Only ONE worker succeeds ✓                │
 │                                                  │
 │ 2. Check deduplication cache (while locked)     │
@@ -145,6 +145,23 @@ Each message gets a distributed lock during claim:
 │    └─ Handler executes                          │
 └─────────────────────────────────────────────────┘
 ```
+
+### 🛠 Automatic Recovery (Visibility TTL)
+
+Long-running handlers sometimes crash or die before completing. S3Queue continuously scans for messages stuck in the `processing` state with an expired `visibleAt` timestamp and automatically requeues them. If the message has already reached `maxAttempts`, it is moved to the dead letter queue instead.
+
+Tunable controls:
+
+```javascript
+new S3QueuePlugin({
+  resource: 'videos',
+  recoveryInterval: 10_000,     // run recovery every 10s
+  recoveryBatchSize: 50,        // recover up to 50 per sweep
+  visibilityTimeout: 15 * 60 * 1000
+});
+```
+
+When a message is brought back to `pending`, the plugin emits `plg:s3-queue:message-recovered`.
 
 ### ⏱️ Visibility Timeout Pattern
 
@@ -486,6 +503,8 @@ await images.enqueue({
 #### Example 3: Call External API
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 const webhookQueue = new S3QueuePlugin({
   resource: 'webhooks',
   maxAttempts: 5, // Retry up to 5 times for reliability
@@ -502,7 +521,17 @@ const webhookQueue = new S3QueuePlugin({
     });
 
     if (!response.ok) {
-      throw new Error(`Webhook failed: ${response.status} ${response.statusText}`);
+      throw new PluginError('Webhook endpoint rejected the payload', {
+        statusCode: response.status,
+        retriable: response.status >= 500,
+        suggestion: response.status >= 500
+          ? 'Remote endpoint returned a 5xx. S3Queue will retry; ensure the service recovers.'
+          : 'Inspect the remote service logs and payload to fix validation issues before retrying.',
+        metadata: {
+          endpoint: webhook.url,
+          statusText: response.statusText
+        }
+      });
     }
 
     return {
@@ -570,6 +599,8 @@ const syncQueue = new S3QueuePlugin({
 #### Example 5: Complex Business Logic
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 const orderQueue = new S3QueuePlugin({
   resource: 'orders',
   concurrency: 10,
@@ -580,7 +611,12 @@ const orderQueue = new S3QueuePlugin({
     // Step 1: Validate inventory
     const inventory = await checkInventory(order.items);
     if (!inventory.available) {
-      throw new Error('Out of stock');
+      throw new PluginError('Order cannot be fulfilled: inventory unavailable', {
+        statusCode: 409,
+        retriable: false,
+        suggestion: 'Restock the missing SKUs or route the order to a fallback warehouse before retrying.',
+        metadata: { missingSkus: inventory.missing }
+      });
     }
 
     // Step 2: Process payment
@@ -591,7 +627,14 @@ const orderQueue = new S3QueuePlugin({
     });
 
     if (!payment.success) {
-      throw new Error(`Payment failed: ${payment.error}`);
+      throw new PluginError('Payment processor declined the transaction', {
+        statusCode: payment.status ?? 402,
+        retriable: payment.retriable ?? false,
+        suggestion: payment.retriable
+          ? 'Allow S3Queue to retry after the backoff window or try a backup processor.'
+          : 'Ask the customer to supply a new payment method or authorize the charge.',
+        metadata: { attemptId: payment.id, reason: payment.error }
+      });
     }
 
     // Step 3: Create shipment
@@ -680,8 +723,15 @@ onMessage: async (msg) => {
   const response = await callAPI(msg);
 
   if (!response.ok) {
-    throw new Error(`API failed: ${response.status}`);
-    // → Will retry with exponential backoff
+    throw new PluginError('Upstream API returned a non-2xx response', {
+      statusCode: response.status,
+      retriable: response.status >= 500,
+      suggestion: response.status >= 500
+        ? 'Leave the message in-flight so the automatic retry kicks in.'
+        : 'Fix the request payload or authentication before retrying.',
+      metadata: { endpoint: response.url }
+    });
+    // → Will retry with exponential backoff when retriable=true
   }
 
   return { success: true };
@@ -689,6 +739,24 @@ onMessage: async (msg) => {
 ```
 
 ### Error Handling in `onMessage`
+
+S3QueuePlugin now throws `QueueError` (a `PluginError`) when queue messages are malformed or when the target resource is unavailable. When you want to fail deliberately from inside `onMessage`, throw your own `PluginError` (import it from `s3db.js`) so operators receive clear guidance.
+
+```javascript
+if (error.name === 'QueueError') {
+  console.error('Status:', error.statusCode, 'Retriable?', error.retriable);
+  console.error('Suggestion:', error.suggestion);
+}
+```
+
+| Scenario | Status | Retriable? | Message | Suggested Fix |
+|----------|--------|------------|---------|---------------|
+| Missing `resource` or `action` | 400 | `false` | `Resource not found in message` / `Action not found in message` | Ensure the producer includes both fields before enqueueing. |
+| Unknown resource | 404 | `false` | `Resource '<name>' not found` | Create the resource (or adjust naming) before processing messages. |
+| Unsupported action | 400 | `false` | `Unsupported action '<name>'` | Use `insert`, `update`, `delete`, or extend the consumer to handle custom actions. |
+| Queue storage locked | 423 | `true` | `Message already claimed by worker-X` | Let the default retry run; the lock TTL will release. |
+
+Call `error.toJson()` whenever you send telemetry—the payload already contains `suggestion`, `docs`, `metadata`, and `retriable` so your dashboards remain actionable.
 
 **If your function throws an error**, S3Queue will:
 
@@ -772,7 +840,10 @@ new S3QueuePlugin({
   // === Concurrency ===
   concurrency: 3,                 // Number of parallel workers
   pollInterval: 1000,             // Poll every 1 second
+  pollBatchSize: 32,              // Max messages fetched per poll
   visibilityTimeout: 30000,       // 30 seconds invisible time
+  recoveryInterval: 5000,         // Scan for stalled messages every 5s
+  recoveryBatchSize: 20,          // Max recovered per scan
 
   // === Retries ===
   maxAttempts: 3,                 // Retry up to 3 times
@@ -793,6 +864,15 @@ new S3QueuePlugin({
 ```
 
 ### Configuration Patterns
+
+#### Dependency Graph
+
+```mermaid
+flowchart TB
+  S3Q[S3Queue Plugin]
+  TTL[TTL Plugin]
+  S3Q -- optional --> TTL
+```
 
 #### Pattern 1: High Throughput
 
@@ -925,6 +1005,8 @@ await db.usePlugin(orderQueue);
 ### Use Case 2: Webhook Delivery System
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 const webhooks = await db.createResource({
   name: 'webhooks',
   attributes: {
@@ -955,7 +1037,14 @@ const webhookQueue = new S3QueuePlugin({
     });
 
     if (!response.ok) {
-      throw new Error(`Webhook failed: ${response.status}`);
+      throw new PluginError('Webhook delivery failed', {
+        statusCode: response.status,
+        retriable: response.status >= 500,
+        suggestion: response.status >= 500
+          ? 'Keep the message in the queue—S3Queue will retry automatically.'
+          : 'Fix the consumer endpoint; consider moving the event to the dead-letter queue.',
+        metadata: { endpoint: webhook.url }
+      });
     }
 
     return {
@@ -1138,11 +1227,11 @@ S3Queue creates three S3DB resources for each queue:
 │     ├─ visibleAt: visibility timeout                    │
 │     └─ ETag: for atomic claims                          │
 │                                                          │
-│  3. Lock Resource (tasks_locks)                         │
-│     ├─ Distributed locks                                │
-│     ├─ workerId: which worker owns lock                 │
-│     ├─ timestamp: when lock was acquired                │
-│     └─ ttl: lock expiry (5 seconds)                     │
+│  3. Plugin Storage Locks                                │
+│     ├─ Stored under `plugin=s3-queue/locks/*`           │
+│     ├─ workerId/token metadata for ownership            │
+│     ├─ Auto-expire based on TTL                         │
+│     └─ No extra resource clutter                        │
 │                                                          │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -1170,11 +1259,11 @@ S3Queue creates three S3DB resources for each queue:
 
 3️⃣  ACQUIRE LOCK
     │
-    ├─► Try to create lock in 'tasks_locks'
-    │   { id: 'lock-queue-1', workerId: 'worker-A', timestamp: now }
+    ├─► Use PluginStorage: storage.acquireLock('msg-queue-1', { ttl: 5 })
+    │   { name: 'msg-queue-1', token: 'xyz', workerId: 'worker-A' }
     │
-    ├─► If lock exists → Skip (another worker has it)
-    └─► If created → Worker A owns the lock ✓
+    ├─► If returns null → Skip (another worker processed)
+    └─► If lock object returned → Worker A owns the lock ✓
 
 4️⃣  CHECK CACHE (while holding lock)
     │
@@ -1182,7 +1271,7 @@ S3Queue creates three S3DB resources for each queue:
     │   └─► Yes → Release lock, skip message
     │   └─► No → Add to cache, continue
     │
-    └─► Release lock (cache updated)
+    └─► Release lock with storage.releaseLock(lock) (cache updated)
 
 5️⃣  CLAIM WITH ETAG
     │
@@ -1391,6 +1480,16 @@ Stop processing for this resource.
 await tasks.stopProcessing();
 ```
 
+#### `resource.extendQueueVisibility(queueId, extraMs)`
+
+Extend the visibility timeout for a specific queue entry. Useful when the handler knows it will take longer than the original `visibilityTimeout`.
+
+```javascript
+await tasks.extendQueueVisibility(queueId, 5 * 60 * 1000); // add 5 minutes
+```
+
+Returns `true` when the update succeeds.
+
 ### Handler Context
 
 The `onMessage` handler receives a context object:
@@ -1432,6 +1531,12 @@ queue.on('plg:s3-queue:message-claimed', (event) => {
 queue.on('plg:s3-queue:message-processing', (event) => {
   console.log(`⚙️ Processing: ${event.queueId}`);
   // { queueId, workerId }
+});
+
+// Message recovered after visibility timeout
+queue.on('plg:s3-queue:message-recovered', (event) => {
+  console.log(`🛠 Recovered: ${event.queueId}`);
+  // { queueId, originalId }
 });
 
 // Message completed
@@ -1542,6 +1647,8 @@ onMessage: async (order) => {
 Handle shutdown signals properly:
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 let isShuttingDown = false;
 
 process.on('SIGTERM', async () => {
@@ -1566,7 +1673,11 @@ const queue = new S3QueuePlugin({
   onMessage: async (task) => {
     // Check if shutting down
     if (isShuttingDown) {
-      throw new Error('Shutting down, will retry later');
+      throw new PluginError('Worker shutting down, please retry later', {
+        statusCode: 503,
+        retriable: true,
+        suggestion: 'S3Queue will release the invisibility timeout; no manual action required.'
+      });
     }
 
     await processTask(task);
@@ -1641,17 +1752,25 @@ const batchQueue = new S3QueuePlugin({
 Prevent cascading failures:
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 class CircuitBreaker {
   constructor(threshold = 5, timeout = 60000) {
     this.failures = 0;
     this.threshold = threshold;
     this.timeout = timeout;
     this.state = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+    this.openUntil = null;
   }
 
   async execute(fn) {
     if (this.state === 'OPEN') {
-      throw new Error('Circuit breaker is OPEN');
+      throw new PluginError('Circuit breaker is OPEN', {
+        statusCode: 429,
+        retriable: true,
+        suggestion: `Wait ${Math.round((this.openUntil - Date.now()) / 1000)}s before retrying.`,
+        metadata: { failures: this.failures }
+      });
     }
 
     try {
@@ -1675,9 +1794,11 @@ class CircuitBreaker {
     this.failures++;
     if (this.failures >= this.threshold) {
       this.state = 'OPEN';
+      this.openUntil = Date.now() + this.timeout;
       setTimeout(() => {
         this.state = 'HALF_OPEN';
         this.failures = 0;
+        this.openUntil = null;
       }, this.timeout);
     }
   }
@@ -1940,12 +2061,13 @@ console.log(queueEntries.map(e => ({
 **Solutions:**
 
 ```javascript
-// Check 1: Verify lock resource exists
-console.log('Lock resource:', db.resources['tasks_locks']);
+// Check 1: Inspect PluginStorage locks
+const storage = queue.getStorage();
+const lockKeys = await storage.list('locks');
+console.log('Active locks:', lockKeys);
 
-if (!db.resources['tasks_locks']) {
-  console.error('⚠️ Lock resource not created!');
-  // Recreate plugin
+if (!lockKeys.length) {
+  console.warn('No lock keys found - ensure workers are running and TTL not expiring immediately.');
 }
 
 // Check 2: Enable verbose mode

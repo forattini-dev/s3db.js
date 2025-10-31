@@ -82,7 +82,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
       }
     });
 
-    await expect(plugin.install(db)).rejects.toThrow('must have either "ttl"');
+    await expect(plugin.install(db)).rejects.toThrow('[TTLPlugin] Missing TTL configuration');
     await db.disconnect();
   });
 

@@ -8,6 +8,7 @@ Bundle that orchestrates **CookieFarmPlugin**, **PuppeteerPlugin**, **S3QueuePlu
 
 ```javascript
 import { CookieFarmSuitePlugin } from 's3db.js/plugins';
+import { PluginError } from 's3db.js';
 
 const suite = new CookieFarmSuitePlugin({
   namespace: 'persona',
@@ -24,7 +25,12 @@ suite.setProcessor(async (job, context, { cookieFarm }) => {
   if (job.jobType === 'generate') {
     return { scheduled: true, count: job.payload?.count ?? 1 };
   }
-  throw new Error(`Unsupported job type: ${job.jobType}`);
+  throw new PluginError('Unsupported job type for CookieFarm suite processor', {
+    statusCode: 400,
+    retriable: false,
+    suggestion: `Accept one of: "generate", "warmup", "retire". Received "${job.jobType}".`,
+    metadata: { jobType: job.jobType }
+  });
 });
 
 await suite.enqueueJob({ jobType: 'generate', payload: { count: 5 } });
@@ -60,6 +66,22 @@ await suite.startProcessing();
 - `enqueue(data, options)`: helper to push new jobs
 - `resource`: direct handle to the jobs resource
 
+### Dependency Graph
+
+```mermaid
+flowchart TB
+  Suite[CookieFarmSuite Plugin]
+  CF[CookieFarmPlugin]
+  Puppeteer[PuppeteerPlugin]
+  Queue[S3QueuePlugin]
+  TTL[TTLPlugin]
+
+  Suite --> CF
+  Suite --> Puppeteer
+  Suite --> Queue
+  Suite -- optional --> TTL
+```
+
 ---
 
 ## 📬 Enqueuing Jobs
@@ -91,6 +113,44 @@ You decide how to interpret `jobType`/`payload`. A common pattern is:
 | `enqueueJob(data, options)` | Enqueue a persona job (wraps `resource.enqueue`) |
 | `startProcessing(options)` | Starts bundled queue workers |
 | `stopProcessing()` | Stops queue workers |
+
+---
+
+## 🚨 Error Handling
+
+All bundled plugins surface `PluginError` subclasses with HTTP-style metadata. Always inspect `statusCode`, `retriable`, and `suggestion` before deciding to retry or dead-letter a job.
+
+```javascript
+try {
+  await suite.enqueueJob({ jobType: 'warmup' });
+} catch (error) {
+  if (error.name === 'QueueError') {
+    console.warn('Queue misconfiguration', {
+      status: error.statusCode,
+      retriable: error.retriable,
+      suggestion: error.suggestion
+    });
+  } else if (error.name === 'CookieFarmError') {
+    console.warn('Persona workflow rejected', error.toJson());
+  } else if (error.name === 'BrowserPoolError') {
+    console.warn('Puppeteer pool exhausted, will retry', {
+      retriable: error.retriable,
+      hint: error.hint
+    });
+  } else {
+    throw error; // Bubble up unknown errors
+  }
+}
+```
+
+| Source | Status | Retriable? | Message | Suggestion |
+|--------|--------|------------|---------|------------|
+| `CookieFarmError` | 400 | `false` | `Warmup pipeline requires warmup.enabled=true` | Enable the warmup feature or change `jobType`. |
+| `QueueError` | 409 | `true` | `Duplicate job detected` | Keep the default retry logic or adjust deduplication keys. |
+| `QueueError` | 404 | `false` | `jobs resource persona_persona_jobs not found` | Provision the resource or adjust `jobsResource`. |
+| `BrowserPoolError` | 503 | `true` | `No healthy proxies available` | Increase proxy pool size or relax proxy health thresholds. |
+
+Call `error.toJson()` when sending telemetry—the payload already includes `suggestion`, `docs`, and `metadata` fields that operators can act on.
 
 ---
 

@@ -2,16 +2,28 @@
 
 ## ⚡ TLDR
 
-**Drastically** reduces S3 costs and latency with intelligent caching (memory/filesystem/S3).
+**Drastically** reduces S3 costs and latency with intelligent caching (memory/redis/S3).
 
 **1 line to get started:**
 ```javascript
 await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x faster!
 ```
 
+**Multi-tier caching (cascade L1→L2→L3→Database):**
+```javascript
+await db.usePlugin(new CachePlugin({
+  drivers: [
+    { driver: 'memory', ttl: 300000, config: { maxMemoryPercent: 0.1 } },  // L1: ~1ms
+    { driver: 'redis', ttl: 3600000, config: { host: 'localhost' } },      // L2: ~15ms
+    { driver: 's3', ttl: 86400000, config: { keyPrefix: 'cache/' } }       // L3: ~120ms
+  ]
+}));
+```
+
 **Key features:**
-- ✅ Drivers: memory (LRU/FIFO), filesystem, S3
-- ✅ Configurable TTL (milliseconds) + automatic invalidation
+- ✅ Drivers: memory (LRU/FIFO), redis, S3
+- ✅ Multi-tier caching with auto-promotion (hot data moves to faster layers)
+- ✅ Configurable TTL per layer + automatic invalidation
 - ✅ Optional compression (gzip)
 - ✅ Hit/miss/eviction statistics
 - ✅ Partition-aware caching with usage insights
@@ -267,10 +279,11 @@ setInterval(() => {
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `driver` | string | `'memory'` | Cache storage driver: `'memory'`, `'filesystem'`, or `'s3'` |
-| `ttl` | number | `300000` | Time-to-live in milliseconds (5 minutes default) |
-| `maxSize` | number | `1000` | Maximum number of cached items |
-| `config` | object | `{}` | Driver-specific configuration options |
+| `driver` | string | `'memory'` | Single-tier mode: Cache storage driver (`'memory'`, `'redis'`, or `'s3'`) |
+| `drivers` | array | `undefined` | Multi-tier mode: Array of driver configs `[{ driver, ttl, config }, ...]` |
+| `ttl` | number | `300000` | Time-to-live in milliseconds (5 minutes default) - single-tier mode only |
+| `maxSize` | number | `1000` | Maximum number of cached items - single-tier mode only |
+| `config` | object | `{}` | Driver-specific configuration options - single-tier mode only |
 
 ### Memory Driver Config
 
@@ -286,15 +299,20 @@ setInterval(() => {
 | `enableCompression` | boolean | `false` | Compress cached values with gzip |
 | `compressionThreshold` | number | `1024` | Minimum size (bytes) to trigger compression |
 
-### Filesystem Driver Config
+### Redis Driver Config
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `directory` | string | **required** | Path to store cache files |
-| `enableCompression` | boolean | `true` | Enable gzip compression |
-| `createDirectory` | boolean | `true` | Auto-create directory if missing |
-| `enableCleanup` | boolean | `true` | Auto-cleanup expired files |
-| `cleanupInterval` | number | `300000` | Cleanup interval in ms (5 minutes) |
+| `host` | string | `'localhost'` | Redis server host |
+| `port` | number | `6379` | Redis server port |
+| `password` | string | `undefined` | Redis authentication password |
+| `db` | number | `0` | Redis database number (0-15) |
+| `keyPrefix` | string | `'cache'` | Prefix for all Redis keys |
+| `enableCompression` | boolean | `true` | Compress cached values with gzip |
+| `compressionThreshold` | number | `1024` | Minimum size (bytes) to trigger compression |
+| `connectTimeout` | number | `5000` | Connection timeout in milliseconds |
+| `commandTimeout` | number | `5000` | Command execution timeout in milliseconds |
+| `retryStrategy` | function | See docs | Custom retry logic for failed connections |
 
 ### S3 Driver Config
 
@@ -306,6 +324,63 @@ setInterval(() => {
 ---
 
 ## 📚 Configuration Examples
+
+### Multi-Tier Cache Architecture
+
+**Multi-tier caching** creates a cascade of cache layers with different speed/cost trade-offs:
+
+```javascript
+// L1 (Memory) → L2 (Redis) → L3 (S3) → Database
+await db.usePlugin(new CachePlugin({
+  drivers: [
+    {
+      driver: 'memory',
+      ttl: 300000,        // 5 minutes (hot data)
+      config: {
+        maxMemoryPercent: 0.1,  // 10% of system memory
+        evictionPolicy: 'lru',
+        enableCompression: true
+      }
+    },
+    {
+      driver: 'redis',
+      ttl: 3600000,       // 1 hour (warm data)
+      config: {
+        host: 'localhost',
+        port: 6379,
+        keyPrefix: 'app-cache/',
+        enableCompression: true
+      }
+    },
+    {
+      driver: 's3',
+      ttl: 86400000,      // 24 hours (cold data)
+      config: {
+        keyPrefix: 'cache/'
+      }
+    }
+  ],
+  promoteOnHit: true,    // Move data to faster layers when accessed
+  strategy: 'write-through'  // Write to all layers immediately
+}));
+
+// How it works:
+// 1. GET request checks L1 (memory) → ~1ms if found
+// 2. If L1 miss, check L2 (Redis) → ~15ms if found, promote to L1
+// 3. If L2 miss, check L3 (S3) → ~120ms if found, promote to L1+L2
+// 4. If L3 miss, fetch from database → ~500ms, store in all layers
+```
+
+**Performance characteristics:**
+- L1 (Memory): ~1-2ms, 10-100MB, instance-specific
+- L2 (Redis): ~10-20ms, 1-10GB, shared across instances
+- L3 (S3): ~100-200ms, unlimited, persistent, multi-region
+
+**Use cases:**
+- **Hot path**: Frequently accessed data lives in L1 (memory)
+- **Warm data**: Less frequent but still popular data in L2 (Redis)
+- **Cold data**: Rarely accessed but cacheable data in L3 (S3)
+- **Auto-promotion**: Popular data automatically moves to faster layers
 
 ### Example 1: Memory Cache (Fast, Temporary)
 
@@ -549,14 +624,23 @@ if (stats.enabled) {
 ### 1. Choose the Right Driver
 
 ```javascript
-// Development: Memory cache
+// Development: Memory cache (L1 - fastest)
 { driver: 'memory', ttl: 300000 }
 
-// Single server: Filesystem cache
-{ driver: 'filesystem', config: { directory: './cache' } }
+// Production single-server: Redis cache (L2 - persistent, shared)
+{ driver: 'redis', config: { host: 'localhost', port: 6379 } }
 
-// Multi-server: S3 cache
+// Multi-server/Distributed: S3 cache (L3 - unlimited, multi-region)
 { driver: 's3' }
+
+// Production multi-tier: Combine all 3 layers
+{
+  drivers: [
+    { driver: 'memory', ttl: 300000, config: { maxMemoryPercent: 0.1 } },
+    { driver: 'redis', ttl: 3600000, config: { host: 'localhost' } },
+    { driver: 's3', ttl: 86400000 }
+  ]
+}
 ```
 
 ### 2. Tune TTL Based on Data Freshness
@@ -747,7 +831,7 @@ The Cache Plugin uses standardized error classes with comprehensive context and 
 
 ### CacheError
 
-All cache operations throw `CacheError` instances with detailed context:
+All cache operations throw `CacheError` instances with HTTP-style metadata:
 
 ```javascript
 try {
@@ -755,8 +839,11 @@ try {
 } catch (error) {
   console.error(error.name);        // 'CacheError'
   console.error(error.message);     // Brief error summary
+  console.error(error.statusCode);  // e.g. 400, 413, 500
   console.error(error.description); // Detailed explanation with guidance
   console.error(error.context);     // Operation context
+  console.error(error.retriable);   // boolean
+  console.error(error.suggestion);  // Next steps in plain English
 }
 ```
 
@@ -802,7 +889,8 @@ try {
 } catch (error) {
   if (error.name === 'CacheError') {
     console.error('Filesystem cache error:', error.description);
-    // Check directory permissions, disk space
+    console.error('Status:', error.statusCode, 'Retriable?', error.retriable);
+    // Common fixes: check directory permissions, disk space, lockTimeout settings
   }
 }
 ```
@@ -815,6 +903,17 @@ try {
   if (error.name === 'CacheError') {
     console.error('S3 cache error:', error.description);
     // Check S3 credentials, permissions, bucket access
+  }
+}
+```
+
+**Memory Driver**:
+```javascript
+try {
+  await resource.cache.set('key', hugePayload);
+} catch (error) {
+  if (error.name === 'CacheError' && error.statusCode === 400) {
+    console.warn(error.suggestion); // e.g. choose either maxMemoryBytes or maxMemoryPercent
   }
 }
 ```
@@ -918,9 +1017,10 @@ async function cacheSetWithRetry(cache, key, value, retries = 3) {
 
 **Q: Which cache driver should I use?**
 A: Depends on your use case:
-- `memory`: Development and temporary cache (fastest)
-- `filesystem`: Production single-server (persists between restarts)
-- `s3`: Multi-server/distributed (shared between instances)
+- `memory`: Development and hot data (fastest, ~1ms)
+- `redis`: Production/shared cache (persistent, ~15ms)
+- `s3`: Multi-server/distributed (unlimited, ~120ms)
+- Multi-tier: Combine all 3 for optimal performance
 
 **Q: Does cache work automatically?**
 A: Yes! After installing the plugin, all read operations (`fetched`, `list`, `count`, `query`) are automatically cached.
@@ -981,7 +1081,11 @@ await database.plugins.cache.warmCache('users', {
 ### Performance
 
 **Q: Which driver is fastest?**
-A: `memory` is fastest (~2ms vs 180ms from S3). `filesystem` is intermediate. `s3` has higher latency but allows sharing between instances.
+A: Performance ranking (fastest to slowest):
+1. `memory`: ~1-2ms (in-process)
+2. `redis`: ~10-20ms (network, shared)
+3. `s3`: ~100-200ms (API call, distributed)
+Use multi-tier to get benefits of all layers.
 
 **Q: How to analyze cache usage?**
 A: Use `analyzeCacheUsage()` with partition-aware cache:
