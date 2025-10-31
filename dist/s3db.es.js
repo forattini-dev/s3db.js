@@ -29714,6 +29714,594 @@ class MLPlugin extends Plugin {
   }
 }
 
+class PuppeteerPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.config = {
+      // Browser Pool
+      pool: {
+        enabled: true,
+        maxBrowsers: 5,
+        maxTabsPerBrowser: 10,
+        reuseTab: true,
+        closeOnIdle: true,
+        idleTimeout: 3e5,
+        // 5 minutes
+        ...options.pool
+      },
+      // Browser Launch Options
+      launch: {
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-accelerated-2d-canvas",
+          "--no-first-run",
+          "--no-zygote",
+          "--disable-gpu"
+        ],
+        ignoreHTTPSErrors: true,
+        ...options.launch
+      },
+      // Viewport & User Agent
+      viewport: {
+        width: 1920,
+        height: 1080,
+        deviceScaleFactor: 1,
+        randomize: true,
+        presets: ["desktop", "laptop", "tablet"],
+        ...options.viewport
+      },
+      // User Agent Management
+      userAgent: {
+        enabled: true,
+        random: true,
+        filters: {
+          deviceCategory: "desktop",
+          ...options.userAgent?.filters
+        },
+        custom: options.userAgent?.custom || null,
+        ...options.userAgent
+      },
+      // Stealth Mode (Anti-Detection)
+      stealth: {
+        enabled: true,
+        enableEvasions: true,
+        ...options.stealth
+      },
+      // Human Behavior Simulation
+      humanBehavior: {
+        enabled: true,
+        mouse: {
+          enabled: true,
+          bezierCurves: true,
+          overshoot: true,
+          jitter: true,
+          pathThroughElements: true,
+          ...options.humanBehavior?.mouse
+        },
+        typing: {
+          enabled: true,
+          mistakes: true,
+          corrections: true,
+          pauseAfterWord: true,
+          speedVariation: true,
+          delayRange: [50, 150],
+          ...options.humanBehavior?.typing
+        },
+        scrolling: {
+          enabled: true,
+          randomStops: true,
+          backScroll: true,
+          horizontalJitter: true,
+          ...options.humanBehavior?.scrolling
+        },
+        ...options.humanBehavior
+      },
+      // Cookie Management & Farming
+      cookies: {
+        enabled: true,
+        storage: {
+          resource: "puppeteer_cookies",
+          autoSave: true,
+          autoLoad: true,
+          encrypt: true,
+          ...options.cookies?.storage
+        },
+        farming: {
+          enabled: true,
+          warmup: {
+            enabled: true,
+            pages: ["https://www.google.com", "https://www.youtube.com", "https://www.wikipedia.org"],
+            randomOrder: true,
+            timePerPage: { min: 5e3, max: 15e3 },
+            interactions: { scroll: true, click: true, hover: true },
+            ...options.cookies?.farming?.warmup
+          },
+          rotation: {
+            enabled: true,
+            requestsPerCookie: 100,
+            maxAge: 864e5,
+            // 24 hours
+            poolSize: 10,
+            ...options.cookies?.farming?.rotation
+          },
+          reputation: {
+            enabled: true,
+            trackSuccess: true,
+            retireThreshold: 0.5,
+            ageBoost: true,
+            ...options.cookies?.farming?.reputation
+          },
+          ...options.cookies?.farming
+        },
+        ...options.cookies
+      },
+      // Performance Optimization
+      performance: {
+        blockResources: {
+          enabled: true,
+          types: ["image", "stylesheet", "font", "media"],
+          ...options.performance?.blockResources
+        },
+        cacheEnabled: true,
+        javascriptEnabled: true,
+        ...options.performance
+      },
+      // Screenshot & Recording
+      screenshot: {
+        fullPage: false,
+        type: "png",
+        ...options.screenshot
+      },
+      // Proxy Support
+      proxy: {
+        enabled: false,
+        server: null,
+        username: null,
+        password: null,
+        ...options.proxy
+      },
+      // Error Handling & Retries
+      retries: {
+        enabled: true,
+        maxAttempts: 3,
+        backoff: "exponential",
+        initialDelay: 1e3,
+        ...options.retries
+      },
+      // Logging & Debugging
+      debug: {
+        enabled: false,
+        screenshots: false,
+        console: false,
+        network: false,
+        ...options.debug
+      }
+    };
+    this.browserPool = [];
+    this.tabPool = /* @__PURE__ */ new Map();
+    this.userAgentGenerator = null;
+    this.ghostCursor = null;
+    this.cookieManager = null;
+    this.initialized = false;
+  }
+  /**
+   * Install plugin and validate dependencies
+   */
+  async onInstall() {
+    requirePluginDependency("puppeteer", this.name);
+    requirePluginDependency("puppeteer-extra", this.name);
+    requirePluginDependency("puppeteer-extra-plugin-stealth", this.name);
+    requirePluginDependency("user-agents", this.name);
+    requirePluginDependency("ghost-cursor", this.name);
+    if (this.config.cookies.enabled) {
+      await this._setupCookieStorage();
+    }
+    this.emit("puppeteer.installed");
+  }
+  /**
+   * Start plugin and initialize browser pool
+   */
+  async onStart() {
+    if (this.initialized) return;
+    await this._importDependencies();
+    if (this.config.cookies.enabled) {
+      await this._initializeCookieManager();
+    }
+    if (this.config.pool.enabled) {
+      await this._warmupBrowserPool();
+    }
+    this.initialized = true;
+    this.emit("puppeteer.started");
+  }
+  /**
+   * Stop plugin and cleanup resources
+   */
+  async onStop() {
+    await this._closeBrowserPool();
+    this.initialized = false;
+    this.emit("puppeteer.stopped");
+  }
+  /**
+   * Uninstall plugin
+   */
+  async onUninstall(options = {}) {
+    await this.onStop();
+    this.emit("puppeteer.uninstalled");
+  }
+  /**
+   * Import required dependencies (lazy loading)
+   * @private
+   */
+  async _importDependencies() {
+    const puppeteerModule = await import('puppeteer-extra');
+    const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+    const UserAgent = (await import('user-agents')).default;
+    const { createCursor } = await import('ghost-cursor');
+    this.puppeteer = puppeteerModule.default || puppeteerModule;
+    if (this.config.stealth.enabled) {
+      this.puppeteer.use(StealthPlugin());
+    }
+    if (this.config.userAgent.enabled && this.config.userAgent.random) {
+      this.UserAgent = UserAgent;
+    }
+    this.createGhostCursor = createCursor;
+  }
+  /**
+   * Setup cookie storage resource
+   * @private
+   */
+  async _setupCookieStorage() {
+    const resourceName = this.config.cookies.storage.resource;
+    try {
+      await this.database.getResource(resourceName);
+    } catch (err) {
+      await this.database.createResource({
+        name: resourceName,
+        attributes: {
+          sessionId: "string|required",
+          cookies: "array|required",
+          userAgent: "string",
+          viewport: "object",
+          reputation: {
+            successCount: "number",
+            failCount: "number",
+            successRate: "number",
+            lastUsed: "number"
+          },
+          metadata: {
+            createdAt: "number",
+            expiresAt: "number",
+            requestCount: "number",
+            age: "number"
+          }
+        },
+        timestamps: true,
+        behavior: "body-only"
+      });
+    }
+  }
+  /**
+   * Initialize cookie manager
+   * @private
+   */
+  async _initializeCookieManager() {
+    const { CookieManager } = await Promise.resolve().then(function () { return cookieManager; });
+    this.cookieManager = new CookieManager(this);
+    await this.cookieManager.initialize();
+  }
+  /**
+   * Warmup browser pool
+   * @private
+   */
+  async _warmupBrowserPool() {
+    const poolSize = Math.min(this.config.pool.maxBrowsers, 2);
+    for (let i = 0; i < poolSize; i++) {
+      await this._createBrowser();
+    }
+    this.emit("puppeteer.poolWarmed", { size: this.browserPool.length });
+  }
+  /**
+   * Create a new browser instance
+   * @private
+   * @returns {Promise<Browser>}
+   */
+  async _createBrowser() {
+    const launchOptions = { ...this.config.launch };
+    if (this.config.proxy.enabled && this.config.proxy.server) {
+      launchOptions.args.push(`--proxy-server=${this.config.proxy.server}`);
+    }
+    const browser = await this.puppeteer.launch(launchOptions);
+    this.browserPool.push(browser);
+    this.tabPool.set(this.browserPool.length - 1, []);
+    browser.on("disconnected", () => {
+      const index = this.browserPool.indexOf(browser);
+      if (index > -1) {
+        this.browserPool.splice(index, 1);
+        this.tabPool.delete(index);
+      }
+    });
+    return browser;
+  }
+  /**
+   * Get or create a browser instance
+   * @private
+   * @returns {Promise<Browser>}
+   */
+  async _getBrowser() {
+    if (this.config.pool.enabled) {
+      for (let i = 0; i < this.browserPool.length; i++) {
+        const tabs = this.tabPool.get(i) || [];
+        if (tabs.length < this.config.pool.maxTabsPerBrowser) {
+          return this.browserPool[i];
+        }
+      }
+      if (this.browserPool.length < this.config.pool.maxBrowsers) {
+        return await this._createBrowser();
+      }
+      let minIndex = 0;
+      let minTabs = this.tabPool.get(0)?.length || 0;
+      for (let i = 1; i < this.browserPool.length; i++) {
+        const tabs = this.tabPool.get(i)?.length || 0;
+        if (tabs < minTabs) {
+          minIndex = i;
+          minTabs = tabs;
+        }
+      }
+      return this.browserPool[minIndex];
+    } else {
+      return await this._createBrowser();
+    }
+  }
+  /**
+   * Close all browsers in pool
+   * @private
+   */
+  async _closeBrowserPool() {
+    for (const browser of this.browserPool) {
+      try {
+        await browser.close();
+      } catch (err) {
+      }
+    }
+    this.browserPool = [];
+    this.tabPool.clear();
+  }
+  /**
+   * Generate random user agent
+   * @private
+   * @returns {string}
+   */
+  _generateUserAgent() {
+    if (this.config.userAgent.custom) {
+      return this.config.userAgent.custom;
+    }
+    if (this.config.userAgent.random && this.UserAgent) {
+      const userAgent = new this.UserAgent(this.config.userAgent.filters);
+      return userAgent.toString();
+    }
+    return null;
+  }
+  /**
+   * Generate random viewport
+   * @private
+   * @returns {Object}
+   */
+  _generateViewport() {
+    if (!this.config.viewport.randomize) {
+      return {
+        width: this.config.viewport.width,
+        height: this.config.viewport.height,
+        deviceScaleFactor: this.config.viewport.deviceScaleFactor
+      };
+    }
+    const presets = {
+      desktop: [
+        { width: 1920, height: 1080, deviceScaleFactor: 1 },
+        { width: 1680, height: 1050, deviceScaleFactor: 1 },
+        { width: 1600, height: 900, deviceScaleFactor: 1 },
+        { width: 1440, height: 900, deviceScaleFactor: 1 },
+        { width: 1366, height: 768, deviceScaleFactor: 1 }
+      ],
+      laptop: [
+        { width: 1440, height: 900, deviceScaleFactor: 1 },
+        { width: 1366, height: 768, deviceScaleFactor: 1 },
+        { width: 1280, height: 800, deviceScaleFactor: 1 }
+      ],
+      tablet: [
+        { width: 1024, height: 768, deviceScaleFactor: 2 },
+        { width: 768, height: 1024, deviceScaleFactor: 2 }
+      ]
+    };
+    const categories = this.config.viewport.presets || ["desktop"];
+    const availablePresets = categories.flatMap((cat) => presets[cat] || []);
+    return availablePresets[Math.floor(Math.random() * availablePresets.length)];
+  }
+  /**
+   * PUBLIC API
+   */
+  /**
+   * Navigate to URL with human behavior
+   * @param {string} url - URL to navigate to
+   * @param {Object} options - Navigation options
+   * @returns {Promise<Page>}
+   */
+  async navigate(url, options = {}) {
+    const {
+      useSession = null,
+      screenshot = false,
+      waitUntil = "networkidle2",
+      timeout = 3e4
+    } = options;
+    const browser = await this._getBrowser();
+    const page = await browser.newPage();
+    const viewport = this._generateViewport();
+    await page.setViewport(viewport);
+    const userAgent = this._generateUserAgent();
+    if (userAgent) {
+      await page.setUserAgent(userAgent);
+    }
+    if (this.config.performance.blockResources.enabled) {
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        if (this.config.performance.blockResources.types.includes(request.resourceType())) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+    }
+    if (useSession && this.cookieManager) {
+      await this.cookieManager.loadSession(page, useSession);
+    }
+    let cursor = null;
+    if (this.config.humanBehavior.enabled && this.config.humanBehavior.mouse.enabled) {
+      cursor = this.createGhostCursor(page);
+    }
+    await page.goto(url, { waitUntil, timeout });
+    if (screenshot) {
+      const screenshotBuffer = await page.screenshot(this.config.screenshot);
+      page._screenshot = screenshotBuffer;
+    }
+    page._cursor = cursor;
+    page._userAgent = userAgent;
+    page._viewport = viewport;
+    if (this.config.humanBehavior.enabled) {
+      this._attachHumanBehaviorMethods(page);
+    }
+    if (useSession && this.cookieManager) {
+      page.on("close", async () => {
+        await this.cookieManager.saveSession(page, useSession);
+      });
+    }
+    this.emit("puppeteer.navigate", { url, userAgent, viewport });
+    return page;
+  }
+  /**
+   * Attach human behavior methods to page
+   * @private
+   */
+  _attachHumanBehaviorMethods(page) {
+    page.humanClick = async (selector, options = {}) => {
+      const element = await page.$(selector);
+      if (!element) throw new Error(`Element not found: ${selector}`);
+      if (this.config.humanBehavior.mouse.pathThroughElements && page._cursor) {
+        await page._cursor.moveTo(selector);
+        await page._cursor.click();
+      } else {
+        await element.click();
+      }
+    };
+    page.humanMoveTo = async (selector, options = {}) => {
+      if (!page._cursor) {
+        throw new Error("Ghost cursor not initialized");
+      }
+      await page._cursor.moveTo(selector);
+    };
+    page.humanType = async (selector, text, options = {}) => {
+      const element = await page.$(selector);
+      if (!element) throw new Error(`Element not found: ${selector}`);
+      await element.click();
+      if (this.config.humanBehavior.typing.mistakes) {
+        await this._typeWithMistakes(page, text, options);
+      } else {
+        const [min, max] = this.config.humanBehavior.typing.delayRange;
+        await page.type(selector, text, {
+          delay: min + Math.random() * (max - min)
+        });
+      }
+    };
+    page.humanScroll = async (options = {}) => {
+      const { distance = null, direction = "down" } = options;
+      if (distance) {
+        await page.evaluate((dist, dir) => {
+          window.scrollBy(0, dir === "down" ? dist : -dist);
+        }, distance, direction);
+      } else {
+        await this._scrollWithStops(page, direction);
+      }
+    };
+  }
+  /**
+   * Type with random mistakes and corrections
+   * @private
+   */
+  async _typeWithMistakes(page, text, options = {}) {
+    const words = text.split(" ");
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (Math.random() < 0.2 && word.length > 3) {
+        const wrongPos = Math.floor(Math.random() * word.length);
+        const wrongChar = String.fromCharCode(97 + Math.floor(Math.random() * 26));
+        const wrongWord = word.slice(0, wrongPos) + wrongChar + word.slice(wrongPos + 1);
+        await page.keyboard.type(wrongWord, { delay: 100 });
+        await this._randomDelay(200, 500);
+        for (let j = 0; j < wrongWord.length; j++) {
+          await page.keyboard.press("Backspace");
+          await this._randomDelay(50, 100);
+        }
+        await page.keyboard.type(word, { delay: 100 });
+      } else {
+        await page.keyboard.type(word, { delay: 100 });
+      }
+      if (i < words.length - 1) {
+        await page.keyboard.press("Space");
+        await this._randomDelay(100, 300);
+      }
+    }
+  }
+  /**
+   * Scroll with random stops
+   * @private
+   */
+  async _scrollWithStops(page, direction = "down") {
+    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    const steps = Math.floor(scrollHeight / viewportHeight);
+    for (let i = 0; i < steps; i++) {
+      await page.evaluate((dir, vh) => {
+        window.scrollBy(0, dir === "down" ? vh : -vh);
+      }, direction, viewportHeight);
+      await this._randomDelay(500, 1500);
+      if (this.config.humanBehavior.scrolling.backScroll && Math.random() < 0.1) {
+        await page.evaluate(() => window.scrollBy(0, -100));
+        await this._randomDelay(200, 500);
+      }
+    }
+  }
+  /**
+   * Random delay helper
+   * @private
+   */
+  async _randomDelay(min, max) {
+    const delay = min + Math.random() * (max - min);
+    return new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  /**
+   * Farm cookies for a session
+   * @param {string} sessionId - Session identifier
+   * @returns {Promise<void>}
+   */
+  async farmCookies(sessionId) {
+    if (!this.cookieManager) {
+      throw new Error("Cookie manager not initialized");
+    }
+    return await this.cookieManager.farmCookies(sessionId);
+  }
+  /**
+   * Get cookie pool statistics
+   * @returns {Promise<Object>}
+   */
+  async getCookieStats() {
+    if (!this.cookieManager) {
+      throw new Error("Cookie manager not initialized");
+    }
+    return await this.cookieManager.getStats();
+  }
+}
+
 class SqsConsumer {
   constructor({ queueUrl, onMessage, onError, poolingInterval = 5e3, maxMessages = 10, region = "us-east-1", credentials, endpoint, driver = "sqs" }) {
     this.driver = driver;
@@ -46958,6 +47546,337 @@ var prometheusFormatter = /*#__PURE__*/Object.freeze({
   formatPrometheusMetrics: formatPrometheusMetrics
 });
 
+class CookieManager {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.cookies;
+    this.storage = null;
+    this.cookiePool = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Initialize cookie manager
+   */
+  async initialize() {
+    this.storage = this.plugin.database.getResource(this.config.storage.resource);
+    if (this.config.farming.enabled) {
+      await this._loadCookiePool();
+    }
+  }
+  /**
+   * Load cookie pool from storage
+   * @private
+   */
+  async _loadCookiePool() {
+    const limit = this.config.farming.rotation.poolSize;
+    const cookies = await this.storage.list({ limit });
+    for (const cookie of cookies) {
+      this.cookiePool.set(cookie.sessionId, cookie);
+    }
+    this.plugin.emit("cookieManager.poolLoaded", {
+      size: this.cookiePool.size
+    });
+  }
+  /**
+   * Load cookies into page
+   * @param {Page} page - Puppeteer page
+   * @param {string} sessionId - Session identifier
+   */
+  async loadSession(page, sessionId) {
+    let session = this.cookiePool.get(sessionId);
+    if (!session) {
+      try {
+        session = await this.storage.get(sessionId);
+        this.cookiePool.set(sessionId, session);
+      } catch (err) {
+        return;
+      }
+    }
+    if (session.cookies && session.cookies.length > 0) {
+      await page.setCookie(...session.cookies);
+    }
+    if (session.userAgent) {
+      await page.setUserAgent(session.userAgent);
+    }
+    if (session.viewport) {
+      await page.setViewport(session.viewport);
+    }
+    session.metadata.lastUsed = Date.now();
+    session.metadata.requestCount = (session.metadata.requestCount || 0) + 1;
+    this.plugin.emit("cookieManager.sessionLoaded", {
+      sessionId,
+      cookieCount: session.cookies.length
+    });
+  }
+  /**
+   * Save cookies from page
+   * @param {Page} page - Puppeteer page
+   * @param {string} sessionId - Session identifier
+   * @param {Object} options - Save options
+   */
+  async saveSession(page, sessionId, options = {}) {
+    const { success = true } = options;
+    const cookies = await page.cookies();
+    let session = this.cookiePool.get(sessionId) || {
+      sessionId,
+      cookies: [],
+      userAgent: page._userAgent,
+      viewport: page._viewport,
+      reputation: {
+        successCount: 0,
+        failCount: 0,
+        successRate: 1,
+        lastUsed: Date.now()
+      },
+      metadata: {
+        createdAt: Date.now(),
+        expiresAt: Date.now() + this.config.farming.rotation.maxAge,
+        requestCount: 0,
+        age: 0
+      }
+    };
+    session.cookies = cookies;
+    if (this.config.farming.reputation.enabled && this.config.farming.reputation.trackSuccess) {
+      if (success) {
+        session.reputation.successCount++;
+      } else {
+        session.reputation.failCount++;
+      }
+      const total = session.reputation.successCount + session.reputation.failCount;
+      session.reputation.successRate = session.reputation.successCount / total;
+    }
+    session.metadata.age = Date.now() - session.metadata.createdAt;
+    if (this.config.storage.autoSave) {
+      try {
+        const existing = await this.storage.get(sessionId);
+        await this.storage.update(sessionId, session);
+      } catch (err) {
+        await this.storage.insert(session);
+      }
+    }
+    this.cookiePool.set(sessionId, session);
+    this.plugin.emit("cookieManager.sessionSaved", {
+      sessionId,
+      cookieCount: cookies.length,
+      reputation: session.reputation
+    });
+  }
+  /**
+   * Farm cookies for a session
+   * @param {string} sessionId - Session identifier
+   * @returns {Promise<void>}
+   */
+  async farmCookies(sessionId) {
+    if (!this.config.farming.enabled || !this.config.farming.warmup.enabled) {
+      throw new Error("Cookie farming is not enabled");
+    }
+    const warmupConfig = this.config.farming.warmup;
+    const pages = [...warmupConfig.pages];
+    if (warmupConfig.randomOrder) {
+      pages.sort(() => Math.random() - 0.5);
+    }
+    this.plugin.emit("cookieManager.farmingStarted", {
+      sessionId,
+      pages: pages.length
+    });
+    for (const url of pages) {
+      try {
+        const page = await this.plugin.navigate(url, { useSession: sessionId });
+        const timeOnPage = warmupConfig.timePerPage.min + Math.random() * (warmupConfig.timePerPage.max - warmupConfig.timePerPage.min);
+        if (warmupConfig.interactions.scroll) {
+          await this._randomScroll(page);
+        }
+        if (warmupConfig.interactions.hover) {
+          await this._randomHover(page);
+        }
+        if (warmupConfig.interactions.click) {
+          await this._randomClick(page);
+        }
+        await this._delay(timeOnPage);
+        await this.saveSession(page, sessionId, { success: true });
+        await page.close();
+        this.plugin.emit("cookieManager.warmupPageCompleted", {
+          sessionId,
+          url
+        });
+      } catch (err) {
+        this.plugin.emit("cookieManager.warmupPageFailed", {
+          sessionId,
+          url,
+          error: err.message
+        });
+      }
+    }
+    this.plugin.emit("cookieManager.farmingCompleted", { sessionId });
+  }
+  /**
+   * Get best cookie from pool based on reputation
+   * @param {Object} options - Selection options
+   * @returns {Promise<Object>}
+   */
+  async getBestCookie(options = {}) {
+    if (!this.config.farming.enabled || !this.config.farming.reputation.enabled) {
+      throw new Error("Cookie farming and reputation must be enabled");
+    }
+    const candidates = Array.from(this.cookiePool.values()).filter((session) => {
+      if (session.reputation.successRate < this.config.farming.reputation.retireThreshold) {
+        return false;
+      }
+      if (Date.now() > session.metadata.expiresAt) {
+        return false;
+      }
+      if (session.metadata.requestCount >= this.config.farming.rotation.requestsPerCookie) {
+        return false;
+      }
+      return true;
+    });
+    if (candidates.length === 0) {
+      return null;
+    }
+    const scored = candidates.map((session) => {
+      let score = session.reputation.successRate;
+      if (this.config.farming.reputation.ageBoost) {
+        const ageInHours = session.metadata.age / (1e3 * 60 * 60);
+        const ageBoost = Math.min(ageInHours / 24, 1) * 0.2;
+        score += ageBoost;
+      }
+      return { session, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0].session;
+  }
+  /**
+   * Rotate cookies - remove expired/overused cookies
+   * @returns {Promise<number>}
+   */
+  async rotateCookies() {
+    if (!this.config.farming.enabled || !this.config.farming.rotation.enabled) {
+      return 0;
+    }
+    let removed = 0;
+    const now = Date.now();
+    for (const [sessionId, session] of this.cookiePool.entries()) {
+      let shouldRemove = false;
+      if (now > session.metadata.expiresAt) {
+        shouldRemove = true;
+      }
+      if (session.metadata.requestCount >= this.config.farming.rotation.requestsPerCookie) {
+        shouldRemove = true;
+      }
+      if (this.config.farming.reputation.enabled && session.reputation.successRate < this.config.farming.reputation.retireThreshold) {
+        shouldRemove = true;
+      }
+      if (shouldRemove) {
+        this.cookiePool.delete(sessionId);
+        try {
+          await this.storage.remove(sessionId);
+        } catch (err) {
+        }
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      this.plugin.emit("cookieManager.cookiesRotated", { removed });
+    }
+    return removed;
+  }
+  /**
+   * Get cookie pool statistics
+   * @returns {Promise<Object>}
+   */
+  async getStats() {
+    const sessions = Array.from(this.cookiePool.values());
+    const stats = {
+      total: sessions.length,
+      healthy: 0,
+      expired: 0,
+      overused: 0,
+      lowReputation: 0,
+      averageAge: 0,
+      averageSuccessRate: 0,
+      averageRequestCount: 0
+    };
+    if (sessions.length === 0) {
+      return stats;
+    }
+    const now = Date.now();
+    let totalAge = 0;
+    let totalSuccessRate = 0;
+    let totalRequestCount = 0;
+    for (const session of sessions) {
+      if (now > session.metadata.expiresAt) {
+        stats.expired++;
+        continue;
+      }
+      if (session.metadata.requestCount >= this.config.farming.rotation.requestsPerCookie) {
+        stats.overused++;
+        continue;
+      }
+      if (session.reputation.successRate < this.config.farming.reputation.retireThreshold) {
+        stats.lowReputation++;
+        continue;
+      }
+      stats.healthy++;
+      totalAge += session.metadata.age;
+      totalSuccessRate += session.reputation.successRate;
+      totalRequestCount += session.metadata.requestCount;
+    }
+    stats.averageAge = totalAge / stats.healthy || 0;
+    stats.averageSuccessRate = totalSuccessRate / stats.healthy || 0;
+    stats.averageRequestCount = totalRequestCount / stats.healthy || 0;
+    return stats;
+  }
+  /**
+   * Random scroll helper
+   * @private
+   */
+  async _randomScroll(page) {
+    const scrollDistance = Math.floor(Math.random() * 500) + 200;
+    await page.evaluate((distance) => {
+      window.scrollBy(0, distance);
+    }, scrollDistance);
+  }
+  /**
+   * Random hover helper
+   * @private
+   */
+  async _randomHover(page) {
+    try {
+      const elements = await page.$$("a, button");
+      if (elements.length > 0) {
+        const randomElement = elements[Math.floor(Math.random() * elements.length)];
+        await randomElement.hover();
+      }
+    } catch (err) {
+    }
+  }
+  /**
+   * Random click helper
+   * @private
+   */
+  async _randomClick(page) {
+    try {
+      const elements = await page.$$('button:not([type="submit"]), div[role="button"]');
+      if (elements.length > 0) {
+        const randomElement = elements[Math.floor(Math.random() * elements.length)];
+        await randomElement.click();
+      }
+    } catch (err) {
+    }
+  }
+  /**
+   * Delay helper
+   * @private
+   */
+  async _delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+var cookieManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  CookieManager: CookieManager
+});
+
 function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
   const k = centroids.length;
   const n = vectors.length;
@@ -51893,5 +52812,5 @@ var routes = /*#__PURE__*/Object.freeze({
   registerUIRoutes: registerUIRoutes
 });
 
-export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, ApiPlugin, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, S3Client as Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, DynamoDBReplicator, EncryptionError, ErrorMap, EventualConsistencyPlugin, Factory, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, GeoPlugin, IdentityPlugin, InvalidResourceItem, MLPlugin, MemoryCache, MemoryClient, MemoryStorage, MetadataLimitError, MetricsPlugin, MissingMetadata, MongoDBReplicator, MultiBackupDriver, MySQLReplicator, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, PlanetScaleReplicator, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3Client, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, Seeder, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TTLPlugin, TfStatePlugin, TursoReplicator, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Memory, compactHash, createBackupDriver, createConsumer, createCustomGenerator, createReplicator, decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, expandHash, generateTypes, getBehavior, getNanoidInitializationError, getSizeBreakdown, getUrlAlphabet, hashPassword, hashPasswordSync, idGenerator, initializeNanoid, isBcryptHash, mapAwsError, md5, passwordGenerator, printTypes, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig, verifyPassword$1 as verifyPassword };
+export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, ApiPlugin, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, S3Client as Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, DynamoDBReplicator, EncryptionError, ErrorMap, EventualConsistencyPlugin, Factory, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, GeoPlugin, IdentityPlugin, InvalidResourceItem, MLPlugin, MemoryCache, MemoryClient, MemoryStorage, MetadataLimitError, MetricsPlugin, MissingMetadata, MongoDBReplicator, MultiBackupDriver, MySQLReplicator, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, PlanetScaleReplicator, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, PuppeteerPlugin, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3Client, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, Seeder, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TTLPlugin, TfStatePlugin, TursoReplicator, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Memory, compactHash, createBackupDriver, createConsumer, createCustomGenerator, createReplicator, decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, expandHash, generateTypes, getBehavior, getNanoidInitializationError, getSizeBreakdown, getUrlAlphabet, hashPassword, hashPasswordSync, idGenerator, initializeNanoid, isBcryptHash, mapAwsError, md5, passwordGenerator, printTypes, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig, verifyPassword$1 as verifyPassword };
 //# sourceMappingURL=s3db.es.js.map

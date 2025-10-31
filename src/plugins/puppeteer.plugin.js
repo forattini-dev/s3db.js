@@ -1,0 +1,738 @@
+import { Plugin } from './plugin.class.js';
+import { requirePluginDependency } from './concerns/plugin-dependencies.js';
+
+/**
+ * PuppeteerPlugin - Headless browser automation with anti-bot detection
+ *
+ * Features:
+ * - Browser pool management with tab recycling
+ * - Cookie farming and session management
+ * - Human behavior simulation (ghost-cursor)
+ * - Anti-detection (puppeteer-extra-plugin-stealth)
+ * - Random user agent generation
+ * - Performance optimization (resource blocking)
+ * - Proxy support
+ *
+ * @extends Plugin
+ */
+export class PuppeteerPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+
+    // Default configuration
+    this.config = {
+      // Browser Pool
+      pool: {
+        enabled: true,
+        maxBrowsers: 5,
+        maxTabsPerBrowser: 10,
+        reuseTab: true,
+        closeOnIdle: true,
+        idleTimeout: 300000, // 5 minutes
+        ...options.pool
+      },
+
+      // Browser Launch Options
+      launch: {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu'
+        ],
+        ignoreHTTPSErrors: true,
+        ...options.launch
+      },
+
+      // Viewport & User Agent
+      viewport: {
+        width: 1920,
+        height: 1080,
+        deviceScaleFactor: 1,
+        randomize: true,
+        presets: ['desktop', 'laptop', 'tablet'],
+        ...options.viewport
+      },
+
+      // User Agent Management
+      userAgent: {
+        enabled: true,
+        random: true,
+        filters: {
+          deviceCategory: 'desktop',
+          ...options.userAgent?.filters
+        },
+        custom: options.userAgent?.custom || null,
+        ...options.userAgent
+      },
+
+      // Stealth Mode (Anti-Detection)
+      stealth: {
+        enabled: true,
+        enableEvasions: true,
+        ...options.stealth
+      },
+
+      // Human Behavior Simulation
+      humanBehavior: {
+        enabled: true,
+        mouse: {
+          enabled: true,
+          bezierCurves: true,
+          overshoot: true,
+          jitter: true,
+          pathThroughElements: true,
+          ...options.humanBehavior?.mouse
+        },
+        typing: {
+          enabled: true,
+          mistakes: true,
+          corrections: true,
+          pauseAfterWord: true,
+          speedVariation: true,
+          delayRange: [50, 150],
+          ...options.humanBehavior?.typing
+        },
+        scrolling: {
+          enabled: true,
+          randomStops: true,
+          backScroll: true,
+          horizontalJitter: true,
+          ...options.humanBehavior?.scrolling
+        },
+        ...options.humanBehavior
+      },
+
+      // Cookie Management & Farming
+      cookies: {
+        enabled: true,
+        storage: {
+          resource: 'puppeteer_cookies',
+          autoSave: true,
+          autoLoad: true,
+          encrypt: true,
+          ...options.cookies?.storage
+        },
+        farming: {
+          enabled: true,
+          warmup: {
+            enabled: true,
+            pages: ['https://www.google.com', 'https://www.youtube.com', 'https://www.wikipedia.org'],
+            randomOrder: true,
+            timePerPage: { min: 5000, max: 15000 },
+            interactions: { scroll: true, click: true, hover: true },
+            ...options.cookies?.farming?.warmup
+          },
+          rotation: {
+            enabled: true,
+            requestsPerCookie: 100,
+            maxAge: 86400000, // 24 hours
+            poolSize: 10,
+            ...options.cookies?.farming?.rotation
+          },
+          reputation: {
+            enabled: true,
+            trackSuccess: true,
+            retireThreshold: 0.5,
+            ageBoost: true,
+            ...options.cookies?.farming?.reputation
+          },
+          ...options.cookies?.farming
+        },
+        ...options.cookies
+      },
+
+      // Performance Optimization
+      performance: {
+        blockResources: {
+          enabled: true,
+          types: ['image', 'stylesheet', 'font', 'media'],
+          ...options.performance?.blockResources
+        },
+        cacheEnabled: true,
+        javascriptEnabled: true,
+        ...options.performance
+      },
+
+      // Screenshot & Recording
+      screenshot: {
+        fullPage: false,
+        type: 'png',
+        ...options.screenshot
+      },
+
+      // Proxy Support
+      proxy: {
+        enabled: false,
+        server: null,
+        username: null,
+        password: null,
+        ...options.proxy
+      },
+
+      // Error Handling & Retries
+      retries: {
+        enabled: true,
+        maxAttempts: 3,
+        backoff: 'exponential',
+        initialDelay: 1000,
+        ...options.retries
+      },
+
+      // Logging & Debugging
+      debug: {
+        enabled: false,
+        screenshots: false,
+        console: false,
+        network: false,
+        ...options.debug
+      }
+    };
+
+    // Internal state
+    this.browserPool = [];
+    this.tabPool = new Map(); // browserIndex -> [pages]
+    this.userAgentGenerator = null;
+    this.ghostCursor = null;
+    this.cookieManager = null;
+    this.initialized = false;
+  }
+
+  /**
+   * Install plugin and validate dependencies
+   */
+  async onInstall() {
+    // Validate required dependencies
+    requirePluginDependency('puppeteer', this.name);
+    requirePluginDependency('puppeteer-extra', this.name);
+    requirePluginDependency('puppeteer-extra-plugin-stealth', this.name);
+    requirePluginDependency('user-agents', this.name);
+    requirePluginDependency('ghost-cursor', this.name);
+
+    // Create cookie storage resource if enabled
+    if (this.config.cookies.enabled) {
+      await this._setupCookieStorage();
+    }
+
+    this.emit('puppeteer.installed');
+  }
+
+  /**
+   * Start plugin and initialize browser pool
+   */
+  async onStart() {
+    if (this.initialized) return;
+
+    // Import dependencies
+    await this._importDependencies();
+
+    // Initialize cookie manager
+    if (this.config.cookies.enabled) {
+      await this._initializeCookieManager();
+    }
+
+    // Pre-warm browser pool if enabled
+    if (this.config.pool.enabled) {
+      await this._warmupBrowserPool();
+    }
+
+    this.initialized = true;
+    this.emit('puppeteer.started');
+  }
+
+  /**
+   * Stop plugin and cleanup resources
+   */
+  async onStop() {
+    await this._closeBrowserPool();
+    this.initialized = false;
+    this.emit('puppeteer.stopped');
+  }
+
+  /**
+   * Uninstall plugin
+   */
+  async onUninstall(options = {}) {
+    await this.onStop();
+    this.emit('puppeteer.uninstalled');
+  }
+
+  /**
+   * Import required dependencies (lazy loading)
+   * @private
+   */
+  async _importDependencies() {
+    const puppeteerModule = await import('puppeteer-extra');
+    const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+    const UserAgent = (await import('user-agents')).default;
+    const { createCursor } = await import('ghost-cursor');
+
+    // Setup puppeteer with stealth plugin
+    this.puppeteer = puppeteerModule.default || puppeteerModule;
+
+    if (this.config.stealth.enabled) {
+      this.puppeteer.use(StealthPlugin());
+    }
+
+    // Setup user agent generator
+    if (this.config.userAgent.enabled && this.config.userAgent.random) {
+      this.UserAgent = UserAgent;
+    }
+
+    // Store ghost-cursor factory
+    this.createGhostCursor = createCursor;
+  }
+
+  /**
+   * Setup cookie storage resource
+   * @private
+   */
+  async _setupCookieStorage() {
+    const resourceName = this.config.cookies.storage.resource;
+
+    try {
+      await this.database.getResource(resourceName);
+    } catch (err) {
+      // Create resource if it doesn't exist
+      await this.database.createResource({
+        name: resourceName,
+        attributes: {
+          sessionId: 'string|required',
+          cookies: 'array|required',
+          userAgent: 'string',
+          viewport: 'object',
+          reputation: {
+            successCount: 'number',
+            failCount: 'number',
+            successRate: 'number',
+            lastUsed: 'number'
+          },
+          metadata: {
+            createdAt: 'number',
+            expiresAt: 'number',
+            requestCount: 'number',
+            age: 'number'
+          }
+        },
+        timestamps: true,
+        behavior: 'body-only'
+      });
+    }
+  }
+
+  /**
+   * Initialize cookie manager
+   * @private
+   */
+  async _initializeCookieManager() {
+    const { CookieManager } = await import('./puppeteer/cookie-manager.js');
+    this.cookieManager = new CookieManager(this);
+    await this.cookieManager.initialize();
+  }
+
+  /**
+   * Warmup browser pool
+   * @private
+   */
+  async _warmupBrowserPool() {
+    const poolSize = Math.min(this.config.pool.maxBrowsers, 2); // Start with 2 browsers
+
+    for (let i = 0; i < poolSize; i++) {
+      await this._createBrowser();
+    }
+
+    this.emit('puppeteer.poolWarmed', { size: this.browserPool.length });
+  }
+
+  /**
+   * Create a new browser instance
+   * @private
+   * @returns {Promise<Browser>}
+   */
+  async _createBrowser() {
+    const launchOptions = { ...this.config.launch };
+
+    // Add proxy if enabled
+    if (this.config.proxy.enabled && this.config.proxy.server) {
+      launchOptions.args.push(`--proxy-server=${this.config.proxy.server}`);
+    }
+
+    const browser = await this.puppeteer.launch(launchOptions);
+    this.browserPool.push(browser);
+    this.tabPool.set(this.browserPool.length - 1, []);
+
+    browser.on('disconnected', () => {
+      const index = this.browserPool.indexOf(browser);
+      if (index > -1) {
+        this.browserPool.splice(index, 1);
+        this.tabPool.delete(index);
+      }
+    });
+
+    return browser;
+  }
+
+  /**
+   * Get or create a browser instance
+   * @private
+   * @returns {Promise<Browser>}
+   */
+  async _getBrowser() {
+    if (this.config.pool.enabled) {
+      // Find browser with available capacity
+      for (let i = 0; i < this.browserPool.length; i++) {
+        const tabs = this.tabPool.get(i) || [];
+        if (tabs.length < this.config.pool.maxTabsPerBrowser) {
+          return this.browserPool[i];
+        }
+      }
+
+      // Create new browser if pool not full
+      if (this.browserPool.length < this.config.pool.maxBrowsers) {
+        return await this._createBrowser();
+      }
+
+      // Use least loaded browser
+      let minIndex = 0;
+      let minTabs = this.tabPool.get(0)?.length || 0;
+
+      for (let i = 1; i < this.browserPool.length; i++) {
+        const tabs = this.tabPool.get(i)?.length || 0;
+        if (tabs < minTabs) {
+          minIndex = i;
+          minTabs = tabs;
+        }
+      }
+
+      return this.browserPool[minIndex];
+    } else {
+      // No pooling - create new browser every time
+      return await this._createBrowser();
+    }
+  }
+
+  /**
+   * Close all browsers in pool
+   * @private
+   */
+  async _closeBrowserPool() {
+    for (const browser of this.browserPool) {
+      try {
+        await browser.close();
+      } catch (err) {
+        // Ignore errors during cleanup
+      }
+    }
+    this.browserPool = [];
+    this.tabPool.clear();
+  }
+
+  /**
+   * Generate random user agent
+   * @private
+   * @returns {string}
+   */
+  _generateUserAgent() {
+    if (this.config.userAgent.custom) {
+      return this.config.userAgent.custom;
+    }
+
+    if (this.config.userAgent.random && this.UserAgent) {
+      const userAgent = new this.UserAgent(this.config.userAgent.filters);
+      return userAgent.toString();
+    }
+
+    return null;
+  }
+
+  /**
+   * Generate random viewport
+   * @private
+   * @returns {Object}
+   */
+  _generateViewport() {
+    if (!this.config.viewport.randomize) {
+      return {
+        width: this.config.viewport.width,
+        height: this.config.viewport.height,
+        deviceScaleFactor: this.config.viewport.deviceScaleFactor
+      };
+    }
+
+    // Predefined viewport presets
+    const presets = {
+      desktop: [
+        { width: 1920, height: 1080, deviceScaleFactor: 1 },
+        { width: 1680, height: 1050, deviceScaleFactor: 1 },
+        { width: 1600, height: 900, deviceScaleFactor: 1 },
+        { width: 1440, height: 900, deviceScaleFactor: 1 },
+        { width: 1366, height: 768, deviceScaleFactor: 1 }
+      ],
+      laptop: [
+        { width: 1440, height: 900, deviceScaleFactor: 1 },
+        { width: 1366, height: 768, deviceScaleFactor: 1 },
+        { width: 1280, height: 800, deviceScaleFactor: 1 }
+      ],
+      tablet: [
+        { width: 1024, height: 768, deviceScaleFactor: 2 },
+        { width: 768, height: 1024, deviceScaleFactor: 2 }
+      ]
+    };
+
+    // Select preset categories
+    const categories = this.config.viewport.presets || ['desktop'];
+    const availablePresets = categories.flatMap(cat => presets[cat] || []);
+
+    return availablePresets[Math.floor(Math.random() * availablePresets.length)];
+  }
+
+  /**
+   * PUBLIC API
+   */
+
+  /**
+   * Navigate to URL with human behavior
+   * @param {string} url - URL to navigate to
+   * @param {Object} options - Navigation options
+   * @returns {Promise<Page>}
+   */
+  async navigate(url, options = {}) {
+    const {
+      useSession = null,
+      screenshot = false,
+      waitUntil = 'networkidle2',
+      timeout = 30000
+    } = options;
+
+    const browser = await this._getBrowser();
+    const page = await browser.newPage();
+
+    // Setup viewport
+    const viewport = this._generateViewport();
+    await page.setViewport(viewport);
+
+    // Setup user agent
+    const userAgent = this._generateUserAgent();
+    if (userAgent) {
+      await page.setUserAgent(userAgent);
+    }
+
+    // Setup resource blocking for performance
+    if (this.config.performance.blockResources.enabled) {
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+        if (this.config.performance.blockResources.types.includes(request.resourceType())) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+    }
+
+    // Load cookies from session
+    if (useSession && this.cookieManager) {
+      await this.cookieManager.loadSession(page, useSession);
+    }
+
+    // Setup ghost cursor for human behavior
+    let cursor = null;
+    if (this.config.humanBehavior.enabled && this.config.humanBehavior.mouse.enabled) {
+      cursor = this.createGhostCursor(page);
+    }
+
+    // Navigate
+    await page.goto(url, { waitUntil, timeout });
+
+    // Take screenshot if requested
+    if (screenshot) {
+      const screenshotBuffer = await page.screenshot(this.config.screenshot);
+      page._screenshot = screenshotBuffer;
+    }
+
+    // Attach helper methods to page
+    page._cursor = cursor;
+    page._userAgent = userAgent;
+    page._viewport = viewport;
+
+    // Add human behavior methods
+    if (this.config.humanBehavior.enabled) {
+      this._attachHumanBehaviorMethods(page);
+    }
+
+    // Save cookies if session tracking
+    if (useSession && this.cookieManager) {
+      page.on('close', async () => {
+        await this.cookieManager.saveSession(page, useSession);
+      });
+    }
+
+    this.emit('puppeteer.navigate', { url, userAgent, viewport });
+
+    return page;
+  }
+
+  /**
+   * Attach human behavior methods to page
+   * @private
+   */
+  _attachHumanBehaviorMethods(page) {
+    // Human click
+    page.humanClick = async (selector, options = {}) => {
+      const element = await page.$(selector);
+      if (!element) throw new Error(`Element not found: ${selector}`);
+
+      if (this.config.humanBehavior.mouse.pathThroughElements && page._cursor) {
+        // Move through elements to destination
+        await page._cursor.moveTo(selector);
+        await page._cursor.click();
+      } else {
+        await element.click();
+      }
+    };
+
+    // Human move
+    page.humanMoveTo = async (selector, options = {}) => {
+      if (!page._cursor) {
+        throw new Error('Ghost cursor not initialized');
+      }
+
+      await page._cursor.moveTo(selector);
+    };
+
+    // Human type
+    page.humanType = async (selector, text, options = {}) => {
+      const element = await page.$(selector);
+      if (!element) throw new Error(`Element not found: ${selector}`);
+
+      await element.click();
+
+      if (this.config.humanBehavior.typing.mistakes) {
+        // Type with mistakes and corrections
+        await this._typeWithMistakes(page, text, options);
+      } else {
+        // Normal typing with delays
+        const [min, max] = this.config.humanBehavior.typing.delayRange;
+        await page.type(selector, text, {
+          delay: min + Math.random() * (max - min)
+        });
+      }
+    };
+
+    // Human scroll
+    page.humanScroll = async (options = {}) => {
+      const { distance = null, direction = 'down' } = options;
+
+      if (distance) {
+        await page.evaluate((dist, dir) => {
+          window.scrollBy(0, dir === 'down' ? dist : -dist);
+        }, distance, direction);
+      } else {
+        // Scroll to bottom with random stops
+        await this._scrollWithStops(page, direction);
+      }
+    };
+  }
+
+  /**
+   * Type with random mistakes and corrections
+   * @private
+   */
+  async _typeWithMistakes(page, text, options = {}) {
+    const words = text.split(' ');
+
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+
+      // 20% chance of making a mistake
+      if (Math.random() < 0.2 && word.length > 3) {
+        // Type wrong letter
+        const wrongPos = Math.floor(Math.random() * word.length);
+        const wrongChar = String.fromCharCode(97 + Math.floor(Math.random() * 26));
+        const wrongWord = word.slice(0, wrongPos) + wrongChar + word.slice(wrongPos + 1);
+
+        await page.keyboard.type(wrongWord, { delay: 100 });
+        await this._randomDelay(200, 500);
+
+        // Delete and retype
+        for (let j = 0; j < wrongWord.length; j++) {
+          await page.keyboard.press('Backspace');
+          await this._randomDelay(50, 100);
+        }
+
+        await page.keyboard.type(word, { delay: 100 });
+      } else {
+        await page.keyboard.type(word, { delay: 100 });
+      }
+
+      // Add space between words
+      if (i < words.length - 1) {
+        await page.keyboard.press('Space');
+        await this._randomDelay(100, 300);
+      }
+    }
+  }
+
+  /**
+   * Scroll with random stops
+   * @private
+   */
+  async _scrollWithStops(page, direction = 'down') {
+    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    const steps = Math.floor(scrollHeight / viewportHeight);
+
+    for (let i = 0; i < steps; i++) {
+      await page.evaluate((dir, vh) => {
+        window.scrollBy(0, dir === 'down' ? vh : -vh);
+      }, direction, viewportHeight);
+
+      await this._randomDelay(500, 1500);
+
+      // Random back scroll
+      if (this.config.humanBehavior.scrolling.backScroll && Math.random() < 0.1) {
+        await page.evaluate(() => window.scrollBy(0, -100));
+        await this._randomDelay(200, 500);
+      }
+    }
+  }
+
+  /**
+   * Random delay helper
+   * @private
+   */
+  async _randomDelay(min, max) {
+    const delay = min + Math.random() * (max - min);
+    return new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  /**
+   * Farm cookies for a session
+   * @param {string} sessionId - Session identifier
+   * @returns {Promise<void>}
+   */
+  async farmCookies(sessionId) {
+    if (!this.cookieManager) {
+      throw new Error('Cookie manager not initialized');
+    }
+
+    return await this.cookieManager.farmCookies(sessionId);
+  }
+
+  /**
+   * Get cookie pool statistics
+   * @returns {Promise<Object>}
+   */
+  async getCookieStats() {
+    if (!this.cookieManager) {
+      throw new Error('Cookie manager not initialized');
+    }
+
+    return await this.cookieManager.getStats();
+  }
+}
+
+export default PuppeteerPlugin;
