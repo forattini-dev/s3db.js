@@ -4,9 +4,16 @@ The **Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery
 
 ## 🚀 What's New
 
-**Latest Update**: Added **MongoDB Atlas** support and expanded coverage for Alibaba Cloud, Linode, Hetzner, and Cloudflare!
+**Latest Update**: **Terraform/OpenTofu Export** + MongoDB Atlas support + expanded cloud coverage!
 
 ### ✨ New in This Release
+
+**🆕 Terraform/OpenTofu Export** (Brownfield to IaC!)
+- Export discovered resources to `.tfstate` format
+- 170+ resource type mappings across 11 providers
+- Instant IaC management for existing infrastructure
+- Three export methods: memory, file, S3
+- Compatible with Terraform 0.12+ and OpenTofu
 
 **🆕 MongoDB Atlas Support** (11th provider!)
 - Projects, Clusters, Serverless Instances
@@ -21,7 +28,7 @@ The **Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery
 - **Hetzner**: +3 services (Primary IPs, Placement Groups, ISOs)
 - **Cloudflare**: +3 services (SSL Certificates, WAF Rulesets, Access Applications/Policies)
 
-**Total Coverage:** 11 cloud providers, 200+ resource types, production-ready with resilient error handling!
+**Total Coverage:** 11 cloud providers, 200+ resource types, production-ready!
 
 ---
 
@@ -285,6 +292,226 @@ await plugin.syncCloud('aws');   // single cloud
 ```
 
 Each call returns a summary `{ cloudId, driver, created, updated, unchanged, processed, durationMs }`.
+
+---
+
+## Terraform/OpenTofu Export
+
+**🚀 NEW: Brownfield to IaC Workflow**
+
+Export discovered cloud resources to Terraform/OpenTofu state format (`.tfstate`), enabling instant infrastructure-as-code management for existing resources.
+
+### Use Cases
+
+- **Brownfield Migration**: Import existing cloud infrastructure into Terraform management
+- **Disaster Recovery**: Generate Terraform state files for infrastructure recreation
+- **Compliance & Audit**: Create IaC baselines for security/compliance verification
+- **Multi-Cloud IaC**: Unified Terraform management across 11 cloud providers
+- **Documentation**: Auto-generate infrastructure documentation via Terraform
+
+### Quick Start
+
+```javascript
+// 1. Discover resources
+await plugin.syncAll();
+
+// 2. Export to Terraform state
+const result = await plugin.exportToTerraformState();
+console.log(result.state);  // Standard Terraform state object
+console.log(result.stats);  // { total, converted, skipped }
+
+// 3. Export to file
+await plugin.exportToTerraformStateFile('./terraform.tfstate');
+
+// 4. Use with Terraform/OpenTofu
+// $ terraform plan  # Terraform recognizes existing resources
+```
+
+### Export Methods
+
+#### `exportToTerraformState(options)`
+
+Export to Terraform state object in memory.
+
+**Options:**
+- `providers` (Array<string>) - Filter by provider (e.g., `['aws', 'gcp']`)
+- `resourceTypes` (Array<string>) - Filter by resource type (e.g., `['aws.ec2.instance']`)
+- `cloudId` (string) - Filter by specific cloud ID
+- `terraformVersion` (string) - Terraform version (default: `'1.5.0'`)
+- `serial` (number) - State serial number (default: `1`)
+- `lineage` (string) - State lineage UUID (default: auto-generated)
+- `outputs` (Object) - Terraform outputs (default: `{}`)
+
+**Returns:** `{ state, stats }`
+- `state` - Terraform state object (version 4 format)
+- `stats` - { total, converted, skipped, skippedTypes }
+
+**Examples:**
+
+```javascript
+// Export all resources
+const all = await plugin.exportToTerraformState();
+
+// Export AWS resources only
+const aws = await plugin.exportToTerraformState({
+  providers: ['aws']
+});
+
+// Export specific resource types
+const compute = await plugin.exportToTerraformState({
+  resourceTypes: ['aws.ec2.instance', 'gcp.compute.instance']
+});
+
+// Custom Terraform version and outputs
+const custom = await plugin.exportToTerraformState({
+  terraformVersion: '1.6.0',
+  serial: 42,
+  outputs: {
+    vpc_id: { value: 'vpc-123', type: 'string' }
+  }
+});
+```
+
+#### `exportToTerraformStateFile(filePath, options)`
+
+Export to local `.tfstate` file.
+
+**Parameters:**
+- `filePath` (string) - Output file path
+- `options` (Object) - Same as `exportToTerraformState()`
+
+**Returns:** `{ filePath, state, stats }`
+
+**Example:**
+
+```javascript
+await plugin.exportToTerraformStateFile('./terraform.tfstate', {
+  providers: ['aws', 'gcp']
+});
+```
+
+#### `exportToTerraformStateToS3(bucket, key, options)`
+
+Export to S3 bucket (for remote state backends).
+
+**Parameters:**
+- `bucket` (string) - S3 bucket name
+- `key` (string) - S3 object key
+- `options` (Object) - Same as `exportToTerraformState()`
+
+**Returns:** `{ bucket, key, state, stats }`
+
+**Example:**
+
+```javascript
+await plugin.exportToTerraformStateToS3(
+  'my-terraform-states',
+  'production/terraform.tfstate',
+  { providers: ['aws'] }
+);
+```
+
+### Supported Resource Mappings
+
+The exporter automatically maps cloud inventory resource types to Terraform resource types:
+
+| Cloud Resource Type | Terraform Resource Type | Provider |
+|---------------------|-------------------------|----------|
+| `aws.ec2.instance` | `aws_instance` | AWS |
+| `aws.s3.bucket` | `aws_s3_bucket` | AWS |
+| `aws.rds.instance` | `aws_db_instance` | AWS |
+| `gcp.compute.instance` | `google_compute_instance` | GCP |
+| `gcp.storage.bucket` | `google_storage_bucket` | GCP |
+| `azure.vm` | `azurerm_virtual_machine` | Azure |
+| `do.droplet` | `digitalocean_droplet` | DigitalOcean |
+| `alibaba.ecs.instance` | `alicloud_instance` | Alibaba Cloud |
+| `mongodb-atlas.cluster` | `mongodbatlas_cluster` | MongoDB Atlas |
+| ... | ... | ... |
+
+**Total Mappings:** 170+ resource types across 11 cloud providers
+
+See `src/plugins/cloud-inventory/terraform-exporter.js` for complete list.
+
+### Next Steps After Export
+
+**Option 1: Use Generated State Directly**
+
+```bash
+# Copy exported state
+cp terraform-discovered.tfstate terraform.tfstate
+
+# Terraform recognizes existing resources
+terraform plan
+
+# No changes needed - infrastructure already exists!
+```
+
+**Option 2: Import Individual Resources**
+
+```bash
+# Import resources one by one
+terraform import aws_instance.my_server i-1234567890abcdef0
+terraform import aws_s3_bucket.my_bucket my-app-bucket
+```
+
+**Option 3: Generate Terraform Configuration**
+
+```bash
+# Export state to JSON
+terraform show -json terraform-discovered.tfstate > state.json
+
+# Use tools to generate .tf files
+# - terraformer: github.com/GoogleCloudPlatform/terraformer
+# - terraform-provider-iterative: github.com/iterative/terraform-provider-iterative
+# - Custom script using state.json
+```
+
+### Important Notes
+
+- **Unmapped Resources**: Resources without Terraform mappings are skipped (see `stats.skippedTypes`)
+- **Configuration Accuracy**: Exported attributes match discovered configuration - may need adjustment
+- **State File Format**: Uses Terraform state version 4 (compatible with Terraform 0.12+, OpenTofu)
+- **No Credentials**: Credentials are sanitized during discovery (not included in state)
+- **Resource Names**: Generated from resource IDs, sanitized for Terraform naming conventions
+
+### Example Output
+
+```json
+{
+  "version": 4,
+  "terraform_version": "1.5.0",
+  "serial": 1,
+  "lineage": "a1b2c3d4-e5f6-4789-9abc-def012345678",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "resource_i_1234567890abcdef0",
+      "provider": "registry.terraform.io/hashicorp/aws",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "instanceId": "i-1234567890abcdef0",
+            "instanceType": "t3.medium",
+            "state": "running",
+            "privateIpAddress": "10.0.1.10",
+            "subnetId": "subnet-abc123",
+            "vpcId": "vpc-xyz789"
+          },
+          "private": "bnVsbA==",
+          "dependencies": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Complete Example
+
+See [docs/examples/e70-cloud-inventory-terraform-export.js](../examples/e70-cloud-inventory-terraform-export.js) for a full working example.
 
 ---
 
