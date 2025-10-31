@@ -21244,6 +21244,9 @@ class S3QueuePlugin extends Plugin {
     resource.extendQueueVisibility = async function(queueId, extraMilliseconds) {
       return await plugin.extendVisibility(queueId, extraMilliseconds);
     };
+    resource.clearQueueCache = async function() {
+      plugin.clearProcessedCache();
+    };
   }
   async startProcessing(handler = null, options = {}) {
     if (this.isRunning) {

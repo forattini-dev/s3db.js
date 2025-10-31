@@ -89,7 +89,10 @@ describe.skip('API Plugin - Security Tests', () => {
           config: {
             jwtSecret: 'test-secret-key-for-security-testing',
             jwtExpiresIn: '1h',
-            allowRegistration: true
+            registration: {
+              enabled: true,
+              allowedFields: ['name']
+            }
           }
         },
         resources: {
@@ -118,7 +121,7 @@ describe.skip('API Plugin - Security Tests', () => {
         body: JSON.stringify({
           email: 'security@test.com',
           password: 'SecurePass123!',
-          role: 'admin'
+          name: 'Security Tester'
         })
       });
 
@@ -424,7 +427,9 @@ describe.skip('API Plugin - Security Tests', () => {
           config: {
             realm: 'Security Test API',
             passphrase: 'test-passphrase',
-            allowRegistration: true
+            registration: {
+              enabled: true
+            }
           }
         },
         resources: {

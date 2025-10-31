@@ -1563,6 +1563,8 @@ const dot = machine.visualize();
 Action functions receive `(context, event, machine)` parameters:
 
 ```javascript
+import { StateMachineError } from 's3db.js';
+
 actions: {
   myAction: async (context, event, machine) => {
     // context: Current record data
@@ -2061,17 +2063,33 @@ if (currentState === 'confirmed') {
 **Error**: `Transition blocked by guard '{guardName}': {reason}`
 **Recovery**:
 ```javascript
+import { StateMachineError } from 's3db.js';
+
 // Define guard with clear error messages
 guards: {
   canShip: async (context, event, machine) => {
     const inventory = await machine.database.resources.inventory.get(context.productId);
 
     if (!inventory) {
-      throw new Error('Product not found in inventory');
+      throw new StateMachineError('Product not found in inventory', {
+        statusCode: 404,
+        retriable: false,
+        suggestion: 'Ensure the inventory record exists before attempting to ship.',
+        resourceName: 'inventory',
+        currentState: context._state,
+        operation: 'guard:canShip'
+      });
     }
 
     if (inventory.quantity < context.quantity) {
-      throw new Error(`Insufficient inventory: need ${context.quantity}, have ${inventory.quantity}`);
+      throw new StateMachineError('Insufficient inventory for shipment', {
+        statusCode: 409,
+        retriable: false,
+        suggestion: `Reserve more stock or reduce the shipment quantity (need ${context.quantity}, have ${inventory.quantity}).`,
+        resourceName: 'inventory',
+        currentState: context._state,
+        operation: 'guard:canShip'
+      });
     }
 
     return true;
@@ -2271,6 +2289,8 @@ actions: {
 
 Prevent cascading failures:
 ```javascript
+import { StateMachineError } from 's3db.js';
+
 class GuardCircuitBreaker {
   constructor(maxFailures = 5, resetTimeout = 60000) {
     this.failures = new Map();
@@ -2282,7 +2302,13 @@ class GuardCircuitBreaker {
     const failureCount = this.failures.get(guardName) || 0;
 
     if (failureCount >= this.maxFailures) {
-      throw new Error(`Guard ${guardName} circuit breaker open (${failureCount} failures)`);
+      throw new StateMachineError(`Guard ${guardName} circuit breaker open`, {
+        statusCode: 429,
+        retriable: true,
+        suggestion: `Wait ${this.resetTimeout / 1000}s or investigate the guard failures before retrying.`,
+        metadata: { guardName, failureCount, maxFailures: this.maxFailures },
+        operation: 'guardCircuitBreaker'
+      });
     }
 
     try {
@@ -2581,7 +2607,15 @@ actions: {
 
     // Check state hasn't changed
     if (record._state !== context._state) {
-      throw new Error(`State conflict: expected ${context._state}, got ${record._state}`);
+      throw new StateMachineError('State conflict detected during safe transition', {
+        statusCode: 409,
+        retriable: false,
+        suggestion: 'Reload the entity state before retrying the transition.',
+        currentState: record._state,
+        targetState: context._state,
+        resourceName: 'orders',
+        operation: 'safeTransition'
+      });
     }
 
     // Update with version check (optimistic lock)

@@ -303,6 +303,10 @@ export class S3QueuePlugin extends Plugin {
     resource.extendQueueVisibility = async function(queueId, extraMilliseconds) {
       return await plugin.extendVisibility(queueId, extraMilliseconds);
     };
+
+    resource.clearQueueCache = async function() {
+      plugin.clearProcessedCache();
+    };
   }
 
   async startProcessing(handler = null, options = {}) {
@@ -554,7 +558,6 @@ export class S3QueuePlugin extends Plugin {
 
     if (!okGet || !msgWithETag) {
       // Message was deleted or not found - remove from cache
-      this.processedCache.delete(msg.id);
       await this._clearProcessedMarker(msg.id);
       if (this.config.verbose) {
         console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
@@ -918,7 +921,6 @@ export class S3QueuePlugin extends Plugin {
         originalId: queueEntry.originalId,
         error: 'visibility-timeout exceeded max attempts'
       });
-      this.processedCache.delete(queueEntry.id);
       return;
     }
 
@@ -941,10 +943,82 @@ export class S3QueuePlugin extends Plugin {
       return;
     }
 
-    this.processedCache.delete(queueEntry.id);
+    await this._clearProcessedMarker(queueEntry.id);
     this.emit('plg:s3-queue:message-recovered', {
       queueId: queueEntry.id,
       originalId: queueEntry.originalId
     });
+  }
+
+  clearProcessedCache() {
+    this.processedCache.clear();
+  }
+
+  async _markMessageProcessed(messageId) {
+    const ttl = Math.max(1000, this.config.processedCacheTTL);
+    const expiresAt = Date.now() + ttl;
+    this.processedCache.set(messageId, expiresAt);
+
+    const storage = this.getStorage();
+    const key = storage.getPluginKey(null, 'cache', 'processed', messageId);
+    const ttlSeconds = Math.max(1, Math.ceil(ttl / 1000));
+
+    const payload = {
+      workerId: this.workerId,
+      markedAt: Date.now()
+    };
+
+    const [ok, err] = await tryFn(() =>
+      storage.set(key, payload, {
+        ttl: ttlSeconds,
+        behavior: 'body-only'
+      })
+    );
+
+    if (!ok && this.config.verbose) {
+      console.warn('[S3QueuePlugin] Failed to persist processed marker:', err?.message);
+    }
+  }
+
+  async _isRecentlyProcessed(messageId) {
+    const now = Date.now();
+    const localExpiresAt = this.processedCache.get(messageId);
+    if (localExpiresAt && localExpiresAt > now) {
+      return true;
+    }
+    if (localExpiresAt && localExpiresAt <= now) {
+      this.processedCache.delete(messageId);
+    }
+
+    const storage = this.getStorage();
+    const key = storage.getPluginKey(null, 'cache', 'processed', messageId);
+    const [ok, err, data] = await tryFn(() => storage.get(key));
+
+    if (!ok) {
+      if (err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
+        console.warn('[S3QueuePlugin] Failed to read processed marker:', err.message || err);
+      }
+      return false;
+    }
+
+    if (!data) {
+      return false;
+    }
+
+    const ttl = Math.max(1000, this.config.processedCacheTTL);
+    this.processedCache.set(messageId, now + ttl);
+    return true;
+  }
+
+  async _clearProcessedMarker(messageId) {
+    this.processedCache.delete(messageId);
+
+    const storage = this.getStorage();
+    const key = storage.getPluginKey(null, 'cache', 'processed', messageId);
+
+    const [ok, err] = await tryFn(() => storage.delete(key));
+    if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
+      console.warn('[S3QueuePlugin] Failed to delete processed marker:', err.message || err);
+    }
   }
 }
