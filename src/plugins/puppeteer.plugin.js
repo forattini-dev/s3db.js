@@ -168,6 +168,17 @@ export class PuppeteerPlugin extends Plugin {
       // Proxy Support
       proxy: {
         enabled: false,
+        list: [], // Array of proxy URLs or objects
+        selectionStrategy: 'round-robin', // 'round-robin' | 'random' | 'least-used' | 'best-performance'
+        bypassList: [], // Domains to bypass proxy
+        healthCheck: {
+          enabled: true,
+          interval: 300000, // 5 minutes
+          testUrl: 'https://www.google.com',
+          timeout: 10000,
+          successRateThreshold: 0.3
+        },
+        // Legacy single proxy support (deprecated)
         server: null,
         username: null,
         password: null,
@@ -199,6 +210,7 @@ export class PuppeteerPlugin extends Plugin {
     this.userAgentGenerator = null;
     this.ghostCursor = null;
     this.cookieManager = null;
+    this.proxyManager = null;
     this.initialized = false;
   }
 
@@ -229,6 +241,11 @@ export class PuppeteerPlugin extends Plugin {
 
     // Import dependencies
     await this._importDependencies();
+
+    // Initialize proxy manager
+    if (this.config.proxy.enabled) {
+      await this._initializeProxyManager();
+    }
 
     // Initialize cookie manager
     if (this.config.cookies.enabled) {
@@ -305,6 +322,7 @@ export class PuppeteerPlugin extends Plugin {
           cookies: 'array|required',
           userAgent: 'string',
           viewport: 'object',
+          proxyId: 'string|optional', // IMMUTABLE: Proxy binding
           reputation: {
             successCount: 'number',
             failCount: 'number',
@@ -322,6 +340,16 @@ export class PuppeteerPlugin extends Plugin {
         behavior: 'body-only'
       });
     }
+  }
+
+  /**
+   * Initialize proxy manager
+   * @private
+   */
+  async _initializeProxyManager() {
+    const { ProxyManager } = await import('./puppeteer/proxy-manager.js');
+    this.proxyManager = new ProxyManager(this);
+    await this.proxyManager.initialize();
   }
 
   /**
@@ -351,27 +379,36 @@ export class PuppeteerPlugin extends Plugin {
   /**
    * Create a new browser instance
    * @private
+   * @param {Object} proxy - Optional proxy configuration
    * @returns {Promise<Browser>}
    */
-  async _createBrowser() {
+  async _createBrowser(proxy = null) {
     const launchOptions = { ...this.config.launch };
 
-    // Add proxy if enabled
-    if (this.config.proxy.enabled && this.config.proxy.server) {
+    // Add proxy args if provided
+    if (proxy && this.proxyManager) {
+      const proxyArgs = this.proxyManager.getProxyLaunchArgs(proxy);
+      launchOptions.args.push(...proxyArgs);
+    } else if (this.config.proxy.enabled && this.config.proxy.server) {
+      // Legacy single proxy support (deprecated)
       launchOptions.args.push(`--proxy-server=${this.config.proxy.server}`);
     }
 
     const browser = await this.puppeteer.launch(launchOptions);
-    this.browserPool.push(browser);
-    this.tabPool.set(this.browserPool.length - 1, []);
 
-    browser.on('disconnected', () => {
-      const index = this.browserPool.indexOf(browser);
-      if (index > -1) {
-        this.browserPool.splice(index, 1);
-        this.tabPool.delete(index);
-      }
-    });
+    // Only add to pool if no specific proxy (shared browser)
+    if (!proxy && this.config.pool.enabled) {
+      this.browserPool.push(browser);
+      this.tabPool.set(this.browserPool.length - 1, []);
+
+      browser.on('disconnected', () => {
+        const index = this.browserPool.indexOf(browser);
+        if (index > -1) {
+          this.browserPool.splice(index, 1);
+          this.tabPool.delete(index);
+        }
+      });
+    }
 
     return browser;
   }
@@ -379,9 +416,14 @@ export class PuppeteerPlugin extends Plugin {
   /**
    * Get or create a browser instance
    * @private
+   * @param {Object} proxy - Optional proxy configuration
    * @returns {Promise<Browser>}
    */
-  async _getBrowser() {
+  async _getBrowser(proxy = null) {
+    // If proxy specified, create dedicated browser (not pooled)
+    if (proxy) {
+      return await this._createBrowser(proxy);
+    }
     if (this.config.pool.enabled) {
       // Find browser with available capacity
       for (let i = 0; i < this.browserPool.length; i++) {
@@ -508,8 +550,23 @@ export class PuppeteerPlugin extends Plugin {
       timeout = 30000
     } = options;
 
-    const browser = await this._getBrowser();
+    // IMMUTABLE PROXY BINDING: Get proxy for session if proxy is enabled
+    let proxy = null;
+    let proxyId = null;
+
+    if (useSession && this.proxyManager) {
+      proxy = this.proxyManager.getProxyForSession(useSession, true);
+      proxyId = proxy?.id || null;
+    }
+
+    // Get browser (with proxy if needed)
+    const browser = await this._getBrowser(proxy);
     const page = await browser.newPage();
+
+    // Authenticate proxy if needed
+    if (proxy && this.proxyManager) {
+      await this.proxyManager.authenticateProxy(page, proxy);
+    }
 
     // Setup viewport
     const viewport = this._generateViewport();
@@ -544,8 +601,23 @@ export class PuppeteerPlugin extends Plugin {
       cursor = this.createGhostCursor(page);
     }
 
-    // Navigate
-    await page.goto(url, { waitUntil, timeout });
+    // Navigate with error handling for proxy
+    let navigationSuccess = false;
+    try {
+      await page.goto(url, { waitUntil, timeout });
+      navigationSuccess = true;
+
+      // Record successful proxy usage
+      if (proxyId && this.proxyManager) {
+        this.proxyManager.recordProxyUsage(proxyId, true);
+      }
+    } catch (err) {
+      // Record failed proxy usage
+      if (proxyId && this.proxyManager) {
+        this.proxyManager.recordProxyUsage(proxyId, false);
+      }
+      throw err;
+    }
 
     // Take screenshot if requested
     if (screenshot) {
@@ -557,6 +629,7 @@ export class PuppeteerPlugin extends Plugin {
     page._cursor = cursor;
     page._userAgent = userAgent;
     page._viewport = viewport;
+    page._proxyId = proxyId; // IMMUTABLE: Proxy binding stored on page
 
     // Add human behavior methods
     if (this.config.humanBehavior.enabled) {
@@ -566,11 +639,19 @@ export class PuppeteerPlugin extends Plugin {
     // Save cookies if session tracking
     if (useSession && this.cookieManager) {
       page.on('close', async () => {
-        await this.cookieManager.saveSession(page, useSession);
+        await this.cookieManager.saveSession(page, useSession, {
+          success: navigationSuccess
+        });
       });
     }
 
-    this.emit('puppeteer.navigate', { url, userAgent, viewport });
+    this.emit('puppeteer.navigate', {
+      url,
+      userAgent,
+      viewport,
+      proxyId,
+      sessionId: useSession
+    });
 
     return page;
   }
@@ -732,6 +813,42 @@ export class PuppeteerPlugin extends Plugin {
     }
 
     return await this.cookieManager.getStats();
+  }
+
+  /**
+   * Get proxy pool statistics
+   * @returns {Array}
+   */
+  getProxyStats() {
+    if (!this.proxyManager) {
+      throw new Error('Proxy manager not initialized');
+    }
+
+    return this.proxyManager.getProxyStats();
+  }
+
+  /**
+   * Get session-proxy bindings
+   * @returns {Array}
+   */
+  getSessionProxyBindings() {
+    if (!this.proxyManager) {
+      throw new Error('Proxy manager not initialized');
+    }
+
+    return this.proxyManager.getSessionBindings();
+  }
+
+  /**
+   * Check health of all proxies
+   * @returns {Promise<Object>}
+   */
+  async checkProxyHealth() {
+    if (!this.proxyManager) {
+      throw new Error('Proxy manager not initialized');
+    }
+
+    return await this.proxyManager.checkAllProxies();
   }
 }
 

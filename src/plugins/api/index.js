@@ -1006,3 +1006,6 @@ export {
   createNotificationStateMachine,
   createAttemptStateMachine
 } from './concerns/state-machine.js';
+
+// Export route context utilities (NEW!)
+export { RouteContext, withContext } from './concerns/route-context.js';
