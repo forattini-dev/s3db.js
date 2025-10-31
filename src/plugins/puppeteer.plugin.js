@@ -243,15 +243,8 @@ export class PuppeteerPlugin extends Plugin {
 
     this.config.cookies.storage.resource = resolveResourceName('puppeteer', {
       defaultName: 'plg_puppeteer_cookies',
-      override: options.cookies?.storage?.resource
+      override: resourceNamesOption.cookies
     });
-    this.legacyCookieStorageNames = ['puppeteer_cookies'];
-    if (options.cookies?.storage?.resource) {
-      this.legacyCookieStorageNames.push(options.cookies.storage.resource);
-    }
-    if (resourceNamesOption.cookies) {
-      this.legacyCookieStorageNames.push(resourceNamesOption.cookies);
-    }
 
     // Internal state
     this.browserPool = [];
@@ -388,51 +381,42 @@ export class PuppeteerPlugin extends Plugin {
 
     try {
       await this.database.getResource(resourceName);
+      return;
     } catch (err) {
-      for (const legacyName of this.legacyCookieStorageNames) {
-        if (!legacyName) continue;
-        try {
-          const legacyResource = await this.database.getResource(legacyName);
-          this.config.cookies.storage.resource = legacyName;
-          return legacyResource;
-        } catch (legacyErr) {
-          // Try next legacy name
-        }
-      }
-
-      // Create resource if it doesn't exist
-      await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          sessionId: 'string|required',
-          cookies: 'array|required',
-          userAgent: 'string',
-          viewport: 'object',
-          proxyId: 'string|optional', // IMMUTABLE: Proxy binding
-          domain: 'string',            // Main domain for cookies
-          date: 'string',              // YYYY-MM-DD for temporal partitioning
-          reputation: {
-            successCount: 'number',
-            failCount: 'number',
-            successRate: 'number',
-            lastUsed: 'number'
-          },
-          metadata: {
-            createdAt: 'number',
-            expiresAt: 'number',
-            requestCount: 'number',
-            age: 'number'
-          }
-        },
-        timestamps: true,
-        behavior: 'body-only',
-        partitions: {
-          byProxy: { fields: { proxyId: 'string' } },   // Query cookies for a proxy
-          byDate: { fields: { date: 'string' } },       // Query by date (for rotation)
-          byDomain: { fields: { domain: 'string' } }    // Query cookies for a domain
-        }
-      });
+      // Resource missing, will create below
     }
+
+    await this.database.createResource({
+      name: resourceName,
+      attributes: {
+        sessionId: 'string|required',
+        cookies: 'array|required',
+        userAgent: 'string',
+        viewport: 'object',
+        proxyId: 'string|optional', // IMMUTABLE: Proxy binding
+        domain: 'string',            // Main domain for cookies
+        date: 'string',              // YYYY-MM-DD for temporal partitioning
+        reputation: {
+          successCount: 'number',
+          failCount: 'number',
+          successRate: 'number',
+          lastUsed: 'number'
+        },
+        metadata: {
+          createdAt: 'number',
+          expiresAt: 'number',
+          requestCount: 'number',
+          age: 'number'
+        }
+      },
+      timestamps: true,
+      behavior: 'body-only',
+      partitions: {
+        byProxy: { fields: { proxyId: 'string' } },   // Query cookies for a proxy
+        byDate: { fields: { date: 'string' } },       // Query by date (for rotation)
+        byDomain: { fields: { domain: 'string' } }    // Query cookies for a domain
+      }
+    });
   }
 
   /**

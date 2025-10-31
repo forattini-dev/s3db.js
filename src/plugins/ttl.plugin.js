@@ -175,7 +175,7 @@ export class TTLPlugin extends Plugin {
     this.expirationIndex = null;
     this.indexResourceName = resolveResourceName('ttl', {
       defaultName: 'plg_ttl_expiration_index',
-      override: config.indexResourceName
+      override: resourceNamesOption.index
     });
   }
 

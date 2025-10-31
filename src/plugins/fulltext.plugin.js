@@ -524,9 +524,13 @@ export class FullTextPlugin extends Plugin {
         },
         behavior: 'body-overflow'
       }));
-    this.indexResource = ok
-      ? indexResource
-      : (this.database.resources[this.indexResourceName] || this.database.resources.fulltext_indexes);
+    if (ok) {
+      this.indexResource = indexResource;
+    } else if (this.database.resources[this.indexResourceName]) {
+      this.indexResource = this.database.resources[this.indexResourceName];
+    } else {
+      throw err;
+    }
 
     // Load existing indexes
     await this.loadIndexes();

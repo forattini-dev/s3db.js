@@ -272,29 +272,23 @@ export class TfStatePlugin extends Plugin {
     this.driverConfig = config.config || {};
 
     // Resource names
-    const resources = config.resources || {};
+    const resourceNamesOption = config.resourceNames || {};
     this.resourceName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_resources',
-      override: resources.resources || config.resourceName
+      override: resourceNamesOption.resources
     });
     this.stateFilesName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_state_files',
-      override: resources.stateFiles || config.stateFilesName
+      override: resourceNamesOption.stateFiles
     });
     this.diffsName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_state_diffs',
-      override: resources.diffs || config.diffsName
+      override: resourceNamesOption.diffs
     });
     this.lineagesName = resolveResourceName('tfstate', {
       defaultName: 'plg_tfstate_lineages',
-      override: resources.lineages
+      override: resourceNamesOption.lineages
     });
-    this.legacyResourceNames = {
-      resources: ['plg_tfstate_resources'],
-      stateFiles: ['plg_tfstate_state_files'],
-      diffs: ['plg_tfstate_state_diffs'],
-      lineages: ['plg_tfstate_lineages']
-    };
 
     // Monitoring configuration
     const monitor = config.monitor || {};
@@ -375,101 +369,131 @@ export class TfStatePlugin extends Plugin {
 
     // Resource 0: Terraform Lineages (Master tracking resource)
     // NEW: Tracks unique Tfstate lineages for efficient diff tracking
-    this.lineagesResource = await this.database.createResource({
-      name: this.lineagesName,
-      attributes: {
-        id: 'string|required',           // = lineage UUID from Tfstate
-        latestSerial: 'number',           // Track latest for quick access
-        latestStateId: 'string',          // FK to stateFilesResource
-        totalStates: 'number',            // Counter
-        firstImportedAt: 'number',
-        lastImportedAt: 'number',
-        metadata: 'json'                  // Custom tags, project info, etc.
-      },
-      timestamps: true,
-      asyncPartitions: this.asyncPartitions,  // Configurable async partitions
-      partitions: {},                     // No partitions - simple tracking resource
-      createdBy: 'TfStatePlugin'
-    });
+    {
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+        name: this.lineagesName,
+        attributes: {
+          id: 'string|required',
+          latestSerial: 'number',
+          latestStateId: 'string',
+          totalStates: 'number',
+          firstImportedAt: 'number',
+          lastImportedAt: 'number',
+          metadata: 'json'
+        },
+        timestamps: true,
+        asyncPartitions: this.asyncPartitions,
+        partitions: {},
+        createdBy: 'TfStatePlugin'
+      }));
+
+      if (created) {
+        this.lineagesResource = resource;
+      } else {
+        this.lineagesResource = this.database.resources?.[this.lineagesName];
+        if (!this.lineagesResource) {
+          throw createErr;
+        }
+      }
+    }
 
     // Resource 1: Tfstate Files Metadata
     // Dedicated to tracking state file metadata with SHA256 hash for deduplication
-    this.stateFilesResource = await this.database.createResource({
-      name: this.stateFilesName,
-      attributes: {
-        id: 'string|required',
-        lineageId: 'string|required',     // NEW: FK to lineages (= lineage UUID)
-        sourceFile: 'string|required',    // Full path or s3:// URI
-        serial: 'number|required',
-        lineage: 'string|required',       // Denormalized for queries
-        terraformVersion: 'string',
-        stateVersion: 'number|required',
-        resourceCount: 'number',
-        sha256Hash: 'string|required',    // SHA256 hash for deduplication
-        importedAt: 'number|required'
-      },
-      timestamps: true,
-      asyncPartitions: this.asyncPartitions,  // Configurable async partitions
-      partitions: {
-        byLineage: { fields: { lineageId: 'string' } },                        // NEW: Primary lookup
-        byLineageSerial: { fields: { lineageId: 'string', serial: 'number' } }, // NEW: Composite key
-        bySourceFile: { fields: { sourceFile: 'string' } },                    // Legacy support
-        bySerial: { fields: { serial: 'number' } },
-        bySha256: { fields: { sha256Hash: 'string' } }
-      },
-      createdBy: 'TfStatePlugin'
-    });
+    {
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+        name: this.stateFilesName,
+        attributes: {
+          id: 'string|required',
+          lineageId: 'string|required',
+          sourceFile: 'string|required',
+          serial: 'number|required',
+          lineage: 'string|required',
+          terraformVersion: 'string',
+          stateVersion: 'number|required',
+          resourceCount: 'number',
+          sha256Hash: 'string|required',
+          importedAt: 'number|required'
+        },
+        timestamps: true,
+        asyncPartitions: this.asyncPartitions,
+        partitions: {
+          byLineage: { fields: { lineageId: 'string' } },
+          byLineageSerial: { fields: { lineageId: 'string', serial: 'number' } },
+          bySourceFile: { fields: { sourceFile: 'string' } },
+          bySerial: { fields: { serial: 'number' } },
+          bySha256: { fields: { sha256Hash: 'string' } }
+        },
+        createdBy: 'TfStatePlugin'
+      }));
+
+      if (created) {
+        this.stateFilesResource = resource;
+      } else {
+        this.stateFilesResource = this.database.resources?.[this.stateFilesName];
+        if (!this.stateFilesResource) {
+          throw createErr;
+        }
+      }
+    }
 
     // Resource 2: Terraform Resources
     // Store extracted resources with foreign key to state files
-    this.resource = await this.database.createResource({
-      name: this.resourceName,
-      attributes: {
-        id: 'string|required',
-        stateFileId: 'string|required',   // FK to stateFilesResource
-        lineageId: 'string|required',     // NEW: FK to lineages
-        // Denormalized fields for fast queries
-        stateSerial: 'number|required',
-        sourceFile: 'string|required',
-        // Resource data
-        resourceType: 'string|required',
-        resourceName: 'string|required',
-        resourceAddress: 'string|required',
-        providerName: 'string|required',
-        mode: 'string', // managed or data
-        attributes: 'json',
-        dependencies: 'array',
-        importedAt: 'number|required'
-      },
-      timestamps: true,
-      asyncPartitions: this.asyncPartitions,  // Configurable async partitions
-      partitions: {
-        byLineageSerial: { fields: { lineageId: 'string', stateSerial: 'number' } }, // NEW: Efficient diff queries
-        byLineage: { fields: { lineageId: 'string' } },                               // NEW: All resources for lineage
-        byType: { fields: { resourceType: 'string' } },
-        byProvider: { fields: { providerName: 'string' } },
-        bySerial: { fields: { stateSerial: 'number' } },
-        bySourceFile: { fields: { sourceFile: 'string' } },                           // Legacy support
-        byProviderAndType: { fields: { providerName: 'string', resourceType: 'string' } },
-        byLineageType: { fields: { lineageId: 'string', resourceType: 'string' } }   // NEW: Type queries per lineage
-      },
-      createdBy: 'TfStatePlugin'
-    });
+    {
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+        name: this.resourceName,
+        attributes: {
+          id: 'string|required',
+          stateFileId: 'string|required',
+          lineageId: 'string|required',
+          stateSerial: 'number|required',
+          sourceFile: 'string|required',
+          resourceType: 'string|required',
+          resourceName: 'string|required',
+          resourceAddress: 'string|required',
+          providerName: 'string|required',
+          mode: 'string',
+          attributes: 'json',
+          dependencies: 'array',
+          importedAt: 'number|required'
+        },
+        timestamps: true,
+        asyncPartitions: this.asyncPartitions,
+        partitions: {
+          byLineageSerial: { fields: { lineageId: 'string', stateSerial: 'number' } },
+          byLineage: { fields: { lineageId: 'string' } },
+          byType: { fields: { resourceType: 'string' } },
+          byProvider: { fields: { providerName: 'string' } },
+          bySerial: { fields: { stateSerial: 'number' } },
+          bySourceFile: { fields: { sourceFile: 'string' } },
+          byProviderAndType: { fields: { providerName: 'string', resourceType: 'string' } },
+          byLineageType: { fields: { lineageId: 'string', resourceType: 'string' } }
+        },
+        createdBy: 'TfStatePlugin'
+      }));
+
+      if (created) {
+        this.resource = resource;
+      } else {
+        this.resource = this.database.resources?.[this.resourceName];
+        if (!this.resource) {
+          throw createErr;
+        }
+      }
+    }
 
     // Resource 3: Tfstate Diffs
     // Track changes between state versions (if diff tracking enabled)
     if (this.trackDiffs) {
-      this.diffsResource = await this.database.createResource({
+      const [created, createErr, resource] = await tryFn(() => this.database.createResource({
         name: this.diffsName,
         attributes: {
           id: 'string|required',
-          lineageId: 'string|required',     // NEW: FK to lineages
+          lineageId: 'string|required',
           oldSerial: 'number|required',
           newSerial: 'number|required',
-          oldStateId: 'string',              // NEW: FK to stateFilesResource
-          newStateId: 'string|required',     // NEW: FK to stateFilesResource
+          oldStateId: 'string',
+          newStateId: 'string|required',
           calculatedAt: 'number|required',
-          // Summary statistics
           summary: {
             type: 'object',
             props: {
@@ -478,7 +502,6 @@ export class TfStatePlugin extends Plugin {
               deletedCount: 'number'
             }
           },
-          // Detailed changes
           changes: {
             type: 'object',
             props: {
@@ -488,17 +511,26 @@ export class TfStatePlugin extends Plugin {
             }
           }
         },
-        behavior: 'body-only',              // Force all data to body for reliable nested object handling
+        behavior: 'body-only',
         timestamps: true,
-        asyncPartitions: this.asyncPartitions,  // Configurable async partitions
+        asyncPartitions: this.asyncPartitions,
         partitions: {
-          byLineage: { fields: { lineageId: 'string' } },                               // NEW: All diffs for lineage
-          byLineageNewSerial: { fields: { lineageId: 'string', newSerial: 'number' } }, // NEW: Specific version lookup
+          byLineage: { fields: { lineageId: 'string' } },
+          byLineageNewSerial: { fields: { lineageId: 'string', newSerial: 'number' } },
           byNewSerial: { fields: { newSerial: 'number' } },
           byOldSerial: { fields: { oldSerial: 'number' } }
         },
         createdBy: 'TfStatePlugin'
-      });
+      }));
+
+      if (created) {
+        this.diffsResource = resource;
+      } else {
+        this.diffsResource = this.database.resources?.[this.diffsName];
+        if (!this.diffsResource) {
+          throw createErr;
+        }
+      }
     }
 
     if (this.verbose) {

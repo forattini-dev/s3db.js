@@ -580,7 +580,7 @@ import { resolveResourceNames } from "./concerns/resource-names.js";
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
-    const resourceOverrides = options.resources || {};
+    const resourceOverrides = options.resourceNames || {};
     this.resourceNames = resolveResourceNames('metrics', {
       metrics: {
         defaultName: 'plg_metrics',
@@ -595,11 +595,6 @@ export class MetricsPlugin extends Plugin {
         override: resourceOverrides.performance
       }
     });
-    this.legacyResourceNames = {
-      metrics: 'plg_metrics',
-      errors: 'plg_error_logs',
-      performance: 'plg_performance_logs'
-    };
     this.config = {
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
@@ -664,7 +659,7 @@ export class MetricsPlugin extends Plugin {
       }));
       this.metricsResource = ok1
         ? metricsResource
-        : (this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics]);
+        : this.database.resources[this.resourceNames.metrics];
 
       const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
         name: this.resourceNames.errors,
@@ -684,7 +679,7 @@ export class MetricsPlugin extends Plugin {
       }));
       this.errorsResource = ok2
         ? errorsResource
-        : (this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors]);
+        : this.database.resources[this.resourceNames.errors];
 
       const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
         name: this.resourceNames.performance,
@@ -704,13 +699,13 @@ export class MetricsPlugin extends Plugin {
       }));
       this.performanceResource = ok3
         ? performanceResource
-        : (this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance]);
+        : this.database.resources[this.resourceNames.performance];
     });
     if (!ok) {
       // Resources might already exist
-      this.metricsResource = this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics];
-      this.errorsResource = this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors];
-      this.performanceResource = this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance];
+      this.metricsResource = this.database.resources[this.resourceNames.metrics];
+      this.errorsResource = this.database.resources[this.resourceNames.errors];
+      this.performanceResource = this.database.resources[this.resourceNames.performance];
     }
 
     // Use database hooks for automatic resource discovery
@@ -767,8 +762,7 @@ export class MetricsPlugin extends Plugin {
   }
 
   isInternalResource(resourceName) {
-    return Object.values(this.resourceNames).includes(resourceName) ||
-      Object.values(this.legacyResourceNames).includes(resourceName);
+    return Object.values(this.resourceNames).includes(resourceName);
   }
 
   installMetricsHooks() {

@@ -114,15 +114,8 @@ export class CookieFarmPlugin extends Plugin {
 
     this.config.storage.resource = resolveResourceName('cookiefarm', {
       defaultName: 'plg_cookie_farm_personas',
-      override: resourceNamesOption.personas || options.storage?.resource
+      override: resourceNamesOption.personas
     });
-    this.legacyStorageResourceNames = ['cookie_farm_personas'];
-    if (options.storage?.resource) {
-      this.legacyStorageResourceNames.push(options.storage.resource);
-    }
-    if (resourceNamesOption.personas) {
-      this.legacyStorageResourceNames.push(resourceNamesOption.personas);
-    }
 
     // Internal state
     this.puppeteerPlugin = null;
@@ -211,18 +204,8 @@ export class CookieFarmPlugin extends Plugin {
 
     try {
       await this.database.getResource(resourceName);
+      return;
     } catch (err) {
-      for (const legacyName of this.legacyStorageResourceNames) {
-        if (!legacyName) continue;
-        try {
-          const legacyResource = await this.database.getResource(legacyName);
-          this.config.storage.resource = legacyName;
-          return legacyResource;
-        } catch (legacyErr) {
-          // Continue checking other legacy names
-        }
-      }
-
       // Create resource if it doesn't exist
       await this.database.createResource({
         name: resourceName,

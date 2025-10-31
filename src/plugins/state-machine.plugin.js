@@ -103,13 +103,26 @@ export class StateMachinePlugin extends Plugin {
   constructor(options = {}) {
     super();
 
+    const resourceNamesOption = options.resourceNames || {};
+
+    this.resourceNames = resolveResourceNames('state_machine', {
+      transitionLog: {
+        defaultName: 'plg_state_transitions',
+        override: resourceNamesOption.transitionLog
+      },
+      states: {
+        defaultName: 'plg_entity_states',
+        override: resourceNamesOption.states
+      }
+    });
+
     this.config = {
       stateMachines: options.stateMachines || {},
       actions: options.actions || {},
       guards: options.guards || {},
       persistTransitions: options.persistTransitions !== false,
-      transitionLogResource: options.transitionLogResource || 'plg_state_transitions',
-      stateResource: options.stateResource || 'plg_entity_states',
+      transitionLogResource: this.resourceNames.transitionLog,
+      stateResource: this.resourceNames.states,
       retryAttempts: options.retryAttempts || 3,
       retryDelay: options.retryDelay || 100,
       verbose: options.verbose || false,
@@ -129,23 +142,6 @@ export class StateMachinePlugin extends Plugin {
       enableEventTriggers: options.enableEventTriggers !== false,
       triggerCheckInterval: options.triggerCheckInterval || 60000 // Check triggers every 60s by default
     };
-
-    this.resourceNames = resolveResourceNames('state_machine', {
-      transitionLog: {
-        defaultName: 'plg_state_transitions',
-        override: options.transitionLogResource
-      },
-      states: {
-        defaultName: 'plg_entity_states',
-        override: options.stateResource
-      }
-    });
-    this.legacyResourceNames = {
-      transitionLog: 'plg_state_transitions',
-      states: 'plg_entity_states'
-    };
-    this.config.transitionLogResource = this.resourceNames.transitionLog;
-    this.config.stateResource = this.resourceNames.states;
 
     this.database = null;
     this.machines = new Map();
