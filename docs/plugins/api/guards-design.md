@@ -144,13 +144,20 @@ guard: {
 ### 5. Automatic Multi-Tenant Guard
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 guard: {
   // ALL operations force tenantId
   '*': (ctx) => {
     const tenantId = ctx.user.tenantId || ctx.user.tid;
 
     if (!tenantId) {
-      throw new Error('Tenant ID missing');
+      throw new PluginError('Tenant ID missing for multi-tenant guard', {
+        statusCode: 401,
+        retriable: false,
+        suggestion: 'Authenticate with a tenant-scoped token or attach tenantId to the user context.',
+        metadata: { userId: ctx.user.id }
+      });
     }
 
     // Force tenant in ALL operations

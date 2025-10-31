@@ -86,7 +86,7 @@ await db.usePlugin(new ApiPlugin({
 ```
 
 **Generated routes:**
-- `POST /auth/register` - Register new user
+- `POST /auth/register` (when enabled) - Register new user with minimal fields
 - `POST /auth/login` - Login and get JWT token
 - `POST /auth/token/refresh` - Refresh JWT token
 - `GET /auth/me` - Get current user info
@@ -162,11 +162,13 @@ await db.usePlugin(new ApiPlugin({
     resource: 'users',                    // Resource that manages auth
     usernameField: 'email',               // Field for username (default: 'email')
     passwordField: 'password',            // Field for password (default: 'password')
-    config: {
-      realm: 'API Access',                // WWW-Authenticate realm (default: 'API Access')
-      allowRegistration: true             // Enable /auth/register (default: true)
+  config: {
+    realm: 'API Access',                // WWW-Authenticate realm (default: 'API Access')
+    registration: {
+      enabled: true                    // Enable /auth/register (default: false)
     }
-  },
+  }
+},
   resources: {
     cars: {
       auth: true  // Require authentication

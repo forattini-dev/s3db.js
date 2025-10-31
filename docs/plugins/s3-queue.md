@@ -1273,9 +1273,9 @@ S3Queue creates three S3DB resources for each queue:
 
 4️⃣  CHECK CACHE (while holding lock)
     │
-    ├─► Is queue-1 in processedCache?
+    ├─► Is queue-1 flagged in the distributed cache?
     │   └─► Yes → Release lock, skip message
-    │   └─► No → Add to cache, continue
+    │   └─► No → Add marker (PluginStorage + local), continue
     │
     └─► Release lock with storage.releaseLock(lock) (cache updated)
 
