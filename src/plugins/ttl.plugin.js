@@ -221,6 +221,7 @@ export class TTLPlugin extends Plugin {
   }
 
   onNamespaceChanged() {
+    if (!this._indexResourceDescriptor) return;
     this.indexResourceName = this._resolveIndexResourceName();
   }
 

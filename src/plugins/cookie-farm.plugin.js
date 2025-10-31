@@ -29,6 +29,8 @@ export class CookieFarmPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    const resourceNamesOption = options.resourceNames || {};
+
     // Default configuration
     this.config = {
       // Persona generation
@@ -257,7 +259,7 @@ export class CookieFarmPlugin extends Plugin {
       await this.database.getResource(resourceName);
       return;
     } catch (err) {
-      if (err?.name !== 'ResourceNotFoundError') {
+      if (!['ResourceNotFoundError', 'ResourceNotFound'].includes(err?.name)) {
         throw err;
       }
     }
@@ -328,7 +330,7 @@ export class CookieFarmPlugin extends Plugin {
    * @private
    */
   async _loadPersonaPool() {
-    const storage = this.database.getResource(this.config.storage.resource);
+    const storage = await this.database.getResource(this.config.storage.resource);
     const personas = await storage.list({ limit: 1000 });
 
     for (const persona of personas) {

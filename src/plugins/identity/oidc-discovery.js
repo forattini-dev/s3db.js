@@ -5,6 +5,8 @@
  * Implements OpenID Connect Discovery 1.0 specification
  */
 
+import { PluginError } from '../../errors.js';
+
 /**
  * Generate OpenID Connect Discovery Document
  * @param {Object} options - Configuration options
@@ -23,7 +25,13 @@ export function generateDiscoveryDocument(options = {}) {
   } = options;
 
   if (!issuer) {
-    throw new Error('Issuer URL is required for OIDC discovery');
+    throw new PluginError('Issuer URL is required for OIDC discovery', {
+      pluginName: 'IdentityPlugin',
+      operation: 'generateDiscoveryDocument',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide options.issuer when generating the discovery document.'
+    });
   }
 
   // Remove trailing slash from issuer

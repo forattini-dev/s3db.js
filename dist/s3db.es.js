@@ -11749,7 +11749,13 @@ function generateDiscoveryDocument(options = {}) {
     scopes = ["openid", "profile", "email", "offline_access"]
   } = options;
   if (!issuer) {
-    throw new Error("Issuer URL is required for OIDC discovery");
+    throw new PluginError("Issuer URL is required for OIDC discovery", {
+      pluginName: "IdentityPlugin",
+      operation: "generateDiscoveryDocument",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide options.issuer when generating the discovery document."
+    });
   }
   const baseUrl = issuer.replace(/\/$/, "");
   return {
@@ -11967,13 +11973,31 @@ class OAuth2Server {
       authCodeExpiry = "10m"
     } = options;
     if (!issuer) {
-      throw new Error("Issuer URL is required for OAuth2Server");
+      throw new PluginError("Issuer URL is required for OAuth2Server", {
+        pluginName: "IdentityPlugin",
+        operation: "OAuth2Server.constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass { issuer: "https://auth.example.com" } when initializing OAuth2Server.'
+      });
     }
     if (!keyResource) {
-      throw new Error("keyResource is required for OAuth2Server");
+      throw new PluginError("keyResource is required for OAuth2Server", {
+        pluginName: "IdentityPlugin",
+        operation: "OAuth2Server.constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide a keyResource (S3DB resource) to store signing keys."
+      });
     }
     if (!userResource) {
-      throw new Error("userResource is required for OAuth2Server");
+      throw new PluginError("userResource is required for OAuth2Server", {
+        pluginName: "IdentityPlugin",
+        operation: "OAuth2Server.constructor",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Provide a userResource to look up user accounts during token exchange."
+      });
     }
     this.issuer = issuer.replace(/\/$/, "");
     this.keyResource = keyResource;
@@ -12436,7 +12460,13 @@ class OAuth2Server {
   parseExpiryToSeconds(expiresIn) {
     const match = expiresIn.match(/^(\d+)([smhd])$/);
     if (!match) {
-      throw new Error("Invalid expiresIn format");
+      throw new PluginError("Invalid expiresIn format", {
+        pluginName: "IdentityPlugin",
+        operation: "parseExpiryToSeconds",
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Use a duration string such as "15m", "24h", or "30s".'
+      });
     }
     const [, value, unit] = match;
     const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
@@ -16390,7 +16420,15 @@ class MemoryCache extends Cache {
     super(config);
     this.caseSensitive = config.caseSensitive !== void 0 ? config.caseSensitive : true;
     this.serializer = typeof config.serializer === "function" ? config.serializer : JSON.stringify;
-    this.deserializer = typeof config.deserializer === "function" ? config.deserializer : JSON.parse;
+    const defaultDeserializer = (str) => {
+      return JSON.parse(str, (key, value) => {
+        if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/.test(value)) {
+          return new Date(value);
+        }
+        return value;
+      });
+    };
+    this.deserializer = typeof config.deserializer === "function" ? config.deserializer : defaultDeserializer;
     this.enableStats = config.enableStats === true;
     this.evictionPolicy = (config.evictionPolicy || "fifo").toLowerCase();
     if (!["lru", "fifo"].includes(this.evictionPolicy)) {
@@ -16400,7 +16438,7 @@ class MemoryCache extends Cache {
     this.meta = {};
     this.maxSize = config.maxSize !== void 0 ? config.maxSize : 1e3;
     if (config.maxMemoryBytes && config.maxMemoryBytes > 0 && config.maxMemoryPercent && config.maxMemoryPercent > 0) {
-      throw new CacheError("MemoryCache cannot use both maxMemoryBytes and maxMemoryPercent", {
+      throw new CacheError("[MemoryCache] Cannot use both maxMemoryBytes and maxMemoryPercent", {
         driver: "memory",
         operation: "constructor",
         statusCode: 400,
@@ -16410,7 +16448,7 @@ class MemoryCache extends Cache {
     }
     if (config.maxMemoryPercent && config.maxMemoryPercent > 0) {
       if (config.maxMemoryPercent > 1) {
-        throw new CacheError("MemoryCache maxMemoryPercent must be between 0 and 1", {
+        throw new CacheError("[MemoryCache] maxMemoryPercent must be between 0 and 1", {
           driver: "memory",
           operation: "constructor",
           statusCode: 400,
@@ -16522,6 +16560,9 @@ class MemoryCache extends Cache {
       this.currentMemoryBytes -= oldSize;
     }
     if (this.maxMemoryBytes > 0) {
+      if (itemSize > this.maxMemoryBytes) {
+        return data;
+      }
       while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
         const candidate = this._selectEvictionCandidate();
         if (!candidate) break;
@@ -19360,6 +19401,7 @@ class PersonaNotFoundError extends CookieFarmError {
 class CookieFarmPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+    const resourceNamesOption = options.resourceNames || {};
     this.config = {
       // Persona generation
       generation: {
@@ -19572,7 +19614,7 @@ class CookieFarmPlugin extends Plugin {
       await this.database.getResource(resourceName);
       return;
     } catch (err) {
-      if (err?.name !== "ResourceNotFoundError") {
+      if (!["ResourceNotFoundError", "ResourceNotFound"].includes(err?.name)) {
         throw err;
       }
     }
@@ -19640,7 +19682,7 @@ class CookieFarmPlugin extends Plugin {
    * @private
    */
   async _loadPersonaPool() {
-    const storage = this.database.getResource(this.config.storage.resource);
+    const storage = await this.database.getResource(this.config.storage.resource);
     const personas = await storage.list({ limit: 1e3 });
     for (const persona of personas) {
       this.personaPool.set(persona.personaId, persona);
@@ -20142,6 +20184,7 @@ class S3QueuePlugin extends Plugin {
     });
   }
   onNamespaceChanged() {
+    if (!this._queueResourceDescriptor) return;
     this.queueResourceName = this._resolveQueueResourceName();
     this.config.queueResourceName = this.queueResourceName;
     this.deadLetterResourceName = this._resolveDeadLetterResourceName();
@@ -20775,6 +20818,7 @@ class TTLPlugin extends Plugin {
     });
   }
   onNamespaceChanged() {
+    if (!this._indexResourceDescriptor) return;
     this.indexResourceName = this._resolveIndexResourceName();
   }
   /**
@@ -21250,6 +21294,12 @@ class CookieFarmSuitePlugin extends Plugin {
       ttl: options.ttl || null,
       processor: typeof options.processor === "function" ? options.processor : null
     };
+    this.pluginFactories = {
+      puppeteer: options.pluginFactories?.puppeteer || ((pluginOptions) => new PuppeteerPlugin(pluginOptions)),
+      cookieFarm: options.pluginFactories?.cookieFarm || ((pluginOptions) => new CookieFarmPlugin(pluginOptions)),
+      queue: options.pluginFactories?.queue || ((queueOptions) => new S3QueuePlugin(queueOptions)),
+      ttl: options.pluginFactories?.ttl || ((ttlOptions) => new TTLPlugin(ttlOptions))
+    };
     this.dependencies = [];
     this.jobsResource = null;
     this.puppeteerPlugin = null;
@@ -21306,14 +21356,14 @@ class CookieFarmSuitePlugin extends Plugin {
     await this._ensureJobsResource();
     this.puppeteerPlugin = await this._installDependency(
       "puppeteer",
-      new PuppeteerPlugin({
+      this.pluginFactories.puppeteer({
         namespace: this.namespace,
         ...this.config.puppeteer
       })
     );
     this.cookieFarmPlugin = await this._installDependency(
       "cookie-farm",
-      new CookieFarmPlugin({
+      this.pluginFactories.cookieFarm({
         namespace: this.namespace,
         ...this.config.cookieFarm
       })
@@ -21330,10 +21380,7 @@ class CookieFarmSuitePlugin extends Plugin {
       onMessage: this.queueHandler,
       verbose: this.config.queue.verbose
     };
-    this.queuePlugin = await this._installDependency(
-      "queue",
-      new S3QueuePlugin(queueOptions)
-    );
+    this.queuePlugin = await this._installDependency("queue", this.pluginFactories.queue(queueOptions));
     if (this.config.ttl) {
       const ttlConfig = {
         namespace: this.namespace,
@@ -21348,10 +21395,7 @@ class CookieFarmSuitePlugin extends Plugin {
         };
       }
       delete ttlConfig.queue;
-      this.ttlPlugin = await this._installDependency(
-        "ttl",
-        new TTLPlugin(ttlConfig)
-      );
+      this.ttlPlugin = await this._installDependency("ttl", this.pluginFactories.ttl(ttlConfig));
     }
     this.emit("cookieFarmSuite.installed", {
       namespace: this.namespace,
@@ -35351,6 +35395,11 @@ class SpiderSuitePlugin extends Plugin {
       ttl: options.ttl || null,
       processor: typeof options.processor === "function" ? options.processor : null
     };
+    this.pluginFactories = {
+      puppeteer: options.pluginFactories?.puppeteer || ((pluginOptions) => new PuppeteerPlugin(pluginOptions)),
+      queue: options.pluginFactories?.queue || ((queueOptions) => new S3QueuePlugin(queueOptions)),
+      ttl: options.pluginFactories?.ttl || ((ttlOptions) => new TTLPlugin(ttlOptions))
+    };
     this.dependencies = [];
     this.targetsResource = null;
     this.puppeteerPlugin = null;
@@ -35406,7 +35455,7 @@ class SpiderSuitePlugin extends Plugin {
     await this._ensureTargetsResource();
     this.puppeteerPlugin = await this._installDependency(
       "puppeteer",
-      new PuppeteerPlugin({
+      this.pluginFactories.puppeteer({
         namespace: this.namespace,
         ...this.config.puppeteer
       })
@@ -35423,10 +35472,7 @@ class SpiderSuitePlugin extends Plugin {
       onMessage: this.queueHandler,
       verbose: this.config.queue.verbose
     };
-    this.queuePlugin = await this._installDependency(
-      "queue",
-      new S3QueuePlugin(queueOptions)
-    );
+    this.queuePlugin = await this._installDependency("queue", this.pluginFactories.queue(queueOptions));
     if (this.config.ttl) {
       const ttlConfig = {
         namespace: this.namespace,
@@ -35441,10 +35487,7 @@ class SpiderSuitePlugin extends Plugin {
         };
       }
       delete ttlConfig.queue;
-      this.ttlPlugin = await this._installDependency(
-        "ttl",
-        new TTLPlugin(ttlConfig)
-      );
+      this.ttlPlugin = await this._installDependency("ttl", this.pluginFactories.ttl(ttlConfig));
     }
     this.emit("spiderSuite.installed", {
       namespace: this.namespace,
@@ -63305,7 +63348,13 @@ class SessionManager {
     } else if (typeof res.header === "function") {
       res.header("Set-Cookie", cookieValue);
     } else {
-      throw new Error("Unsupported response object");
+      throw new PluginError("Unsupported response object for session cookies", {
+        pluginName: "IdentityPlugin",
+        operation: "SessionManager.setSessionCookie",
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Pass an HTTP response object that implements setHeader() or header()."
+      });
     }
   }
   /**

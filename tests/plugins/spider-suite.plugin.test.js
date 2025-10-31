@@ -1,8 +1,30 @@
 import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import { createMemoryDatabaseForTest } from '../config.js';
 import { SpiderSuitePlugin } from '../../src/plugins/spider-suite.plugin.js';
+import { PuppeteerPlugin as BasePuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
 
 process.env.S3DB_SKIP_PLUGIN_DEP_CHECK = '1';
+
+class PuppeteerPluginStub extends BasePuppeteerPlugin {
+  constructor(options = {}) {
+    super({ ...options, slug: 'puppeteer' });
+  }
+
+  async _importDependencies() {
+    this.puppeteer = {
+      use: () => {},
+      launch: async () => ({ close: async () => {} })
+    };
+  }
+
+  async onStart() {
+    this.initialized = true;
+  }
+
+  async onStop() {
+    this.initialized = false;
+  }
+}
 
 describe('SpiderSuitePlugin', () => {
   let db;
@@ -14,7 +36,10 @@ describe('SpiderSuitePlugin', () => {
 
     suite = new SpiderSuitePlugin({
       namespace: 'crawler',
-      queue: { autoStart: false }
+      queue: { autoStart: false },
+      pluginFactories: {
+        puppeteer: (options) => new PuppeteerPluginStub(options)
+      }
     });
 
     await db.usePlugin(suite, 'crawler-suite');
@@ -61,7 +86,10 @@ describe('SpiderSuitePlugin', () => {
     const ttlSuite = new SpiderSuitePlugin({
       namespace: 'spider-ttl',
       queue: { autoStart: false },
-      ttl: { queue: { ttl: 600 } }
+      ttl: { queue: { ttl: 600 } },
+      pluginFactories: {
+        puppeteer: (options) => new PuppeteerPluginStub(options)
+      }
     });
 
     await ttlDb.usePlugin(ttlSuite, 'spider-ttl-suite');

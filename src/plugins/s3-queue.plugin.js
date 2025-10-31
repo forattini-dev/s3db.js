@@ -140,6 +140,7 @@ export class S3QueuePlugin extends Plugin {
   }
 
   onNamespaceChanged() {
+    if (!this._queueResourceDescriptor) return;
     this.queueResourceName = this._resolveQueueResourceName();
     this.config.queueResourceName = this.queueResourceName;
     this.deadLetterResourceName = this._resolveDeadLetterResourceName();

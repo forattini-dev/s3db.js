@@ -1,8 +1,30 @@
 import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import { createMemoryDatabaseForTest } from '../config.js';
 import { CookieFarmSuitePlugin } from '../../src/plugins/cookie-farm-suite.plugin.js';
+import { PuppeteerPlugin as BasePuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
 
 process.env.S3DB_SKIP_PLUGIN_DEP_CHECK = '1';
+
+class PuppeteerPluginStub extends BasePuppeteerPlugin {
+  constructor(options = {}) {
+    super({ ...options, slug: 'puppeteer' });
+  }
+
+  async _importDependencies() {
+    this.puppeteer = {
+      use: () => {},
+      launch: async () => ({ close: async () => {} })
+    };
+  }
+
+  async onStart() {
+    this.initialized = true;
+  }
+
+  async onStop() {
+    this.initialized = false;
+  }
+}
 
 describe('CookieFarmSuitePlugin', () => {
   let db;
@@ -18,6 +40,9 @@ describe('CookieFarmSuitePlugin', () => {
       cookieFarm: {
         generation: { count: 0 },
         warmup: { enabled: false }
+      },
+      pluginFactories: {
+        puppeteer: (options) => new PuppeteerPluginStub(options)
       }
     });
 
@@ -66,6 +91,9 @@ describe('CookieFarmSuitePlugin', () => {
       cookieFarm: {
         generation: { count: 0 },
         warmup: { enabled: false }
+      },
+      pluginFactories: {
+        puppeteer: (options) => new PuppeteerPluginStub(options)
       }
     });
 
