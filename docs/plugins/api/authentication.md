@@ -63,20 +63,21 @@ await db.usePlugin(new ApiPlugin({
     resource: 'users',                    // Resource that manages auth
     usernameField: 'email',               // Field for username (default: 'email')
     passwordField: 'password',            // Field for password (default: 'password')
-  config: {
-    jwtSecret: 'your-256-bit-secret',  // Required for JWT
-    jwtExpiresIn: '7d',                // Token expiration (default: 7d)
+    config: {
+      jwtSecret: 'your-256-bit-secret',  // Required for JWT
+      jwtExpiresIn: '7d'                // Token expiration (default: 7d)
+    },
     registration: {
       enabled: true,                  // Enable /auth/register (default: false)
-      allowedFields: ['name']         // Optional extra fields accepted during registration
+      allowedFields: ['name'],        // Optional extra fields accepted during registration
+      defaultRole: 'user'             // Optional role override (default: 'user')
     },
     loginThrottle: {                  // Optional login throttling (defaults shown)
       maxAttempts: 5,
       windowMs: 60000,
       blockDurationMs: 300000
     }
-  }
-},
+  },
   resources: {
     cars: {
       auth: true  // Require authentication for this resource
@@ -162,13 +163,19 @@ await db.usePlugin(new ApiPlugin({
     resource: 'users',                    // Resource that manages auth
     usernameField: 'email',               // Field for username (default: 'email')
     passwordField: 'password',            // Field for password (default: 'password')
-  config: {
-    realm: 'API Access',                // WWW-Authenticate realm (default: 'API Access')
+    config: {
+      realm: 'API Access'                 // WWW-Authenticate realm (default: 'API Access')
+    },
     registration: {
-      enabled: true                    // Enable /auth/register (default: false)
+      enabled: true                     // Enable /auth/register (default: false)
+      // allowedFields: ['name']        // Optional additional fields
+    },
+    loginThrottle: {
+      maxAttempts: 5,
+      windowMs: 60000,
+      blockDurationMs: 300000
     }
-  }
-},
+  },
   resources: {
     cars: {
       auth: true  // Require authentication

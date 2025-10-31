@@ -190,11 +190,13 @@ const coldKey = await users.getCacheKeyResolver('cache--analytics')({ action: 'l
 
 Some plugins install or expect other plugins. s3db.js now treats these relationships explicitly:
 
-- **Bundle plugins** such as `SpiderSuitePlugin` and `CookieFarmSuitePlugin` install their constituent plugins automatically, keeping everything under a shared namespace.
-- Individual plugins can declare expectations in documentation (and via `requirePluginDependency`) so you know which combos make sense—e.g. `CookieFarmPlugin` requires `PuppeteerPlugin` to capture cookies, while `S3QueuePlugin` often pairs with `TTLPlugin` for housekeeping.
-- When you install multiple plugins manually, prefer a common namespace and, if needed, pass references between them (e.g., `suite.queuePlugin` or `suite.cookieFarmPlugin`).
+- **Dependency graphs**: Every plugin doc now includes a quick Mermaid dependency graph (right after the configuration table) that calls out hard (`→`) and optional (`-- optional -->`) relationships.
+- **Bundle plugins** such as `SpiderSuitePlugin` and `CookieFarmSuitePlugin` call `database.usePlugin()` internally, passing down your original options so shared settings (e.g. `namespace`, `ttl`, `puppeteer`) flow through to their child plugins.
+- **Shared configuration**: Pass nested config blocks that mirror the dependency name (e.g. `puppeteer: { pool: { enabled: false } }`) and the bundle forwards them. Aliases/namespaces are derived from the outer plugin, so everything stays scoped like `plg_<namespace>_*`.
+- **Manual combos**: When you compose plugins yourself, prefer a common namespace and, if needed, pass references between them (e.g. expose the installed cache via `db.plugins.cacheHot`). The helper `requirePluginDependency()` throws an actionable error (with install command/version) when a runtime dependency is missing.
+- **Resource naming overrides**: For multi-instance setups, most plugins accept `resourceNames` overrides so you can keep storage/resources distinct even when dependencies are shared.
 
-Every plugin doc now includes a quick Mermaid dependency graph to visualise these links right after the configuration table.
+> ✅ Tip: Set `S3DB_SKIP_PLUGIN_DEP_CHECK=1` in tests if you mock dependencies—the runtime safety nets stay in production while your test suite avoids installing heavy packages.
 
 ### Plugin Cleanup and Uninstall
 

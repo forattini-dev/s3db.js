@@ -95,6 +95,7 @@ export class S3QueuePlugin extends Plugin {
     this.config.recoveryInterval = options.recoveryInterval ?? 5000;
     this.config.recoveryBatchSize = options.recoveryBatchSize ?? Math.max((this.config.concurrency || 1) * 2, 10);
     this.config.processedCacheTTL = options.processedCacheTTL ?? 30000;
+    this.config.maxPollInterval = options.maxPollInterval ?? this.config.pollInterval;
 
     this._queueResourceDescriptor = {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
@@ -389,24 +390,28 @@ export class S3QueuePlugin extends Plugin {
 
   createWorker(handler, workerIndex) {
     return (async () => {
+      let idleStreak = 0;
       while (this.isRunning) {
         try {
           // Try to claim a message
           const message = await this.claimMessage();
 
           if (message) {
+            idleStreak = 0;
             // Process the claimed message
             await this.processMessage(message, handler);
           } else {
             // No messages available, wait before polling again
-            await new Promise(resolve => setTimeout(resolve, this.config.pollInterval));
+            idleStreak = Math.min(idleStreak + 1, 10);
+            const delay = this._computeIdleDelay(idleStreak);
+            await this._sleep(delay);
           }
         } catch (error) {
           if (this.config.verbose) {
             console.error(`[Worker ${workerIndex}] Error:`, error.message);
           }
           // Wait a bit before retrying on error
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await this._sleep(1000);
         }
       }
     })();
@@ -948,6 +953,22 @@ export class S3QueuePlugin extends Plugin {
       queueId: queueEntry.id,
       originalId: queueEntry.originalId
     });
+  }
+
+  _computeIdleDelay(idleStreak) {
+    const base = this.config.pollInterval;
+    const maxInterval = Math.max(base, this.config.maxPollInterval || base);
+    if (maxInterval <= base) {
+      return base;
+    }
+    const factor = Math.pow(2, Math.max(0, idleStreak - 1));
+    const delay = base * factor;
+    return Math.min(delay, maxInterval);
+  }
+
+  async _sleep(ms) {
+    if (!ms || ms <= 0) return;
+    await new Promise(resolve => setTimeout(resolve, ms));
   }
 
   clearProcessedCache() {

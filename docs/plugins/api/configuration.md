@@ -103,6 +103,46 @@ new ApiPlugin({
 })
 ```
 
+### Dependency Graph
+
+```mermaid
+flowchart TB
+  API[Api Plugin]
+  Identity[Identity Plugin]
+  TTL[TTL Plugin]
+  API -- optional --> Identity
+  API -- optional --> TTL
+```
+
+The API plugin does not auto-install other plugins, but it will detect an existing `IdentityPlugin` (to share the `users` resource and rate-limit defaults) and cooperates with `TTLPlugin` if it is installed to add automatic expiry to the fail-ban resources.
+
+### Authentication Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `auth.driver` | string | `null` | Primary authentication driver (`'jwt'`, `'basic'`, `'apiKey'`, `'oidc'`, `'oauth2'`) for shorthand configuration. |
+| `auth.drivers` | Array | `[]` | Explicit driver list when combining multiple drivers (each entry: `{ driver, config }`). First entry becomes the default. |
+| `auth.resource` | string | Auto (`plg_api_users`) | Resource that stores credentials. The plugin reuses Identity's `users` resource when present. |
+| `auth.createResource` | boolean | `true` | Automatically create the auth resource when missing. Set `false` to use a pre-existing resource only. |
+| `auth.usernameField` | string | `'email'` | Field used as the username/identifier during login. |
+| `auth.passwordField` | string | `'password'` | Field that stores hashed passwords in the auth resource. |
+
+**Registration (`auth.registration`)**
+
+- `enabled` (boolean, default `false`): exposes `POST /auth/register`.
+- `allowedFields` (string[], default `[]`): additional fields accepted during registration (e.g., `['name', 'profile']`).
+- `defaultRole` (string, default `'user'`): role assigned to new accounts when the request omits it.
+
+**Login Throttle (`auth.loginThrottle`)**
+
+- `enabled` (boolean, default `true`): toggles the adaptive login/IP throttling system.
+- `maxAttempts` (number, default `5`): failed login attempts before an IP is temporarily blocked.
+- `windowMs` (number, default `60000`): measurement window in milliseconds for the above attempts.
+- `blockDurationMs` (number, default `300000`): how long an offending IP remains banned.
+- `maxEntries` (number, default `10000`): cap for tracked IP entries to keep the in-memory cache bounded.
+
+> 💡 When Identity plugin is installed under the same namespace, the API plugin automatically shares the user resource and inherits the Identity rate limit guardrails, so you only need to configure `auth.registration`/`auth.loginThrottle` when diverging from those defaults.
+
 ---
 
 ## Schema Validation

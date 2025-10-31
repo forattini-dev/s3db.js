@@ -285,6 +285,20 @@ setInterval(() => {
 | `maxSize` | number | `1000` | Maximum number of cached items - single-tier mode only |
 | `config` | object | `{}` | Driver-specific configuration options - single-tier mode only |
 
+### Dependency Graph
+
+```mermaid
+flowchart TB
+  Cache[Cache Plugin]
+  Redis[(redis/ioredis pkg)]
+  S3[(AWS S3 client)]
+  Cache --> NoDeps((No plugin dependencies))
+  Cache -- optional --> Redis
+  Cache -- optional --> S3
+```
+
+The cache plugin ships without hard plugin dependencies. When you enable the Redis driver make sure `ioredis` is installed; the S3 driver reuses the database S3 client but also accepts a custom client via `config.client`. Each cache instance is fully namespaced—install multiple tiers by supplying `namespace` or an alias to `db.usePlugin()`.
+
 ### Memory Driver Config
 
 | Parameter | Type | Default | Description |

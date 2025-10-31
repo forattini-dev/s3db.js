@@ -1324,6 +1324,8 @@ Example for `wallets.balance`:
 **A:** Yes! The default reducer is `sum`, but you can implement custom logic:
 
 ```javascript
+import { ValidationError } from 's3db.js';
+
 // The consolidation process:
 // 1. Fetches all pending transactions
 // 2. Applies reducer (sum by default)
@@ -1336,7 +1338,14 @@ await db.createResource({
   hooks: {
     beforeUpdate: [(data) => {
       // Custom validation or transformation
-      if (data.balance < 0) throw new Error('Negative balance');
+      if (data.balance < 0) {
+        throw new ValidationError('Balance cannot be negative', {
+          statusCode: 422,
+          retriable: false,
+          suggestion: 'Ensure debits do not exceed credits before updating wallets.balance.',
+          metadata: { attemptedBalance: data.balance }
+        });
+      }
       return data;
     }]
   }
