@@ -141,17 +141,30 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         }
       }
 
+      // ✅ NEW: Check for partition filters from guards (set via ctx.setPartition())
+      const guardPartitionFilters = c.get('partitionFilters') || [];
+
       let items;
       let total;
 
-      // Use query if filters are present
-      if (Object.keys(filters).length > 0) {
+      // ✅ Priority 1: Partition filters from guards (tenant isolation)
+      if (guardPartitionFilters.length > 0) {
+        const { partitionName, partitionFields } = guardPartitionFilters[0];
+
+        // Use partition query for O(1) tenant isolation
+        items = await resource.listPartition(partitionName, partitionFields, { limit, offset });
+        total = items.length;
+      }
+      // Priority 2: Use query if filters are present
+      else if (Object.keys(filters).length > 0) {
         // Query with native offset support (efficient!)
         items = await resource.query(filters, { limit, offset });
         // Note: total is approximate (length of returned items)
         // For exact total count with filters, would need separate count query
         total = items.length;
-      } else if (partition && partitionValues) {
+      }
+      // Priority 3: Partition from query params
+      else if (partition && partitionValues) {
         // Query specific partition
         items = await resource.listPartition({
           partition,
@@ -160,7 +173,9 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           offset
         });
         total = items.length;
-      } else {
+      }
+      // Priority 4: Regular list (full scan)
+      else {
         // Regular list
         items = await resource.list({ limit, offset });
         total = items.length;

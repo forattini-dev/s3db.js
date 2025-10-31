@@ -3061,10 +3061,15 @@ function asyncHandler(fn) {
   };
 }
 
-function checkGuard(user, guard, context = {}) {
+function checkGuard(ctxOrUser, guard, recordOrContext = null) {
   if (!guard) {
     return true;
   }
+  const isRouteContext = ctxOrUser && typeof ctxOrUser === "object" && ("user" in ctxOrUser || "_currentResource" in ctxOrUser);
+  const ctx = isRouteContext ? ctxOrUser : null;
+  const user = isRouteContext ? ctxOrUser.user : ctxOrUser;
+  const record = isRouteContext ? recordOrContext : null;
+  const legacyContext = isRouteContext ? {} : recordOrContext || {};
   if (!user && guard !== true) {
     return false;
   }
@@ -3073,7 +3078,16 @@ function checkGuard(user, guard, context = {}) {
   }
   if (typeof guard === "function") {
     try {
-      return guard(user, context);
+      if (ctx) {
+        const guardLength = guard.length;
+        if (guardLength >= 2 && record !== null) {
+          return guard(ctx, record);
+        } else {
+          return guard(ctx);
+        }
+      } else {
+        return guard(user, legacyContext);
+      }
     } catch (err) {
       console.error("[Guards] Error executing guard function:", err);
       return false;
@@ -3103,7 +3117,11 @@ function checkGuard(user, guard, context = {}) {
     }
     if (guard.check && typeof guard.check === "function") {
       try {
-        return guard.check(user, context);
+        if (ctx) {
+          return guard.check(ctx, record);
+        } else {
+          return guard.check(user, legacyContext);
+        }
       } catch (err) {
         console.error("[Guards] Error executing guard.check function:", err);
         return false;
@@ -3162,15 +3180,14 @@ function getOperationGuard(guards, operation) {
   }
   return null;
 }
-function guardMiddleware(guards, operation) {
+function guardMiddleware(guards, operation, options = {}) {
   return async (c, next) => {
-    const user = c.get("user");
+    const { RouteContext } = await Promise.resolve().then(function () { return routeContext; });
+    const legacyContext = c.get("customRouteContext") || {};
+    const { database, resource, plugins = {} } = { ...legacyContext, ...options };
+    const ctx = new RouteContext(c, database, resource, plugins);
     const guard = getOperationGuard(guards, operation);
-    const authorized = checkGuard(user, guard, {
-      operation,
-      resourceName: c.req.param("resource"),
-      data: c.req.method !== "GET" ? await c.req.json().catch(() => ({})) : {}
-    });
+    const authorized = checkGuard(ctx, guard, null);
     if (!authorized) {
       return c.json({
         success: false,
@@ -3179,11 +3196,14 @@ function guardMiddleware(guards, operation) {
           code: "FORBIDDEN",
           details: {
             operation,
-            user: user ? { id: user.id, role: user.role } : null
+            user: ctx.user ? { id: ctx.user.id, role: ctx.user.role } : null
           }
         },
         _status: 403
       }, 403);
+    }
+    if (ctx.hasPartitionFilters()) {
+      c.set("partitionFilters", ctx.getPartitionFilters());
     }
     await next();
   };
@@ -3271,9 +3291,14 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
           }
         }
       }
+      const guardPartitionFilters = c.get("partitionFilters") || [];
       let items;
       let total;
-      if (Object.keys(filters).length > 0) {
+      if (guardPartitionFilters.length > 0) {
+        const { partitionName, partitionFields } = guardPartitionFilters[0];
+        items = await resource.listPartition(partitionName, partitionFields, { limit, offset });
+        total = items.length;
+      } else if (Object.keys(filters).length > 0) {
         items = await resource.query(filters, { limit, offset });
         total = items.length;
       } else if (partition && partitionValues) {
@@ -4246,6 +4271,58 @@ class RouteContext {
       );
     }
   }
+  // ============================================
+  // Partition Helpers (for Guards)
+  // ============================================
+  /**
+   * Set partition filter for current query (used by guards for tenant isolation)
+   * @param {string} partitionName - Partition name (e.g., 'byUserId')
+   * @param {Object} partitionFields - Partition field values (e.g., { userId: 'user123' })
+   * @returns {void}
+   *
+   * @example
+   * // In guard:
+   * users.guard = {
+   *   list: (ctx) => {
+   *     if (ctx.user.scopes?.includes('preset:admin')) {
+   *       return true; // Admin sees everything
+   *     }
+   *
+   *     // Regular user sees only their data (O(1) via partition)
+   *     ctx.setPartition('byUserId', { userId: ctx.user.id });
+   *     return true;
+   *   }
+   * };
+   */
+  setPartition(partitionName, partitionFields) {
+    if (!this._partitionFilters) {
+      this._partitionFilters = [];
+    }
+    this._partitionFilters.push({ partitionName, partitionFields });
+  }
+  /**
+   * Get partition filters set by guards
+   * @returns {Array} Partition filters
+   * @internal
+   */
+  getPartitionFilters() {
+    return this._partitionFilters || [];
+  }
+  /**
+   * Clear partition filters
+   * @returns {void}
+   * @internal
+   */
+  clearPartitionFilters() {
+    this._partitionFilters = [];
+  }
+  /**
+   * Check if partition filters are set
+   * @returns {boolean} True if partition filters exist
+   */
+  hasPartitionFilters() {
+    return this._partitionFilters && this._partitionFilters.length > 0;
+  }
 }
 function withContext(handler, options = {}) {
   return async (c) => {
@@ -4256,6 +4333,12 @@ function withContext(handler, options = {}) {
     return await handler(c, ctx);
   };
 }
+
+var routeContext = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  RouteContext: RouteContext,
+  withContext: withContext
+});
 
 function parseRouteKey(key) {
   const match = key.match(/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i);
@@ -7755,8 +7838,64 @@ function createFailbanAdminRoutes(Hono, plugin) {
   return app;
 }
 
+const PREFIX = "plg_";
+function sanitizeName(name) {
+  if (!name || typeof name !== "string") {
+    throw new Error("[resource-names] Resource name must be a non-empty string");
+  }
+  return name.trim();
+}
+function ensurePlgPrefix(name) {
+  const sanitized = sanitizeName(name);
+  if (sanitized.startsWith(PREFIX)) {
+    return sanitized;
+  }
+  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
+}
+function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}) {
+  if (!defaultName && !override && !suffix) {
+    throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
+  }
+  if (override) {
+    return ensurePlgPrefix(override);
+  }
+  if (defaultName) {
+    return defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
+  }
+  if (!suffix) {
+    throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
+  }
+  return ensurePlgPrefix(`${pluginKey}_${suffix}`);
+}
+function resolveResourceNames(pluginKey, descriptors = {}) {
+  const result = {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (typeof descriptor === "string") {
+      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor });
+      continue;
+    }
+    result[key] = resolveResourceName(pluginKey, descriptor);
+  }
+  return result;
+}
+
 class FailbanManager {
   constructor(options = {}) {
+    const resourceOverrides = options.resources || {};
+    this.resourceNames = resolveResourceNames("api_failban", {
+      bans: {
+        defaultName: "plg_api_failban_bans",
+        override: resourceOverrides.bans
+      },
+      violations: {
+        defaultName: "plg_api_failban_violations",
+        override: resourceOverrides.violations
+      }
+    });
+    this.legacyResourceNames = {
+      bans: "_api_failban_bans",
+      violations: "_api_failban_violations"
+    };
     this.options = {
       enabled: options.enabled !== false,
       database: options.database,
@@ -7774,7 +7913,8 @@ class FailbanManager {
         blockedCountries: options.geo?.blockedCountries || [],
         blockUnknown: options.geo?.blockUnknown || false,
         cacheResults: options.geo?.cacheResults !== false
-      }
+      },
+      resources: this.resourceNames
     };
     this.database = options.database;
     this.bansResource = null;
@@ -7825,75 +7965,83 @@ class FailbanManager {
    * @private
    */
   async _createBansResource() {
-    const resourceName = "_api_failban_bans";
-    try {
-      return await this.database.getResource(resourceName);
-    } catch (err) {
-      const resource = await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          ip: "string|required",
-          reason: "string",
-          violations: "number",
-          bannedAt: "string",
-          expiresAt: "string|required",
-          metadata: {
-            userAgent: "string",
-            path: "string",
-            lastViolation: "string"
-          }
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        partitions: {
-          byExpiry: {
-            fields: { expiresAtCohort: "string" }
-          }
-        }
-      });
-      const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
-      if (ttlPlugin) {
-        ttlPlugin.options.resources = ttlPlugin.options.resources || {};
-        ttlPlugin.options.resources[resourceName] = {
-          enabled: true,
-          field: "expiresAt"
-        };
-        if (this.options.verbose) {
-          console.log("[Failban] TTL configured for bans resource");
-        }
-      } else {
-        console.warn("[Failban] TTLPlugin not found - bans will not auto-expire from DB");
+    const resourceName = this.resourceNames.bans;
+    const candidates = [resourceName, this.legacyResourceNames.bans];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        return await this.database.getResource(candidate);
+      } catch (err) {
       }
-      return resource;
     }
+    const resource = await this.database.createResource({
+      name: resourceName,
+      attributes: {
+        ip: "string|required",
+        reason: "string",
+        violations: "number",
+        bannedAt: "string",
+        expiresAt: "string|required",
+        metadata: {
+          userAgent: "string",
+          path: "string",
+          lastViolation: "string"
+        }
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        byExpiry: {
+          fields: { expiresAtCohort: "string" }
+        }
+      }
+    });
+    const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
+    if (ttlPlugin) {
+      ttlPlugin.options.resources = ttlPlugin.options.resources || {};
+      ttlPlugin.options.resources[resourceName] = {
+        enabled: true,
+        field: "expiresAt"
+      };
+      if (this.options.verbose) {
+        console.log(`[Failban] TTL configured for bans resource (${resourceName})`);
+      }
+    } else {
+      console.warn("[Failban] TTLPlugin not found - bans will not auto-expire from DB");
+    }
+    return resource;
   }
   /**
    * Create violations tracking resource
    * @private
    */
   async _createViolationsResource() {
-    const resourceName = "_api_failban_violations";
-    try {
-      return await this.database.getResource(resourceName);
-    } catch (err) {
-      return await this.database.createResource({
-        name: resourceName,
-        attributes: {
-          ip: "string|required",
-          timestamp: "string|required",
-          type: "string",
-          path: "string",
-          userAgent: "string"
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        partitions: {
-          byIp: {
-            fields: { ip: "string" }
-          }
-        }
-      });
+    const resourceName = this.resourceNames.violations;
+    const candidates = [resourceName, this.legacyResourceNames.violations];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        return await this.database.getResource(candidate);
+      } catch (err) {
+      }
     }
+    return await this.database.createResource({
+      name: resourceName,
+      attributes: {
+        ip: "string|required",
+        timestamp: "string|required",
+        type: "string",
+        path: "string",
+        userAgent: "string"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        byIp: {
+          fields: { ip: "string" }
+        }
+      }
+    });
   }
   /**
    * Load existing bans into memory cache
@@ -9784,47 +9932,6 @@ class ApiServer {
   }
 }
 
-const PREFIX = "plg_";
-function sanitizeName(name) {
-  if (!name || typeof name !== "string") {
-    throw new Error("[resource-names] Resource name must be a non-empty string");
-  }
-  return name.trim();
-}
-function ensurePlgPrefix(name) {
-  const sanitized = sanitizeName(name);
-  if (sanitized.startsWith(PREFIX)) {
-    return sanitized;
-  }
-  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
-}
-function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}) {
-  if (!defaultName && !override && !suffix) {
-    throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
-  }
-  if (override) {
-    return ensurePlgPrefix(override);
-  }
-  if (defaultName) {
-    return defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
-  }
-  if (!suffix) {
-    throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
-  }
-  return ensurePlgPrefix(`${pluginKey}_${suffix}`);
-}
-function resolveResourceNames(pluginKey, descriptors = {}) {
-  const result = {};
-  for (const [key, descriptor] of Object.entries(descriptors)) {
-    if (typeof descriptor === "string") {
-      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor });
-      continue;
-    }
-    result[key] = resolveResourceName(pluginKey, descriptor);
-  }
-  return result;
-}
-
 const AUTH_DRIVER_KEYS = ["jwt", "apiKey", "basic", "oidc", "oauth2"];
 function normalizeAuthConfig(authOptions = {}) {
   if (!authOptions) {
@@ -9846,7 +9953,7 @@ function normalizeAuthConfig(authOptions = {}) {
     pathAuth: authOptions.pathAuth,
     strategy: authOptions.strategy || "any",
     priorities: authOptions.priorities || {},
-    resource: authOptions.resource || "users",
+    resource: authOptions.resource,
     usernameField: authOptions.usernameField || "email",
     passwordField: authOptions.passwordField || "password"
   };
@@ -10554,9 +10661,12 @@ class ApiPlugin extends Plugin {
     const { purgeData = false } = options;
     await this.onStop();
     if (purgeData && this.usersResource) {
-      const [ok] = await tryFn(() => this.database.deleteResource("plg_users"));
-      if (ok && this.config.verbose) {
-        console.log("[API Plugin] Deleted plg_users resource");
+      const candidates = /* @__PURE__ */ new Set([this.usersResourceName, ...this.legacyUsersResourceNames]);
+      for (const candidate of candidates) {
+        const [ok] = await tryFn(() => this.database.deleteResource(candidate));
+        if (ok && this.config.verbose) {
+          console.log(`[API Plugin] Deleted ${candidate} resource`);
+        }
       }
     }
     if (this.config.verbose) {
@@ -16987,6 +17097,11 @@ class CookieFarmPlugin extends Plugin {
         ...options.stealth
       }
     };
+    this.config.storage.resource = resolveResourceName("cookiefarm", {
+      defaultName: "plg_cookie_farm_personas",
+      override: options.storage?.resource
+    });
+    this.legacyStorageResourceNames = ["cookie_farm_personas"];
     this.puppeteerPlugin = null;
     this.stealthManager = null;
     this.personaPool = /* @__PURE__ */ new Map();
@@ -17054,6 +17169,15 @@ class CookieFarmPlugin extends Plugin {
     try {
       await this.database.getResource(resourceName);
     } catch (err) {
+      for (const legacyName of this.legacyStorageResourceNames) {
+        if (!legacyName) continue;
+        try {
+          const legacyResource = await this.database.getResource(legacyName);
+          this.config.storage.resource = legacyName;
+          return legacyResource;
+        } catch (legacyErr) {
+        }
+      }
       await this.database.createResource({
         name: resourceName,
         attributes: {
@@ -31166,6 +31290,11 @@ class PuppeteerPlugin extends Plugin {
         ...options.debug
       }
     };
+    this.config.cookies.storage.resource = resolveResourceName("puppeteer", {
+      defaultName: "plg_puppeteer_cookies",
+      override: options.cookies?.storage?.resource
+    });
+    this.legacyCookieStorageNames = ["puppeteer_cookies"];
     this.browserPool = [];
     this.tabPool = /* @__PURE__ */ new Map();
     this.browserIdleTimers = /* @__PURE__ */ new Map();
@@ -31263,6 +31392,15 @@ class PuppeteerPlugin extends Plugin {
     try {
       await this.database.getResource(resourceName);
     } catch (err) {
+      for (const legacyName of this.legacyCookieStorageNames) {
+        if (!legacyName) continue;
+        try {
+          const legacyResource = await this.database.getResource(legacyName);
+          this.config.cookies.storage.resource = legacyName;
+          return legacyResource;
+        } catch (legacyErr) {
+        }
+      }
       await this.database.createResource({
         name: resourceName,
         attributes: {

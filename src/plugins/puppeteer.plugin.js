@@ -1,5 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
+import { resolveResourceName } from './concerns/resource-names.js';
 
 /**
  * PuppeteerPlugin - Headless browser automation with anti-bot detection
@@ -225,6 +226,12 @@ export class PuppeteerPlugin extends Plugin {
       }
     };
 
+    this.config.cookies.storage.resource = resolveResourceName('puppeteer', {
+      defaultName: 'plg_puppeteer_cookies',
+      override: options.cookies?.storage?.resource
+    });
+    this.legacyCookieStorageNames = ['puppeteer_cookies'];
+
     // Internal state
     this.browserPool = [];
     this.tabPool = new Map(); // Browser instance -> Set<Page>
@@ -355,6 +362,17 @@ export class PuppeteerPlugin extends Plugin {
     try {
       await this.database.getResource(resourceName);
     } catch (err) {
+      for (const legacyName of this.legacyCookieStorageNames) {
+        if (!legacyName) continue;
+        try {
+          const legacyResource = await this.database.getResource(legacyName);
+          this.config.cookies.storage.resource = legacyName;
+          return legacyResource;
+        } catch (legacyErr) {
+          // Try next legacy name
+        }
+      }
+
       // Create resource if it doesn't exist
       await this.database.createResource({
         name: resourceName,
