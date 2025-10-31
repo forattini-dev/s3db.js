@@ -128,7 +128,7 @@ resources: {
 
 ```javascript
 'POST /batch': async (c, ctx) => {
-  const body = await ctx.json();
+  const body = await ctx.body();
 
   for (const userData of body.users) {
     // ✅ Validate individual objects
@@ -148,7 +148,7 @@ resources: {
 
 ```javascript
 'POST /users': async (c, ctx) => {
-  const body = await ctx.json();
+  const body = await ctx.body();
 
   // ✅ Throws error if invalid (caught by error handler)
   ctx.validator.validateOrThrow('users', body);
@@ -179,7 +179,7 @@ resources: {
   const userAgent = ctx.header('user-agent');
 
   // ✅ Body parsing
-  const body = await ctx.json();          // JSON
+  const body = await ctx.body();          // JSON
   const text = await ctx.text();          // Text
   const formData = await ctx.formData();  // FormData
 
@@ -499,7 +499,7 @@ routes: {
     }
 
     // Validate partial update
-    const body = await ctx.json();
+    const body = await ctx.body();
     const result = validator.validate('projects', body);
     if (!result.valid) return ctx.error(result.errors[0].message, 400);
 
