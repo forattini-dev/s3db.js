@@ -18,7 +18,7 @@ export class CookieManager {
    * Initialize cookie manager
    */
   async initialize() {
-    this.storage = this.plugin.database.getResource(this.config.storage.resource);
+    this.storage = await this.plugin.database.getResource(this.config.storage.resource);
 
     // Load existing cookies into pool if enabled
     if (this.config.farming.enabled) {

@@ -16801,9 +16801,27 @@ class CookieFarmPlugin extends Plugin {
         includeCredentials: false,
         // Mask proxy credentials
         ...options.export
+      },
+      // Stealth mode (anti-detection)
+      stealth: {
+        enabled: true,
+        timingProfile: "normal",
+        // 'very-slow' | 'slow' | 'normal' | 'fast'
+        consistentFingerprint: true,
+        // Maintain consistent fingerprint per persona
+        executeJSChallenges: true,
+        // Auto-solve JS challenges
+        humanBehavior: true,
+        // Simulate mouse/scroll/typing
+        requestPacing: true,
+        // Throttle requests to avoid rate limits
+        geoConsistency: true,
+        // Match timezone/language to proxy geo
+        ...options.stealth
       }
     };
     this.puppeteerPlugin = null;
+    this.stealthManager = null;
     this.personaPool = /* @__PURE__ */ new Map();
     this.initialized = false;
   }
@@ -16828,6 +16846,11 @@ class CookieFarmPlugin extends Plugin {
    */
   async onStart() {
     if (this.initialized) return;
+    if (this.config.stealth.enabled) {
+      const { StealthManager } = await Promise.resolve().then(function () { return stealthManager; });
+      this.stealthManager = new StealthManager(this);
+      this.emit("cookieFarm.stealthEnabled");
+    }
     await this._loadPersonaPool();
     if (this.personaPool.size === 0 && this.config.generation.count > 0) {
       this.emit("cookieFarm.generatingInitialPersonas", {
@@ -16837,7 +16860,8 @@ class CookieFarmPlugin extends Plugin {
     }
     this.initialized = true;
     this.emit("cookieFarm.started", {
-      personaCount: this.personaPool.size
+      personaCount: this.personaPool.size,
+      stealthEnabled: this.config.stealth.enabled
     });
   }
   /**
@@ -30944,11 +30968,11 @@ class PuppeteerPlugin extends Plugin {
   async onStart() {
     if (this.initialized) return;
     await this._importDependencies();
-    if (this.config.proxy.enabled) {
-      await this._initializeProxyManager();
-    }
     if (this.config.cookies.enabled) {
       await this._initializeCookieManager();
+    }
+    if (this.config.proxy.enabled) {
+      await this._initializeProxyManager();
     }
     if (this.config.pool.enabled) {
       await this._warmupBrowserPool();
@@ -31061,7 +31085,10 @@ class PuppeteerPlugin extends Plugin {
    * @returns {Promise<Browser>}
    */
   async _createBrowser(proxy = null) {
-    const launchOptions = { ...this.config.launch };
+    const launchOptions = {
+      ...this.config.launch,
+      args: [...this.config.launch.args || []]
+    };
     if (proxy && this.proxyManager) {
       const proxyArgs = this.proxyManager.getProxyLaunchArgs(proxy);
       launchOptions.args.push(...proxyArgs);
@@ -31071,13 +31098,13 @@ class PuppeteerPlugin extends Plugin {
     const browser = await this.puppeteer.launch(launchOptions);
     if (!proxy && this.config.pool.enabled) {
       this.browserPool.push(browser);
-      this.tabPool.set(this.browserPool.length - 1, []);
+      this.tabPool.set(browser, /* @__PURE__ */ new Set());
       browser.on("disconnected", () => {
         const index = this.browserPool.indexOf(browser);
         if (index > -1) {
           this.browserPool.splice(index, 1);
-          this.tabPool.delete(index);
         }
+        this.tabPool.delete(browser);
       });
     }
     return browser;
@@ -31093,25 +31120,25 @@ class PuppeteerPlugin extends Plugin {
       return await this._createBrowser(proxy);
     }
     if (this.config.pool.enabled) {
-      for (let i = 0; i < this.browserPool.length; i++) {
-        const tabs = this.tabPool.get(i) || [];
-        if (tabs.length < this.config.pool.maxTabsPerBrowser) {
-          return this.browserPool[i];
+      for (const browser of this.browserPool) {
+        const tabs = this.tabPool.get(browser);
+        if (!tabs || tabs.size < this.config.pool.maxTabsPerBrowser) {
+          return browser;
         }
       }
       if (this.browserPool.length < this.config.pool.maxBrowsers) {
         return await this._createBrowser();
       }
-      let minIndex = 0;
-      let minTabs = this.tabPool.get(0)?.length || 0;
-      for (let i = 1; i < this.browserPool.length; i++) {
-        const tabs = this.tabPool.get(i)?.length || 0;
+      let targetBrowser = this.browserPool[0];
+      let minTabs = this.tabPool.get(targetBrowser)?.size || 0;
+      for (const browser of this.browserPool.slice(1)) {
+        const tabs = this.tabPool.get(browser)?.size || 0;
         if (tabs < minTabs) {
-          minIndex = i;
+          targetBrowser = browser;
           minTabs = tabs;
         }
       }
-      return this.browserPool[minIndex];
+      return targetBrowser;
     } else {
       return await this._createBrowser();
     }
@@ -31204,6 +31231,13 @@ class PuppeteerPlugin extends Plugin {
     }
     const browser = await this._getBrowser(proxy);
     const page = await browser.newPage();
+    const isPooledBrowser = !proxy && this.config.pool.enabled;
+    if (isPooledBrowser) {
+      const tabs = this.tabPool.get(browser);
+      if (tabs) {
+        tabs.add(page);
+      }
+    }
     if (proxy && this.proxyManager) {
       await this.proxyManager.authenticateProxy(page, proxy);
     }
@@ -31253,13 +31287,6 @@ class PuppeteerPlugin extends Plugin {
     page._proxyId = proxyId;
     if (this.config.humanBehavior.enabled) {
       this._attachHumanBehaviorMethods(page);
-    }
-    if (useSession && this.cookieManager) {
-      page.on("close", async () => {
-        await this.cookieManager.saveSession(page, useSession, {
-          success: navigationSuccess
-        });
-      });
     }
     this.emit("puppeteer.navigate", {
       url,
@@ -48509,6 +48536,404 @@ var server = /*#__PURE__*/Object.freeze({
   IdentityServer: IdentityServer
 });
 
+class StealthManager {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.config = plugin.config.stealth || {};
+    this.timingProfiles = {
+      "very-slow": { min: 5e3, max: 15e3, jitter: 2e3 },
+      "slow": { min: 3e3, max: 8e3, jitter: 1500 },
+      "normal": { min: 1e3, max: 5e3, jitter: 1e3 },
+      "fast": { min: 500, max: 2e3, jitter: 500 }
+    };
+    this.geoData = {
+      "US": { timezones: ["America/New_York", "America/Chicago", "America/Los_Angeles"], languages: ["en-US"] },
+      "BR": { timezones: ["America/Sao_Paulo"], languages: ["pt-BR", "en-US"] },
+      "GB": { timezones: ["Europe/London"], languages: ["en-GB", "en-US"] },
+      "DE": { timezones: ["Europe/Berlin"], languages: ["de-DE", "en-US"] },
+      "FR": { timezones: ["Europe/Paris"], languages: ["fr-FR", "en-US"] },
+      "JP": { timezones: ["Asia/Tokyo"], languages: ["ja-JP", "en-US"] },
+      "CN": { timezones: ["Asia/Shanghai"], languages: ["zh-CN", "en-US"] }
+    };
+  }
+  /**
+   * Create a stealth-optimized persona profile
+   * Ensures all fingerprint components are consistent
+   */
+  async createStealthProfile(options = {}) {
+    const {
+      proxy = null,
+      country = null,
+      // Target country (if known from proxy)
+      timingProfile = "normal",
+      screenResolution = null
+    } = options;
+    const geoProfile = this._selectGeoProfile(country);
+    const userAgent = this._generateConsistentUserAgent();
+    const viewport = this._generateConsistentViewport(screenResolution);
+    const profile = {
+      // Core identity
+      userAgent,
+      viewport,
+      timezone: geoProfile.timezone,
+      language: geoProfile.language,
+      // Consistency markers
+      acceptLanguage: `${geoProfile.language},en;q=0.9`,
+      acceptEncoding: "gzip, deflate, br",
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      // Platform consistency
+      platform: this._getPlatformFromUA(userAgent),
+      hardwareConcurrency: this._getHardwareConcurrency(userAgent),
+      deviceMemory: this._getDeviceMemory(userAgent),
+      // Timing behavior
+      timingProfile: this.timingProfiles[timingProfile],
+      // Proxy binding
+      proxyId: proxy?.id || null,
+      proxyCountry: country,
+      // Behavioral markers
+      behavioral: {
+        typingSpeed: { min: 100, max: 300 },
+        // ms per character
+        mouseMovements: true,
+        scrollBehavior: "smooth",
+        clickDelay: { min: 200, max: 800 }
+      }
+    };
+    return profile;
+  }
+  /**
+   * Select geo profile (timezone + language) based on country
+   * @private
+   */
+  _selectGeoProfile(country) {
+    if (country && this.geoData[country]) {
+      const data = this.geoData[country];
+      const timezone = data.timezones[Math.floor(Math.random() * data.timezones.length)];
+      const language = data.languages[0];
+      return { timezone, language };
+    }
+    return {
+      timezone: "America/New_York",
+      language: "en-US"
+    };
+  }
+  /**
+   * Generate consistent user agent (avoid churn)
+   * @private
+   */
+  _generateConsistentUserAgent() {
+    const stableUserAgents = [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ];
+    return stableUserAgents[Math.floor(Math.random() * stableUserAgents.length)];
+  }
+  /**
+   * Generate viewport consistent with screen resolution
+   * @private
+   */
+  _generateConsistentViewport(screenResolution) {
+    const commonResolutions = [
+      { width: 1920, height: 1080, deviceScaleFactor: 1 },
+      // Full HD
+      { width: 1680, height: 1050, deviceScaleFactor: 1 },
+      // WSXGA+
+      { width: 1440, height: 900, deviceScaleFactor: 1 },
+      // WXGA+
+      { width: 1366, height: 768, deviceScaleFactor: 1 },
+      // HD
+      { width: 2560, height: 1440, deviceScaleFactor: 1 }
+      // QHD
+    ];
+    if (screenResolution) {
+      return screenResolution;
+    }
+    return commonResolutions[Math.floor(Math.random() * commonResolutions.length)];
+  }
+  /**
+   * Get platform from user agent
+   * @private
+   */
+  _getPlatformFromUA(userAgent) {
+    if (userAgent.includes("Windows")) return "Win32";
+    if (userAgent.includes("Mac")) return "MacIntel";
+    if (userAgent.includes("Linux")) return "Linux x86_64";
+    return "Win32";
+  }
+  /**
+   * Get hardware concurrency (CPU cores) from user agent
+   * @private
+   */
+  _getHardwareConcurrency(userAgent) {
+    return [4, 6, 8][Math.floor(Math.random() * 3)];
+  }
+  /**
+   * Get device memory from user agent
+   * @private
+   */
+  _getDeviceMemory(userAgent) {
+    return [4, 8, 16][Math.floor(Math.random() * 3)];
+  }
+  /**
+   * Apply stealth profile to page
+   * Overrides navigator properties to match profile
+   */
+  async applyStealthProfile(page, profile) {
+    await page.emulateTimezone(profile.timezone);
+    await page.evaluateOnNewDocument((profile2) => {
+      Object.defineProperty(navigator, "platform", {
+        get: () => profile2.platform
+      });
+      Object.defineProperty(navigator, "hardwareConcurrency", {
+        get: () => profile2.hardwareConcurrency
+      });
+      Object.defineProperty(navigator, "deviceMemory", {
+        get: () => profile2.deviceMemory
+      });
+      Object.defineProperty(navigator, "languages", {
+        get: () => [profile2.language, "en"]
+      });
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => false
+      });
+      if (!window.chrome) {
+        window.chrome = {
+          runtime: {}
+        };
+      }
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => parameters.name === "notifications" ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);
+    }, profile);
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": profile.acceptLanguage,
+      "Accept-Encoding": profile.acceptEncoding,
+      "Accept": profile.accept
+    });
+  }
+  /**
+   * Execute JS challenges automatically
+   * Simulates human JS execution
+   */
+  async executeJSChallenges(page) {
+    try {
+      await page.waitForFunction(() => document.readyState === "complete", {
+        timeout: 1e4
+      });
+      await page.evaluate(() => {
+        if (!document.cookie.includes("js_ok")) {
+          document.cookie = "js_ok=1; path=/";
+        }
+        if (window.__JS_CHALLENGE_INIT) {
+          window.__JS_CHALLENGE_INIT();
+        }
+        window.dispatchEvent(new Event("load"));
+        document.dispatchEvent(new Event("DOMContentLoaded"));
+      });
+      await this._loadPageResources(page);
+      await page.evaluate(async () => {
+        try {
+          const response = await fetch("/.js-challenge", {
+            method: "GET",
+            credentials: "include"
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.token) {
+              window.__JS_CHALLENGE_TOKEN = data.token;
+            }
+          }
+        } catch (err) {
+        }
+      });
+    } catch (err) {
+      this.plugin.emit("stealth.jsChallengeWarning", {
+        error: err.message
+      });
+    }
+  }
+  /**
+   * Load page resources to simulate real browser
+   * @private
+   */
+  async _loadPageResources(page) {
+    try {
+      await page.evaluate(() => {
+        const images = Array.from(document.querySelectorAll("img"));
+        images.forEach((img) => {
+          if (!img.complete) {
+            img.dispatchEvent(new Event("load"));
+          }
+        });
+      });
+      await page.evaluateHandle(() => document.fonts.ready);
+    } catch (err) {
+    }
+  }
+  /**
+   * Add human-like delay between actions
+   * Uses timing profile from persona
+   */
+  async humanDelay(profile, action = "default") {
+    const timing = profile.timingProfile;
+    const baseDelay = timing.min + Math.random() * (timing.max - timing.min);
+    const jitter = (Math.random() - 0.5) * timing.jitter;
+    const totalDelay = Math.max(100, baseDelay + jitter);
+    await this._delay(totalDelay);
+  }
+  /**
+   * Simulate human typing with profile-specific speed
+   */
+  async humanType(page, selector, text, profile) {
+    const element = await page.$(selector);
+    if (!element) {
+      throw new Error(`Element not found: ${selector}`);
+    }
+    await element.click();
+    for (const char of text) {
+      await page.keyboard.type(char);
+      const { min, max } = profile.behavioral.typingSpeed;
+      const charDelay = min + Math.random() * (max - min);
+      await this._delay(charDelay);
+      if ([".", ",", "!", "?"].includes(char)) {
+        await this._delay(200 + Math.random() * 300);
+      }
+    }
+  }
+  /**
+   * Simulate realistic request pacing
+   * Prevents rate limiting / velocity detection
+   */
+  async paceRequests(persona, requestCount) {
+    const maxRequestsPerMinute = 30;
+    const minDelayMs = 60 * 1e3 / maxRequestsPerMinute;
+    const jitter = minDelayMs * (0.5 + Math.random() * 0.5);
+    const totalDelay = minDelayMs + jitter;
+    await this._delay(totalDelay);
+    persona.metadata.lastRequestTime = Date.now();
+  }
+  /**
+   * Check if persona should "rest" (cooldown)
+   * Prevents velocity/concurrent use detection
+   */
+  shouldRest(persona) {
+    const now = Date.now();
+    const lastUsed = persona.metadata.lastUsed || 0;
+    const timeSinceLastUse = now - lastUsed;
+    if (timeSinceLastUse < 5e3) {
+      return true;
+    }
+    const requestsInLastMinute = persona.metadata.recentRequests || 0;
+    if (requestsInLastMinute > 20) {
+      return true;
+    }
+    return false;
+  }
+  /**
+   * Simulate mouse movements and scrolling
+   * Generates behavioral fingerprint
+   */
+  async simulateHumanBehavior(page, profile) {
+    try {
+      const scrollDistance = Math.floor(Math.random() * 500) + 200;
+      await page.evaluate((distance) => {
+        window.scrollBy({
+          top: distance,
+          behavior: "smooth"
+        });
+      }, scrollDistance);
+      await this._delay(1e3 + Math.random() * 1e3);
+      if (page._cursor) {
+        try {
+          const viewport = await page.viewport();
+          const x = Math.floor(Math.random() * viewport.width);
+          const y = Math.floor(Math.random() * viewport.height);
+          await page._cursor.move({ x, y });
+          await this._delay(500);
+        } catch (err) {
+        }
+      }
+      const elements = await page.$$("a, button, input");
+      if (elements.length > 0) {
+        const randomElement = elements[Math.floor(Math.random() * elements.length)];
+        await randomElement.hover().catch(() => {
+        });
+        await this._delay(300 + Math.random() * 500);
+      }
+    } catch (err) {
+    }
+  }
+  /**
+   * Validate persona consistency before use
+   * Ensures no fingerprint leakage
+   */
+  validatePersonaConsistency(persona, currentContext) {
+    const warnings = [];
+    if (persona.proxyId && currentContext.proxyId !== persona.proxyId) {
+      warnings.push({
+        type: "PROXY_MISMATCH",
+        message: `Persona ${persona.personaId} bound to ${persona.proxyId} but using ${currentContext.proxyId}`,
+        severity: "HIGH"
+      });
+    }
+    if (currentContext.userAgent && currentContext.userAgent !== persona.userAgent) {
+      warnings.push({
+        type: "UA_MISMATCH",
+        message: "User agent changed",
+        severity: "HIGH"
+      });
+    }
+    if (currentContext.viewport) {
+      if (currentContext.viewport.width !== persona.viewport.width || currentContext.viewport.height !== persona.viewport.height) {
+        warnings.push({
+          type: "VIEWPORT_MISMATCH",
+          message: "Viewport changed",
+          severity: "MEDIUM"
+        });
+      }
+    }
+    if (this.shouldRest(persona)) {
+      warnings.push({
+        type: "HIGH_VELOCITY",
+        message: "Persona used too frequently",
+        severity: "MEDIUM"
+      });
+    }
+    return warnings;
+  }
+  /**
+   * Generate realistic browsing session
+   * Visits pages with human-like patterns
+   */
+  async generateBrowsingSession(page, profile, urls) {
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      await page.goto(url, { waitUntil: "networkidle2" });
+      await this.executeJSChallenges(page);
+      await this.simulateHumanBehavior(page, profile);
+      await this.humanDelay(profile);
+      if (i > 0 && Math.random() < 0.1) {
+        await page.goBack();
+        await this._delay(1e3);
+        await page.goForward();
+      }
+    }
+  }
+  /**
+   * Delay helper
+   * @private
+   */
+  async _delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+var stealthManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  StealthManager: StealthManager
+});
+
 function sanitizeLabel(value) {
   if (typeof value !== "string") {
     value = String(value);
@@ -49037,7 +49462,7 @@ class CookieManager {
    * Initialize cookie manager
    */
   async initialize() {
-    this.storage = this.plugin.database.getResource(this.config.storage.resource);
+    this.storage = await this.plugin.database.getResource(this.config.storage.resource);
     if (this.config.farming.enabled) {
       await this._loadCookiePool();
     }
