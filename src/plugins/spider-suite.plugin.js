@@ -57,6 +57,15 @@ export class SpiderSuitePlugin extends Plugin {
       processor: typeof options.processor === 'function' ? options.processor : null
     };
 
+    this.pluginFactories = {
+      puppeteer: options.pluginFactories?.puppeteer ||
+        ((pluginOptions) => new PuppeteerPlugin(pluginOptions)),
+      queue: options.pluginFactories?.queue ||
+        ((queueOptions) => new S3QueuePlugin(queueOptions)),
+      ttl: options.pluginFactories?.ttl ||
+        ((ttlOptions) => new TTLPlugin(ttlOptions))
+    };
+
     this.dependencies = [];
     this.targetsResource = null;
     this.puppeteerPlugin = null;
@@ -120,9 +129,8 @@ export class SpiderSuitePlugin extends Plugin {
     await this._ensureTargetsResource();
 
     // Install Puppeteer first so other plugins can depend on it
-    this.puppeteerPlugin = await this._installDependency(
-      'puppeteer',
-      new PuppeteerPlugin({
+    this.puppeteerPlugin = await this._installDependency('puppeteer',
+      this.pluginFactories.puppeteer({
         namespace: this.namespace,
         ...this.config.puppeteer
       })
@@ -141,10 +149,7 @@ export class SpiderSuitePlugin extends Plugin {
       verbose: this.config.queue.verbose
     };
 
-    this.queuePlugin = await this._installDependency(
-      'queue',
-      new S3QueuePlugin(queueOptions)
-    );
+    this.queuePlugin = await this._installDependency('queue', this.pluginFactories.queue(queueOptions));
 
     if (this.config.ttl) {
       const ttlConfig = {
@@ -164,10 +169,7 @@ export class SpiderSuitePlugin extends Plugin {
 
       delete ttlConfig.queue;
 
-      this.ttlPlugin = await this._installDependency(
-        'ttl',
-        new TTLPlugin(ttlConfig)
-      );
+      this.ttlPlugin = await this._installDependency('ttl', this.pluginFactories.ttl(ttlConfig));
     }
 
     this.emit('spiderSuite.installed', {

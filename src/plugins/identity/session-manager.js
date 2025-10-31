@@ -335,7 +335,13 @@ export class SessionManager {
       // Hono-style
       res.header('Set-Cookie', cookieValue);
     } else {
-      throw new Error('Unsupported response object');
+      throw new PluginError('Unsupported response object for session cookies', {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.setSessionCookie',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass an HTTP response object that implements setHeader() or header().' 
+      });
     }
   }
 

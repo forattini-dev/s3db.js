@@ -144,7 +144,19 @@ export class MemoryCache extends Cache {
     super(config);
     this.caseSensitive = config.caseSensitive !== undefined ? config.caseSensitive : true;
     this.serializer = typeof config.serializer === 'function' ? config.serializer : JSON.stringify;
-    this.deserializer = typeof config.deserializer === 'function' ? config.deserializer : JSON.parse;
+
+    // Default deserializer with Date reconstruction
+    const defaultDeserializer = (str) => {
+      return JSON.parse(str, (key, value) => {
+        // Reconstruct Date objects from ISO strings
+        if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/.test(value)) {
+          return new Date(value);
+        }
+        return value;
+      });
+    };
+
+    this.deserializer = typeof config.deserializer === 'function' ? config.deserializer : defaultDeserializer;
     this.enableStats = config.enableStats === true;
     this.evictionPolicy = (config.evictionPolicy || 'fifo').toLowerCase();
     if (!['lru', 'fifo'].includes(this.evictionPolicy)) {
@@ -157,7 +169,7 @@ export class MemoryCache extends Cache {
     // Validate that only one memory limit option is used
     if (config.maxMemoryBytes && config.maxMemoryBytes > 0 &&
         config.maxMemoryPercent && config.maxMemoryPercent > 0) {
-      throw new CacheError('MemoryCache cannot use both maxMemoryBytes and maxMemoryPercent', {
+      throw new CacheError('[MemoryCache] Cannot use both maxMemoryBytes and maxMemoryPercent', {
         driver: 'memory',
         operation: 'constructor',
         statusCode: 400,
@@ -169,7 +181,7 @@ export class MemoryCache extends Cache {
     // Calculate maxMemoryBytes from percentage if provided
     if (config.maxMemoryPercent && config.maxMemoryPercent > 0) {
       if (config.maxMemoryPercent > 1) {
-        throw new CacheError('MemoryCache maxMemoryPercent must be between 0 and 1', {
+        throw new CacheError('[MemoryCache] maxMemoryPercent must be between 0 and 1', {
           driver: 'memory',
           operation: 'constructor',
           statusCode: 400,
@@ -316,6 +328,12 @@ export class MemoryCache extends Cache {
 
     // Memory-aware eviction: Remove items until we have space
     if (this.maxMemoryBytes > 0) {
+      // If item is too large to fit even in empty cache, don't cache it
+      if (itemSize > this.maxMemoryBytes) {
+        // Silently skip caching - item too large
+        return data;
+      }
+
       while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
         const candidate = this._selectEvictionCandidate();
         if (!candidate) break;

@@ -59,6 +59,17 @@ export class CookieFarmSuitePlugin extends Plugin {
       processor: typeof options.processor === 'function' ? options.processor : null
     };
 
+    this.pluginFactories = {
+      puppeteer: options.pluginFactories?.puppeteer ||
+        ((pluginOptions) => new PuppeteerPlugin(pluginOptions)),
+      cookieFarm: options.pluginFactories?.cookieFarm ||
+        ((pluginOptions) => new CookieFarmPlugin(pluginOptions)),
+      queue: options.pluginFactories?.queue ||
+        ((queueOptions) => new S3QueuePlugin(queueOptions)),
+      ttl: options.pluginFactories?.ttl ||
+        ((ttlOptions) => new TTLPlugin(ttlOptions))
+    };
+
     this.dependencies = [];
     this.jobsResource = null;
     this.puppeteerPlugin = null;
@@ -122,17 +133,15 @@ export class CookieFarmSuitePlugin extends Plugin {
   async onInstall() {
     await this._ensureJobsResource();
 
-    this.puppeteerPlugin = await this._installDependency(
-      'puppeteer',
-      new PuppeteerPlugin({
+    this.puppeteerPlugin = await this._installDependency('puppeteer',
+      this.pluginFactories.puppeteer({
         namespace: this.namespace,
         ...this.config.puppeteer
       })
     );
 
-    this.cookieFarmPlugin = await this._installDependency(
-      'cookie-farm',
-      new CookieFarmPlugin({
+    this.cookieFarmPlugin = await this._installDependency('cookie-farm',
+      this.pluginFactories.cookieFarm({
         namespace: this.namespace,
         ...this.config.cookieFarm
       })
@@ -151,10 +160,7 @@ export class CookieFarmSuitePlugin extends Plugin {
       verbose: this.config.queue.verbose
     };
 
-    this.queuePlugin = await this._installDependency(
-      'queue',
-      new S3QueuePlugin(queueOptions)
-    );
+    this.queuePlugin = await this._installDependency('queue', this.pluginFactories.queue(queueOptions));
 
     if (this.config.ttl) {
       const ttlConfig = {
@@ -174,10 +180,7 @@ export class CookieFarmSuitePlugin extends Plugin {
 
       delete ttlConfig.queue;
 
-      this.ttlPlugin = await this._installDependency(
-        'ttl',
-        new TTLPlugin(ttlConfig)
-      );
+      this.ttlPlugin = await this._installDependency('ttl', this.pluginFactories.ttl(ttlConfig));
     }
 
     this.emit('cookieFarmSuite.installed', {

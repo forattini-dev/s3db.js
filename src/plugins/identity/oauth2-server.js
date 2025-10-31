@@ -42,6 +42,7 @@ import {
 } from './oidc-discovery.js';
 import tryFn from '../../concerns/try-fn.js';
 import { verifyPassword } from './concerns/password.js';
+import { PluginError } from '../../errors.js';
 
 /**
  * OAuth2/OIDC Authorization Server
@@ -64,15 +65,33 @@ export class OAuth2Server {
     } = options;
 
     if (!issuer) {
-      throw new Error('Issuer URL is required for OAuth2Server');
+      throw new PluginError('Issuer URL is required for OAuth2Server', {
+        pluginName: 'IdentityPlugin',
+        operation: 'OAuth2Server.constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass { issuer: "https://auth.example.com" } when initializing OAuth2Server.'
+      });
     }
 
     if (!keyResource) {
-      throw new Error('keyResource is required for OAuth2Server');
+      throw new PluginError('keyResource is required for OAuth2Server', {
+        pluginName: 'IdentityPlugin',
+        operation: 'OAuth2Server.constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide a keyResource (S3DB resource) to store signing keys.'
+      });
     }
 
     if (!userResource) {
-      throw new Error('userResource is required for OAuth2Server');
+      throw new PluginError('userResource is required for OAuth2Server', {
+        pluginName: 'IdentityPlugin',
+        operation: 'OAuth2Server.constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide a userResource to look up user accounts during token exchange.'
+      });
     }
 
     this.issuer = issuer.replace(/\/$/, '');
@@ -656,7 +675,13 @@ export class OAuth2Server {
   parseExpiryToSeconds(expiresIn) {
     const match = expiresIn.match(/^(\d+)([smhd])$/);
     if (!match) {
-      throw new Error('Invalid expiresIn format');
+      throw new PluginError('Invalid expiresIn format', {
+        pluginName: 'IdentityPlugin',
+        operation: 'parseExpiryToSeconds',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Use a duration string such as "15m", "24h", or "30s".'
+      });
     }
 
     const [, value, unit] = match;
