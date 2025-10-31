@@ -1026,15 +1026,20 @@ await analyticsResource.insert({
 Added validation at the beginning of `updateAnalytics()` that detects when the race condition occurs:
 
 ```javascript
+import { PluginError } from 's3db.js';
+
 if (!config.field) {
-  throw new Error(
-    `[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()!\n` +
-    `This indicates a race condition in the plugin where multiple handlers ` +
-    `are sharing the same config object.\n` +
-    `Config: ${JSON.stringify({ resource: config.resource, field: config.field })}\n` +
-    `Transactions count: ${transactions.length}\n` +
-    `AnalyticsResource: ${analyticsResource?.name}`
-  );
+  throw new PluginError('[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()', {
+    statusCode: 500,
+    retriable: true,
+    suggestion: 'Investigate concurrent handlers mutating shared config objects; ensure each handler clones the config.',
+    metadata: {
+      resource: config.resource,
+      field: config.field,
+      transactionsCount: transactions.length,
+      analyticsResource: analyticsResource?.name
+    }
+  });
 }
 ```
 

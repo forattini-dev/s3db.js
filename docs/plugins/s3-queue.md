@@ -106,8 +106,8 @@ Unlike traditional queues that guarantee "at-least-once" delivery, S3Queue achie
 │  Layer 1: PluginStorage Locks                   │
 │            ↓ Prevents concurrent cache checks    │
 │                                                   │
-│  Layer 2: Deduplication Cache (In-Memory)        │
-│            ↓ Fast local duplicate detection      │
+│  Layer 2: Deduplication Cache (Distributed)      │
+│            ↓ PluginStorage + local TTL cache     │
 │                                                   │
 │  Layer 3: ETag Atomicity (S3 Native)             │
 │            ↓ Atomic claim via conditional update │
@@ -129,7 +129,7 @@ Each message gets a distributed lock during claim:
 │    ├─ Check if lock exists (token check)        │
 │    └─ Only ONE worker succeeds ✓                │
 │                                                  │
-│ 2. Check deduplication cache (while locked)     │
+│ 2. Check distributed cache (while locked)       │
 │    ├─ Already processed? → Release lock, skip   │
 │    └─ Not processed? → Add to cache ✓           │
 │                                                  │
