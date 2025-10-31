@@ -14,6 +14,7 @@ export * from './fulltext.plugin.js'
 export * from './geo.plugin.js'
 export * from './metrics.plugin.js'
 export * from './ml.plugin.js'
+export * from './puppeteer.plugin.js'
 // export * from './cloud-inventory.plugin.js' // Temporarily disabled due to AWS SDK paginator issues
 export * from './queue-consumer.plugin.js'
 export * from './relation.plugin.js'
