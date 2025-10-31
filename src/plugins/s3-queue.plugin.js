@@ -735,19 +735,9 @@ export class S3QueuePlugin extends Plugin {
   }
 
   async getStats() {
-    const [ok, err, allMessages] = await tryFn(() =>
-      this.queueResource.list()
-    );
-
-    if (!ok) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] Failed to get stats:', err.message);
-      }
-      return null;
-    }
-
+    const statusKeys = ['pending', 'processing', 'completed', 'failed', 'dead'];
     const stats = {
-      total: allMessages.length,
+      total: 0,
       pending: 0,
       processing: 0,
       completed: 0,
@@ -755,9 +745,29 @@ export class S3QueuePlugin extends Plugin {
       dead: 0
     };
 
-    for (const msg of allMessages) {
-      if (stats[msg.status] !== undefined) {
-        stats[msg.status]++;
+    const counts = await Promise.all(
+      statusKeys.map(status => tryFn(() => this.queueResource.count({ status })))
+    );
+
+    let derivedTotal = 0;
+
+    counts.forEach(([ok, err, count], index) => {
+      const status = statusKeys[index];
+      if (ok) {
+        stats[status] = count || 0;
+        derivedTotal += count || 0;
+      } else if (this.config.verbose) {
+        console.warn(`[S3QueuePlugin] Failed to count status '${status}':`, err?.message);
+      }
+    });
+
+    const [totalOk, totalErr, totalCount] = await tryFn(() => this.queueResource.count());
+    if (totalOk) {
+      stats.total = totalCount || 0;
+    } else {
+      stats.total = derivedTotal;
+      if (this.config.verbose) {
+        console.warn('[S3QueuePlugin] Failed to count total messages:', totalErr?.message);
       }
     }
 

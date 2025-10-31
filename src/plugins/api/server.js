@@ -831,6 +831,14 @@ export class ApiServer {
     const { database, auth } = this.options;
     const { drivers, resource: resourceName, usernameField, passwordField } = auth;
 
+    const identityPlugin = database?.plugins?.identity || database?.plugins?.Identity;
+    if (identityPlugin) {
+      if (this.options.verbose) {
+        console.warn('[API Plugin] IdentityPlugin detected. Skipping built-in auth routes.');
+      }
+      return;
+    }
+
     // Find first JWT driver (for /auth/login endpoint)
     const jwtDriver = drivers.find(d => d.driver === 'jwt');
 
@@ -847,6 +855,28 @@ export class ApiServer {
     }
 
     const driverConfig = jwtDriver.config || {};
+    const registrationConfig = {
+      enabled: driverConfig.allowRegistration === true ||
+        driverConfig.registration?.enabled === true ||
+        auth.registration?.enabled === true,
+      allowedFields: Array.isArray(driverConfig.registration?.allowedFields)
+        ? driverConfig.registration.allowedFields
+        : Array.isArray(auth.registration?.allowedFields)
+          ? auth.registration.allowedFields
+          : [],
+      defaultRole: driverConfig.registration?.defaultRole ??
+        auth.registration?.defaultRole ??
+        'user'
+    };
+
+    const driverLoginThrottle = driverConfig.loginThrottle || {};
+    const loginThrottleConfig = {
+      enabled: driverLoginThrottle.enabled ?? auth.loginThrottle?.enabled ?? true,
+      maxAttempts: driverLoginThrottle.maxAttempts || auth.loginThrottle?.maxAttempts || 5,
+      windowMs: driverLoginThrottle.windowMs || auth.loginThrottle?.windowMs || 60_000,
+      blockDurationMs: driverLoginThrottle.blockDurationMs || auth.loginThrottle?.blockDurationMs || 300_000,
+      maxEntries: driverLoginThrottle.maxEntries || auth.loginThrottle?.maxEntries || 10_000
+    };
 
     // Prepare auth config for routes
     const authConfig = {
@@ -856,7 +886,9 @@ export class ApiServer {
       jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
       jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d',
       passphrase: driverConfig.passphrase || 'secret',
-      allowRegistration: driverConfig.allowRegistration !== false
+      allowRegistration: registrationConfig.enabled,
+      registration: registrationConfig,
+      loginThrottle: loginThrottleConfig
     };
 
     // Create auth routes

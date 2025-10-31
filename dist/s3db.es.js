@@ -1,7 +1,6 @@
 import crypto, { createHash, createVerify, generateKeyPairSync, createPublicKey, createSign, randomUUID, randomBytes } from 'crypto';
 import EventEmitter, { EventEmitter as EventEmitter$1 } from 'events';
 import { Hono } from 'hono';
-import bcrypt from 'bcrypt';
 import { jwtVerify, createRemoteJWKSet, SignJWT } from 'jose';
 import fs$1, { readFile, mkdir, copyFile, unlink, stat, access, readdir, writeFile, rm, watch } from 'fs/promises';
 import path, { resolve, join, dirname } from 'path';
@@ -65,6 +64,7 @@ import { glob } from 'glob';
 import { gzip as gzip$1, brotliCompress } from 'zlib';
 import { promisify as promisify$1 } from 'util';
 import { fileURLToPath } from 'url';
+import bcrypt from 'bcrypt';
 import { randomFillSync } from 'node:crypto';
 
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -4355,26 +4355,104 @@ function createAuthRoutes(authResource, config = {}) {
   };
   const schemaAttributes = authResource.schema?.attributes || {};
   const passwordAttribute = schemaAttributes?.[passwordField];
-  typeof passwordAttribute === "string" ? passwordAttribute.includes("password") : passwordAttribute?.type === "password";
+  const isPasswordType = typeof passwordAttribute === "string" ? passwordAttribute.includes("password") : passwordAttribute?.type === "password";
   const allowedRegistrationFields = /* @__PURE__ */ new Set([usernameField, passwordField]);
   for (const field of registrationConfig.allowedFields) {
     if (typeof field === "string" && field && field !== passwordField) {
       allowedRegistrationFields.add(field);
     }
   }
-  ({
+  const blockedRegistrationFields = /* @__PURE__ */ new Set([
+    "role",
+    "active",
+    "apiKey",
+    "jwtSecret",
+    "scopes",
+    "createdAt",
+    "updatedAt",
+    "metadata",
+    "id"
+  ]);
+  const loginThrottleConfig = {
     enabled: loginThrottle?.enabled !== false,
     maxAttempts: loginThrottle?.maxAttempts ?? 5,
     windowMs: loginThrottle?.windowMs ?? 6e4,
     blockDurationMs: loginThrottle?.blockDurationMs ?? 3e5,
     maxEntries: loginThrottle?.maxEntries ?? 1e4
-  });
-  if (allowRegistration) {
+  };
+  const loginAttempts = /* @__PURE__ */ new Map();
+  const getClientIp = (c) => {
+    const forwarded = c.req.header("x-forwarded-for");
+    if (forwarded) {
+      return forwarded.split(",")[0].trim();
+    }
+    const cfConnecting = c.req.header("cf-connecting-ip");
+    if (cfConnecting) {
+      return cfConnecting;
+    }
+    return c.req.raw?.socket?.remoteAddress || "unknown";
+  };
+  const cleanupLoginAttempts = () => {
+    if (loginAttempts.size <= loginThrottleConfig.maxEntries) {
+      return;
+    }
+    const oldestKey = loginAttempts.keys().next().value;
+    if (oldestKey) {
+      loginAttempts.delete(oldestKey);
+    }
+  };
+  const getThrottleRecord = (key, now) => {
+    if (!loginThrottleConfig.enabled) return null;
+    let record = loginAttempts.get(key);
+    if (record && record.blockedUntil && now > record.blockedUntil) {
+      loginAttempts.delete(key);
+      record = null;
+    }
+    if (!record || now - record.firstAttemptAt > loginThrottleConfig.windowMs) {
+      record = { attempts: 0, firstAttemptAt: now, blockedUntil: null };
+      loginAttempts.set(key, record);
+      cleanupLoginAttempts();
+    }
+    return record;
+  };
+  const registerFailedAttempt = (record, now) => {
+    if (!loginThrottleConfig.enabled || !record) {
+      return { blocked: false };
+    }
+    record.attempts += 1;
+    record.lastAttemptAt = now;
+    if (record.attempts >= loginThrottleConfig.maxAttempts) {
+      record.blockedUntil = now + loginThrottleConfig.blockDurationMs;
+      const retryAfter = Math.ceil((record.blockedUntil - now) / 1e3);
+      return { blocked: true, retryAfter };
+    }
+    return { blocked: false };
+  };
+  const buildPublicUser = (user) => {
+    const publicUser = { id: user.id };
+    const identifier = user[usernameField] ?? user.email ?? user.username;
+    if (identifier !== void 0) {
+      publicUser[usernameField] = identifier;
+    }
+    for (const field of allowedRegistrationFields) {
+      if (field === usernameField || field === passwordField) continue;
+      if (user[field] !== void 0) {
+        publicUser[field] = user[field];
+      }
+    }
+    if (schemaAttributes.role !== void 0 && user.role !== void 0) {
+      publicUser.role = user.role;
+    }
+    if (schemaAttributes.active !== void 0 && user.active !== void 0) {
+      publicUser.active = user.active;
+    }
+    return publicUser;
+  };
+  if (registrationConfig.enabled) {
     app.post("/register", asyncHandler(async (c) => {
       const data = await c.req.json();
       const username = data[usernameField];
       const password = data[passwordField];
-      const role = data.role || "user";
       if (!username || !password) {
         const response2 = validationError([
           { field: usernameField, message: `${usernameField} is required` },
@@ -4398,18 +4476,23 @@ function createAuthRoutes(authResource, config = {}) {
         return c.json(response2, response2._status);
       }
       const { id, ...dataWithoutId } = data;
-      const userData = {
-        ...dataWithoutId,
-        // Include all fields from request except id
-        [usernameField]: username,
-        // Override to ensure correct value
-        [passwordField]: password
-        // Will be auto-encrypted by schema (secret field)
-      };
-      if (!userData.role) {
-        userData.role = role;
+      const userData = {};
+      for (const [key, value] of Object.entries(dataWithoutId)) {
+        if (!allowedRegistrationFields.has(key)) continue;
+        if (blockedRegistrationFields.has(key)) continue;
+        if (key === usernameField || key === passwordField) continue;
+        userData[key] = value;
       }
-      if (userData.active === void 0) {
+      userData[usernameField] = username;
+      if (isPasswordType) {
+        userData[passwordField] = password;
+      } else {
+        userData[passwordField] = await hashPassword(password);
+      }
+      if (schemaAttributes.role !== void 0) {
+        userData.role = registrationConfig.defaultRole;
+      }
+      if (schemaAttributes.active !== void 0) {
         userData.active = true;
       }
       const user = await authResource.insert(userData);
@@ -4425,9 +4508,8 @@ function createAuthRoutes(authResource, config = {}) {
           jwtExpiresIn
         );
       }
-      const { [passwordField]: _, ...userWithoutPassword } = user;
       const response = created({
-        user: userWithoutPassword,
+        user: buildPublicUser(user),
         ...token && { token }
         // Only include token if JWT driver
       }, `/auth/users/${user.id}`);
@@ -4446,6 +4528,24 @@ function createAuthRoutes(authResource, config = {}) {
       const queryFilter = { [usernameField]: username };
       const users = await authResource.query(queryFilter);
       if (!users || users.length === 0) {
+        const now2 = Date.now();
+        let throttleRecord2 = null;
+        let throttleKey2 = null;
+        if (loginThrottleConfig.enabled) {
+          const ip = getClientIp(c);
+          throttleKey2 = `${ip}:${username}`;
+          throttleRecord2 = getThrottleRecord(throttleKey2, now2);
+          const throttleResult = registerFailedAttempt(throttleRecord2, now2);
+          if (throttleResult.blocked) {
+            c.header("Retry-After", throttleResult.retryAfter.toString());
+            const response3 = error$1("Too many login attempts. Try again later.", {
+              status: 429,
+              code: "TOO_MANY_ATTEMPTS",
+              details: { retryAfter: throttleResult.retryAfter }
+            });
+            return c.json(response3, response3._status);
+          }
+        }
         const response2 = unauthorized("Invalid credentials");
         return c.json(response2, response2._status);
       }
@@ -4453,6 +4553,24 @@ function createAuthRoutes(authResource, config = {}) {
       if (user.active !== void 0 && !user.active) {
         const response2 = unauthorized("User account is inactive");
         return c.json(response2, response2._status);
+      }
+      const now = Date.now();
+      let throttleRecord = null;
+      let throttleKey = null;
+      if (loginThrottleConfig.enabled) {
+        const ip = getClientIp(c);
+        throttleKey = `${ip}:${username}`;
+        throttleRecord = getThrottleRecord(throttleKey, now);
+        if (throttleRecord && throttleRecord.blockedUntil && now < throttleRecord.blockedUntil) {
+          const retryAfter = Math.ceil((throttleRecord.blockedUntil - now) / 1e3);
+          c.header("Retry-After", retryAfter.toString());
+          const response2 = error$1("Too many login attempts. Try again later.", {
+            status: 429,
+            code: "TOO_MANY_ATTEMPTS",
+            details: { retryAfter }
+          });
+          return c.json(response2, response2._status);
+        }
       }
       let isValid = false;
       const storedPassword = user[passwordField];
@@ -4468,6 +4586,16 @@ function createAuthRoutes(authResource, config = {}) {
         isValid = storedPassword === password;
       }
       if (!isValid) {
+        const throttleResult = registerFailedAttempt(throttleRecord, now);
+        if (throttleResult.blocked) {
+          c.header("Retry-After", throttleResult.retryAfter.toString());
+          const response3 = error$1("Too many login attempts. Try again later.", {
+            status: 429,
+            code: "TOO_MANY_ATTEMPTS",
+            details: { retryAfter: throttleResult.retryAfter }
+          });
+          return c.json(response3, response3._status);
+        }
         const response2 = unauthorized("Invalid credentials");
         return c.json(response2, response2._status);
       }
@@ -4488,9 +4616,11 @@ function createAuthRoutes(authResource, config = {}) {
           jwtExpiresIn
         );
       }
-      const { [passwordField]: _, ...userWithoutPassword } = user;
+      if (loginThrottleConfig.enabled && throttleKey) {
+        loginAttempts.delete(throttleKey);
+      }
       const response = success$1({
-        user: userWithoutPassword,
+        user: buildPublicUser(user),
         token,
         expiresIn: jwtExpiresIn
       });
@@ -4522,12 +4652,7 @@ function createAuthRoutes(authResource, config = {}) {
       const response2 = unauthorized("Authentication required");
       return c.json(response2, response2._status);
     }
-    if (!user.password) {
-      const response2 = success$1(user);
-      return c.json(response2, response2._status);
-    }
-    const { password: _, ...userWithoutPassword } = user;
-    const response = success$1(userWithoutPassword);
+    const response = success$1(buildPublicUser(user));
     return c.json(response, response._status);
   }));
   app.post("/api-key/regenerate", asyncHandler(async (c) => {
@@ -4537,7 +4662,7 @@ function createAuthRoutes(authResource, config = {}) {
       return c.json(response2, response2._status);
     }
     const newApiKey = generateApiKey();
-    await usersResource.update(user.id, {
+    await authResource.update(user.id, {
       apiKey: newApiKey
     });
     const response = success$1({
