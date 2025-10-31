@@ -11,15 +11,15 @@ import tryFn from "#src/concerns/try-fn.js";
  * Filter out plugin attributes from attributes object
  * Plugin attributes are internal implementation details and should not be replicated
  * @param {Object} attributes - All attributes including plugin attributes
- * @param {Object} resource - Resource instance with schema._pluginAttributes
+ * @param {Object} resource - Resource instance with $schema._pluginAttributes
  * @returns {Object} Filtered attributes (user attributes only)
  */
 function filterPluginAttributes(attributes, resource) {
-  if (!resource?.schema?._pluginAttributes) {
+  if (!resource?.$schema?._pluginAttributes) {
     return attributes;
   }
 
-  const pluginAttrNames = Object.values(resource.schema._pluginAttributes).flat();
+  const pluginAttrNames = Object.values(resource.$schema._pluginAttributes).flat();
 
   return Object.fromEntries(
     Object.entries(attributes).filter(([name]) => !pluginAttrNames.includes(name))

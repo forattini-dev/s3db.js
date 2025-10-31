@@ -18,6 +18,8 @@
  * - Detect performance issues
  * - Security monitoring (CSP violations)
  */
+import tryFn from '../../concerns/try-fn.js';
+
 export class ConsoleMonitor {
   constructor(plugin) {
     this.plugin = plugin;
@@ -71,9 +73,14 @@ export class ConsoleMonitor {
       return;
     }
 
+    const resourceNames = this.plugin.resourceNames || {};
+    const sessionsName = resourceNames.consoleSessions || 'plg_puppeteer_console_sessions';
+    const messagesName = resourceNames.consoleMessages || 'plg_puppeteer_console_messages';
+    const errorsName = resourceNames.consoleErrors || 'plg_puppeteer_console_errors';
+
     // Create sessions resource (metadata about each console session)
-    this.sessionsResource = await this.plugin.database.createResource({
-      name: 'console_sessions',
+    const [sessionsCreated, sessionsErr, sessionsResource] = await tryFn(() => this.plugin.database.createResource({
+      name: sessionsName,
       attributes: {
         sessionId: 'string|required',
         url: 'string|required',
@@ -104,16 +111,19 @@ export class ConsoleMonitor {
         byDate: { fields: { date: 'string' } },
         byDomain: { fields: { domain: 'string' } }
       }
-    }).catch(async (err) => {
-      if (err.name === 'ResourceAlreadyExistsError') {
-        return await this.plugin.database.getResource('console_sessions');
-      }
-      throw err;
-    });
+    }));
+
+    if (sessionsCreated) {
+      this.sessionsResource = sessionsResource;
+    } else if (this.plugin.database.resources?.[sessionsName]) {
+      this.sessionsResource = this.plugin.database.resources[sessionsName];
+    } else {
+      throw sessionsErr;
+    }
 
     // Create messages resource (all console messages)
-    this.messagesResource = await this.plugin.database.createResource({
-      name: 'console_messages',
+    const [messagesCreated, messagesErr, messagesResource] = await tryFn(() => this.plugin.database.createResource({
+      name: messagesName,
       attributes: {
         messageId: 'string|required',
         sessionId: 'string|required',
@@ -143,16 +153,19 @@ export class ConsoleMonitor {
         byDate: { fields: { date: 'string' } },
         byDomain: { fields: { domain: 'string' } }
       }
-    }).catch(async (err) => {
-      if (err.name === 'ResourceAlreadyExistsError') {
-        return await this.plugin.database.getResource('console_messages');
-      }
-      throw err;
-    });
+    }));
+
+    if (messagesCreated) {
+      this.messagesResource = messagesResource;
+    } else if (this.plugin.database.resources?.[messagesName]) {
+      this.messagesResource = this.plugin.database.resources[messagesName];
+    } else {
+      throw messagesErr;
+    }
 
     // Create errors resource (errors and exceptions only)
-    this.errorsResource = await this.plugin.database.createResource({
-      name: 'console_errors',
+    const [errorsCreated, errorsErr, errorsResource] = await tryFn(() => this.plugin.database.createResource({
+      name: errorsName,
       attributes: {
         errorId: 'string|required',
         sessionId: 'string|required',
@@ -188,12 +201,15 @@ export class ConsoleMonitor {
         byDate: { fields: { date: 'string' } },
         byDomain: { fields: { domain: 'string' } }
       }
-    }).catch(async (err) => {
-      if (err.name === 'ResourceAlreadyExistsError') {
-        return await this.plugin.database.getResource('console_errors');
-      }
-      throw err;
-    });
+    }));
+
+    if (errorsCreated) {
+      this.errorsResource = errorsResource;
+    } else if (this.plugin.database.resources?.[errorsName]) {
+      this.errorsResource = this.plugin.database.resources[errorsName];
+    } else {
+      throw errorsErr;
+    }
 
     this.plugin.emit('consoleMonitor.initialized', {
       persist: this.config.persist

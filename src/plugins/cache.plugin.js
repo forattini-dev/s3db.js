@@ -204,11 +204,11 @@ export class CachePlugin extends Plugin {
   }
 
   shouldCacheResource(resourceName) {
-    // Get resource metadata to check createdBy
-    const resourceMetadata = this.database.savedMetadata?.resources?.[resourceName];
+    // Use $schema for reliable access to createdBy
+    const resource = this.database.resources[resourceName];
 
     // Skip plugin-created resources by default (unless explicitly included)
-    if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== 'user' && !this.config.include) {
+    if (resource?.$schema?.createdBy && resource.$schema.createdBy !== 'user' && !this.config.include) {
       return false;
     }
 
@@ -448,7 +448,7 @@ export class CachePlugin extends Plugin {
       }
       
       // Clear partition-specific caches if this resource has partitions
-      if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
+      if (this.config.includePartitions === true && resource.$schema.partitions && Object.keys(resource.$schema.partitions).length > 0) {
         const partitionValues = this.getPartitionValues(data, resource);
         for (const [partitionName, values] of Object.entries(partitionValues)) {
           if (values && Object.keys(values).length > 0 && Object.values(values).some(v => v !== null && v !== undefined)) {
@@ -596,7 +596,7 @@ export class CachePlugin extends Plugin {
 
     // Use partition-aware warming if available
     if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
-      const partitionNames = resource.config.partitions ? Object.keys(resource.config.partitions) : [];
+      const partitionNames = resource.$schema.partitions ? Object.keys(resource.$schema.partitions) : [];
       return await resource.warmPartitionCache(partitionNames, options);
     }
 
@@ -628,8 +628,8 @@ export class CachePlugin extends Plugin {
     }
 
     // Warm partition caches if enabled
-    if (includePartitions && resource.config.partitions && sampledRecords.length > 0) {
-      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
+    if (includePartitions && resource.$schema.partitions && sampledRecords.length > 0) {
+      for (const [partitionName, partitionDef] of Object.entries(resource.$schema.partitions)) {
         if (partitionDef.fields) {
           // Get unique partition values from sample
           const partitionValuesSet = new Set();
@@ -653,8 +653,8 @@ export class CachePlugin extends Plugin {
     return {
       resourceName,
       recordsSampled: sampledRecords.length,
-      partitionsWarmed: includePartitions && resource.config.partitions
-        ? Object.keys(resource.config.partitions).length
+      partitionsWarmed: includePartitions && resource.$schema.partitions
+        ? Object.keys(resource.$schema.partitions).length
         : 0
     };
   }

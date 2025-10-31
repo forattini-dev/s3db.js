@@ -22,6 +22,8 @@
  * - Cost analysis (bandwidth usage)
  * - A/B testing (compare network behavior)
  */
+import tryFn from '../../concerns/try-fn.js';
+
 export class NetworkMonitor {
   constructor(plugin) {
     this.plugin = plugin;
@@ -78,8 +80,13 @@ export class NetworkMonitor {
     }
 
     // Create sessions resource (metadata about each crawl session)
-    this.sessionsResource = await this.plugin.database.createResource({
-      name: 'network_sessions',
+    const resourceNames = this.plugin.resourceNames || {};
+    const sessionsName = resourceNames.networkSessions || 'plg_puppeteer_network_sessions';
+    const requestsName = resourceNames.networkRequests || 'plg_puppeteer_network_requests';
+    const errorsName = resourceNames.networkErrors || 'plg_puppeteer_network_errors';
+
+    const [sessionsCreated, sessionsErr, sessionsResource] = await tryFn(() => this.plugin.database.createResource({
+      name: sessionsName,
       attributes: {
         sessionId: 'string|required',
         url: 'string|required',
@@ -113,17 +120,19 @@ export class NetworkMonitor {
         byDate: { fields: { date: 'string' } },
         byDomain: { fields: { domain: 'string' } }
       }
-    }).catch(async (err) => {
-      // Resource might already exist
-      if (err.name === 'ResourceAlreadyExistsError') {
-        return await this.plugin.database.getResource('network_sessions');
-      }
-      throw err;
-    });
+    }));
+
+    if (sessionsCreated) {
+      this.sessionsResource = sessionsResource;
+    } else if (this.plugin.database.resources?.[sessionsName]) {
+      this.sessionsResource = this.plugin.database.resources[sessionsName];
+    } else {
+      throw sessionsErr;
+    }
 
     // Create requests resource (detailed info about each request)
-    this.requestsResource = await this.plugin.database.createResource({
-      name: 'network_requests',
+    const [requestsCreated, requestsErr, requestsResource] = await tryFn(() => this.plugin.database.createResource({
+      name: requestsName,
       attributes: {
         requestId: 'string|required',
         sessionId: 'string|required',
@@ -186,16 +195,19 @@ export class NetworkMonitor {
         bySize: { fields: { size: 'number' } },
         byDomain: { fields: { domain: 'string' } }
       }
-    }).catch(async (err) => {
-      if (err.name === 'ResourceAlreadyExistsError') {
-        return await this.plugin.database.getResource('network_requests');
-      }
-      throw err;
-    });
+    }));
+
+    if (requestsCreated) {
+      this.requestsResource = requestsResource;
+    } else if (this.plugin.database.resources?.[requestsName]) {
+      this.requestsResource = this.plugin.database.resources[requestsName];
+    } else {
+      throw requestsErr;
+    }
 
     // Create errors resource (failed requests only)
-    this.errorsResource = await this.plugin.database.createResource({
-      name: 'network_errors',
+    const [errorsCreated, errorsErr, errorsResource] = await tryFn(() => this.plugin.database.createResource({
+      name: errorsName,
       attributes: {
         errorId: 'string|required',
         sessionId: 'string|required',
@@ -226,12 +238,15 @@ export class NetworkMonitor {
         byDate: { fields: { date: 'string' } },
         byDomain: { fields: { domain: 'string' } }
       }
-    }).catch(async (err) => {
-      if (err.name === 'ResourceAlreadyExistsError') {
-        return await this.plugin.database.getResource('network_errors');
-      }
-      throw err;
-    });
+    }));
+
+    if (errorsCreated) {
+      this.errorsResource = errorsResource;
+    } else if (this.plugin.database.resources?.[errorsName]) {
+      this.errorsResource = this.plugin.database.resources[errorsName];
+    } else {
+      throw errorsErr;
+    }
 
     this.plugin.emit('networkMonitor.initialized', {
       persist: this.config.persist

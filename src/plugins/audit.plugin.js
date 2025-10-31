@@ -636,9 +636,9 @@ export class AuditPlugin extends Plugin {
 
   getPartitionValues(data, resource) {
     if (!this.config.includePartitions) return null;
-    
-    // Access partitions from resource.config.partitions, not resource.partitions
-    const partitions = resource.config?.partitions || resource.partitions;
+
+    // Use $schema for reliable access to partition definitions
+    const partitions = resource.$schema.partitions;
     if (!partitions) {
       return null;
     }
