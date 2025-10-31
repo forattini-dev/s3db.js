@@ -1,95 +1,95 @@
-# Authorization Patterns com s3db.js
+# Authorization Patterns with s3db.js
 
-Autenticação responde **"quem é você?"**, autorização responde **"o que você pode fazer?"**.
+Authentication answers **"who are you?"**, authorization answers **"what can you do?"**.
 
-Este guia mostra padrões completos de autorização usando s3db.js:
-- **Scopes Granulares** - Estrutura de scopes escalável
-- **Row-Level Security (RLS)** - Controle de acesso por linha usando partitions
-- **Multi-Tenancy** - Isolamento completo de dados por tenant
-- **Attribute-Based Access Control (ABAC)** - Políticas baseadas em atributos
+This guide shows complete authorization patterns using s3db.js:
+- **Granular Scopes** - Scalable scope structure
+- **Row-Level Security (RLS)** - Per-row access control using partitions
+- **Multi-Tenancy** - Complete data isolation per tenant
+- **Attribute-Based Access Control (ABAC)** - Attribute-based policies
 
 ---
 
-## 📋 Índice
+## 📋 Table of Contents
 
-1. [Scopes Granulares](#scopes-granulares)
+1. [Granular Scopes](#granular-scopes)
 2. [Row-Level Security (RLS)](#row-level-security-rls)
-3. [Multi-Tenancy com Partitions](#multi-tenancy-com-partitions)
+3. [Multi-Tenancy with Partitions](#multi-tenancy-with-partitions)
 4. [Authorization Middleware](#authorization-middleware)
 5. [ABAC (Attribute-Based Access Control)](#abac-attribute-based-access-control)
-6. [Padrões Avançados](#padrões-avançados)
+6. [Advanced Patterns](#advanced-patterns)
 
 ---
 
-## Scopes Granulares
+## Granular Scopes
 
-### ❌ Problema: Scopes Muito Amplos
+### ❌ Problem: Overly Broad Scopes
 
 ```javascript
-// RUIM - Muito permissivo
+// BAD - Too permissive
 const scopes = [
-  'orders:read',    // Pode ler TODOS os orders? Ou só os próprios?
-  'orders:write',   // Pode editar TODOS os orders?
-  'users:read'      // Pode ler TODOS os usuários?
+  'orders:read',    // Can read ALL orders? Or just own?
+  'orders:write',   // Can edit ALL orders?
+  'users:read'      // Can read ALL users?
 ];
 ```
 
-### ✅ Solução: Scopes com Níveis de Permissão
+### ✅ Solution: Scopes with Permission Levels
 
 ```javascript
-// BOM - Granular e escalável
+// GOOD - Granular and scalable
 const scopes = [
   // Read permissions
-  'orders:read:own',       // Lê apenas próprios orders
-  'orders:read:team',      // Lê orders do time
-  'orders:read:org',       // Lê orders da organização
-  'orders:read:all',       // Admin - lê tudo
+  'orders:read:own',       // Read only own orders
+  'orders:read:team',      // Read team orders
+  'orders:read:org',       // Read organization orders
+  'orders:read:all',       // Admin - read everything
 
   // Write permissions
-  'orders:write:own',      // Edita apenas próprios orders
-  'orders:write:team',     // Edita orders do time
-  'orders:write:all',      // Admin - edita tudo
+  'orders:write:own',      // Edit only own orders
+  'orders:write:team',     // Edit team orders
+  'orders:write:all',      // Admin - edit everything
 
   // Special permissions
-  'orders:delete:own',     // Deleta próprios orders
-  'orders:delete:all',     // Admin - deleta qualquer order
-  'orders:approve',        // Aprova orders (workflow)
-  'orders:export',         // Exporta relatórios
+  'orders:delete:own',     // Delete own orders
+  'orders:delete:all',     // Admin - delete any order
+  'orders:approve',        // Approve orders (workflow)
+  'orders:export',         // Export reports
 ];
 ```
 
-### Estrutura de Scopes Recomendada
+### Recommended Scope Structure
 
 ```
 <resource>:<action>:<scope>:<constraint?>
 
-Exemplos:
-- orders:read:own           → Lê próprios orders
-- orders:read:team:pending  → Lê orders pendentes do time
-- orders:write:org          → Edita orders da org
-- orders:delete:all         → Deleta qualquer order
-- users:read:own            → Lê próprio perfil
-- users:write:team          → Edita usuários do time
-- analytics:read:org        → Lê analytics da org
+Examples:
+- orders:read:own           → Read own orders
+- orders:read:team:pending  → Read pending team orders
+- orders:write:org          → Edit org orders
+- orders:delete:all         → Delete any order
+- users:read:own            → Read own profile
+- users:write:team          → Edit team users
+- analytics:read:org        → Read org analytics
 ```
 
-### Hierarquia de Scopes
+### Scope Hierarchy
 
 ```javascript
 const SCOPE_HIERARCHY = {
-  own: 1,    // Menor permissão
+  own: 1,    // Lowest permission
   team: 2,
   org: 3,
-  all: 4     // Maior permissão (admin)
+  all: 4     // Highest permission (admin)
 };
 
 function hasPermission(userScope, requiredScope) {
   return SCOPE_HIERARCHY[userScope] >= SCOPE_HIERARCHY[requiredScope];
 }
 
-// Exemplo:
-// User tem 'orders:read:org' (nível 3)
-// Endpoint requer 'orders:read:team' (nível 2)
+// Example:
+// User has 'orders:read:org' (level 3)
+// Endpoint requires 'orders:read:team' (level 2)
 // hasPermission('org', 'team') → true ✅
 ```
 
@@ -97,18 +97,18 @@ function hasPermission(userScope, requiredScope) {
 
 ## Row-Level Security (RLS)
 
-**Conceito**: Cada linha/documento só é acessível por usuários autorizados.
+**Concept**: Each row/document is only accessible by authorized users.
 
-### Padrão 1: Partition por User ID
+### Pattern 1: Partition by User ID
 
 ```javascript
 // ========================================
-// 1. Criar resource com partition por userId
+// 1. Create resource with partition by userId
 // ========================================
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: {
-    userId: 'string|required',      // Owner do order
+    userId: 'string|required',      // Order owner
     productId: 'string|required',
     quantity: 'number',
     total: 'number',
@@ -123,13 +123,13 @@ const ordersResource = await db.createResource({
 });
 
 // ========================================
-// 2. Middleware de RLS automático
+// 2. Automatic RLS middleware
 // ========================================
 function rlsMiddleware(req, res, next) {
-  // Injeta userId do token em todas as queries
-  req.userId = req.user.sub;  // User ID do token (Azure AD oid, Keycloak sub)
+  // Inject userId from token into all queries
+  req.userId = req.user.sub;  // User ID from token (Azure AD oid, Keycloak sub)
 
-  // Força filtro por userId em TODAS as queries
+  // Force filter by userId in ALL queries
   req.rlsFilter = { userId: req.userId };
 
   next();
@@ -138,13 +138,13 @@ function rlsMiddleware(req, res, next) {
 apiPlugin.use(rlsMiddleware);
 
 // ========================================
-// 3. Rotas com RLS automático
+// 3. Routes with automatic RLS
 // ========================================
 apiPlugin.addRoute({
   path: '/api/orders',
   method: 'GET',
   handler: async (req, res) => {
-    // Query automaticamente filtrada por userId via partition
+    // Query automatically filtered by userId via partition
     const orders = await ordersResource.listPartition('byUser', {
       userId: req.userId  // O(1) lookup via partition!
     });
@@ -160,9 +160,9 @@ apiPlugin.addRoute({
   handler: async (req, res) => {
     const { productId, quantity, total } = req.body;
 
-    // Força userId do token (não aceita userId do request body)
+    // Force userId from token (don't trust request body)
     const order = await ordersResource.insert({
-      userId: req.userId,  // Sempre do token, nunca confia no input
+      userId: req.userId,  // Always from token, never trust input
       productId,
       quantity,
       total,
@@ -180,16 +180,16 @@ apiPlugin.addRoute({
   handler: async (req, res) => {
     const { id } = req.params;
 
-    // Busca order
+    // Fetch order
     const order = await ordersResource.get(id);
 
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    // RLS Check - só retorna se for do próprio user
+    // RLS Check - only return if it belongs to the user
     if (order.userId !== req.userId) {
-      return res.status(404).json({ error: 'Order not found' });  // 404, não 403!
+      return res.status(404).json({ error: 'Order not found' });  // 404, not 403!
     }
 
     res.json(order);
@@ -198,32 +198,32 @@ apiPlugin.addRoute({
 });
 ```
 
-**Performance**: Partition `byUser` transforma query O(n) em O(1) lookup!
+**Performance**: Partition `byUser` transforms O(n) query into O(1) lookup!
 
 ---
 
-## Multi-Tenancy com Partitions
+## Multi-Tenancy with Partitions
 
-**Conceito**: Cada tenant (organização) tem dados completamente isolados.
+**Concept**: Each tenant (organization) has completely isolated data.
 
-### Padrão: Partition por Tenant ID
+### Pattern: Partition by Tenant ID
 
 ```javascript
 // ========================================
-// 1. Resource com partition por tenantId
+// 1. Resource with partition by tenantId
 // ========================================
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: {
     tenantId: 'string|required',    // Organization ID
-    userId: 'string|required',      // User dentro do tenant
+    userId: 'string|required',      // User within tenant
     productId: 'string|required',
     quantity: 'number',
     total: 'number'
   },
   partitions: {
     byTenant: {
-      fields: { tenantId: 'string' }  // Isolamento total por tenant
+      fields: { tenantId: 'string' }  // Complete isolation per tenant
     },
     byTenantUser: {
       fields: {
@@ -236,14 +236,14 @@ const ordersResource = await db.createResource({
 });
 
 // ========================================
-// 2. Middleware Multi-Tenant
+// 2. Multi-Tenant Middleware
 // ========================================
 function multiTenantMiddleware(req, res, next) {
-  // TenantId vem do token JWT (custom claim)
+  // TenantId comes from JWT token (custom claim)
   req.tenantId = req.user.tenantId || req.user.tid;  // Azure AD tid, Keycloak custom
   req.userId = req.user.sub;
 
-  // Valida que tenant existe
+  // Validate that tenant exists
   if (!req.tenantId) {
     return res.status(403).json({
       error: 'forbidden',
@@ -251,7 +251,7 @@ function multiTenantMiddleware(req, res, next) {
     });
   }
 
-  // Força filtro por tenant em TODAS as queries
+  // Force tenant filter in ALL queries
   req.tenantFilter = { tenantId: req.tenantId };
 
   next();
@@ -260,13 +260,13 @@ function multiTenantMiddleware(req, res, next) {
 apiPlugin.use(multiTenantMiddleware);
 
 // ========================================
-// 3. Rotas Multi-Tenant
+// 3. Multi-Tenant Routes
 // ========================================
 apiPlugin.addRoute({
   path: '/api/orders',
   method: 'GET',
   handler: async (req, res) => {
-    // Busca apenas orders do tenant do usuário
+    // Fetch only orders from user's tenant
     const orders = await ordersResource.listPartition('byTenant', {
       tenantId: req.tenantId
     });
@@ -283,7 +283,7 @@ apiPlugin.addRoute({
   path: '/api/orders/my',
   method: 'GET',
   handler: async (req, res) => {
-    // Busca orders do user dentro do tenant (double partition!)
+    // Fetch user's orders within tenant (double partition!)
     const orders = await ordersResource.listPartition('byTenantUser', {
       tenantId: req.tenantId,
       userId: req.userId
@@ -300,10 +300,10 @@ apiPlugin.addRoute({
   handler: async (req, res) => {
     const { productId, quantity, total } = req.body;
 
-    // NUNCA aceita tenantId/userId do request - sempre do token!
+    // NEVER accept tenantId/userId from request - always from token!
     const order = await ordersResource.insert({
-      tenantId: req.tenantId,  // Do token
-      userId: req.userId,      // Do token
+      tenantId: req.tenantId,  // From token
+      userId: req.userId,      // From token
       productId,
       quantity,
       total,
@@ -316,19 +316,19 @@ apiPlugin.addRoute({
 });
 
 // ========================================
-// 4. Admin pode ver todos os tenants
+// 4. Admin can see all tenants
 // ========================================
 apiPlugin.addRoute({
   path: '/api/admin/orders',
   method: 'GET',
   handler: async (req, res) => {
-    // Verifica role de super-admin
+    // Check super-admin role
     const roles = req.user.realm_access?.roles || [];
     if (!roles.includes('super-admin')) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    // Admin pode listar TUDO (sem filtro de tenant)
+    // Admin can list EVERYTHING (no tenant filter)
     const orders = await ordersResource.list({ limit: 1000 });
 
     res.json({ orders });
@@ -337,10 +337,10 @@ apiPlugin.addRoute({
 });
 ```
 
-### Custom Claims no Keycloak para Multi-Tenancy
+### Custom Claims in Keycloak for Multi-Tenancy
 
 ```javascript
-// Keycloak: Protocol Mappers para incluir tenantId no token
+// Keycloak: Protocol Mappers to include tenantId in token
 
 // 1. Client → orders-api → Mappers → Create
 // 2. Mapper Type: User Attribute
@@ -350,7 +350,7 @@ apiPlugin.addRoute({
 // 6. Claim JSON Type: String
 // 7. Add to access token: ON
 
-// Agora o token terá:
+// Now the token will have:
 {
   "sub": "user-123",
   "email": "john@acme.com",
@@ -363,7 +363,7 @@ apiPlugin.addRoute({
 
 ## Authorization Middleware
 
-Middleware reutilizável para verificar scopes e permissões.
+Reusable middleware to check scopes and permissions.
 
 ```javascript
 // ========================================
@@ -371,7 +371,7 @@ Middleware reutilizável para verificar scopes e permissões.
 // ========================================
 
 /**
- * Verifica se user tem scope necessário
+ * Check if user has required scope
  */
 function requireScope(scope) {
   return (req, res, next) => {
@@ -391,7 +391,7 @@ function requireScope(scope) {
 }
 
 /**
- * Verifica se user tem algum dos scopes (OR)
+ * Check if user has any of the scopes (OR)
  */
 function requireAnyScope(...scopes) {
   return (req, res, next) => {
@@ -412,7 +412,7 @@ function requireAnyScope(...scopes) {
 }
 
 /**
- * Verifica se user tem todos os scopes (AND)
+ * Check if user has all scopes (AND)
  */
 function requireAllScopes(...scopes) {
   return (req, res, next) => {
@@ -433,7 +433,7 @@ function requireAllScopes(...scopes) {
 }
 
 /**
- * Verifica se user tem role necessária
+ * Check if user has required role
  */
 function requireRole(role, level = 'client') {
   return (req, res, next) => {
@@ -465,7 +465,7 @@ function requireRole(role, level = 'client') {
 }
 
 /**
- * Verifica ownership do recurso
+ * Check resource ownership
  */
 function requireOwnership(resourceGetter, userIdField = 'userId') {
   return async (req, res, next) => {
@@ -494,7 +494,7 @@ function requireOwnership(resourceGetter, userIdField = 'userId') {
 }
 
 /**
- * Verifica tenant isolation
+ * Check tenant isolation
  */
 function requireTenant() {
   return (req, res, next) => {
@@ -524,7 +524,7 @@ export {
 };
 ```
 
-### Uso do Authorization Middleware
+### Using Authorization Middleware
 
 ```javascript
 import {
@@ -543,7 +543,7 @@ apiPlugin.addRoute({
   method: 'POST',
   middleware: [requireScope('orders:write:own')],
   handler: async (req, res) => {
-    // Handler só executa se scope correto
+    // Handler only executes if correct scope
     const order = await ordersResource.insert({
       userId: req.user.sub,
       ...req.body
@@ -554,14 +554,14 @@ apiPlugin.addRoute({
 });
 
 // ========================================
-// Multi-scope (OR) - aceita qualquer um
+// Multi-scope (OR) - accepts any one
 // ========================================
 apiPlugin.addRoute({
   path: '/api/orders/export',
   method: 'GET',
   middleware: [requireAnyScope('orders:export', 'orders:read:all')],
   handler: async (req, res) => {
-    // Executa se tem orders:export OU orders:read:all
+    // Executes if has orders:export OR orders:read:all
     const orders = await ordersResource.list();
     res.json(orders);
   },
@@ -569,14 +569,14 @@ apiPlugin.addRoute({
 });
 
 // ========================================
-// Multi-scope (AND) - precisa de todos
+// Multi-scope (AND) - needs all
 // ========================================
 apiPlugin.addRoute({
   path: '/api/orders/:id/approve',
   method: 'POST',
   middleware: [requireAllScopes('orders:read:all', 'orders:approve')],
   handler: async (req, res) => {
-    // Precisa de ambos os scopes
+    // Needs both scopes
     const order = await ordersResource.update(req.params.id, { status: 'approved' });
     res.json(order);
   },
@@ -591,7 +591,7 @@ apiPlugin.addRoute({
   method: 'GET',
   middleware: [requireRole('admin', 'client')],
   handler: async (req, res) => {
-    // Só admins podem acessar
+    // Only admins can access
     const users = await usersResource.list();
     res.json({ users });
   },
@@ -610,7 +610,7 @@ apiPlugin.addRoute({
     }, 'userId')
   ],
   handler: async (req, res) => {
-    // Ownership já validado, resource em req.resource
+    // Ownership already validated, resource in req.resource
     await ordersResource.delete(req.params.id);
     res.status(204).send();
   },
@@ -628,16 +628,16 @@ apiPlugin.addRoute({
     requireOwnership(async (req) => {
       const order = await ordersResource.get(req.params.id);
 
-      // Valida tenant antes de ownership
+      // Validate tenant before ownership
       if (order && order.tenantId !== req.tenantId) {
-        return null;  // Retorna 404
+        return null;  // Returns 404
       }
 
       return order;
     })
   ],
   handler: async (req, res) => {
-    // Tenant e ownership validados
+    // Tenant and ownership validated
     res.json(req.resource);
   },
   auth: 'oauth2'
@@ -648,7 +648,7 @@ apiPlugin.addRoute({
 
 ## ABAC (Attribute-Based Access Control)
 
-Políticas de autorização baseadas em atributos do usuário e do recurso.
+Authorization policies based on user and resource attributes.
 
 ```javascript
 // ========================================
@@ -667,15 +667,15 @@ class ABACPolicy {
 }
 
 // ========================================
-// Políticas de exemplo
+// Example policies
 // ========================================
 
-// Política: User pode editar próprios orders
+// Policy: User can edit own orders
 const canEditOwnOrder = new ABACPolicy('canEditOwnOrder', async (ctx) => {
   return ctx.resource.userId === ctx.user.sub;
 });
 
-// Política: Manager pode editar orders do time
+// Policy: Manager can edit team orders
 const canEditTeamOrder = new ABACPolicy('canEditTeamOrder', async (ctx) => {
   const userTeam = ctx.user.team;
   const orderTeam = ctx.resource.team;
@@ -684,7 +684,7 @@ const canEditTeamOrder = new ABACPolicy('canEditTeamOrder', async (ctx) => {
   return isManager && userTeam === orderTeam;
 });
 
-// Política: Pode aprovar orders acima de limite se tem permissão
+// Policy: Can approve orders above limit if has permission
 const canApproveHighValueOrder = new ABACPolicy('canApproveHighValueOrder', async (ctx) => {
   const orderTotal = ctx.resource.total;
   const userApprovalLimit = ctx.user.approvalLimit || 0;
@@ -692,14 +692,14 @@ const canApproveHighValueOrder = new ABACPolicy('canApproveHighValueOrder', asyn
   return orderTotal <= userApprovalLimit;
 });
 
-// Política: Horário comercial (9am-6pm)
+// Policy: Business hours (9am-6pm)
 const isBusinessHours = new ABACPolicy('isBusinessHours', async (ctx) => {
   const now = new Date();
   const hour = now.getHours();
   return hour >= 9 && hour < 18;
 });
 
-// Política: Tenant isolation
+// Policy: Tenant isolation
 const sameTenant = new ABACPolicy('sameTenant', async (ctx) => {
   return ctx.resource.tenantId === ctx.user.tenantId;
 });
@@ -740,14 +740,14 @@ class PolicyEngine {
 }
 
 // ========================================
-// Middleware ABAC
+// ABAC Middleware
 // ========================================
 
 function requirePolicies(...policyNames) {
   return async (req, res, next) => {
     const context = {
       user: req.user,
-      resource: req.resource,  // Precisa ser populado antes (via requireOwnership ou similar)
+      resource: req.resource,  // Needs to be populated before (via requireOwnership or similar)
       request: req,
       timestamp: new Date()
     };
@@ -768,10 +768,10 @@ function requirePolicies(...policyNames) {
 }
 
 // ========================================
-// Uso do ABAC
+// Using ABAC
 // ========================================
 
-// Registrar políticas
+// Register policies
 const policyEngine = new PolicyEngine();
 policyEngine.register(canEditOwnOrder);
 policyEngine.register(canEditTeamOrder);
@@ -779,7 +779,7 @@ policyEngine.register(canApproveHighValueOrder);
 policyEngine.register(isBusinessHours);
 policyEngine.register(sameTenant);
 
-// Rota com múltiplas políticas
+// Route with multiple policies
 apiPlugin.addRoute({
   path: '/api/orders/:id',
   method: 'PATCH',
@@ -789,14 +789,14 @@ apiPlugin.addRoute({
     requirePolicies('sameTenant', 'canEditOwnOrder', 'isBusinessHours')
   ],
   handler: async (req, res) => {
-    // Todas as políticas passaram
+    // All policies passed
     const order = await ordersResource.update(req.params.id, req.body);
     res.json(order);
   },
   auth: 'oauth2'
 });
 
-// Aprovar order - políticas complexas
+// Approve order - complex policies
 apiPlugin.addRoute({
   path: '/api/orders/:id/approve',
   method: 'POST',
@@ -821,12 +821,12 @@ export { ABACPolicy, PolicyEngine, requirePolicies, policyEngine };
 
 ---
 
-## Padrões Avançados
+## Advanced Patterns
 
 ### 1. Hierarchical Permissions (Inheritance)
 
 ```javascript
-// Usuário herda permissões do grupo/org
+// User inherits permissions from group/org
 const userPermissions = new Set([
   ...userOwnPermissions,
   ...teamPermissions,
@@ -855,7 +855,7 @@ function getEffectivePermissions(user) {
 ### 2. Time-Based Permissions
 
 ```javascript
-// Permissões temporárias (expiram)
+// Temporary permissions (expire)
 const temporaryAccess = new ABACPolicy('temporaryAccess', async (ctx) => {
   const grantedAt = new Date(ctx.resource.accessGrantedAt);
   const expiresAt = new Date(grantedAt.getTime() + 24 * 60 * 60 * 1000);  // 24h
@@ -868,11 +868,11 @@ const temporaryAccess = new ABACPolicy('temporaryAccess', async (ctx) => {
 ### 3. Dynamic Scopes (Context-Aware)
 
 ```javascript
-// Scope muda baseado em contexto
+// Scope changes based on context
 function getDynamicScopes(user, context) {
   const scopes = [...user.baseScopes];
 
-  // Add emergency scopes fora do horário comercial
+  // Add emergency scopes outside business hours
   const hour = new Date().getHours();
   if (hour < 9 || hour >= 18) {
     if (user.roles.includes('on-call')) {
@@ -889,10 +889,10 @@ function getDynamicScopes(user, context) {
 }
 ```
 
-### 4. Audit Trail para Authorization
+### 4. Audit Trail for Authorization
 
 ```javascript
-// Log todas as decisões de autorização
+// Log all authorization decisions
 function auditAuthorization(decision, context) {
   auditResource.insert({
     userId: context.user.sub,
@@ -909,42 +909,42 @@ function auditAuthorization(decision, context) {
 
 ---
 
-## 🎯 Resumo: Camadas de Autorização
+## 🎯 Summary: Authorization Layers
 
 ```
 ┌─────────────────────────────────────────┐
-│  1. Authentication (OAuth2/OIDC)        │  ← Quem é você?
-│     ✅ Token JWT válido                  │
+│  1. Authentication (OAuth2/OIDC)        │  ← Who are you?
+│     ✅ Valid JWT token                   │
 └─────────────────────────────────────────┘
               ↓
 ┌─────────────────────────────────────────┐
-│  2. Tenant Isolation (Multi-tenancy)    │  ← Qual organização?
-│     ✅ tenantId no token                 │
-│     ✅ Partition por tenant              │
+│  2. Tenant Isolation (Multi-tenancy)    │  ← Which organization?
+│     ✅ tenantId in token                 │
+│     ✅ Partition by tenant               │
 └─────────────────────────────────────────┘
               ↓
 ┌─────────────────────────────────────────┐
-│  3. Scope Check (Permissions)           │  ← Que tipo de acesso?
+│  3. Scope Check (Permissions)           │  ← What type of access?
 │     ✅ orders:read:own                   │
 │     ✅ orders:write:team                 │
 └─────────────────────────────────────────┘
               ↓
 ┌─────────────────────────────────────────┐
-│  4. Role Check (RBAC)                   │  ← Que papel?
+│  4. Role Check (RBAC)                   │  ← What role?
 │     ✅ admin, manager, user              │
 └─────────────────────────────────────────┘
               ↓
 ┌─────────────────────────────────────────┐
-│  5. Ownership Check (RLS)               │  ← É seu?
+│  5. Ownership Check (RLS)               │  ← Is it yours?
 │     ✅ resource.userId === token.sub     │
-│     ✅ Partition por userId              │
+│     ✅ Partition by userId               │
 └─────────────────────────────────────────┘
               ↓
 ┌─────────────────────────────────────────┐
-│  6. ABAC Policies (Business Rules)      │  ← Regras de negócio
-│     ✅ Horário comercial                 │
-│     ✅ Limite de aprovação               │
-│     ✅ Região permitida                  │
+│  6. ABAC Policies (Business Rules)      │  ← Business rules
+│     ✅ Business hours                    │
+│     ✅ Approval limit                    │
+│     ✅ Allowed region                    │
 └─────────────────────────────────────────┘
               ↓
          ✅ ALLOWED
@@ -952,15 +952,15 @@ function auditAuthorization(decision, context) {
 
 ---
 
-## 🚀 Próximos Passos
+## 🚀 Next Steps
 
-1. **Implementar exemplo completo** - Ver `docs/examples/e64-authorization-complete.js`
-2. **Authorization Plugin** - Plugin reutilizável para autorização
-3. **Admin Dashboard** - UI para gerenciar scopes, roles, policies
-4. **Testes de autorização** - Garantir que RLS/ABAC funcionam
+1. **Implement complete example** - See `docs/examples/e64-authorization-complete.js`
+2. **Authorization Plugin** - Reusable plugin for authorization
+3. **Admin Dashboard** - UI to manage scopes, roles, policies
+4. **Authorization tests** - Ensure RLS/ABAC work
 
-**Lembre-se:**
-- **Partitions são chave** para performance e isolamento
-- **Nunca confie no input do usuário** para tenantId/userId
-- **Sempre use 404 ao invés de 403** para evitar information leakage
-- **Audit trail** para todas as decisões críticas
+**Remember:**
+- **Partitions are key** for performance and isolation
+- **Never trust user input** for tenantId/userId
+- **Always use 404 instead of 403** to avoid information leakage
+- **Audit trail** for all critical decisions

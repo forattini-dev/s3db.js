@@ -1,114 +1,114 @@
-# EventualConsistencyPlugin - Garantias de Consistência 💯
+# EventualConsistencyPlugin - Consistency Guarantees 💯
 
-## 🎯 Como Garantir Consistência SEMPRE
+## 🎯 How to Ensure Consistency ALWAYS
 
-O EventualConsistencyPlugin do s3db.js foi projetado com múltiplas camadas de proteção para garantir **consistência eventual forte**. Este documento explica todos os mecanismos e melhores práticas.
-
----
-
-## 📋 Índice
-
-1. [Garantias Fundamentais](#garantias-fundamentais)
-2. [Mecanismos de Proteção](#mecanismos-de-proteção)
-3. [Melhores Práticas](#melhores-práticas)
-4. [Configurações Críticas](#configurações-críticas)
-5. [Monitoramento e Debugging](#monitoramento-e-debugging)
-6. [Cenários de Falha e Recuperação](#cenários-de-falha-e-recuperação)
-7. [Checklist de Produção](#checklist-de-produção)
+The s3db.js EventualConsistencyPlugin was designed with multiple protection layers to guarantee **strong eventual consistency**. This document explains all mechanisms and best practices.
 
 ---
 
-## 🛡️ Garantias Fundamentais
+## 📋 Table of Contents
 
-### 1. **Atomicidade de Transações**
-Cada operação gera uma transação atômica que é:
-- ✅ **Durável**: Persistida no S3 imediatamente
-- ✅ **Ordenada**: Timestamp preciso (milissegundos)
-- ✅ **Rastreável**: ID único + metadata completa
-- ✅ **Imutável**: Nunca modificada, apenas aplicada
-
-### 2. **Idempotência Garantida**
-- Transações têm ID único
-- Consolidação detecta duplicatas automaticamente
-- Aplicar a mesma transação múltiplas vezes = mesmo resultado
-
-### 3. **Eventual Consistency com Timing Configurável**
-- **Default**: 30 segundos
-- **Produção recomendado**: 5-10 segundos
-- **Alta performance**: 1-2 segundos (requer mais recursos)
-
-### 4. **Proteção contra Race Conditions**
-- Sistema de locks distribuídos
-- Consolidação por record ID (um por vez)
-- Cleanup automático de locks órfãos
+1. [Fundamental Guarantees](#fundamental-guarantees)
+2. [Protection Mechanisms](#protection-mechanisms)
+3. [Best Practices](#best-practices)
+4. [Critical Configurations](#critical-configurations)
+5. [Monitoring and Debugging](#monitoring-and-debugging)
+6. [Failure and Recovery Scenarios](#failure-and-recovery-scenarios)
+7. [Production Checklist](#production-checklist)
 
 ---
 
-## 🔒 Mecanismos de Proteção
+## 🛡️ Fundamental Guarantees
+
+### 1. **Transaction Atomicity**
+Each operation generates an atomic transaction that is:
+- ✅ **Durable**: Persisted to S3 immediately
+- ✅ **Ordered**: Precise timestamp (milliseconds)
+- ✅ **Traceable**: Unique ID + complete metadata
+- ✅ **Immutable**: Never modified, only applied
+
+### 2. **Guaranteed Idempotency**
+- Transactions have unique IDs
+- Consolidation automatically detects duplicates
+- Applying the same transaction multiple times = same result
+
+### 3. **Eventual Consistency with Configurable Timing**
+- **Default**: 30 seconds
+- **Production recommended**: 5-10 seconds
+- **High performance**: 1-2 seconds (requires more resources)
+
+### 4. **Race Condition Protection**
+- Distributed lock system
+- Consolidation per record ID (one at a time)
+- Automatic cleanup of orphaned locks
+
+---
+
+## 🔒 Protection Mechanisms
 
 ### 1. Distributed Locking System
 
 ```javascript
-// Arquivo: src/plugins/eventual-consistency/locks.js
+// File: src/plugins/eventual-consistency/locks.js
 
-// Cada record é consolidado com lock exclusivo
+// Each record is consolidated with exclusive lock
 const lockId = `${config.resource}-${config.field}-${recordId}`;
 
-// Timeout automático previne deadlocks
-lockTimeout: 300 // 5 minutos (padrão)
+// Automatic timeout prevents deadlocks
+lockTimeout: 300 // 5 minutes (default)
 
-// Cleanup de locks órfãos
-cleanupStaleLocks() // Roda periodicamente
+// Orphaned lock cleanup
+cleanupStaleLocks() // Runs periodically
 ```
 
-**Como funciona:**
-1. Antes de consolidar, tenta adquirir lock via `insert(lockId)`
-2. Se lock existe, outro worker está processando → skip
-3. Após consolidação, lock é removido
-4. Se worker crasha, lock expira automaticamente após `lockTimeout`
+**How it works:**
+1. Before consolidating, attempts to acquire lock via `insert(lockId)`
+2. If lock exists, another worker is processing → skip
+3. After consolidation, lock is removed
+4. If worker crashes, lock automatically expires after `lockTimeout`
 
-**Configuração recomendada:**
+**Recommended configuration:**
 ```javascript
 {
-  lockTimeout: 300, // 5 minutos para operações normais
-  // Para operações muito pesadas:
-  lockTimeout: 900  // 15 minutos
+  lockTimeout: 300, // 5 minutes for normal operations
+  // For very heavy operations:
+  lockTimeout: 900  // 15 minutes
 }
 ```
 
 ### 2. Partition-Based Isolation
 
 ```javascript
-// Transações são particionadas por hora
+// Transactions are partitioned by hour
 partition: `cohortHour=${cohortHour}`
 
-// Consolidação processa apenas últimas N horas
+// Consolidation processes only last N hours
 hoursToCheck: config.consolidationWindow || 24
 ```
 
-**Benefícios:**
-- ✅ Queries O(1) ao invés de O(n)
-- ✅ Isolamento temporal (transações antigas não interferem)
-- ✅ Garbage collection eficiente
+**Benefits:**
+- ✅ O(1) queries instead of O(n)
+- ✅ Temporal isolation (old transactions don't interfere)
+- ✅ Efficient garbage collection
 
 ### 3. Transaction Ordering
 
 ```javascript
-// Transactions são sempre ordenadas por timestamp
+// Transactions are always ordered by timestamp
 transactions.sort((a, b) => a.timestamp - b.timestamp);
 
-// Aplicadas sequencialmente
+// Applied sequentially
 for (const tx of transactions) {
   await applyTransaction(tx);
 }
 ```
 
-**Garantia:** Mesmo com race conditions, ordem temporal é preservada.
+**Guarantee:** Even with race conditions, temporal order is preserved.
 
-### 4. Retry com Exponential Backoff
+### 4. Retry with Exponential Backoff
 
 ```javascript
-// Em consolidation.js
+// In consolidation.js
 const MAX_RETRIES = 3;
 const BACKOFF_MS = 1000;
 
@@ -124,16 +124,16 @@ for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
 }
 ```
 
-**Protege contra:**
-- Falhas temporárias de rede
+**Protects against:**
+- Temporary network failures
 - S3 rate limiting
-- Contenção de recursos
+- Resource contention
 
 ---
 
-## 🎯 Melhores Práticas
+## 🎯 Best Practices
 
-### 1. **Configuração de Produção**
+### 1. **Production Configuration**
 
 ```javascript
 const db = new Database({ /* ... */ });
@@ -142,116 +142,116 @@ await db.registerPlugin(new EventualConsistencyPlugin({
   resource: 'users',
   field: 'balance',
 
-  // ✅ CRÍTICO: Configurações de produção
-  consolidationInterval: 5,      // 5 segundos (não 30!)
-  consolidationWindow: 48,        // 48 horas de histórico
-  lockTimeout: 300,               // 5 minutos
-  maxRetries: 5,                  // Mais retries em prod
+  // ✅ CRITICAL: Production configurations
+  consolidationInterval: 5,      // 5 seconds (not 30!)
+  consolidationWindow: 48,        // 48 hours of history
+  lockTimeout: 300,               // 5 minutes
+  maxRetries: 5,                  // More retries in prod
 
-  // ✅ RECOMENDADO: Monitoring
-  verbose: false,                 // false em prod (use logs externos)
-  enableMetrics: true,            // coleta métricas
+  // ✅ RECOMMENDED: Monitoring
+  verbose: false,                 // false in prod (use external logs)
+  enableMetrics: true,            // collect metrics
 
   // ✅ PERFORMANCE: Batch processing
-  batchSize: 100,                 // processa 100 records por vez
-  concurrency: 10,                // 10 records em paralelo
+  batchSize: 100,                 // process 100 records at a time
+  concurrency: 10,                // 10 records in parallel
 
   // ✅ CLEANUP: Garbage collection
-  retentionDays: 30,              // mantém transações por 30 dias
-  cleanupInterval: 3600,          // cleanup a cada hora
+  retentionDays: 30,              // keep transactions for 30 days
+  cleanupInterval: 3600,          // cleanup every hour
 }));
 ```
 
-### 2. **Field Handlers Robustos**
+### 2. **Robust Field Handlers**
 
 ```javascript
 const fieldHandlers = {
   balance: {
-    // ✅ SEMPRE retorne número (nunca undefined/null)
+    // ✅ ALWAYS return number (never undefined/null)
     get: (record) => record?.balance ?? 0,
 
-    // ✅ SEMPRE valide entrada
+    // ✅ ALWAYS validate input
     set: (record, value) => {
       const numValue = Number(value);
       if (!isFinite(numValue)) {
         throw new Error(`Invalid balance value: ${value}`);
       }
-      record.balance = Math.max(0, numValue); // nunca negativo
+      record.balance = Math.max(0, numValue); // never negative
     },
 
-    // ✅ SEMPRE retorne número como default
+    // ✅ ALWAYS return number as default
     default: () => 0,
 
-    // ✅ OPERAÇÕES devem ser puras (sem side effects)
+    // ✅ OPERATIONS must be pure (no side effects)
     increment: (current, delta) => {
       const result = (current ?? 0) + (delta ?? 0);
-      return Math.max(0, result); // nunca negativo
+      return Math.max(0, result); // never negative
     },
 
     decrement: (current, delta) => {
       const result = (current ?? 0) - (delta ?? 0);
-      return Math.max(0, result); // nunca negativo
+      return Math.max(0, result); // never negative
     }
   }
 };
 ```
 
-**Regras de Ouro:**
-1. **Sempre retorne um valor** (nunca undefined/null)
-2. **Valide todas as entradas** (type checking + range checking)
-3. **Operações devem ser puras** (mesma entrada = mesma saída)
-4. **Use valores default seguros** (0 para números, [] para arrays)
+**Golden Rules:**
+1. **Always return a value** (never undefined/null)
+2. **Validate all inputs** (type checking + range checking)
+3. **Operations must be pure** (same input = same output)
+4. **Use safe default values** (0 for numbers, [] for arrays)
 
-### 3. **Transações Seguras**
+### 3. **Safe Transactions**
 
 ```javascript
-// ✅ BOM: Operações atômicas
+// ✅ GOOD: Atomic operations
 await resource.update(userId, {
-  balance: { $increment: 100 }  // EventualConsistency processa
+  balance: { $increment: 100 }  // EventualConsistency processes
 });
 
-// ✅ BOM: Múltiplos campos
+// ✅ GOOD: Multiple fields
 await resource.update(userId, {
   balance: { $increment: 100 },
   points: { $increment: 10 }
 });
 
-// ❌ RUIM: Modificar diretamente sem plugin
+// ❌ BAD: Modify directly without plugin
 const user = await resource.get(userId);
 user.balance += 100;  // RACE CONDITION!
 await resource.update(userId, user);
 
-// ❌ RUIM: Read-modify-write manual
+// ❌ BAD: Manual read-modify-write
 const user = await resource.get(userId);
 const newBalance = user.balance + 100;
 await resource.update(userId, { balance: newBalance });  // RACE!
 ```
 
-### 4. **Consolidação Forçada (quando necessário)**
+### 4. **Forced Consolidation (when necessary)**
 
 ```javascript
-// Forçar consolidação imediata de um record
+// Force immediate consolidation of a record
 await plugin.consolidateRecord('user-123');
 
-// Forçar consolidação de todos os pending
+// Force consolidation of all pending
 await plugin.runConsolidationNow();
 
-// ⚠️ Use com moderação! Consolidação automática é mais eficiente
+// ⚠️ Use sparingly! Automatic consolidation is more efficient
 ```
 
-**Quando usar:**
-- Antes de operações críticas (pagamentos, transferências)
-- Em testes (garantir estado consistente)
-- Debugging de problemas de consistência
-- Migrations ou manutenção
+**When to use:**
+- Before critical operations (payments, transfers)
+- In tests (ensure consistent state)
+- Debugging consistency issues
+- Migrations or maintenance
 
 ---
 
-## ⚙️ Configurações Críticas
+## ⚙️ Critical Configurations
 
-### Tabela de Configurações por Ambiente
+### Configuration Table by Environment
 
-| Config | Dev | Staging | Produção | High-Volume |
+| Config | Dev | Staging | Production | High-Volume |
 |--------|-----|---------|----------|-------------|
 | `consolidationInterval` | 30s | 10s | 5s | 2s |
 | `consolidationWindow` | 24h | 48h | 48h | 72h |
@@ -263,37 +263,37 @@ await plugin.runConsolidationNow();
 | `cleanupInterval` | 7200s | 3600s | 3600s | 1800s |
 | `verbose` | true | false | false | false |
 
-### Cálculo de Recursos
+### Resource Calculation
 
-**Fórmula para estimar carga:**
+**Formula to estimate load:**
 ```javascript
-// Transações por segundo
+// Transactions per second
 const txPerSecond = writesPerSecond * fieldsWithEC;
 
-// Records consolidados por intervalo
+// Records consolidated per interval
 const recordsPerCycle = txPerSecond * consolidationInterval;
 
-// Throughput necessário
+// Required throughput
 const throughput = recordsPerCycle / consolidationInterval;
 
-// Exemplo: 1000 writes/s, 2 fields EC, 5s interval
+// Example: 1000 writes/s, 2 fields EC, 5s interval
 // = 2000 tx/s * 5s = 10,000 records per cycle
 // = 10,000 / 5 = 2,000 records/s throughput needed
 ```
 
-**Recursos recomendados:**
-- **CPU**: 2 cores por 10,000 tx/s
-- **Memory**: 512MB por 100,000 records em cache
-- **S3 Ops**: ~3-5 ops por consolidação (query + update + cleanup)
+**Recommended resources:**
+- **CPU**: 2 cores per 10,000 tx/s
+- **Memory**: 512MB per 100,000 records in cache
+- **S3 Ops**: ~3-5 ops per consolidation (query + update + cleanup)
 
 ---
 
-## 📊 Monitoramento e Debugging
+## 📊 Monitoring and Debugging
 
-### 1. Métricas Essenciais
+### 1. Essential Metrics
 
 ```javascript
-// Coletar métricas via plugin
+// Collect metrics via plugin
 const metrics = await plugin.getMetrics();
 
 console.log({
@@ -302,17 +302,17 @@ console.log({
   averageLatency: metrics.avgLatency,
   failureRate: metrics.failures / metrics.total,
 
-  // ⚠️ ALERTAS se:
+  // ⚠️ ALERTS if:
   pendingTooHigh: metrics.pending > 10000,
   latencyTooHigh: metrics.avgLatency > 60000, // > 1 min
   failureRateTooHigh: (metrics.failures / metrics.total) > 0.01 // > 1%
 });
 ```
 
-### 2. Debugging de Consistência
+### 2. Consistency Debugging
 
 ```javascript
-// Verificar estado de um record
+// Check record state
 const debug = await plugin.debugRecord('user-123');
 
 console.log({
@@ -321,25 +321,25 @@ console.log({
   lastConsolidation: debug.lastConsolidated,
   locks: debug.locks,
 
-  // Detectar problemas
+  // Detect issues
   isStale: debug.pending.length > 100,
   isLocked: debug.locks.length > 0,
   needsConsolidation: Date.now() - debug.lastConsolidated > 60000
 });
 
-// Se encontrar problema, forçar consolidação
+// If issue found, force consolidation
 if (debug.pending.length > 0) {
   await plugin.consolidateRecord('user-123');
 }
 ```
 
-### 3. Logs Estruturados
+### 3. Structured Logs
 
 ```javascript
-// Habilitar verbose em dev
+// Enable verbose in dev
 verbose: true
 
-// Em produção, use sistema de logs externo
+// In production, use external log system
 const winston = require('winston');
 
 await db.registerPlugin(new EventualConsistencyPlugin({
@@ -376,50 +376,50 @@ await db.registerPlugin(new EventualConsistencyPlugin({
 
 ---
 
-## 🚨 Cenários de Falha e Recuperação
+## 🚨 Failure and Recovery Scenarios
 
-### Cenário 1: Worker Crash Durante Consolidação
+### Scenario 1: Worker Crash During Consolidation
 
-**Problema:**
-Worker adquire lock → crasha antes de concluir → lock fica órfão
+**Problem:**
+Worker acquires lock → crashes before completing → lock becomes orphaned
 
-**Proteção:**
+**Protection:**
 ```javascript
-// lockTimeout garante que lock expira
-lockTimeout: 300 // 5 minutos
+// lockTimeout ensures lock expires
+lockTimeout: 300 // 5 minutes
 
-// Cleanup automático de locks órfãos
-cleanupInterval: 3600 // toda hora
+// Automatic orphaned lock cleanup
+cleanupInterval: 3600 // every hour
 ```
 
-**Recuperação:**
-- Aguardar `lockTimeout` segundos
-- Próximo worker pegará o record automaticamente
-- Transações não são perdidas (persistidas no S3)
+**Recovery:**
+- Wait `lockTimeout` seconds
+- Next worker will automatically pick up the record
+- Transactions are not lost (persisted in S3)
 
-### Cenário 2: S3 Rate Limiting
+### Scenario 2: S3 Rate Limiting
 
-**Problema:**
-Muitas operações simultâneas → S3 retorna 503 SlowDown
+**Problem:**
+Many simultaneous operations → S3 returns 503 SlowDown
 
-**Proteção:**
+**Protection:**
 ```javascript
 maxRetries: 5,
 retryBackoff: 'exponential',
-concurrency: 10 // limita operações paralelas
+concurrency: 10 // limits parallel operations
 ```
 
-**Recuperação:**
-- Retry automático com backoff
-- Se falhar após 5 retries, transação fica pending
-- Próxima consolidação tentará novamente
+**Recovery:**
+- Automatic retry with backoff
+- If fails after 5 retries, transaction stays pending
+- Next consolidation will try again
 
-### Cenário 3: Transações Acumuladas (Backlog)
+### Scenario 3: Accumulated Transactions (Backlog)
 
-**Problema:**
-Consolidação não acompanha volume de writes → backlog cresce
+**Problem:**
+Consolidation can't keep up with write volume → backlog grows
 
-**Detecção:**
+**Detection:**
 ```javascript
 const pending = await plugin.getPendingCount();
 if (pending > 10000) {
@@ -427,36 +427,36 @@ if (pending > 10000) {
 }
 ```
 
-**Recuperação:**
+**Recovery:**
 ```javascript
-// Opção 1: Reduzir interval temporariamente
-consolidationInterval: 2 // de 5s para 2s
+// Option 1: Reduce interval temporarily
+consolidationInterval: 2 // from 5s to 2s
 
-// Opção 2: Aumentar concurrency
-concurrency: 20 // de 10 para 20
+// Option 2: Increase concurrency
+concurrency: 20 // from 10 to 20
 
-// Opção 3: Rodar consolidação extra
+// Option 3: Run extra consolidation
 await plugin.runConsolidationNow();
 
-// Opção 4: Escalar horizontalmente (mais workers)
-// Cada worker processa diferentes partições
+// Option 4: Scale horizontally (more workers)
+// Each worker processes different partitions
 ```
 
-### Cenário 4: Valores Inconsistentes
+### Scenario 4: Inconsistent Values
 
-**Problema:**
-Valor final não bate com soma das transações
+**Problem:**
+Final value doesn't match sum of transactions
 
 **Debugging:**
 ```javascript
-// 1. Verificar todas as transações
+// 1. Check all transactions
 const txs = await plugin.getTransactions('user-123');
 const expectedSum = txs.reduce((sum, tx) =>
   tx.operation === 'increment' ? sum + tx.value : sum - tx.value,
   0
 );
 
-// 2. Comparar com valor atual
+// 2. Compare with current value
 const record = await resource.get('user-123');
 const diff = record.balance - expectedSum;
 
@@ -467,112 +467,112 @@ if (diff !== 0) {
     diff
   });
 
-  // 3. Forçar recalculação
+  // 3. Force recalculation
   await plugin.recalculate('user-123', { force: true });
 }
 ```
 
-**Causas comuns:**
-1. Field handler incorreto (não retorna default)
-2. Transação duplicada aplicada
-3. Modificação direta do record (bypass do plugin)
+**Common causes:**
+1. Incorrect field handler (doesn't return default)
+2. Duplicate transaction applied
+3. Direct record modification (bypassing plugin)
 
 ---
 
-## ✅ Checklist de Produção
+## ✅ Production Checklist
 
-### Antes de Deploy
+### Before Deploy
 
-- [ ] `consolidationInterval` ≤ 10 segundos
-- [ ] `lockTimeout` configurado (recomendado: 300s)
+- [ ] `consolidationInterval` ≤ 10 seconds
+- [ ] `lockTimeout` configured (recommended: 300s)
 - [ ] `maxRetries` ≥ 5
-- [ ] `retentionDays` adequado para compliance
-- [ ] Field handlers testados com valores edge case (null, undefined, 0, negativo)
-- [ ] Field handlers são **puros** (sem side effects)
-- [ ] Métricas de monitoring configuradas
-- [ ] Alertas configurados (pending > threshold, latency > threshold)
-- [ ] Logs estruturados habilitados
-- [ ] Testes de carga executados (1000+ tx/s)
-- [ ] Plano de rollback definido
+- [ ] `retentionDays` adequate for compliance
+- [ ] Field handlers tested with edge case values (null, undefined, 0, negative)
+- [ ] Field handlers are **pure** (no side effects)
+- [ ] Monitoring metrics configured
+- [ ] Alerts configured (pending > threshold, latency > threshold)
+- [ ] Structured logging enabled
+- [ ] Load tests executed (1000+ tx/s)
+- [ ] Rollback plan defined
 
-### Em Produção
+### In Production
 
-- [ ] Monitorar `pendingTransactions` diariamente
-- [ ] Monitorar `consolidationLatency` (deve ser < 2x interval)
-- [ ] Monitorar `failureRate` (deve ser < 1%)
-- [ ] Verificar garbage collection (transações antigas sendo removidas)
-- [ ] Verificar locks órfãos (devem ser raros)
-- [ ] Backup regular das transactions (para audit trail)
-- [ ] Testar recovery procedures mensalmente
+- [ ] Monitor `pendingTransactions` daily
+- [ ] Monitor `consolidationLatency` (should be < 2x interval)
+- [ ] Monitor `failureRate` (should be < 1%)
+- [ ] Verify garbage collection (old transactions being removed)
+- [ ] Check orphaned locks (should be rare)
+- [ ] Regular transaction backups (for audit trail)
+- [ ] Test recovery procedures monthly
 
-### Troubleshooting Rápido
+### Quick Troubleshooting
 
 ```bash
-# 1. Verificar pending transactions
+# 1. Check pending transactions
 curl http://api/admin/ec/metrics
 
-# 2. Verificar locks ativos
+# 2. Check active locks
 curl http://api/admin/ec/locks
 
-# 3. Forçar consolidação de record específico
+# 3. Force consolidation of specific record
 curl -X POST http://api/admin/ec/consolidate/user-123
 
-# 4. Limpar locks órfãos manualmente
+# 4. Manually clean orphaned locks
 curl -X POST http://api/admin/ec/cleanup-locks
 
-# 5. Recalcular valor de record
+# 5. Recalculate record value
 curl -X POST http://api/admin/ec/recalculate/user-123
 ```
 
 ---
 
-## 🎓 Princípios Fundamentais
+## 🎓 Fundamental Principles
 
 ### 1. **Never Modify Directly**
 ```javascript
-// ❌ NUNCA
+// ❌ NEVER
 user.balance += 100;
 await resource.update(userId, user);
 
-// ✅ SEMPRE
+// ✅ ALWAYS
 await resource.update(userId, {
   balance: { $increment: 100 }
 });
 ```
 
 ### 2. **Trust the Process**
-- Consolidação automática funciona
-- Não force consolidação desnecessariamente
-- Eventual consistency é eventual, não instantânea
+- Automatic consolidation works
+- Don't force consolidation unnecessarily
+- Eventual consistency is eventual, not instantaneous
 
 ### 3. **Idempotency is King**
-- Toda operação deve ser repetível
-- Field handlers devem ser determinísticos
-- Mesma transação aplicada 2x = mesmo resultado
+- Every operation must be repeatable
+- Field handlers must be deterministic
+- Same transaction applied 2x = same result
 
 ### 4. **Monitor, Don't Guess**
-- Use métricas para decisões
-- Logs estruturados para debugging
-- Alertas proativos para problemas
+- Use metrics for decisions
+- Structured logs for debugging
+- Proactive alerts for issues
 
 ---
 
-## 📚 Recursos Adicionais
+## 📚 Additional Resources
 
-- **Testes**: `tests/plugins/eventual-consistency-*.test.js` (122 suites, 2700+ testes)
-- **Exemplos**: `docs/examples/e52-eventual-consistency-analytics.js`
+- **Tests**: `tests/plugins/eventual-consistency-*.test.js` (122 suites, 2700+ tests)
+- **Examples**: `docs/examples/e52-eventual-consistency-analytics.js`
 - **Source**: `src/plugins/eventual-consistency/`
 - **Benchmarks**: `docs/benchmarks/eventual-consistency-performance.md`
 
 ---
 
-## 🏆 Resumo: Como Garantir Consistência SEMPRE
+## 🏆 Summary: How to Ensure Consistency ALWAYS
 
-1. **Configure adequadamente** (interval ≤ 10s em prod)
-2. **Field handlers robustos** (sempre retorne valores, valide entrada)
-3. **Monitore ativamente** (pending, latency, failures)
-4. **Nunca bypass o plugin** (sempre use $increment/$decrement)
-5. **Teste extensivamente** (carga, race conditions, failures)
-6. **Escale horizontalmente** quando necessário (múltiplos workers)
+1. **Configure properly** (interval ≤ 10s in prod)
+2. **Robust field handlers** (always return values, validate input)
+3. **Monitor actively** (pending, latency, failures)
+4. **Never bypass plugin** (always use $increment/$decrement)
+5. **Test extensively** (load, race conditions, failures)
+6. **Scale horizontally** when needed (multiple workers)
 
-**Seguindo estas práticas, você terá consistência eventual forte com garantias matemáticas! 💯**
+**Following these practices, you'll have strong eventual consistency with mathematical guarantees! 💯**
