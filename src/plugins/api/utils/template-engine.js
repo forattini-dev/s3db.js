@@ -3,6 +3,7 @@
  *
  * Provides c.render() helper that works with multiple template engines:
  * - EJS (for mrt-shortner compatibility)
+ * - Pug (formerly Jade)
  * - JSX (Hono native)
  * - Custom engines via setRenderer()
  *
@@ -12,6 +13,17 @@
  *   engine: 'ejs',
  *   templatesDir: './views',
  *   layout: 'layouts/main'
+ * }));
+ *
+ * app.get('/page', async (c) => {
+ *   return c.render('landing', { urlCount: 1000 });
+ * });
+ *
+ * @example
+ * // Pug usage
+ * app.use('*', setupTemplateEngine({
+ *   engine: 'pug',
+ *   templatesDir: './views'
  * }));
  *
  * app.get('/page', async (c) => {
@@ -46,10 +58,26 @@ async function loadEJS() {
 }
 
 /**
+ * Lazy-load Pug (peer dependency)
+ * @returns {Promise<Object>} Pug module
+ */
+async function loadPug() {
+  try {
+    const pug = await import('pug');
+    return pug.default || pug;
+  } catch (err) {
+    throw new Error(
+      'Pug template engine not installed. Install with: npm install pug\n' +
+      'Pug is a peer dependency to keep the core package lightweight.'
+    );
+  }
+}
+
+/**
  * Setup template engine middleware
  * @param {Object} options - Template engine options
- * @param {string} options.engine - Engine name: 'ejs', 'jsx', 'custom'
- * @param {string} options.templatesDir - Directory containing templates (required for EJS)
+ * @param {string} options.engine - Engine name: 'ejs', 'pug', 'jsx', 'custom'
+ * @param {string} options.templatesDir - Directory containing templates (required for EJS/Pug)
  * @param {string} options.layout - Default layout template (optional for EJS)
  * @param {Object} options.engineOptions - Additional engine-specific options
  * @param {Function} options.customRenderer - Custom render function (for 'custom' engine)
@@ -70,7 +98,7 @@ export function setupTemplateEngine(options = {}) {
   return async (c, next) => {
     /**
      * Render template with data
-     * @param {string|JSX.Element} template - Template name (for EJS) or JSX element
+     * @param {string|JSX.Element} template - Template name (for EJS/Pug) or JSX element
      * @param {Object} data - Data to pass to template
      * @param {Object} renderOptions - Render-specific options
      * @returns {Response} HTML response
@@ -80,6 +108,37 @@ export function setupTemplateEngine(options = {}) {
       if (typeof template === 'object' && template !== null) {
         // Assume it's a JSX element
         return c.html(template);
+      }
+
+      // Pug: File-based rendering
+      if (engine === 'pug') {
+        // Lazy-load Pug
+        const pug = await loadPug();
+
+        const templateFile = template.endsWith('.pug') ? template : `${template}.pug`;
+        const templatePath = join(templatesPath, templateFile);
+
+        if (!existsSync(templatePath)) {
+          throw new Error(`Template not found: ${templatePath}`);
+        }
+
+        // Merge global data + render data
+        const renderData = {
+          ...data,
+          // Add helpers that Pug templates might expect
+          _url: c.req.url,
+          _path: c.req.path,
+          _method: c.req.method
+        };
+
+        // Render template
+        const html = pug.renderFile(templatePath, {
+          ...renderData,
+          ...engineOptions,
+          ...renderOptions
+        });
+
+        return c.html(html);
       }
 
       // EJS: File-based rendering
@@ -165,6 +224,20 @@ export function ejsEngine(templatesDir, options = {}) {
 }
 
 /**
+ * Create Pug template engine middleware (convenience wrapper)
+ * @param {string} templatesDir - Directory containing templates
+ * @param {Object} options - Additional options
+ * @returns {Function} Hono middleware
+ */
+export function pugEngine(templatesDir, options = {}) {
+  return setupTemplateEngine({
+    engine: 'pug',
+    templatesDir,
+    ...options
+  });
+}
+
+/**
  * Create JSX template engine middleware (convenience wrapper)
  * Note: JSX rendering is built into Hono, this just provides c.render()
  * @returns {Function} Hono middleware
@@ -184,5 +257,6 @@ export function jsxEngine() {
 export default {
   setupTemplateEngine,
   ejsEngine,
+  pugEngine,
   jsxEngine
 };
