@@ -69,7 +69,7 @@ registerCloudDriver('aws', (options) => new AwsInventoryDriver(options));
 const plugin = new CloudInventoryPlugin({
   clouds: [
     {
-      driver: AwsInventoryDriver, // também é possível passar a classe diretamente
+      driver: AwsInventoryDriver, // You can also pass the class directly
       credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -1169,9 +1169,9 @@ const results = await plugin.syncAll();
 
 ### Mock Drivers
 
-- `aws-mock`, `gcp-mock`, `vultr-mock`, `digitalocean-mock` (alias `do-mock`), `oracle-mock` (alias `oci-mock`), `azure-mock` (alias `az-mock`), `linode-mock`, `hetzner-mock`, `alibaba-mock` (alias `aliyun-mock`), `cloudflare-mock` (alias `cf-mock`), `mongodb-atlas-mock` (alias `atlas-mock`) – mocks determinísticos para desenvolvimento e testes rápidos.
+- `aws-mock`, `gcp-mock`, `vultr-mock`, `digitalocean-mock` (alias `do-mock`), `oracle-mock` (alias `oci-mock`), `azure-mock` (alias `az-mock`), `linode-mock`, `hetzner-mock`, `alibaba-mock` (alias `aliyun-mock`), `cloudflare-mock` (alias `cf-mock`), `mongodb-atlas-mock` (alias `atlas-mock`) – Deterministic mocks for fast development and testing.
 
-Os drivers mock emitem recursos estáticos para exercitar o fluxo (por exemplo `driver: "aws-mock"`). É possível substituir os exemplos padrões passando `config.sampleResources`:
+Mock drivers emit static resources to exercise the workflow (e.g., `driver: "aws-mock"`). You can override the default samples by passing `config.sampleResources`:
 
 ```jsonc
 {
@@ -1200,7 +1200,7 @@ Os drivers mock emitem recursos estáticos para exercitar o fluxo (por exemplo `
 }
 ```
 
-Se precisar usar um driver customizado, chame `registerCloudDriver('aws', factory)` para sobrescrever a implementação padrão (a versão mock continua disponível como `aws-mock`).
+If you need to use a custom driver, call `registerCloudDriver('aws', factory)` to override the default implementation (the mock version remains available as `aws-mock`).
 
 ---
 
