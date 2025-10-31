@@ -42,6 +42,20 @@ const BASE_SCHEDULE = {
   runOnStart: false
 };
 
+const DEFAULT_TERRAFORM = {
+  enabled: false,
+  autoExport: false,
+  output: null,
+  outputType: 'file', // 'file', 's3', or 'custom'
+  filters: {
+    providers: [],
+    resourceTypes: [],
+    cloudId: null
+  },
+  terraformVersion: '1.5.0',
+  serial: 1
+};
+
 const INLINE_DRIVER_NAMES = new Map();
 
 /**
@@ -79,6 +93,14 @@ export class CloudInventoryPlugin extends Plugin {
       lock: {
         ttl: options.lock?.ttl ?? DEFAULT_LOCK.ttl,
         timeout: options.lock?.timeout ?? DEFAULT_LOCK.timeout
+      },
+      terraform: {
+        ...DEFAULT_TERRAFORM,
+        ...(options.terraform || {}),
+        filters: {
+          ...DEFAULT_TERRAFORM.filters,
+          ...(options.terraform?.filters || {})
+        }
       }
     };
 
@@ -122,6 +144,12 @@ export class CloudInventoryPlugin extends Plugin {
       const result = await this.syncCloud(cloud.id, options);
       results.push(result);
     }
+
+    // Auto-export to Terraform after all clouds sync (if configured for global export)
+    if (this.config.terraform.enabled && this.config.terraform.autoExport && !this.config.terraform.filters.cloudId) {
+      await this._autoExportTerraform(null); // null = all clouds
+    }
+
     return results;
   }
 
@@ -315,6 +343,12 @@ export class CloudInventoryPlugin extends Plugin {
     };
 
     this._log('info', 'Cloud sync finished', summary);
+
+    // Auto-export to Terraform if configured
+    if (this.config.terraform.enabled && this.config.terraform.autoExport) {
+      await this._autoExportTerraform(cloudId);
+    }
+
     return summary;
   }
 
@@ -481,6 +515,67 @@ export class CloudInventoryPlugin extends Plugin {
       key,
       ...result
     };
+  }
+
+  /**
+   * Auto-export Terraform state after discovery (internal)
+   * @private
+   */
+  async _autoExportTerraform(cloudId = null) {
+    try {
+      const { terraform } = this.config;
+      const exportOptions = {
+        ...terraform.filters,
+        terraformVersion: terraform.terraformVersion,
+        serial: terraform.serial
+      };
+
+      // If cloudId specified, override filter
+      if (cloudId) {
+        exportOptions.cloudId = cloudId;
+      }
+
+      this._log('info', 'Auto-exporting Terraform state', {
+        output: terraform.output,
+        outputType: terraform.outputType,
+        cloudId: cloudId || 'all'
+      });
+
+      let result;
+
+      // Determine output type and call appropriate export method
+      if (terraform.outputType === 's3') {
+        // Parse S3 URL: s3://bucket/path/to/file.tfstate
+        const s3Match = terraform.output?.match(/^s3:\/\/([^/]+)\/(.+)$/);
+        if (!s3Match) {
+          throw new Error(`Invalid S3 URL format: ${terraform.output}. Expected: s3://bucket/path/file.tfstate`);
+        }
+        const [, bucket, key] = s3Match;
+        result = await this.exportToTerraformStateToS3(bucket, key, exportOptions);
+      } else if (terraform.outputType === 'file') {
+        // File path
+        if (!terraform.output) {
+          throw new Error('Terraform output path not configured');
+        }
+        result = await this.exportToTerraformStateFile(terraform.output, exportOptions);
+      } else {
+        // Custom function (user-provided)
+        if (typeof terraform.output === 'function') {
+          const stateData = await this.exportToTerraformState(exportOptions);
+          result = await terraform.output(stateData);
+        } else {
+          throw new Error(`Unknown terraform.outputType: ${terraform.outputType}`);
+        }
+      }
+
+      this._log('info', 'Terraform state auto-export completed', result.stats);
+    } catch (err) {
+      this._log('error', 'Failed to auto-export Terraform state', {
+        error: err.message,
+        stack: err.stack
+      });
+      // Don't throw - auto-export is best-effort
+    }
   }
 
   async _ensureResources() {
