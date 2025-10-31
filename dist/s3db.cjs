@@ -17,6 +17,7 @@ var zlib = require('node:zlib');
 var os = require('os');
 var jsonStableStringify = require('json-stable-stringify');
 var os$1 = require('node:os');
+var node_util = require('node:util');
 var promisePool = require('@supercharge/promise-pool');
 var lodashEs = require('lodash-es');
 var flat = require('flat');
@@ -10761,6 +10762,18 @@ class ApiPlugin extends Plugin {
       override: resourceNamesOption.authUsers || options.auth?.resource
     };
     const normalizedAuth = normalizeAuthConfig(options.auth);
+    normalizedAuth.registration = {
+      enabled: options.auth?.registration?.enabled === true,
+      allowedFields: Array.isArray(options.auth?.registration?.allowedFields) ? options.auth.registration.allowedFields : [],
+      defaultRole: options.auth?.registration?.defaultRole || "user"
+    };
+    normalizedAuth.loginThrottle = {
+      enabled: options.auth?.loginThrottle?.enabled !== false,
+      maxAttempts: options.auth?.loginThrottle?.maxAttempts || 5,
+      windowMs: options.auth?.loginThrottle?.windowMs || 6e4,
+      blockDurationMs: options.auth?.loginThrottle?.blockDurationMs || 3e5,
+      maxEntries: options.auth?.loginThrottle?.maxEntries || 1e4
+    };
     this.usersResourceName = this._resolveUsersResourceName();
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;
@@ -10811,7 +10824,8 @@ class ApiPlugin extends Plugin {
         windowMs: options.rateLimit?.windowMs || 6e4,
         // 1 minute
         maxRequests: options.rateLimit?.maxRequests || 100,
-        keyGenerator: options.rateLimit?.keyGenerator || null
+        keyGenerator: options.rateLimit?.keyGenerator || null,
+        maxUniqueKeys: options.rateLimit?.maxUniqueKeys || 1e3
       },
       // Logging configuration
       logging: {
@@ -16802,6 +16816,397 @@ class MemoryCache extends Cache {
   }
 }
 
+const gzip = node_util.promisify(zlib.gzip);
+const unzip = node_util.promisify(zlib.unzip);
+class RedisCache extends Cache {
+  constructor({
+    host = "localhost",
+    port = 6379,
+    password,
+    db = 0,
+    keyPrefix = "cache",
+    ttl = 36e5,
+    enableCompression = true,
+    compressionThreshold = 1024,
+    connectTimeout = 5e3,
+    commandTimeout = 5e3,
+    retryAttempts = 3,
+    retryDelay = 1e3,
+    lazyConnect = true,
+    keepAlive = true,
+    keepAliveInitialDelay = 0,
+    retryStrategy,
+    enableStats = false,
+    ...redisOptions
+  }) {
+    super();
+    requirePluginDependency("ioredis", "RedisCache");
+    this.config = {
+      host,
+      port,
+      password,
+      db,
+      keyPrefix: keyPrefix.endsWith("/") ? keyPrefix : keyPrefix + "/",
+      ttl,
+      enableCompression,
+      compressionThreshold,
+      connectTimeout,
+      commandTimeout,
+      retryAttempts,
+      retryDelay,
+      lazyConnect,
+      keepAlive,
+      keepAliveInitialDelay,
+      retryStrategy,
+      enableStats,
+      ...redisOptions
+    };
+    this.ttlMs = typeof ttl === "number" && ttl > 0 ? ttl : 0;
+    this.ttlSeconds = this.ttlMs > 0 ? Math.ceil(this.ttlMs / 1e3) : 0;
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      errors: 0,
+      sets: 0,
+      deletes: 0,
+      enabled: enableStats
+    };
+    this.client = null;
+    this.connected = false;
+    this.connecting = false;
+  }
+  /**
+   * Initialize Redis connection
+   * @private
+   */
+  async _ensureConnection() {
+    if (this.connected) return;
+    if (this.connecting) {
+      await new Promise((resolve) => {
+        const check = setInterval(() => {
+          if (this.connected || !this.connecting) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 50);
+      });
+      return;
+    }
+    this.connecting = true;
+    try {
+      const Redis = (await import('ioredis')).default;
+      this.client = new Redis({
+        host: this.config.host,
+        port: this.config.port,
+        password: this.config.password,
+        db: this.config.db,
+        connectTimeout: this.config.connectTimeout,
+        commandTimeout: this.config.commandTimeout,
+        lazyConnect: this.config.lazyConnect,
+        keepAlive: this.config.keepAlive,
+        keepAliveInitialDelay: this.config.keepAliveInitialDelay,
+        retryStrategy: this.config.retryStrategy || ((times) => {
+          if (times > this.config.retryAttempts) {
+            return null;
+          }
+          return Math.min(times * this.config.retryDelay, 5e3);
+        }),
+        ...this.config.redisOptions
+      });
+      if (this.config.lazyConnect) {
+        await this.client.connect();
+      }
+      this.connected = true;
+      this.connecting = false;
+      this.client.on("error", (err) => {
+        if (this.config.enableStats) {
+          this.stats.errors++;
+        }
+        console.error("Redis connection error:", err);
+      });
+      this.client.on("close", () => {
+        this.connected = false;
+      });
+      this.client.on("reconnecting", () => {
+        this.connected = false;
+        this.connecting = true;
+      });
+      this.client.on("ready", () => {
+        this.connected = true;
+        this.connecting = false;
+      });
+    } catch (error) {
+      this.connecting = false;
+      throw new CacheError("Failed to connect to Redis", {
+        operation: "connect",
+        driver: "RedisCache",
+        config: {
+          host: this.config.host,
+          port: this.config.port,
+          db: this.config.db
+        },
+        cause: error,
+        suggestion: "Ensure Redis server is running and accessible. Install ioredis: npm install ioredis"
+      });
+    }
+  }
+  /**
+   * Build full Redis key with prefix
+   * @private
+   */
+  _getKey(key) {
+    return `${this.config.keyPrefix}${key}`;
+  }
+  /**
+   * Compress data if enabled and above threshold
+   * @private
+   */
+  async _compressData(data) {
+    const jsonString = JSON.stringify(data);
+    if (!this.config.enableCompression || jsonString.length < this.config.compressionThreshold) {
+      return {
+        data: jsonString,
+        compressed: false,
+        originalSize: jsonString.length
+      };
+    }
+    const compressed = await gzip(Buffer.from(jsonString, "utf-8"));
+    return {
+      data: compressed.toString("base64"),
+      compressed: true,
+      originalSize: jsonString.length,
+      compressedSize: compressed.length,
+      compressionRatio: (compressed.length / jsonString.length).toFixed(2)
+    };
+  }
+  /**
+   * Decompress data if needed
+   * @private
+   */
+  async _decompressData(storedData) {
+    if (!storedData) return null;
+    const metadata = JSON.parse(storedData);
+    if (!metadata.compressed) {
+      return JSON.parse(metadata.data);
+    }
+    const buffer = Buffer.from(metadata.data, "base64");
+    const decompressed = await unzip(buffer);
+    return JSON.parse(decompressed.toString("utf-8"));
+  }
+  async _set(key, data) {
+    await this._ensureConnection();
+    try {
+      const compressed = await this._compressData(data);
+      const redisKey = this._getKey(key);
+      const value = JSON.stringify(compressed);
+      if (this.ttlSeconds > 0) {
+        await this.client.setex(redisKey, this.ttlSeconds, value);
+      } else {
+        await this.client.set(redisKey, value);
+      }
+      if (this.config.enableStats) {
+        this.stats.sets++;
+      }
+      return true;
+    } catch (error) {
+      if (this.config.enableStats) {
+        this.stats.errors++;
+      }
+      throw new CacheError("Failed to set cache value in Redis", {
+        operation: "set",
+        driver: "RedisCache",
+        key,
+        cause: error,
+        retriable: true,
+        suggestion: "Check Redis connection and server status"
+      });
+    }
+  }
+  async _get(key) {
+    await this._ensureConnection();
+    try {
+      const redisKey = this._getKey(key);
+      const value = await this.client.get(redisKey);
+      if (!value) {
+        if (this.config.enableStats) {
+          this.stats.misses++;
+        }
+        return null;
+      }
+      if (this.config.enableStats) {
+        this.stats.hits++;
+      }
+      return await this._decompressData(value);
+    } catch (error) {
+      if (this.config.enableStats) {
+        this.stats.errors++;
+      }
+      throw new CacheError("Failed to get cache value from Redis", {
+        operation: "get",
+        driver: "RedisCache",
+        key,
+        cause: error,
+        retriable: true,
+        suggestion: "Check Redis connection and server status"
+      });
+    }
+  }
+  async _del(key) {
+    await this._ensureConnection();
+    try {
+      const redisKey = this._getKey(key);
+      await this.client.del(redisKey);
+      if (this.config.enableStats) {
+        this.stats.deletes++;
+      }
+      return true;
+    } catch (error) {
+      if (this.config.enableStats) {
+        this.stats.errors++;
+      }
+      throw new CacheError("Failed to delete cache key from Redis", {
+        operation: "delete",
+        driver: "RedisCache",
+        key,
+        cause: error,
+        retriable: true,
+        suggestion: "Check Redis connection and server status"
+      });
+    }
+  }
+  async _clear(prefix) {
+    await this._ensureConnection();
+    try {
+      const pattern = prefix ? `${this.config.keyPrefix}${prefix}*` : `${this.config.keyPrefix}*`;
+      let cursor = "0";
+      let deletedCount = 0;
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          "MATCH",
+          pattern,
+          "COUNT",
+          100
+        );
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          await this.client.del(...keys);
+          deletedCount += keys.length;
+        }
+      } while (cursor !== "0");
+      if (this.config.enableStats) {
+        this.stats.deletes += deletedCount;
+      }
+      return true;
+    } catch (error) {
+      if (this.config.enableStats) {
+        this.stats.errors++;
+      }
+      throw new CacheError("Failed to clear cache keys from Redis", {
+        operation: "clear",
+        driver: "RedisCache",
+        prefix,
+        cause: error,
+        retriable: true,
+        suggestion: "Check Redis connection and server status"
+      });
+    }
+  }
+  async size() {
+    await this._ensureConnection();
+    try {
+      const pattern = `${this.config.keyPrefix}*`;
+      let cursor = "0";
+      let count = 0;
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          "MATCH",
+          pattern,
+          "COUNT",
+          100
+        );
+        cursor = nextCursor;
+        count += keys.length;
+      } while (cursor !== "0");
+      return count;
+    } catch (error) {
+      throw new CacheError("Failed to get cache size from Redis", {
+        operation: "size",
+        driver: "RedisCache",
+        cause: error,
+        retriable: true,
+        suggestion: "Check Redis connection and server status"
+      });
+    }
+  }
+  async keys() {
+    await this._ensureConnection();
+    try {
+      const pattern = `${this.config.keyPrefix}*`;
+      const allKeys = [];
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          "MATCH",
+          pattern,
+          "COUNT",
+          100
+        );
+        cursor = nextCursor;
+        const cleanKeys = keys.map(
+          (k) => k.startsWith(this.config.keyPrefix) ? k.slice(this.config.keyPrefix.length) : k
+        );
+        allKeys.push(...cleanKeys);
+      } while (cursor !== "0");
+      return allKeys;
+    } catch (error) {
+      throw new CacheError("Failed to get cache keys from Redis", {
+        operation: "keys",
+        driver: "RedisCache",
+        cause: error,
+        retriable: true,
+        suggestion: "Check Redis connection and server status"
+      });
+    }
+  }
+  /**
+   * Get cache statistics
+   */
+  getStats() {
+    if (!this.stats.enabled) {
+      return {
+        enabled: false,
+        message: "Statistics are disabled. Enable with enableStats: true"
+      };
+    }
+    const total = this.stats.hits + this.stats.misses;
+    const hitRate = total > 0 ? this.stats.hits / total : 0;
+    return {
+      enabled: true,
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      errors: this.stats.errors,
+      sets: this.stats.sets,
+      deletes: this.stats.deletes,
+      total,
+      hitRate,
+      hitRatePercent: (hitRate * 100).toFixed(2) + "%"
+    };
+  }
+  /**
+   * Disconnect from Redis
+   */
+  async disconnect() {
+    if (this.client && this.connected) {
+      await this.client.quit();
+      this.connected = false;
+      this.client = null;
+    }
+  }
+}
+
 class FilesystemCache extends Cache {
   constructor({
     directory,
@@ -17752,12 +18157,320 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
 }
 
+class MultiTierCache extends Cache {
+  constructor({
+    drivers = [],
+    promoteOnHit = true,
+    strategy = "write-through",
+    // 'write-through' | 'lazy-promotion'
+    fallbackOnError = true,
+    verbose = false
+  }) {
+    super();
+    if (!Array.isArray(drivers) || drivers.length === 0) {
+      throw new CacheError("MultiTierCache requires at least one driver", {
+        operation: "constructor",
+        driver: "MultiTierCache",
+        provided: drivers,
+        suggestion: "Pass drivers array with at least one cache driver instance"
+      });
+    }
+    this.drivers = drivers.map((d, index) => ({
+      instance: d.driver,
+      name: d.name || `L${index + 1}`,
+      tier: index + 1
+    }));
+    this.config = {
+      promoteOnHit,
+      strategy,
+      fallbackOnError,
+      verbose
+    };
+    this.stats = {
+      enabled: true,
+      tiers: this.drivers.map((d) => ({
+        name: d.name,
+        hits: 0,
+        misses: 0,
+        promotions: 0,
+        errors: 0,
+        sets: 0
+      }))
+    };
+  }
+  /**
+   * Log message if verbose enabled
+   * @private
+   */
+  _log(...args) {
+    if (this.config.verbose) {
+      console.log("[MultiTierCache]", ...args);
+    }
+  }
+  /**
+   * Get value from cache tiers (cascade L1 → L2 → L3)
+   * @private
+   */
+  async _get(key) {
+    for (let i = 0; i < this.drivers.length; i++) {
+      const tier = this.drivers[i];
+      const tierStats = this.stats.tiers[i];
+      try {
+        const value = await tier.instance.get(key);
+        if (value !== null && value !== void 0) {
+          tierStats.hits++;
+          this._log(`\u2713 Cache HIT on ${tier.name} for key: ${key}`);
+          if (this.config.promoteOnHit && i > 0) {
+            this._promoteToFasterTiers(key, value, i);
+          }
+          return value;
+        } else {
+          tierStats.misses++;
+          this._log(`\u2717 Cache MISS on ${tier.name} for key: ${key}`);
+        }
+      } catch (error) {
+        tierStats.errors++;
+        this._log(`\u26A0 Error on ${tier.name} for key: ${key}`, error.message);
+        if (!this.config.fallbackOnError) {
+          throw new CacheError(`Cache get failed on ${tier.name}`, {
+            operation: "get",
+            driver: "MultiTierCache",
+            tier: tier.name,
+            key,
+            cause: error,
+            suggestion: "Enable fallbackOnError to skip failed tiers"
+          });
+        }
+        continue;
+      }
+    }
+    this._log(`\u2717 Cache MISS on ALL tiers for key: ${key}`);
+    return null;
+  }
+  /**
+   * Promote value to faster tiers (L2 hit → write to L1, L3 hit → write to L1+L2)
+   * @private
+   */
+  async _promoteToFasterTiers(key, value, hitTierIndex) {
+    for (let i = 0; i < hitTierIndex; i++) {
+      const tier = this.drivers[i];
+      const tierStats = this.stats.tiers[i];
+      try {
+        await tier.instance.set(key, value);
+        tierStats.promotions++;
+        this._log(`\u2191 Promoted key "${key}" to ${tier.name}`);
+      } catch (error) {
+        tierStats.errors++;
+        this._log(`\u26A0 Failed to promote key "${key}" to ${tier.name}:`, error.message);
+      }
+    }
+  }
+  /**
+   * Set value in cache tiers
+   * @private
+   */
+  async _set(key, data) {
+    if (this.config.strategy === "write-through") {
+      return this._writeToAllTiers(key, data);
+    } else if (this.config.strategy === "lazy-promotion") {
+      return this._writeToL1Only(key, data);
+    }
+  }
+  /**
+   * Write-through strategy: write to all tiers immediately
+   * @private
+   */
+  async _writeToAllTiers(key, data) {
+    const results = await Promise.allSettled(
+      this.drivers.map(async (tier, index) => {
+        try {
+          await tier.instance.set(key, data);
+          this.stats.tiers[index].sets++;
+          this._log(`\u2713 Wrote key "${key}" to ${tier.name}`);
+          return { success: true, tier: tier.name };
+        } catch (error) {
+          this.stats.tiers[index].errors++;
+          this._log(`\u26A0 Failed to write key "${key}" to ${tier.name}:`, error.message);
+          return { success: false, tier: tier.name, error };
+        }
+      })
+    );
+    const l1Success = results[0]?.status === "fulfilled" && results[0].value.success;
+    if (!l1Success && !this.config.fallbackOnError) {
+      throw new CacheError("Failed to write to L1 cache", {
+        operation: "set",
+        driver: "MultiTierCache",
+        key,
+        results,
+        suggestion: "Enable fallbackOnError or check L1 cache health"
+      });
+    }
+    return true;
+  }
+  /**
+   * Lazy-promotion strategy: write only to L1
+   * @private
+   */
+  async _writeToL1Only(key, data) {
+    const tier = this.drivers[0];
+    const tierStats = this.stats.tiers[0];
+    try {
+      await tier.instance.set(key, data);
+      tierStats.sets++;
+      this._log(`\u2713 Wrote key "${key}" to ${tier.name} (lazy-promotion)`);
+      return true;
+    } catch (error) {
+      tierStats.errors++;
+      throw new CacheError(`Failed to write to ${tier.name}`, {
+        operation: "set",
+        driver: "MultiTierCache",
+        tier: tier.name,
+        key,
+        cause: error,
+        suggestion: "Check L1 cache health"
+      });
+    }
+  }
+  /**
+   * Delete key from all tiers
+   * @private
+   */
+  async _del(key) {
+    const results = await Promise.allSettled(
+      this.drivers.map(async (tier) => {
+        try {
+          await tier.instance.del(key);
+          this._log(`\u2713 Deleted key "${key}" from ${tier.name}`);
+          return { success: true, tier: tier.name };
+        } catch (error) {
+          this._log(`\u26A0 Failed to delete key "${key}" from ${tier.name}:`, error.message);
+          return { success: false, tier: tier.name, error };
+        }
+      })
+    );
+    const anySuccess = results.some((r) => r.status === "fulfilled" && r.value.success);
+    if (!anySuccess && !this.config.fallbackOnError) {
+      throw new CacheError("Failed to delete from all cache tiers", {
+        operation: "delete",
+        driver: "MultiTierCache",
+        key,
+        results,
+        suggestion: "Enable fallbackOnError or check cache health"
+      });
+    }
+    return true;
+  }
+  /**
+   * Clear all keys from all tiers
+   * @private
+   */
+  async _clear(prefix) {
+    await Promise.allSettled(
+      this.drivers.map(async (tier) => {
+        try {
+          await tier.instance.clear(prefix);
+          this._log(`\u2713 Cleared ${prefix ? `prefix "${prefix}"` : "all keys"} from ${tier.name}`);
+          return { success: true, tier: tier.name };
+        } catch (error) {
+          this._log(`\u26A0 Failed to clear ${tier.name}:`, error.message);
+          return { success: false, tier: tier.name, error };
+        }
+      })
+    );
+    return true;
+  }
+  /**
+   * Get total size across all tiers (may have duplicates)
+   */
+  async size() {
+    let totalSize = 0;
+    for (const tier of this.drivers) {
+      try {
+        if (typeof tier.instance.size === "function") {
+          const size = await tier.instance.size();
+          totalSize += size;
+        }
+      } catch (error) {
+        this._log(`\u26A0 Failed to get size from ${tier.name}:`, error.message);
+      }
+    }
+    return totalSize;
+  }
+  /**
+   * Get all keys from all tiers (deduplicated)
+   */
+  async keys() {
+    const allKeys = /* @__PURE__ */ new Set();
+    for (const tier of this.drivers) {
+      try {
+        if (typeof tier.instance.keys === "function") {
+          const keys = await tier.instance.keys();
+          keys.forEach((k) => allKeys.add(k));
+        }
+      } catch (error) {
+        this._log(`\u26A0 Failed to get keys from ${tier.name}:`, error.message);
+      }
+    }
+    return Array.from(allKeys);
+  }
+  /**
+   * Get comprehensive statistics
+   */
+  getStats() {
+    const totals = {
+      hits: 0,
+      misses: 0,
+      promotions: 0,
+      errors: 0,
+      sets: 0
+    };
+    for (const tierStats of this.stats.tiers) {
+      totals.hits += tierStats.hits;
+      totals.misses += tierStats.misses;
+      totals.promotions += tierStats.promotions;
+      totals.errors += tierStats.errors;
+      totals.sets += tierStats.sets;
+    }
+    const total = totals.hits + totals.misses;
+    const hitRate = total > 0 ? totals.hits / total : 0;
+    return {
+      enabled: true,
+      strategy: this.config.strategy,
+      promoteOnHit: this.config.promoteOnHit,
+      tiers: this.stats.tiers.map((t) => {
+        const tierTotal = t.hits + t.misses;
+        const tierHitRate = tierTotal > 0 ? t.hits / tierTotal : 0;
+        return {
+          ...t,
+          hitRate: tierHitRate,
+          hitRatePercent: (tierHitRate * 100).toFixed(2) + "%"
+        };
+      }),
+      totals: {
+        ...totals,
+        total,
+        hitRate,
+        hitRatePercent: (hitRate * 100).toFixed(2) + "%"
+      }
+    };
+  }
+}
+
 class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+    const isMultiTier = Array.isArray(options.drivers) && options.drivers.length > 0;
     this.config = {
-      // Driver configuration
+      // Driver configuration (single-tier or multi-tier)
       driver: options.driver || "s3",
+      drivers: options.drivers,
+      // Array of driver configs for multi-tier
+      isMultiTier,
+      // Multi-tier specific options
+      promoteOnHit: options.promoteOnHit !== false,
+      strategy: options.strategy || "write-through",
+      // 'write-through' | 'lazy-promotion'
+      fallbackOnError: options.fallbackOnError !== false,
       config: {
         ttl: options.ttl,
         maxSize: options.maxSize,
@@ -17794,26 +18507,12 @@ class CachePlugin extends Plugin {
     };
   }
   async onInstall() {
-    if (this.config.driver && typeof this.config.driver === "object") {
+    if (this.config.isMultiTier) {
+      this.driver = await this._createMultiTierDriver();
+    } else if (this.config.driver && typeof this.config.driver === "object") {
       this.driver = this.config.driver;
-    } else if (this.config.driver === "memory") {
-      this.driver = new MemoryCache(this.config.config);
-    } else if (this.config.driver === "filesystem") {
-      if (this.config.partitionAware) {
-        this.driver = new PartitionAwareFilesystemCache({
-          partitionStrategy: this.config.partitionStrategy,
-          trackUsage: this.config.trackUsage,
-          preloadRelated: this.config.preloadRelated,
-          ...this.config.config
-        });
-      } else {
-        this.driver = new FilesystemCache(this.config.config);
-      }
     } else {
-      this.driver = new S3Cache({
-        client: this.database.client,
-        ...this.config.config
-      });
+      this.driver = await this._createSingleDriver(this.config.driver, this.config.config);
     }
     this.installDatabaseHooks();
     this.installResourceHooks();
@@ -17831,6 +18530,57 @@ class CachePlugin extends Plugin {
   async onStart() {
   }
   async onStop() {
+  }
+  /**
+   * Create a single cache driver instance
+   * @private
+   */
+  async _createSingleDriver(driverName, config) {
+    if (driverName === "memory") {
+      return new MemoryCache(config);
+    } else if (driverName === "redis") {
+      return new RedisCache(config);
+    } else if (driverName === "filesystem") {
+      if (this.config.partitionAware) {
+        return new PartitionAwareFilesystemCache({
+          partitionStrategy: this.config.partitionStrategy,
+          trackUsage: this.config.trackUsage,
+          preloadRelated: this.config.preloadRelated,
+          ...config
+        });
+      } else {
+        return new FilesystemCache(config);
+      }
+    } else {
+      return new S3Cache({
+        client: this.database.client,
+        ...config
+      });
+    }
+  }
+  /**
+   * Create multi-tier cache driver
+   * @private
+   */
+  async _createMultiTierDriver() {
+    const driverInstances = [];
+    for (const driverConfig of this.config.drivers) {
+      const driverInstance = await this._createSingleDriver(
+        driverConfig.driver,
+        driverConfig.config || {}
+      );
+      driverInstances.push({
+        driver: driverInstance,
+        name: driverConfig.name || `L${driverInstances.length + 1}-${driverConfig.driver}`
+      });
+    }
+    return new MultiTierCache({
+      drivers: driverInstances,
+      promoteOnHit: this.config.promoteOnHit,
+      strategy: this.config.strategy,
+      fallbackOnError: this.config.fallbackOnError,
+      verbose: this.config.verbose
+    });
   }
   // Remove the old installDatabaseProxy method
   installResourceHooks() {
@@ -20154,21 +20904,24 @@ class S3QueuePlugin extends Plugin {
       });
     }
     this.config = {
+      ...options,
       resource: options.resource,
-      visibilityTimeout: options.visibilityTimeout || 3e4,
+      visibilityTimeout: options.visibilityTimeout ?? 3e4,
       // 30 seconds
-      pollInterval: options.pollInterval || 1e3,
+      pollInterval: options.pollInterval ?? 1e3,
       // 1 second
-      maxAttempts: options.maxAttempts || 3,
-      concurrency: options.concurrency || 1,
-      deadLetterResource: options.deadLetterResource || null,
+      maxAttempts: options.maxAttempts ?? 3,
+      concurrency: options.concurrency ?? 1,
+      deadLetterResource: options.deadLetterResource ?? null,
       autoStart: options.autoStart !== false,
       onMessage: options.onMessage,
       onError: options.onError,
       onComplete: options.onComplete,
-      verbose: options.verbose || false,
-      ...options
+      verbose: options.verbose ?? false
     };
+    this.config.pollBatchSize = options.pollBatchSize ?? Math.max((this.config.concurrency || 1) * 4, 16);
+    this.config.recoveryInterval = options.recoveryInterval ?? 5e3;
+    this.config.recoveryBatchSize = options.recoveryBatchSize ?? Math.max((this.config.concurrency || 1) * 2, 10);
     this._queueResourceDescriptor = {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
       override: resourceNamesOption.queue || options.queueResource
@@ -20195,6 +20948,8 @@ class S3QueuePlugin extends Plugin {
     this.cacheCleanupInterval = null;
     this.lockCleanupInterval = null;
     this.messageLocks = /* @__PURE__ */ new Map();
+    this._lastRecovery = 0;
+    this._recoveryInFlight = false;
   }
   _resolveQueueResourceName() {
     return resolveResourceName("s3queue", this._queueResourceDescriptor, {
@@ -20323,6 +21078,9 @@ class S3QueuePlugin extends Plugin {
     resource.stopProcessing = async function() {
       return await plugin.stopProcessing();
     };
+    resource.extendQueueVisibility = async function(queueId, extraMilliseconds) {
+      return await plugin.extendVisibility(queueId, extraMilliseconds);
+    };
   }
   async startProcessing(handler = null, options = {}) {
     if (this.isRunning) {
@@ -20353,6 +21111,7 @@ class S3QueuePlugin extends Plugin {
         }
       }
     }, 5e3);
+    this._lastRecovery = 0;
     for (let i = 0; i < concurrency; i++) {
       const worker = this.createWorker(messageHandler, i);
       this.workers.push(worker);
@@ -20398,9 +21157,13 @@ class S3QueuePlugin extends Plugin {
   }
   async claimMessage() {
     const now = Date.now();
+    await this.recoverStalledMessages(now);
     const [ok, err, messages] = await tryFn(
       () => this.queueResource.query({
-        status: "pending"
+        status: "pending",
+        visibleAt: { "<=": now }
+      }, {
+        limit: this.config.pollBatchSize
       })
     );
     if (!ok || !messages || messages.length === 0) {
@@ -20692,6 +21455,119 @@ class S3QueuePlugin extends Plugin {
     if (this.config.verbose) {
       console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
     }
+  }
+  async extendVisibility(queueId, extraMilliseconds) {
+    if (!queueId || !extraMilliseconds || extraMilliseconds <= 0) {
+      return false;
+    }
+    const [okGet, errGet, entry] = await tryFn(() => this.queueResource.get(queueId));
+    if (!okGet || !entry) {
+      if (this.config.verbose) {
+        console.warn("[S3QueuePlugin] extendVisibility failed to load entry:", errGet?.message);
+      }
+      return false;
+    }
+    const baseTime = Math.max(entry.visibleAt || 0, Date.now());
+    const newVisibleAt = baseTime + extraMilliseconds;
+    const [okUpdate, errUpdate, result] = await tryFn(
+      () => this.queueResource.updateConditional(queueId, {
+        visibleAt: newVisibleAt,
+        claimedAt: entry.claimedAt || Date.now()
+      }, {
+        ifMatch: entry._etag
+      })
+    );
+    if (!okUpdate || !result?.success) {
+      if (this.config.verbose) {
+        console.warn("[S3QueuePlugin] extendVisibility conditional update failed:", errUpdate?.message || result?.error);
+      }
+      return false;
+    }
+    return true;
+  }
+  async recoverStalledMessages(now) {
+    if (this.config.recoveryInterval <= 0) return;
+    if (this._recoveryInFlight) return;
+    if (this._lastRecovery && now - this._lastRecovery < this.config.recoveryInterval) {
+      return;
+    }
+    this._recoveryInFlight = true;
+    this._lastRecovery = now;
+    try {
+      const [ok, err, candidates] = await tryFn(
+        () => this.queueResource.query({
+          status: "processing",
+          visibleAt: { "<=": now }
+        }, {
+          limit: this.config.recoveryBatchSize
+        })
+      );
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn("[S3QueuePlugin] Failed to query stalled messages:", err?.message);
+        }
+        return;
+      }
+      if (!candidates || candidates.length === 0) {
+        return;
+      }
+      for (const candidate of candidates) {
+        await this._recoverSingleMessage(candidate, now);
+      }
+    } finally {
+      this._recoveryInFlight = false;
+    }
+  }
+  async _recoverSingleMessage(candidate, now) {
+    const [okGet, errGet, queueEntry] = await tryFn(() => this.queueResource.get(candidate.id));
+    if (!okGet || !queueEntry) {
+      if (this.config.verbose) {
+        console.warn("[S3QueuePlugin] Failed to load stalled message:", errGet?.message);
+      }
+      return;
+    }
+    if (queueEntry.status !== "processing" || queueEntry.visibleAt > now) {
+      return;
+    }
+    if (queueEntry.maxAttempts !== void 0 && queueEntry.attempts >= queueEntry.maxAttempts) {
+      let record = null;
+      const [okRecord, , original] = await tryFn(() => this.targetResource.get(queueEntry.originalId));
+      if (okRecord && original) {
+        record = original;
+      } else {
+        record = { id: queueEntry.originalId, _missing: true };
+      }
+      await this.moveToDeadLetter(queueEntry.id, record, "visibility-timeout exceeded max attempts");
+      this.emit("plg:s3-queue:message-dead", {
+        queueId: queueEntry.id,
+        originalId: queueEntry.originalId,
+        error: "visibility-timeout exceeded max attempts"
+      });
+      this.processedCache.delete(queueEntry.id);
+      return;
+    }
+    const [okUpdate, errUpdate, result] = await tryFn(
+      () => this.queueResource.updateConditional(queueEntry.id, {
+        status: "pending",
+        visibleAt: now,
+        claimedBy: null,
+        claimedAt: null,
+        error: "Recovered after visibility timeout"
+      }, {
+        ifMatch: queueEntry._etag
+      })
+    );
+    if (!okUpdate || !result?.success) {
+      if (this.config.verbose) {
+        console.warn("[S3QueuePlugin] Failed to recover message:", errUpdate?.message || result?.error);
+      }
+      return;
+    }
+    this.processedCache.delete(queueEntry.id);
+    this.emit("plg:s3-queue:message-recovered", {
+      queueId: queueEntry.id,
+      originalId: queueEntry.originalId
+    });
   }
 }
 
@@ -38374,9 +39250,11 @@ class AwsInventoryDriver extends BaseCloudDriver {
         }
       }
       const v2Client = this._getApiGatewayV2Client(region);
-      const v2Paginator = clientApigatewayv2.paginateGetApis({ client: v2Client }, {});
-      for await (const page of v2Paginator) {
-        const apis = page.Items || [];
+      let nextToken;
+      do {
+        const response = await v2Client.send(new clientApigatewayv2.GetApisCommand({ NextToken: nextToken }));
+        const apis = response.Items || [];
+        nextToken = response.NextToken;
         for (const api of apis) {
           const tags = await this._safeGetAPIGatewayV2Tags(v2Client, api.ApiId);
           const type = api.ProtocolType?.toLowerCase() || "http";
@@ -38392,7 +39270,7 @@ class AwsInventoryDriver extends BaseCloudDriver {
             configuration: sanitizeConfiguration$1(api)
           };
         }
-      }
+      } while (nextToken);
     }
   }
   async *_collectCloudFrontDistributions() {

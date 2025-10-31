@@ -51,6 +51,20 @@ await spiderSuite.startProcessing();
 - `enqueue(data, options)`: helper that reuses the targets resource helper
 - `resource`: direct handle to the targets resource (`db.resources[...]`)
 
+### Dependency Graph
+
+```mermaid
+flowchart TB
+  Suite[SpiderSuite Plugin]
+  Puppeteer[PuppeteerPlugin]
+  Queue[S3QueuePlugin]
+  TTL[TTLPlugin]
+
+  Suite --> Puppeteer
+  Suite --> Queue
+  Suite -- optional --> TTL
+```
+
 ---
 
 ## 🧩 Usage Patterns
@@ -103,6 +117,43 @@ The suite exposes a few convenience methods:
 | `enqueueTarget(data, options)` | Adds a crawl target (wraps `resource.enqueue`) |
 | `startProcessing(options)` | Starts workers with the registered handler |
 | `stopProcessing()` | Stops the bundled `S3QueuePlugin` workers |
+
+---
+
+## 🚨 Error Handling
+
+Spider Suite simply forwards the structured errors produced by its child plugins. Handle them by checking `error.name`, `statusCode`, and `retriable`:
+
+```javascript
+suite.setProcessor(async (task, context, helpers) => {
+  try {
+    return await crawl(task.url, helpers.puppeteer);
+  } catch (error) {
+    if (error.name === 'BrowserPoolError') {
+      // PuppeteerPlugin: usually retriable, inspect `error.hint`
+      context.logger.warn(error.suggestion);
+      throw error; // propagate so S3Queue decides whether to retry
+    }
+    if (error.name === 'QueueError') {
+      // S3QueuePlugin: misconfigured queue or malformed task
+      context.logger.error(error.toJson());
+      throw error;
+    }
+
+    // Any other PluginError keeps the structured metadata
+    throw error;
+  }
+});
+```
+
+| Source | Status | Retriable? | Message | Suggested Fix |
+|--------|--------|------------|---------|---------------|
+| `QueueError` | 400 | `false` | `Processor function is missing` | Call `setProcessor()` before `startProcessing()` or provide `processor` in the constructor. |
+| `QueueError` | 404 | `false` | `plg_spider_targets resource not found` | Create the targets resource or change `targetsResource`. |
+| `BrowserPoolError` | 503 | `true` | `No healthy browser instances available` | Relax proxy health thresholds or increase `puppeteer.pool.size`. |
+| `TTLPluginError` | 500 | `true` | `Failed to schedule TTL cleanup` | Review S3 permissions for the TTL namespace and retry. |
+
+Log `error.toJson()` so operators receive the embedded `suggestion` and `docs` URLs.
 
 ---
 

@@ -186,6 +186,16 @@ const coldKey = await users.getCacheKeyResolver('cache--analytics')({ action: 'l
 
 > 🔁 Passing a custom alias to `db.usePlugin(plugin, 'alias')` auto-derives the namespace when you omit it.
 
+### Dependency Awareness
+
+Some plugins install or expect other plugins. s3db.js now treats these relationships explicitly:
+
+- **Bundle plugins** such as `SpiderSuitePlugin` and `CookieFarmSuitePlugin` install their constituent plugins automatically, keeping everything under a shared namespace.
+- Individual plugins can declare expectations in documentation (and via `requirePluginDependency`) so you know which combos make sense—e.g. `CookieFarmPlugin` requires `PuppeteerPlugin` to capture cookies, while `S3QueuePlugin` often pairs with `TTLPlugin` for housekeeping.
+- When you install multiple plugins manually, prefer a common namespace and, if needed, pass references between them (e.g., `suite.queuePlugin` or `suite.cookieFarmPlugin`).
+
+Every plugin doc now includes a quick Mermaid dependency graph to visualise these links right after the configuration table.
+
 ### Plugin Cleanup and Uninstall
 
 Proper cleanup is essential for preventing data leaks and resource exhaustion. The s3db.js plugin system provides robust cleanup mechanisms at multiple levels.
@@ -1003,7 +1013,7 @@ Building a plugin is easier than you think! Here's a complete plugin in ~50 line
 ### Creating a Custom Plugin
 
 ```javascript
-import { Plugin } from 's3db.js';
+import { Plugin, ValidationError } from 's3db.js';
 
 class MyCustomPlugin extends Plugin {
   constructor(options = {}) {
@@ -1013,7 +1023,11 @@ class MyCustomPlugin extends Plugin {
     
     // Validate configuration
     if (!options.resource) {
-      throw new Error('Resource name is required');
+      throw new ValidationError('MyCustomPlugin requires a target resource', {
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass { resource: "my-resource" } when instantiating the plugin.'
+      });
     }
     
     this.config = {
@@ -1076,6 +1090,7 @@ class MyCustomPlugin extends Plugin {
 #### Pattern 1: Multi-Driver Support
 
 ```javascript
+import { Plugin, PluginError } from 's3db.js';
 class FlexiblePlugin extends Plugin {
   async onSetup() {
     switch(this.config.driver) {
@@ -1086,7 +1101,12 @@ class FlexiblePlugin extends Plugin {
         this.driver = new RedisDriver(this.config);
         break;
       default:
-        throw new Error(`Unknown driver: ${this.config.driver}`);
+        throw new PluginError(`Unknown driver "${this.config.driver}"`, {
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Choose one of: memory | redis.',
+          metadata: { availableDrivers: ['memory', 'redis'] }
+        });
     }
   }
 }
@@ -1355,7 +1375,7 @@ if (!lock) return;
 try {
   // Do work
 } finally {
-  await storage.releaseLock(id);
+  await storage.releaseLock(lock);
 }
 // No manual cleanup needed - TTL handles it! ✨
 ```
@@ -2344,11 +2364,17 @@ if (!ok) {
 Validate configuration in constructor:
 
 ```javascript
+import { ValidationError } from 's3db.js';
+
 constructor(options = {}) {
   super(options);
   
   if (!options.resource) {
-    throw new Error('Resource name is required');
+    throw new ValidationError('Plugin configuration requires a resource', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Pass { resource: "..." } when instantiating your plugin.'
+    });
   }
   
   this.config = {

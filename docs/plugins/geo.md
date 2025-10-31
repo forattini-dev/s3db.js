@@ -738,6 +738,8 @@ resources: {
 ### 3. Validate Coordinates
 
 ```javascript
+import { ValidationError } from 's3db.js';
+
 // Validate before insert
 function isValidCoordinate(lat, lon) {
   return lat >= -90 && lat <= 90 &&
@@ -747,7 +749,15 @@ function isValidCoordinate(lat, lon) {
 if (isValidCoordinate(data.latitude, data.longitude)) {
   await stores.insert(data);
 } else {
-  throw new Error('Invalid coordinates');
+  throw new ValidationError('Invalid coordinates for GeoPlugin resource', {
+    statusCode: 422,
+    retriable: false,
+    suggestion: 'Ensure latitude ∈ [-90, 90] and longitude ∈ [-180, 180] before inserting.',
+    metadata: {
+      latitude: data.latitude,
+      longitude: data.longitude
+    }
+  });
 }
 ```
 
@@ -814,13 +824,21 @@ try {
     radius: 10
   });
 } catch (err) {
-  if (err.message.includes('required')) {
-    console.error('Invalid coordinates provided');
-  } else {
-    console.error('Proximity search failed:', err);
+  if (err.name === 'PluginError') {
+    console.error('Status:', err.statusCode, 'Retriable?', err.retriable);
+    console.error('Suggestion:', err.suggestion);
   }
 }
 ```
+
+Common structured errors emitted by the plugin:
+
+| Scenario | Status | Message | Suggested fix |
+|----------|--------|---------|---------------|
+| Missing `lat`/`lon` in `findNearby` | 400 | `Latitude and longitude are required for findNearby()` | Supply both coordinates or ensure your DTO maps them correctly. |
+| Missing bounding box fields | 400 | `Bounding box requires north, south, east, west coordinates` | Provide all four boundaries. |
+| Distance between records where one record is missing coordinates | 422 | `One or both records are missing coordinates` | Populate `latField` / `lonField` for every record before calling `getDistance`. |
+| Nested field configured but plugin not registered for root field | 404 | `No eventual consistency plugin found for root field` | Register the root field in the GeoPlugin configuration. |
 
 ### 7. Monitoring and Stats
 

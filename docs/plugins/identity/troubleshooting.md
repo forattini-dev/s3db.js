@@ -24,10 +24,39 @@ try {
 } catch (error) {
   console.error(error.name);        // 'IdentityError'
   console.error(error.message);     // Brief error summary
-  console.error(error.description); // Detailed explanation
+   console.error(error.statusCode); // HTTP-style status code
+   console.error(error.description); // Detailed explanation
   console.error(error.context);     // Operation context
+  console.error(error.retriable);   // Retry hint
+  console.error(error.suggestion);  // Human-readable fix
 }
 ```
+
+### Structured Plugin Errors
+
+Session management, OAuth2, and OIDC helpers now throw `PluginError` (or subclasses) with HTTP-style metadata:
+
+```javascript
+try {
+  await identityPlugin.sessionManager.createSession({});
+} catch (error) {
+  console.log(error.statusCode); // e.g. 400
+  console.log(error.retriable);  // boolean
+  console.log(error.suggestion); // human-friendly fix
+  console.log(error.docs);       // Optional reference docs
+}
+```
+
+| Component | Status | Retriable? | Message | Suggested Fix |
+|-----------|--------|------------|---------|---------------|
+| SessionManager | 400 | `false` | `SessionManager requires a sessionResource` | Pass a S3DB resource when constructing the plugin. |
+| SessionManager | 400 | `false` | `userId is required to create a session` | Provide `data.userId` when calling `createSession`. |
+| SessionManager | 500 | `true` | `Failed to create/update session: ...` | Inspect the `original` error for database issues (permissions, connectivity). |
+| OAuth2Server | 400 | `false` | `Issuer URL is required for OAuth2Server` | Configure `issuer`, `keyResource`, and `userResource` in the constructor. |
+| OIDC Discovery | 400 | `false` | `Issuer URL is required for OIDC discovery` | Ensure the discovery handler receives the same `issuer` used by the server. |
+| Session Cookie helpers | 400 | `false` | `Unsupported response object` | Use an HTTP response object that supports `setHeader()`/`header()`. |
+
+All identity-related errors support `error.toJson()`—pipe it to your observability tooling so operators receive the embedded `hint` and `docs` fields.
 
 ### OAuth2Error
 

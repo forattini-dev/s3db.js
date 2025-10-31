@@ -87,7 +87,7 @@ import {
 } from '@aws-sdk/client-api-gateway';
 import {
   ApiGatewayV2Client,
-  paginateGetApis,
+  GetApisCommand,
   GetTagsCommand as GetAPIGatewayV2TagsCommand
 } from '@aws-sdk/client-apigatewayv2';
 import {
@@ -952,9 +952,12 @@ export class AwsInventoryDriver extends BaseCloudDriver {
 
       // HTTP/WebSocket APIs (v2)
       const v2Client = this._getApiGatewayV2Client(region);
-      const v2Paginator = paginateGetApis({ client: v2Client }, {});
-      for await (const page of v2Paginator) {
-        const apis = page.Items || [];
+      let nextToken;
+      do {
+        const response = await v2Client.send(new GetApisCommand({ NextToken: nextToken }));
+        const apis = response.Items || [];
+        nextToken = response.NextToken;
+
         for (const api of apis) {
           const tags = await this._safeGetAPIGatewayV2Tags(v2Client, api.ApiId);
           const type = api.ProtocolType?.toLowerCase() || 'http';
@@ -970,7 +973,7 @@ export class AwsInventoryDriver extends BaseCloudDriver {
             configuration: sanitizeConfiguration(api)
           };
         }
-      }
+      } while (nextToken);
     }
   }
 

@@ -5,8 +5,10 @@ import crypto from 'crypto';
 import { Plugin } from "./plugin.class.js";
 import S3Cache from "./cache/s3-cache.class.js";
 import MemoryCache from "./cache/memory-cache.class.js";
+import RedisCache from "./cache/redis-cache.class.js";
 import { FilesystemCache } from "./cache/filesystem-cache.class.js";
 import { PartitionAwareFilesystemCache } from "./cache/partition-aware-filesystem-cache.class.js";
+import MultiTierCache from "./cache/multi-tier-cache.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { CacheError } from "./cache.errors.js";
 
@@ -96,10 +98,21 @@ export class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    // Detect multi-tier mode (drivers array)
+    const isMultiTier = Array.isArray(options.drivers) && options.drivers.length > 0;
+
     // Clean, consolidated configuration
     this.config = {
-      // Driver configuration
+      // Driver configuration (single-tier or multi-tier)
       driver: options.driver || 's3',
+      drivers: options.drivers, // Array of driver configs for multi-tier
+      isMultiTier,
+
+      // Multi-tier specific options
+      promoteOnHit: options.promoteOnHit !== false,
+      strategy: options.strategy || 'write-through', // 'write-through' | 'lazy-promotion'
+      fallbackOnError: options.fallbackOnError !== false,
+
       config: {
         ttl: options.ttl,
         maxSize: options.maxSize,
@@ -139,30 +152,16 @@ export class CachePlugin extends Plugin {
   }
 
   async onInstall() {
-    // Initialize cache driver
-    if (this.config.driver && typeof this.config.driver === 'object') {
+    // Initialize cache driver (multi-tier or single-tier)
+    if (this.config.isMultiTier) {
+      // Multi-tier mode: create multiple drivers and wrap with MultiTierCache
+      this.driver = await this._createMultiTierDriver();
+    } else if (this.config.driver && typeof this.config.driver === 'object') {
       // Use custom driver instance if provided
       this.driver = this.config.driver;
-    } else if (this.config.driver === 'memory') {
-      this.driver = new MemoryCache(this.config.config);
-    } else if (this.config.driver === 'filesystem') {
-      // Use partition-aware filesystem cache if enabled
-      if (this.config.partitionAware) {
-        this.driver = new PartitionAwareFilesystemCache({
-          partitionStrategy: this.config.partitionStrategy,
-          trackUsage: this.config.trackUsage,
-          preloadRelated: this.config.preloadRelated,
-          ...this.config.config
-        });
-      } else {
-        this.driver = new FilesystemCache(this.config.config);
-      }
     } else {
-      // Default to S3Cache
-      this.driver = new S3Cache({
-        client: this.database.client,
-        ...this.config.config
-      });
+      // Single-tier mode: create single driver
+      this.driver = await this._createSingleDriver(this.config.driver, this.config.config);
     }
 
     // Use database hooks instead of method overwriting
@@ -190,6 +189,66 @@ export class CachePlugin extends Plugin {
 
   async onStop() {
     // Cleanup if needed
+  }
+
+  /**
+   * Create a single cache driver instance
+   * @private
+   */
+  async _createSingleDriver(driverName, config) {
+    if (driverName === 'memory') {
+      return new MemoryCache(config);
+    } else if (driverName === 'redis') {
+      return new RedisCache(config);
+    } else if (driverName === 'filesystem') {
+      // Use partition-aware filesystem cache if enabled
+      if (this.config.partitionAware) {
+        return new PartitionAwareFilesystemCache({
+          partitionStrategy: this.config.partitionStrategy,
+          trackUsage: this.config.trackUsage,
+          preloadRelated: this.config.preloadRelated,
+          ...config
+        });
+      } else {
+        return new FilesystemCache(config);
+      }
+    } else {
+      // Default to S3Cache
+      return new S3Cache({
+        client: this.database.client,
+        ...config
+      });
+    }
+  }
+
+  /**
+   * Create multi-tier cache driver
+   * @private
+   */
+  async _createMultiTierDriver() {
+    const driverInstances = [];
+
+    // Create each driver instance
+    for (const driverConfig of this.config.drivers) {
+      const driverInstance = await this._createSingleDriver(
+        driverConfig.driver,
+        driverConfig.config || {}
+      );
+
+      driverInstances.push({
+        driver: driverInstance,
+        name: driverConfig.name || `L${driverInstances.length + 1}-${driverConfig.driver}`
+      });
+    }
+
+    // Wrap with MultiTierCache
+    return new MultiTierCache({
+      drivers: driverInstances,
+      promoteOnHit: this.config.promoteOnHit,
+      strategy: this.config.strategy,
+      fallbackOnError: this.config.fallbackOnError,
+      verbose: this.config.verbose
+    });
   }
 
   // Remove the old installDatabaseProxy method

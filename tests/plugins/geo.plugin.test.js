@@ -739,7 +739,7 @@ describe('GeoPlugin', () => {
       const resource = database.resources.stores;
 
       await expect(resource.findNearby({ radius: 10 })).rejects.toThrow(
-        'lat and lon are required'
+        'Latitude and longitude are required for findNearby()'
       );
     });
 
@@ -941,7 +941,7 @@ describe('GeoPlugin', () => {
       const resource = database.resources.stores;
 
       await expect(resource.findInBounds({ north: 1, south: 0 })).rejects.toThrow(
-        'north, south, east, west are required'
+        'Bounding box requires north, south, east, west coordinates'
       );
     });
 
@@ -1143,7 +1143,7 @@ describe('GeoPlugin', () => {
       });
 
       await expect(resource.getDistance(store1.id, store2.id)).rejects.toThrow(
-        'One or both records missing coordinates'
+        'One or both records are missing coordinates'
       );
     });
   });
