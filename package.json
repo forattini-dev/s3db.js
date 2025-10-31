@@ -157,12 +157,14 @@
     "@tensorflow/tfjs-node": "^4.0.0",
     "amqplib": "^0.10.8",
     "bcrypt": "^5.0.0 || ^6.0.0",
+    "ejs": "^3.0.0",
     "express": "^4.0.0 || ^5.0.0",
     "hono": "^4.0.0",
     "jose": "^5.0.0 || ^6.0.0",
     "node-cron": "^4.0.0",
     "nodemailer": "^6.0.0 || ^7.0.0",
-    "pg": "^8.0.0"
+    "pg": "^8.0.0",
+    "pug": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-acm": {
@@ -311,6 +313,12 @@
     },
     "pg": {
       "optional": true
+    },
+    "ejs": {
+      "optional": true
+    },
+    "pug": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -383,6 +391,8 @@
     "nodemon": "^3.1.10",
     "ora": "^9.0.0",
     "pg": "^8.16.3",
+    "ejs": "^3.1.10",
+    "pug": "^3.0.3",
     "rollup": "^4.52.5",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-esbuild": "^6.2.1",
