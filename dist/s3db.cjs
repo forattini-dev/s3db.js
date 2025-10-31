@@ -7946,10 +7946,18 @@ function createS3Handler(config = {}) {
     cors = false
   } = config;
   if (!s3Client) {
-    throw new Error('S3 static handler requires "s3Client"');
+    throw new PluginError('S3 static handler requires "s3Client"', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Pass an initialized AWS S3 client to the handler configuration."
+    });
   }
   if (!bucket) {
-    throw new Error('S3 static handler requires "bucket" name');
+    throw new PluginError('S3 static handler requires "bucket" name', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide the target bucket name in the static configuration."
+    });
   }
   return async (c) => {
     try {
@@ -8045,31 +8053,67 @@ function createS3Handler(config = {}) {
 }
 function validateS3Config(config) {
   if (!config.bucket || typeof config.bucket !== "string") {
-    throw new Error('S3 static config requires "bucket" name (string)');
+    throw new PluginError('S3 static config requires "bucket" name (string)', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Set bucket to the S3 bucket you want to serve from."
+    });
   }
   if (config.prefix !== void 0 && typeof config.prefix !== "string") {
-    throw new Error('S3 static "prefix" must be a string');
+    throw new PluginError('S3 static "prefix" must be a string', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide prefixes like "static/" as strings.'
+    });
   }
   if (config.streaming !== void 0 && typeof config.streaming !== "boolean") {
-    throw new Error('S3 static "streaming" must be a boolean');
+    throw new PluginError('S3 static "streaming" must be a boolean', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Set streaming to true or false."
+    });
   }
   if (config.signedUrlExpiry !== void 0 && typeof config.signedUrlExpiry !== "number") {
-    throw new Error('S3 static "signedUrlExpiry" must be a number');
+    throw new PluginError('S3 static "signedUrlExpiry" must be a number', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide the expiry in seconds as a numeric value."
+    });
   }
   if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
-    throw new Error('S3 static "maxAge" must be a number');
+    throw new PluginError('S3 static "maxAge" must be a number', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide cache durations in milliseconds as a number."
+    });
   }
   if (config.cacheControl !== void 0 && typeof config.cacheControl !== "string") {
-    throw new Error('S3 static "cacheControl" must be a string');
+    throw new PluginError('S3 static "cacheControl" must be a string', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Pass values like "public, max-age=3600" as strings.'
+    });
   }
   if (config.contentDisposition !== void 0 && typeof config.contentDisposition !== "string") {
-    throw new Error('S3 static "contentDisposition" must be a string');
+    throw new PluginError('S3 static "contentDisposition" must be a string', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Use strings such as "inline" or "attachment".'
+    });
   }
   if (config.etag !== void 0 && typeof config.etag !== "boolean") {
-    throw new Error('S3 static "etag" must be a boolean');
+    throw new PluginError('S3 static "etag" must be a boolean', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Set etag to true or false."
+    });
   }
   if (config.cors !== void 0 && typeof config.cors !== "boolean") {
-    throw new Error('S3 static "cors" must be a boolean');
+    throw new PluginError('S3 static "cors" must be a boolean', {
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Set cors to true or false."
+    });
   }
 }
 
@@ -8078,9 +8122,12 @@ async function loadEJS() {
     const ejs = await import('ejs');
     return ejs.default || ejs;
   } catch (err) {
-    throw new Error(
-      "EJS template engine not installed. Install with: npm install ejs\nEJS is a peer dependency to keep the core package lightweight."
-    );
+    throw new PluginError("EJS template engine not installed", {
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Install the peer dependency via `npm install ejs` to enable EJS rendering.",
+      original: err
+    });
   }
 }
 async function loadPug() {
@@ -8088,9 +8135,12 @@ async function loadPug() {
     const pug = await import('pug');
     return pug.default || pug;
   } catch (err) {
-    throw new Error(
-      "Pug template engine not installed. Install with: npm install pug\nPug is a peer dependency to keep the core package lightweight."
-    );
+    throw new PluginError("Pug template engine not installed", {
+      statusCode: 500,
+      retriable: false,
+      suggestion: "Install the peer dependency via `npm install pug` to enable Pug rendering.",
+      original: err
+    });
   }
 }
 function setupTemplateEngine(options = {}) {
@@ -13121,7 +13171,7 @@ function createRedirectRateLimitMiddleware(limiter, getKey, buildRedirectUrl) {
   };
 }
 
-const BASE_USER_ATTRIBUTES$1 = {
+const BASE_USER_ATTRIBUTES = {
   // Authentication
   email: "string|required|email",
   password: "password|required",
@@ -13151,7 +13201,7 @@ const BASE_USER_ATTRIBUTES$1 = {
   // Metadata
   metadata: "object|optional"
 };
-const BASE_TENANT_ATTRIBUTES$1 = {
+const BASE_TENANT_ATTRIBUTES = {
   // Identity
   name: "string|required",
   slug: "string|required",
@@ -13163,7 +13213,7 @@ const BASE_TENANT_ATTRIBUTES$1 = {
   // Metadata
   metadata: "object|optional"
 };
-const BASE_CLIENT_ATTRIBUTES$1 = {
+const BASE_CLIENT_ATTRIBUTES = {
   // OAuth2 Identity
   clientId: "string|required",
   clientSecret: "secret|required",
@@ -13227,7 +13277,7 @@ function validateExtraAttributes(baseAttributes, userAttributes, resourceType) {
     errors
   };
 }
-function mergeResourceConfig$1(baseConfig, userConfig = {}, resourceType) {
+function mergeResourceConfig(baseConfig, userConfig = {}, resourceType) {
   if (userConfig.attributes) {
     const validation = validateExtraAttributes(
       baseConfig.attributes,
@@ -13299,18 +13349,18 @@ function prepareResourceConfigs(resourcesOptions = {}) {
       "IdentityPlugin configuration error:\n" + resourcesValidation.errors.join("\n")
     );
   }
-  mergeResourceConfig$1(
-    { attributes: BASE_USER_ATTRIBUTES$1 },
+  mergeResourceConfig(
+    { attributes: BASE_USER_ATTRIBUTES },
     resourcesOptions.users,
     "users"
   );
-  mergeResourceConfig$1(
-    { attributes: BASE_TENANT_ATTRIBUTES$1 },
+  mergeResourceConfig(
+    { attributes: BASE_TENANT_ATTRIBUTES },
     resourcesOptions.tenants,
     "tenants"
   );
-  mergeResourceConfig$1(
-    { attributes: BASE_CLIENT_ATTRIBUTES$1 },
+  mergeResourceConfig(
+    { attributes: BASE_CLIENT_ATTRIBUTES },
     resourcesOptions.clients,
     "clients"
   );
@@ -13328,6 +13378,137 @@ function prepareResourceConfigs(resourcesOptions = {}) {
       mergedConfig: null
     }
   };
+}
+
+class AuthDriver {
+  constructor(name, supportedTypes = []) {
+    this.name = name;
+    this.supportedTypes = supportedTypes;
+  }
+  /**
+   * Called once during plugin initialization with database/config/resources
+   * @param {Object} context
+   */
+  // eslint-disable-next-line no-unused-vars
+  async initialize(context) {
+    throw new Error("AuthDriver.initialize(context) must be implemented by subclasses");
+  }
+  /**
+   * Authenticate a request (password, client credentials, etc)
+   * @param {Object} request
+   */
+  // eslint-disable-next-line no-unused-vars
+  async authenticate(request) {
+    throw new Error("AuthDriver.authenticate(request) must be implemented by subclasses");
+  }
+  supportsType(type) {
+    if (!type) return false;
+    return this.supportedTypes.includes(type);
+  }
+  /**
+   * Whether the driver supports issuing tokens for the given grant type
+   * @param {string} grantType
+   */
+  // eslint-disable-next-line no-unused-vars
+  supportsGrant(grantType) {
+    return false;
+  }
+  /**
+   * Optionally issue tokens (if driver is responsible for it)
+   * @param {Object} payload
+   */
+  // eslint-disable-next-line no-unused-vars
+  async issueTokens(payload) {
+    throw new Error(`AuthDriver ${this.name} does not implement issueTokens`);
+  }
+  /**
+   * Optionally revoke tokens (if driver manages them)
+   * @param {Object} payload
+   */
+  // eslint-disable-next-line no-unused-vars
+  async revokeTokens(payload) {
+    return;
+  }
+}
+
+class PasswordAuthDriver extends AuthDriver {
+  constructor(options = {}) {
+    super("password", ["password"]);
+    this.options = options;
+    this.usersResource = null;
+    this.passwordHelper = null;
+  }
+  async initialize(context) {
+    this.usersResource = context.resources?.users;
+    this.passwordHelper = context.helpers?.password;
+    if (!this.usersResource) {
+      throw new Error("PasswordAuthDriver requires users resource");
+    }
+    if (!this.passwordHelper || typeof this.passwordHelper.verify !== "function") {
+      throw new Error("PasswordAuthDriver requires password helper with verify(password, hash)");
+    }
+  }
+  async authenticate(request = {}) {
+    const email = request.email || request.username;
+    const password = request.password;
+    if (!email || !password) {
+      return {
+        success: false,
+        error: "missing_credentials",
+        statusCode: 400
+      };
+    }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    let user = request.user || null;
+    if (!user) {
+      const [ok, err, users] = await tryFn(
+        () => this.usersResource.query({ email: normalizedEmail })
+      );
+      if (!ok) {
+        return {
+          success: false,
+          error: err?.message || "lookup_failed",
+          statusCode: 500
+        };
+      }
+      if (!users || users.length === 0) {
+        return {
+          success: false,
+          error: "invalid_credentials",
+          statusCode: 401
+        };
+      }
+      user = users[0];
+    }
+    const passwordHash = user.password;
+    if (!passwordHash) {
+      return {
+        success: false,
+        error: "password_not_set",
+        statusCode: 401
+      };
+    }
+    const validPassword = await this.passwordHelper.verify(password, passwordHash);
+    if (!validPassword) {
+      return {
+        success: false,
+        error: "invalid_credentials",
+        statusCode: 401
+      };
+    }
+    return {
+      success: true,
+      user
+    };
+  }
+}
+
+function createBuiltInAuthDrivers(options = {}) {
+  const drivers = [];
+  if (options.disablePassword !== true) {
+    drivers.push(new PasswordAuthDriver(options.password || {}));
+  }
+  return drivers;
 }
 
 class IdentityPlugin extends Plugin {
@@ -13682,7 +13863,8 @@ class IdentityPlugin extends Plugin {
         // emailVerification: { enabled: false, required: false },
         // passwordPolicy: { enabled: false, minLength: 8, ... },
         // webhooks: { enabled: false, endpoints: [], events: [] }
-      }
+      },
+      authDrivers: options.authDrivers || {}
     };
     this.server = null;
     this.oauth2Server = null;
@@ -13700,6 +13882,7 @@ class IdentityPlugin extends Plugin {
     this.tenantsResource = null;
     this.clientsResource = null;
     this.rateLimiters = this._createRateLimiters();
+    this.authDrivers = /* @__PURE__ */ new Map();
   }
   _resolveInternalResourceNames() {
     return resolveResourceNames("identity", this._internalResourceDescriptors, {
@@ -13765,6 +13948,7 @@ class IdentityPlugin extends Plugin {
     await this._initializeFailbanManager();
     await this._initializeAuditPlugin();
     await this._initializeMFAManager();
+    await this._initializeAuthDrivers();
     if (this.config.verbose) {
       console.log("[Identity Plugin] Installed successfully");
     }
@@ -14213,6 +14397,53 @@ class IdentityPlugin extends Plugin {
       console.log(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
       console.log(`[Identity Plugin] Required: ${this.config.mfa.required}`);
     }
+  }
+  async _initializeAuthDrivers() {
+    const drivers = createBuiltInAuthDrivers(this.config.authDrivers);
+    if (!drivers.length) {
+      return;
+    }
+    const context = {
+      database: this.database,
+      config: this.config,
+      resources: {
+        users: this.usersResource,
+        tenants: this.tenantsResource,
+        clients: this.clientsResource
+      },
+      helpers: {
+        password: {
+          verify: verifyPassword
+        }
+      }
+    };
+    for (const driver of drivers) {
+      await driver.initialize(context);
+      if (Array.isArray(driver.supportedTypes)) {
+        for (const type of driver.supportedTypes) {
+          this.authDrivers.set(type, driver);
+        }
+      }
+    }
+  }
+  getAuthDriver(type) {
+    return this.authDrivers.get(type);
+  }
+  async authenticateWithPassword({ email, password, user }) {
+    const driver = this.getAuthDriver("password");
+    if (!driver) {
+      return {
+        success: false,
+        error: "password_driver_not_configured",
+        statusCode: 500
+      };
+    }
+    return await driver.authenticate({
+      type: "password",
+      email,
+      password,
+      user
+    });
   }
   /**
    * Start plugin
@@ -62432,6 +62663,59 @@ class MemoryStorage {
     return crypto.createHash("md5").update(buffer).digest("hex");
   }
   /**
+   * Ensure ETag matches AWS quoting
+   */
+  _formatEtag(etag) {
+    return `"${etag}"`;
+  }
+  /**
+   * Normalize ETag header value into array of plain hashes (without quotes)
+   */
+  _normalizeEtagHeader(headerValue) {
+    if (headerValue === void 0 || headerValue === null) {
+      return [];
+    }
+    return String(headerValue).split(",").map((value) => value.trim()).filter(Boolean).map((value) => value.replace(/^W\//i, "").replace(/^['"]|['"]$/g, ""));
+  }
+  /**
+   * Encode continuation token (opaque base64 string)
+   */
+  _encodeContinuationToken(key) {
+    return Buffer.from(String(key), "utf8").toString("base64");
+  }
+  /**
+   * Decode continuation token back to key
+   */
+  _decodeContinuationToken(token) {
+    try {
+      return Buffer.from(String(token), "base64").toString("utf8");
+    } catch (error) {
+      throw new ValidationError("Invalid continuation token", {
+        field: "ContinuationToken",
+        retriable: false,
+        suggestion: "Use the NextContinuationToken returned by a previous ListObjectsV2 response.",
+        original: error
+      });
+    }
+  }
+  /**
+   * Extract common prefix entry when delimiter is used (S3 semantics)
+   */
+  _extractCommonPrefix(prefix, delimiter, key) {
+    if (!delimiter) return null;
+    const hasPrefix = Boolean(prefix);
+    if (hasPrefix && !key.startsWith(prefix)) {
+      return null;
+    }
+    const remainder = hasPrefix ? key.slice(prefix.length) : key;
+    const index = remainder.indexOf(delimiter);
+    if (index === -1) {
+      return null;
+    }
+    const prefixLength = hasPrefix ? prefix.length : 0;
+    return key.slice(0, prefixLength + index + delimiter.length);
+  }
+  /**
    * Calculate metadata size in bytes
    */
   _calculateMetadataSize(metadata) {
@@ -62479,7 +62763,10 @@ class MemoryStorage {
     this._validateLimits(body, metadata);
     const existing = this.objects.get(key);
     if (ifMatch !== void 0) {
-      if (!existing || existing.etag !== ifMatch) {
+      const expectedEtags = this._normalizeEtagHeader(ifMatch);
+      const currentEtag = existing ? existing.etag : null;
+      const matches = expectedEtags.length === 0 ? false : expectedEtags.includes(currentEtag);
+      if (!existing || !matches) {
         throw new ResourceError(`Precondition failed: ETag mismatch for key "${key}"`, {
           bucket: this.bucket,
           key,
@@ -62491,8 +62778,9 @@ class MemoryStorage {
       }
     }
     if (ifNoneMatch !== void 0) {
+      const normalized = this._normalizeEtagHeader(ifNoneMatch);
       const targetValue = existing ? existing.etag : null;
-      const shouldFail = ifNoneMatch === "*" && existing || ifNoneMatch !== "*" && existing && targetValue === ifNoneMatch;
+      const shouldFail = ifNoneMatch === "*" && existing || normalized.length > 0 && existing && normalized.includes(targetValue);
       if (shouldFail) {
         throw new ResourceError(`Precondition failed: object already exists for key "${key}"`, {
           bucket: this.bucket,
@@ -62526,7 +62814,7 @@ class MemoryStorage {
       await this.saveToDisk();
     }
     return {
-      ETag: etag,
+      ETag: this._formatEtag(etag),
       VersionId: null,
       // Memory storage doesn't support versioning
       ServerSideEncryption: null,
@@ -62557,7 +62845,7 @@ class MemoryStorage {
       Metadata: { ...obj.metadata },
       ContentType: obj.contentType,
       ContentLength: obj.size,
-      ETag: obj.etag,
+      ETag: this._formatEtag(obj.etag),
       LastModified: new Date(obj.lastModified),
       ContentEncoding: obj.contentEncoding
     };
@@ -62584,7 +62872,7 @@ class MemoryStorage {
       Metadata: { ...obj.metadata },
       ContentType: obj.contentType,
       ContentLength: obj.size,
-      ETag: obj.etag,
+      ETag: this._formatEtag(obj.etag),
       LastModified: new Date(obj.lastModified),
       ContentEncoding: obj.contentEncoding
     };
@@ -62670,50 +62958,66 @@ class MemoryStorage {
   /**
    * List objects with prefix/delimiter support
    */
-  async list({ prefix = "", delimiter = null, maxKeys = 1e3, continuationToken = null }) {
-    const allKeys = Array.from(this.objects.keys());
-    let filteredKeys = prefix ? allKeys.filter((key) => key.startsWith(prefix)) : allKeys;
-    filteredKeys.sort();
-    let startIndex = 0;
+  async list({ prefix = "", delimiter = null, maxKeys = 1e3, continuationToken = null, startAfter = null }) {
+    const sortedKeys = Array.from(this.objects.keys()).sort();
+    const prefixFilter = prefix || "";
+    let filteredKeys = prefixFilter ? sortedKeys.filter((key) => key.startsWith(prefixFilter)) : sortedKeys;
+    let startAfterKey = null;
     if (continuationToken) {
-      startIndex = parseInt(continuationToken) || 0;
+      startAfterKey = this._decodeContinuationToken(continuationToken);
+    } else if (startAfter) {
+      startAfterKey = startAfter;
     }
-    const paginatedKeys = filteredKeys.slice(startIndex, startIndex + maxKeys);
-    const isTruncated = startIndex + maxKeys < filteredKeys.length;
-    const nextContinuationToken = isTruncated ? String(startIndex + maxKeys) : null;
-    const commonPrefixes = /* @__PURE__ */ new Set();
+    if (startAfterKey) {
+      filteredKeys = filteredKeys.filter((key) => key > startAfterKey);
+    }
     const contents = [];
-    for (const key of paginatedKeys) {
-      if (delimiter && prefix) {
-        const suffix = key.substring(prefix.length);
-        const delimiterIndex = suffix.indexOf(delimiter);
-        if (delimiterIndex !== -1) {
-          const commonPrefix = prefix + suffix.substring(0, delimiterIndex + 1);
-          commonPrefixes.add(commonPrefix);
-          continue;
+    const commonPrefixes = /* @__PURE__ */ new Set();
+    let processed = 0;
+    let lastKeyInPage = null;
+    let lastIndexVisited = -1;
+    for (let index = 0; index < filteredKeys.length; index++) {
+      if (processed >= maxKeys) {
+        break;
+      }
+      const key = filteredKeys[index];
+      lastIndexVisited = index;
+      const prefixEntry = delimiter ? this._extractCommonPrefix(prefixFilter, delimiter, key) : null;
+      if (prefixEntry) {
+        if (!commonPrefixes.has(prefixEntry)) {
+          commonPrefixes.add(prefixEntry);
+          processed++;
+          lastKeyInPage = key;
         }
+        continue;
       }
       const obj = this.objects.get(key);
       contents.push({
         Key: key,
         Size: obj.size,
         LastModified: new Date(obj.lastModified),
-        ETag: obj.etag,
+        ETag: this._formatEtag(obj.etag),
         StorageClass: "STANDARD"
       });
+      processed++;
+      lastKeyInPage = key;
     }
+    const hasMoreKeys = lastIndexVisited >= 0 && lastIndexVisited < filteredKeys.length - 1;
+    const nextContinuationToken = hasMoreKeys && lastKeyInPage ? this._encodeContinuationToken(lastKeyInPage) : null;
     if (this.verbose) {
-      console.log(`[MemoryStorage] LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes)`);
+      console.log(`[MemoryStorage] LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes, truncated=${Boolean(nextContinuationToken)})`);
     }
     return {
       Contents: contents,
-      CommonPrefixes: Array.from(commonPrefixes).map((prefix2) => ({ Prefix: prefix2 })),
-      IsTruncated: isTruncated,
+      CommonPrefixes: Array.from(commonPrefixes).map((commonPrefix) => ({ Prefix: commonPrefix })),
+      IsTruncated: Boolean(nextContinuationToken),
+      ContinuationToken: continuationToken || void 0,
       NextContinuationToken: nextContinuationToken,
-      KeyCount: contents.length + commonPrefixes.size,
+      KeyCount: contents.length,
       MaxKeys: maxKeys,
-      Prefix: prefix,
-      Delimiter: delimiter
+      Prefix: prefix || void 0,
+      Delimiter: delimiter || void 0,
+      StartAfter: startAfter || void 0
     };
   }
   /**
@@ -72587,15 +72891,15 @@ function registerUIRoutes(app, plugin) {
           }
           return c.redirect(`/login?error=${encodeURIComponent("Email and password are required")}&email=${encodeURIComponent(email || "")}`);
         }
-        const [okVerify, errVerify, isValid] = await tryFn(
-          () => verifyPassword(password, user.password)
-        );
-        if (!okVerify) {
-          if (config.verbose) {
-            console.error("[Identity Plugin] Password verification error:", errVerify?.message);
+        const authResult = await plugin.authenticateWithPassword({
+          email: normalizedEmail,
+          password,
+          user
+        });
+        if (!authResult.success) {
+          if (authResult.statusCode >= 500 && config.verbose) {
+            console.error("[Identity Plugin] Password driver error:", authResult.error);
           }
-        }
-        if (!okVerify || !isValid) {
           if (accountLockoutConfig.enabled) {
             const failedAttempts = (user.failedLoginAttempts || 0) + 1;
             const nowIso = (/* @__PURE__ */ new Date()).toISOString();
@@ -72634,6 +72938,7 @@ function registerUIRoutes(app, plugin) {
             });
           }
         }
+        user = authResult.user || user;
       }
       if (supportsStatusField && user.status && user.status !== "active") {
         const message = user.status === "suspended" ? "Your account has been suspended. Please contact support." : "Your account is inactive. Please contact support.";
