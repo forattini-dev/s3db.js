@@ -6742,6 +6742,16 @@ async function loadEJS() {
     );
   }
 }
+async function loadPug() {
+  try {
+    const pug = await import('pug');
+    return pug.default || pug;
+  } catch (err) {
+    throw new Error(
+      "Pug template engine not installed. Install with: npm install pug\nPug is a peer dependency to keep the core package lightweight."
+    );
+  }
+}
 function setupTemplateEngine(options = {}) {
   const {
     engine = "jsx",
@@ -6755,6 +6765,27 @@ function setupTemplateEngine(options = {}) {
     c.render = async (template, data = {}, renderOptions = {}) => {
       if (typeof template === "object" && template !== null) {
         return c.html(template);
+      }
+      if (engine === "pug") {
+        const pug = await loadPug();
+        const templateFile = template.endsWith(".pug") ? template : `${template}.pug`;
+        const templatePath = path.join(templatesPath, templateFile);
+        if (!fs$1.existsSync(templatePath)) {
+          throw new Error(`Template not found: ${templatePath}`);
+        }
+        const renderData = {
+          ...data,
+          // Add helpers that Pug templates might expect
+          _url: c.req.url,
+          _path: c.req.path,
+          _method: c.req.method
+        };
+        const html = pug.renderFile(templatePath, {
+          ...renderData,
+          ...engineOptions,
+          ...renderOptions
+        });
+        return c.html(html);
       }
       if (engine === "ejs") {
         const ejs = await loadEJS();
