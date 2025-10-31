@@ -17321,9 +17321,15 @@ class CookieFarmPlugin extends Plugin {
     };
     this.config.storage.resource = resolveResourceName("cookiefarm", {
       defaultName: "plg_cookie_farm_personas",
-      override: options.storage?.resource
+      override: resourceNamesOption.personas || options.storage?.resource
     });
     this.legacyStorageResourceNames = ["cookie_farm_personas"];
+    if (options.storage?.resource) {
+      this.legacyStorageResourceNames.push(options.storage.resource);
+    }
+    if (resourceNamesOption.personas) {
+      this.legacyStorageResourceNames.push(resourceNamesOption.personas);
+    }
     this.puppeteerPlugin = null;
     this.stealthManager = null;
     this.personaPool = /* @__PURE__ */ new Map();
@@ -31536,6 +31542,12 @@ class PuppeteerPlugin extends Plugin {
       override: options.cookies?.storage?.resource
     });
     this.legacyCookieStorageNames = ["puppeteer_cookies"];
+    if (options.cookies?.storage?.resource) {
+      this.legacyCookieStorageNames.push(options.cookies.storage.resource);
+    }
+    if (resourceNamesOption.cookies) {
+      this.legacyCookieStorageNames.push(resourceNamesOption.cookies);
+    }
     this.browserPool = [];
     this.tabPool = /* @__PURE__ */ new Map();
     this.browserIdleTimers = /* @__PURE__ */ new Map();
@@ -31655,6 +31667,10 @@ class PuppeteerPlugin extends Plugin {
           viewport: "object",
           proxyId: "string|optional",
           // IMMUTABLE: Proxy binding
+          domain: "string",
+          // Main domain for cookies
+          date: "string",
+          // YYYY-MM-DD for temporal partitioning
           reputation: {
             successCount: "number",
             failCount: "number",
@@ -31669,7 +31685,15 @@ class PuppeteerPlugin extends Plugin {
           }
         },
         timestamps: true,
-        behavior: "body-only"
+        behavior: "body-only",
+        partitions: {
+          byProxy: { fields: { proxyId: "string" } },
+          // Query cookies for a proxy
+          byDate: { fields: { date: "string" } },
+          // Query by date (for rotation)
+          byDomain: { fields: { domain: "string" } }
+          // Query cookies for a domain
+        }
       });
     }
   }
@@ -50572,6 +50596,9 @@ class CookieManager {
       viewport: page._viewport,
       proxyId: page._proxyId || null,
       // IMMUTABLE: Proxy binding
+      domain: this._extractMainDomain(cookies),
+      date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      // YYYY-MM-DD
       reputation: {
         successCount: 0,
         failCount: 0,
@@ -50586,6 +50613,8 @@ class CookieManager {
       }
     };
     session.cookies = cookies;
+    session.domain = this._extractMainDomain(cookies);
+    session.date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     if (this.config.farming.reputation.enabled && this.config.farming.reputation.trackSuccess) {
       if (success) {
         session.reputation.successCount++;
@@ -50813,6 +50842,21 @@ class CookieManager {
       }
     } catch (err) {
     }
+  }
+  /**
+   * Extract main domain from cookies
+   * @private
+   */
+  _extractMainDomain(cookies) {
+    if (!cookies || cookies.length === 0) {
+      return "unknown";
+    }
+    const domains = {};
+    cookies.forEach((cookie) => {
+      const domain = cookie.domain || "unknown";
+      domains[domain] = (domains[domain] || 0) + 1;
+    });
+    return Object.entries(domains).sort((a, b) => b[1] - a[1])[0][0].replace(/^\./, "");
   }
   /**
    * Delay helper
