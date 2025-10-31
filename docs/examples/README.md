@@ -1,100 +1,100 @@
 # s3db.js Examples
 
-Exemplos organizados por categoria para ajudar você a começar rapidamente.
+Organized examples by category to help you get started quickly.
 
-## 📚 Índice por Categoria
+## 📚 Index by Category
 
-### 🔰 Básico (Getting Started)
-- [e01-basic-crud.js](./e01-basic-crud.js) - CRUD básico
-- [e02-validation.js](./e02-validation.js) - Validação de schemas
-- [e03-timestamps.js](./e03-timestamps.js) - Timestamps automáticos
-- [e04-unique-fields.js](./e04-unique-fields.js) - Campos únicos
-- [e05-custom-ids.js](./e05-custom-ids.js) - IDs customizados
+### 🔰 Basics (Getting Started)
+- [e01-basic-crud.js](./e01-basic-crud.js) - Basic CRUD
+- [e02-validation.js](./e02-validation.js) - Schema validation
+- [e03-timestamps.js](./e03-timestamps.js) - Auto timestamps
+- [e04-unique-fields.js](./e04-unique-fields.js) - Unique fields
+- [e05-custom-ids.js](./e05-custom-ids.js) - Custom IDs
 - [e06-behaviors.js](./e06-behaviors.js) - Behaviors (metadata overflow)
-- [e07-encryption.js](./e07-encryption.js) - Criptografia de campos
+- [e07-encryption.js](./e07-encryption.js) - Field encryption
 
 ### 📊 Queries & Partitions
-- [e08-queries.js](./e08-queries.js) - Queries avançadas
-- [e09-partitions.js](./e09-partitions.js) - Partições para performance
-- [e10-indexes.js](./e10-indexes.js) - Índices secundários
-- [e11-pagination.js](./e11-pagination.js) - Paginação
-- [e44-orphaned-partitions.js](./e44-orphaned-partitions.js) - Recovery de partitions órfãs
+- [e08-queries.js](./e08-queries.js) - Advanced queries
+- [e09-partitions.js](./e09-partitions.js) - Partitions for performance
+- [e10-indexes.js](./e10-indexes.js) - Secondary indexes
+- [e11-pagination.js](./e11-pagination.js) - Pagination
+- [e44-orphaned-partitions.js](./e44-orphaned-partitions.js) - Orphaned partitions recovery
 
 ### 🔌 Plugins
 - [e18-cache-plugin.js](./e18-cache-plugin.js) - Cache (memory/S3/filesystem)
 - [e19-audit-plugin.js](./e19-audit-plugin.js) - Audit trail
 - [e20-ttl-plugin.js](./e20-ttl-plugin.js) - Time-to-live (auto-cleanup)
-- [e21-replicator-plugin.js](./e21-replicator-plugin.js) - Replicação para PostgreSQL/BigQuery
-- [e22-metrics-plugin.js](./e22-metrics-plugin.js) - Métricas de performance
-- [e23-costs-plugin.js](./e23-costs-plugin.js) - Tracking de custos AWS
-- [e24-backup-plugin.js](./e24-backup-plugin.js) - Backup automático
+- [e21-replicator-plugin.js](./e21-replicator-plugin.js) - Replication to PostgreSQL/BigQuery
+- [e22-metrics-plugin.js](./e22-metrics-plugin.js) - Performance metrics
+- [e23-costs-plugin.js](./e23-costs-plugin.js) - AWS cost tracking
+- [e24-backup-plugin.js](./e24-backup-plugin.js) - Automatic backup
 
 ### 🌊 Streams
-- [e12-streams-read.js](./e12-streams-read.js) - Ler recursos como stream
-- [e13-streams-write.js](./e13-streams-write.js) - Escrever via stream
+- [e12-streams-read.js](./e12-streams-read.js) - Read resources as stream
+- [e13-streams-write.js](./e13-streams-write.js) - Write via stream
 - [e14-streams-transform.js](./e14-streams-transform.js) - Transform streams
 
 ### 🧠 Machine Learning & RAG
 - [e41-embeddings.js](./e41-embeddings.js) - Vector embeddings (77% compression)
-- [e42-rag-basic.js](./e42-rag-basic.js) - RAG básico com OpenAI
-- [e43-rag-advanced.js](./e43-rag-advanced.js) - RAG avançado com hybrid search
+- [e42-rag-basic.js](./e42-rag-basic.js) - Basic RAG with OpenAI
+- [e43-rag-advanced.js](./e43-rag-advanced.js) - Advanced RAG with hybrid search
 
 ### 🔐 OAuth2 / OIDC (Authentication)
 - [e60-oauth2-sso-server.js](./e60-oauth2-sso-server.js) - **SSO Server** (Authorization Server)
-  - Emite tokens JWT (RS256)
+  - Issues JWT tokens (RS256)
   - OIDC Discovery
   - Client Credentials flow
   - JWKS endpoint
   - Token introspection
-  - Zero dependências externas!
+  - Zero external dependencies!
 
 - [e61-oauth2-resource-server.js](./e61-oauth2-resource-server.js) - **Resource Server** (API)
-  - Valida tokens JWT localmente
+  - Validates JWT tokens locally
   - OIDC Client (JWKS auto-fetch)
   - Scope enforcement
   - Multi-resource server support
 
 - [e62-azure-ad-integration.js](./e62-azure-ad-integration.js) - **Azure AD Integration**
-  - API passiva (só valida tokens)
-  - Azure AD gerencia usuários
-  - Setup completo do Azure Portal
-  - App Roles e Scopes
-  - 3 métodos para obter tokens
+  - Passive API (validates tokens only)
+  - Azure AD manages users
+  - Complete Azure Portal setup
+  - App Roles and Scopes
+  - 3 methods to obtain tokens
 
 - [e63-keycloak-integration.js](./e63-keycloak-integration.js) - **Keycloak Integration**
-  - API passiva (só valida tokens)
-  - Keycloak gerencia usuários
-  - Docker setup completo
+  - Passive API (validates tokens only)
+  - Keycloak manages users
+  - Complete Docker setup
   - Realm, Client, Roles, Scopes
-  - Comparação: Keycloak vs Azure AD
+  - Comparison: Keycloak vs Azure AD
 
 ### 🛡️ Authorization (Row-Level Security)
-- [e64-authorization-complete.js](./e64-authorization-complete.js) - **Authorization Completa**
-  - ✅ Multi-tenancy (partition por tenant)
+- [e64-authorization-complete.js](./e64-authorization-complete.js) - **Complete Authorization**
+  - ✅ Multi-tenancy (partition by tenant)
   - ✅ Row-Level Security (RLS via partitions)
-  - ✅ Scopes granulares (own/team/org/all)
+  - ✅ Granular scopes (own/team/org/all)
   - ✅ RBAC (Role-Based Access Control)
   - ✅ ABAC (Attribute-Based Access Control)
   - ✅ Ownership checks
-  - ✅ Audit trail automático
-  - Ver também: [../authorization-patterns.md](../authorization-patterns.md)
+  - ✅ Automatic audit trail
+  - See also: [../authorization-patterns.md](../authorization-patterns.md)
 
 ### 🏢 Multi-Tenancy
-- [e30-multi-tenant.js](./e30-multi-tenant.js) - Multi-tenancy básico
-- [e31-tenant-isolation.js](./e31-tenant-isolation.js) - Isolamento total por tenant
-- [e64-authorization-complete.js](./e64-authorization-complete.js) - Multi-tenancy + RLS completo
+- [e30-multi-tenant.js](./e30-multi-tenant.js) - Basic multi-tenancy
+- [e31-tenant-isolation.js](./e31-tenant-isolation.js) - Complete tenant isolation
+- [e64-authorization-complete.js](./e64-authorization-complete.js) - Multi-tenancy + complete RLS
 
 ### ⚡ Performance
-- [e50-update-methods.js](./e50-update-methods.js) - Comparação: update() vs patch() vs replace()
-- [e51-batch-operations.js](./e51-batch-operations.js) - Operações em lote
-- [e52-concurrent-writes.js](./e52-concurrent-writes.js) - Escritas concorrentes
+- [e50-update-methods.js](./e50-update-methods.js) - Comparison: update() vs patch() vs replace()
+- [e51-batch-operations.js](./e51-batch-operations.js) - Batch operations
+- [e52-concurrent-writes.js](./e52-concurrent-writes.js) - Concurrent writes
 
 ### 🔧 Advanced
 - [e15-hooks.js](./e15-hooks.js) - Lifecycle hooks
-- [e16-custom-validation.js](./e16-custom-validation.js) - Validações customizadas
-- [e17-transactions.js](./e17-transactions.js) - Transações (eventual consistency)
+- [e16-custom-validation.js](./e16-custom-validation.js) - Custom validations
+- [e17-transactions.js](./e17-transactions.js) - Transactions (eventual consistency)
 - [e25-migrations.js](./e25-migrations.js) - Schema migrations
-- [e26-versioning.js](./e26-versioning.js) - Versionamento de recursos
+- [e26-versioning.js](./e26-versioning.js) - Resource versioning
 
 ---
 
@@ -102,33 +102,33 @@ Exemplos organizados por categoria para ajudar você a começar rapidamente.
 
 ### 1. OAuth2/OIDC (Authentication)
 
-Se você quer autenticação completa:
+If you want complete authentication:
 
 ```bash
-# Opção 1: SSO próprio (você gerencia usuários)
+# Option 1: Own SSO (you manage users)
 node docs/examples/e60-oauth2-sso-server.js
 
-# Opção 2: API passiva com Azure AD
+# Option 2: Passive API with Azure AD
 node docs/examples/e62-azure-ad-integration.js
 
-# Opção 3: API passiva com Keycloak (open-source)
+# Option 3: Passive API with Keycloak (open-source)
 node docs/examples/e63-keycloak-integration.js
 ```
 
 ### 2. Authorization (Row-Level Security)
 
-Depois de autenticação, adicione autorização granular:
+After authentication, add granular authorization:
 
 ```bash
-# Authorization completa: Multi-tenancy + RLS + RBAC + ABAC
+# Complete authorization: Multi-tenancy + RLS + RBAC + ABAC
 node docs/examples/e64-authorization-complete.js
 ```
 
-**Ver documentação completa:** [authorization-patterns.md](../authorization-patterns.md)
+**See complete documentation:** [authorization-patterns.md](../authorization-patterns.md)
 
-### 3. CRUD Básico
+### 3. Basic CRUD
 
-Para começar com CRUD simples:
+To get started with simple CRUD:
 
 ```bash
 node docs/examples/e01-basic-crud.js
@@ -136,55 +136,55 @@ node docs/examples/e01-basic-crud.js
 
 ---
 
-## 📖 Documentação
+## 📖 Documentation
 
 ### OAuth2/OIDC
-- [oauth2-dependencies.md](../oauth2-dependencies.md) - Zero dependências!
-- [oauth2-testing.md](../oauth2-testing.md) - 101 testes automatizados
+- [oauth2-dependencies.md](../oauth2-dependencies.md) - Zero dependencies!
+- [oauth2-testing.md](../oauth2-testing.md) - 101 automated tests
 
 ### Authorization
-- [authorization-patterns.md](../authorization-patterns.md) - Padrões completos de autorização
-  - Scopes granulares
+- [authorization-patterns.md](../authorization-patterns.md) - Complete authorization patterns
+  - Granular scopes
   - Row-Level Security (RLS)
   - Multi-tenancy
   - RBAC & ABAC
   - Audit trail
 
-### Geral
-- [README.md](../../README.md) - Documentação principal
+### General
+- [README.md](../../README.md) - Main documentation
 - [client.md](../client.md) - S3 Client API
 - [resource.md](../resource.md) - Resource API
 - [plugins/](../plugins/) - Plugin docs
 
 ---
 
-## 🎯 Casos de Uso
+## 🎯 Use Cases
 
-### "Preciso de autenticação completa com usuários próprios"
+### "I need complete authentication with my own users"
 → [e60-oauth2-sso-server.js](./e60-oauth2-sso-server.js) + [e61-oauth2-resource-server.js](./e61-oauth2-resource-server.js)
 
-### "Preciso integrar com Azure AD / Microsoft 365"
+### "I need to integrate with Azure AD / Microsoft 365"
 → [e62-azure-ad-integration.js](./e62-azure-ad-integration.js)
 
-### "Preciso de identity provider open-source"
+### "I need an open-source identity provider"
 → [e63-keycloak-integration.js](./e63-keycloak-integration.js)
 
-### "Preciso de multi-tenancy com isolamento total"
+### "I need multi-tenancy with complete isolation"
 → [e64-authorization-complete.js](./e64-authorization-complete.js)
 
-### "Cada usuário só pode ver seus próprios dados"
+### "Each user should only see their own data"
 → [e64-authorization-complete.js](./e64-authorization-complete.js) (Row-Level Security)
 
-### "Preciso de RAG com embeddings"
+### "I need RAG with embeddings"
 → [e42-rag-basic.js](./e42-rag-basic.js) + [e43-rag-advanced.js](./e43-rag-advanced.js)
 
-### "Preciso de cache para performance"
+### "I need caching for performance"
 → [e18-cache-plugin.js](./e18-cache-plugin.js)
 
-### "Preciso de replicação para BigQuery/PostgreSQL"
+### "I need replication to BigQuery/PostgreSQL"
 → [e21-replicator-plugin.js](./e21-replicator-plugin.js)
 
-### "Preciso de auto-cleanup de dados antigos"
+### "I need auto-cleanup of old data"
 → [e20-ttl-plugin.js](./e20-ttl-plugin.js)
 
 ---
@@ -229,18 +229,18 @@ node docs/examples/e01-basic-crud.js
               ✅ ALLOWED
 ```
 
-**Stack completo:** [e64-authorization-complete.js](./e64-authorization-complete.js)
+**Complete stack:** [e64-authorization-complete.js](./e64-authorization-complete.js)
 
 ---
 
 ## 💡 Tips
 
-1. **Performance**: Use partitions para queries O(1) ao invés de O(n)
-2. **Security**: NUNCA confie em `userId`/`tenantId` do request body - sempre pegue do token
-3. **Multi-tenancy**: Use `404` ao invés de `403` para evitar information leakage
-4. **Audit**: Log TODAS as decisões de autorização
-5. **Scopes**: Use hierarquia (own < team < org < all)
-6. **ABAC**: Combine com RBAC para flexibilidade máxima
+1. **Performance**: Use partitions for O(1) queries instead of O(n)
+2. **Security**: NEVER trust `userId`/`tenantId` from request body - always get from token
+3. **Multi-tenancy**: Use `404` instead of `403` to avoid information leakage
+4. **Audit**: Log ALL authorization decisions
+5. **Scopes**: Use hierarchy (own < team < org < all)
+6. **ABAC**: Combine with RBAC for maximum flexibility
 
 ---
 
@@ -265,7 +265,7 @@ node docs/examples/e64-authorization-complete.js
 
 | # | File | Description |
 |---|------|-------------|
-| 01 | `e01-basic-crud.js` | CRUD básico |
+| 01 | `e01-basic-crud.js` | Basic CRUD |
 | 02 | `e02-validation.js` | Schema validation |
 | 03 | `e03-timestamps.js` | Auto timestamps |
 | 04 | `e04-unique-fields.js` | Unique constraints |
