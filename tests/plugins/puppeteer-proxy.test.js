@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import { createMockDatabase } from './helpers/mock-database.js';
-import * as dependencyModule from '../../src/plugins/concerns/plugin-dependencies.js';
-import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
-import { ProxyManager } from '../../src/plugins/puppeteer/proxy-manager.js';
 
-jest.spyOn(dependencyModule, 'requirePluginDependency').mockImplementation(() => {});
+jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
+  requirePluginDependency: jest.fn()
+}));
+
+const { PuppeteerPlugin } = await import('../../src/plugins/puppeteer.plugin.js');
+const { ProxyManager } = await import('../../src/plugins/puppeteer/proxy-manager.js');
 
 describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   let db;
@@ -100,6 +102,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(puppeteerPlugin);
       await db.start();
 
@@ -115,6 +120,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
           enabled: false
         }
       });
+
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(puppeteerPlugin);
       await db.start();
@@ -139,6 +147,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         },
         cookies: { enabled: false }
       });
+
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(puppeteerPlugin);
       await db.start();
@@ -196,6 +207,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         },
         cookies: { enabled: false }
       });
+
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(puppeteerPlugin);
       await db.start();
@@ -308,6 +322,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(puppeteerPlugin);
       await db.start();
     });
@@ -366,6 +383,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(puppeteerPlugin);
       await db.start();
     });
@@ -404,6 +424,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(puppeteerPlugin);
       await db.start();
 
@@ -440,6 +463,9 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         },
         cookies: { enabled: false }
       });
+
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(puppeteerPlugin);
       await db.start();

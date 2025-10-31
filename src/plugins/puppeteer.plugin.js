@@ -158,6 +158,27 @@ export class PuppeteerPlugin extends Plugin {
         ...options.performance
       },
 
+      // Network Monitoring (CDP)
+      networkMonitor: {
+        enabled: false,                  // Disabled by default (adds overhead)
+        persist: false,                  // Save to S3DB
+        filters: {
+          types: null,                   // ['image', 'script'] or null for all
+          statuses: null,                // [404, 500] or null for all
+          minSize: null,                 // Only requests >= size (bytes)
+          maxSize: null,                 // Only requests <= size (bytes)
+          saveErrors: true,              // Always save failed requests
+          saveLargeAssets: true,         // Always save assets > 1MB
+          ...options.networkMonitor?.filters
+        },
+        compression: {
+          enabled: true,
+          threshold: 10240,              // Compress payloads > 10KB
+          ...options.networkMonitor?.compression
+        },
+        ...options.networkMonitor
+      },
+
       // Screenshot & Recording
       screenshot: {
         fullPage: false,
@@ -214,6 +235,7 @@ export class PuppeteerPlugin extends Plugin {
     this.cookieManager = null;
     this.proxyManager = null;
     this.performanceManager = null;
+    this.networkMonitor = null;
     this.initialized = false;
 
     if (this.config.pool.reuseTab) {
@@ -264,6 +286,11 @@ export class PuppeteerPlugin extends Plugin {
 
     // Initialize performance manager
     await this._initializePerformanceManager();
+
+    // Initialize network monitor
+    if (this.config.networkMonitor.enabled) {
+      await this._initializeNetworkMonitor();
+    }
 
     // Pre-warm browser pool if enabled
     if (this.config.pool.enabled) {
@@ -384,6 +411,22 @@ export class PuppeteerPlugin extends Plugin {
     const { PerformanceManager } = await import('./puppeteer/performance-manager.js');
     this.performanceManager = new PerformanceManager(this);
     this.emit('puppeteer.performanceManager.initialized');
+  }
+
+  /**
+   * Initialize network monitor
+   * @private
+   */
+  async _initializeNetworkMonitor() {
+    const { NetworkMonitor } = await import('./puppeteer/network-monitor.js');
+    this.networkMonitor = new NetworkMonitor(this);
+
+    // Initialize S3DB resources if persistence enabled
+    if (this.config.networkMonitor.persist) {
+      await this.networkMonitor.initialize();
+    }
+
+    this.emit('puppeteer.networkMonitor.initialized');
   }
 
   /**

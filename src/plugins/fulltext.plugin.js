@@ -485,11 +485,16 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { FulltextError } from "./fulltext.errors.js";
+import { resolveResourceName } from "./concerns/resource-names.js";
 
 export class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super();
     this.indexResource = null;
+    this.indexResourceName = resolveResourceName('fulltext', {
+      defaultName: 'plg_fulltext_indexes',
+      override: options.indexResource
+    });
     this.config = {
       minWordLength: options.minWordLength || 3,
       maxResults: options.maxResults || 100,
@@ -504,7 +509,7 @@ export class FullTextPlugin extends Plugin {
     
     // Create index resource if it doesn't exist
     const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
-        name: 'plg_fulltext_indexes',
+        name: this.indexResourceName,
         attributes: {
           id: 'string|required',
           resourceName: 'string|required',
@@ -519,7 +524,9 @@ export class FullTextPlugin extends Plugin {
         },
         behavior: 'body-overflow'
       }));
-    this.indexResource = ok ? indexResource : this.database.resources.fulltext_indexes;
+    this.indexResource = ok
+      ? indexResource
+      : (this.database.resources[this.indexResourceName] || this.database.resources.fulltext_indexes);
 
     // Load existing indexes
     await this.loadIndexes();
@@ -541,6 +548,10 @@ export class FullTextPlugin extends Plugin {
     
     // Remove database hooks
     this.removeDatabaseHooks();
+  }
+
+  isInternalResource(name) {
+    return name === this.indexResourceName || name === 'plg_fulltext_indexes';
   }
 
   async loadIndexes() {
@@ -631,7 +642,7 @@ export class FullTextPlugin extends Plugin {
   installDatabaseHooks() {
     // Use the new database hooks system for automatic resource discovery
     this.database.addHook('afterCreateResource', (resource) => {
-      if (resource.name !== 'plg_fulltext_indexes') {
+      if (!this.isInternalResource(resource.name)) {
         this.installResourceHooks(resource);
       }
     });
@@ -650,7 +661,7 @@ export class FullTextPlugin extends Plugin {
     this.database.plugins.fulltext = this;
 
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name === 'plg_fulltext_indexes') continue;
+      if (this.isInternalResource(resource.name)) continue;
       
       this.installResourceHooks(resource);
     }
@@ -661,9 +672,9 @@ export class FullTextPlugin extends Plugin {
       this.database._previousCreateResourceForFullText = this.database.createResource;
       this.database.createResource = async function (...args) {
         const resource = await this._previousCreateResourceForFullText(...args);
-        if (this.plugins?.fulltext && resource.name !== 'plg_fulltext_indexes') {
-          this.plugins.fulltext.installResourceHooks(resource);
-        }
+      if (this.plugins?.fulltext && !this.plugins.fulltext.isInternalResource(resource.name)) {
+        this.plugins.fulltext.installResourceHooks(resource);
+      }
         return resource;
       };
       this.database._fulltextProxyInstalled = true;
@@ -671,7 +682,7 @@ export class FullTextPlugin extends Plugin {
 
     // Ensure all existing resources have hooks (even if created before plugin setup)
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== 'plg_fulltext_indexes') {
+      if (!this.isInternalResource(resource.name)) {
         this.installResourceHooks(resource);
       }
     }
@@ -1009,7 +1020,7 @@ export class FullTextPlugin extends Plugin {
   }
 
   async _rebuildAllIndexesInternal() {
-    const resourceNames = Object.keys(this.database.resources).filter(name => name !== 'plg_fulltext_indexes');
+    const resourceNames = Object.keys(this.database.resources).filter(name => !this.isInternalResource(name));
     
     // Process resources sequentially to avoid overwhelming the system
     for (const resourceName of resourceNames) {

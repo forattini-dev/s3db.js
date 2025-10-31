@@ -575,10 +575,31 @@
 
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { resolveResourceNames } from "./concerns/resource-names.js";
 
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
+    const resourceOverrides = options.resources || {};
+    this.resourceNames = resolveResourceNames('metrics', {
+      metrics: {
+        defaultName: 'plg_metrics',
+        override: resourceOverrides.metrics
+      },
+      errors: {
+        defaultName: 'plg_metrics_errors',
+        override: resourceOverrides.errors
+      },
+      performance: {
+        defaultName: 'plg_metrics_performance',
+        override: resourceOverrides.performance
+      }
+    });
+    this.legacyResourceNames = {
+      metrics: 'plg_metrics',
+      errors: 'plg_error_logs',
+      performance: 'plg_performance_logs'
+    };
     this.config = {
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
@@ -622,7 +643,7 @@ export class MetricsPlugin extends Plugin {
 
     const [ok, err] = await tryFn(async () => {
       const [ok1, err1, metricsResource] = await tryFn(() => this.database.createResource({
-        name: 'plg_metrics',
+        name: this.resourceNames.metrics,
         attributes: {
           id: 'string|required',
           type: 'string|required', // 'operation', 'error', 'performance'
@@ -641,10 +662,12 @@ export class MetricsPlugin extends Plugin {
         },
         behavior: 'body-overflow'
       }));
-      this.metricsResource = ok1 ? metricsResource : this.database.resources.plg_metrics;
+      this.metricsResource = ok1
+        ? metricsResource
+        : (this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics]);
 
       const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
-        name: 'plg_error_logs',
+        name: this.resourceNames.errors,
         attributes: {
           id: 'string|required',
           resourceName: 'string|required',
@@ -659,10 +682,12 @@ export class MetricsPlugin extends Plugin {
         },
         behavior: 'body-overflow'
       }));
-      this.errorsResource = ok2 ? errorsResource : this.database.resources.plg_error_logs;
+      this.errorsResource = ok2
+        ? errorsResource
+        : (this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors]);
 
       const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
-        name: 'plg_performance_logs',
+        name: this.resourceNames.performance,
         attributes: {
           id: 'string|required',
           resourceName: 'string|required',
@@ -677,13 +702,15 @@ export class MetricsPlugin extends Plugin {
         },
         behavior: 'body-overflow'
       }));
-      this.performanceResource = ok3 ? performanceResource : this.database.resources.plg_performance_logs;
+      this.performanceResource = ok3
+        ? performanceResource
+        : (this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance]);
     });
     if (!ok) {
       // Resources might already exist
-      this.metricsResource = this.database.resources.plg_metrics;
-      this.errorsResource = this.database.resources.plg_error_logs;
-      this.performanceResource = this.database.resources.plg_performance_logs;
+      this.metricsResource = this.database.resources[this.resourceNames.metrics] || this.database.resources[this.legacyResourceNames.metrics];
+      this.errorsResource = this.database.resources[this.resourceNames.errors] || this.database.resources[this.legacyResourceNames.errors];
+      this.performanceResource = this.database.resources[this.resourceNames.performance] || this.database.resources[this.legacyResourceNames.performance];
     }
 
     // Use database hooks for automatic resource discovery
@@ -728,7 +755,7 @@ export class MetricsPlugin extends Plugin {
   installDatabaseHooks() {
     // Use the new database hooks system for automatic resource discovery
     this.database.addHook('afterCreateResource', (resource) => {
-      if (resource.name !== 'plg_metrics' && resource.name !== 'plg_error_logs' && resource.name !== 'plg_performance_logs') {
+      if (!this.isInternalResource(resource.name)) {
         this.installResourceHooks(resource);
       }
     });
@@ -739,10 +766,15 @@ export class MetricsPlugin extends Plugin {
     this.database.removeHook('afterCreateResource', this.installResourceHooks.bind(this));
   }
 
+  isInternalResource(resourceName) {
+    return Object.values(this.resourceNames).includes(resourceName) ||
+      Object.values(this.legacyResourceNames).includes(resourceName);
+  }
+
   installMetricsHooks() {
     // Only hook into non-metrics resources
     for (const resource of Object.values(this.database.resources)) {
-      if (['plg_metrics', 'plg_error_logs', 'plg_performance_logs'].includes(resource.name)) {
+      if (this.isInternalResource(resource.name)) {
         continue; // Skip metrics resources to avoid recursion
       }
 
@@ -753,7 +785,7 @@ export class MetricsPlugin extends Plugin {
     this.database._createResource = this.database.createResource;
     this.database.createResource = async function (...args) {
       const resource = await this._createResource(...args);
-      if (this.plugins?.metrics && !['plg_metrics', 'plg_error_logs', 'plg_performance_logs'].includes(resource.name)) {
+      if (this.plugins?.metrics && !this.plugins.metrics.isInternalResource(resource.name)) {
         this.plugins.metrics.installResourceHooks(resource);
       }
       return resource;

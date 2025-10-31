@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import { createMockDatabase } from './helpers/mock-database.js';
-import * as dependencyModule from '../../src/plugins/concerns/plugin-dependencies.js';
-import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
-import { CookieManager } from '../../src/plugins/puppeteer/cookie-manager.js';
 
-jest.spyOn(dependencyModule, 'requirePluginDependency').mockImplementation(() => {});
+jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
+  requirePluginDependency: jest.fn()
+}));
+
+const { PuppeteerPlugin } = await import('../../src/plugins/puppeteer.plugin.js');
+const { CookieManager } = await import('../../src/plugins/puppeteer/cookie-manager.js');
 
 describe('PuppeteerPlugin - CookieManager', () => {
   let db;
@@ -42,6 +44,9 @@ describe('PuppeteerPlugin - CookieManager', () => {
         }
       }
     });
+
+    puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+    puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
     await db.installPlugin(puppeteerPlugin);
     await db.start();
@@ -355,11 +360,18 @@ describe('PuppeteerPlugin - CookieManager', () => {
         }
       });
 
+      disabledPlugin._importDependencies = jest.fn().mockResolvedValue();
+      disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(disabledPlugin);
+
+      await db.start();
 
       await expect(disabledPlugin.farmCookies('test')).rejects.toThrow(
         'Cookie farming is not enabled'
       );
+
+      await db.stop();
     });
 
     it('should throw error when getting best cookie with farming disabled', async () => {
@@ -371,6 +383,9 @@ describe('PuppeteerPlugin - CookieManager', () => {
           }
         }
       });
+
+      disabledPlugin._importDependencies = jest.fn().mockResolvedValue();
+      disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(disabledPlugin);
       await db.start();

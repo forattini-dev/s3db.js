@@ -1,6 +1,7 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
+import { resolveResourceName } from "./concerns/resource-names.js";
 
 // Time constants (in seconds)
 const ONE_MINUTE_SEC = 60;
@@ -172,6 +173,10 @@ export class TTLPlugin extends Plugin {
 
     // Expiration index (plugin storage)
     this.expirationIndex = null;
+    this.indexResourceName = resolveResourceName('ttl', {
+      defaultName: 'plg_ttl_expiration_index',
+      override: config.indexResourceName
+    });
   }
 
   /**
@@ -266,7 +271,7 @@ export class TTLPlugin extends Plugin {
    */
   async _createExpirationIndex() {
     this.expirationIndex = await this.database.createResource({
-      name: 'plg_ttl_expiration_index',
+      name: this.indexResourceName,
       attributes: {
         resourceName: 'string|required',
         recordId: 'string|required',

@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventEmitter } from 'events';
 import { createMockDatabase } from './helpers/mock-database.js';
-import * as dependencyModule from '../../src/plugins/concerns/plugin-dependencies.js';
-import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
 
-jest.spyOn(dependencyModule, 'requirePluginDependency').mockImplementation(() => {});
+jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
+  requirePluginDependency: jest.fn()
+}));
+
+const { PuppeteerPlugin } = await import('../../src/plugins/puppeteer.plugin.js');
 
 describe('PuppeteerPlugin', () => {
   let db;
@@ -25,6 +27,16 @@ describe('PuppeteerPlugin', () => {
   beforeEach(() => {
     // Reset plugin instance for each test
     puppeteerPlugin = null;
+  });
+
+  afterEach(async () => {
+    if (puppeteerPlugin && typeof puppeteerPlugin.stop === 'function') {
+      await puppeteerPlugin.stop().catch(() => {});
+    }
+    if (db) {
+      db.installedPlugins = [];
+      db.resources.clear();
+    }
   });
 
   describe('Plugin Installation', () => {
@@ -199,6 +211,9 @@ describe('PuppeteerPlugin', () => {
         }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(puppeteerPlugin);
       await db.start();
 
@@ -215,6 +230,9 @@ describe('PuppeteerPlugin', () => {
         }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.installPlugin(puppeteerPlugin);
       await db.start();
 
@@ -227,6 +245,9 @@ describe('PuppeteerPlugin', () => {
   describe('Cleanup', () => {
     it('should cleanup resources on stop', async () => {
       puppeteerPlugin = new PuppeteerPlugin();
+
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(puppeteerPlugin);
       await db.start();
@@ -244,6 +265,9 @@ describe('PuppeteerPlugin', () => {
           enabled: true
         }
       });
+
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.installPlugin(puppeteerPlugin);
       await db.start();
