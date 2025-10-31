@@ -1277,16 +1277,28 @@ Extend s3db.js with powerful plugins for caching, monitoring, replication, relat
 
 | Plugin | Description | Dependencies |
 |--------|-------------|--------------|
-| [**CachePlugin**](./docs/plugins/cache.md) | Memory/S3/filesystem caching with compression | None |
-| [**CostsPlugin**](./docs/plugins/costs.md) | AWS cost tracking and optimization | None |
-| [**MetricsPlugin**](./docs/plugins/metrics.md) | Performance monitoring and Prometheus export | None |
+| [**APIPlugin**](./docs/plugins/api.md) | Auto-generated REST API with OpenAPI, path-based auth, template engine | `ejs` (optional) |
 | [**AuditPlugin**](./docs/plugins/audit.md) | Complete audit trail for all operations | None |
-| [**TTLPlugin**](./docs/plugins/ttl.md) | Auto-cleanup expired records (O(1) partition-based) | None |
+| [**BackupPlugin**](./docs/plugins/backup.md) | Multi-destination backup system for data protection | None |
+| [**CachePlugin**](./docs/plugins/cache.md) | Memory/S3/filesystem caching with compression | None |
+| [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) | Multi-cloud inventory with versioning & diffs | None |
+| [**CostsPlugin**](./docs/plugins/costs.md) | AWS cost tracking and optimization | None |
+| [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) | Eventually consistent counters and analytics | None |
+| [**FullTextPlugin**](./docs/plugins/fulltext.md) | Full-text search with indexing | None |
+| [**GeoPlugin**](./docs/plugins/geo.md) | Geospatial queries and distance calculations | None |
+| [**IdentityPlugin**](./docs/plugins/identity.md) | OAuth2/OIDC authentication with MFA and whitelabel UI | None |
+| [**ImporterPlugin**](./docs/plugins/importer.md) | Multi-format data import (JSON, CSV, bulk migrations) | None |
+| [**MetricsPlugin**](./docs/plugins/metrics.md) | Performance monitoring and Prometheus export | None |
+| [**MLPlugin**](./docs/plugins/ml-plugin.md) | Machine learning model management and inference | None |
+| [**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) | Process RabbitMQ/SQS messages for event-driven architecture | `@aws-sdk/client-sqs`, `amqplib` |
 | [**RelationPlugin**](./docs/plugins/relation.md) | ORM-like relationships (10-100x faster queries) | None |
 | [**ReplicatorPlugin**](./docs/plugins/replicator.md) | Real-time replication to BigQuery, PostgreSQL, SQS | `pg`, `@google-cloud/bigquery`, `@aws-sdk/client-sqs` |
-| [**FullTextPlugin**](./docs/plugins/fulltext.md) | Full-text search with indexing | None |
-| [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) | Eventually consistent counters and analytics | None |
-| [**GeoPlugin**](./docs/plugins/geo.md) | Geospatial queries and distance calculations | None |
+| [**S3QueuePlugin**](./docs/plugins/s3-queue.md) | Distributed queue with zero race conditions | None |
+| [**SchedulerPlugin**](./docs/plugins/scheduler.md) | Cron-based job scheduling for maintenance tasks | `node-cron` |
+| [**StateMachinePlugin**](./docs/plugins/state-machine.md) | Finite state machine workflows for business processes | None |
+| [**TfstatePlugin**](./docs/plugins/tfstate.md) | Track Terraform infrastructure changes | `node-cron` |
+| [**TTLPlugin**](./docs/plugins/ttl.md) | Auto-cleanup expired records (O(1) partition-based) | None |
+| [**VectorPlugin**](./docs/plugins/vector.md) | Vector similarity search (cosine, euclidean) for RAG & ML | None |
 
 ### Plugin Installation
 
@@ -1295,9 +1307,12 @@ Extend s3db.js with powerful plugins for caching, monitoring, replication, relat
 # Included in s3db.js package
 
 # External dependencies (install only what you need)
-pnpm add pg                      # PostgreSQL replication
-pnpm add @google-cloud/bigquery  # BigQuery replication
-pnpm add @aws-sdk/client-sqs     # SQS replication/consumption
+pnpm add pg                      # PostgreSQL replication (ReplicatorPlugin)
+pnpm add @google-cloud/bigquery  # BigQuery replication (ReplicatorPlugin)
+pnpm add @aws-sdk/client-sqs     # SQS replication/consumption (ReplicatorPlugin, QueueConsumerPlugin)
+pnpm add amqplib                 # RabbitMQ consumption (QueueConsumerPlugin)
+pnpm add node-cron               # Job scheduling (SchedulerPlugin, TfstatePlugin)
+pnpm add ejs                     # Template engine (APIPlugin - optional)
 ```
 
 ### Quick Example
