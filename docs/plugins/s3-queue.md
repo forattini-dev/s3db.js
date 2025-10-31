@@ -863,6 +863,12 @@ new S3QueuePlugin({
 });
 ```
 
+Key tuning knobs:
+
+- `pollBatchSize` – caps how many pending items each worker fetches per poll.
+- `recoveryInterval` – controls how often the plugin scans for stalled messages.
+- `recoveryBatchSize` – limits how many stalled entries are recovered per sweep.
+
 ### Configuration Patterns
 
 #### Dependency Graph

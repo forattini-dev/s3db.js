@@ -138,6 +138,20 @@ export class ApiPlugin extends Plugin {
       override: resourceNamesOption.authUsers || options.auth?.resource
     };
     const normalizedAuth = normalizeAuthConfig(options.auth);
+    normalizedAuth.registration = {
+      enabled: options.auth?.registration?.enabled === true,
+      allowedFields: Array.isArray(options.auth?.registration?.allowedFields)
+        ? options.auth.registration.allowedFields
+        : [],
+      defaultRole: options.auth?.registration?.defaultRole || 'user'
+    };
+    normalizedAuth.loginThrottle = {
+      enabled: options.auth?.loginThrottle?.enabled !== false,
+      maxAttempts: options.auth?.loginThrottle?.maxAttempts || 5,
+      windowMs: options.auth?.loginThrottle?.windowMs || 60_000,
+      blockDurationMs: options.auth?.loginThrottle?.blockDurationMs || 300_000,
+      maxEntries: options.auth?.loginThrottle?.maxEntries || 10_000
+    };
     this.usersResourceName = this._resolveUsersResourceName();
     normalizedAuth.resource = this.usersResourceName;
     normalizedAuth.createResource = options.auth?.createResource !== false;
@@ -192,7 +206,8 @@ export class ApiPlugin extends Plugin {
         enabled: options.rateLimit?.enabled || false,
         windowMs: options.rateLimit?.windowMs || 60000, // 1 minute
         maxRequests: options.rateLimit?.maxRequests || 100,
-        keyGenerator: options.rateLimit?.keyGenerator || null
+        keyGenerator: options.rateLimit?.keyGenerator || null,
+        maxUniqueKeys: options.rateLimit?.maxUniqueKeys || 1000
       },
 
       // Logging configuration
@@ -639,13 +654,23 @@ export class ApiPlugin extends Plugin {
    */
   async _createRateLimitMiddleware() {
     const requests = new Map();
-    const { windowMs, maxRequests, keyGenerator } = this.config.rateLimit;
+    const { windowMs, maxRequests, keyGenerator, maxUniqueKeys } = this.config.rateLimit;
+
+    const getClientIp = (c) => {
+      const forwarded = c.req.header('x-forwarded-for');
+      if (forwarded) {
+        return forwarded.split(',')[0].trim();
+      }
+      const cfConnecting = c.req.header('cf-connecting-ip');
+      if (cfConnecting) {
+        return cfConnecting;
+      }
+      return c.req.raw?.socket?.remoteAddress || 'unknown';
+    };
 
     return async (c, next) => {
       // Generate key (IP or custom)
-      const key = keyGenerator
-        ? keyGenerator(c)
-        : c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || 'unknown';
+      const key = keyGenerator ? keyGenerator(c) : getClientIp(c) || 'unknown';
 
       let record = requests.get(key);
 
@@ -658,6 +683,12 @@ export class ApiPlugin extends Plugin {
       if (!record) {
         record = { count: 0, resetAt: Date.now() + windowMs };
         requests.set(key, record);
+        if (requests.size > maxUniqueKeys) {
+          const oldestKey = requests.keys().next().value;
+          if (oldestKey) {
+            requests.delete(oldestKey);
+          }
+        }
       }
 
       // Check limit
