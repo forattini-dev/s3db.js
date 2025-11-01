@@ -215,8 +215,9 @@ await database.createResource({
 
 ### Connection Strings
 ```
-s3://KEY:SECRET@bucket?region=us-east-1
-http://KEY:SECRET@localhost:9000/bucket  # MinIO
+s3://KEY:SECRET@bucket?region=us-east-1           # AWS S3
+http://KEY:SECRET@localhost:9000/bucket           # MinIO
+memory://mybucket/databases/myapp                 # MemoryClient (testing)
 ```
 
 ### Caching
@@ -265,6 +266,8 @@ s3db insert <resource> -d '<json>'  # Insert
 - **S3Client**: `src/clients/s3-client.class.js` (Production - AWS S3, MinIO, LocalStack)
 - **MemoryClient**: `src/clients/memory-client.class.js` (Testing - 100-1000x faster, zero dependencies)
   - Pure in-memory implementation
+  - Connection string: `memory://bucket/path` (recommended)
+  - Manual config: `new MemoryClient({ bucket, keyPrefix })`
   - Snapshot/restore for test isolation
   - Optional persistence to disk
   - Full S3 API compatibility
