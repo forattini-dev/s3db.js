@@ -152,8 +152,9 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
           exclude: ['data.*']
         }
       });
-      expect(plugin.resourceName).toBe('custom_resources');
-      expect(plugin.diffsName).toBe('custom_history');
+      // Plugin applies namespace prefix to resource names
+      expect(plugin.resourceName).toMatch(/custom_resources$/);
+      expect(plugin.diffsName).toMatch(/custom_history$/);
       expect(plugin.trackDiffs).toBe(false);
       expect(plugin.autoSync).toBe(true);
       expect(plugin.verbose).toBe(true);

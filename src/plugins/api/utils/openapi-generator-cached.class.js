@@ -20,7 +20,7 @@ export class OpenAPIGeneratorCached {
     this.cache = null;
     this.cacheKey = null;
 
-    if (options?.verbose) {
+    if (options.verbose) {
       console.log('[OpenAPIGenerator] Caching enabled');
     }
   }

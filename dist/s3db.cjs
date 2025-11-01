@@ -4,11 +4,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
 var crypto = require('crypto');
 var EventEmitter = require('events');
-var hono = require('hono');
 var jose = require('jose');
-var fs = require('fs/promises');
+var fs$1 = require('fs/promises');
 var path = require('path');
-var fs$1 = require('fs');
+var fs = require('fs');
+var hono = require('hono');
 var clientS3 = require('@aws-sdk/client-s3');
 var s3RequestPresigner = require('@aws-sdk/s3-request-presigner');
 var promises = require('stream/promises');
@@ -88,7 +88,7 @@ function _interopNamespaceDefault(e) {
   return Object.freeze(n);
 }
 
-var fs__namespace = /*#__PURE__*/_interopNamespaceDefault(fs$1);
+var fs__namespace = /*#__PURE__*/_interopNamespaceDefault(fs);
 var readline__namespace = /*#__PURE__*/_interopNamespaceDefault(readline);
 
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -3592,62 +3592,16 @@ function error$1(error2, options = {}) {
     _status: status
   };
 }
-function list(items, pagination = {}) {
-  const { total, page, pageSize, pageCount } = pagination;
-  return {
-    success: true,
-    data: items,
-    pagination: {
-      total: total || items.length,
-      page: page || 1,
-      pageSize: pageSize || items.length,
-      pageCount: pageCount || 1
-    },
-    meta: {
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    },
-    _status: 200
-  };
-}
-function created(data, location) {
-  return {
-    success: true,
-    data,
-    meta: {
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      location
-    },
-    _status: 201
-  };
-}
-function noContent() {
-  return {
-    success: true,
-    data: null,
-    meta: {
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    },
-    _status: 204
-  };
-}
-function validationError(errors) {
-  return error$1("Validation failed", {
-    status: 400,
-    code: "VALIDATION_ERROR",
-    details: { errors }
-  });
-}
-function notFound(resource, id) {
-  return error$1(`${resource} with id '${id}' not found`, {
-    status: 404,
-    code: "NOT_FOUND",
-    details: { resource, id }
-  });
-}
-function unauthorized(message = "Unauthorized") {
-  return error$1(message, {
-    status: 401,
-    code: "UNAUTHORIZED"
+function payloadTooLarge(size, limit) {
+  return error$1("Request payload too large", {
+    status: 413,
+    code: "PAYLOAD_TOO_LARGE",
+    details: {
+      receivedSize: size,
+      maxSize: limit,
+      receivedMB: (size / 1024 / 1024).toFixed(2),
+      maxMB: (limit / 1024 / 1024).toFixed(2)
+    }
   });
 }
 
@@ -3719,12 +3673,2669 @@ function errorHandler$1(err, c) {
   }
   return c.json(response, response._status);
 }
+
+function success(data, options = {}) {
+  const { status = 200, meta = {} } = options;
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      ...meta
+    },
+    _status: status
+  };
+}
+function error(error2, options = {}) {
+  const { status = 500, code = "INTERNAL_ERROR", details = {} } = options;
+  const errorMessage = error2 instanceof Error ? error2.message : error2;
+  const errorStack = error2 instanceof Error && process.env.NODE_ENV !== "production" ? error2.stack : void 0;
+  return {
+    success: false,
+    error: {
+      message: errorMessage,
+      code,
+      details,
+      stack: errorStack
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: status
+  };
+}
+function list(items, pagination = {}) {
+  const { total, page, pageSize, pageCount } = pagination;
+  return {
+    success: true,
+    data: items,
+    pagination: {
+      total: total || items.length,
+      page: page || 1,
+      pageSize: pageSize || items.length,
+      pageCount: pageCount || 1
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: 200
+  };
+}
+function created(data, location) {
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      location
+    },
+    _status: 201
+  };
+}
+function noContent() {
+  return {
+    success: true,
+    data: null,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: 204
+  };
+}
+function validationError(errors) {
+  return error("Validation failed", {
+    status: 400,
+    code: "VALIDATION_ERROR",
+    details: { errors }
+  });
+}
+function notFound(resource, id) {
+  return error(`${resource} with id '${id}' not found`, {
+    status: 404,
+    code: "NOT_FOUND",
+    details: { resource, id }
+  });
+}
+function unauthorized(message = "Unauthorized") {
+  return error(message, {
+    status: 401,
+    code: "UNAUTHORIZED"
+  });
+}
+
+class RateLimitStore {
+  constructor(options = {}) {
+    this.store = /* @__PURE__ */ new Map();
+    this.cleanupInterval = options.cleanupInterval || 6e4;
+    this.windowMs = options.windowMs || 9e5;
+    this.cleanupTimer = setInterval(() => this.cleanup(), this.cleanupInterval);
+  }
+  /**
+   * Record an attempt
+   * @param {string} key - Rate limit key
+   * @returns {number} Current attempt count in window
+   */
+  record(key) {
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+    if (!this.store.has(key)) {
+      this.store.set(key, { attempts: [] });
+    }
+    const entry = this.store.get(key);
+    entry.attempts = entry.attempts.filter((timestamp) => timestamp > cutoff);
+    entry.attempts.push(now);
+    return entry.attempts.length;
+  }
+  /**
+   * Get current attempt count
+   * @param {string} key - Rate limit key
+   * @returns {number} Current attempt count in window
+   */
+  getCount(key) {
+    if (!this.store.has(key)) {
+      return 0;
+    }
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+    const entry = this.store.get(key);
+    entry.attempts = entry.attempts.filter((timestamp) => timestamp > cutoff);
+    return entry.attempts.length;
+  }
+  /**
+   * Reset rate limit for key
+   * @param {string} key - Rate limit key
+   */
+  reset(key) {
+    this.store.delete(key);
+  }
+  /**
+   * Get time until next allowed attempt
+   * @param {string} key - Rate limit key
+   * @returns {number} Milliseconds until next attempt allowed
+   */
+  getRetryAfter(key) {
+    if (!this.store.has(key)) {
+      return 0;
+    }
+    const entry = this.store.get(key);
+    if (entry.attempts.length === 0) {
+      return 0;
+    }
+    const oldestAttempt = entry.attempts[0];
+    const expiresAt = oldestAttempt + this.windowMs;
+    const now = Date.now();
+    return Math.max(0, expiresAt - now);
+  }
+  /**
+   * Cleanup expired entries
+   * @private
+   */
+  cleanup() {
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+    for (const [key, entry] of this.store.entries()) {
+      entry.attempts = entry.attempts.filter((timestamp) => timestamp > cutoff);
+      if (entry.attempts.length === 0) {
+        this.store.delete(key);
+      }
+    }
+  }
+  /**
+   * Stop cleanup timer
+   */
+  stop() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+  /**
+   * Get statistics
+   * @returns {Object} Store statistics
+   */
+  getStats() {
+    return {
+      totalKeys: this.store.size,
+      totalAttempts: Array.from(this.store.values()).reduce(
+        (sum, entry) => sum + entry.attempts.length,
+        0
+      )
+    };
+  }
+}
+function createDriverRateLimiter(config = {}) {
+  const {
+    windowMs = 9e5,
+    // 15 minutes
+    maxAttempts = 5,
+    keyPrefix = "ratelimit",
+    keyGenerator = null,
+    skipSuccessfulRequests = false,
+    handler = null,
+    enabled = true
+  } = config;
+  if (!enabled) {
+    return async (c, next) => await next();
+  }
+  const store = new RateLimitStore({ windowMs });
+  return async (c, next) => {
+    let key;
+    if (keyGenerator && typeof keyGenerator === "function") {
+      key = await keyGenerator(c);
+    } else {
+      const ip = c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown";
+      key = `${keyPrefix}:${ip}`;
+    }
+    const currentCount = store.getCount(key);
+    if (currentCount >= maxAttempts) {
+      const retryAfter = store.getRetryAfter(key);
+      const retryAfterSeconds = Math.ceil(retryAfter / 1e3);
+      c.header("Retry-After", String(retryAfterSeconds));
+      c.header("X-RateLimit-Limit", String(maxAttempts));
+      c.header("X-RateLimit-Remaining", "0");
+      c.header("X-RateLimit-Reset", String(Date.now() + retryAfter));
+      if (handler && typeof handler === "function") {
+        return handler(c, { retryAfter: retryAfterSeconds });
+      }
+      return c.json({
+        error: "Too Many Requests",
+        message: `Rate limit exceeded. Try again in ${retryAfterSeconds} seconds.`,
+        retryAfter: retryAfterSeconds
+      }, 429);
+    }
+    if (!skipSuccessfulRequests) {
+      store.record(key);
+    }
+    const previousUser = c.get("user");
+    await next();
+    if (skipSuccessfulRequests) {
+      const currentUser = c.get("user");
+      if (!currentUser && !previousUser) {
+        store.record(key);
+      }
+    }
+    const remaining = Math.max(0, maxAttempts - store.getCount(key));
+    c.header("X-RateLimit-Limit", String(maxAttempts));
+    c.header("X-RateLimit-Remaining", String(remaining));
+  };
+}
+function createAuthDriverRateLimiter(driver, config = {}) {
+  const defaults = {
+    oidc: {
+      windowMs: 9e5,
+      // 15 minutes
+      maxAttempts: 5,
+      keyPrefix: "auth:oidc",
+      skipSuccessfulRequests: true
+    },
+    jwt: {
+      windowMs: 3e5,
+      // 5 minutes
+      maxAttempts: 20,
+      keyPrefix: "auth:jwt",
+      skipSuccessfulRequests: false
+    },
+    basic: {
+      windowMs: 9e5,
+      // 15 minutes
+      maxAttempts: 10,
+      keyPrefix: "auth:basic",
+      skipSuccessfulRequests: true
+    },
+    apikey: {
+      windowMs: 6e4,
+      // 1 minute
+      maxAttempts: 100,
+      keyPrefix: "auth:apikey",
+      skipSuccessfulRequests: false
+    }
+  };
+  const driverDefaults = defaults[driver] || defaults.basic;
+  const finalConfig = { ...driverDefaults, ...config };
+  return createDriverRateLimiter(finalConfig);
+}
+
+async function getOrCreateUser(usersResource, claims, config) {
+  const {
+    autoCreateUser = true,
+    userIdClaim = "sub",
+    fallbackIdClaims = ["email", "preferred_username"],
+    lookupFields = ["email", "preferred_username"]
+  } = config;
+  const candidateIds = [];
+  if (userIdClaim && claims[userIdClaim]) {
+    candidateIds.push(String(claims[userIdClaim]));
+  }
+  for (const field of fallbackIdClaims) {
+    if (!field || field === userIdClaim) continue;
+    const value = claims[field];
+    if (value) {
+      candidateIds.push(String(value));
+    }
+  }
+  let user = null;
+  for (const candidate of candidateIds) {
+    try {
+      user = await usersResource.get(candidate);
+      break;
+    } catch (_) {
+    }
+  }
+  if (!user) {
+    const fields = Array.isArray(lookupFields) ? lookupFields : [lookupFields];
+    for (const field of fields) {
+      if (!field) continue;
+      const value = claims[field];
+      if (!value) continue;
+      const results = await usersResource.query({ [field]: value }, { limit: 1 });
+      if (results.length > 0) {
+        user = results[0];
+        break;
+      }
+    }
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (user) {
+    const updates = {
+      lastLoginAt: now,
+      metadata: {
+        ...user.metadata,
+        oidc: {
+          sub: claims.sub,
+          provider: config.issuer,
+          lastSync: now,
+          claims: {
+            name: claims.name,
+            email: claims.email,
+            picture: claims.picture
+          }
+        }
+      }
+    };
+    if (claims.name && claims.name !== user.name) {
+      updates.name = claims.name;
+    }
+    if (config.beforeUpdateUser && typeof config.beforeUpdateUser === "function") {
+      try {
+        const enrichedData = await config.beforeUpdateUser({
+          user,
+          updates,
+          claims,
+          usersResource
+        });
+        if (enrichedData && typeof enrichedData === "object") {
+          Object.assign(updates, enrichedData);
+          if (enrichedData.metadata) {
+            updates.metadata = {
+              ...updates.metadata,
+              ...enrichedData.metadata
+            };
+          }
+        }
+      } catch (hookErr) {
+        console.error("[OIDC] beforeUpdateUser hook failed:", hookErr);
+      }
+    }
+    user = await usersResource.update(userId, updates);
+    return { user, created: false };
+  }
+  if (!autoCreateUser) {
+    return { user: null, created: false };
+  }
+  const newUserId = candidateIds[0];
+  if (!newUserId) {
+    throw new Error("Cannot determine user ID from OIDC claims");
+  }
+  const newUser = {
+    id: newUserId,
+    email: claims.email || newUserId,
+    username: claims.preferred_username || claims.email || newUserId,
+    name: claims.name || claims.email || newUserId,
+    picture: claims.picture || null,
+    role: config.defaultRole || "user",
+    scopes: config.defaultScopes || ["openid", "profile", "email"],
+    active: true,
+    apiKey: null,
+    // Will be generated on first API usage if needed
+    lastLoginAt: now,
+    metadata: {
+      oidc: {
+        sub: claims.sub,
+        provider: config.issuer,
+        createdAt: now,
+        claims: {
+          name: claims.name,
+          email: claims.email,
+          picture: claims.picture
+        }
+      },
+      costCenterId: config.defaultCostCenter || null,
+      teamId: config.defaultTeam || null
+    }
+  };
+  if (config.beforeCreateUser && typeof config.beforeCreateUser === "function") {
+    try {
+      const enrichedData = await config.beforeCreateUser({
+        user: newUser,
+        claims,
+        usersResource
+      });
+      if (enrichedData && typeof enrichedData === "object") {
+        Object.assign(newUser, enrichedData);
+        if (enrichedData.metadata) {
+          newUser.metadata = {
+            ...newUser.metadata,
+            ...enrichedData.metadata
+          };
+        }
+      }
+    } catch (hookErr) {
+      console.error("[OIDC] beforeCreateUser hook failed:", hookErr);
+    }
+  }
+  user = await usersResource.insert(newUser);
+  return { user, created: true };
+}
+async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
+  const response = await fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`Token refresh failed: ${response.status}`);
+  }
+  return await response.json();
+}
+function createOIDCHandler(config, app, usersResource, events = null) {
+  const finalConfig = {
+    scopes: ["openid", "profile", "email", "offline_access"],
+    cookieName: "oidc_session",
+    cookieMaxAge: 6048e5,
+    // 7 days (same as absolute duration)
+    rollingDuration: 864e5,
+    // 24 hours
+    absoluteDuration: 6048e5,
+    // 7 days
+    loginPath: "/auth/login",
+    callbackPath: "/auth/callback",
+    logoutPath: "/auth/logout",
+    postLoginRedirect: "/",
+    postLogoutRedirect: "/",
+    idpLogout: true,
+    autoCreateUser: true,
+    userIdClaim: "sub",
+    fallbackIdClaims: ["email", "preferred_username"],
+    lookupFields: ["email", "preferred_username"],
+    autoRefreshTokens: true,
+    refreshThreshold: 3e5,
+    // 5 minutes before expiry
+    cookieSecure: process.env.NODE_ENV === "production",
+    cookieSameSite: "Lax",
+    defaultRole: "user",
+    defaultScopes: ["openid", "profile", "email"],
+    rateLimit: config.rateLimit !== void 0 ? config.rateLimit : {
+      enabled: true,
+      windowMs: 9e5,
+      // 15 minutes
+      maxAttempts: 5,
+      skipSuccessfulRequests: true
+    },
+    ...config
+  };
+  const {
+    issuer,
+    clientId,
+    clientSecret,
+    redirectUri,
+    scopes,
+    cookieSecret,
+    cookieName,
+    cookieMaxAge,
+    rollingDuration,
+    absoluteDuration,
+    loginPath,
+    callbackPath,
+    logoutPath,
+    postLoginRedirect,
+    postLogoutRedirect,
+    idpLogout,
+    autoCreateUser,
+    autoRefreshTokens,
+    refreshThreshold,
+    cookieSecure,
+    cookieSameSite
+  } = finalConfig;
+  const authorizationEndpoint = `${issuer}/oauth/authorize`;
+  const tokenEndpoint = `${issuer}/oauth/token`;
+  const logoutEndpoint = `${issuer}/oauth2/v2.0/logout`;
+  async function encodeSession(data) {
+    const secret = new TextEncoder().encode(cookieSecret);
+    const jwt = await new jose.SignJWT(data).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${Math.floor(cookieMaxAge / 1e3)}s`).sign(secret);
+    return jwt;
+  }
+  async function decodeSession(jwt) {
+    try {
+      const secret = new TextEncoder().encode(cookieSecret);
+      const { payload } = await jose.jwtVerify(jwt, secret);
+      return payload;
+    } catch (err) {
+      return null;
+    }
+  }
+  function validateSessionDuration(session) {
+    const now = Date.now();
+    if (session.issued_at + absoluteDuration < now) {
+      return { valid: false, reason: "absolute_expired" };
+    }
+    if (session.last_activity + rollingDuration < now) {
+      return { valid: false, reason: "rolling_expired" };
+    }
+    return { valid: true };
+  }
+  function generateState() {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+  function decodeIdToken(idToken) {
+    try {
+      const parts = idToken.split(".");
+      if (parts.length !== 3) return null;
+      const payload = Buffer.from(parts[1], "base64").toString("utf-8");
+      return JSON.parse(payload);
+    } catch (err) {
+      return null;
+    }
+  }
+  let rateLimiter = null;
+  if (finalConfig.rateLimit?.enabled) {
+    rateLimiter = createAuthDriverRateLimiter("oidc", finalConfig.rateLimit);
+  }
+  app.get(loginPath, async (c) => {
+    const state = generateState();
+    const stateJWT = await encodeSession({ state, type: "csrf", expires: Date.now() + 6e5 });
+    c.header("Set-Cookie", `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: scopes.join(" "),
+      state
+    });
+    return c.redirect(`${authorizationEndpoint}?${params.toString()}`, 302);
+  });
+  const callbackHandler = async (c) => {
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    const stateCookie = c.req.cookie(`${cookieName}_state`);
+    if (!stateCookie) {
+      return c.json({ error: "Missing state cookie (CSRF protection)" }, 400);
+    }
+    const stateData = await decodeSession(stateCookie);
+    if (!stateData || stateData.state !== state) {
+      return c.json({ error: "Invalid state (CSRF protection)" }, 400);
+    }
+    c.header("Set-Cookie", `${cookieName}_state=; Path=/; HttpOnly; Max-Age=0`);
+    if (!code) {
+      return c.json({ error: "Missing authorization code" }, 400);
+    }
+    try {
+      const tokenResponse = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri
+        })
+      });
+      if (!tokenResponse.ok) {
+        const error = await tokenResponse.text();
+        console.error("[OIDC] Token exchange failed:", error);
+        return c.json({ error: "Failed to exchange code for tokens" }, 500);
+      }
+      const tokens = await tokenResponse.json();
+      const idTokenClaims = decodeIdToken(tokens.id_token);
+      if (!idTokenClaims) {
+        return c.json({ error: "Failed to decode id_token" }, 500);
+      }
+      let user = null;
+      let userCreated = false;
+      if (usersResource) {
+        try {
+          const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+          user = result.user;
+          userCreated = result.created;
+          if (!user) {
+            return c.json({
+              error: "User not provisioned",
+              message: "User does not exist in configured auth resource"
+            }, 403);
+          }
+          if (events) {
+            if (userCreated) {
+              events.emitUserEvent("created", {
+                user: { id: user.id, email: user.email, name: user.name },
+                source: "oidc",
+                provider: finalConfig.issuer
+              });
+            }
+            events.emitUserEvent("login", {
+              user: { id: user.id, email: user.email, name: user.name },
+              source: "oidc",
+              provider: finalConfig.issuer,
+              newUser: userCreated
+            });
+          }
+          if (finalConfig.onUserAuthenticated && typeof finalConfig.onUserAuthenticated === "function") {
+            try {
+              await finalConfig.onUserAuthenticated({
+                user,
+                created: userCreated,
+                claims: idTokenClaims,
+                tokens: {
+                  access_token: tokens.access_token,
+                  id_token: tokens.id_token,
+                  refresh_token: tokens.refresh_token
+                },
+                context: c
+                // 🔥 Pass Hono context for cookie/header manipulation
+              });
+            } catch (hookErr) {
+              console.error("[OIDC] onUserAuthenticated hook failed:", hookErr);
+            }
+          }
+        } catch (err) {
+          console.error("[OIDC] Failed to create/update user:", err);
+        }
+      }
+      const now = Date.now();
+      const sessionData = {
+        access_token: tokens.access_token,
+        id_token: tokens.id_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: now + tokens.expires_in * 1e3,
+        issued_at: now,
+        last_activity: now,
+        // User data (avoid DB lookup on every request)
+        user: user ? {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          name: user.name,
+          picture: user.picture,
+          role: user.role,
+          scopes: user.scopes,
+          active: user.active,
+          metadata: {
+            costCenterId: user.metadata?.costCenterId,
+            teamId: user.metadata?.teamId
+          }
+        } : {
+          id: idTokenClaims.sub,
+          email: idTokenClaims.email,
+          username: idTokenClaims.preferred_username || idTokenClaims.email,
+          name: idTokenClaims.name,
+          picture: idTokenClaims.picture,
+          role: "user",
+          scopes,
+          active: true,
+          isVirtual: true
+        }
+      };
+      const sessionJWT = await encodeSession(sessionData);
+      const cookieOptions = [
+        `${cookieName}=${sessionJWT}`,
+        "Path=/",
+        "HttpOnly",
+        `Max-Age=${Math.floor(cookieMaxAge / 1e3)}`,
+        `SameSite=${cookieSameSite}`
+      ];
+      if (cookieSecure) {
+        cookieOptions.push("Secure");
+      }
+      c.header("Set-Cookie", cookieOptions.join("; "));
+      return c.redirect(postLoginRedirect, 302);
+    } catch (err) {
+      console.error("[OIDC] Error during token exchange:", err);
+      return c.json({ error: "Authentication failed" }, 500);
+    }
+  };
+  if (rateLimiter) {
+    app.get(callbackPath, rateLimiter, callbackHandler);
+  } else {
+    app.get(callbackPath, callbackHandler);
+  }
+  app.get(logoutPath, async (c) => {
+    const sessionCookie = c.req.cookie(cookieName);
+    let idToken = null;
+    if (sessionCookie) {
+      const session = await decodeSession(sessionCookie);
+      idToken = session?.id_token;
+    }
+    c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+    if (idpLogout && idToken) {
+      const params = new URLSearchParams({
+        id_token_hint: idToken,
+        post_logout_redirect_uri: `${postLogoutRedirect}`
+      });
+      return c.redirect(`${logoutEndpoint}?${params.toString()}`, 302);
+    }
+    return c.redirect(postLogoutRedirect, 302);
+  });
+  function matchPath(path, pattern) {
+    if (pattern === path) return true;
+    const regexPattern = pattern.replace(/\*\*/g, "___GLOBSTAR___").replace(/\*/g, "[^/]*").replace(/___GLOBSTAR___/g, ".*").replace(/\//g, "\\/") + "$";
+    const regex = new RegExp("^" + regexPattern);
+    return regex.test(path);
+  }
+  const middleware = async (c, next) => {
+    const protectedPaths = finalConfig.protectedPaths || [];
+    const currentPath = c.req.path;
+    if (protectedPaths.length > 0) {
+      const isProtected = protectedPaths.some((pattern) => matchPath(currentPath, pattern));
+      if (!isProtected) {
+        return await next();
+      }
+    }
+    const sessionCookie = c.req.cookie(cookieName);
+    if (!sessionCookie) {
+      if (protectedPaths.length > 0) {
+        const acceptHeader = c.req.header("accept") || "";
+        const acceptsHtml = acceptHeader.includes("text/html");
+        if (acceptsHtml) {
+          const returnTo = encodeURIComponent(currentPath);
+          return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+        } else {
+          const response = unauthorized("Authentication required");
+          return c.json(response, response._status);
+        }
+      }
+      return await next();
+    }
+    const session = await decodeSession(sessionCookie);
+    if (!session || !session.access_token) {
+      return await next();
+    }
+    const validation = validateSessionDuration(session);
+    if (!validation.valid) {
+      c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+      return await next();
+    }
+    if (autoRefreshTokens && session.refresh_token && session.expires_at) {
+      const timeUntilExpiry = session.expires_at - Date.now();
+      if (timeUntilExpiry < refreshThreshold) {
+        try {
+          const newTokens = await refreshAccessToken(
+            tokenEndpoint,
+            session.refresh_token,
+            clientId,
+            clientSecret
+          );
+          session.access_token = newTokens.access_token;
+          session.expires_at = Date.now() + newTokens.expires_in * 1e3;
+          if (newTokens.refresh_token) {
+            session.refresh_token = newTokens.refresh_token;
+          }
+        } catch (err) {
+          console.error("[OIDC] Token refresh failed:", err);
+        }
+      }
+    }
+    session.last_activity = Date.now();
+    if (session.user.active !== void 0 && !session.user.active) {
+      c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+      const acceptHeader = c.req.header("accept") || "";
+      const acceptsHtml = acceptHeader.includes("text/html");
+      if (acceptsHtml) {
+        return c.redirect(`${loginPath}?error=account_inactive`, 302);
+      } else {
+        const response = unauthorized("User account is inactive");
+        return c.json(response, response._status);
+      }
+    }
+    c.set("user", {
+      ...session.user,
+      authMethod: "oidc",
+      session: {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        expires_at: session.expires_at
+      }
+    });
+    const newSessionJWT = await encodeSession(session);
+    const cookieOptions = [
+      `${cookieName}=${newSessionJWT}`,
+      "Path=/",
+      "HttpOnly",
+      `Max-Age=${Math.floor(cookieMaxAge / 1e3)}`,
+      `SameSite=${cookieSameSite}`
+    ];
+    if (cookieSecure) {
+      cookieOptions.push("Secure");
+    }
+    c.header("Set-Cookie", cookieOptions.join("; "));
+    return await next();
+  };
+  return {
+    middleware,
+    routes: {
+      [loginPath]: "Login (redirect to SSO)",
+      [callbackPath]: "OAuth2 callback",
+      [logoutPath]: "Logout (local + IdP)"
+    },
+    config: finalConfig
+  };
+}
+
+const PREFIX = "plg_";
+function normalizeNamespace(namespace) {
+  if (!namespace) return null;
+  const text = String(namespace).trim().toLowerCase();
+  if (!text) return null;
+  const normalized = text.replace(/[^a-z0-9]+/g, "_").replace(/^_+/, "").replace(/_+$/, "");
+  return normalized || null;
+}
+function applyNamespace(name, namespace) {
+  const ensured = ensurePlgPrefix(name);
+  if (!namespace) {
+    return ensured;
+  }
+  const withoutPrefix = ensured.slice(PREFIX.length);
+  if (withoutPrefix.startsWith(`${namespace}_`)) {
+    return ensured;
+  }
+  return `${PREFIX}${namespace}_${withoutPrefix}`;
+}
+function sanitizeName(name) {
+  if (!name || typeof name !== "string") {
+    throw new PluginError("[resource-names] Resource name must be a non-empty string", {
+      pluginName: "SharedConcerns",
+      operation: "resourceNames:sanitize",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Pass a non-empty string when deriving resource names."
+    });
+  }
+  return name.trim();
+}
+function ensurePlgPrefix(name) {
+  const sanitized = sanitizeName(name);
+  if (sanitized.startsWith(PREFIX)) {
+    return sanitized;
+  }
+  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
+}
+function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}, options = {}) {
+  const namespace = normalizeNamespace(options.namespace);
+  const applyOverrideNamespace = options.applyNamespaceToOverrides === true;
+  if (!defaultName && !override && !suffix) {
+    throw new PluginError(`[resource-names] Missing name parameters for plugin "${pluginKey}"`, {
+      pluginName: "SharedConcerns",
+      operation: "resourceNames:resolve",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide at least one of defaultName, override, or suffix when resolving resource names."
+    });
+  }
+  if (override) {
+    const ensured2 = ensurePlgPrefix(override);
+    return applyOverrideNamespace ? applyNamespace(ensured2, namespace) : ensured2;
+  }
+  if (defaultName) {
+    const ensured2 = defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
+    return applyNamespace(ensured2, namespace);
+  }
+  if (!suffix) {
+    throw new PluginError(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`, {
+      pluginName: "SharedConcerns",
+      operation: "resourceNames:resolve",
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Provide a suffix or defaultName when computing derived resource names."
+    });
+  }
+  const ensured = ensurePlgPrefix(`${pluginKey}_${suffix}`);
+  return applyNamespace(ensured, namespace);
+}
+function resolveResourceNames(pluginKey, descriptors = {}, options = {}) {
+  const result = {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (typeof descriptor === "string") {
+      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor }, options);
+      continue;
+    }
+    result[key] = resolveResourceName(pluginKey, descriptor, options);
+  }
+  return result;
+}
+
+class FailbanManager {
+  constructor(options = {}) {
+    this.namespace = options.namespace || null;
+    const resourceOverrides = options.resourceNames || options.resources || {};
+    this._resourceDescriptors = {
+      bans: {
+        defaultName: "plg_api_failban_bans",
+        override: resourceOverrides.bans
+      },
+      violations: {
+        defaultName: "plg_api_failban_violations",
+        override: resourceOverrides.violations
+      }
+    };
+    this.resourceNames = this._resolveResourceNames();
+    this.options = {
+      enabled: options.enabled !== false,
+      database: options.database,
+      maxViolations: options.maxViolations || 3,
+      violationWindow: options.violationWindow || 36e5,
+      banDuration: options.banDuration || 864e5,
+      whitelist: options.whitelist || ["127.0.0.1", "::1"],
+      blacklist: options.blacklist || [],
+      persistViolations: options.persistViolations !== false,
+      verbose: options.verbose || false,
+      geo: {
+        enabled: options.geo?.enabled || false,
+        databasePath: options.geo?.databasePath || null,
+        allowedCountries: options.geo?.allowedCountries || [],
+        blockedCountries: options.geo?.blockedCountries || [],
+        blockUnknown: options.geo?.blockUnknown || false,
+        cacheResults: options.geo?.cacheResults !== false
+      },
+      resources: this.resourceNames
+    };
+    this.database = options.database;
+    this.bansResource = null;
+    this.violationsResource = null;
+    this.memoryCache = /* @__PURE__ */ new Map();
+    this.geoCache = /* @__PURE__ */ new Map();
+    this.geoReader = null;
+    this.cleanupTimer = null;
+  }
+  _resolveResourceNames() {
+    return resolveResourceNames("api_failban", this._resourceDescriptors, {
+      namespace: this.namespace
+    });
+  }
+  setNamespace(namespace) {
+    this.namespace = namespace;
+    this.resourceNames = this._resolveResourceNames();
+    this.options.resources = this.resourceNames;
+  }
+  /**
+   * Initialize failban manager
+   */
+  async initialize() {
+    if (!this.options.enabled) {
+      if (this.options.verbose) {
+        console.log("[Failban] Disabled, skipping initialization");
+      }
+      return;
+    }
+    if (!this.database) {
+      throw new Error("[Failban] Database instance is required");
+    }
+    if (this.options.geo.enabled) {
+      await this._initializeGeoIP();
+    }
+    this.bansResource = await this._createBansResource();
+    if (this.options.persistViolations) {
+      this.violationsResource = await this._createViolationsResource();
+    }
+    await this._loadBansIntoCache();
+    this._setupCleanupTimer();
+    if (this.options.verbose) {
+      console.log("[Failban] Initialized");
+      console.log(`[Failban] Max violations: ${this.options.maxViolations}`);
+      console.log(`[Failban] Violation window: ${this.options.violationWindow}ms`);
+      console.log(`[Failban] Ban duration: ${this.options.banDuration}ms`);
+      console.log(`[Failban] Whitelist: ${this.options.whitelist.join(", ")}`);
+      if (this.options.geo.enabled) {
+        console.log(`[Failban] GeoIP enabled`);
+        console.log(`[Failban] Allowed countries: ${this.options.geo.allowedCountries.join(", ") || "none"}`);
+        console.log(`[Failban] Blocked countries: ${this.options.geo.blockedCountries.join(", ") || "none"}`);
+        console.log(`[Failban] Block unknown: ${this.options.geo.blockUnknown}`);
+      }
+    }
+  }
+  /**
+   * Create bans resource with TTL support
+   * @private
+   */
+  async _createBansResource() {
+    const resourceName = this.resourceNames.bans;
+    try {
+      return await this.database.getResource(resourceName);
+    } catch (err) {
+    }
+    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+      name: resourceName,
+      attributes: {
+        ip: "string|required",
+        reason: "string",
+        violations: "number",
+        bannedAt: "string",
+        expiresAt: "string|required",
+        metadata: {
+          userAgent: "string",
+          path: "string",
+          lastViolation: "string"
+        }
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        byExpiry: {
+          fields: { expiresAtCohort: "string" }
+        }
+      }
+    }));
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (existing) {
+        return existing;
+      }
+      throw createErr;
+    }
+    const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
+    if (ttlPlugin) {
+      ttlPlugin.options.resources = ttlPlugin.options.resources || {};
+      ttlPlugin.options.resources[resourceName] = {
+        enabled: true,
+        field: "expiresAt"
+      };
+      if (this.options.verbose) {
+        console.log(`[Failban] TTL configured for bans resource (${resourceName})`);
+      }
+    } else {
+      console.warn("[Failban] TTLPlugin not found - bans will not auto-expire from DB");
+    }
+    return resource;
+  }
+  /**
+   * Create violations tracking resource
+   * @private
+   */
+  async _createViolationsResource() {
+    const resourceName = this.resourceNames.violations;
+    try {
+      return await this.database.getResource(resourceName);
+    } catch (err) {
+    }
+    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
+      name: resourceName,
+      attributes: {
+        ip: "string|required",
+        timestamp: "string|required",
+        type: "string",
+        path: "string",
+        userAgent: "string"
+      },
+      behavior: "body-overflow",
+      timestamps: true,
+      partitions: {
+        byIp: {
+          fields: { ip: "string" }
+        }
+      }
+    }));
+    if (!created) {
+      const existing = this.database.resources?.[resourceName];
+      if (existing) {
+        return existing;
+      }
+      throw createErr;
+    }
+    return resource;
+  }
+  /**
+   * Load existing bans into memory cache
+   * @private
+   */
+  async _loadBansIntoCache() {
+    try {
+      const bans = await this.bansResource.list({ limit: 1e3 });
+      const now = Date.now();
+      for (const ban of bans) {
+        const expiresAt = new Date(ban.expiresAt).getTime();
+        if (expiresAt > now) {
+          this.memoryCache.set(ban.ip, {
+            expiresAt,
+            reason: ban.reason,
+            violations: ban.violations
+          });
+        }
+      }
+      if (this.options.verbose) {
+        console.log(`[Failban] Loaded ${this.memoryCache.size} active bans into cache`);
+      }
+    } catch (err) {
+      console.error("[Failban] Failed to load bans:", err.message);
+    }
+  }
+  /**
+   * Setup cleanup timer for memory cache
+   * @private
+   */
+  _setupCleanupTimer() {
+    this.cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      let cleaned = 0;
+      for (const [ip, ban] of this.memoryCache.entries()) {
+        if (ban.expiresAt <= now) {
+          this.memoryCache.delete(ip);
+          cleaned++;
+          this.database.emit?.("security:unbanned", {
+            ip,
+            reason: "expired",
+            bannedFor: ban.reason
+          });
+        }
+      }
+      if (this.options.verbose && cleaned > 0) {
+        console.log(`[Failban] Cleaned ${cleaned} expired bans from cache`);
+      }
+    }, 6e4);
+  }
+  /**
+   * Initialize GeoIP reader
+   * @private
+   */
+  async _initializeGeoIP() {
+    if (!this.options.geo.databasePath) {
+      console.warn("[Failban] GeoIP enabled but no databasePath provided");
+      return;
+    }
+    try {
+      const Reader = await requirePluginDependency(
+        "@maxmind/geoip2-node",
+        "ApiPlugin (Failban)",
+        "GeoIP country blocking"
+      );
+      this.geoReader = await Reader.open(this.options.geo.databasePath);
+      if (this.options.verbose) {
+        console.log(`[Failban] GeoIP database loaded from ${this.options.geo.databasePath}`);
+      }
+    } catch (err) {
+      console.error("[Failban] Failed to initialize GeoIP:", err.message);
+      console.warn("[Failban] GeoIP features will be disabled");
+      this.options.geo.enabled = false;
+    }
+  }
+  /**
+   * Get country code for IP address
+   */
+  getCountryCode(ip) {
+    if (!this.options.geo.enabled || !this.geoReader) {
+      return null;
+    }
+    if (this.options.geo.cacheResults && this.geoCache.has(ip)) {
+      return this.geoCache.get(ip);
+    }
+    try {
+      const response = this.geoReader.country(ip);
+      const countryCode = response?.country?.isoCode || null;
+      if (this.options.geo.cacheResults) {
+        this.geoCache.set(ip, countryCode);
+        if (this.geoCache.size > 1e4) {
+          const firstKey = this.geoCache.keys().next().value;
+          this.geoCache.delete(firstKey);
+        }
+      }
+      return countryCode;
+    } catch (err) {
+      if (this.options.verbose) {
+        console.log(`[Failban] GeoIP lookup failed for ${ip}: ${err.message}`);
+      }
+      return null;
+    }
+  }
+  /**
+   * Check if country is blocked
+   */
+  isCountryBlocked(countryCode) {
+    if (!this.options.geo.enabled) {
+      return false;
+    }
+    if (!countryCode) {
+      return this.options.geo.blockUnknown;
+    }
+    const upperCode = countryCode.toUpperCase();
+    if (this.options.geo.blockedCountries.length > 0) {
+      if (this.options.geo.blockedCountries.includes(upperCode)) {
+        return true;
+      }
+    }
+    if (this.options.geo.allowedCountries.length > 0) {
+      return !this.options.geo.allowedCountries.includes(upperCode);
+    }
+    return false;
+  }
+  /**
+   * Check if IP is blocked by country restrictions
+   */
+  checkCountryBlock(ip) {
+    if (!this.options.geo.enabled) {
+      return null;
+    }
+    if (this.isWhitelisted(ip)) {
+      return null;
+    }
+    const countryCode = this.getCountryCode(ip);
+    if (this.isCountryBlocked(countryCode)) {
+      return {
+        blocked: true,
+        reason: "country_restricted",
+        country: countryCode || "unknown",
+        ip
+      };
+    }
+    return null;
+  }
+  /**
+   * Check if IP is in whitelist
+   */
+  isWhitelisted(ip) {
+    return this.options.whitelist.includes(ip);
+  }
+  /**
+   * Check if IP is in blacklist
+   */
+  isBlacklisted(ip) {
+    return this.options.blacklist.includes(ip);
+  }
+  /**
+   * Check if IP is currently banned
+   */
+  isBanned(ip) {
+    if (!this.options.enabled) return false;
+    if (this.isWhitelisted(ip)) return false;
+    if (this.isBlacklisted(ip)) return true;
+    const cachedBan = this.memoryCache.get(ip);
+    if (cachedBan) {
+      if (cachedBan.expiresAt > Date.now()) {
+        return true;
+      } else {
+        this.memoryCache.delete(ip);
+        return false;
+      }
+    }
+    return false;
+  }
+  /**
+   * Get ban details for IP
+   */
+  async getBan(ip) {
+    if (!this.options.enabled) return null;
+    if (this.isBlacklisted(ip)) {
+      return {
+        ip,
+        reason: "blacklisted",
+        permanent: true
+      };
+    }
+    try {
+      const ban = await this.bansResource.get(ip);
+      if (!ban) return null;
+      if (new Date(ban.expiresAt).getTime() <= Date.now()) {
+        return null;
+      }
+      return ban;
+    } catch (err) {
+      return null;
+    }
+  }
+  /**
+   * Record a violation
+   */
+  async recordViolation(ip, type = "rate_limit", metadata = {}) {
+    if (!this.options.enabled) return;
+    if (this.isWhitelisted(ip)) return;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.database.emit?.("security:violation", {
+      ip,
+      type,
+      timestamp: now,
+      ...metadata
+    });
+    if (this.violationsResource) {
+      try {
+        await this.violationsResource.insert({
+          id: `${ip}_${Date.now()}`,
+          ip,
+          timestamp: now,
+          type,
+          path: metadata.path,
+          userAgent: metadata.userAgent
+        });
+      } catch (err) {
+        console.error("[Failban] Failed to persist violation:", err.message);
+      }
+    }
+    await this._checkAndBan(ip, type, metadata);
+  }
+  /**
+   * Check violation count and ban if threshold exceeded
+   * @private
+   */
+  async _checkAndBan(ip, type, metadata) {
+    if (this.isBanned(ip)) return;
+    const cutoff = new Date(Date.now() - this.options.violationWindow).toISOString();
+    let violationCount = 0;
+    if (this.violationsResource) {
+      try {
+        const violations = await this.violationsResource.query({
+          ip,
+          timestamp: { $gte: cutoff }
+        });
+        violationCount = violations.length;
+      } catch (err) {
+        console.error("[Failban] Failed to count violations:", err.message);
+        return;
+      }
+    }
+    if (violationCount >= this.options.maxViolations) {
+      await this.ban(ip, `${violationCount} ${type} violations`, metadata);
+    }
+  }
+  /**
+   * Ban an IP
+   */
+  async ban(ip, reason, metadata = {}) {
+    if (!this.options.enabled) return;
+    if (this.isWhitelisted(ip)) {
+      console.warn(`[Failban] Cannot ban whitelisted IP: ${ip}`);
+      return;
+    }
+    const now = /* @__PURE__ */ new Date();
+    const expiresAt = new Date(now.getTime() + this.options.banDuration);
+    const banRecord = {
+      id: ip,
+      ip,
+      reason,
+      violations: metadata.violationCount || this.options.maxViolations,
+      bannedAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      metadata: {
+        userAgent: metadata.userAgent,
+        path: metadata.path,
+        lastViolation: now.toISOString()
+      }
+    };
+    try {
+      await this.bansResource.insert(banRecord);
+      this.memoryCache.set(ip, {
+        expiresAt: expiresAt.getTime(),
+        reason,
+        violations: banRecord.violations
+      });
+      this.database.emit?.("security:banned", {
+        ip,
+        reason,
+        expiresAt: expiresAt.toISOString(),
+        duration: this.options.banDuration
+      });
+      if (this.options.verbose) {
+        console.log(`[Failban] Banned ${ip} for ${reason} until ${expiresAt.toISOString()}`);
+      }
+    } catch (err) {
+      console.error("[Failban] Failed to ban IP:", err.message);
+    }
+  }
+  /**
+   * Unban an IP
+   */
+  async unban(ip) {
+    if (!this.options.enabled) return;
+    try {
+      await this.bansResource.delete(ip);
+      this.memoryCache.delete(ip);
+      this.database.emit?.("security:unbanned", {
+        ip,
+        reason: "manual",
+        unbannedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      if (this.options.verbose) {
+        console.log(`[Failban] Unbanned ${ip}`);
+      }
+      return true;
+    } catch (err) {
+      console.error("[Failban] Failed to unban IP:", err.message);
+      return false;
+    }
+  }
+  /**
+   * List all active bans
+   */
+  async listBans() {
+    if (!this.options.enabled) return [];
+    try {
+      const bans = await this.bansResource.list({ limit: 1e3 });
+      const now = Date.now();
+      return bans.filter((ban) => new Date(ban.expiresAt).getTime() > now);
+    } catch (err) {
+      console.error("[Failban] Failed to list bans:", err.message);
+      return [];
+    }
+  }
+  /**
+   * Get statistics
+   */
+  async getStats() {
+    const activeBans = await this.listBans();
+    let totalViolations = 0;
+    if (this.violationsResource) {
+      try {
+        const violations = await this.violationsResource.list({ limit: 1e4 });
+        totalViolations = violations.length;
+      } catch (err) {
+        console.error("[Failban] Failed to count violations:", err.message);
+      }
+    }
+    return {
+      enabled: this.options.enabled,
+      activeBans: activeBans.length,
+      cachedBans: this.memoryCache.size,
+      totalViolations,
+      whitelistedIPs: this.options.whitelist.length,
+      blacklistedIPs: this.options.blacklist.length,
+      geo: {
+        enabled: this.options.geo.enabled,
+        allowedCountries: this.options.geo.allowedCountries.length,
+        blockedCountries: this.options.geo.blockedCountries.length,
+        blockUnknown: this.options.geo.blockUnknown
+      },
+      config: {
+        maxViolations: this.options.maxViolations,
+        violationWindow: this.options.violationWindow,
+        banDuration: this.options.banDuration
+      }
+    };
+  }
+  /**
+   * Cleanup
+   */
+  async cleanup() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+    this.memoryCache.clear();
+    this.geoCache.clear();
+    if (this.geoReader) {
+      this.geoReader = null;
+    }
+    if (this.options.verbose) {
+      console.log("[Failban] Cleaned up");
+    }
+  }
+}
+
+var failbanManager = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  FailbanManager: FailbanManager
+});
+
+function patternToRegex$1(pattern) {
+  let escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+  escaped = escaped.replace(/\*\*/g, "__DOUBLE_STAR__");
+  escaped = escaped.replace(/\*/g, "([^/]+)");
+  escaped = escaped.replace(/__DOUBLE_STAR__/g, "(.*)");
+  return new RegExp(`^${escaped}$`);
+}
+function matchPath$1(pattern, path) {
+  const regex = patternToRegex$1(pattern);
+  return regex.test(path);
+}
+function calculateSpecificity$1(pattern) {
+  const segments = pattern.split("/").filter((s) => s !== "");
+  let score = 0;
+  for (const segment of segments) {
+    if (segment === "**") {
+      score += 10;
+    } else if (segment === "*") {
+      score += 100;
+    } else {
+      score += 1e3;
+    }
+  }
+  return score;
+}
+function findBestMatch(rules, path) {
+  if (!rules || rules.length === 0) {
+    return null;
+  }
+  const matches = rules.map((rule) => ({
+    rule,
+    specificity: calculateSpecificity$1(rule.pattern)
+  })).filter(({ rule }) => matchPath$1(rule.pattern, path)).sort((a, b) => b.specificity - a.specificity);
+  return matches.length > 0 ? matches[0].rule : null;
+}
+function validatePathAuth(pathAuth) {
+  if (!Array.isArray(pathAuth)) {
+    throw new Error("pathAuth must be an array of rules");
+  }
+  for (const [index, rule] of pathAuth.entries()) {
+    if (!rule.pattern || typeof rule.pattern !== "string") {
+      throw new Error(`pathAuth[${index}]: pattern is required and must be a string`);
+    }
+    if (!rule.pattern.startsWith("/")) {
+      throw new Error(`pathAuth[${index}]: pattern must start with / (got: ${rule.pattern})`);
+    }
+    if (rule.drivers !== void 0 && !Array.isArray(rule.drivers)) {
+      throw new Error(`pathAuth[${index}]: drivers must be an array (got: ${typeof rule.drivers})`);
+    }
+    if (rule.required !== void 0 && typeof rule.required !== "boolean") {
+      throw new Error(`pathAuth[${index}]: required must be a boolean (got: ${typeof rule.required})`);
+    }
+    const validDrivers = ["jwt", "apiKey", "basic", "oauth2", "oidc"];
+    if (rule.drivers) {
+      for (const driver of rule.drivers) {
+        if (!validDrivers.includes(driver)) {
+          throw new Error(
+            `pathAuth[${index}]: invalid driver '${driver}'. Valid drivers: ${validDrivers.join(", ")}`
+          );
+        }
+      }
+    }
+  }
+}
+
+class ApiEventEmitter extends EventEmitter.EventEmitter {
+  constructor(options = {}) {
+    super();
+    this.options = {
+      enabled: options.enabled !== false,
+      // Enabled by default
+      verbose: options.verbose || false,
+      maxListeners: options.maxListeners || 10
+    };
+    this.setMaxListeners(this.options.maxListeners);
+  }
+  /**
+   * Emit event with wildcard support
+   * @param {string} event - Event name
+   * @param {Object} data - Event data
+   */
+  emit(event, data = {}) {
+    if (!this.options.enabled) {
+      return false;
+    }
+    if (this.options.verbose) {
+      console.log(`[API Events] ${event}`, data);
+    }
+    super.emit(event, { event, ...data, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    if (event.includes(":")) {
+      const [prefix] = event.split(":");
+      const wildcardEvent = `${prefix}:*`;
+      super.emit(wildcardEvent, { event, ...data, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    }
+    return true;
+  }
+  /**
+   * Helper to emit user events
+   * @param {string} action - created, login, updated, deleted
+   * @param {Object} data - Event data
+   */
+  emitUserEvent(action, data) {
+    this.emit(`user:${action}`, data);
+  }
+  /**
+   * Helper to emit auth events
+   * @param {string} action - success, failure
+   * @param {Object} data - Event data
+   */
+  emitAuthEvent(action, data) {
+    this.emit(`auth:${action}`, data);
+  }
+  /**
+   * Helper to emit resource events
+   * @param {string} action - created, updated, deleted
+   * @param {Object} data - Event data
+   */
+  emitResourceEvent(action, data) {
+    this.emit(`resource:${action}`, data);
+  }
+  /**
+   * Helper to emit request events
+   * @param {string} action - start, end, error
+   * @param {Object} data - Event data
+   */
+  emitRequestEvent(action, data) {
+    this.emit(`request:${action}`, data);
+  }
+  /**
+   * Get event statistics
+   * @returns {Object} Event statistics
+   */
+  getStats() {
+    const stats = {
+      enabled: this.options.enabled,
+      maxListeners: this.options.maxListeners,
+      listeners: {}
+    };
+    for (const event of this.eventNames()) {
+      stats.listeners[event] = this.listenerCount(event);
+    }
+    return stats;
+  }
+}
+
+class MetricsCollector {
+  constructor(options = {}) {
+    this.options = {
+      enabled: options.enabled !== false,
+      // Enabled by default
+      verbose: options.verbose || false,
+      maxPathsTracked: options.maxPathsTracked || 100,
+      // Limit memory usage
+      resetInterval: options.resetInterval || 3e5
+      // Reset every 5 minutes
+    };
+    this.metrics = this._createEmptyMetrics();
+    this.startTime = Date.now();
+    if (this.options.resetInterval > 0) {
+      this.resetTimer = setInterval(() => {
+        if (this.options.verbose) {
+          console.log("[Metrics] Auto-resetting metrics");
+        }
+        this.reset();
+      }, this.options.resetInterval);
+    }
+  }
+  /**
+   * Create empty metrics structure
+   * @private
+   */
+  _createEmptyMetrics() {
+    return {
+      requests: {
+        total: 0,
+        byMethod: {},
+        byStatus: {},
+        byPath: {},
+        durations: []
+      },
+      auth: {
+        success: 0,
+        failure: 0,
+        byMethod: {}
+      },
+      resources: {
+        created: 0,
+        updated: 0,
+        deleted: 0,
+        byResource: {}
+      },
+      users: {
+        logins: 0,
+        newUsers: 0
+      },
+      errors: {
+        total: 0,
+        byType: {}
+      }
+    };
+  }
+  /**
+   * Record request metrics
+   * @param {Object} data - Request data
+   */
+  recordRequest({ method, path, status, duration }) {
+    if (!this.options.enabled) return;
+    const metrics = this.metrics.requests;
+    metrics.total++;
+    metrics.byMethod[method] = (metrics.byMethod[method] || 0) + 1;
+    const statusGroup = `${Math.floor(status / 100)}xx`;
+    metrics.byStatus[statusGroup] = (metrics.byStatus[statusGroup] || 0) + 1;
+    if (Object.keys(metrics.byPath).length < this.options.maxPathsTracked || metrics.byPath[path]) {
+      if (!metrics.byPath[path]) {
+        metrics.byPath[path] = { count: 0, totalDuration: 0, errors: 0 };
+      }
+      metrics.byPath[path].count++;
+      metrics.byPath[path].totalDuration += duration;
+      if (status >= 400) {
+        metrics.byPath[path].errors++;
+      }
+    }
+    metrics.durations.push(duration);
+    if (metrics.durations.length > 1e3) {
+      metrics.durations.shift();
+    }
+    if (this.options.verbose) {
+      console.log(`[Metrics] Request: ${method} ${path} ${status} (${duration}ms)`);
+    }
+  }
+  /**
+   * Record auth metrics
+   * @param {Object} data - Auth data
+   */
+  recordAuth({ success, method }) {
+    if (!this.options.enabled) return;
+    const metrics = this.metrics.auth;
+    if (success) {
+      metrics.success++;
+    } else {
+      metrics.failure++;
+    }
+    if (!metrics.byMethod[method]) {
+      metrics.byMethod[method] = { success: 0, failure: 0 };
+    }
+    if (success) {
+      metrics.byMethod[method].success++;
+    } else {
+      metrics.byMethod[method].failure++;
+    }
+    if (this.options.verbose) {
+      console.log(`[Metrics] Auth: ${method} ${success ? "success" : "failure"}`);
+    }
+  }
+  /**
+   * Record resource operation metrics
+   * @param {Object} data - Resource operation data
+   */
+  recordResourceOperation({ action, resource }) {
+    if (!this.options.enabled) return;
+    const metrics = this.metrics.resources;
+    if (action === "created") metrics.created++;
+    else if (action === "updated") metrics.updated++;
+    else if (action === "deleted") metrics.deleted++;
+    if (!metrics.byResource[resource]) {
+      metrics.byResource[resource] = { created: 0, updated: 0, deleted: 0 };
+    }
+    metrics.byResource[resource][action]++;
+    if (this.options.verbose) {
+      console.log(`[Metrics] Resource: ${resource} ${action}`);
+    }
+  }
+  /**
+   * Record user event metrics
+   * @param {Object} data - User event data
+   */
+  recordUserEvent({ action }) {
+    if (!this.options.enabled) return;
+    const metrics = this.metrics.users;
+    if (action === "login") {
+      metrics.logins++;
+    } else if (action === "created") {
+      metrics.newUsers++;
+    }
+    if (this.options.verbose) {
+      console.log(`[Metrics] User: ${action}`);
+    }
+  }
+  /**
+   * Record error metrics
+   * @param {Object} data - Error data
+   */
+  recordError({ error, type = "unknown" }) {
+    if (!this.options.enabled) return;
+    const metrics = this.metrics.errors;
+    metrics.total++;
+    metrics.byType[type] = (metrics.byType[type] || 0) + 1;
+    if (this.options.verbose) {
+      console.log(`[Metrics] Error: ${type} - ${error}`);
+    }
+  }
+  /**
+   * Calculate percentile from sorted array
+   * @private
+   */
+  _percentile(arr, p) {
+    if (arr.length === 0) return 0;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const index = Math.ceil(p / 100 * sorted.length) - 1;
+    return sorted[Math.max(0, index)];
+  }
+  /**
+   * Get metrics summary
+   * @returns {Object} Metrics summary
+   */
+  getSummary() {
+    const uptime = Date.now() - this.startTime;
+    return {
+      uptime: {
+        milliseconds: uptime,
+        seconds: Math.floor(uptime / 1e3),
+        formatted: this._formatDuration(uptime)
+      },
+      requests: {
+        total: this.metrics.requests.total,
+        rps: (this.metrics.requests.total / (uptime / 1e3)).toFixed(2),
+        byMethod: this.metrics.requests.byMethod,
+        byStatus: this.metrics.requests.byStatus,
+        topPaths: this._getTopPaths(),
+        duration: {
+          p50: this._percentile(this.metrics.requests.durations, 50),
+          p95: this._percentile(this.metrics.requests.durations, 95),
+          p99: this._percentile(this.metrics.requests.durations, 99),
+          avg: this.metrics.requests.durations.length > 0 ? (this.metrics.requests.durations.reduce((a, b) => a + b, 0) / this.metrics.requests.durations.length).toFixed(2) : 0
+        }
+      },
+      auth: {
+        total: this.metrics.auth.success + this.metrics.auth.failure,
+        success: this.metrics.auth.success,
+        failure: this.metrics.auth.failure,
+        successRate: this._calculateRate(this.metrics.auth.success, this.metrics.auth.success + this.metrics.auth.failure),
+        byMethod: this.metrics.auth.byMethod
+      },
+      resources: {
+        total: this.metrics.resources.created + this.metrics.resources.updated + this.metrics.resources.deleted,
+        created: this.metrics.resources.created,
+        updated: this.metrics.resources.updated,
+        deleted: this.metrics.resources.deleted,
+        byResource: this.metrics.resources.byResource
+      },
+      users: this.metrics.users,
+      errors: {
+        total: this.metrics.errors.total,
+        rate: this._calculateRate(this.metrics.errors.total, this.metrics.requests.total),
+        byType: this.metrics.errors.byType
+      }
+    };
+  }
+  /**
+   * Get top paths by request count
+   * @private
+   */
+  _getTopPaths(limit = 10) {
+    return Object.entries(this.metrics.requests.byPath).map(([path, data]) => ({
+      path,
+      count: data.count,
+      avgDuration: (data.totalDuration / data.count).toFixed(2),
+      errors: data.errors,
+      errorRate: this._calculateRate(data.errors, data.count)
+    })).sort((a, b) => b.count - a.count).slice(0, limit);
+  }
+  /**
+   * Calculate rate as percentage
+   * @private
+   */
+  _calculateRate(numerator, denominator) {
+    if (denominator === 0) return "0.00%";
+    return (numerator / denominator * 100).toFixed(2) + "%";
+  }
+  /**
+   * Format duration in human-readable form
+   * @private
+   */
+  _formatDuration(ms) {
+    const seconds = Math.floor(ms / 1e3);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+    return `${seconds}s`;
+  }
+  /**
+   * Reset metrics
+   */
+  reset() {
+    this.metrics = this._createEmptyMetrics();
+    this.startTime = Date.now();
+  }
+  /**
+   * Stop metrics collection and cleanup
+   */
+  stop() {
+    if (this.resetTimer) {
+      clearInterval(this.resetTimer);
+      this.resetTimer = null;
+    }
+  }
+}
+
+function createRequestIdMiddleware(config = {}) {
+  const {
+    headerName = "X-Request-ID",
+    generator = () => idGenerator(),
+    includeInResponse = true,
+    includeInLogs = true
+    // Reserved for future use
+  } = config;
+  return async (c, next) => {
+    let requestId = c.req.header(headerName);
+    if (!requestId) {
+      requestId = generator();
+    }
+    c.set("requestId", requestId);
+    await next();
+    if (includeInResponse) {
+      c.header(headerName, requestId);
+    }
+  };
+}
+
+function createSecurityHeadersMiddleware(config = {}) {
+  const defaults = {
+    csp: "default-src 'self'",
+    hsts: { maxAge: 31536e3, includeSubDomains: true, preload: false },
+    xFrameOptions: "DENY",
+    xContentTypeOptions: "nosniff",
+    referrerPolicy: "strict-origin-when-cross-origin",
+    xssProtection: "1; mode=block",
+    permissionsPolicy: "geolocation=(), microphone=(), camera=()"
+  };
+  const settings = {
+    ...defaults,
+    ...config.headers || {}
+  };
+  if (config.headers?.hsts && typeof config.headers.hsts === "object") {
+    settings.hsts = {
+      ...defaults.hsts,
+      ...config.headers.hsts
+    };
+  }
+  return async (c, next) => {
+    if (settings.csp) {
+      c.header("Content-Security-Policy", settings.csp);
+    }
+    if (settings.hsts) {
+      const hsts = settings.hsts;
+      let hstsValue = `max-age=${hsts.maxAge}`;
+      if (hsts.includeSubDomains) {
+        hstsValue += "; includeSubDomains";
+      }
+      if (hsts.preload) {
+        hstsValue += "; preload";
+      }
+      c.header("Strict-Transport-Security", hstsValue);
+    }
+    if (settings.xFrameOptions) {
+      c.header("X-Frame-Options", settings.xFrameOptions);
+    }
+    if (settings.xContentTypeOptions) {
+      c.header("X-Content-Type-Options", settings.xContentTypeOptions);
+    }
+    if (settings.referrerPolicy) {
+      c.header("Referrer-Policy", settings.referrerPolicy);
+    }
+    if (settings.xssProtection) {
+      c.header("X-XSS-Protection", settings.xssProtection);
+    }
+    if (settings.permissionsPolicy) {
+      c.header("Permissions-Policy", settings.permissionsPolicy);
+    }
+    await next();
+  };
+}
+
+function createSessionTrackingMiddleware(config = {}, db) {
+  const {
+    enabled = false,
+    resource = null,
+    cookieName = "session_id",
+    cookieMaxAge = 2592e6,
+    // 30 days
+    cookieSecure = process.env.NODE_ENV === "production",
+    cookieSameSite = "Strict",
+    updateOnRequest = true,
+    passphrase = null,
+    enrichSession = null
+  } = config;
+  if (!enabled) {
+    return async (c, next) => await next();
+  }
+  if (!passphrase) {
+    throw new Error("sessionTracking.passphrase is required when sessionTracking.enabled = true");
+  }
+  const sessionsResource = resource && db ? db.resources[resource] : null;
+  return async (c, next) => {
+    let session = null;
+    let sessionId = null;
+    let isNewSession = false;
+    const sessionCookie = c.req.cookie(cookieName);
+    if (sessionCookie) {
+      try {
+        sessionId = await decrypt(sessionCookie, passphrase);
+        if (sessionsResource) {
+          const exists = await sessionsResource.exists(sessionId);
+          if (exists) {
+            session = await sessionsResource.get(sessionId);
+          }
+        } else {
+          session = { id: sessionId };
+        }
+      } catch (err) {
+        console.error("[SessionTracking] Failed to decrypt cookie:", err.message);
+      }
+    }
+    if (!session) {
+      isNewSession = true;
+      sessionId = idGenerator();
+      const sessionData = {
+        id: sessionId,
+        userAgent: c.req.header("user-agent") || null,
+        ip: c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || null,
+        referer: c.req.header("referer") || null,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        lastSeenAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      if (enrichSession && typeof enrichSession === "function") {
+        try {
+          const enriched = await enrichSession({ session: sessionData, context: c });
+          if (enriched && typeof enriched === "object") {
+            Object.assign(sessionData, enriched);
+          }
+        } catch (enrichErr) {
+          console.error("[SessionTracking] enrichSession failed:", enrichErr.message);
+        }
+      }
+      if (sessionsResource) {
+        try {
+          session = await sessionsResource.insert(sessionData);
+        } catch (insertErr) {
+          console.error("[SessionTracking] Failed to insert session:", insertErr.message);
+          session = sessionData;
+        }
+      } else {
+        session = sessionData;
+      }
+    } else if (updateOnRequest && !isNewSession && sessionsResource) {
+      const updates = {
+        lastSeenAt: (/* @__PURE__ */ new Date()).toISOString(),
+        lastUserAgent: c.req.header("user-agent") || null,
+        lastIp: c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || null
+      };
+      sessionsResource.update(sessionId, updates).catch((updateErr) => {
+        console.error("[SessionTracking] Failed to update session:", updateErr.message);
+      });
+      Object.assign(session, updates);
+    }
+    try {
+      const encryptedSessionId = await encrypt(sessionId, passphrase);
+      c.header(
+        "Set-Cookie",
+        `${cookieName}=${encryptedSessionId}; Max-Age=${Math.floor(cookieMaxAge / 1e3)}; Path=/; HttpOnly; ` + (cookieSecure ? "Secure; " : "") + `SameSite=${cookieSameSite}`
+      );
+    } catch (encryptErr) {
+      console.error("[SessionTracking] Failed to encrypt session ID:", encryptErr.message);
+    }
+    c.set("sessionId", sessionId);
+    c.set("session", session);
+    await next();
+  };
+}
+
+function createFailbanMiddleware(config = {}) {
+  const {
+    plugin,
+    events = null,
+    handler = null
+  } = config;
+  if (!plugin || !plugin.options.enabled) {
+    return async (c, next) => await next();
+  }
+  return async (c, next) => {
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
+    if (plugin.isBlacklisted(ip)) {
+      c.header("X-Ban-Status", "blacklisted");
+      c.header("X-Ban-Reason", "IP is permanently blacklisted");
+      if (handler) {
+        return handler(c, { ip, reason: "blacklisted", permanent: true });
+      }
+      return c.json({
+        error: "Forbidden",
+        message: "Your IP address has been permanently blocked",
+        ip
+      }, 403);
+    }
+    const countryBlock = plugin.checkCountryBlock(ip);
+    if (countryBlock) {
+      c.header("X-Ban-Status", "country_blocked");
+      c.header("X-Ban-Reason", countryBlock.reason);
+      c.header("X-Country-Code", countryBlock.country);
+      if (events) {
+        events.emit("security:country_blocked", {
+          ip,
+          country: countryBlock.country,
+          reason: countryBlock.reason,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      if (handler) {
+        return handler(c, countryBlock);
+      }
+      return c.json({
+        error: "Forbidden",
+        message: "Access from your country is not allowed",
+        country: countryBlock.country,
+        ip
+      }, 403);
+    }
+    if (plugin.isBanned(ip)) {
+      const ban = await plugin.getBan(ip);
+      if (ban) {
+        const expiresAt = new Date(ban.expiresAt);
+        const retryAfter = Math.ceil((expiresAt.getTime() - Date.now()) / 1e3);
+        c.header("Retry-After", String(retryAfter));
+        c.header("X-Ban-Status", "banned");
+        c.header("X-Ban-Reason", ban.reason);
+        c.header("X-Ban-Expires", ban.expiresAt);
+        if (handler) {
+          return handler(c, { ip, ban, retryAfter });
+        }
+        return c.json({
+          error: "Forbidden",
+          message: "Your IP address has been temporarily banned due to security violations",
+          reason: ban.reason,
+          expiresAt: ban.expiresAt,
+          retryAfter
+        }, 403);
+      }
+    }
+    await next();
+  };
+}
+function setupFailbanViolationListener(config = {}) {
+  const { plugin, events } = config;
+  if (!plugin || !plugin.options.enabled || !events) {
+    return;
+  }
+  events.on("auth:failure", (data) => {
+    const ip = data.ip || "unknown";
+    plugin.recordViolation(ip, "auth_failure", {
+      path: data.path,
+      allowedMethods: data.allowedMethods
+    });
+  });
+  events.on("request:error", (data) => {
+    const ip = data.ip || "unknown";
+    if (data.status && data.status >= 400 && data.status < 500) {
+      plugin.recordViolation(ip, "request_error", {
+        path: data.path,
+        error: data.error,
+        userAgent: data.userAgent
+      });
+    }
+  });
+  if (plugin.options.verbose) {
+    console.log("[Failban] Violation listeners configured");
+  }
+}
+function createFailbanAdminRoutes(Hono, plugin) {
+  const app = new Hono();
+  app.get("/bans", async (c) => {
+    try {
+      const bans = await plugin.listBans();
+      return c.json({
+        success: true,
+        data: bans,
+        meta: { count: bans.length }
+      });
+    } catch (err) {
+      return c.json({
+        success: false,
+        error: err.message
+      }, 500);
+    }
+  });
+  app.get("/bans/:ip", async (c) => {
+    const ip = c.req.param("ip");
+    try {
+      const ban = await plugin.getBan(ip);
+      if (!ban) {
+        return c.json({
+          success: false,
+          error: "Ban not found"
+        }, 404);
+      }
+      return c.json({
+        success: true,
+        data: ban
+      });
+    } catch (err) {
+      return c.json({
+        success: false,
+        error: err.message
+      }, 500);
+    }
+  });
+  app.post("/bans", async (c) => {
+    try {
+      const { ip, reason, duration } = await c.req.json();
+      if (!ip) {
+        return c.json({
+          success: false,
+          error: "IP address is required"
+        }, 400);
+      }
+      const originalDuration = plugin.options.banDuration;
+      if (duration) {
+        plugin.options.banDuration = duration;
+      }
+      await plugin.ban(ip, reason || "Manual ban by admin");
+      if (duration) {
+        plugin.options.banDuration = originalDuration;
+      }
+      return c.json({
+        success: true,
+        message: `IP ${ip} has been banned`
+      });
+    } catch (err) {
+      return c.json({
+        success: false,
+        error: err.message
+      }, 500);
+    }
+  });
+  app.delete("/bans/:ip", async (c) => {
+    const ip = c.req.param("ip");
+    try {
+      const result = await plugin.unban(ip);
+      if (!result) {
+        return c.json({
+          success: false,
+          error: "Failed to unban IP"
+        }, 500);
+      }
+      return c.json({
+        success: true,
+        message: `IP ${ip} has been unbanned`
+      });
+    } catch (err) {
+      return c.json({
+        success: false,
+        error: err.message
+      }, 500);
+    }
+  });
+  app.get("/stats", async (c) => {
+    try {
+      const stats = await plugin.getStats();
+      return c.json({
+        success: true,
+        data: stats
+      });
+    } catch (err) {
+      return c.json({
+        success: false,
+        error: err.message
+      }, 500);
+    }
+  });
+  return app;
+}
+
+async function loadEJS() {
+  try {
+    const ejs = await import('ejs');
+    return ejs.default || ejs;
+  } catch (err) {
+    throw new Error(
+      "EJS template engine not installed. Install with: npm install ejs\nEJS is a peer dependency to keep the core package lightweight."
+    );
+  }
+}
+async function loadPug() {
+  try {
+    const pug = await import('pug');
+    return pug.default || pug;
+  } catch (err) {
+    throw new Error(
+      "Pug template engine not installed. Install with: npm install pug\nPug is a peer dependency to keep the core package lightweight."
+    );
+  }
+}
+function setupTemplateEngine(options = {}) {
+  const {
+    engine = "jsx",
+    templatesDir = "./views",
+    layout = null,
+    engineOptions = {},
+    customRenderer = null
+  } = options;
+  const templatesPath = path.resolve(templatesDir);
+  return async (c, next) => {
+    c.render = async (template, data = {}, renderOptions = {}) => {
+      if (typeof template === "object" && template !== null) {
+        return c.html(template);
+      }
+      if (engine === "pug") {
+        const pug = await loadPug();
+        const templateFile = template.endsWith(".pug") ? template : `${template}.pug`;
+        const templatePath = path.join(templatesPath, templateFile);
+        if (!fs.existsSync(templatePath)) {
+          throw new Error(`Template not found: ${templatePath}`);
+        }
+        const renderData = {
+          ...data,
+          // Add helpers that Pug templates might expect
+          _url: c.req.url,
+          _path: c.req.path,
+          _method: c.req.method
+        };
+        const html = pug.renderFile(templatePath, {
+          ...renderData,
+          ...engineOptions,
+          ...renderOptions
+        });
+        return c.html(html);
+      }
+      if (engine === "ejs") {
+        const ejs = await loadEJS();
+        const templateFile = template.endsWith(".ejs") ? template : `${template}.ejs`;
+        const templatePath = path.join(templatesPath, templateFile);
+        if (!fs.existsSync(templatePath)) {
+          throw new Error(`Template not found: ${templatePath}`);
+        }
+        const templateContent = await fs$1.readFile(templatePath, "utf-8");
+        const renderData = {
+          ...data,
+          // Add helpers that EJS templates might expect
+          _url: c.req.url,
+          _path: c.req.path,
+          _method: c.req.method
+        };
+        const html = ejs.render(templateContent, renderData, {
+          filename: templatePath,
+          // For includes to work
+          ...engineOptions,
+          ...renderOptions
+        });
+        if (layout || renderOptions.layout) {
+          const layoutName = renderOptions.layout || layout;
+          const layoutFile = layoutName.endsWith(".ejs") ? layoutName : `${layoutName}.ejs`;
+          const layoutPath = path.join(templatesPath, layoutFile);
+          if (!fs.existsSync(layoutPath)) {
+            throw new Error(`Layout not found: ${layoutPath}`);
+          }
+          const layoutContent = await fs$1.readFile(layoutPath, "utf-8");
+          const wrappedHtml = ejs.render(layoutContent, {
+            ...renderData,
+            body: html
+            // Content goes into <%- body %>
+          }, {
+            filename: layoutPath,
+            ...engineOptions
+          });
+          return c.html(wrappedHtml);
+        }
+        return c.html(html);
+      }
+      if (engine === "custom" && customRenderer) {
+        return customRenderer(c, template, data, renderOptions);
+      }
+      throw new Error(`Unsupported template engine: ${engine}`);
+    };
+    await next();
+  };
+}
+
+class MiddlewareChain {
+  constructor({
+    requestId,
+    cors,
+    security,
+    sessionTracking,
+    middlewares,
+    templates,
+    maxBodySize,
+    failban,
+    events,
+    verbose,
+    database,
+    inFlightRequests,
+    acceptingRequests,
+    corsMiddleware
+  }) {
+    this.requestId = requestId;
+    this.cors = cors;
+    this.security = security;
+    this.sessionTracking = sessionTracking;
+    this.middlewares = middlewares || [];
+    this.templates = templates;
+    this.maxBodySize = maxBodySize;
+    this.failban = failban;
+    this.events = events;
+    this.verbose = verbose;
+    this.database = database;
+    this.inFlightRequests = inFlightRequests;
+    this.acceptingRequests = acceptingRequests;
+    this.corsMiddleware = corsMiddleware;
+  }
+  /**
+   * Apply all middlewares to Hono app in correct order
+   * @param {Hono} app - Hono application instance
+   */
+  apply(app) {
+    this.applyRequestTracking(app);
+    this.applyFailban(app);
+    this.applyRequestId(app);
+    this.applyCors(app);
+    this.applySecurity(app);
+    this.applySessionTracking(app);
+    this.applyCustomMiddlewares(app);
+    this.applyTemplates(app);
+    this.applyBodySizeLimits(app);
+  }
+  /**
+   * Apply request tracking middleware (for graceful shutdown)
+   * @private
+   */
+  applyRequestTracking(app) {
+    app.use("*", async (c, next) => {
+      if (!this.acceptingRequests()) {
+        return c.json({ error: "Server is shutting down" }, 503);
+      }
+      const requestId = Symbol("request");
+      this.inFlightRequests.add(requestId);
+      const startTime = Date.now();
+      const requestInfo = {
+        requestId: c.get("requestId") || requestId.toString(),
+        method: c.req.method,
+        path: c.req.path,
+        userAgent: c.req.header("user-agent"),
+        ip: c.req.header("x-forwarded-for") || c.req.header("x-real-ip")
+      };
+      this.events.emitRequestEvent("start", requestInfo);
+      try {
+        await next();
+        this.events.emitRequestEvent("end", {
+          ...requestInfo,
+          duration: Date.now() - startTime,
+          status: c.res.status
+        });
+      } catch (err) {
+        this.events.emitRequestEvent("error", {
+          ...requestInfo,
+          duration: Date.now() - startTime,
+          error: err.message,
+          stack: err.stack
+        });
+        throw err;
+      } finally {
+        this.inFlightRequests.delete(requestId);
+      }
+    });
+  }
+  /**
+   * Apply failban middleware
+   * @private
+   */
+  applyFailban(app) {
+    if (!this.failban) {
+      return;
+    }
+    const failbanMiddleware = createFailbanMiddleware({
+      plugin: this.failban,
+      events: this.events
+    });
+    app.use("*", failbanMiddleware);
+    setupFailbanViolationListener({
+      plugin: this.failban,
+      events: this.events
+    });
+    if (this.verbose) {
+      console.log("[MiddlewareChain] Failban protection enabled");
+    }
+  }
+  /**
+   * Apply request ID middleware
+   * @private
+   */
+  applyRequestId(app) {
+    if (!this.requestId?.enabled) {
+      app.use("*", async (c, next) => {
+        c.set("requestId", idGenerator());
+        c.set("verbose", this.verbose);
+        await next();
+      });
+      return;
+    }
+    const requestIdMiddleware = createRequestIdMiddleware(this.requestId);
+    app.use("*", requestIdMiddleware);
+    if (this.verbose) {
+      console.log(`[MiddlewareChain] Request ID tracking enabled (header: ${this.requestId.headerName || "X-Request-ID"})`);
+    }
+  }
+  /**
+   * Apply CORS middleware
+   * @private
+   */
+  applyCors(app) {
+    if (!this.cors?.enabled || !this.corsMiddleware) {
+      return;
+    }
+    const corsConfig = this.cors;
+    app.use("*", this.corsMiddleware({
+      origin: corsConfig.origin || "*",
+      allowMethods: corsConfig.allowMethods || ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: corsConfig.allowHeaders || ["Content-Type", "Authorization", "X-Request-ID"],
+      exposeHeaders: corsConfig.exposeHeaders || ["X-Request-ID"],
+      credentials: corsConfig.credentials || false,
+      maxAge: corsConfig.maxAge || 86400
+    }));
+    if (this.verbose) {
+      console.log(`[MiddlewareChain] CORS enabled (maxAge: ${corsConfig.maxAge || 86400}s, origin: ${corsConfig.origin || "*"})`);
+    }
+  }
+  /**
+   * Apply security headers middleware
+   * @private
+   */
+  applySecurity(app) {
+    if (!this.security?.enabled) {
+      return;
+    }
+    const securityMiddleware = createSecurityHeadersMiddleware(this.security);
+    app.use("*", securityMiddleware);
+    if (this.verbose) {
+      console.log("[MiddlewareChain] Security headers enabled");
+    }
+  }
+  /**
+   * Apply session tracking middleware
+   * @private
+   */
+  applySessionTracking(app) {
+    if (!this.sessionTracking?.enabled) {
+      return;
+    }
+    const sessionMiddleware = createSessionTrackingMiddleware(
+      this.sessionTracking,
+      this.database
+    );
+    app.use("*", sessionMiddleware);
+    if (this.verbose) {
+      const resource = this.sessionTracking.resource ? ` (resource: ${this.sessionTracking.resource})` : " (in-memory)";
+      console.log(`[MiddlewareChain] Session tracking enabled${resource}`);
+    }
+  }
+  /**
+   * Apply custom middlewares
+   * @private
+   */
+  applyCustomMiddlewares(app) {
+    this.middlewares.forEach((middleware) => {
+      app.use("*", middleware);
+    });
+    if (this.verbose && this.middlewares.length > 0) {
+      console.log(`[MiddlewareChain] Applied ${this.middlewares.length} custom middleware(s)`);
+    }
+  }
+  /**
+   * Apply template engine middleware
+   * @private
+   */
+  applyTemplates(app) {
+    if (!this.templates?.enabled) {
+      return;
+    }
+    const templateMiddleware = setupTemplateEngine(this.templates);
+    app.use("*", templateMiddleware);
+    if (this.verbose) {
+      console.log(`[MiddlewareChain] Template engine enabled: ${this.templates.engine}`);
+    }
+  }
+  /**
+   * Apply body size limits
+   * @private
+   */
+  applyBodySizeLimits(app) {
+    app.use("*", async (c, next) => {
+      const method = c.req.method;
+      if (["POST", "PUT", "PATCH"].includes(method)) {
+        const contentLength = c.req.header("content-length");
+        if (contentLength) {
+          const size = parseInt(contentLength);
+          if (size > this.maxBodySize) {
+            const response = payloadTooLarge(size, this.maxBodySize);
+            c.header("Connection", "close");
+            return c.json(response, response._status);
+          }
+        }
+      }
+      await next();
+    });
+  }
+}
+
+const errorStatusMap = {
+  "ValidationError": 400,
+  "InvalidResourceItem": 400,
+  "ResourceNotFound": 404,
+  "NoSuchKey": 404,
+  "NoSuchBucket": 404,
+  "PartitionError": 400,
+  "CryptoError": 500,
+  "SchemaError": 400,
+  "QueueError": 500,
+  "ResourceError": 500
+};
+function getStatusFromError(err) {
+  if (err.name && errorStatusMap[err.name]) {
+    return errorStatusMap[err.name];
+  }
+  if (err.constructor && err.constructor.name && errorStatusMap[err.constructor.name]) {
+    return errorStatusMap[err.constructor.name];
+  }
+  if (err.message) {
+    if (err.message.includes("not found") || err.message.includes("does not exist")) {
+      return 404;
+    }
+    if (err.message.includes("validation") || err.message.includes("invalid")) {
+      return 400;
+    }
+    if (err.message.includes("unauthorized") || err.message.includes("authentication")) {
+      return 401;
+    }
+    if (err.message.includes("forbidden") || err.message.includes("permission")) {
+      return 403;
+    }
+  }
+  return 500;
+}
+function errorHandler(err, c) {
+  const status = getStatusFromError(err);
+  const code = err.name || "INTERNAL_ERROR";
+  const details = {};
+  if (err.resource) details.resource = err.resource;
+  if (err.bucket) details.bucket = err.bucket;
+  if (err.key) details.key = err.key;
+  if (err.operation) details.operation = err.operation;
+  if (err.suggestion) details.suggestion = err.suggestion;
+  if (err.availableResources) details.availableResources = err.availableResources;
+  const response = error(err, {
+    status,
+    code,
+    details
+  });
+  if (status >= 500) {
+    console.error("[API Plugin] Error:", {
+      message: err.message,
+      code,
+      status,
+      stack: err.stack,
+      details
+    });
+  } else if (status >= 400 && status < 500 && c.get("verbose")) {
+    console.warn("[API Plugin] Client error:", {
+      message: err.message,
+      code,
+      status,
+      details
+    });
+  }
+  return c.json(response, response._status);
+}
 function asyncHandler(fn) {
   return async (c) => {
     try {
       return await fn(c);
     } catch (err) {
-      return errorHandler$1(err, c);
+      return errorHandler(err, c);
     }
   };
 }
@@ -3928,7 +6539,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
             return result;
           }
           if (result !== void 0 && result !== null) {
-            return c.json(success$1(result));
+            return c.json(success(result));
           }
           return c.json(noContent(), 204);
         }));
@@ -4012,7 +6623,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
         const response2 = notFound(resourceName, id);
         return c.json(response2, response2._status);
       }
-      const response = success$1(item);
+      const response = success(item);
       return c.json(response, response._status);
     }));
   }
@@ -4053,7 +6664,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
           user: c.get("user")
         });
       }
-      const response = success$1(updated);
+      const response = success(updated);
       return c.json(response, response._status);
     }));
   }
@@ -4078,7 +6689,7 @@ function createResourceRoutes(resource, version, config = {}, Hono) {
           user: c.get("user")
         });
       }
-      const response = success$1(updated);
+      const response = success(updated);
       return c.json(response, response._status);
     }));
   }
@@ -4211,7 +6822,7 @@ function createRelationalRoutes(sourceResource, relationName, relationConfig, ve
       c.header("X-Page-Count", Math.ceil(items.length / limit).toString());
       return c.json(response, response._status);
     } else {
-      const response = success$1(relatedData);
+      const response = success(relatedData);
       return c.json(response, response._status);
     }
   }));
@@ -4493,7 +7104,7 @@ function createAuthRoutes(authResource, config = {}) {
       const queryFilter = { [usernameField]: username };
       const existing = await authResource.query(queryFilter);
       if (existing && existing.length > 0) {
-        const response2 = error$1(`${usernameField} already exists`, {
+        const response2 = error(`${usernameField} already exists`, {
           status: 409,
           code: "CONFLICT"
         });
@@ -4562,7 +7173,7 @@ function createAuthRoutes(authResource, config = {}) {
           const throttleResult = registerFailedAttempt(throttleRecord2, now2);
           if (throttleResult.blocked) {
             c.header("Retry-After", throttleResult.retryAfter.toString());
-            const response3 = error$1("Too many login attempts. Try again later.", {
+            const response3 = error("Too many login attempts. Try again later.", {
               status: 429,
               code: "TOO_MANY_ATTEMPTS",
               details: { retryAfter: throttleResult.retryAfter }
@@ -4588,7 +7199,7 @@ function createAuthRoutes(authResource, config = {}) {
         if (throttleRecord && throttleRecord.blockedUntil && now < throttleRecord.blockedUntil) {
           const retryAfter = Math.ceil((throttleRecord.blockedUntil - now) / 1e3);
           c.header("Retry-After", retryAfter.toString());
-          const response2 = error$1("Too many login attempts. Try again later.", {
+          const response2 = error("Too many login attempts. Try again later.", {
             status: 429,
             code: "TOO_MANY_ATTEMPTS",
             details: { retryAfter }
@@ -4613,7 +7224,7 @@ function createAuthRoutes(authResource, config = {}) {
         const throttleResult = registerFailedAttempt(throttleRecord, now);
         if (throttleResult.blocked) {
           c.header("Retry-After", throttleResult.retryAfter.toString());
-          const response3 = error$1("Too many login attempts. Try again later.", {
+          const response3 = error("Too many login attempts. Try again later.", {
             status: 429,
             code: "TOO_MANY_ATTEMPTS",
             details: { retryAfter: throttleResult.retryAfter }
@@ -4643,7 +7254,7 @@ function createAuthRoutes(authResource, config = {}) {
       if (loginThrottleConfig.enabled && throttleKey) {
         loginAttempts.delete(throttleKey);
       }
-      const response = success$1({
+      const response = success({
         user: buildPublicUser(user),
         token,
         expiresIn: jwtExpiresIn
@@ -4663,7 +7274,7 @@ function createAuthRoutes(authResource, config = {}) {
         jwtSecret,
         jwtExpiresIn
       );
-      const response = success$1({
+      const response = success({
         token,
         expiresIn: jwtExpiresIn
       });
@@ -4676,7 +7287,7 @@ function createAuthRoutes(authResource, config = {}) {
       const response2 = unauthorized("Authentication required");
       return c.json(response2, response2._status);
     }
-    const response = success$1(buildPublicUser(user));
+    const response = success(buildPublicUser(user));
     return c.json(response, response._status);
   }));
   app.post("/api-key/regenerate", asyncHandler(async (c) => {
@@ -4689,7 +7300,7 @@ function createAuthRoutes(authResource, config = {}) {
     await authResource.update(user.id, {
       apiKey: newApiKey
     });
-    const response = success$1({
+    const response = success({
       apiKey: newApiKey,
       message: "API key regenerated successfully"
     });
@@ -5192,116 +7803,845 @@ function mountCustomRoutes(app, routes, context = {}, verbose = false, options =
   }
 }
 
-function success(data, options = {}) {
-  const { status = 200, meta = {} } = options;
-  return {
-    success: true,
-    data,
-    meta: {
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      ...meta
-    },
-    _status: status
-  };
+const MIME_TYPES = {
+  // Text
+  "txt": "text/plain",
+  "html": "text/html",
+  "htm": "text/html",
+  "css": "text/css",
+  "js": "text/javascript",
+  "mjs": "text/javascript",
+  "json": "application/json",
+  "xml": "application/xml",
+  "csv": "text/csv",
+  "md": "text/markdown",
+  // Images
+  "jpg": "image/jpeg",
+  "jpeg": "image/jpeg",
+  "png": "image/png",
+  "gif": "image/gif",
+  "webp": "image/webp",
+  "svg": "image/svg+xml",
+  "ico": "image/x-icon",
+  "bmp": "image/bmp",
+  "tiff": "image/tiff",
+  "tif": "image/tiff",
+  // Audio
+  "mp3": "audio/mpeg",
+  "wav": "audio/wav",
+  "ogg": "audio/ogg",
+  "flac": "audio/flac",
+  "m4a": "audio/mp4",
+  // Video
+  "mp4": "video/mp4",
+  "webm": "video/webm",
+  "ogv": "video/ogg",
+  "avi": "video/x-msvideo",
+  "mov": "video/quicktime",
+  "mkv": "video/x-matroska",
+  // Documents
+  "pdf": "application/pdf",
+  "doc": "application/msword",
+  "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "xls": "application/vnd.ms-excel",
+  "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "ppt": "application/vnd.ms-powerpoint",
+  "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // Archives
+  "zip": "application/zip",
+  "tar": "application/x-tar",
+  "gz": "application/gzip",
+  "bz2": "application/x-bzip2",
+  "7z": "application/x-7z-compressed",
+  "rar": "application/vnd.rar",
+  // Fonts
+  "ttf": "font/ttf",
+  "otf": "font/otf",
+  "woff": "font/woff",
+  "woff2": "font/woff2",
+  "eot": "application/vnd.ms-fontobject",
+  // Application
+  "wasm": "application/wasm",
+  "bin": "application/octet-stream"
+};
+function getMimeType(filename) {
+  if (!filename || typeof filename !== "string") {
+    return "application/octet-stream";
+  }
+  const ext = filename.split(".").pop().toLowerCase();
+  return MIME_TYPES[ext] || "application/octet-stream";
 }
-function error(error2, options = {}) {
-  const { status = 500, code = "INTERNAL_ERROR", details = {} } = options;
-  const errorMessage = error2 instanceof Error ? error2.message : error2;
-  const errorStack = error2 instanceof Error && process.env.NODE_ENV !== "production" ? error2.stack : void 0;
-  return {
-    success: false,
-    error: {
-      message: errorMessage,
-      code,
-      details,
-      stack: errorStack
-    },
-    meta: {
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    },
-    _status: status
-  };
+function getCharset(mimeType) {
+  if (!mimeType) return null;
+  if (mimeType.startsWith("text/")) return "utf-8";
+  if (mimeType.includes("javascript")) return "utf-8";
+  if (mimeType.includes("json")) return "utf-8";
+  if (mimeType.includes("xml")) return "utf-8";
+  return null;
 }
-function payloadTooLarge(size, limit) {
-  return error("Request payload too large", {
-    status: 413,
-    code: "PAYLOAD_TOO_LARGE",
-    details: {
-      receivedSize: size,
-      maxSize: limit,
-      receivedMB: (size / 1024 / 1024).toFixed(2),
-      maxMB: (limit / 1024 / 1024).toFixed(2)
-    }
-  });
+function getContentType(filename) {
+  const mimeType = getMimeType(filename);
+  const charset = getCharset(mimeType);
+  return charset ? `${mimeType}; charset=${charset}` : mimeType;
 }
 
-const errorStatusMap = {
-  "ValidationError": 400,
-  "InvalidResourceItem": 400,
-  "ResourceNotFound": 404,
-  "NoSuchKey": 404,
-  "NoSuchBucket": 404,
-  "PartitionError": 400,
-  "CryptoError": 500,
-  "SchemaError": 400,
-  "QueueError": 500,
-  "ResourceError": 500
-};
-function getStatusFromError(err) {
-  if (err.name && errorStatusMap[err.name]) {
-    return errorStatusMap[err.name];
+function createFilesystemHandler(config = {}) {
+  const {
+    root,
+    index = ["index.html"],
+    fallback = false,
+    maxAge = 0,
+    dotfiles = "ignore",
+    etag = true,
+    cors = false
+  } = config;
+  if (!root) {
+    throw new Error('Filesystem static handler requires "root" directory');
   }
-  if (err.constructor && err.constructor.name && errorStatusMap[err.constructor.name]) {
-    return errorStatusMap[err.constructor.name];
+  const absoluteRoot = path.resolve(root);
+  let fallbackFile = null;
+  if (fallback === true) {
+    fallbackFile = index[0];
+  } else if (typeof fallback === "string") {
+    fallbackFile = fallback;
   }
-  if (err.message) {
-    if (err.message.includes("not found") || err.message.includes("does not exist")) {
-      return 404;
+  return async (c) => {
+    try {
+      let requestPath = c.req.path.replace(/^\//, "");
+      const safePath = path.normalize(requestPath).replace(/^(\.\.(\/|\\|$))+/, "");
+      const fullPath = path.join(absoluteRoot, safePath);
+      if (!fullPath.startsWith(absoluteRoot)) {
+        return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+      }
+      let stats;
+      let useFallback = false;
+      try {
+        stats = await fs$1.stat(fullPath);
+      } catch (err) {
+        if (err.code === "ENOENT" && fallbackFile) {
+          useFallback = true;
+        } else if (err.code === "ENOENT") {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        } else {
+          throw err;
+        }
+      }
+      let filePath = fullPath;
+      if (useFallback) {
+        filePath = path.join(absoluteRoot, fallbackFile);
+        try {
+          stats = await fs$1.stat(filePath);
+        } catch (err) {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        }
+      }
+      if (!useFallback && stats.isDirectory()) {
+        let indexFound = false;
+        for (const indexFile of index) {
+          const indexPath = path.join(fullPath, indexFile);
+          try {
+            const indexStats = await fs$1.stat(indexPath);
+            if (indexStats.isFile()) {
+              filePath = indexPath;
+              stats = indexStats;
+              indexFound = true;
+              break;
+            }
+          } catch (err) {
+          }
+        }
+        if (!indexFound) {
+          if (fallbackFile) {
+            filePath = path.join(absoluteRoot, fallbackFile);
+            try {
+              stats = await fs$1.stat(filePath);
+            } catch (err) {
+              return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+            }
+          } else {
+            return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+          }
+        }
+      }
+      const filename = path.basename(filePath);
+      if (filename.startsWith(".")) {
+        if (dotfiles === "deny") {
+          return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+        } else if (dotfiles === "ignore") {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        }
+      }
+      const etagValue = etag ? `"${crypto.createHash("md5").update(`${stats.mtime.getTime()}-${stats.size}`).digest("hex")}"` : null;
+      if (etagValue) {
+        const ifNoneMatch = c.req.header("If-None-Match");
+        if (ifNoneMatch === etagValue) {
+          return c.body(null, 304, {
+            "ETag": etagValue,
+            "Cache-Control": maxAge > 0 ? `public, max-age=${Math.floor(maxAge / 1e3)}` : "no-cache"
+          });
+        }
+      }
+      const contentType = getContentType(filename);
+      const headers = {
+        "Content-Type": contentType,
+        "Content-Length": stats.size.toString(),
+        "Last-Modified": stats.mtime.toUTCString()
+      };
+      if (etagValue) {
+        headers["ETag"] = etagValue;
+      }
+      if (maxAge > 0) {
+        headers["Cache-Control"] = `public, max-age=${Math.floor(maxAge / 1e3)}`;
+      } else {
+        headers["Cache-Control"] = "no-cache";
+      }
+      if (cors) {
+        headers["Access-Control-Allow-Origin"] = "*";
+        headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+      }
+      const rangeHeader = c.req.header("Range");
+      if (rangeHeader) {
+        const parts = rangeHeader.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+        if (start >= stats.size || end >= stats.size) {
+          return c.body(null, 416, {
+            "Content-Range": `bytes */${stats.size}`
+          });
+        }
+        const chunkSize = end - start + 1;
+        const stream2 = fs.createReadStream(filePath, { start, end });
+        headers["Content-Range"] = `bytes ${start}-${end}/${stats.size}`;
+        headers["Content-Length"] = chunkSize.toString();
+        headers["Accept-Ranges"] = "bytes";
+        return c.body(stream2, 206, headers);
+      }
+      if (c.req.method === "HEAD") {
+        return c.body(null, 200, headers);
+      }
+      const stream = fs.createReadStream(filePath);
+      return c.body(stream, 200, headers);
+    } catch (err) {
+      console.error("[Static Filesystem] Error:", err);
+      return c.json({ success: false, error: { message: "Internal Server Error" } }, 500);
     }
-    if (err.message.includes("validation") || err.message.includes("invalid")) {
-      return 400;
-    }
-    if (err.message.includes("unauthorized") || err.message.includes("authentication")) {
-      return 401;
-    }
-    if (err.message.includes("forbidden") || err.message.includes("permission")) {
-      return 403;
-    }
-  }
-  return 500;
+  };
 }
-function errorHandler(err, c) {
-  const status = getStatusFromError(err);
-  const code = err.name || "INTERNAL_ERROR";
-  const details = {};
-  if (err.resource) details.resource = err.resource;
-  if (err.bucket) details.bucket = err.bucket;
-  if (err.key) details.key = err.key;
-  if (err.operation) details.operation = err.operation;
-  if (err.suggestion) details.suggestion = err.suggestion;
-  if (err.availableResources) details.availableResources = err.availableResources;
-  const response = error(err, {
-    status,
-    code,
-    details
-  });
-  if (status >= 500) {
-    console.error("[API Plugin] Error:", {
-      message: err.message,
-      code,
-      status,
-      stack: err.stack,
-      details
-    });
-  } else if (status >= 400 && status < 500 && c.get("verbose")) {
-    console.warn("[API Plugin] Client error:", {
-      message: err.message,
-      code,
-      status,
-      details
-    });
+function validateFilesystemConfig(config) {
+  if (!config.root || typeof config.root !== "string") {
+    throw new Error('Filesystem static config requires "root" directory (string)');
   }
-  return c.json(response, response._status);
+  if (config.index !== void 0 && !Array.isArray(config.index)) {
+    throw new Error('Filesystem static "index" must be an array');
+  }
+  if (config.fallback !== void 0 && typeof config.fallback !== "string" && typeof config.fallback !== "boolean") {
+    throw new Error('Filesystem static "fallback" must be a string (filename) or boolean');
+  }
+  if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
+    throw new Error('Filesystem static "maxAge" must be a number');
+  }
+  if (config.dotfiles !== void 0 && !["ignore", "allow", "deny"].includes(config.dotfiles)) {
+    throw new Error('Filesystem static "dotfiles" must be "ignore", "allow", or "deny"');
+  }
+  if (config.etag !== void 0 && typeof config.etag !== "boolean") {
+    throw new Error('Filesystem static "etag" must be a boolean');
+  }
+  if (config.cors !== void 0 && typeof config.cors !== "boolean") {
+    throw new Error('Filesystem static "cors" must be a boolean');
+  }
+}
+
+function createS3Handler(config = {}) {
+  const {
+    s3Client,
+    bucket,
+    prefix = "",
+    streaming = true,
+    signedUrlExpiry = 300,
+    maxAge = 0,
+    cacheControl,
+    contentDisposition = "inline",
+    etag = true,
+    cors = false
+  } = config;
+  if (!s3Client) {
+    throw new Error('S3 static handler requires "s3Client"');
+  }
+  if (!bucket) {
+    throw new Error('S3 static handler requires "bucket" name');
+  }
+  return async (c) => {
+    try {
+      let requestPath = c.req.path.replace(/^\//, "");
+      const key = prefix ? `${prefix}${requestPath}` : requestPath;
+      if (key.includes("..") || key.includes("//")) {
+        return c.json({ success: false, error: { message: "Forbidden" } }, 403);
+      }
+      let metadata;
+      try {
+        const headCommand = new clientS3.HeadObjectCommand({ Bucket: bucket, Key: key });
+        metadata = await s3Client.send(headCommand);
+      } catch (err) {
+        if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
+          return c.json({ success: false, error: { message: "Not Found" } }, 404);
+        }
+        throw err;
+      }
+      if (etag && metadata.ETag) {
+        const ifNoneMatch = c.req.header("If-None-Match");
+        if (ifNoneMatch === metadata.ETag) {
+          const headers2 = {
+            "ETag": metadata.ETag,
+            "Cache-Control": cacheControl || (maxAge > 0 ? `public, max-age=${Math.floor(maxAge / 1e3)}` : "no-cache")
+          };
+          if (cors) {
+            headers2["Access-Control-Allow-Origin"] = "*";
+            headers2["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+          }
+          return c.body(null, 304, headers2);
+        }
+      }
+      if (!streaming) {
+        const getCommand2 = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key });
+        const signedUrl = await s3RequestPresigner.getSignedUrl(s3Client, getCommand2, { expiresIn: signedUrlExpiry });
+        return c.redirect(signedUrl, 302);
+      }
+      const contentType = metadata.ContentType || getContentType(key);
+      const headers = {
+        "Content-Type": contentType,
+        "Content-Length": metadata.ContentLength?.toString() || "0",
+        "Last-Modified": metadata.LastModified?.toUTCString() || (/* @__PURE__ */ new Date()).toUTCString()
+      };
+      if (metadata.ETag && etag) {
+        headers["ETag"] = metadata.ETag;
+      }
+      if (cacheControl) {
+        headers["Cache-Control"] = cacheControl;
+      } else if (maxAge > 0) {
+        headers["Cache-Control"] = `public, max-age=${Math.floor(maxAge / 1e3)}`;
+      } else {
+        headers["Cache-Control"] = "no-cache";
+      }
+      if (contentDisposition) {
+        const filename = key.split("/").pop();
+        headers["Content-Disposition"] = `${contentDisposition}; filename="${filename}"`;
+      }
+      if (cors) {
+        headers["Access-Control-Allow-Origin"] = "*";
+        headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+      }
+      const rangeHeader = c.req.header("Range");
+      let getCommand;
+      if (rangeHeader) {
+        const parts = rangeHeader.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : metadata.ContentLength - 1;
+        if (start >= metadata.ContentLength || end >= metadata.ContentLength) {
+          return c.body(null, 416, {
+            "Content-Range": `bytes */${metadata.ContentLength}`
+          });
+        }
+        const range = `bytes=${start}-${end}`;
+        getCommand = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key, Range: range });
+        const chunkSize = end - start + 1;
+        headers["Content-Range"] = `bytes ${start}-${end}/${metadata.ContentLength}`;
+        headers["Content-Length"] = chunkSize.toString();
+        headers["Accept-Ranges"] = "bytes";
+        const response2 = await s3Client.send(getCommand);
+        return c.body(response2.Body, 206, headers);
+      }
+      if (c.req.method === "HEAD") {
+        return c.body(null, 200, headers);
+      }
+      getCommand = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key });
+      const response = await s3Client.send(getCommand);
+      return c.body(response.Body, 200, headers);
+    } catch (err) {
+      console.error("[Static S3] Error:", err);
+      return c.json({ success: false, error: { message: "Internal Server Error" } }, 500);
+    }
+  };
+}
+function validateS3Config(config) {
+  if (!config.bucket || typeof config.bucket !== "string") {
+    throw new Error('S3 static config requires "bucket" name (string)');
+  }
+  if (config.prefix !== void 0 && typeof config.prefix !== "string") {
+    throw new Error('S3 static "prefix" must be a string');
+  }
+  if (config.streaming !== void 0 && typeof config.streaming !== "boolean") {
+    throw new Error('S3 static "streaming" must be a boolean');
+  }
+  if (config.signedUrlExpiry !== void 0 && typeof config.signedUrlExpiry !== "number") {
+    throw new Error('S3 static "signedUrlExpiry" must be a number');
+  }
+  if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
+    throw new Error('S3 static "maxAge" must be a number');
+  }
+  if (config.cacheControl !== void 0 && typeof config.cacheControl !== "string") {
+    throw new Error('S3 static "cacheControl" must be a string');
+  }
+  if (config.contentDisposition !== void 0 && typeof config.contentDisposition !== "string") {
+    throw new Error('S3 static "contentDisposition" must be a string');
+  }
+  if (config.etag !== void 0 && typeof config.etag !== "boolean") {
+    throw new Error('S3 static "etag" must be a boolean');
+  }
+  if (config.cors !== void 0 && typeof config.cors !== "boolean") {
+    throw new Error('S3 static "cors" must be a boolean');
+  }
+}
+
+class Router {
+  constructor({ database, resources, routes, versionPrefix, auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono }) {
+    this.database = database;
+    this.resources = resources || {};
+    this.routes = routes || {};
+    this.versionPrefix = versionPrefix;
+    this.auth = auth;
+    this.staticConfigs = staticConfigs || [];
+    this.failban = failban;
+    this.metrics = metrics;
+    this.relationsPlugin = relationsPlugin;
+    this.authMiddleware = authMiddleware;
+    this.verbose = verbose;
+    this.Hono = Hono;
+  }
+  /**
+   * Mount all routes on Hono app
+   * @param {Hono} app - Hono application instance
+   * @param {Object} events - Event emitter
+   */
+  mount(app, events) {
+    this.mountStaticRoutes(app);
+    this.mountResourceRoutes(app, events);
+    this.mountAuthRoutes(app);
+    this.mountRelationalRoutes(app);
+    this.mountCustomRoutes(app);
+    this.mountAdminRoutes(app);
+  }
+  /**
+   * Mount resource routes (auto-generated CRUD)
+   * @private
+   */
+  mountResourceRoutes(app, events) {
+    const databaseResources = this.database.resources;
+    for (const [name, resource] of Object.entries(databaseResources)) {
+      const resourceConfig = this.resources[name];
+      const isPluginResource = name.startsWith("plg_");
+      if (isPluginResource && !resourceConfig) {
+        if (this.verbose) {
+          console.log(`[API Router] Skipping internal resource '${name}' (not included in config.resources)`);
+        }
+        continue;
+      }
+      if (resourceConfig?.enabled === false) {
+        if (this.verbose) {
+          console.log(`[API Router] Resource '${name}' disabled via config.resources`);
+        }
+        continue;
+      }
+      const version = resource.config?.currentVersion || resource.version || "v1";
+      let versionPrefixConfig;
+      if (resourceConfig && resourceConfig.versionPrefix !== void 0) {
+        versionPrefixConfig = resourceConfig.versionPrefix;
+      } else if (resource.config && resource.config.versionPrefix !== void 0) {
+        versionPrefixConfig = resource.config.versionPrefix;
+      } else if (this.versionPrefix !== void 0) {
+        versionPrefixConfig = this.versionPrefix;
+      } else {
+        versionPrefixConfig = false;
+      }
+      let prefix = "";
+      if (versionPrefixConfig === true) {
+        prefix = version;
+      } else if (versionPrefixConfig === false) {
+        prefix = "";
+      } else if (typeof versionPrefixConfig === "string") {
+        prefix = versionPrefixConfig;
+      }
+      const middlewares = [];
+      const authDisabled = resourceConfig?.auth === false;
+      if (this.authMiddleware && !authDisabled) {
+        middlewares.push(this.authMiddleware);
+      }
+      const extraMiddleware = resourceConfig?.customMiddleware;
+      if (extraMiddleware) {
+        const toRegister = Array.isArray(extraMiddleware) ? extraMiddleware : [extraMiddleware];
+        for (const middleware of toRegister) {
+          if (typeof middleware === "function") {
+            middlewares.push(middleware);
+          } else if (this.verbose) {
+            console.warn(`[API Router] Ignoring non-function middleware for resource '${name}'`);
+          }
+        }
+      }
+      let methods = resourceConfig?.methods || resource.config?.methods;
+      if (!Array.isArray(methods) || methods.length === 0) {
+        methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+      } else {
+        methods = methods.filter(Boolean).map((method) => typeof method === "string" ? method.toUpperCase() : method);
+      }
+      const enableValidation = resourceConfig?.validation !== void 0 ? resourceConfig.validation !== false : resource.config?.validation !== false;
+      const resourceApp = createResourceRoutes(resource, version, {
+        methods,
+        customMiddleware: middlewares,
+        enableValidation,
+        versionPrefix: prefix,
+        events
+      }, this.Hono);
+      const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
+      app.route(mountPath, resourceApp);
+      if (this.verbose) {
+        console.log(`[API Router] Mounted routes for resource '${name}' at ${mountPath}`);
+      }
+      if (resource.config?.routes) {
+        const routeContext = {
+          resource,
+          database: this.database,
+          resourceName: name,
+          version
+        };
+        mountCustomRoutes(resourceApp, resource.config.routes, routeContext, this.verbose);
+      }
+    }
+  }
+  /**
+   * Mount authentication routes
+   * @private
+   */
+  mountAuthRoutes(app) {
+    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = this.auth;
+    const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
+    if (identityPlugin) {
+      if (this.verbose) {
+        console.warn("[API Router] IdentityPlugin detected. Skipping built-in auth routes.");
+      }
+      return;
+    }
+    const jwtDriver = drivers?.find((d) => d.driver === "jwt");
+    if (!jwtDriver) {
+      return;
+    }
+    const authResource = this.database.resources[resourceName];
+    if (!authResource) {
+      console.error(`[API Router] Auth resource '${resourceName}' not found. Skipping auth routes.`);
+      return;
+    }
+    const driverConfig = jwtDriver.config || {};
+    const registrationConfig = {
+      enabled: driverConfig.allowRegistration === true || driverConfig.registration?.enabled === true || registration?.enabled === true,
+      allowedFields: Array.isArray(driverConfig.registration?.allowedFields) ? driverConfig.registration.allowedFields : Array.isArray(registration?.allowedFields) ? registration.allowedFields : [],
+      defaultRole: driverConfig.registration?.defaultRole ?? registration?.defaultRole ?? "user"
+    };
+    const driverLoginThrottle = driverConfig.loginThrottle || {};
+    const loginThrottleConfig = {
+      enabled: driverLoginThrottle.enabled ?? loginThrottle?.enabled ?? true,
+      maxAttempts: driverLoginThrottle.maxAttempts || loginThrottle?.maxAttempts || 5,
+      windowMs: driverLoginThrottle.windowMs || loginThrottle?.windowMs || 6e4,
+      blockDurationMs: driverLoginThrottle.blockDurationMs || loginThrottle?.blockDurationMs || 3e5,
+      maxEntries: driverLoginThrottle.maxEntries || loginThrottle?.maxEntries || 1e4
+    };
+    const authConfig = {
+      driver: "jwt",
+      usernameField,
+      passwordField,
+      jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
+      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
+      passphrase: driverConfig.passphrase || "secret",
+      allowRegistration: registrationConfig.enabled,
+      registration: registrationConfig,
+      loginThrottle: loginThrottleConfig
+    };
+    const authApp = createAuthRoutes(authResource, authConfig);
+    app.route("/auth", authApp);
+    if (this.verbose) {
+      console.log("[API Router] Mounted auth routes (driver: jwt) at /auth");
+    }
+  }
+  /**
+   * Mount static file serving routes
+   * @private
+   */
+  mountStaticRoutes(app) {
+    if (!this.staticConfigs || this.staticConfigs.length === 0) {
+      return;
+    }
+    if (!Array.isArray(this.staticConfigs)) {
+      throw new Error("Static config must be an array of mount points");
+    }
+    for (const [index, config] of this.staticConfigs.entries()) {
+      try {
+        if (!config.driver) {
+          throw new Error(`static[${index}]: "driver" is required (filesystem or s3)`);
+        }
+        if (!config.path) {
+          throw new Error(`static[${index}]: "path" is required (mount path)`);
+        }
+        if (!config.path.startsWith("/")) {
+          throw new Error(`static[${index}]: "path" must start with / (got: ${config.path})`);
+        }
+        const driverConfig = config.config || {};
+        let handler;
+        if (config.driver === "filesystem") {
+          validateFilesystemConfig({ ...config, ...driverConfig });
+          handler = createFilesystemHandler({
+            root: config.root,
+            index: driverConfig.index,
+            fallback: driverConfig.fallback,
+            maxAge: driverConfig.maxAge,
+            dotfiles: driverConfig.dotfiles,
+            etag: driverConfig.etag,
+            cors: driverConfig.cors
+          });
+        } else if (config.driver === "s3") {
+          validateS3Config({ ...config, ...driverConfig });
+          const s3Client = this.database?.client?.client;
+          if (!s3Client) {
+            throw new Error(`static[${index}]: S3 driver requires database with S3 client`);
+          }
+          handler = createS3Handler({
+            s3Client,
+            bucket: config.bucket,
+            prefix: config.prefix,
+            streaming: driverConfig.streaming,
+            signedUrlExpiry: driverConfig.signedUrlExpiry,
+            maxAge: driverConfig.maxAge,
+            cacheControl: driverConfig.cacheControl,
+            contentDisposition: driverConfig.contentDisposition,
+            etag: driverConfig.etag,
+            cors: driverConfig.cors
+          });
+        } else {
+          throw new Error(
+            `static[${index}]: invalid driver "${config.driver}". Valid drivers: filesystem, s3`
+          );
+        }
+        const mountPath = config.path === "/" ? "/*" : `${config.path}/*`;
+        app.get(mountPath, handler);
+        app.head(mountPath, handler);
+        if (this.verbose) {
+          console.log(
+            `[API Router] Mounted static files (${config.driver}) at ${config.path}` + (config.driver === "filesystem" ? ` -> ${config.root}` : ` -> s3://${config.bucket}/${config.prefix || ""}`)
+          );
+        }
+      } catch (err) {
+        console.error(`[API Router] Failed to setup static files for index ${index}:`, err.message);
+        throw err;
+      }
+    }
+  }
+  /**
+   * Mount relational routes (if RelationPlugin is active)
+   * @private
+   */
+  mountRelationalRoutes(app) {
+    if (!this.relationsPlugin || !this.relationsPlugin.relations) {
+      return;
+    }
+    const relations = this.relationsPlugin.relations;
+    if (this.verbose) {
+      console.log("[API Router] Setting up relational routes...");
+    }
+    for (const [resourceName, relationsDef] of Object.entries(relations)) {
+      const resource = this.database.resources[resourceName];
+      if (!resource) {
+        if (this.verbose) {
+          console.warn(`[API Router] Resource '${resourceName}' not found for relational routes`);
+        }
+        continue;
+      }
+      if (resourceName.startsWith("plg_") && !this.resources[resourceName]) {
+        continue;
+      }
+      const version = resource.config?.currentVersion || resource.version || "v1";
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        if (relationConfig.type === "belongsTo") {
+          continue;
+        }
+        const resourceConfig = this.resources[resourceName];
+        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
+        if (!exposeRelation) {
+          continue;
+        }
+        const relationalApp = createRelationalRoutes(
+          resource,
+          relationName,
+          relationConfig,
+          version,
+          this.Hono
+        );
+        app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
+        if (this.verbose) {
+          console.log(
+            `[API Router] Mounted relational route: /${version}/${resourceName}/:id/${relationName} (${relationConfig.type} -> ${relationConfig.resource})`
+          );
+        }
+      }
+    }
+  }
+  /**
+   * Mount plugin-level custom routes
+   * @private
+   */
+  mountCustomRoutes(app) {
+    if (!this.routes || Object.keys(this.routes).length === 0) {
+      return;
+    }
+    const context = {
+      database: this.database,
+      plugins: this.database?.plugins || {}
+    };
+    mountCustomRoutes(app, this.routes, context, this.verbose);
+    if (this.verbose) {
+      console.log(`[API Router] Mounted ${Object.keys(this.routes).length} plugin-level custom routes`);
+    }
+  }
+  /**
+   * Mount admin routes (failban, metrics)
+   * @private
+   */
+  mountAdminRoutes(app) {
+    if (this.metrics?.enabled) {
+      app.get("/metrics", (c) => {
+        const summary = this.metrics.getSummary();
+        const response = success$1(summary);
+        return c.json(response);
+      });
+      if (this.verbose) {
+        console.log("[API Router] Metrics endpoint enabled at /metrics");
+      }
+    }
+    if (this.failban) {
+      const failbanAdminRoutes = createFailbanAdminRoutes(this.Hono, this.failban);
+      app.route("/admin/security", failbanAdminRoutes);
+      if (this.verbose) {
+        console.log("[API Router] Failban admin endpoints enabled at /admin/security");
+      }
+    }
+  }
+}
+
+class HealthManager {
+  constructor({ database, healthConfig, verbose }) {
+    this.database = database;
+    this.healthConfig = healthConfig || {};
+    this.verbose = verbose;
+  }
+  /**
+   * Register all health endpoints on Hono app
+   * @param {Hono} app - Hono application instance
+   */
+  register(app) {
+    app.get("/health/live", (c) => this.livenessProbe(c));
+    app.get("/health/ready", (c) => this.readinessProbe(c));
+    app.get("/health", (c) => this.genericHealth(c));
+    if (this.verbose) {
+      console.log("[HealthManager] Health endpoints registered:");
+      console.log("[HealthManager]   GET /health");
+      console.log("[HealthManager]   GET /health/live");
+      console.log("[HealthManager]   GET /health/ready");
+    }
+  }
+  /**
+   * Liveness probe - checks if app is alive
+   * If this fails, Kubernetes will restart the pod
+   * @private
+   */
+  livenessProbe(c) {
+    const response = success$1({
+      status: "alive",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    return c.json(response);
+  }
+  /**
+   * Readiness probe - checks if app is ready to receive traffic
+   * If this fails, Kubernetes will remove pod from service endpoints
+   * @private
+   */
+  async readinessProbe(c) {
+    const checks = {};
+    let isHealthy = true;
+    const customChecks = this.healthConfig.readiness?.checks || [];
+    try {
+      const startTime = Date.now();
+      const isDbReady = this.database && this.database.connected && Object.keys(this.database.resources).length > 0;
+      const latency = Date.now() - startTime;
+      if (isDbReady) {
+        checks.s3db = {
+          status: "healthy",
+          latency_ms: latency,
+          resources: Object.keys(this.database.resources).length
+        };
+      } else {
+        checks.s3db = {
+          status: "unhealthy",
+          connected: this.database?.connected || false,
+          resources: Object.keys(this.database?.resources || {}).length
+        };
+        isHealthy = false;
+      }
+    } catch (err) {
+      checks.s3db = {
+        status: "unhealthy",
+        error: err.message
+      };
+      isHealthy = false;
+    }
+    for (const check of customChecks) {
+      try {
+        const startTime = Date.now();
+        const timeout = check.timeout || 5e3;
+        const result = await Promise.race([
+          check.check(),
+          new Promise(
+            (_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout)
+          )
+        ]);
+        const latency = Date.now() - startTime;
+        checks[check.name] = {
+          status: result.healthy ? "healthy" : "unhealthy",
+          latency_ms: latency,
+          ...result
+        };
+        if (!result.healthy && !check.optional) {
+          isHealthy = false;
+        }
+      } catch (err) {
+        checks[check.name] = {
+          status: "unhealthy",
+          error: err.message
+        };
+        if (!check.optional) {
+          isHealthy = false;
+        }
+      }
+    }
+    const status = isHealthy ? 200 : 503;
+    return c.json({
+      status: isHealthy ? "healthy" : "unhealthy",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      uptime: process.uptime(),
+      checks
+    }, status);
+  }
+  /**
+   * Generic health check
+   * @private
+   */
+  genericHealth(c) {
+    const response = success$1({
+      status: "ok",
+      uptime: process.uptime(),
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      checks: {
+        liveness: "/health/live",
+        readiness: "/health/ready"
+      }
+    });
+    return c.json(response);
+  }
 }
 
 function mapFieldTypeToOpenAPI(fieldType) {
@@ -6592,6 +9932,160 @@ For detailed information about each endpoint, see the sections below.`;
   return spec;
 }
 
+class OpenAPIGeneratorCached {
+  constructor({ database, options }) {
+    this.database = database;
+    this.options = options;
+    this.cache = null;
+    this.cacheKey = null;
+    if (options.verbose) {
+      console.log("[OpenAPIGenerator] Caching enabled");
+    }
+  }
+  /**
+   * Generate OpenAPI spec (with caching)
+   * @returns {Object} OpenAPI specification
+   */
+  generate() {
+    const currentKey = this.generateCacheKey();
+    if (this.cacheKey === currentKey && this.cache) {
+      if (this.options.verbose) {
+        console.log("[OpenAPIGenerator] Cache HIT (0ms)");
+      }
+      return this.cache;
+    }
+    if (this.options.verbose) {
+      const reason = !this.cache ? "initial" : "invalidated";
+      console.log(`[OpenAPIGenerator] Cache MISS (${reason})`);
+    }
+    const startTime = Date.now();
+    this.cache = generateOpenAPISpec(this.database, this.options);
+    this.cacheKey = currentKey;
+    if (this.options.verbose) {
+      const duration = Date.now() - startTime;
+      console.log(`[OpenAPIGenerator] Generated spec in ${duration}ms`);
+    }
+    return this.cache;
+  }
+  /**
+   * Generate cache key based on schema state
+   * @private
+   * @returns {string} Cache key (hash)
+   */
+  generateCacheKey() {
+    const components = {
+      // Resource names and versions
+      resources: Object.keys(this.database.resources).map((name) => {
+        const resource = this.database.resources[name];
+        return {
+          name,
+          version: resource.config?.currentVersion || resource.version || "v1",
+          // Shallow hash of attributes (type changes invalidate cache)
+          attributes: Object.keys(resource.attributes || {}).sort().join(",")
+        };
+      }),
+      // Auth configuration affects security schemes
+      auth: {
+        drivers: this.options.auth?.drivers?.map((d) => d.driver).sort() || [],
+        pathRules: this.options.auth?.pathRules?.length || 0,
+        pathAuth: !!this.options.auth?.pathAuth
+      },
+      // Resource config affects paths
+      resourceConfig: Object.keys(this.options.resources || {}).sort(),
+      // Version prefix affects URLs
+      versionPrefix: this.options.versionPrefix,
+      // API info
+      apiInfo: {
+        title: this.options.title,
+        version: this.options.version,
+        description: this.options.description
+      }
+    };
+    const hash = crypto.createHash("sha256").update(JSON.stringify(components)).digest("hex").substring(0, 16);
+    return hash;
+  }
+  /**
+   * Invalidate cache (force regeneration on next request)
+   */
+  invalidate() {
+    this.cache = null;
+    this.cacheKey = null;
+    if (this.options.verbose) {
+      console.log("[OpenAPIGenerator] Cache manually invalidated");
+    }
+  }
+  /**
+   * Get cache statistics
+   * @returns {Object} Cache stats
+   */
+  getStats() {
+    return {
+      cached: !!this.cache,
+      cacheKey: this.cacheKey,
+      size: this.cache ? JSON.stringify(this.cache).length : 0
+    };
+  }
+}
+
+class BaseAuthStrategy {
+  constructor({ drivers, authResource, oidcMiddleware, verbose }) {
+    this.drivers = drivers || [];
+    this.authResource = authResource;
+    this.oidcMiddleware = oidcMiddleware;
+    this.verbose = verbose;
+  }
+  /**
+   * Extract driver configs from drivers array
+   * @param {Array<string>} driverNames - Names of drivers to extract
+   * @returns {Object} Driver configs
+   * @protected
+   */
+  extractDriverConfigs(driverNames) {
+    const configs = {
+      jwt: {},
+      apiKey: {},
+      basic: {},
+      oauth2: {}
+    };
+    for (const driverDef of this.drivers) {
+      const driverName = driverDef.driver;
+      const driverConfig = driverDef.config || {};
+      if (driverNames && !driverNames.includes(driverName)) {
+        continue;
+      }
+      if (driverName === "oauth2-server" || driverName === "oidc") {
+        continue;
+      }
+      if (driverName === "jwt") {
+        configs.jwt = {
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d"
+        };
+      } else if (driverName === "apiKey") {
+        configs.apiKey = {
+          headerName: driverConfig.headerName || "X-API-Key"
+        };
+      } else if (driverName === "basic") {
+        configs.basic = {
+          realm: driverConfig.realm || "API Access",
+          passphrase: driverConfig.passphrase || "secret"
+        };
+      } else if (driverName === "oauth2") {
+        configs.oauth2 = driverConfig;
+      }
+    }
+    return configs;
+  }
+  /**
+   * Create auth middleware (must be implemented by subclasses)
+   * @abstract
+   * @returns {Function} Hono middleware
+   */
+  createMiddleware() {
+    throw new Error("createMiddleware() must be implemented by subclass");
+  }
+}
+
 function parseBasicAuth(authHeader) {
   if (!authHeader) {
     return null;
@@ -6886,1296 +10380,89 @@ function createAuthMiddleware(options = {}) {
   };
 }
 
-class RateLimitStore {
-  constructor(options = {}) {
-    this.store = /* @__PURE__ */ new Map();
-    this.cleanupInterval = options.cleanupInterval || 6e4;
-    this.windowMs = options.windowMs || 9e5;
-    this.cleanupTimer = setInterval(() => this.cleanup(), this.cleanupInterval);
-  }
-  /**
-   * Record an attempt
-   * @param {string} key - Rate limit key
-   * @returns {number} Current attempt count in window
-   */
-  record(key) {
-    const now = Date.now();
-    const cutoff = now - this.windowMs;
-    if (!this.store.has(key)) {
-      this.store.set(key, { attempts: [] });
-    }
-    const entry = this.store.get(key);
-    entry.attempts = entry.attempts.filter((timestamp) => timestamp > cutoff);
-    entry.attempts.push(now);
-    return entry.attempts.length;
-  }
-  /**
-   * Get current attempt count
-   * @param {string} key - Rate limit key
-   * @returns {number} Current attempt count in window
-   */
-  getCount(key) {
-    if (!this.store.has(key)) {
-      return 0;
-    }
-    const now = Date.now();
-    const cutoff = now - this.windowMs;
-    const entry = this.store.get(key);
-    entry.attempts = entry.attempts.filter((timestamp) => timestamp > cutoff);
-    return entry.attempts.length;
-  }
-  /**
-   * Reset rate limit for key
-   * @param {string} key - Rate limit key
-   */
-  reset(key) {
-    this.store.delete(key);
-  }
-  /**
-   * Get time until next allowed attempt
-   * @param {string} key - Rate limit key
-   * @returns {number} Milliseconds until next attempt allowed
-   */
-  getRetryAfter(key) {
-    if (!this.store.has(key)) {
-      return 0;
-    }
-    const entry = this.store.get(key);
-    if (entry.attempts.length === 0) {
-      return 0;
-    }
-    const oldestAttempt = entry.attempts[0];
-    const expiresAt = oldestAttempt + this.windowMs;
-    const now = Date.now();
-    return Math.max(0, expiresAt - now);
-  }
-  /**
-   * Cleanup expired entries
-   * @private
-   */
-  cleanup() {
-    const now = Date.now();
-    const cutoff = now - this.windowMs;
-    for (const [key, entry] of this.store.entries()) {
-      entry.attempts = entry.attempts.filter((timestamp) => timestamp > cutoff);
-      if (entry.attempts.length === 0) {
-        this.store.delete(key);
+class GlobalAuthStrategy extends BaseAuthStrategy {
+  createMiddleware() {
+    const methods = [];
+    const driverConfigs = this.extractDriverConfigs(null);
+    for (const driverDef of this.drivers) {
+      const driverName = driverDef.driver;
+      if (driverName === "oauth2-server" || driverName === "oidc") {
+        continue;
+      }
+      if (!methods.includes(driverName)) {
+        methods.push(driverName);
       }
     }
+    if (this.verbose) {
+      console.log(`[GlobalAuthStrategy] Using global auth with methods: ${methods.join(", ")}`);
+    }
+    return createAuthMiddleware({
+      methods,
+      jwt: driverConfigs.jwt,
+      apiKey: driverConfigs.apiKey,
+      basic: driverConfigs.basic,
+      oauth2: driverConfigs.oauth2,
+      oidc: this.oidcMiddleware || null,
+      usersResource: this.authResource,
+      optional: true
+      // Let guards handle authorization
+    });
   }
-  /**
-   * Stop cleanup timer
-   */
-  stop() {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-  }
-  /**
-   * Get statistics
-   * @returns {Object} Store statistics
-   */
-  getStats() {
-    return {
-      totalKeys: this.store.size,
-      totalAttempts: Array.from(this.store.values()).reduce(
-        (sum, entry) => sum + entry.attempts.length,
-        0
-      )
-    };
-  }
-}
-function createDriverRateLimiter(config = {}) {
-  const {
-    windowMs = 9e5,
-    // 15 minutes
-    maxAttempts = 5,
-    keyPrefix = "ratelimit",
-    keyGenerator = null,
-    skipSuccessfulRequests = false,
-    handler = null,
-    enabled = true
-  } = config;
-  if (!enabled) {
-    return async (c, next) => await next();
-  }
-  const store = new RateLimitStore({ windowMs });
-  return async (c, next) => {
-    let key;
-    if (keyGenerator && typeof keyGenerator === "function") {
-      key = await keyGenerator(c);
-    } else {
-      const ip = c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown";
-      key = `${keyPrefix}:${ip}`;
-    }
-    const currentCount = store.getCount(key);
-    if (currentCount >= maxAttempts) {
-      const retryAfter = store.getRetryAfter(key);
-      const retryAfterSeconds = Math.ceil(retryAfter / 1e3);
-      c.header("Retry-After", String(retryAfterSeconds));
-      c.header("X-RateLimit-Limit", String(maxAttempts));
-      c.header("X-RateLimit-Remaining", "0");
-      c.header("X-RateLimit-Reset", String(Date.now() + retryAfter));
-      if (handler && typeof handler === "function") {
-        return handler(c, { retryAfter: retryAfterSeconds });
-      }
-      return c.json({
-        error: "Too Many Requests",
-        message: `Rate limit exceeded. Try again in ${retryAfterSeconds} seconds.`,
-        retryAfter: retryAfterSeconds
-      }, 429);
-    }
-    if (!skipSuccessfulRequests) {
-      store.record(key);
-    }
-    const previousUser = c.get("user");
-    await next();
-    if (skipSuccessfulRequests) {
-      const currentUser = c.get("user");
-      if (!currentUser && !previousUser) {
-        store.record(key);
-      }
-    }
-    const remaining = Math.max(0, maxAttempts - store.getCount(key));
-    c.header("X-RateLimit-Limit", String(maxAttempts));
-    c.header("X-RateLimit-Remaining", String(remaining));
-  };
-}
-function createAuthDriverRateLimiter(driver, config = {}) {
-  const defaults = {
-    oidc: {
-      windowMs: 9e5,
-      // 15 minutes
-      maxAttempts: 5,
-      keyPrefix: "auth:oidc",
-      skipSuccessfulRequests: true
-    },
-    jwt: {
-      windowMs: 3e5,
-      // 5 minutes
-      maxAttempts: 20,
-      keyPrefix: "auth:jwt",
-      skipSuccessfulRequests: false
-    },
-    basic: {
-      windowMs: 9e5,
-      // 15 minutes
-      maxAttempts: 10,
-      keyPrefix: "auth:basic",
-      skipSuccessfulRequests: true
-    },
-    apikey: {
-      windowMs: 6e4,
-      // 1 minute
-      maxAttempts: 100,
-      keyPrefix: "auth:apikey",
-      skipSuccessfulRequests: false
-    }
-  };
-  const driverDefaults = defaults[driver] || defaults.basic;
-  const finalConfig = { ...driverDefaults, ...config };
-  return createDriverRateLimiter(finalConfig);
 }
 
-async function getOrCreateUser(usersResource, claims, config) {
-  const {
-    autoCreateUser = true,
-    userIdClaim = "sub",
-    fallbackIdClaims = ["email", "preferred_username"],
-    lookupFields = ["email", "preferred_username"]
-  } = config;
-  const candidateIds = [];
-  if (userIdClaim && claims[userIdClaim]) {
-    candidateIds.push(String(claims[userIdClaim]));
+class PathBasedAuthStrategy extends BaseAuthStrategy {
+  constructor({ drivers, authResource, oidcMiddleware, pathAuth, verbose }) {
+    super({ drivers, authResource, oidcMiddleware, verbose });
+    this.pathAuth = pathAuth;
   }
-  for (const field of fallbackIdClaims) {
-    if (!field || field === userIdClaim) continue;
-    const value = claims[field];
-    if (value) {
-      candidateIds.push(String(value));
+  createMiddleware() {
+    if (this.verbose) {
+      console.log("[PathBasedAuthStrategy] Using legacy pathAuth system");
     }
-  }
-  let user = null;
-  for (const candidate of candidateIds) {
-    try {
-      user = await usersResource.get(candidate);
-      break;
-    } catch (_) {
-    }
-  }
-  if (!user) {
-    const fields = Array.isArray(lookupFields) ? lookupFields : [lookupFields];
-    for (const field of fields) {
-      if (!field) continue;
-      const value = claims[field];
-      if (!value) continue;
-      const results = await usersResource.query({ [field]: value }, { limit: 1 });
-      if (results.length > 0) {
-        user = results[0];
-        break;
-      }
-    }
-  }
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  if (user) {
-    const updates = {
-      lastLoginAt: now,
-      metadata: {
-        ...user.metadata,
-        oidc: {
-          sub: claims.sub,
-          provider: config.issuer,
-          lastSync: now,
-          claims: {
-            name: claims.name,
-            email: claims.email,
-            picture: claims.picture
-          }
+    return async (c, next) => {
+      const requestPath = c.req.path;
+      const matchedRule = findBestMatch(this.pathAuth, requestPath);
+      if (this.verbose) {
+        if (matchedRule) {
+          console.log(`[PathBasedAuthStrategy] Path ${requestPath} matched rule: ${matchedRule.pattern}`);
+        } else {
+          console.log(`[PathBasedAuthStrategy] Path ${requestPath} no pathAuth rule matched (using global auth)`);
         }
       }
-    };
-    if (claims.name && claims.name !== user.name) {
-      updates.name = claims.name;
-    }
-    if (config.beforeUpdateUser && typeof config.beforeUpdateUser === "function") {
-      try {
-        const enrichedData = await config.beforeUpdateUser({
-          user,
-          updates,
-          claims,
-          usersResource
+      if (!matchedRule) {
+        const methods = this.drivers.map((d) => d.driver).filter((d) => d !== "oauth2-server" && d !== "oidc");
+        const driverConfigs2 = this.extractDriverConfigs(null);
+        const globalAuth = createAuthMiddleware({
+          methods,
+          jwt: driverConfigs2.jwt,
+          apiKey: driverConfigs2.apiKey,
+          basic: driverConfigs2.basic,
+          oauth2: driverConfigs2.oauth2,
+          oidc: this.oidcMiddleware || null,
+          usersResource: this.authResource,
+          optional: true
         });
-        if (enrichedData && typeof enrichedData === "object") {
-          Object.assign(updates, enrichedData);
-          if (enrichedData.metadata) {
-            updates.metadata = {
-              ...updates.metadata,
-              ...enrichedData.metadata
-            };
-          }
-        }
-      } catch (hookErr) {
-        console.error("[OIDC] beforeUpdateUser hook failed:", hookErr);
+        return await globalAuth(c, next);
       }
-    }
-    user = await usersResource.update(userId, updates);
-    return { user, created: false };
-  }
-  if (!autoCreateUser) {
-    return { user: null, created: false };
-  }
-  const newUserId = candidateIds[0];
-  if (!newUserId) {
-    throw new Error("Cannot determine user ID from OIDC claims");
-  }
-  const newUser = {
-    id: newUserId,
-    email: claims.email || newUserId,
-    username: claims.preferred_username || claims.email || newUserId,
-    name: claims.name || claims.email || newUserId,
-    picture: claims.picture || null,
-    role: config.defaultRole || "user",
-    scopes: config.defaultScopes || ["openid", "profile", "email"],
-    active: true,
-    apiKey: null,
-    // Will be generated on first API usage if needed
-    lastLoginAt: now,
-    metadata: {
-      oidc: {
-        sub: claims.sub,
-        provider: config.issuer,
-        createdAt: now,
-        claims: {
-          name: claims.name,
-          email: claims.email,
-          picture: claims.picture
-        }
-      },
-      costCenterId: config.defaultCostCenter || null,
-      teamId: config.defaultTeam || null
-    }
-  };
-  if (config.beforeCreateUser && typeof config.beforeCreateUser === "function") {
-    try {
-      const enrichedData = await config.beforeCreateUser({
-        user: newUser,
-        claims,
-        usersResource
-      });
-      if (enrichedData && typeof enrichedData === "object") {
-        Object.assign(newUser, enrichedData);
-        if (enrichedData.metadata) {
-          newUser.metadata = {
-            ...newUser.metadata,
-            ...enrichedData.metadata
-          };
-        }
-      }
-    } catch (hookErr) {
-      console.error("[OIDC] beforeCreateUser hook failed:", hookErr);
-    }
-  }
-  user = await usersResource.insert(newUser);
-  return { user, created: true };
-}
-async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
-  const response = await fetch(tokenEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken
-    })
-  });
-  if (!response.ok) {
-    throw new Error(`Token refresh failed: ${response.status}`);
-  }
-  return await response.json();
-}
-function createOIDCHandler(config, app, usersResource, events = null) {
-  const finalConfig = {
-    scopes: ["openid", "profile", "email", "offline_access"],
-    cookieName: "oidc_session",
-    cookieMaxAge: 6048e5,
-    // 7 days (same as absolute duration)
-    rollingDuration: 864e5,
-    // 24 hours
-    absoluteDuration: 6048e5,
-    // 7 days
-    loginPath: "/auth/login",
-    callbackPath: "/auth/callback",
-    logoutPath: "/auth/logout",
-    postLoginRedirect: "/",
-    postLogoutRedirect: "/",
-    idpLogout: true,
-    autoCreateUser: true,
-    userIdClaim: "sub",
-    fallbackIdClaims: ["email", "preferred_username"],
-    lookupFields: ["email", "preferred_username"],
-    autoRefreshTokens: true,
-    refreshThreshold: 3e5,
-    // 5 minutes before expiry
-    cookieSecure: process.env.NODE_ENV === "production",
-    cookieSameSite: "Lax",
-    defaultRole: "user",
-    defaultScopes: ["openid", "profile", "email"],
-    rateLimit: config.rateLimit !== void 0 ? config.rateLimit : {
-      enabled: true,
-      windowMs: 9e5,
-      // 15 minutes
-      maxAttempts: 5,
-      skipSuccessfulRequests: true
-    },
-    ...config
-  };
-  const {
-    issuer,
-    clientId,
-    clientSecret,
-    redirectUri,
-    scopes,
-    cookieSecret,
-    cookieName,
-    cookieMaxAge,
-    rollingDuration,
-    absoluteDuration,
-    loginPath,
-    callbackPath,
-    logoutPath,
-    postLoginRedirect,
-    postLogoutRedirect,
-    idpLogout,
-    autoCreateUser,
-    autoRefreshTokens,
-    refreshThreshold,
-    cookieSecure,
-    cookieSameSite
-  } = finalConfig;
-  const authorizationEndpoint = `${issuer}/oauth/authorize`;
-  const tokenEndpoint = `${issuer}/oauth/token`;
-  const logoutEndpoint = `${issuer}/oauth2/v2.0/logout`;
-  async function encodeSession(data) {
-    const secret = new TextEncoder().encode(cookieSecret);
-    const jwt = await new jose.SignJWT(data).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${Math.floor(cookieMaxAge / 1e3)}s`).sign(secret);
-    return jwt;
-  }
-  async function decodeSession(jwt) {
-    try {
-      const secret = new TextEncoder().encode(cookieSecret);
-      const { payload } = await jose.jwtVerify(jwt, secret);
-      return payload;
-    } catch (err) {
-      return null;
-    }
-  }
-  function validateSessionDuration(session) {
-    const now = Date.now();
-    if (session.issued_at + absoluteDuration < now) {
-      return { valid: false, reason: "absolute_expired" };
-    }
-    if (session.last_activity + rollingDuration < now) {
-      return { valid: false, reason: "rolling_expired" };
-    }
-    return { valid: true };
-  }
-  function generateState() {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  }
-  function decodeIdToken(idToken) {
-    try {
-      const parts = idToken.split(".");
-      if (parts.length !== 3) return null;
-      const payload = Buffer.from(parts[1], "base64").toString("utf-8");
-      return JSON.parse(payload);
-    } catch (err) {
-      return null;
-    }
-  }
-  let rateLimiter = null;
-  if (finalConfig.rateLimit?.enabled) {
-    rateLimiter = createAuthDriverRateLimiter("oidc", finalConfig.rateLimit);
-  }
-  app.get(loginPath, async (c) => {
-    const state = generateState();
-    const stateJWT = await encodeSession({ state, type: "csrf", expires: Date.now() + 6e5 });
-    c.header("Set-Cookie", `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
-    const params = new URLSearchParams({
-      response_type: "code",
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      scope: scopes.join(" "),
-      state
-    });
-    return c.redirect(`${authorizationEndpoint}?${params.toString()}`, 302);
-  });
-  const callbackHandler = async (c) => {
-    const code = c.req.query("code");
-    const state = c.req.query("state");
-    const stateCookie = c.req.cookie(`${cookieName}_state`);
-    if (!stateCookie) {
-      return c.json({ error: "Missing state cookie (CSRF protection)" }, 400);
-    }
-    const stateData = await decodeSession(stateCookie);
-    if (!stateData || stateData.state !== state) {
-      return c.json({ error: "Invalid state (CSRF protection)" }, 400);
-    }
-    c.header("Set-Cookie", `${cookieName}_state=; Path=/; HttpOnly; Max-Age=0`);
-    if (!code) {
-      return c.json({ error: "Missing authorization code" }, 400);
-    }
-    try {
-      const tokenResponse = await fetch(tokenEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
-        },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: redirectUri
-        })
-      });
-      if (!tokenResponse.ok) {
-        const error = await tokenResponse.text();
-        console.error("[OIDC] Token exchange failed:", error);
-        return c.json({ error: "Failed to exchange code for tokens" }, 500);
-      }
-      const tokens = await tokenResponse.json();
-      const idTokenClaims = decodeIdToken(tokens.id_token);
-      if (!idTokenClaims) {
-        return c.json({ error: "Failed to decode id_token" }, 500);
-      }
-      let user = null;
-      let userCreated = false;
-      if (usersResource) {
-        try {
-          const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
-          user = result.user;
-          userCreated = result.created;
-          if (!user) {
-            return c.json({
-              error: "User not provisioned",
-              message: "User does not exist in configured auth resource"
-            }, 403);
-          }
-          if (events) {
-            if (userCreated) {
-              events.emitUserEvent("created", {
-                user: { id: user.id, email: user.email, name: user.name },
-                source: "oidc",
-                provider: finalConfig.issuer
-              });
-            }
-            events.emitUserEvent("login", {
-              user: { id: user.id, email: user.email, name: user.name },
-              source: "oidc",
-              provider: finalConfig.issuer,
-              newUser: userCreated
-            });
-          }
-          if (finalConfig.onUserAuthenticated && typeof finalConfig.onUserAuthenticated === "function") {
-            try {
-              await finalConfig.onUserAuthenticated({
-                user,
-                created: userCreated,
-                claims: idTokenClaims,
-                tokens: {
-                  access_token: tokens.access_token,
-                  id_token: tokens.id_token,
-                  refresh_token: tokens.refresh_token
-                },
-                context: c
-                // 🔥 Pass Hono context for cookie/header manipulation
-              });
-            } catch (hookErr) {
-              console.error("[OIDC] onUserAuthenticated hook failed:", hookErr);
-            }
-          }
-        } catch (err) {
-          console.error("[OIDC] Failed to create/update user:", err);
-        }
-      }
-      const now = Date.now();
-      const sessionData = {
-        access_token: tokens.access_token,
-        id_token: tokens.id_token,
-        refresh_token: tokens.refresh_token,
-        expires_at: now + tokens.expires_in * 1e3,
-        issued_at: now,
-        last_activity: now,
-        // User data (avoid DB lookup on every request)
-        user: user ? {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          name: user.name,
-          picture: user.picture,
-          role: user.role,
-          scopes: user.scopes,
-          active: user.active,
-          metadata: {
-            costCenterId: user.metadata?.costCenterId,
-            teamId: user.metadata?.teamId
-          }
-        } : {
-          id: idTokenClaims.sub,
-          email: idTokenClaims.email,
-          username: idTokenClaims.preferred_username || idTokenClaims.email,
-          name: idTokenClaims.name,
-          picture: idTokenClaims.picture,
-          role: "user",
-          scopes,
-          active: true,
-          isVirtual: true
-        }
-      };
-      const sessionJWT = await encodeSession(sessionData);
-      const cookieOptions = [
-        `${cookieName}=${sessionJWT}`,
-        "Path=/",
-        "HttpOnly",
-        `Max-Age=${Math.floor(cookieMaxAge / 1e3)}`,
-        `SameSite=${cookieSameSite}`
-      ];
-      if (cookieSecure) {
-        cookieOptions.push("Secure");
-      }
-      c.header("Set-Cookie", cookieOptions.join("; "));
-      return c.redirect(postLoginRedirect, 302);
-    } catch (err) {
-      console.error("[OIDC] Error during token exchange:", err);
-      return c.json({ error: "Authentication failed" }, 500);
-    }
-  };
-  if (rateLimiter) {
-    app.get(callbackPath, rateLimiter, callbackHandler);
-  } else {
-    app.get(callbackPath, callbackHandler);
-  }
-  app.get(logoutPath, async (c) => {
-    const sessionCookie = c.req.cookie(cookieName);
-    let idToken = null;
-    if (sessionCookie) {
-      const session = await decodeSession(sessionCookie);
-      idToken = session?.id_token;
-    }
-    c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
-    if (idpLogout && idToken) {
-      const params = new URLSearchParams({
-        id_token_hint: idToken,
-        post_logout_redirect_uri: `${postLogoutRedirect}`
-      });
-      return c.redirect(`${logoutEndpoint}?${params.toString()}`, 302);
-    }
-    return c.redirect(postLogoutRedirect, 302);
-  });
-  function matchPath(path, pattern) {
-    if (pattern === path) return true;
-    const regexPattern = pattern.replace(/\*\*/g, "___GLOBSTAR___").replace(/\*/g, "[^/]*").replace(/___GLOBSTAR___/g, ".*").replace(/\//g, "\\/") + "$";
-    const regex = new RegExp("^" + regexPattern);
-    return regex.test(path);
-  }
-  const middleware = async (c, next) => {
-    const protectedPaths = finalConfig.protectedPaths || [];
-    const currentPath = c.req.path;
-    if (protectedPaths.length > 0) {
-      const isProtected = protectedPaths.some((pattern) => matchPath(currentPath, pattern));
-      if (!isProtected) {
+      if (!matchedRule.required) {
         return await next();
       }
-    }
-    const sessionCookie = c.req.cookie(cookieName);
-    if (!sessionCookie) {
-      if (protectedPaths.length > 0) {
-        const acceptHeader = c.req.header("accept") || "";
-        const acceptsHtml = acceptHeader.includes("text/html");
-        if (acceptsHtml) {
-          const returnTo = encodeURIComponent(currentPath);
-          return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
-        } else {
-          const response = unauthorized("Authentication required");
-          return c.json(response, response._status);
-        }
-      }
-      return await next();
-    }
-    const session = await decodeSession(sessionCookie);
-    if (!session || !session.access_token) {
-      return await next();
-    }
-    const validation = validateSessionDuration(session);
-    if (!validation.valid) {
-      c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
-      return await next();
-    }
-    if (autoRefreshTokens && session.refresh_token && session.expires_at) {
-      const timeUntilExpiry = session.expires_at - Date.now();
-      if (timeUntilExpiry < refreshThreshold) {
-        try {
-          const newTokens = await refreshAccessToken(
-            tokenEndpoint,
-            session.refresh_token,
-            clientId,
-            clientSecret
-          );
-          session.access_token = newTokens.access_token;
-          session.expires_at = Date.now() + newTokens.expires_in * 1e3;
-          if (newTokens.refresh_token) {
-            session.refresh_token = newTokens.refresh_token;
-          }
-        } catch (err) {
-          console.error("[OIDC] Token refresh failed:", err);
-        }
-      }
-    }
-    session.last_activity = Date.now();
-    if (session.user.active !== void 0 && !session.user.active) {
-      c.header("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
-      const acceptHeader = c.req.header("accept") || "";
-      const acceptsHtml = acceptHeader.includes("text/html");
-      if (acceptsHtml) {
-        return c.redirect(`${loginPath}?error=account_inactive`, 302);
-      } else {
-        const response = unauthorized("User account is inactive");
-        return c.json(response, response._status);
-      }
-    }
-    c.set("user", {
-      ...session.user,
-      authMethod: "oidc",
-      session: {
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-        expires_at: session.expires_at
-      }
-    });
-    const newSessionJWT = await encodeSession(session);
-    const cookieOptions = [
-      `${cookieName}=${newSessionJWT}`,
-      "Path=/",
-      "HttpOnly",
-      `Max-Age=${Math.floor(cookieMaxAge / 1e3)}`,
-      `SameSite=${cookieSameSite}`
-    ];
-    if (cookieSecure) {
-      cookieOptions.push("Secure");
-    }
-    c.header("Set-Cookie", cookieOptions.join("; "));
-    return await next();
-  };
-  return {
-    middleware,
-    routes: {
-      [loginPath]: "Login (redirect to SSO)",
-      [callbackPath]: "OAuth2 callback",
-      [logoutPath]: "Logout (local + IdP)"
-    },
-    config: finalConfig
-  };
-}
-
-function patternToRegex$1(pattern) {
-  let escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-  escaped = escaped.replace(/\*\*/g, "__DOUBLE_STAR__");
-  escaped = escaped.replace(/\*/g, "([^/]+)");
-  escaped = escaped.replace(/__DOUBLE_STAR__/g, "(.*)");
-  return new RegExp(`^${escaped}$`);
-}
-function matchPath$1(pattern, path) {
-  const regex = patternToRegex$1(pattern);
-  return regex.test(path);
-}
-function calculateSpecificity$1(pattern) {
-  const segments = pattern.split("/").filter((s) => s !== "");
-  let score = 0;
-  for (const segment of segments) {
-    if (segment === "**") {
-      score += 10;
-    } else if (segment === "*") {
-      score += 100;
-    } else {
-      score += 1e3;
-    }
-  }
-  return score;
-}
-function findBestMatch(rules, path) {
-  if (!rules || rules.length === 0) {
-    return null;
-  }
-  const matches = rules.map((rule) => ({
-    rule,
-    specificity: calculateSpecificity$1(rule.pattern)
-  })).filter(({ rule }) => matchPath$1(rule.pattern, path)).sort((a, b) => b.specificity - a.specificity);
-  return matches.length > 0 ? matches[0].rule : null;
-}
-function validatePathAuth(pathAuth) {
-  if (!Array.isArray(pathAuth)) {
-    throw new Error("pathAuth must be an array of rules");
-  }
-  for (const [index, rule] of pathAuth.entries()) {
-    if (!rule.pattern || typeof rule.pattern !== "string") {
-      throw new Error(`pathAuth[${index}]: pattern is required and must be a string`);
-    }
-    if (!rule.pattern.startsWith("/")) {
-      throw new Error(`pathAuth[${index}]: pattern must start with / (got: ${rule.pattern})`);
-    }
-    if (rule.drivers !== void 0 && !Array.isArray(rule.drivers)) {
-      throw new Error(`pathAuth[${index}]: drivers must be an array (got: ${typeof rule.drivers})`);
-    }
-    if (rule.required !== void 0 && typeof rule.required !== "boolean") {
-      throw new Error(`pathAuth[${index}]: required must be a boolean (got: ${typeof rule.required})`);
-    }
-    const validDrivers = ["jwt", "apiKey", "basic", "oauth2", "oidc"];
-    if (rule.drivers) {
-      for (const driver of rule.drivers) {
-        if (!validDrivers.includes(driver)) {
-          throw new Error(
-            `pathAuth[${index}]: invalid driver '${driver}'. Valid drivers: ${validDrivers.join(", ")}`
-          );
-        }
-      }
-    }
-  }
-}
-
-const MIME_TYPES = {
-  // Text
-  "txt": "text/plain",
-  "html": "text/html",
-  "htm": "text/html",
-  "css": "text/css",
-  "js": "text/javascript",
-  "mjs": "text/javascript",
-  "json": "application/json",
-  "xml": "application/xml",
-  "csv": "text/csv",
-  "md": "text/markdown",
-  // Images
-  "jpg": "image/jpeg",
-  "jpeg": "image/jpeg",
-  "png": "image/png",
-  "gif": "image/gif",
-  "webp": "image/webp",
-  "svg": "image/svg+xml",
-  "ico": "image/x-icon",
-  "bmp": "image/bmp",
-  "tiff": "image/tiff",
-  "tif": "image/tiff",
-  // Audio
-  "mp3": "audio/mpeg",
-  "wav": "audio/wav",
-  "ogg": "audio/ogg",
-  "flac": "audio/flac",
-  "m4a": "audio/mp4",
-  // Video
-  "mp4": "video/mp4",
-  "webm": "video/webm",
-  "ogv": "video/ogg",
-  "avi": "video/x-msvideo",
-  "mov": "video/quicktime",
-  "mkv": "video/x-matroska",
-  // Documents
-  "pdf": "application/pdf",
-  "doc": "application/msword",
-  "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "xls": "application/vnd.ms-excel",
-  "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "ppt": "application/vnd.ms-powerpoint",
-  "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  // Archives
-  "zip": "application/zip",
-  "tar": "application/x-tar",
-  "gz": "application/gzip",
-  "bz2": "application/x-bzip2",
-  "7z": "application/x-7z-compressed",
-  "rar": "application/vnd.rar",
-  // Fonts
-  "ttf": "font/ttf",
-  "otf": "font/otf",
-  "woff": "font/woff",
-  "woff2": "font/woff2",
-  "eot": "application/vnd.ms-fontobject",
-  // Application
-  "wasm": "application/wasm",
-  "bin": "application/octet-stream"
-};
-function getMimeType(filename) {
-  if (!filename || typeof filename !== "string") {
-    return "application/octet-stream";
-  }
-  const ext = filename.split(".").pop().toLowerCase();
-  return MIME_TYPES[ext] || "application/octet-stream";
-}
-function getCharset(mimeType) {
-  if (!mimeType) return null;
-  if (mimeType.startsWith("text/")) return "utf-8";
-  if (mimeType.includes("javascript")) return "utf-8";
-  if (mimeType.includes("json")) return "utf-8";
-  if (mimeType.includes("xml")) return "utf-8";
-  return null;
-}
-function getContentType(filename) {
-  const mimeType = getMimeType(filename);
-  const charset = getCharset(mimeType);
-  return charset ? `${mimeType}; charset=${charset}` : mimeType;
-}
-
-function createFilesystemHandler(config = {}) {
-  const {
-    root,
-    index = ["index.html"],
-    fallback = false,
-    maxAge = 0,
-    dotfiles = "ignore",
-    etag = true,
-    cors = false
-  } = config;
-  if (!root) {
-    throw new Error('Filesystem static handler requires "root" directory');
-  }
-  const absoluteRoot = path.resolve(root);
-  let fallbackFile = null;
-  if (fallback === true) {
-    fallbackFile = index[0];
-  } else if (typeof fallback === "string") {
-    fallbackFile = fallback;
-  }
-  return async (c) => {
-    try {
-      let requestPath = c.req.path.replace(/^\//, "");
-      const safePath = path.normalize(requestPath).replace(/^(\.\.(\/|\\|$))+/, "");
-      const fullPath = path.join(absoluteRoot, safePath);
-      if (!fullPath.startsWith(absoluteRoot)) {
-        return c.json({ success: false, error: { message: "Forbidden" } }, 403);
-      }
-      let stats;
-      let useFallback = false;
-      try {
-        stats = await fs.stat(fullPath);
-      } catch (err) {
-        if (err.code === "ENOENT" && fallbackFile) {
-          useFallback = true;
-        } else if (err.code === "ENOENT") {
-          return c.json({ success: false, error: { message: "Not Found" } }, 404);
-        } else {
-          throw err;
-        }
-      }
-      let filePath = fullPath;
-      if (useFallback) {
-        filePath = path.join(absoluteRoot, fallbackFile);
-        try {
-          stats = await fs.stat(filePath);
-        } catch (err) {
-          return c.json({ success: false, error: { message: "Not Found" } }, 404);
-        }
-      }
-      if (!useFallback && stats.isDirectory()) {
-        let indexFound = false;
-        for (const indexFile of index) {
-          const indexPath = path.join(fullPath, indexFile);
-          try {
-            const indexStats = await fs.stat(indexPath);
-            if (indexStats.isFile()) {
-              filePath = indexPath;
-              stats = indexStats;
-              indexFound = true;
-              break;
-            }
-          } catch (err) {
-          }
-        }
-        if (!indexFound) {
-          if (fallbackFile) {
-            filePath = path.join(absoluteRoot, fallbackFile);
-            try {
-              stats = await fs.stat(filePath);
-            } catch (err) {
-              return c.json({ success: false, error: { message: "Forbidden" } }, 403);
-            }
-          } else {
-            return c.json({ success: false, error: { message: "Forbidden" } }, 403);
-          }
-        }
-      }
-      const filename = path.basename(filePath);
-      if (filename.startsWith(".")) {
-        if (dotfiles === "deny") {
-          return c.json({ success: false, error: { message: "Forbidden" } }, 403);
-        } else if (dotfiles === "ignore") {
-          return c.json({ success: false, error: { message: "Not Found" } }, 404);
-        }
-      }
-      const etagValue = etag ? `"${crypto.createHash("md5").update(`${stats.mtime.getTime()}-${stats.size}`).digest("hex")}"` : null;
-      if (etagValue) {
-        const ifNoneMatch = c.req.header("If-None-Match");
-        if (ifNoneMatch === etagValue) {
-          return c.body(null, 304, {
-            "ETag": etagValue,
-            "Cache-Control": maxAge > 0 ? `public, max-age=${Math.floor(maxAge / 1e3)}` : "no-cache"
-          });
-        }
-      }
-      const contentType = getContentType(filename);
-      const headers = {
-        "Content-Type": contentType,
-        "Content-Length": stats.size.toString(),
-        "Last-Modified": stats.mtime.toUTCString()
-      };
-      if (etagValue) {
-        headers["ETag"] = etagValue;
-      }
-      if (maxAge > 0) {
-        headers["Cache-Control"] = `public, max-age=${Math.floor(maxAge / 1e3)}`;
-      } else {
-        headers["Cache-Control"] = "no-cache";
-      }
-      if (cors) {
-        headers["Access-Control-Allow-Origin"] = "*";
-        headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
-      }
-      const rangeHeader = c.req.header("Range");
-      if (rangeHeader) {
-        const parts = rangeHeader.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
-        if (start >= stats.size || end >= stats.size) {
-          return c.body(null, 416, {
-            "Content-Range": `bytes */${stats.size}`
-          });
-        }
-        const chunkSize = end - start + 1;
-        const stream2 = fs$1.createReadStream(filePath, { start, end });
-        headers["Content-Range"] = `bytes ${start}-${end}/${stats.size}`;
-        headers["Content-Length"] = chunkSize.toString();
-        headers["Accept-Ranges"] = "bytes";
-        return c.body(stream2, 206, headers);
-      }
-      if (c.req.method === "HEAD") {
-        return c.body(null, 200, headers);
-      }
-      const stream = fs$1.createReadStream(filePath);
-      return c.body(stream, 200, headers);
-    } catch (err) {
-      console.error("[Static Filesystem] Error:", err);
-      return c.json({ success: false, error: { message: "Internal Server Error" } }, 500);
-    }
-  };
-}
-function validateFilesystemConfig(config) {
-  if (!config.root || typeof config.root !== "string") {
-    throw new Error('Filesystem static config requires "root" directory (string)');
-  }
-  if (config.index !== void 0 && !Array.isArray(config.index)) {
-    throw new Error('Filesystem static "index" must be an array');
-  }
-  if (config.fallback !== void 0 && typeof config.fallback !== "string" && typeof config.fallback !== "boolean") {
-    throw new Error('Filesystem static "fallback" must be a string (filename) or boolean');
-  }
-  if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
-    throw new Error('Filesystem static "maxAge" must be a number');
-  }
-  if (config.dotfiles !== void 0 && !["ignore", "allow", "deny"].includes(config.dotfiles)) {
-    throw new Error('Filesystem static "dotfiles" must be "ignore", "allow", or "deny"');
-  }
-  if (config.etag !== void 0 && typeof config.etag !== "boolean") {
-    throw new Error('Filesystem static "etag" must be a boolean');
-  }
-  if (config.cors !== void 0 && typeof config.cors !== "boolean") {
-    throw new Error('Filesystem static "cors" must be a boolean');
-  }
-}
-
-function createS3Handler(config = {}) {
-  const {
-    s3Client,
-    bucket,
-    prefix = "",
-    streaming = true,
-    signedUrlExpiry = 300,
-    maxAge = 0,
-    cacheControl,
-    contentDisposition = "inline",
-    etag = true,
-    cors = false
-  } = config;
-  if (!s3Client) {
-    throw new Error('S3 static handler requires "s3Client"');
-  }
-  if (!bucket) {
-    throw new Error('S3 static handler requires "bucket" name');
-  }
-  return async (c) => {
-    try {
-      let requestPath = c.req.path.replace(/^\//, "");
-      const key = prefix ? `${prefix}${requestPath}` : requestPath;
-      if (key.includes("..") || key.includes("//")) {
-        return c.json({ success: false, error: { message: "Forbidden" } }, 403);
-      }
-      let metadata;
-      try {
-        const headCommand = new clientS3.HeadObjectCommand({ Bucket: bucket, Key: key });
-        metadata = await s3Client.send(headCommand);
-      } catch (err) {
-        if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
-          return c.json({ success: false, error: { message: "Not Found" } }, 404);
-        }
-        throw err;
-      }
-      if (etag && metadata.ETag) {
-        const ifNoneMatch = c.req.header("If-None-Match");
-        if (ifNoneMatch === metadata.ETag) {
-          const headers2 = {
-            "ETag": metadata.ETag,
-            "Cache-Control": cacheControl || (maxAge > 0 ? `public, max-age=${Math.floor(maxAge / 1e3)}` : "no-cache")
-          };
-          if (cors) {
-            headers2["Access-Control-Allow-Origin"] = "*";
-            headers2["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
-          }
-          return c.body(null, 304, headers2);
-        }
-      }
-      if (!streaming) {
-        const getCommand2 = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key });
-        const signedUrl = await s3RequestPresigner.getSignedUrl(s3Client, getCommand2, { expiresIn: signedUrlExpiry });
-        return c.redirect(signedUrl, 302);
-      }
-      const contentType = metadata.ContentType || getContentType(key);
-      const headers = {
-        "Content-Type": contentType,
-        "Content-Length": metadata.ContentLength?.toString() || "0",
-        "Last-Modified": metadata.LastModified?.toUTCString() || (/* @__PURE__ */ new Date()).toUTCString()
-      };
-      if (metadata.ETag && etag) {
-        headers["ETag"] = metadata.ETag;
-      }
-      if (cacheControl) {
-        headers["Cache-Control"] = cacheControl;
-      } else if (maxAge > 0) {
-        headers["Cache-Control"] = `public, max-age=${Math.floor(maxAge / 1e3)}`;
-      } else {
-        headers["Cache-Control"] = "no-cache";
-      }
-      if (contentDisposition) {
-        const filename = key.split("/").pop();
-        headers["Content-Disposition"] = `${contentDisposition}; filename="${filename}"`;
-      }
-      if (cors) {
-        headers["Access-Control-Allow-Origin"] = "*";
-        headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
-      }
-      const rangeHeader = c.req.header("Range");
-      let getCommand;
-      if (rangeHeader) {
-        const parts = rangeHeader.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : metadata.ContentLength - 1;
-        if (start >= metadata.ContentLength || end >= metadata.ContentLength) {
-          return c.body(null, 416, {
-            "Content-Range": `bytes */${metadata.ContentLength}`
-          });
-        }
-        const range = `bytes=${start}-${end}`;
-        getCommand = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key, Range: range });
-        const chunkSize = end - start + 1;
-        headers["Content-Range"] = `bytes ${start}-${end}/${metadata.ContentLength}`;
-        headers["Content-Length"] = chunkSize.toString();
-        headers["Accept-Ranges"] = "bytes";
-        const response2 = await s3Client.send(getCommand);
-        return c.body(response2.Body, 206, headers);
-      }
-      if (c.req.method === "HEAD") {
-        return c.body(null, 200, headers);
-      }
-      getCommand = new clientS3.GetObjectCommand({ Bucket: bucket, Key: key });
-      const response = await s3Client.send(getCommand);
-      return c.body(response.Body, 200, headers);
-    } catch (err) {
-      console.error("[Static S3] Error:", err);
-      return c.json({ success: false, error: { message: "Internal Server Error" } }, 500);
-    }
-  };
-}
-function validateS3Config(config) {
-  if (!config.bucket || typeof config.bucket !== "string") {
-    throw new Error('S3 static config requires "bucket" name (string)');
-  }
-  if (config.prefix !== void 0 && typeof config.prefix !== "string") {
-    throw new Error('S3 static "prefix" must be a string');
-  }
-  if (config.streaming !== void 0 && typeof config.streaming !== "boolean") {
-    throw new Error('S3 static "streaming" must be a boolean');
-  }
-  if (config.signedUrlExpiry !== void 0 && typeof config.signedUrlExpiry !== "number") {
-    throw new Error('S3 static "signedUrlExpiry" must be a number');
-  }
-  if (config.maxAge !== void 0 && typeof config.maxAge !== "number") {
-    throw new Error('S3 static "maxAge" must be a number');
-  }
-  if (config.cacheControl !== void 0 && typeof config.cacheControl !== "string") {
-    throw new Error('S3 static "cacheControl" must be a string');
-  }
-  if (config.contentDisposition !== void 0 && typeof config.contentDisposition !== "string") {
-    throw new Error('S3 static "contentDisposition" must be a string');
-  }
-  if (config.etag !== void 0 && typeof config.etag !== "boolean") {
-    throw new Error('S3 static "etag" must be a boolean');
-  }
-  if (config.cors !== void 0 && typeof config.cors !== "boolean") {
-    throw new Error('S3 static "cors" must be a boolean');
-  }
-}
-
-async function loadEJS() {
-  try {
-    const ejs = await import('ejs');
-    return ejs.default || ejs;
-  } catch (err) {
-    throw new Error(
-      "EJS template engine not installed. Install with: npm install ejs\nEJS is a peer dependency to keep the core package lightweight."
-    );
-  }
-}
-async function loadPug() {
-  try {
-    const pug = await import('pug');
-    return pug.default || pug;
-  } catch (err) {
-    throw new Error(
-      "Pug template engine not installed. Install with: npm install pug\nPug is a peer dependency to keep the core package lightweight."
-    );
-  }
-}
-function setupTemplateEngine(options = {}) {
-  const {
-    engine = "jsx",
-    templatesDir = "./views",
-    layout = null,
-    engineOptions = {},
-    customRenderer = null
-  } = options;
-  const templatesPath = path.resolve(templatesDir);
-  return async (c, next) => {
-    c.render = async (template, data = {}, renderOptions = {}) => {
-      if (typeof template === "object" && template !== null) {
-        return c.html(template);
-      }
-      if (engine === "pug") {
-        const pug = await loadPug();
-        const templateFile = template.endsWith(".pug") ? template : `${template}.pug`;
-        const templatePath = path.join(templatesPath, templateFile);
-        if (!fs$1.existsSync(templatePath)) {
-          throw new Error(`Template not found: ${templatePath}`);
-        }
-        const renderData = {
-          ...data,
-          // Add helpers that Pug templates might expect
-          _url: c.req.url,
-          _path: c.req.path,
-          _method: c.req.method
-        };
-        const html = pug.renderFile(templatePath, {
-          ...renderData,
-          ...engineOptions,
-          ...renderOptions
-        });
-        return c.html(html);
-      }
-      if (engine === "ejs") {
-        const ejs = await loadEJS();
-        const templateFile = template.endsWith(".ejs") ? template : `${template}.ejs`;
-        const templatePath = path.join(templatesPath, templateFile);
-        if (!fs$1.existsSync(templatePath)) {
-          throw new Error(`Template not found: ${templatePath}`);
-        }
-        const templateContent = await fs.readFile(templatePath, "utf-8");
-        const renderData = {
-          ...data,
-          // Add helpers that EJS templates might expect
-          _url: c.req.url,
-          _path: c.req.path,
-          _method: c.req.method
-        };
-        const html = ejs.render(templateContent, renderData, {
-          filename: templatePath,
-          // For includes to work
-          ...engineOptions,
-          ...renderOptions
-        });
-        if (layout || renderOptions.layout) {
-          const layoutName = renderOptions.layout || layout;
-          const layoutFile = layoutName.endsWith(".ejs") ? layoutName : `${layoutName}.ejs`;
-          const layoutPath = path.join(templatesPath, layoutFile);
-          if (!fs$1.existsSync(layoutPath)) {
-            throw new Error(`Layout not found: ${layoutPath}`);
-          }
-          const layoutContent = await fs.readFile(layoutPath, "utf-8");
-          const wrappedHtml = ejs.render(layoutContent, {
-            ...renderData,
-            body: html
-            // Content goes into <%- body %>
-          }, {
-            filename: layoutPath,
-            ...engineOptions
-          });
-          return c.html(wrappedHtml);
-        }
-        return c.html(html);
-      }
-      if (engine === "custom" && customRenderer) {
-        return customRenderer(c, template, data, renderOptions);
-      }
-      throw new Error(`Unsupported template engine: ${engine}`);
+      const ruleMethods = matchedRule.drivers || [];
+      const driverConfigs = this.extractDriverConfigs(ruleMethods);
+      const ruleAuth = createAuthMiddleware({
+        methods: ruleMethods,
+        jwt: driverConfigs.jwt,
+        apiKey: driverConfigs.apiKey,
+        basic: driverConfigs.basic,
+        oauth2: driverConfigs.oauth2,
+        oidc: this.oidcMiddleware || null,
+        usersResource: this.authResource,
+        optional: false
+        // Auth is required
+      });
+      return await ruleAuth(c, next);
     };
-    await next();
-  };
+  }
 }
 
 function calculateSpecificity(pattern) {
@@ -8324,2210 +10611,167 @@ function createPathBasedAuthMiddleware(options = {}) {
   };
 }
 
-function createRequestIdMiddleware(config = {}) {
-  const {
-    headerName = "X-Request-ID",
-    generator = () => idGenerator(),
-    includeInResponse = true,
-    includeInLogs = true
-    // Reserved for future use
-  } = config;
-  return async (c, next) => {
-    let requestId = c.req.header(headerName);
-    if (!requestId) {
-      requestId = generator();
-    }
-    c.set("requestId", requestId);
-    await next();
-    if (includeInResponse) {
-      c.header(headerName, requestId);
-    }
-  };
-}
-
-function createSecurityHeadersMiddleware(config = {}) {
-  const defaults = {
-    csp: "default-src 'self'",
-    hsts: { maxAge: 31536e3, includeSubDomains: true, preload: false },
-    xFrameOptions: "DENY",
-    xContentTypeOptions: "nosniff",
-    referrerPolicy: "strict-origin-when-cross-origin",
-    xssProtection: "1; mode=block",
-    permissionsPolicy: "geolocation=(), microphone=(), camera=()"
-  };
-  const settings = {
-    ...defaults,
-    ...config.headers || {}
-  };
-  if (config.headers?.hsts && typeof config.headers.hsts === "object") {
-    settings.hsts = {
-      ...defaults.hsts,
-      ...config.headers.hsts
-    };
-  }
-  return async (c, next) => {
-    if (settings.csp) {
-      c.header("Content-Security-Policy", settings.csp);
-    }
-    if (settings.hsts) {
-      const hsts = settings.hsts;
-      let hstsValue = `max-age=${hsts.maxAge}`;
-      if (hsts.includeSubDomains) {
-        hstsValue += "; includeSubDomains";
-      }
-      if (hsts.preload) {
-        hstsValue += "; preload";
-      }
-      c.header("Strict-Transport-Security", hstsValue);
-    }
-    if (settings.xFrameOptions) {
-      c.header("X-Frame-Options", settings.xFrameOptions);
-    }
-    if (settings.xContentTypeOptions) {
-      c.header("X-Content-Type-Options", settings.xContentTypeOptions);
-    }
-    if (settings.referrerPolicy) {
-      c.header("Referrer-Policy", settings.referrerPolicy);
-    }
-    if (settings.xssProtection) {
-      c.header("X-XSS-Protection", settings.xssProtection);
-    }
-    if (settings.permissionsPolicy) {
-      c.header("Permissions-Policy", settings.permissionsPolicy);
-    }
-    await next();
-  };
-}
-
-function createSessionTrackingMiddleware(config = {}, db) {
-  const {
-    enabled = false,
-    resource = null,
-    cookieName = "session_id",
-    cookieMaxAge = 2592e6,
-    // 30 days
-    cookieSecure = process.env.NODE_ENV === "production",
-    cookieSameSite = "Strict",
-    updateOnRequest = true,
-    passphrase = null,
-    enrichSession = null
-  } = config;
-  if (!enabled) {
-    return async (c, next) => await next();
-  }
-  if (!passphrase) {
-    throw new Error("sessionTracking.passphrase is required when sessionTracking.enabled = true");
-  }
-  const sessionsResource = resource && db ? db.resources[resource] : null;
-  return async (c, next) => {
-    let session = null;
-    let sessionId = null;
-    let isNewSession = false;
-    const sessionCookie = c.req.cookie(cookieName);
-    if (sessionCookie) {
-      try {
-        sessionId = await decrypt(sessionCookie, passphrase);
-        if (sessionsResource) {
-          const exists = await sessionsResource.exists(sessionId);
-          if (exists) {
-            session = await sessionsResource.get(sessionId);
-          }
-        } else {
-          session = { id: sessionId };
-        }
-      } catch (err) {
-        console.error("[SessionTracking] Failed to decrypt cookie:", err.message);
-      }
-    }
-    if (!session) {
-      isNewSession = true;
-      sessionId = idGenerator();
-      const sessionData = {
-        id: sessionId,
-        userAgent: c.req.header("user-agent") || null,
-        ip: c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || null,
-        referer: c.req.header("referer") || null,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-        lastSeenAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      if (enrichSession && typeof enrichSession === "function") {
-        try {
-          const enriched = await enrichSession({ session: sessionData, context: c });
-          if (enriched && typeof enriched === "object") {
-            Object.assign(sessionData, enriched);
-          }
-        } catch (enrichErr) {
-          console.error("[SessionTracking] enrichSession failed:", enrichErr.message);
-        }
-      }
-      if (sessionsResource) {
-        try {
-          session = await sessionsResource.insert(sessionData);
-        } catch (insertErr) {
-          console.error("[SessionTracking] Failed to insert session:", insertErr.message);
-          session = sessionData;
-        }
-      } else {
-        session = sessionData;
-      }
-    } else if (updateOnRequest && !isNewSession && sessionsResource) {
-      const updates = {
-        lastSeenAt: (/* @__PURE__ */ new Date()).toISOString(),
-        lastUserAgent: c.req.header("user-agent") || null,
-        lastIp: c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || null
-      };
-      sessionsResource.update(sessionId, updates).catch((updateErr) => {
-        console.error("[SessionTracking] Failed to update session:", updateErr.message);
-      });
-      Object.assign(session, updates);
-    }
-    try {
-      const encryptedSessionId = await encrypt(sessionId, passphrase);
-      c.header(
-        "Set-Cookie",
-        `${cookieName}=${encryptedSessionId}; Max-Age=${Math.floor(cookieMaxAge / 1e3)}; Path=/; HttpOnly; ` + (cookieSecure ? "Secure; " : "") + `SameSite=${cookieSameSite}`
-      );
-    } catch (encryptErr) {
-      console.error("[SessionTracking] Failed to encrypt session ID:", encryptErr.message);
-    }
-    c.set("sessionId", sessionId);
-    c.set("session", session);
-    await next();
-  };
-}
-
-function createFailbanMiddleware(config = {}) {
-  const {
-    plugin,
-    events = null,
-    handler = null
-  } = config;
-  if (!plugin || !plugin.options.enabled) {
-    return async (c, next) => await next();
-  }
-  return async (c, next) => {
-    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
-    if (plugin.isBlacklisted(ip)) {
-      c.header("X-Ban-Status", "blacklisted");
-      c.header("X-Ban-Reason", "IP is permanently blacklisted");
-      if (handler) {
-        return handler(c, { ip, reason: "blacklisted", permanent: true });
-      }
-      return c.json({
-        error: "Forbidden",
-        message: "Your IP address has been permanently blocked",
-        ip
-      }, 403);
-    }
-    const countryBlock = plugin.checkCountryBlock(ip);
-    if (countryBlock) {
-      c.header("X-Ban-Status", "country_blocked");
-      c.header("X-Ban-Reason", countryBlock.reason);
-      c.header("X-Country-Code", countryBlock.country);
-      if (events) {
-        events.emit("security:country_blocked", {
-          ip,
-          country: countryBlock.country,
-          reason: countryBlock.reason,
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        });
-      }
-      if (handler) {
-        return handler(c, countryBlock);
-      }
-      return c.json({
-        error: "Forbidden",
-        message: "Access from your country is not allowed",
-        country: countryBlock.country,
-        ip
-      }, 403);
-    }
-    if (plugin.isBanned(ip)) {
-      const ban = await plugin.getBan(ip);
-      if (ban) {
-        const expiresAt = new Date(ban.expiresAt);
-        const retryAfter = Math.ceil((expiresAt.getTime() - Date.now()) / 1e3);
-        c.header("Retry-After", String(retryAfter));
-        c.header("X-Ban-Status", "banned");
-        c.header("X-Ban-Reason", ban.reason);
-        c.header("X-Ban-Expires", ban.expiresAt);
-        if (handler) {
-          return handler(c, { ip, ban, retryAfter });
-        }
-        return c.json({
-          error: "Forbidden",
-          message: "Your IP address has been temporarily banned due to security violations",
-          reason: ban.reason,
-          expiresAt: ban.expiresAt,
-          retryAfter
-        }, 403);
-      }
-    }
-    await next();
-  };
-}
-function setupFailbanViolationListener(config = {}) {
-  const { plugin, events } = config;
-  if (!plugin || !plugin.options.enabled || !events) {
-    return;
-  }
-  events.on("auth:failure", (data) => {
-    const ip = data.ip || "unknown";
-    plugin.recordViolation(ip, "auth_failure", {
-      path: data.path,
-      allowedMethods: data.allowedMethods
-    });
-  });
-  events.on("request:error", (data) => {
-    const ip = data.ip || "unknown";
-    if (data.status && data.status >= 400 && data.status < 500) {
-      plugin.recordViolation(ip, "request_error", {
-        path: data.path,
-        error: data.error,
-        userAgent: data.userAgent
-      });
-    }
-  });
-  if (plugin.options.verbose) {
-    console.log("[Failban] Violation listeners configured");
-  }
-}
-function createFailbanAdminRoutes(Hono, plugin) {
-  const app = new Hono();
-  app.get("/bans", async (c) => {
-    try {
-      const bans = await plugin.listBans();
-      return c.json({
-        success: true,
-        data: bans,
-        meta: { count: bans.length }
-      });
-    } catch (err) {
-      return c.json({
-        success: false,
-        error: err.message
-      }, 500);
-    }
-  });
-  app.get("/bans/:ip", async (c) => {
-    const ip = c.req.param("ip");
-    try {
-      const ban = await plugin.getBan(ip);
-      if (!ban) {
-        return c.json({
-          success: false,
-          error: "Ban not found"
-        }, 404);
-      }
-      return c.json({
-        success: true,
-        data: ban
-      });
-    } catch (err) {
-      return c.json({
-        success: false,
-        error: err.message
-      }, 500);
-    }
-  });
-  app.post("/bans", async (c) => {
-    try {
-      const { ip, reason, duration } = await c.req.json();
-      if (!ip) {
-        return c.json({
-          success: false,
-          error: "IP address is required"
-        }, 400);
-      }
-      const originalDuration = plugin.options.banDuration;
-      if (duration) {
-        plugin.options.banDuration = duration;
-      }
-      await plugin.ban(ip, reason || "Manual ban by admin");
-      if (duration) {
-        plugin.options.banDuration = originalDuration;
-      }
-      return c.json({
-        success: true,
-        message: `IP ${ip} has been banned`
-      });
-    } catch (err) {
-      return c.json({
-        success: false,
-        error: err.message
-      }, 500);
-    }
-  });
-  app.delete("/bans/:ip", async (c) => {
-    const ip = c.req.param("ip");
-    try {
-      const result = await plugin.unban(ip);
-      if (!result) {
-        return c.json({
-          success: false,
-          error: "Failed to unban IP"
-        }, 500);
-      }
-      return c.json({
-        success: true,
-        message: `IP ${ip} has been unbanned`
-      });
-    } catch (err) {
-      return c.json({
-        success: false,
-        error: err.message
-      }, 500);
-    }
-  });
-  app.get("/stats", async (c) => {
-    try {
-      const stats = await plugin.getStats();
-      return c.json({
-        success: true,
-        data: stats
-      });
-    } catch (err) {
-      return c.json({
-        success: false,
-        error: err.message
-      }, 500);
-    }
-  });
-  return app;
-}
-
-const PREFIX = "plg_";
-function normalizeNamespace(namespace) {
-  if (!namespace) return null;
-  const text = String(namespace).trim().toLowerCase();
-  if (!text) return null;
-  const normalized = text.replace(/[^a-z0-9]+/g, "_").replace(/^_+/, "").replace(/_+$/, "");
-  return normalized || null;
-}
-function applyNamespace(name, namespace) {
-  const ensured = ensurePlgPrefix(name);
-  if (!namespace) {
-    return ensured;
-  }
-  const withoutPrefix = ensured.slice(PREFIX.length);
-  if (withoutPrefix.startsWith(`${namespace}_`)) {
-    return ensured;
-  }
-  return `${PREFIX}${namespace}_${withoutPrefix}`;
-}
-function sanitizeName(name) {
-  if (!name || typeof name !== "string") {
-    throw new PluginError("[resource-names] Resource name must be a non-empty string", {
-      pluginName: "SharedConcerns",
-      operation: "resourceNames:sanitize",
-      statusCode: 400,
-      retriable: false,
-      suggestion: "Pass a non-empty string when deriving resource names."
-    });
-  }
-  return name.trim();
-}
-function ensurePlgPrefix(name) {
-  const sanitized = sanitizeName(name);
-  if (sanitized.startsWith(PREFIX)) {
-    return sanitized;
-  }
-  return `${PREFIX}${sanitized.replace(/^\_+/, "")}`;
-}
-function resolveResourceName(pluginKey, { defaultName, override, suffix } = {}, options = {}) {
-  const namespace = normalizeNamespace(options.namespace);
-  const applyOverrideNamespace = options.applyNamespaceToOverrides === true;
-  if (!defaultName && !override && !suffix) {
-    throw new PluginError(`[resource-names] Missing name parameters for plugin "${pluginKey}"`, {
-      pluginName: "SharedConcerns",
-      operation: "resourceNames:resolve",
-      statusCode: 400,
-      retriable: false,
-      suggestion: "Provide at least one of defaultName, override, or suffix when resolving resource names."
-    });
-  }
-  if (override) {
-    const ensured2 = ensurePlgPrefix(override);
-    return applyOverrideNamespace ? applyNamespace(ensured2, namespace) : ensured2;
-  }
-  if (defaultName) {
-    const ensured2 = defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
-    return applyNamespace(ensured2, namespace);
-  }
-  if (!suffix) {
-    throw new PluginError(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`, {
-      pluginName: "SharedConcerns",
-      operation: "resourceNames:resolve",
-      statusCode: 400,
-      retriable: false,
-      suggestion: "Provide a suffix or defaultName when computing derived resource names."
-    });
-  }
-  const ensured = ensurePlgPrefix(`${pluginKey}_${suffix}`);
-  return applyNamespace(ensured, namespace);
-}
-function resolveResourceNames(pluginKey, descriptors = {}, options = {}) {
-  const result = {};
-  for (const [key, descriptor] of Object.entries(descriptors)) {
-    if (typeof descriptor === "string") {
-      result[key] = resolveResourceName(pluginKey, { defaultName: descriptor }, options);
-      continue;
-    }
-    result[key] = resolveResourceName(pluginKey, descriptor, options);
-  }
-  return result;
-}
-
-class FailbanManager {
-  constructor(options = {}) {
-    this.namespace = options.namespace || null;
-    const resourceOverrides = options.resourceNames || options.resources || {};
-    this._resourceDescriptors = {
-      bans: {
-        defaultName: "plg_api_failban_bans",
-        override: resourceOverrides.bans
-      },
-      violations: {
-        defaultName: "plg_api_failban_violations",
-        override: resourceOverrides.violations
-      }
-    };
-    this.resourceNames = this._resolveResourceNames();
-    this.options = {
-      enabled: options.enabled !== false,
-      database: options.database,
-      maxViolations: options.maxViolations || 3,
-      violationWindow: options.violationWindow || 36e5,
-      banDuration: options.banDuration || 864e5,
-      whitelist: options.whitelist || ["127.0.0.1", "::1"],
-      blacklist: options.blacklist || [],
-      persistViolations: options.persistViolations !== false,
-      verbose: options.verbose || false,
-      geo: {
-        enabled: options.geo?.enabled || false,
-        databasePath: options.geo?.databasePath || null,
-        allowedCountries: options.geo?.allowedCountries || [],
-        blockedCountries: options.geo?.blockedCountries || [],
-        blockUnknown: options.geo?.blockUnknown || false,
-        cacheResults: options.geo?.cacheResults !== false
-      },
-      resources: this.resourceNames
-    };
-    this.database = options.database;
-    this.bansResource = null;
-    this.violationsResource = null;
-    this.memoryCache = /* @__PURE__ */ new Map();
-    this.geoCache = /* @__PURE__ */ new Map();
-    this.geoReader = null;
-    this.cleanupTimer = null;
-  }
-  _resolveResourceNames() {
-    return resolveResourceNames("api_failban", this._resourceDescriptors, {
-      namespace: this.namespace
-    });
-  }
-  setNamespace(namespace) {
-    this.namespace = namespace;
-    this.resourceNames = this._resolveResourceNames();
-    this.options.resources = this.resourceNames;
-  }
-  /**
-   * Initialize failban manager
-   */
-  async initialize() {
-    if (!this.options.enabled) {
-      if (this.options.verbose) {
-        console.log("[Failban] Disabled, skipping initialization");
-      }
-      return;
-    }
-    if (!this.database) {
-      throw new Error("[Failban] Database instance is required");
-    }
-    if (this.options.geo.enabled) {
-      await this._initializeGeoIP();
-    }
-    this.bansResource = await this._createBansResource();
-    if (this.options.persistViolations) {
-      this.violationsResource = await this._createViolationsResource();
-    }
-    await this._loadBansIntoCache();
-    this._setupCleanupTimer();
-    if (this.options.verbose) {
-      console.log("[Failban] Initialized");
-      console.log(`[Failban] Max violations: ${this.options.maxViolations}`);
-      console.log(`[Failban] Violation window: ${this.options.violationWindow}ms`);
-      console.log(`[Failban] Ban duration: ${this.options.banDuration}ms`);
-      console.log(`[Failban] Whitelist: ${this.options.whitelist.join(", ")}`);
-      if (this.options.geo.enabled) {
-        console.log(`[Failban] GeoIP enabled`);
-        console.log(`[Failban] Allowed countries: ${this.options.geo.allowedCountries.join(", ") || "none"}`);
-        console.log(`[Failban] Blocked countries: ${this.options.geo.blockedCountries.join(", ") || "none"}`);
-        console.log(`[Failban] Block unknown: ${this.options.geo.blockUnknown}`);
-      }
-    }
-  }
-  /**
-   * Create bans resource with TTL support
-   * @private
-   */
-  async _createBansResource() {
-    const resourceName = this.resourceNames.bans;
-    try {
-      return await this.database.getResource(resourceName);
-    } catch (err) {
-    }
-    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
-      name: resourceName,
-      attributes: {
-        ip: "string|required",
-        reason: "string",
-        violations: "number",
-        bannedAt: "string",
-        expiresAt: "string|required",
-        metadata: {
-          userAgent: "string",
-          path: "string",
-          lastViolation: "string"
-        }
-      },
-      behavior: "body-overflow",
-      timestamps: true,
-      partitions: {
-        byExpiry: {
-          fields: { expiresAtCohort: "string" }
-        }
-      }
-    }));
-    if (!created) {
-      const existing = this.database.resources?.[resourceName];
-      if (existing) {
-        return existing;
-      }
-      throw createErr;
-    }
-    const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
-    if (ttlPlugin) {
-      ttlPlugin.options.resources = ttlPlugin.options.resources || {};
-      ttlPlugin.options.resources[resourceName] = {
-        enabled: true,
-        field: "expiresAt"
-      };
-      if (this.options.verbose) {
-        console.log(`[Failban] TTL configured for bans resource (${resourceName})`);
-      }
-    } else {
-      console.warn("[Failban] TTLPlugin not found - bans will not auto-expire from DB");
-    }
-    return resource;
-  }
-  /**
-   * Create violations tracking resource
-   * @private
-   */
-  async _createViolationsResource() {
-    const resourceName = this.resourceNames.violations;
-    try {
-      return await this.database.getResource(resourceName);
-    } catch (err) {
-    }
-    const [created, createErr, resource] = await tryFn(() => this.database.createResource({
-      name: resourceName,
-      attributes: {
-        ip: "string|required",
-        timestamp: "string|required",
-        type: "string",
-        path: "string",
-        userAgent: "string"
-      },
-      behavior: "body-overflow",
-      timestamps: true,
-      partitions: {
-        byIp: {
-          fields: { ip: "string" }
-        }
-      }
-    }));
-    if (!created) {
-      const existing = this.database.resources?.[resourceName];
-      if (existing) {
-        return existing;
-      }
-      throw createErr;
-    }
-    return resource;
-  }
-  /**
-   * Load existing bans into memory cache
-   * @private
-   */
-  async _loadBansIntoCache() {
-    try {
-      const bans = await this.bansResource.list({ limit: 1e3 });
-      const now = Date.now();
-      for (const ban of bans) {
-        const expiresAt = new Date(ban.expiresAt).getTime();
-        if (expiresAt > now) {
-          this.memoryCache.set(ban.ip, {
-            expiresAt,
-            reason: ban.reason,
-            violations: ban.violations
-          });
-        }
-      }
-      if (this.options.verbose) {
-        console.log(`[Failban] Loaded ${this.memoryCache.size} active bans into cache`);
-      }
-    } catch (err) {
-      console.error("[Failban] Failed to load bans:", err.message);
-    }
-  }
-  /**
-   * Setup cleanup timer for memory cache
-   * @private
-   */
-  _setupCleanupTimer() {
-    this.cleanupTimer = setInterval(() => {
-      const now = Date.now();
-      let cleaned = 0;
-      for (const [ip, ban] of this.memoryCache.entries()) {
-        if (ban.expiresAt <= now) {
-          this.memoryCache.delete(ip);
-          cleaned++;
-          this.database.emit?.("security:unbanned", {
-            ip,
-            reason: "expired",
-            bannedFor: ban.reason
-          });
-        }
-      }
-      if (this.options.verbose && cleaned > 0) {
-        console.log(`[Failban] Cleaned ${cleaned} expired bans from cache`);
-      }
-    }, 6e4);
-  }
-  /**
-   * Initialize GeoIP reader
-   * @private
-   */
-  async _initializeGeoIP() {
-    if (!this.options.geo.databasePath) {
-      console.warn("[Failban] GeoIP enabled but no databasePath provided");
-      return;
-    }
-    try {
-      const Reader = await requirePluginDependency(
-        "@maxmind/geoip2-node",
-        "ApiPlugin (Failban)",
-        "GeoIP country blocking"
-      );
-      this.geoReader = await Reader.open(this.options.geo.databasePath);
-      if (this.options.verbose) {
-        console.log(`[Failban] GeoIP database loaded from ${this.options.geo.databasePath}`);
-      }
-    } catch (err) {
-      console.error("[Failban] Failed to initialize GeoIP:", err.message);
-      console.warn("[Failban] GeoIP features will be disabled");
-      this.options.geo.enabled = false;
-    }
-  }
-  /**
-   * Get country code for IP address
-   */
-  getCountryCode(ip) {
-    if (!this.options.geo.enabled || !this.geoReader) {
-      return null;
-    }
-    if (this.options.geo.cacheResults && this.geoCache.has(ip)) {
-      return this.geoCache.get(ip);
-    }
-    try {
-      const response = this.geoReader.country(ip);
-      const countryCode = response?.country?.isoCode || null;
-      if (this.options.geo.cacheResults) {
-        this.geoCache.set(ip, countryCode);
-        if (this.geoCache.size > 1e4) {
-          const firstKey = this.geoCache.keys().next().value;
-          this.geoCache.delete(firstKey);
-        }
-      }
-      return countryCode;
-    } catch (err) {
-      if (this.options.verbose) {
-        console.log(`[Failban] GeoIP lookup failed for ${ip}: ${err.message}`);
-      }
-      return null;
-    }
-  }
-  /**
-   * Check if country is blocked
-   */
-  isCountryBlocked(countryCode) {
-    if (!this.options.geo.enabled) {
-      return false;
-    }
-    if (!countryCode) {
-      return this.options.geo.blockUnknown;
-    }
-    const upperCode = countryCode.toUpperCase();
-    if (this.options.geo.blockedCountries.length > 0) {
-      if (this.options.geo.blockedCountries.includes(upperCode)) {
-        return true;
-      }
-    }
-    if (this.options.geo.allowedCountries.length > 0) {
-      return !this.options.geo.allowedCountries.includes(upperCode);
-    }
-    return false;
-  }
-  /**
-   * Check if IP is blocked by country restrictions
-   */
-  checkCountryBlock(ip) {
-    if (!this.options.geo.enabled) {
-      return null;
-    }
-    if (this.isWhitelisted(ip)) {
-      return null;
-    }
-    const countryCode = this.getCountryCode(ip);
-    if (this.isCountryBlocked(countryCode)) {
-      return {
-        blocked: true,
-        reason: "country_restricted",
-        country: countryCode || "unknown",
-        ip
-      };
-    }
-    return null;
-  }
-  /**
-   * Check if IP is in whitelist
-   */
-  isWhitelisted(ip) {
-    return this.options.whitelist.includes(ip);
-  }
-  /**
-   * Check if IP is in blacklist
-   */
-  isBlacklisted(ip) {
-    return this.options.blacklist.includes(ip);
-  }
-  /**
-   * Check if IP is currently banned
-   */
-  isBanned(ip) {
-    if (!this.options.enabled) return false;
-    if (this.isWhitelisted(ip)) return false;
-    if (this.isBlacklisted(ip)) return true;
-    const cachedBan = this.memoryCache.get(ip);
-    if (cachedBan) {
-      if (cachedBan.expiresAt > Date.now()) {
-        return true;
-      } else {
-        this.memoryCache.delete(ip);
-        return false;
-      }
-    }
-    return false;
-  }
-  /**
-   * Get ban details for IP
-   */
-  async getBan(ip) {
-    if (!this.options.enabled) return null;
-    if (this.isBlacklisted(ip)) {
-      return {
-        ip,
-        reason: "blacklisted",
-        permanent: true
-      };
-    }
-    try {
-      const ban = await this.bansResource.get(ip);
-      if (!ban) return null;
-      if (new Date(ban.expiresAt).getTime() <= Date.now()) {
-        return null;
-      }
-      return ban;
-    } catch (err) {
-      return null;
-    }
-  }
-  /**
-   * Record a violation
-   */
-  async recordViolation(ip, type = "rate_limit", metadata = {}) {
-    if (!this.options.enabled) return;
-    if (this.isWhitelisted(ip)) return;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    this.database.emit?.("security:violation", {
-      ip,
-      type,
-      timestamp: now,
-      ...metadata
-    });
-    if (this.violationsResource) {
-      try {
-        await this.violationsResource.insert({
-          id: `${ip}_${Date.now()}`,
-          ip,
-          timestamp: now,
-          type,
-          path: metadata.path,
-          userAgent: metadata.userAgent
-        });
-      } catch (err) {
-        console.error("[Failban] Failed to persist violation:", err.message);
-      }
-    }
-    await this._checkAndBan(ip, type, metadata);
-  }
-  /**
-   * Check violation count and ban if threshold exceeded
-   * @private
-   */
-  async _checkAndBan(ip, type, metadata) {
-    if (this.isBanned(ip)) return;
-    const cutoff = new Date(Date.now() - this.options.violationWindow).toISOString();
-    let violationCount = 0;
-    if (this.violationsResource) {
-      try {
-        const violations = await this.violationsResource.query({
-          ip,
-          timestamp: { $gte: cutoff }
-        });
-        violationCount = violations.length;
-      } catch (err) {
-        console.error("[Failban] Failed to count violations:", err.message);
-        return;
-      }
-    }
-    if (violationCount >= this.options.maxViolations) {
-      await this.ban(ip, `${violationCount} ${type} violations`, metadata);
-    }
-  }
-  /**
-   * Ban an IP
-   */
-  async ban(ip, reason, metadata = {}) {
-    if (!this.options.enabled) return;
-    if (this.isWhitelisted(ip)) {
-      console.warn(`[Failban] Cannot ban whitelisted IP: ${ip}`);
-      return;
-    }
-    const now = /* @__PURE__ */ new Date();
-    const expiresAt = new Date(now.getTime() + this.options.banDuration);
-    const banRecord = {
-      id: ip,
-      ip,
-      reason,
-      violations: metadata.violationCount || this.options.maxViolations,
-      bannedAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      metadata: {
-        userAgent: metadata.userAgent,
-        path: metadata.path,
-        lastViolation: now.toISOString()
-      }
-    };
-    try {
-      await this.bansResource.insert(banRecord);
-      this.memoryCache.set(ip, {
-        expiresAt: expiresAt.getTime(),
-        reason,
-        violations: banRecord.violations
-      });
-      this.database.emit?.("security:banned", {
-        ip,
-        reason,
-        expiresAt: expiresAt.toISOString(),
-        duration: this.options.banDuration
-      });
-      if (this.options.verbose) {
-        console.log(`[Failban] Banned ${ip} for ${reason} until ${expiresAt.toISOString()}`);
-      }
-    } catch (err) {
-      console.error("[Failban] Failed to ban IP:", err.message);
-    }
-  }
-  /**
-   * Unban an IP
-   */
-  async unban(ip) {
-    if (!this.options.enabled) return;
-    try {
-      await this.bansResource.delete(ip);
-      this.memoryCache.delete(ip);
-      this.database.emit?.("security:unbanned", {
-        ip,
-        reason: "manual",
-        unbannedAt: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      if (this.options.verbose) {
-        console.log(`[Failban] Unbanned ${ip}`);
-      }
-      return true;
-    } catch (err) {
-      console.error("[Failban] Failed to unban IP:", err.message);
-      return false;
-    }
-  }
-  /**
-   * List all active bans
-   */
-  async listBans() {
-    if (!this.options.enabled) return [];
-    try {
-      const bans = await this.bansResource.list({ limit: 1e3 });
-      const now = Date.now();
-      return bans.filter((ban) => new Date(ban.expiresAt).getTime() > now);
-    } catch (err) {
-      console.error("[Failban] Failed to list bans:", err.message);
-      return [];
-    }
-  }
-  /**
-   * Get statistics
-   */
-  async getStats() {
-    const activeBans = await this.listBans();
-    let totalViolations = 0;
-    if (this.violationsResource) {
-      try {
-        const violations = await this.violationsResource.list({ limit: 1e4 });
-        totalViolations = violations.length;
-      } catch (err) {
-        console.error("[Failban] Failed to count violations:", err.message);
-      }
-    }
-    return {
-      enabled: this.options.enabled,
-      activeBans: activeBans.length,
-      cachedBans: this.memoryCache.size,
-      totalViolations,
-      whitelistedIPs: this.options.whitelist.length,
-      blacklistedIPs: this.options.blacklist.length,
-      geo: {
-        enabled: this.options.geo.enabled,
-        allowedCountries: this.options.geo.allowedCountries.length,
-        blockedCountries: this.options.geo.blockedCountries.length,
-        blockUnknown: this.options.geo.blockUnknown
-      },
-      config: {
-        maxViolations: this.options.maxViolations,
-        violationWindow: this.options.violationWindow,
-        banDuration: this.options.banDuration
-      }
-    };
-  }
-  /**
-   * Cleanup
-   */
-  async cleanup() {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-    this.memoryCache.clear();
-    this.geoCache.clear();
-    if (this.geoReader) {
-      this.geoReader = null;
-    }
-    if (this.options.verbose) {
-      console.log("[Failban] Cleaned up");
-    }
-  }
-}
-
-var failbanManager = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  FailbanManager: FailbanManager
-});
-
-class ApiEventEmitter extends EventEmitter.EventEmitter {
-  constructor(options = {}) {
-    super();
-    this.options = {
-      enabled: options.enabled !== false,
-      // Enabled by default
-      verbose: options.verbose || false,
-      maxListeners: options.maxListeners || 10
-    };
-    this.setMaxListeners(this.options.maxListeners);
-  }
-  /**
-   * Emit event with wildcard support
-   * @param {string} event - Event name
-   * @param {Object} data - Event data
-   */
-  emit(event, data = {}) {
-    if (!this.options.enabled) {
-      return false;
-    }
-    if (this.options.verbose) {
-      console.log(`[API Events] ${event}`, data);
-    }
-    super.emit(event, { event, ...data, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-    if (event.includes(":")) {
-      const [prefix] = event.split(":");
-      const wildcardEvent = `${prefix}:*`;
-      super.emit(wildcardEvent, { event, ...data, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-    }
-    return true;
-  }
-  /**
-   * Helper to emit user events
-   * @param {string} action - created, login, updated, deleted
-   * @param {Object} data - Event data
-   */
-  emitUserEvent(action, data) {
-    this.emit(`user:${action}`, data);
-  }
-  /**
-   * Helper to emit auth events
-   * @param {string} action - success, failure
-   * @param {Object} data - Event data
-   */
-  emitAuthEvent(action, data) {
-    this.emit(`auth:${action}`, data);
-  }
-  /**
-   * Helper to emit resource events
-   * @param {string} action - created, updated, deleted
-   * @param {Object} data - Event data
-   */
-  emitResourceEvent(action, data) {
-    this.emit(`resource:${action}`, data);
-  }
-  /**
-   * Helper to emit request events
-   * @param {string} action - start, end, error
-   * @param {Object} data - Event data
-   */
-  emitRequestEvent(action, data) {
-    this.emit(`request:${action}`, data);
-  }
-  /**
-   * Get event statistics
-   * @returns {Object} Event statistics
-   */
-  getStats() {
-    const stats = {
-      enabled: this.options.enabled,
-      maxListeners: this.options.maxListeners,
-      listeners: {}
-    };
-    for (const event of this.eventNames()) {
-      stats.listeners[event] = this.listenerCount(event);
-    }
-    return stats;
-  }
-}
-
-class MetricsCollector {
-  constructor(options = {}) {
-    this.options = {
-      enabled: options.enabled !== false,
-      // Enabled by default
-      verbose: options.verbose || false,
-      maxPathsTracked: options.maxPathsTracked || 100,
-      // Limit memory usage
-      resetInterval: options.resetInterval || 3e5
-      // Reset every 5 minutes
-    };
-    this.metrics = this._createEmptyMetrics();
-    this.startTime = Date.now();
-    if (this.options.resetInterval > 0) {
-      this.resetTimer = setInterval(() => {
-        if (this.options.verbose) {
-          console.log("[Metrics] Auto-resetting metrics");
-        }
-        this.reset();
-      }, this.options.resetInterval);
-    }
-  }
-  /**
-   * Create empty metrics structure
-   * @private
-   */
-  _createEmptyMetrics() {
-    return {
-      requests: {
-        total: 0,
-        byMethod: {},
-        byStatus: {},
-        byPath: {},
-        durations: []
-      },
-      auth: {
-        success: 0,
-        failure: 0,
-        byMethod: {}
-      },
-      resources: {
-        created: 0,
-        updated: 0,
-        deleted: 0,
-        byResource: {}
-      },
-      users: {
-        logins: 0,
-        newUsers: 0
-      },
-      errors: {
-        total: 0,
-        byType: {}
-      }
-    };
-  }
-  /**
-   * Record request metrics
-   * @param {Object} data - Request data
-   */
-  recordRequest({ method, path, status, duration }) {
-    if (!this.options.enabled) return;
-    const metrics = this.metrics.requests;
-    metrics.total++;
-    metrics.byMethod[method] = (metrics.byMethod[method] || 0) + 1;
-    const statusGroup = `${Math.floor(status / 100)}xx`;
-    metrics.byStatus[statusGroup] = (metrics.byStatus[statusGroup] || 0) + 1;
-    if (Object.keys(metrics.byPath).length < this.options.maxPathsTracked || metrics.byPath[path]) {
-      if (!metrics.byPath[path]) {
-        metrics.byPath[path] = { count: 0, totalDuration: 0, errors: 0 };
-      }
-      metrics.byPath[path].count++;
-      metrics.byPath[path].totalDuration += duration;
-      if (status >= 400) {
-        metrics.byPath[path].errors++;
-      }
-    }
-    metrics.durations.push(duration);
-    if (metrics.durations.length > 1e3) {
-      metrics.durations.shift();
-    }
-    if (this.options.verbose) {
-      console.log(`[Metrics] Request: ${method} ${path} ${status} (${duration}ms)`);
-    }
-  }
-  /**
-   * Record auth metrics
-   * @param {Object} data - Auth data
-   */
-  recordAuth({ success, method }) {
-    if (!this.options.enabled) return;
-    const metrics = this.metrics.auth;
-    if (success) {
-      metrics.success++;
-    } else {
-      metrics.failure++;
-    }
-    if (!metrics.byMethod[method]) {
-      metrics.byMethod[method] = { success: 0, failure: 0 };
-    }
-    if (success) {
-      metrics.byMethod[method].success++;
-    } else {
-      metrics.byMethod[method].failure++;
-    }
-    if (this.options.verbose) {
-      console.log(`[Metrics] Auth: ${method} ${success ? "success" : "failure"}`);
-    }
-  }
-  /**
-   * Record resource operation metrics
-   * @param {Object} data - Resource operation data
-   */
-  recordResourceOperation({ action, resource }) {
-    if (!this.options.enabled) return;
-    const metrics = this.metrics.resources;
-    if (action === "created") metrics.created++;
-    else if (action === "updated") metrics.updated++;
-    else if (action === "deleted") metrics.deleted++;
-    if (!metrics.byResource[resource]) {
-      metrics.byResource[resource] = { created: 0, updated: 0, deleted: 0 };
-    }
-    metrics.byResource[resource][action]++;
-    if (this.options.verbose) {
-      console.log(`[Metrics] Resource: ${resource} ${action}`);
-    }
-  }
-  /**
-   * Record user event metrics
-   * @param {Object} data - User event data
-   */
-  recordUserEvent({ action }) {
-    if (!this.options.enabled) return;
-    const metrics = this.metrics.users;
-    if (action === "login") {
-      metrics.logins++;
-    } else if (action === "created") {
-      metrics.newUsers++;
-    }
-    if (this.options.verbose) {
-      console.log(`[Metrics] User: ${action}`);
-    }
-  }
-  /**
-   * Record error metrics
-   * @param {Object} data - Error data
-   */
-  recordError({ error, type = "unknown" }) {
-    if (!this.options.enabled) return;
-    const metrics = this.metrics.errors;
-    metrics.total++;
-    metrics.byType[type] = (metrics.byType[type] || 0) + 1;
-    if (this.options.verbose) {
-      console.log(`[Metrics] Error: ${type} - ${error}`);
-    }
-  }
-  /**
-   * Calculate percentile from sorted array
-   * @private
-   */
-  _percentile(arr, p) {
-    if (arr.length === 0) return 0;
-    const sorted = [...arr].sort((a, b) => a - b);
-    const index = Math.ceil(p / 100 * sorted.length) - 1;
-    return sorted[Math.max(0, index)];
-  }
-  /**
-   * Get metrics summary
-   * @returns {Object} Metrics summary
-   */
-  getSummary() {
-    const uptime = Date.now() - this.startTime;
-    return {
-      uptime: {
-        milliseconds: uptime,
-        seconds: Math.floor(uptime / 1e3),
-        formatted: this._formatDuration(uptime)
-      },
-      requests: {
-        total: this.metrics.requests.total,
-        rps: (this.metrics.requests.total / (uptime / 1e3)).toFixed(2),
-        byMethod: this.metrics.requests.byMethod,
-        byStatus: this.metrics.requests.byStatus,
-        topPaths: this._getTopPaths(),
-        duration: {
-          p50: this._percentile(this.metrics.requests.durations, 50),
-          p95: this._percentile(this.metrics.requests.durations, 95),
-          p99: this._percentile(this.metrics.requests.durations, 99),
-          avg: this.metrics.requests.durations.length > 0 ? (this.metrics.requests.durations.reduce((a, b) => a + b, 0) / this.metrics.requests.durations.length).toFixed(2) : 0
-        }
-      },
-      auth: {
-        total: this.metrics.auth.success + this.metrics.auth.failure,
-        success: this.metrics.auth.success,
-        failure: this.metrics.auth.failure,
-        successRate: this._calculateRate(this.metrics.auth.success, this.metrics.auth.success + this.metrics.auth.failure),
-        byMethod: this.metrics.auth.byMethod
-      },
-      resources: {
-        total: this.metrics.resources.created + this.metrics.resources.updated + this.metrics.resources.deleted,
-        created: this.metrics.resources.created,
-        updated: this.metrics.resources.updated,
-        deleted: this.metrics.resources.deleted,
-        byResource: this.metrics.resources.byResource
-      },
-      users: this.metrics.users,
-      errors: {
-        total: this.metrics.errors.total,
-        rate: this._calculateRate(this.metrics.errors.total, this.metrics.requests.total),
-        byType: this.metrics.errors.byType
-      }
-    };
-  }
-  /**
-   * Get top paths by request count
-   * @private
-   */
-  _getTopPaths(limit = 10) {
-    return Object.entries(this.metrics.requests.byPath).map(([path, data]) => ({
-      path,
-      count: data.count,
-      avgDuration: (data.totalDuration / data.count).toFixed(2),
-      errors: data.errors,
-      errorRate: this._calculateRate(data.errors, data.count)
-    })).sort((a, b) => b.count - a.count).slice(0, limit);
-  }
-  /**
-   * Calculate rate as percentage
-   * @private
-   */
-  _calculateRate(numerator, denominator) {
-    if (denominator === 0) return "0.00%";
-    return (numerator / denominator * 100).toFixed(2) + "%";
-  }
-  /**
-   * Format duration in human-readable form
-   * @private
-   */
-  _formatDuration(ms) {
-    const seconds = Math.floor(ms / 1e3);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-    if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
-    if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-    return `${seconds}s`;
-  }
-  /**
-   * Reset metrics
-   */
-  reset() {
-    this.metrics = this._createEmptyMetrics();
-    this.startTime = Date.now();
-  }
-  /**
-   * Stop metrics collection and cleanup
-   */
-  stop() {
-    if (this.resetTimer) {
-      clearInterval(this.resetTimer);
-      this.resetTimer = null;
-    }
-  }
-}
-
-class OpenAPIGeneratorCached {
-  constructor({ database, options }) {
-    this.database = database;
-    this.options = options;
-    this.cache = null;
-    this.cacheKey = null;
-    if (options?.verbose) {
-      console.log("[OpenAPIGenerator] Caching enabled");
-    }
-  }
-  /**
-   * Generate OpenAPI spec (with caching)
-   * @returns {Object} OpenAPI specification
-   */
-  generate() {
-    const currentKey = this.generateCacheKey();
-    if (this.cacheKey === currentKey && this.cache) {
-      if (this.options.verbose) {
-        console.log("[OpenAPIGenerator] Cache HIT (0ms)");
-      }
-      return this.cache;
-    }
-    if (this.options.verbose) {
-      const reason = !this.cache ? "initial" : "invalidated";
-      console.log(`[OpenAPIGenerator] Cache MISS (${reason})`);
-    }
-    const startTime = Date.now();
-    this.cache = generateOpenAPISpec(this.database, this.options);
-    this.cacheKey = currentKey;
-    if (this.options.verbose) {
-      const duration = Date.now() - startTime;
-      console.log(`[OpenAPIGenerator] Generated spec in ${duration}ms`);
-    }
-    return this.cache;
-  }
-  /**
-   * Generate cache key based on schema state
-   * @private
-   * @returns {string} Cache key (hash)
-   */
-  generateCacheKey() {
-    const components = {
-      // Resource names and versions
-      resources: Object.keys(this.database.resources).map((name) => {
-        const resource = this.database.resources[name];
-        return {
-          name,
-          version: resource.config?.currentVersion || resource.version || "v1",
-          // Shallow hash of attributes (type changes invalidate cache)
-          attributes: Object.keys(resource.attributes || {}).sort().join(",")
-        };
-      }),
-      // Auth configuration affects security schemes
-      auth: {
-        drivers: this.options.auth?.drivers?.map((d) => d.driver).sort() || [],
-        pathRules: this.options.auth?.pathRules?.length || 0,
-        pathAuth: !!this.options.auth?.pathAuth
-      },
-      // Resource config affects paths
-      resourceConfig: Object.keys(this.options.resources || {}).sort(),
-      // Version prefix affects URLs
-      versionPrefix: this.options.versionPrefix,
-      // API info
-      apiInfo: {
-        title: this.options.title,
-        version: this.options.version,
-        description: this.options.description
-      }
-    };
-    const hash = crypto.createHash("sha256").update(JSON.stringify(components)).digest("hex").substring(0, 16);
-    return hash;
-  }
-  /**
-   * Invalidate cache (force regeneration on next request)
-   */
-  invalidate() {
-    this.cache = null;
-    this.cacheKey = null;
-    if (this.options.verbose) {
-      console.log("[OpenAPIGenerator] Cache manually invalidated");
-    }
-  }
-  /**
-   * Get cache statistics
-   * @returns {Object} Cache stats
-   */
-  getStats() {
-    return {
-      cached: !!this.cache,
-      cacheKey: this.cacheKey,
-      size: this.cache ? JSON.stringify(this.cache).length : 0
-    };
-  }
-}
-
-class Router {
-  constructor({ database, resources, routes, versionPrefix, auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono }) {
-    this.database = database;
-    this.resources = resources || {};
-    this.routes = routes || {};
-    this.versionPrefix = versionPrefix;
-    this.auth = auth;
-    this.staticConfigs = staticConfigs || [];
-    this.failban = failban;
-    this.metrics = metrics;
-    this.relationsPlugin = relationsPlugin;
-    this.authMiddleware = authMiddleware;
-    this.verbose = verbose;
-    this.Hono = Hono;
-  }
-  /**
-   * Mount all routes on Hono app
-   * @param {Hono} app - Hono application instance
-   * @param {Object} events - Event emitter
-   */
-  mount(app, events) {
-    this.mountStaticRoutes(app);
-    this.mountResourceRoutes(app, events);
-    this.mountAuthRoutes(app);
-    this.mountRelationalRoutes(app);
-    this.mountCustomRoutes(app);
-    this.mountAdminRoutes(app);
-  }
-  /**
-   * Mount resource routes (auto-generated CRUD)
-   * @private
-   */
-  mountResourceRoutes(app, events) {
-    const databaseResources = this.database.resources;
-    for (const [name, resource] of Object.entries(databaseResources)) {
-      const resourceConfig = this.resources[name];
-      const isPluginResource = name.startsWith("plg_");
-      if (isPluginResource && !resourceConfig) {
-        if (this.verbose) {
-          console.log(`[API Router] Skipping internal resource '${name}' (not included in config.resources)`);
-        }
-        continue;
-      }
-      if (resourceConfig?.enabled === false) {
-        if (this.verbose) {
-          console.log(`[API Router] Resource '${name}' disabled via config.resources`);
-        }
-        continue;
-      }
-      const version = resource.config?.currentVersion || resource.version || "v1";
-      let versionPrefixConfig;
-      if (resourceConfig && resourceConfig.versionPrefix !== void 0) {
-        versionPrefixConfig = resourceConfig.versionPrefix;
-      } else if (resource.config && resource.config.versionPrefix !== void 0) {
-        versionPrefixConfig = resource.config.versionPrefix;
-      } else if (this.versionPrefix !== void 0) {
-        versionPrefixConfig = this.versionPrefix;
-      } else {
-        versionPrefixConfig = false;
-      }
-      let prefix = "";
-      if (versionPrefixConfig === true) {
-        prefix = version;
-      } else if (versionPrefixConfig === false) {
-        prefix = "";
-      } else if (typeof versionPrefixConfig === "string") {
-        prefix = versionPrefixConfig;
-      }
-      const middlewares = [];
-      const authDisabled = resourceConfig?.auth === false;
-      if (this.authMiddleware && !authDisabled) {
-        middlewares.push(this.authMiddleware);
-      }
-      const extraMiddleware = resourceConfig?.customMiddleware;
-      if (extraMiddleware) {
-        const toRegister = Array.isArray(extraMiddleware) ? extraMiddleware : [extraMiddleware];
-        for (const middleware of toRegister) {
-          if (typeof middleware === "function") {
-            middlewares.push(middleware);
-          } else if (this.verbose) {
-            console.warn(`[API Router] Ignoring non-function middleware for resource '${name}'`);
-          }
-        }
-      }
-      let methods = resourceConfig?.methods || resource.config?.methods;
-      if (!Array.isArray(methods) || methods.length === 0) {
-        methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-      } else {
-        methods = methods.filter(Boolean).map((method) => typeof method === "string" ? method.toUpperCase() : method);
-      }
-      const enableValidation = resourceConfig?.validation !== void 0 ? resourceConfig.validation !== false : resource.config?.validation !== false;
-      const resourceApp = createResourceRoutes(resource, version, {
-        methods,
-        customMiddleware: middlewares,
-        enableValidation,
-        versionPrefix: prefix,
-        events
-      }, this.Hono);
-      const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
-      app.route(mountPath, resourceApp);
-      if (this.verbose) {
-        console.log(`[API Router] Mounted routes for resource '${name}' at ${mountPath}`);
-      }
-      if (resource.config?.routes) {
-        const routeContext = {
-          resource,
-          database: this.database,
-          resourceName: name,
-          version
-        };
-        mountCustomRoutes(resourceApp, resource.config.routes, routeContext, this.verbose);
-      }
-    }
-  }
-  /**
-   * Mount authentication routes
-   * @private
-   */
-  mountAuthRoutes(app) {
-    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = this.auth;
-    const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
-    if (identityPlugin) {
-      if (this.verbose) {
-        console.warn("[API Router] IdentityPlugin detected. Skipping built-in auth routes.");
-      }
-      return;
-    }
-    const jwtDriver = drivers?.find((d) => d.driver === "jwt");
-    if (!jwtDriver) {
-      return;
-    }
-    const authResource = this.database.resources[resourceName];
-    if (!authResource) {
-      console.error(`[API Router] Auth resource '${resourceName}' not found. Skipping auth routes.`);
-      return;
-    }
-    const driverConfig = jwtDriver.config || {};
-    const registrationConfig = {
-      enabled: driverConfig.allowRegistration === true || driverConfig.registration?.enabled === true || registration?.enabled === true,
-      allowedFields: Array.isArray(driverConfig.registration?.allowedFields) ? driverConfig.registration.allowedFields : Array.isArray(registration?.allowedFields) ? registration.allowedFields : [],
-      defaultRole: driverConfig.registration?.defaultRole ?? registration?.defaultRole ?? "user"
-    };
-    const driverLoginThrottle = driverConfig.loginThrottle || {};
-    const loginThrottleConfig = {
-      enabled: driverLoginThrottle.enabled ?? loginThrottle?.enabled ?? true,
-      maxAttempts: driverLoginThrottle.maxAttempts || loginThrottle?.maxAttempts || 5,
-      windowMs: driverLoginThrottle.windowMs || loginThrottle?.windowMs || 6e4,
-      blockDurationMs: driverLoginThrottle.blockDurationMs || loginThrottle?.blockDurationMs || 3e5,
-      maxEntries: driverLoginThrottle.maxEntries || loginThrottle?.maxEntries || 1e4
-    };
-    const authConfig = {
-      driver: "jwt",
-      usernameField,
-      passwordField,
-      jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
-      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
-      passphrase: driverConfig.passphrase || "secret",
-      allowRegistration: registrationConfig.enabled,
-      registration: registrationConfig,
-      loginThrottle: loginThrottleConfig
-    };
-    const authApp = createAuthRoutes(authResource, authConfig);
-    app.route("/auth", authApp);
-    if (this.verbose) {
-      console.log("[API Router] Mounted auth routes (driver: jwt) at /auth");
-    }
-  }
-  /**
-   * Mount static file serving routes
-   * @private
-   */
-  mountStaticRoutes(app) {
-    if (!this.staticConfigs || this.staticConfigs.length === 0) {
-      return;
-    }
-    if (!Array.isArray(this.staticConfigs)) {
-      throw new Error("Static config must be an array of mount points");
-    }
-    for (const [index, config] of this.staticConfigs.entries()) {
-      try {
-        if (!config.driver) {
-          throw new Error(`static[${index}]: "driver" is required (filesystem or s3)`);
-        }
-        if (!config.path) {
-          throw new Error(`static[${index}]: "path" is required (mount path)`);
-        }
-        if (!config.path.startsWith("/")) {
-          throw new Error(`static[${index}]: "path" must start with / (got: ${config.path})`);
-        }
-        const driverConfig = config.config || {};
-        let handler;
-        if (config.driver === "filesystem") {
-          validateFilesystemConfig({ ...config, ...driverConfig });
-          handler = createFilesystemHandler({
-            root: config.root,
-            index: driverConfig.index,
-            fallback: driverConfig.fallback,
-            maxAge: driverConfig.maxAge,
-            dotfiles: driverConfig.dotfiles,
-            etag: driverConfig.etag,
-            cors: driverConfig.cors
-          });
-        } else if (config.driver === "s3") {
-          validateS3Config({ ...config, ...driverConfig });
-          const s3Client = this.database?.client?.client;
-          if (!s3Client) {
-            throw new Error(`static[${index}]: S3 driver requires database with S3 client`);
-          }
-          handler = createS3Handler({
-            s3Client,
-            bucket: config.bucket,
-            prefix: config.prefix,
-            streaming: driverConfig.streaming,
-            signedUrlExpiry: driverConfig.signedUrlExpiry,
-            maxAge: driverConfig.maxAge,
-            cacheControl: driverConfig.cacheControl,
-            contentDisposition: driverConfig.contentDisposition,
-            etag: driverConfig.etag,
-            cors: driverConfig.cors
-          });
-        } else {
-          throw new Error(
-            `static[${index}]: invalid driver "${config.driver}". Valid drivers: filesystem, s3`
-          );
-        }
-        const mountPath = config.path === "/" ? "/*" : `${config.path}/*`;
-        app.get(mountPath, handler);
-        app.head(mountPath, handler);
-        if (this.verbose) {
-          console.log(
-            `[API Router] Mounted static files (${config.driver}) at ${config.path}` + (config.driver === "filesystem" ? ` -> ${config.root}` : ` -> s3://${config.bucket}/${config.prefix || ""}`)
-          );
-        }
-      } catch (err) {
-        console.error(`[API Router] Failed to setup static files for index ${index}:`, err.message);
-        throw err;
-      }
-    }
-  }
-  /**
-   * Mount relational routes (if RelationPlugin is active)
-   * @private
-   */
-  mountRelationalRoutes(app) {
-    if (!this.relationsPlugin || !this.relationsPlugin.relations) {
-      return;
-    }
-    const relations = this.relationsPlugin.relations;
-    if (this.verbose) {
-      console.log("[API Router] Setting up relational routes...");
-    }
-    for (const [resourceName, relationsDef] of Object.entries(relations)) {
-      const resource = this.database.resources[resourceName];
-      if (!resource) {
-        if (this.verbose) {
-          console.warn(`[API Router] Resource '${resourceName}' not found for relational routes`);
-        }
-        continue;
-      }
-      if (resourceName.startsWith("plg_") && !this.resources[resourceName]) {
-        continue;
-      }
-      const version = resource.config?.currentVersion || resource.version || "v1";
-      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
-        if (relationConfig.type === "belongsTo") {
-          continue;
-        }
-        const resourceConfig = this.resources[resourceName];
-        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
-        if (!exposeRelation) {
-          continue;
-        }
-        const relationalApp = createRelationalRoutes(
-          resource,
-          relationName,
-          relationConfig,
-          version,
-          this.Hono
-        );
-        app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
-        if (this.verbose) {
-          console.log(
-            `[API Router] Mounted relational route: /${version}/${resourceName}/:id/${relationName} (${relationConfig.type} -> ${relationConfig.resource})`
-          );
-        }
-      }
-    }
-  }
-  /**
-   * Mount plugin-level custom routes
-   * @private
-   */
-  mountCustomRoutes(app) {
-    if (!this.routes || Object.keys(this.routes).length === 0) {
-      return;
-    }
-    const context = {
-      database: this.database,
-      plugins: this.database?.plugins || {}
-    };
-    mountCustomRoutes(app, this.routes, context, this.verbose);
-    if (this.verbose) {
-      console.log(`[API Router] Mounted ${Object.keys(this.routes).length} plugin-level custom routes`);
-    }
-  }
-  /**
-   * Mount admin routes (failban, metrics)
-   * @private
-   */
-  mountAdminRoutes(app) {
-    if (this.metrics?.enabled) {
-      app.get("/metrics", (c) => {
-        const summary = this.metrics.getSummary();
-        const response = success(summary);
-        return c.json(response);
-      });
-      if (this.verbose) {
-        console.log("[API Router] Metrics endpoint enabled at /metrics");
-      }
-    }
-    if (this.failban) {
-      const failbanAdminRoutes = createFailbanAdminRoutes(this.Hono, this.failban);
-      app.route("/admin/security", failbanAdminRoutes);
-      if (this.verbose) {
-        console.log("[API Router] Failban admin endpoints enabled at /admin/security");
-      }
-    }
-  }
-}
-
-class MiddlewareChain {
-  constructor({
-    requestId,
-    cors,
-    security,
-    sessionTracking,
-    middlewares,
-    templates,
-    maxBodySize,
-    failban,
-    events,
-    verbose,
-    database,
-    inFlightRequests,
-    acceptingRequests,
-    corsMiddleware
-  }) {
-    this.requestId = requestId;
-    this.cors = cors;
-    this.security = security;
-    this.sessionTracking = sessionTracking;
-    this.middlewares = middlewares || [];
-    this.templates = templates;
-    this.maxBodySize = maxBodySize;
-    this.failban = failban;
+class PathRulesAuthStrategy extends BaseAuthStrategy {
+  constructor({ drivers, authResource, oidcMiddleware, pathRules, events, verbose }) {
+    super({ drivers, authResource, oidcMiddleware, verbose });
+    this.pathRules = pathRules;
     this.events = events;
-    this.verbose = verbose;
-    this.database = database;
-    this.inFlightRequests = inFlightRequests;
-    this.acceptingRequests = acceptingRequests;
-    this.corsMiddleware = corsMiddleware;
   }
-  /**
-   * Apply all middlewares to Hono app in correct order
-   * @param {Hono} app - Hono application instance
-   */
-  apply(app) {
-    this.applyRequestTracking(app);
-    this.applyFailban(app);
-    this.applyRequestId(app);
-    this.applyCors(app);
-    this.applySecurity(app);
-    this.applySessionTracking(app);
-    this.applyCustomMiddlewares(app);
-    this.applyTemplates(app);
-    this.applyBodySizeLimits(app);
-  }
-  /**
-   * Apply request tracking middleware (for graceful shutdown)
-   * @private
-   */
-  applyRequestTracking(app) {
-    app.use("*", async (c, next) => {
-      if (!this.acceptingRequests()) {
-        return c.json({ error: "Server is shutting down" }, 503);
+  createMiddleware() {
+    const authMiddlewares = {};
+    for (const driverDef of this.drivers) {
+      const driverType = driverDef.type || driverDef.driver;
+      const driverConfig = driverDef.config || driverDef;
+      if (driverType === "oauth2-server") {
+        continue;
       }
-      const requestId = Symbol("request");
-      this.inFlightRequests.add(requestId);
-      const startTime = Date.now();
-      const requestInfo = {
-        requestId: c.get("requestId") || requestId.toString(),
-        method: c.req.method,
-        path: c.req.path,
-        userAgent: c.req.header("user-agent"),
-        ip: c.req.header("x-forwarded-for") || c.req.header("x-real-ip")
-      };
-      this.events.emitRequestEvent("start", requestInfo);
-      try {
-        await next();
-        this.events.emitRequestEvent("end", {
-          ...requestInfo,
-          duration: Date.now() - startTime,
-          status: c.res.status
-        });
-      } catch (err) {
-        this.events.emitRequestEvent("error", {
-          ...requestInfo,
-          duration: Date.now() - startTime,
-          error: err.message,
-          stack: err.stack
-        });
-        throw err;
-      } finally {
-        this.inFlightRequests.delete(requestId);
+      if (driverType === "oidc") {
+        if (this.oidcMiddleware) {
+          authMiddlewares.oidc = this.oidcMiddleware;
+        }
+        continue;
       }
-    });
-  }
-  /**
-   * Apply failban middleware
-   * @private
-   */
-  applyFailban(app) {
-    if (!this.failban) {
-      return;
+      if (driverType === "jwt") {
+        authMiddlewares.jwt = jwtAuth({
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
+          usersResource: this.authResource,
+          optional: true
+        });
+      }
+      if (driverType === "apiKey") {
+        authMiddlewares.apiKey = apiKeyAuth({
+          headerName: driverConfig.headerName || "X-API-Key",
+          usersResource: this.authResource,
+          optional: true
+        });
+      }
+      if (driverType === "basic") {
+        authMiddlewares.basic = basicAuth({
+          authResource: this.authResource,
+          usernameField: driverConfig.usernameField || "email",
+          passwordField: driverConfig.passwordField || "password",
+          passphrase: driverConfig.passphrase || "secret",
+          adminUser: driverConfig.adminUser || null,
+          optional: true
+        });
+      }
+      if (driverType === "oauth2") {
+        const oauth2Handler = createOAuth2Handler(driverConfig, this.authResource);
+        authMiddlewares.oauth2 = async (c, next) => {
+          const user = await oauth2Handler(c);
+          if (user) {
+            c.set("user", user);
+            return await next();
+          }
+        };
+      }
     }
-    const failbanMiddleware = createFailbanMiddleware({
-      plugin: this.failban,
-      events: this.events
-    });
-    app.use("*", failbanMiddleware);
-    setupFailbanViolationListener({
-      plugin: this.failban,
-      events: this.events
-    });
     if (this.verbose) {
-      console.log("[MiddlewareChain] Failban protection enabled");
+      console.log(`[PathRulesAuthStrategy] Path-based auth with ${this.pathRules.length} rules`);
+      console.log(`[PathRulesAuthStrategy] Available auth methods: ${Object.keys(authMiddlewares).join(", ")}`);
     }
-  }
-  /**
-   * Apply request ID middleware
-   * @private
-   */
-  applyRequestId(app) {
-    if (!this.requestId?.enabled) {
-      app.use("*", async (c, next) => {
-        c.set("requestId", idGenerator());
-        c.set("verbose", this.verbose);
-        await next();
-      });
-      return;
-    }
-    const requestIdMiddleware = createRequestIdMiddleware(this.requestId);
-    app.use("*", requestIdMiddleware);
-    if (this.verbose) {
-      console.log(`[MiddlewareChain] Request ID tracking enabled (header: ${this.requestId.headerName || "X-Request-ID"})`);
-    }
-  }
-  /**
-   * Apply CORS middleware
-   * @private
-   */
-  applyCors(app) {
-    if (!this.cors?.enabled || !this.corsMiddleware) {
-      return;
-    }
-    const corsConfig = this.cors;
-    app.use("*", this.corsMiddleware({
-      origin: corsConfig.origin || "*",
-      allowMethods: corsConfig.allowMethods || ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: corsConfig.allowHeaders || ["Content-Type", "Authorization", "X-Request-ID"],
-      exposeHeaders: corsConfig.exposeHeaders || ["X-Request-ID"],
-      credentials: corsConfig.credentials || false,
-      maxAge: corsConfig.maxAge || 86400
-    }));
-    if (this.verbose) {
-      console.log(`[MiddlewareChain] CORS enabled (maxAge: ${corsConfig.maxAge || 86400}s, origin: ${corsConfig.origin || "*"})`);
-    }
-  }
-  /**
-   * Apply security headers middleware
-   * @private
-   */
-  applySecurity(app) {
-    if (!this.security?.enabled) {
-      return;
-    }
-    const securityMiddleware = createSecurityHeadersMiddleware(this.security);
-    app.use("*", securityMiddleware);
-    if (this.verbose) {
-      console.log("[MiddlewareChain] Security headers enabled");
-    }
-  }
-  /**
-   * Apply session tracking middleware
-   * @private
-   */
-  applySessionTracking(app) {
-    if (!this.sessionTracking?.enabled) {
-      return;
-    }
-    const sessionMiddleware = createSessionTrackingMiddleware(
-      this.sessionTracking,
-      this.database
-    );
-    app.use("*", sessionMiddleware);
-    if (this.verbose) {
-      const resource = this.sessionTracking.resource ? ` (resource: ${this.sessionTracking.resource})` : " (in-memory)";
-      console.log(`[MiddlewareChain] Session tracking enabled${resource}`);
-    }
-  }
-  /**
-   * Apply custom middlewares
-   * @private
-   */
-  applyCustomMiddlewares(app) {
-    this.middlewares.forEach((middleware) => {
-      app.use("*", middleware);
-    });
-    if (this.verbose && this.middlewares.length > 0) {
-      console.log(`[MiddlewareChain] Applied ${this.middlewares.length} custom middleware(s)`);
-    }
-  }
-  /**
-   * Apply template engine middleware
-   * @private
-   */
-  applyTemplates(app) {
-    if (!this.templates?.enabled) {
-      return;
-    }
-    const templateMiddleware = setupTemplateEngine(this.templates);
-    app.use("*", templateMiddleware);
-    if (this.verbose) {
-      console.log(`[MiddlewareChain] Template engine enabled: ${this.templates.engine}`);
-    }
-  }
-  /**
-   * Apply body size limits
-   * @private
-   */
-  applyBodySizeLimits(app) {
-    app.use("*", async (c, next) => {
-      const method = c.req.method;
-      if (["POST", "PUT", "PATCH"].includes(method)) {
-        const contentLength = c.req.header("content-length");
-        if (contentLength) {
-          const size = parseInt(contentLength);
-          if (size > this.maxBodySize) {
-            const response = payloadTooLarge(size, this.maxBodySize);
-            c.header("Connection", "close");
-            return c.json(response, response._status);
+    return createPathBasedAuthMiddleware({
+      rules: this.pathRules,
+      authMiddlewares,
+      unauthorizedHandler: (c, message) => {
+        const acceptHeader = c.req.header("accept") || "";
+        const acceptsHtml = acceptHeader.includes("text/html");
+        if (acceptsHtml) {
+          if (authMiddlewares.oidc) {
+            return c.redirect("/auth/login", 302);
           }
         }
-      }
-      await next();
+        return c.json({
+          error: "Unauthorized",
+          message
+        }, 401);
+      },
+      events: this.events
     });
   }
 }
 
-class HealthManager {
-  constructor({ database, healthConfig, verbose }) {
-    this.database = database;
-    this.healthConfig = healthConfig || {};
-    this.verbose = verbose;
-  }
+class AuthStrategyFactory {
   /**
-   * Register all health endpoints on Hono app
-   * @param {Hono} app - Hono application instance
+   * Create appropriate auth strategy based on config
+   * @param {Object} config - Auth configuration
+   * @param {Array} config.drivers - Auth driver configurations
+   * @param {Object} config.authResource - Users resource for authentication
+   * @param {Function} config.oidcMiddleware - OIDC middleware (if configured)
+   * @param {Array} [config.pathRules] - Modern path rules (priority 1)
+   * @param {Object} [config.pathAuth] - Legacy path auth config (priority 2)
+   * @param {Object} [config.events] - Event emitter
+   * @param {boolean} [config.verbose] - Enable verbose logging
+   * @returns {BaseAuthStrategy} Auth strategy instance
    */
-  register(app) {
-    app.get("/health/live", (c) => this.livenessProbe(c));
-    app.get("/health/ready", (c) => this.readinessProbe(c));
-    app.get("/health", (c) => this.genericHealth(c));
-    if (this.verbose) {
-      console.log("[HealthManager] Health endpoints registered:");
-      console.log("[HealthManager]   GET /health");
-      console.log("[HealthManager]   GET /health/live");
-      console.log("[HealthManager]   GET /health/ready");
+  static create({ drivers, authResource, oidcMiddleware, pathRules, pathAuth, events, verbose }) {
+    if (pathRules && pathRules.length > 0) {
+      return new PathRulesAuthStrategy({
+        drivers,
+        authResource,
+        oidcMiddleware,
+        pathRules,
+        events,
+        verbose
+      });
     }
-  }
-  /**
-   * Liveness probe - checks if app is alive
-   * If this fails, Kubernetes will restart the pod
-   * @private
-   */
-  livenessProbe(c) {
-    const response = success({
-      status: "alive",
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    if (pathAuth) {
+      return new PathBasedAuthStrategy({
+        drivers,
+        authResource,
+        oidcMiddleware,
+        pathAuth,
+        verbose
+      });
+    }
+    return new GlobalAuthStrategy({
+      drivers,
+      authResource,
+      oidcMiddleware,
+      verbose
     });
-    return c.json(response);
-  }
-  /**
-   * Readiness probe - checks if app is ready to receive traffic
-   * If this fails, Kubernetes will remove pod from service endpoints
-   * @private
-   */
-  async readinessProbe(c) {
-    const checks = {};
-    let isHealthy = true;
-    const customChecks = this.healthConfig.readiness?.checks || [];
-    try {
-      const startTime = Date.now();
-      const isDbReady = this.database && this.database.connected && Object.keys(this.database.resources).length > 0;
-      const latency = Date.now() - startTime;
-      if (isDbReady) {
-        checks.s3db = {
-          status: "healthy",
-          latency_ms: latency,
-          resources: Object.keys(this.database.resources).length
-        };
-      } else {
-        checks.s3db = {
-          status: "unhealthy",
-          connected: this.database?.connected || false,
-          resources: Object.keys(this.database?.resources || {}).length
-        };
-        isHealthy = false;
-      }
-    } catch (err) {
-      checks.s3db = {
-        status: "unhealthy",
-        error: err.message
-      };
-      isHealthy = false;
-    }
-    for (const check of customChecks) {
-      try {
-        const startTime = Date.now();
-        const timeout = check.timeout || 5e3;
-        const result = await Promise.race([
-          check.check(),
-          new Promise(
-            (_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout)
-          )
-        ]);
-        const latency = Date.now() - startTime;
-        checks[check.name] = {
-          status: result.healthy ? "healthy" : "unhealthy",
-          latency_ms: latency,
-          ...result
-        };
-        if (!result.healthy && !check.optional) {
-          isHealthy = false;
-        }
-      } catch (err) {
-        checks[check.name] = {
-          status: "unhealthy",
-          error: err.message
-        };
-        if (!check.optional) {
-          isHealthy = false;
-        }
-      }
-    }
-    const status = isHealthy ? 200 : 503;
-    return c.json({
-      status: isHealthy ? "healthy" : "unhealthy",
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      uptime: process.uptime(),
-      checks
-    }, status);
-  }
-  /**
-   * Generic health check
-   * @private
-   */
-  genericHealth(c) {
-    const response = success({
-      status: "ok",
-      uptime: process.uptime(),
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      checks: {
-        liveness: "/health/live",
-        readiness: "/health/ready"
-      }
-    });
-    return c.json(response);
   }
 }
 
 class ApiServer {
-  /**
-   * Create API server
-   * @param {Object} options - Server options
-   * @param {number} options.port - Server port
-   * @param {string} options.host - Server host
-   * @param {Object} options.database - s3db.js database instance
-   * @param {Object} options.resources - Resource configuration
-   * @param {Array} options.middlewares - Global middlewares
-   */
   constructor(options = {}) {
     this.options = {
       port: options.port || 3e3,
       host: options.host || "0.0.0.0",
       database: options.database,
+      namespace: options.namespace || null,
+      versionPrefix: options.versionPrefix,
       resources: options.resources || {},
       routes: options.routes || {},
-      // Plugin-level custom routes
       templates: options.templates || { enabled: false, engine: "jsx" },
-      // Template engine config
       middlewares: options.middlewares || [],
-      requestId: options.requestId || { enabled: false },
-      // Request ID tracking config
       cors: options.cors || { enabled: false },
-      // CORS configuration
       security: options.security || { enabled: false },
-      // Security headers config
       sessionTracking: options.sessionTracking || { enabled: false },
-      // Session tracking config
+      requestId: options.requestId || { enabled: false },
       events: options.events || { enabled: false },
-      // Event hooks config
       metrics: options.metrics || { enabled: false },
-      // Metrics collection config
       failban: options.failban || { enabled: false },
-      // Failban (fail2ban-style) config
+      static: Array.isArray(options.static) ? options.static : [],
+      health: options.health ?? { enabled: true },
       verbose: options.verbose || false,
       auth: options.auth || {},
-      static: options.static || [],
-      // Static file serving config
-      docsEnabled: options.docsEnabled !== false,
-      // Enable /docs by default
-      docsUI: options.docsUI || "redoc",
-      // 'swagger' or 'redoc'
-      maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
-      // 10MB default
-      rootHandler: options.rootHandler,
-      // Custom handler for root path, if not provided redirects to /docs
-      versionPrefix: options.versionPrefix,
-      // Global version prefix config
-      namespace: options.namespace || null,
-      apiInfo: {
-        title: options.apiTitle || "s3db.js API",
-        version: options.apiVersion || "1.0.0",
-        description: options.apiDescription || "Auto-generated REST API for s3db.js resources"
-      }
+      docsEnabled: options.docs?.enabled !== false && options.docsEnabled !== false,
+      docsUI: options.docs?.ui || options.docsUI || "redoc",
+      apiTitle: options.docs?.title || options.apiTitle || "s3db.js API",
+      apiVersion: options.docs?.version || options.apiVersion || "1.0.0",
+      apiDescription: options.docs?.description || options.apiDescription || "Auto-generated REST API for s3db.js resources",
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024
     };
     this.app = null;
     this.server = null;
     this.isRunning = false;
-    this.openAPISpec = null;
     this.initialized = false;
+    this.oidcMiddleware = null;
+    this.middlewareChain = null;
+    this.router = null;
+    this.healthManager = null;
     this.inFlightRequests = /* @__PURE__ */ new Set();
     this.acceptingRequests = true;
     this.events = new ApiEventEmitter({
@@ -10557,15 +10801,215 @@ class ApiServer {
         blacklist: this.options.failban.blacklist || [],
         persistViolations: this.options.failban.persistViolations !== false,
         verbose: this.options.failban.verbose || this.options.verbose,
-        geo: this.options.failban.geo || {}
+        geo: this.options.failban.geo || {},
+        resourceNames: this.options.failban.resourceNames || {}
       });
     }
     this.relationsPlugin = this.options.database?.plugins?.relation || this.options.database?.plugins?.RelationPlugin || null;
+    const resolvedHost = (this.options.host || "localhost") === "0.0.0.0" ? "localhost" : this.options.host || "localhost";
+    this.openApiGenerator = new OpenAPIGeneratorCached({
+      database: this.options.database,
+      options: {
+        auth: this.options.auth,
+        resources: this.options.resources,
+        versionPrefix: this.options.versionPrefix,
+        title: this.options.apiTitle,
+        version: this.options.apiVersion,
+        description: this.options.apiDescription,
+        serverUrl: `http://${resolvedHost}:${this.options.port}`,
+        verbose: this.options.verbose
+      }
+    });
   }
-  /**
-   * Setup metrics event listeners
-   * @private
-   */
+  async start() {
+    if (this.isRunning) {
+      console.warn("[API Plugin] Server is already running");
+      return;
+    }
+    if (!this.initialized) {
+      const { Hono } = await import('hono');
+      const { serve } = await import('@hono/node-server');
+      const { swaggerUI } = await import('@hono/swagger-ui');
+      const { cors } = await Promise.resolve().then(function () { return index; });
+      this.Hono = Hono;
+      this.serve = serve;
+      this.swaggerUI = swaggerUI;
+      this.cors = cors;
+      this.app = new Hono();
+      if (this.failban) {
+        await this.failban.initialize();
+      }
+      this.middlewareChain = new MiddlewareChain({
+        requestId: this.options.requestId,
+        cors: this.options.cors,
+        security: this.options.security,
+        sessionTracking: this.options.sessionTracking,
+        middlewares: this.options.middlewares,
+        templates: this.options.templates,
+        maxBodySize: this.options.maxBodySize,
+        failban: this.failban,
+        events: this.events,
+        verbose: this.options.verbose,
+        database: this.options.database,
+        inFlightRequests: this.inFlightRequests,
+        acceptingRequests: () => this.acceptingRequests,
+        corsMiddleware: this.cors
+      });
+      this.middlewareChain.apply(this.app);
+      const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === "oidc");
+      if (oidcDriver) {
+        this._setupOIDCRoutes(oidcDriver.config);
+      }
+      const authMiddleware = this._createAuthMiddleware();
+      this.router = new Router({
+        database: this.options.database,
+        resources: this.options.resources,
+        routes: this.options.routes,
+        versionPrefix: this.options.versionPrefix,
+        auth: this.options.auth,
+        static: this.options.static,
+        failban: this.failban,
+        metrics: this.metrics,
+        relationsPlugin: this.relationsPlugin,
+        authMiddleware,
+        verbose: this.options.verbose,
+        Hono: this.Hono
+      });
+      this.router.mount(this.app, this.events);
+      if (this.options.health?.enabled !== false) {
+        this.healthManager = new HealthManager({
+          database: this.options.database,
+          healthConfig: this.options.health,
+          verbose: this.options.verbose
+        });
+        this.healthManager.register(this.app);
+      }
+      this._setupDocumentationRoutes();
+      this.app.onError((err, c) => errorHandler$1(err, c));
+      this.app.notFound((c) => {
+        const response = error$1("Route not found", {
+          status: 404,
+          code: "NOT_FOUND",
+          details: {
+            path: c.req.path,
+            method: c.req.method
+          }
+        });
+        return c.json(response, 404);
+      });
+      this.initialized = true;
+    }
+    const { port, host } = this.options;
+    return new Promise((resolve, reject) => {
+      try {
+        this.server = this.serve(
+          { fetch: this.app.fetch, port, hostname: host },
+          (info) => {
+            this.isRunning = true;
+            console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+            const shutdownHandler = async (signal) => {
+              console.log(`[API Server] Received ${signal}, initiating graceful shutdown...`);
+              try {
+                await this.shutdown({ timeout: 3e4 });
+                process.exit(0);
+              } catch (err) {
+                console.error("[API Server] Error during shutdown:", err);
+                process.exit(1);
+              }
+            };
+            process.once("SIGTERM", () => shutdownHandler("SIGTERM"));
+            process.once("SIGINT", () => shutdownHandler("SIGINT"));
+            resolve();
+          }
+        );
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+  async stop() {
+    if (!this.isRunning) {
+      console.warn("[API Plugin] Server is not running");
+      return;
+    }
+    if (this.server && typeof this.server.close === "function") {
+      await new Promise((resolve) => {
+        this.server.close(() => {
+          this.isRunning = false;
+          console.log("[API Plugin] Server stopped");
+          resolve();
+        });
+      });
+    } else {
+      this.isRunning = false;
+      console.log("[API Plugin] Server stopped");
+    }
+    if (this.metrics) {
+      this.metrics.stop();
+    }
+    if (this.failban) {
+      await this.failban.cleanup();
+    }
+  }
+  getInfo() {
+    return {
+      isRunning: this.isRunning,
+      port: this.options.port,
+      host: this.options.host,
+      resources: Object.keys(this.options.database?.resources || {}).length
+    };
+  }
+  getApp() {
+    return this.app;
+  }
+  stopAcceptingRequests() {
+    this.acceptingRequests = false;
+    if (this.options.verbose) {
+      console.log("[API Server] Stopped accepting new requests");
+    }
+  }
+  async waitForRequestsToFinish({ timeout = 3e4 } = {}) {
+    const startTime = Date.now();
+    while (this.inFlightRequests.size > 0) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= timeout) {
+        if (this.options.verbose) {
+          console.warn(`[API Server] Timeout waiting for ${this.inFlightRequests.size} in-flight requests`);
+        }
+        return false;
+      }
+      if (this.options.verbose) {
+        console.log(`[API Server] Waiting for ${this.inFlightRequests.size} in-flight requests...`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (this.options.verbose) {
+      console.log("[API Server] All requests finished");
+    }
+    return true;
+  }
+  async shutdown({ timeout = 3e4 } = {}) {
+    if (!this.isRunning) {
+      console.warn("[API Server] Server is not running");
+      return;
+    }
+    console.log("[API Server] Initiating graceful shutdown...");
+    this.stopAcceptingRequests();
+    const finished = await this.waitForRequestsToFinish({ timeout });
+    if (!finished) {
+      console.warn("[API Server] Some requests did not finish in time");
+    }
+    if (this.server) {
+      await new Promise((resolve, reject) => {
+        this.server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
+    this.isRunning = false;
+    console.log("[API Server] Shutdown complete");
+  }
   _setupMetricsEventListeners() {
     this.events.on("request:end", (data) => {
       this.metrics.recordRequest({
@@ -10611,387 +11055,55 @@ class ApiServer {
         resource: data.resource
       });
     });
-    this.events.on("user:created", (data) => {
-      this.metrics.recordUserEvent({
-        action: "created"
-      });
+    this.events.on("user:created", () => {
+      this.metrics.recordUserEvent({ action: "created" });
     });
-    this.events.on("user:login", (data) => {
-      this.metrics.recordUserEvent({
-        action: "login"
-      });
+    this.events.on("user:login", () => {
+      this.metrics.recordUserEvent({ action: "login" });
     });
     if (this.options.verbose) {
       console.log("[API Server] Metrics event listeners configured");
     }
   }
-  /**
-   * Setup request tracking middleware for graceful shutdown
-   * @private
-   */
-  _setupRequestTracking() {
-    this.app.use("*", async (c, next) => {
-      if (!this.acceptingRequests) {
-        return c.json({ error: "Server is shutting down" }, 503);
-      }
-      const requestId = Symbol("request");
-      this.inFlightRequests.add(requestId);
-      const startTime = Date.now();
-      const requestInfo = {
-        requestId: c.get("requestId") || requestId.toString(),
-        method: c.req.method,
-        path: c.req.path,
-        userAgent: c.req.header("user-agent"),
-        ip: c.req.header("x-forwarded-for") || c.req.header("x-real-ip")
-      };
-      this.events.emitRequestEvent("start", requestInfo);
-      try {
-        await next();
-        this.events.emitRequestEvent("end", {
-          ...requestInfo,
-          duration: Date.now() - startTime,
-          status: c.res.status
-        });
-      } catch (err) {
-        this.events.emitRequestEvent("error", {
-          ...requestInfo,
-          duration: Date.now() - startTime,
-          error: err.message,
-          stack: err.stack
-        });
-        throw err;
-      } finally {
-        this.inFlightRequests.delete(requestId);
-      }
-    });
-  }
-  /**
-   * Stop accepting new requests
-   * @returns {void}
-   */
-  stopAcceptingRequests() {
-    this.acceptingRequests = false;
-    if (this.options.verbose) {
-      console.log("[API Server] Stopped accepting new requests");
-    }
-  }
-  /**
-   * Wait for all in-flight requests to finish
-   * @param {Object} options - Options
-   * @param {number} options.timeout - Max time to wait in ms (default: 30000)
-   * @returns {Promise<boolean>} True if all requests finished, false if timeout
-   */
-  async waitForRequestsToFinish({ timeout = 3e4 } = {}) {
-    const startTime = Date.now();
-    while (this.inFlightRequests.size > 0) {
-      const elapsed = Date.now() - startTime;
-      if (elapsed >= timeout) {
-        if (this.options.verbose) {
-          console.warn(`[API Server] Timeout waiting for ${this.inFlightRequests.size} in-flight requests`);
-        }
-        return false;
-      }
-      if (this.options.verbose) {
-        console.log(`[API Server] Waiting for ${this.inFlightRequests.size} in-flight requests...`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    if (this.options.verbose) {
-      console.log("[API Server] All requests finished");
-    }
-    return true;
-  }
-  /**
-   * Graceful shutdown
-   * @param {Object} options - Shutdown options
-   * @param {number} options.timeout - Max time to wait for requests (default: 30000)
-   * @returns {Promise<void>}
-   */
-  async shutdown({ timeout = 3e4 } = {}) {
-    if (!this.isRunning) {
-      console.warn("[API Server] Server is not running");
-      return;
-    }
-    console.log("[API Server] Initiating graceful shutdown...");
-    this.stopAcceptingRequests();
-    const allFinished = await this.waitForRequestsToFinish({ timeout });
-    if (!allFinished) {
-      console.warn("[API Server] Some requests did not finish in time");
-    }
-    if (this.server) {
-      await new Promise((resolve, reject) => {
-        this.server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    }
-    this.isRunning = false;
-    console.log("[API Server] Shutdown complete");
-  }
-  /**
-   * Setup all routes
-   * @private
-   */
-  _setupRoutes() {
-    const middlewareChain = new MiddlewareChain({
-      requestId: this.options.requestId,
-      cors: this.options.cors,
-      security: this.options.security,
-      sessionTracking: this.options.sessionTracking,
-      middlewares: this.options.middlewares,
-      templates: this.options.templates,
-      maxBodySize: this.options.maxBodySize,
-      failban: this.failban,
-      events: this.events,
-      verbose: this.options.verbose,
-      database: this.options.database,
-      inFlightRequests: this.inFlightRequests,
-      acceptingRequests: this.acceptingRequests,
-      corsMiddleware: this.cors
-    });
-    middlewareChain.apply(this.app);
-    const healthManager = new HealthManager({
-      database: this.options.database,
-      healthConfig: this.options.health,
-      verbose: this.options.verbose
-    });
-    healthManager.register(this.app);
-    if (this.options.metrics?.enabled) {
-      this.app.get("/metrics", (c) => {
-        const summary = this.metrics.getSummary();
-        const response = success(summary);
-        return c.json(response);
-      });
-      if (this.options.verbose) {
-        console.log("[API Server] Metrics endpoint enabled at /metrics");
-      }
-    }
-    if (this.failban) {
-      const failbanAdminRoutes = createFailbanAdminRoutes(this.Hono, this.failban);
-      this.app.route("/admin/security", failbanAdminRoutes);
-      if (this.options.verbose) {
-        console.log("[API Server] Failban admin endpoints enabled at /admin/security");
-      }
-    }
-    this.app.get("/", (c) => {
-      if (this.options.rootHandler) {
-        return this.options.rootHandler(c);
-      }
-      return c.redirect("/docs", 302);
-    });
-    this._setupStaticRoutes();
+  _setupDocumentationRoutes() {
     if (this.options.docsEnabled) {
       this.app.get("/openapi.json", (c) => {
-        if (!this.openAPISpec) {
-          this.openAPISpec = this.openAPIGenerator.generate();
-        }
-        return c.json(this.openAPISpec);
+        const spec = this.openApiGenerator.generate();
+        return c.json(spec);
       });
       if (this.options.docsUI === "swagger") {
-        this.app.get("/docs", this.swaggerUI({
-          url: "/openapi.json"
-        }));
+        this.app.get("/docs", this.swaggerUI({ url: "/openapi.json" }));
       } else {
-        this.app.get("/docs", (c) => {
-          return c.html(`<!DOCTYPE html>
+        this.app.get("/docs", (c) => c.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${this.options.apiInfo.title} - API Documentation</title>
+  <title>${this.options.apiTitle} - API Documentation</title>
   <style>
-    body {
-      margin: 0;
-      padding: 0;
-    }
+    body { margin: 0; padding: 0; }
   </style>
 </head>
 <body>
   <redoc spec-url="/openapi.json"></redoc>
   <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"><\/script>
 </body>
-</html>`);
-        });
+</html>`));
       }
     }
-    const router = new Router({
-      database: this.options.database,
-      resources: this.options.resources,
-      routes: this.options.routes,
-      versionPrefix: this.options.versionPrefix,
-      auth: this.options.auth,
-      static: this.options.static,
-      failban: this.failban,
-      metrics: this.metrics,
-      relationsPlugin: this.relationsPlugin,
-      authMiddleware: this.authMiddleware,
-      verbose: this.options.verbose,
-      Hono: this.Hono
-    });
-    router.mount(this.app, this.events);
-    this.app.onError((err, c) => {
-      return errorHandler(err, c);
-    });
-    this.app.notFound((c) => {
-      const response = error("Route not found", {
-        status: 404,
-        code: "NOT_FOUND",
-        details: {
-          path: c.req.path,
-          method: c.req.method
-        }
-      });
-      return c.json(response, 404);
+    this.app.get("/", (c) => {
+      if (this.options.rootHandler) {
+        return this.options.rootHandler(c);
+      }
+      if (this.options.docsEnabled) {
+        return c.redirect("/docs", 302);
+      }
+      return c.json(success$1({
+        status: "ok",
+        message: "s3db.js API is running"
+      }));
     });
   }
-  /**
-   * Setup routes for all resources
-   * @private
-   */
-  _setupResourceRoutes() {
-    const { database, resources: resourceConfigs = {} } = this.options;
-    const resources = database.resources;
-    const authMiddleware = this._createAuthMiddleware();
-    for (const [name, resource] of Object.entries(resources)) {
-      const resourceConfig = resourceConfigs[name];
-      const isPluginResource = name.startsWith("plg_");
-      if (isPluginResource && !resourceConfig) {
-        if (this.options.verbose) {
-          console.log(`[API Plugin] Skipping internal resource '${name}' (not included in config.resources)`);
-        }
-        continue;
-      }
-      if (resourceConfig?.enabled === false) {
-        if (this.options.verbose) {
-          console.log(`[API Plugin] Resource '${name}' disabled via config.resources`);
-        }
-        continue;
-      }
-      const version = resource.config?.currentVersion || resource.version || "v1";
-      let versionPrefixConfig;
-      if (resourceConfig && resourceConfig.versionPrefix !== void 0) {
-        versionPrefixConfig = resourceConfig.versionPrefix;
-      } else if (resource.config && resource.config.versionPrefix !== void 0) {
-        versionPrefixConfig = resource.config.versionPrefix;
-      } else if (this.options.versionPrefix !== void 0) {
-        versionPrefixConfig = this.options.versionPrefix;
-      } else {
-        versionPrefixConfig = false;
-      }
-      let prefix = "";
-      if (versionPrefixConfig === true) {
-        prefix = version;
-      } else if (versionPrefixConfig === false) {
-        prefix = "";
-      } else if (typeof versionPrefixConfig === "string") {
-        prefix = versionPrefixConfig;
-      }
-      const middlewares = [];
-      const authDisabled = resourceConfig?.auth === false;
-      if (authMiddleware && !authDisabled) {
-        middlewares.push(authMiddleware);
-      }
-      const extraMiddleware = resourceConfig?.customMiddleware;
-      if (extraMiddleware) {
-        const toRegister = Array.isArray(extraMiddleware) ? extraMiddleware : [extraMiddleware];
-        for (const middleware of toRegister) {
-          if (typeof middleware === "function") {
-            middlewares.push(middleware);
-          } else if (this.options.verbose) {
-            console.warn(`[API Plugin] Ignoring non-function middleware for resource '${name}'`);
-          }
-        }
-      }
-      let methods = resourceConfig?.methods || resource.config?.methods;
-      if (!Array.isArray(methods) || methods.length === 0) {
-        methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-      } else {
-        methods = methods.filter(Boolean).map((method) => typeof method === "string" ? method.toUpperCase() : method);
-      }
-      const enableValidation = resourceConfig?.validation !== void 0 ? resourceConfig.validation !== false : resource.config?.validation !== false;
-      const resourceApp = createResourceRoutes(resource, version, {
-        methods,
-        customMiddleware: middlewares,
-        enableValidation,
-        versionPrefix: prefix,
-        events: this.events
-      }, this.Hono);
-      const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
-      this.app.route(mountPath, resourceApp);
-      if (this.options.verbose) {
-        console.log(`[API Plugin] Mounted routes for resource '${name}' at ${mountPath}`);
-      }
-      if (resource.config?.routes) {
-        const routeContext = {
-          resource,
-          database,
-          resourceName: name,
-          version
-        };
-        mountCustomRoutes(resourceApp, resource.config.routes, routeContext, this.options.verbose);
-      }
-    }
-  }
-  /**
-   * Setup authentication routes (when auth drivers are configured)
-   * @private
-   */
-  _setupAuthRoutes() {
-    const { database, auth } = this.options;
-    const { drivers, resource: resourceName, usernameField, passwordField } = auth;
-    const identityPlugin = database?.plugins?.identity || database?.plugins?.Identity;
-    if (identityPlugin) {
-      if (this.options.verbose) {
-        console.warn("[API Plugin] IdentityPlugin detected. Skipping built-in auth routes.");
-      }
-      return;
-    }
-    const jwtDriver = drivers.find((d) => d.driver === "jwt");
-    if (!jwtDriver) {
-      return;
-    }
-    const authResource = database.resources[resourceName];
-    if (!authResource) {
-      console.error(`[API Plugin] Auth resource '${resourceName}' not found. Skipping auth routes.`);
-      return;
-    }
-    const driverConfig = jwtDriver.config || {};
-    const registrationConfig = {
-      enabled: driverConfig.allowRegistration === true || driverConfig.registration?.enabled === true || auth.registration?.enabled === true,
-      allowedFields: Array.isArray(driverConfig.registration?.allowedFields) ? driverConfig.registration.allowedFields : Array.isArray(auth.registration?.allowedFields) ? auth.registration.allowedFields : [],
-      defaultRole: driverConfig.registration?.defaultRole ?? auth.registration?.defaultRole ?? "user"
-    };
-    const driverLoginThrottle = driverConfig.loginThrottle || {};
-    const loginThrottleConfig = {
-      enabled: driverLoginThrottle.enabled ?? auth.loginThrottle?.enabled ?? true,
-      maxAttempts: driverLoginThrottle.maxAttempts || auth.loginThrottle?.maxAttempts || 5,
-      windowMs: driverLoginThrottle.windowMs || auth.loginThrottle?.windowMs || 6e4,
-      blockDurationMs: driverLoginThrottle.blockDurationMs || auth.loginThrottle?.blockDurationMs || 3e5,
-      maxEntries: driverLoginThrottle.maxEntries || auth.loginThrottle?.maxEntries || 1e4
-    };
-    const authConfig = {
-      driver: "jwt",
-      usernameField,
-      passwordField,
-      jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
-      jwtExpiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
-      passphrase: driverConfig.passphrase || "secret",
-      allowRegistration: registrationConfig.enabled,
-      registration: registrationConfig,
-      loginThrottle: loginThrottleConfig
-    };
-    const authApp = createAuthRoutes(authResource, authConfig);
-    this.app.route("/auth", authApp);
-    if (this.options.verbose) {
-      console.log("[API Plugin] Mounted auth routes (driver: jwt) at /auth");
-    }
-  }
-  /**
-   * Setup OIDC routes (when oidc driver is configured)
-   * @private
-   * @param {Object} config - OIDC driver configuration
-   */
   _setupOIDCRoutes(config) {
     const { database, auth } = this.options;
     const authResource = database.resources[auth.resource];
@@ -11008,11 +11120,6 @@ class ApiServer {
       }
     }
   }
-  /**
-   * Create authentication middleware based on configured drivers
-   * @private
-   * @returns {Function|null} Hono middleware or null
-   */
   _createAuthMiddleware() {
     const { database, auth } = this.options;
     const { drivers, resource: defaultResourceName, pathAuth, pathRules } = auth;
@@ -11024,9 +11131,6 @@ class ApiServer {
       console.error(`[API Plugin] Auth resource '${defaultResourceName}' not found for middleware`);
       return null;
     }
-    if (pathRules && pathRules.length > 0) {
-      return this._createPathRulesAuthMiddleware(authResource, drivers, pathRules);
-    }
     if (pathAuth) {
       try {
         validatePathAuth(pathAuth);
@@ -11035,482 +11139,24 @@ class ApiServer {
         throw err;
       }
     }
-    const extractDriverConfigs = (driverNames) => {
-      const configs = {
-        jwt: {},
-        apiKey: {},
-        basic: {},
-        oauth2: {}
-      };
-      for (const driverDef of drivers) {
-        const driverName = driverDef.driver;
-        const driverConfig = driverDef.config || {};
-        if (driverNames && !driverNames.includes(driverName)) {
-          continue;
-        }
-        if (driverName === "oauth2-server" || driverName === "oidc") {
-          continue;
-        }
-        if (driverName === "jwt") {
-          configs.jwt = {
-            secret: driverConfig.jwtSecret || driverConfig.secret,
-            expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d"
-          };
-        } else if (driverName === "apiKey") {
-          configs.apiKey = {
-            headerName: driverConfig.headerName || "X-API-Key"
-          };
-        } else if (driverName === "basic") {
-          configs.basic = {
-            realm: driverConfig.realm || "API Access",
-            passphrase: driverConfig.passphrase || "secret"
-          };
-        } else if (driverName === "oauth2") {
-          configs.oauth2 = driverConfig;
-        }
-      }
-      return configs;
-    };
-    if (pathAuth) {
-      return async (c, next) => {
-        const requestPath = c.req.path;
-        const matchedRule = findBestMatch(pathAuth, requestPath);
-        if (this.options.verbose) {
-          if (matchedRule) {
-            console.log(`[API Plugin] Path ${requestPath} matched rule: ${matchedRule.pattern}`);
-          } else {
-            console.log(`[API Plugin] Path ${requestPath} no pathAuth rule matched (using global auth)`);
-          }
-        }
-        if (!matchedRule) {
-          const methods2 = drivers.map((d) => d.driver).filter((d) => d !== "oauth2-server" && d !== "oidc");
-          const driverConfigs3 = extractDriverConfigs(null);
-          const globalAuth = createAuthMiddleware({
-            methods: methods2,
-            jwt: driverConfigs3.jwt,
-            apiKey: driverConfigs3.apiKey,
-            basic: driverConfigs3.basic,
-            oauth2: driverConfigs3.oauth2,
-            oidc: this.oidcMiddleware || null,
-            usersResource: authResource,
-            optional: true
-          });
-          return await globalAuth(c, next);
-        }
-        if (!matchedRule.required) {
-          return await next();
-        }
-        const ruleMethods = matchedRule.drivers || [];
-        const driverConfigs2 = extractDriverConfigs(ruleMethods);
-        const ruleAuth = createAuthMiddleware({
-          methods: ruleMethods,
-          jwt: driverConfigs2.jwt,
-          apiKey: driverConfigs2.apiKey,
-          basic: driverConfigs2.basic,
-          oauth2: driverConfigs2.oauth2,
-          oidc: this.oidcMiddleware || null,
-          usersResource: authResource,
-          optional: false
-          // Auth is required for this path
-        });
-        return await ruleAuth(c, next);
-      };
-    }
-    const methods = [];
-    const driverConfigs = {
-      jwt: {},
-      apiKey: {},
-      basic: {},
-      oauth2: {}
-    };
-    for (const driverDef of drivers) {
-      const driverName = driverDef.driver;
-      const driverConfig = driverDef.config || {};
-      if (driverName === "oauth2-server" || driverName === "oidc") {
-        continue;
-      }
-      if (!methods.includes(driverName)) {
-        methods.push(driverName);
-      }
-      if (driverName === "jwt") {
-        driverConfigs.jwt = {
-          secret: driverConfig.jwtSecret || driverConfig.secret,
-          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d"
-        };
-      } else if (driverName === "apiKey") {
-        driverConfigs.apiKey = {
-          headerName: driverConfig.headerName || "X-API-Key"
-        };
-      } else if (driverName === "basic") {
-        driverConfigs.basic = {
-          realm: driverConfig.realm || "API Access",
-          passphrase: driverConfig.passphrase || "secret"
-        };
-      } else if (driverName === "oauth2") {
-        driverConfigs.oauth2 = driverConfig;
-      }
-    }
-    return createAuthMiddleware({
-      methods,
-      jwt: driverConfigs.jwt,
-      apiKey: driverConfigs.apiKey,
-      basic: driverConfigs.basic,
-      oauth2: driverConfigs.oauth2,
-      oidc: this.oidcMiddleware || null,
-      // OIDC middleware (if configured)
-      usersResource: authResource,
-      optional: true
-      // Let guards handle authorization
+    const strategy = AuthStrategyFactory.create({
+      drivers,
+      authResource,
+      oidcMiddleware: this.oidcMiddleware || null,
+      pathRules,
+      pathAuth,
+      events: this.events,
+      verbose: this.options.verbose
     });
-  }
-  /**
-   * Create path-based auth middleware using pathRules
-   * @private
-   * @param {Object} authResource - Users resource for authentication
-   * @param {Array} drivers - Auth driver configurations
-   * @param {Array} pathRules - Path-based auth rules
-   * @returns {Function} Hono middleware
-   */
-  _createPathRulesAuthMiddleware(authResource, drivers, pathRules) {
-    const authMiddlewares = {};
-    for (const driverDef of drivers) {
-      const driverType = driverDef.type || driverDef.driver;
-      const driverConfig = driverDef.config || driverDef;
-      if (driverType === "oauth2-server") {
-        continue;
-      }
-      if (driverType === "oidc") {
-        if (this.oidcMiddleware) {
-          authMiddlewares.oidc = this.oidcMiddleware;
-        }
-        continue;
-      }
-      if (driverType === "jwt") {
-        authMiddlewares.jwt = jwtAuth({
-          secret: driverConfig.jwtSecret || driverConfig.secret,
-          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || "7d",
-          usersResource: authResource,
-          optional: true
-        });
-      }
-      if (driverType === "apiKey") {
-        authMiddlewares.apiKey = apiKeyAuth({
-          headerName: driverConfig.headerName || "X-API-Key",
-          usersResource: authResource,
-          optional: true
-        });
-      }
-      if (driverType === "basic") {
-        authMiddlewares.basic = basicAuth({
-          authResource,
-          usernameField: driverConfig.usernameField || "email",
-          passwordField: driverConfig.passwordField || "password",
-          passphrase: driverConfig.passphrase || "secret",
-          adminUser: driverConfig.adminUser || null,
-          optional: true
-        });
-      }
-      if (driverType === "oauth2") {
-        const oauth2Handler = createOAuth2Handler(driverConfig, authResource);
-        authMiddlewares.oauth2 = async (c, next) => {
-          const user = await oauth2Handler(c);
-          if (user) {
-            c.set("user", user);
-            return await next();
-          }
-        };
-      }
-    }
-    if (this.options.verbose) {
-      console.log(`[API Server] Path-based auth with ${pathRules.length} rules`);
-      console.log(`[API Server] Available auth methods: ${Object.keys(authMiddlewares).join(", ")}`);
-    }
-    return createPathBasedAuthMiddleware({
-      rules: pathRules,
-      authMiddlewares,
-      unauthorizedHandler: (c, message) => {
-        const acceptHeader = c.req.header("accept") || "";
-        const acceptsHtml = acceptHeader.includes("text/html");
-        if (acceptsHtml) {
-          if (authMiddlewares.oidc) {
-            return c.redirect("/auth/login", 302);
-          }
-        }
-        return c.json({
-          error: "Unauthorized",
-          message
-        }, 401);
-      },
-      events: this.events
-    });
-  }
-  /**
-   * Setup relational routes (when RelationPlugin is active)
-   * @private
-   */
-  _setupRelationalRoutes() {
-    if (!this.relationsPlugin || !this.relationsPlugin.relations) {
-      return;
-    }
-    const { database } = this.options;
-    const relations = this.relationsPlugin.relations;
-    if (this.options.verbose) {
-      console.log("[API Plugin] Setting up relational routes...");
-    }
-    for (const [resourceName, relationsDef] of Object.entries(relations)) {
-      const resource = database.resources[resourceName];
-      if (!resource) {
-        if (this.options.verbose) {
-          console.warn(`[API Plugin] Resource '${resourceName}' not found for relational routes`);
-        }
-        continue;
-      }
-      if (resourceName.startsWith("plg_") && !this.options.resources[resourceName]) {
-        continue;
-      }
-      const version = resource.config?.currentVersion || resource.version || "v1";
-      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
-        if (relationConfig.type === "belongsTo") {
-          continue;
-        }
-        const resourceConfig = this.options.resources[resourceName];
-        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
-        if (!exposeRelation) {
-          continue;
-        }
-        const relationalApp = createRelationalRoutes(
-          resource,
-          relationName,
-          relationConfig,
-          version,
-          this.Hono
-        );
-        this.app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
-        if (this.options.verbose) {
-          console.log(
-            `[API Plugin] Mounted relational route: /${version}/${resourceName}/:id/${relationName} (${relationConfig.type} -> ${relationConfig.resource})`
-          );
-        }
-      }
+    try {
+      return strategy.createMiddleware();
+    } catch (err) {
+      console.error("[API Plugin] Failed to create auth middleware:", err.message);
+      throw err;
     }
   }
-  /**
-   * Setup plugin-level custom routes
-   * @private
-   */
-  _setupPluginRoutes() {
-    const { routes, database } = this.options;
-    if (!routes || Object.keys(routes).length === 0) {
-      return;
-    }
-    const context = {
-      database,
-      plugins: database?.plugins || {}
-    };
-    mountCustomRoutes(this.app, routes, context, this.options.verbose);
-    if (this.options.verbose) {
-      console.log(`[API Plugin] Mounted ${Object.keys(routes).length} plugin-level custom routes`);
-    }
-  }
-  /**
-   * Setup static file serving routes
-   * @private
-   */
-  _setupStaticRoutes() {
-    const { static: staticConfigs, database } = this.options;
-    if (!staticConfigs || staticConfigs.length === 0) {
-      return;
-    }
-    if (!Array.isArray(staticConfigs)) {
-      throw new Error("Static config must be an array of mount points");
-    }
-    for (const [index, config] of staticConfigs.entries()) {
-      try {
-        if (!config.driver) {
-          throw new Error(`static[${index}]: "driver" is required (filesystem or s3)`);
-        }
-        if (!config.path) {
-          throw new Error(`static[${index}]: "path" is required (mount path)`);
-        }
-        if (!config.path.startsWith("/")) {
-          throw new Error(`static[${index}]: "path" must start with / (got: ${config.path})`);
-        }
-        const driverConfig = config.config || {};
-        let handler;
-        if (config.driver === "filesystem") {
-          validateFilesystemConfig({ ...config, ...driverConfig });
-          handler = createFilesystemHandler({
-            root: config.root,
-            index: driverConfig.index,
-            fallback: driverConfig.fallback,
-            maxAge: driverConfig.maxAge,
-            dotfiles: driverConfig.dotfiles,
-            etag: driverConfig.etag,
-            cors: driverConfig.cors
-          });
-        } else if (config.driver === "s3") {
-          validateS3Config({ ...config, ...driverConfig });
-          const s3Client = database?.client?.client;
-          if (!s3Client) {
-            throw new Error(`static[${index}]: S3 driver requires database with S3 client`);
-          }
-          handler = createS3Handler({
-            s3Client,
-            bucket: config.bucket,
-            prefix: config.prefix,
-            streaming: driverConfig.streaming,
-            signedUrlExpiry: driverConfig.signedUrlExpiry,
-            maxAge: driverConfig.maxAge,
-            cacheControl: driverConfig.cacheControl,
-            contentDisposition: driverConfig.contentDisposition,
-            etag: driverConfig.etag,
-            cors: driverConfig.cors
-          });
-        } else {
-          throw new Error(
-            `static[${index}]: invalid driver "${config.driver}". Valid drivers: filesystem, s3`
-          );
-        }
-        const mountPath = config.path === "/" ? "/*" : `${config.path}/*`;
-        this.app.get(mountPath, handler);
-        this.app.head(mountPath, handler);
-        if (this.options.verbose) {
-          console.log(
-            `[API Plugin] Mounted static files (${config.driver}) at ${config.path}` + (config.driver === "filesystem" ? ` -> ${config.root}` : ` -> s3://${config.bucket}/${config.prefix || ""}`)
-          );
-        }
-      } catch (err) {
-        console.error(`[API Plugin] Failed to setup static files for index ${index}:`, err.message);
-        throw err;
-      }
-    }
-  }
-  /**
-   * Start the server
-   * @returns {Promise<void>}
-   */
-  async start() {
-    if (this.isRunning) {
-      console.warn("[API Plugin] Server is already running");
-      return;
-    }
-    if (!this.initialized) {
-      const { Hono } = await import('hono');
-      const { serve } = await import('@hono/node-server');
-      const { swaggerUI } = await import('@hono/swagger-ui');
-      const { cors } = await Promise.resolve().then(function () { return index; });
-      this.Hono = Hono;
-      this.serve = serve;
-      this.swaggerUI = swaggerUI;
-      this.cors = cors;
-      this.app = new Hono();
-      if (this.failban) {
-        await this.failban.initialize();
-      }
-      this.openAPIGenerator = new OpenAPIGeneratorCached({
-        database: this.options.database,
-        resources: this.options.resources,
-        auth: this.options.auth,
-        versionPrefix: this.options.versionPrefix,
-        apiInfo: this.options.apiInfo,
-        namespace: this.options.namespace,
-        verbose: this.options.verbose
-      });
-      this._setupRoutes();
-      this.initialized = true;
-    }
-    const { port, host } = this.options;
-    return new Promise((resolve, reject) => {
-      try {
-        this.server = this.serve({
-          fetch: this.app.fetch,
-          port,
-          hostname: host
-        }, (info) => {
-          this.isRunning = true;
-          console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
-          const shutdownHandler = async (signal) => {
-            console.log(`[API Server] Received ${signal}, initiating graceful shutdown...`);
-            try {
-              await this.shutdown({ timeout: 3e4 });
-              process.exit(0);
-            } catch (err) {
-              console.error("[API Server] Error during shutdown:", err);
-              process.exit(1);
-            }
-          };
-          process.once("SIGTERM", () => shutdownHandler("SIGTERM"));
-          process.once("SIGINT", () => shutdownHandler("SIGINT"));
-          resolve();
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
-  }
-  /**
-   * Stop the server
-   * @returns {Promise<void>}
-   */
-  async stop() {
-    if (!this.isRunning) {
-      console.warn("[API Plugin] Server is not running");
-      return;
-    }
-    if (this.server && typeof this.server.close === "function") {
-      await new Promise((resolve) => {
-        this.server.close(() => {
-          this.isRunning = false;
-          console.log("[API Plugin] Server stopped");
-          resolve();
-        });
-      });
-    } else {
-      this.isRunning = false;
-      console.log("[API Plugin] Server stopped");
-    }
-    if (this.metrics) {
-      this.metrics.stop();
-    }
-    if (this.failban) {
-      await this.failban.cleanup();
-    }
-  }
-  /**
-   * Get server info
-   * @returns {Object} Server information
-   */
-  getInfo() {
-    return {
-      isRunning: this.isRunning,
-      port: this.options.port,
-      host: this.options.host,
-      resources: Object.keys(this.options.database.resources).length
-    };
-  }
-  /**
-   * Get Hono app instance
-   * @returns {Hono} Hono app
-   */
-  getApp() {
-    return this.app;
-  }
-  /**
-   * Generate OpenAPI specification
-   * @private
-   * @returns {Object} OpenAPI spec
-  */
   _generateOpenAPISpec() {
-    const { port, host, database, resources, auth, apiInfo, versionPrefix } = this.options;
-    return generateOpenAPISpec(database, {
-      title: apiInfo.title,
-      version: apiInfo.version,
-      description: apiInfo.description,
-      serverUrl: `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`,
-      auth,
-      resources,
-      versionPrefix
-    });
+    return this.openApiGenerator.generate();
   }
 }
 
@@ -12279,6 +11925,16 @@ class ApiPlugin extends Plugin {
       routes: this.config.routes,
       templates: this.config.templates,
       middlewares: this.compiledMiddlewares,
+      cors: this.config.cors,
+      security: this.config.security,
+      requestId: this.config.requestId,
+      sessionTracking: this.config.sessionTracking,
+      events: this.config.events,
+      metrics: this.config.metrics,
+      failban: this.config.failban,
+      static: this.config.static,
+      health: this.config.health,
+      maxBodySize: this.config.maxBodySize,
       verbose: this.config.verbose,
       auth: this.config.auth,
       docsEnabled: this.config.docs.enabled,
@@ -16328,7 +15984,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     const targetPath = path.join(targetDir, `${backupId}.backup`);
     const manifestPath = path.join(targetDir, `${backupId}.manifest.json`);
     const [createDirOk, createDirErr] = await tryFn(
-      () => fs.mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
+      () => fs$1.mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
     );
     if (!createDirOk) {
       throw new BackupError("Failed to create backup directory", {
@@ -16340,7 +15996,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check directory permissions and disk space"
       });
     }
-    const [copyOk, copyErr] = await tryFn(() => fs.copyFile(filePath, targetPath));
+    const [copyOk, copyErr] = await tryFn(() => fs$1.copyFile(filePath, targetPath));
     if (!copyOk) {
       throw new BackupError("Failed to copy backup file", {
         operation: "upload",
@@ -16360,7 +16016,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       ))
     );
     if (!manifestOk) {
-      await tryFn(() => fs.unlink(targetPath));
+      await tryFn(() => fs$1.unlink(targetPath));
       throw new BackupError("Failed to write manifest file", {
         operation: "upload",
         driver: "filesystem",
@@ -16370,7 +16026,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check directory permissions and disk space"
       });
     }
-    const [statOk, , stats] = await tryFn(() => fs.stat(targetPath));
+    const [statOk, , stats] = await tryFn(() => fs$1.stat(targetPath));
     const size = statOk ? stats.size : 0;
     this.log(`Uploaded backup ${backupId} to ${targetPath} (${size} bytes)`);
     return {
@@ -16385,7 +16041,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
-    const [existsOk] = await tryFn(() => fs.access(sourcePath));
+    const [existsOk] = await tryFn(() => fs$1.access(sourcePath));
     if (!existsOk) {
       throw new BackupError("Backup file not found", {
         operation: "download",
@@ -16396,8 +16052,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       });
     }
     const targetDir = path.dirname(targetPath);
-    await tryFn(() => fs.mkdir(targetDir, { recursive: true }));
-    const [copyOk, copyErr] = await tryFn(() => fs.copyFile(sourcePath, targetPath));
+    await tryFn(() => fs$1.mkdir(targetDir, { recursive: true }));
+    const [copyOk, copyErr] = await tryFn(() => fs$1.copyFile(sourcePath, targetPath));
     if (!copyOk) {
       throw new BackupError("Failed to download backup", {
         operation: "download",
@@ -16421,8 +16077,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       this.resolvePath(backupId, metadata),
       `${backupId}.manifest.json`
     );
-    const [deleteBackupOk] = await tryFn(() => fs.unlink(backupPath));
-    const [deleteManifestOk] = await tryFn(() => fs.unlink(manifestPath));
+    const [deleteBackupOk] = await tryFn(() => fs$1.unlink(backupPath));
+    const [deleteManifestOk] = await tryFn(() => fs$1.unlink(manifestPath));
     if (!deleteBackupOk && !deleteManifestOk) {
       throw new BackupError("Failed to delete backup files", {
         operation: "delete",
@@ -16450,12 +16106,12 @@ class FilesystemBackupDriver extends BaseBackupDriver {
   }
   async _scanDirectory(dirPath, prefix, results, limit) {
     if (results.length >= limit) return;
-    const [readDirOk, , files] = await tryFn(() => fs.readdir(dirPath));
+    const [readDirOk, , files] = await tryFn(() => fs$1.readdir(dirPath));
     if (!readDirOk) return;
     for (const file of files) {
       if (results.length >= limit) break;
       const fullPath = path.join(dirPath, file);
-      const [statOk, , stats] = await tryFn(() => fs.stat(fullPath));
+      const [statOk, , stats] = await tryFn(() => fs$1.stat(fullPath));
       if (!statOk) continue;
       if (stats.isDirectory()) {
         await this._scanDirectory(fullPath, prefix, results, limit);
@@ -16491,7 +16147,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     );
     const [readOk, readErr] = await tryFn(async () => {
       const hash = crypto.createHash("sha256");
-      const stream = fs$1.createReadStream(backupPath);
+      const stream = fs.createReadStream(backupPath);
       await promises.pipeline(stream, hash);
       const actualChecksum = hash.digest("hex");
       return actualChecksum === expectedChecksum;
@@ -16570,10 +16226,10 @@ class S3BackupDriver extends BaseBackupDriver {
   async upload(filePath, backupId, manifest) {
     const backupKey = this.resolveKey(backupId, manifest);
     const manifestKey = this.resolveManifestKey(backupId, manifest);
-    const [statOk, , stats] = await tryFn(() => fs.stat(filePath));
+    const [statOk, , stats] = await tryFn(() => fs$1.stat(filePath));
     const fileSize = statOk ? stats.size : 0;
     const [uploadOk, uploadErr] = await tryFn(async () => {
-      const fileStream = fs$1.createReadStream(filePath);
+      const fileStream = fs.createReadStream(filePath);
       return await this.config.client.uploadObject({
         bucket: this.config.bucket,
         key: backupKey,
@@ -17162,7 +16818,7 @@ class StreamingExporter {
   async exportResource(resource, outputPath, type = "full", sinceTimestamp = null) {
     let recordCount = 0;
     let bytesWritten = 0;
-    const writeStream = fs$1.createWriteStream(outputPath);
+    const writeStream = fs.createWriteStream(outputPath);
     let outputStream = writeStream;
     if (this.compress) {
       const gzipStream = zlib.createGzip();
@@ -17308,7 +16964,7 @@ class BackupPlugin extends Plugin {
   async onInstall() {
     this.driver = createBackupDriver(this.config.driver, this.config.driverConfig);
     await this.driver.setup(this.database);
-    await fs.mkdir(this.config.tempDir, { recursive: true });
+    await fs$1.mkdir(this.config.tempDir, { recursive: true });
     await this._createBackupMetadataResource();
     if (this.config.verbose) {
       const storageInfo = this.driver.getStorageInfo();
@@ -17371,7 +17027,7 @@ class BackupPlugin extends Plugin {
       this.emit("plg:backup:start", { id: backupId, type });
       const metadata = await this._createBackupMetadata(backupId, type);
       const tempBackupDir = path.join(this.config.tempDir, backupId);
-      await fs.mkdir(tempBackupDir, { recursive: true });
+      await fs$1.mkdir(tempBackupDir, { recursive: true });
       try {
         const manifest = await this._createBackupManifest(type, options);
         const exportedFiles = await this._exportResources(manifest.resources, tempBackupDir, type);
@@ -17589,7 +17245,7 @@ class BackupPlugin extends Plugin {
       };
     }
     const metadataPath = path.join(tempDir, "s3db.json");
-    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    await fs$1.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
     if (this.config.verbose) {
       console.log(`[BackupPlugin] Generated s3db.json metadata`);
     }
@@ -17602,7 +17258,7 @@ class BackupPlugin extends Plugin {
     };
     let totalSize = 0;
     for (const filePath of files) {
-      const [readOk, readErr, content] = await tryFn(() => fs.readFile(filePath, "utf8"));
+      const [readOk, readErr, content] = await tryFn(() => fs$1.readFile(filePath, "utf8"));
       if (!readOk) {
         if (this.config.verbose) {
           console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
@@ -17619,9 +17275,9 @@ class BackupPlugin extends Plugin {
     }
     const archiveJson = JSON.stringify(archive);
     if (compressionType === "none") {
-      await fs.writeFile(targetPath, archiveJson, "utf8");
+      await fs$1.writeFile(targetPath, archiveJson, "utf8");
     } else {
-      const output = fs$1.createWriteStream(targetPath);
+      const output = fs.createWriteStream(targetPath);
       const gzip = zlib.createGzip({ level: 6 });
       await promises.pipeline(
         async function* () {
@@ -17631,13 +17287,13 @@ class BackupPlugin extends Plugin {
         output
       );
     }
-    const [statOk, , stats] = await tryFn(() => fs.stat(targetPath));
+    const [statOk, , stats] = await tryFn(() => fs$1.stat(targetPath));
     return statOk ? stats.size : totalSize;
   }
   async _generateChecksum(filePath) {
     const [ok, err, result] = await tryFn(async () => {
       const hash = crypto.createHash("sha256");
-      const stream = fs$1.createReadStream(filePath);
+      const stream = fs.createReadStream(filePath);
       await promises.pipeline(stream, hash);
       return hash.digest("hex");
     });
@@ -17689,7 +17345,7 @@ class BackupPlugin extends Plugin {
         });
       }
       const tempRestoreDir = path.join(this.config.tempDir, `restore-${backupId}`);
-      await fs.mkdir(tempRestoreDir, { recursive: true });
+      await fs$1.mkdir(tempRestoreDir, { recursive: true });
       try {
         const downloadPath = path.join(tempRestoreDir, `${backupId}.backup`);
         await this.driver.download(backupId, downloadPath, backup.driverInfo);
@@ -17733,7 +17389,7 @@ class BackupPlugin extends Plugin {
     try {
       let archiveData = "";
       if (this.config.compression !== "none") {
-        const input = fs$1.createReadStream(backupPath);
+        const input = fs.createReadStream(backupPath);
         const gunzip = zlib.createGunzip();
         const chunks = [];
         await new Promise((resolve, reject) => {
@@ -17741,7 +17397,7 @@ class BackupPlugin extends Plugin {
         });
         archiveData = Buffer.concat(chunks).toString("utf8");
       } else {
-        archiveData = await fs.readFile(backupPath, "utf8");
+        archiveData = await fs$1.readFile(backupPath, "utf8");
       }
       let archive;
       try {
@@ -19034,7 +18690,7 @@ class FilesystemCache extends Cache {
   }
   async _ensureDirectory(dir) {
     const [ok, err] = await tryFn(async () => {
-      await fs.mkdir(dir, { recursive: true });
+      await fs$1.mkdir(dir, { recursive: true });
     });
     if (!ok && err.code !== "EEXIST") {
       throw new CacheError(`Failed to create cache directory: ${err.message}`, {
@@ -19090,7 +18746,7 @@ class FilesystemCache extends Cache {
         await this._acquireLock(filePath);
       }
       try {
-        await fs.writeFile(filePath, finalData, {
+        await fs$1.writeFile(filePath, finalData, {
           encoding: compressed ? "utf8" : this.encoding,
           mode: this.fileMode
         });
@@ -19104,7 +18760,7 @@ class FilesystemCache extends Cache {
             compressedSize: compressed ? Buffer.byteLength(finalData, "utf8") : originalSize,
             compressionRatio: compressed ? (Buffer.byteLength(finalData, "utf8") / originalSize).toFixed(2) : 1
           };
-          await fs.writeFile(this._getMetadataPath(filePath), JSON.stringify(metadata), {
+          await fs$1.writeFile(this._getMetadataPath(filePath), JSON.stringify(metadata), {
             encoding: this.encoding,
             mode: this.fileMode
           });
@@ -19150,7 +18806,7 @@ class FilesystemCache extends Cache {
         const metadataPath = this._getMetadataPath(filePath);
         if (await this._fileExists(metadataPath)) {
           const [ok, err, metadata] = await tryFn(async () => {
-            const metaContent = await fs.readFile(metadataPath, this.encoding);
+            const metaContent = await fs$1.readFile(metadataPath, this.encoding);
             return JSON.parse(metaContent);
           });
           if (ok && metadata.ttl > 0) {
@@ -19159,7 +18815,7 @@ class FilesystemCache extends Cache {
           }
         }
       } else if (this.ttl > 0) {
-        const stats = await fs.stat(filePath);
+        const stats = await fs$1.stat(filePath);
         const age = Date.now() - stats.mtime.getTime();
         isExpired = age > this.ttl;
       }
@@ -19174,13 +18830,13 @@ class FilesystemCache extends Cache {
         await this._acquireLock(filePath);
       }
       try {
-        const content = await fs.readFile(filePath, this.encoding);
+        const content = await fs$1.readFile(filePath, this.encoding);
         let isCompressed = false;
         if (this.enableMetadata) {
           const metadataPath = this._getMetadataPath(filePath);
           if (await this._fileExists(metadataPath)) {
             const [ok, err, metadata] = await tryFn(async () => {
-              const metaContent = await fs.readFile(metadataPath, this.encoding);
+              const metaContent = await fs$1.readFile(metadataPath, this.encoding);
               return JSON.parse(metaContent);
             });
             if (ok) {
@@ -19219,18 +18875,18 @@ class FilesystemCache extends Cache {
     const filePath = this._getFilePath(key);
     try {
       if (await this._fileExists(filePath)) {
-        await fs.unlink(filePath);
+        await fs$1.unlink(filePath);
       }
       if (this.enableMetadata) {
         const metadataPath = this._getMetadataPath(filePath);
         if (await this._fileExists(metadataPath)) {
-          await fs.unlink(metadataPath);
+          await fs$1.unlink(metadataPath);
         }
       }
       if (this.enableBackup) {
         const backupPath = filePath + this.backupSuffix;
         if (await this._fileExists(backupPath)) {
-          await fs.unlink(backupPath);
+          await fs$1.unlink(backupPath);
         }
       }
       if (this.enableStats) {
@@ -19263,7 +18919,7 @@ class FilesystemCache extends Cache {
         }
         return true;
       }
-      const files = await fs.readdir(this.directory);
+      const files = await fs$1.readdir(this.directory);
       const cacheFiles = files.filter((file) => {
         if (!file.startsWith(this.prefix)) return false;
         if (!file.endsWith(this.fileExtension)) return false;
@@ -19277,7 +18933,7 @@ class FilesystemCache extends Cache {
         const filePath = path.join(this.directory, file);
         try {
           if (await this._fileExists(filePath)) {
-            await fs.unlink(filePath);
+            await fs$1.unlink(filePath);
           }
         } catch (error) {
           if (error.code !== "ENOENT") {
@@ -19288,7 +18944,7 @@ class FilesystemCache extends Cache {
           try {
             const metadataPath = this._getMetadataPath(filePath);
             if (await this._fileExists(metadataPath)) {
-              await fs.unlink(metadataPath);
+              await fs$1.unlink(metadataPath);
             }
           } catch (error) {
             if (error.code !== "ENOENT") {
@@ -19300,7 +18956,7 @@ class FilesystemCache extends Cache {
           try {
             const backupPath = filePath + this.backupSuffix;
             if (await this._fileExists(backupPath)) {
-              await fs.unlink(backupPath);
+              await fs$1.unlink(backupPath);
             }
           } catch (error) {
             if (error.code !== "ENOENT") {
@@ -19342,7 +18998,7 @@ class FilesystemCache extends Cache {
   }
   async keys() {
     try {
-      const files = await fs.readdir(this.directory);
+      const files = await fs$1.readdir(this.directory);
       const cacheFiles = files.filter(
         (file) => file.startsWith(this.prefix) && file.endsWith(this.fileExtension)
       );
@@ -19359,14 +19015,14 @@ class FilesystemCache extends Cache {
   // Helper methods
   async _fileExists(filePath) {
     const [ok] = await tryFn(async () => {
-      await fs.stat(filePath);
+      await fs$1.stat(filePath);
     });
     return ok;
   }
   async _copyFile(src, dest) {
     const [ok, err] = await tryFn(async () => {
-      const content = await fs.readFile(src);
-      await fs.writeFile(dest, content);
+      const content = await fs$1.readFile(src);
+      await fs$1.writeFile(dest, content);
     });
     if (!ok) {
       console.warn("FilesystemCache: Failed to create backup:", err.message);
@@ -19375,7 +19031,7 @@ class FilesystemCache extends Cache {
   async _cleanup() {
     if (!this.ttl || this.ttl <= 0) return;
     try {
-      const files = await fs.readdir(this.directory);
+      const files = await fs$1.readdir(this.directory);
       const now = Date.now();
       for (const file of files) {
         if (!file.startsWith(this.prefix) || !file.endsWith(this.fileExtension)) {
@@ -19387,7 +19043,7 @@ class FilesystemCache extends Cache {
           const metadataPath = this._getMetadataPath(filePath);
           if (await this._fileExists(metadataPath)) {
             const [ok, err, metadata] = await tryFn(async () => {
-              const metaContent = await fs.readFile(metadataPath, this.encoding);
+              const metaContent = await fs$1.readFile(metadataPath, this.encoding);
               return JSON.parse(metaContent);
             });
             if (ok && metadata.ttl > 0) {
@@ -19397,7 +19053,7 @@ class FilesystemCache extends Cache {
           }
         } else {
           const [ok, err, stats] = await tryFn(async () => {
-            return await fs.stat(filePath);
+            return await fs$1.stat(filePath);
           });
           if (ok) {
             const age = now - stats.mtime.getTime();
@@ -19446,7 +19102,7 @@ class FilesystemCache extends Cache {
     };
     const [ok, err] = await tryFn(async () => {
       const line = JSON.stringify(entry) + "\n";
-      await fs$1.promises.appendFile(this.journalFile, line, this.encoding);
+      await fs.promises.appendFile(this.journalFile, line, this.encoding);
     });
     if (!ok) {
       console.warn("FilesystemCache journal error:", err.message);
@@ -19623,7 +19279,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
     const [ok, err] = await tryFn(async () => {
       if (await this._fileExists(partitionDir)) {
-        await fs.rm(partitionDir, { recursive: true });
+        await fs$1.rm(partitionDir, { recursive: true });
       }
     });
     if (!ok) {
@@ -19641,7 +19297,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const resourceDir = path.join(this.directory, `resource=${resource}`);
     const [ok, err] = await tryFn(async () => {
       if (await this._fileExists(resourceDir)) {
-        await fs.rm(resourceDir, { recursive: true });
+        await fs$1.rm(resourceDir, { recursive: true });
       }
     });
     for (const [key] of this.partitionUsage.entries()) {
@@ -19655,13 +19311,13 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   async _clear(prefix) {
     await super._clear(prefix);
     if (!prefix) {
-      const [entriesOk, , entries] = await tryFn(() => fs.readdir(this.directory));
+      const [entriesOk, , entries] = await tryFn(() => fs$1.readdir(this.directory));
       if (entriesOk && entries) {
         for (const entry of entries) {
           const entryPath = path.join(this.directory, entry);
-          const [statOk, , entryStat] = await tryFn(() => fs.stat(entryPath));
+          const [statOk, , entryStat] = await tryFn(() => fs$1.stat(entryPath));
           if (statOk && entryStat.isDirectory() && entry.startsWith("resource=")) {
-            await fs.rm(entryPath, { recursive: true }).catch(() => {
+            await fs$1.rm(entryPath, { recursive: true }).catch(() => {
             });
           }
         }
@@ -19674,7 +19330,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     if (segments.length > 0) {
       const dirPath = path.join(this.directory, ...segments);
       if (await this._fileExists(dirPath)) {
-        await fs.rm(dirPath, { recursive: true }).catch(() => {
+        await fs$1.rm(dirPath, { recursive: true }).catch(() => {
         });
       }
       const resourceSeg = segments.find((seg) => seg.startsWith("resource="));
@@ -19834,11 +19490,11 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     return path.join(dirPath, `${this.prefix}_${fileName}${this.fileExtension}`);
   }
   async _calculateDirectoryStats(dir, stats) {
-    const [ok, err, files] = await tryFn(() => fs.readdir(dir));
+    const [ok, err, files] = await tryFn(() => fs$1.readdir(dir));
     if (!ok) return;
     for (const file of files) {
       const filePath = path.join(dir, file);
-      const [statOk, statErr, fileStat] = await tryFn(() => fs.stat(filePath));
+      const [statOk, statErr, fileStat] = await tryFn(() => fs$1.stat(filePath));
       if (statOk) {
         if (fileStat.isDirectory()) {
           await this._calculateDirectoryStats(filePath, stats);
@@ -19851,7 +19507,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
   async loadUsageStats() {
     const [ok, err, content] = await tryFn(async () => {
-      const data = await fs.readFile(this.usageStatsFile, "utf8");
+      const data = await fs$1.readFile(this.usageStatsFile, "utf8");
       return JSON.parse(data);
     });
     if (ok && content) {
@@ -19861,7 +19517,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   async _saveUsageStats() {
     const statsObject = Object.fromEntries(this.partitionUsage);
     await tryFn(async () => {
-      await fs.writeFile(
+      await fs$1.writeFile(
         this.usageStatsFile,
         JSON.stringify(statsObject, null, 2),
         "utf8"
@@ -19871,7 +19527,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   async _writeFileWithMetadata(filePath, data) {
     const content = JSON.stringify(data);
     const [ok, err] = await tryFn(async () => {
-      await fs.writeFile(filePath, content, {
+      await fs$1.writeFile(filePath, content, {
         encoding: this.encoding,
         mode: this.fileMode
       });
@@ -19891,7 +19547,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
   }
   async _readFileWithMetadata(filePath) {
     const [ok, err, content] = await tryFn(async () => {
-      return await fs.readFile(filePath, this.encoding);
+      return await fs$1.readFile(filePath, this.encoding);
     });
     if (!ok || !content) return null;
     try {
@@ -38195,7 +37851,7 @@ function sanitizeNamespace(value) {
 function defaultTargetsResource(namespace) {
   return `${namespace.replace(/[^a-z0-9]+/g, "_")}_targets`;
 }
-class SpiderSuitePlugin extends Plugin {
+class SpiderPlugin extends Plugin {
   constructor(options = {}) {
     const namespace = options.namespace || "spider";
     super({ ...options, namespace });
@@ -38316,7 +37972,7 @@ class SpiderSuitePlugin extends Plugin {
       delete ttlConfig.queue;
       this.ttlPlugin = await this._installDependency("ttl", this.pluginFactories.ttl(ttlConfig));
     }
-    this.emit("spiderSuite.installed", {
+    this.emit("spider.installed", {
       namespace: this.namespace,
       targetsResource: this.config.targetsResource
     });
@@ -38350,8 +38006,8 @@ class SpiderSuitePlugin extends Plugin {
    */
   async enqueueTarget(data, options = {}) {
     if (!this.targetsResource?.enqueue) {
-      throw new PluginError("[SpiderSuitePlugin] Queue helpers not initialized yet", {
-        pluginName: "SpiderSuitePlugin",
+      throw new PluginError("[SpiderPlugin] Queue helpers not initialized yet", {
+        pluginName: "SpiderPlugin",
         operation: "enqueueTarget",
         statusCode: 500,
         retriable: false,
@@ -38381,8 +38037,8 @@ class SpiderSuitePlugin extends Plugin {
   }
   async queueHandler(record, context) {
     if (typeof this.processor !== "function") {
-      throw new PluginError("[SpiderSuitePlugin] No processor registered. Call setProcessor(fn) first.", {
-        pluginName: "SpiderSuitePlugin",
+      throw new PluginError("[SpiderPlugin] No processor registered. Call setProcessor(fn) first.", {
+        pluginName: "SpiderPlugin",
         operation: "queueHandler",
         statusCode: 500,
         retriable: false,
@@ -58763,8 +58419,9 @@ class ReplicatorPlugin extends Plugin {
           const records = Array.isArray(page) ? page : page.items || [];
           if (records.length === 0) break;
           const poolResult = await promisePool.PromisePool.withConcurrency(this.config.replicatorConcurrency).for(records).process(async (record) => {
+            const sanitizedRecord = this.filterInternalFields(record);
             const [replicateOk, replicateError, result] = await tryFn(
-              () => replicator.replicate(resourceName, "insert", record, record.id)
+              () => replicator.replicate(resourceName, "insert", sanitizedRecord, sanitizedRecord.id)
             );
             if (!replicateOk) {
               if (this.config.verbose) {
@@ -58775,11 +58432,11 @@ class ReplicatorPlugin extends Plugin {
                 replicator: replicator.name || replicator.id,
                 resourceName,
                 operation: "insert",
-                recordId: record.id,
+                recordId: sanitizedRecord.id,
                 error: replicateError.message
               });
               if (this.config.logErrors && this.database) {
-                await this.logError(replicator, resourceName, "insert", record.id, record, replicateError);
+                await this.logError(replicator, resourceName, "insert", sanitizedRecord.id, sanitizedRecord, replicateError);
               }
               throw replicateError;
             }
@@ -58788,7 +58445,7 @@ class ReplicatorPlugin extends Plugin {
               replicator: replicator.name || replicator.id,
               resourceName,
               operation: "insert",
-              recordId: record.id,
+              recordId: sanitizedRecord.id,
               result,
               success: true
             });
@@ -61235,7 +60892,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
    */
   async initialize() {
     try {
-      const stats = await fs.stat(this.basePath);
+      const stats = await fs$1.stat(this.basePath);
       if (!stats.isDirectory()) {
         throw new TfStateError(`Base path is not a directory: ${this.basePath}`, {
           operation: "initialize",
@@ -61270,7 +60927,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
       const stateFiles = await Promise.all(
         files.map(async (file) => {
           const fullPath = path.join(this.basePath, file);
-          const stats = await fs.stat(fullPath);
+          const stats = await fs$1.stat(fullPath);
           return {
             path: file,
             fullPath,
@@ -61300,7 +60957,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
   async readStateFile(path$1) {
     const fullPath = path$1.startsWith(this.basePath) ? path$1 : path.join(this.basePath, path$1);
     try {
-      const content = await fs.readFile(fullPath, "utf-8");
+      const content = await fs$1.readFile(fullPath, "utf-8");
       return JSON.parse(content);
     } catch (error) {
       if (error.code === "ENOENT") {
@@ -61326,7 +60983,7 @@ class FilesystemTfStateDriver extends TfStateDriver {
   async getStateFileMetadata(path$1) {
     const fullPath = path$1.startsWith(this.basePath) ? path$1 : path.join(this.basePath, path$1);
     try {
-      const stats = await fs.stat(fullPath);
+      const stats = await fs$1.stat(fullPath);
       return {
         path: path$1,
         fullPath,
@@ -61777,7 +61434,7 @@ class TfStatePlugin extends Plugin {
     pattern.slice(baseDir.length);
     const findFiles = async (dir) => {
       try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
+        const entries = await fs$1.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = path.join(dir, entry.name);
           if (entry.isDirectory()) {
@@ -62190,11 +61847,11 @@ class TfStatePlugin extends Plugin {
    * @private
    */
   async _readStateFile(filePath) {
-    if (!fs$1.existsSync(filePath)) {
+    if (!fs.existsSync(filePath)) {
       throw new StateFileNotFoundError(filePath);
     }
     const [ok, err, content] = await tryFn(async () => {
-      return await fs.readFile(filePath, "utf-8");
+      return await fs$1.readFile(filePath, "utf-8");
     });
     if (!ok) {
       throw new InvalidStateFileError(filePath, `Failed to read file: ${err.message}`);
@@ -62775,7 +62432,7 @@ class TfStatePlugin extends Plugin {
   async _setupFileWatchers() {
     for (const path of this.watchPaths) {
       try {
-        const watcher = fs.watch(path);
+        const watcher = fs$1.watch(path);
         (async () => {
           for await (const event of watcher) {
             if (event.eventType === "change" && event.filename.endsWith(".tfstate")) {
@@ -64927,7 +64584,7 @@ class MemoryStorage {
     }
     const snapshot = this.snapshot();
     const json = JSON.stringify(snapshot, null, 2);
-    const [ok, err] = await tryFn(() => fs.writeFile(path, json, "utf-8"));
+    const [ok, err] = await tryFn(() => fs$1.writeFile(path, json, "utf-8"));
     if (!ok) {
       throw new ResourceError(`Failed to save to disk: ${err.message}`, {
         bucket: this.bucket,
@@ -64955,7 +64612,7 @@ class MemoryStorage {
         suggestion: "Provide a persistPath when creating MemoryClient or pass a custom path to loadFromDisk()."
       });
     }
-    const [ok, err, json] = await tryFn(() => fs.readFile(path, "utf-8"));
+    const [ok, err, json] = await tryFn(() => fs$1.readFile(path, "utf-8"));
     if (!ok) {
       throw new ResourceError(`Failed to load from disk: ${err.message}`, {
         bucket: this.bucket,
@@ -65974,8 +65631,8 @@ async function generateTypes(database, options = {}) {
   }
   const content = lines.join("\n");
   if (outputPath) {
-    await fs.mkdir(path.dirname(outputPath), { recursive: true });
-    await fs.writeFile(outputPath, content, "utf-8");
+    await fs$1.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs$1.writeFile(outputPath, content, "utf-8");
   }
   return content;
 }
@@ -67866,7 +67523,7 @@ class IdentityServer {
       this.app.use("*", loggingMiddleware);
     }
     this.app.get("/health", (c) => {
-      const response = success({
+      const response = success$1({
         status: "ok",
         service: "identity-provider",
         uptime: process.uptime(),
@@ -67875,7 +67532,7 @@ class IdentityServer {
       return c.json(response);
     });
     this.app.get("/health/live", (c) => {
-      const response = success({
+      const response = success$1({
         status: "alive",
         timestamp: (/* @__PURE__ */ new Date()).toISOString()
       });
@@ -67884,13 +67541,13 @@ class IdentityServer {
     this.app.get("/health/ready", (c) => {
       const isReady = this.options.oauth2Server !== null;
       if (!isReady) {
-        const response2 = error("Service not ready", {
+        const response2 = error$1("Service not ready", {
           status: 503,
           code: "NOT_READY"
         });
         return c.json(response2, 503);
       }
-      const response = success({
+      const response = success$1({
         status: "ready",
         timestamp: (/* @__PURE__ */ new Date()).toISOString()
       });
@@ -67902,10 +67559,10 @@ class IdentityServer {
     this._setupOAuth2Routes();
     this._setupUIRoutes();
     this.app.onError((err, c) => {
-      return errorHandler(err, c);
+      return errorHandler$1(err, c);
     });
     this.app.notFound((c) => {
-      const response = error("Route not found", {
+      const response = error$1("Route not found", {
         status: 404,
         code: "NOT_FOUND",
         details: {
@@ -71978,7 +71635,7 @@ const cssPath = path.join(__dirname$1, "../styles/main.css");
 let cachedCSS = null;
 function getCSS() {
   if (!cachedCSS) {
-    cachedCSS = fs$1.readFileSync(cssPath, "utf-8");
+    cachedCSS = fs.readFileSync(cssPath, "utf-8");
   }
   return cachedCSS;
 }
@@ -76753,7 +76410,7 @@ exports.SchedulerPlugin = SchedulerPlugin;
 exports.Schema = Schema;
 exports.SchemaError = SchemaError;
 exports.Seeder = Seeder;
-exports.SpiderSuitePlugin = SpiderSuitePlugin;
+exports.SpiderPlugin = SpiderPlugin;
 exports.SqsConsumer = SqsConsumer;
 exports.SqsReplicator = SqsReplicator;
 exports.StateMachinePlugin = StateMachinePlugin;

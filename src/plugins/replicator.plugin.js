@@ -1042,8 +1042,9 @@ export class ReplicatorPlugin extends Plugin {
             .withConcurrency(this.config.replicatorConcurrency)
             .for(records)
             .process(async (record) => {
+              const sanitizedRecord = this.filterInternalFields(record);
               const [replicateOk, replicateError, result] = await tryFn(() =>
-                replicator.replicate(resourceName, 'insert', record, record.id)
+                replicator.replicate(resourceName, 'insert', sanitizedRecord, sanitizedRecord.id)
               );
 
               if (!replicateOk) {
@@ -1056,12 +1057,12 @@ export class ReplicatorPlugin extends Plugin {
                   replicator: replicator.name || replicator.id,
                   resourceName,
                   operation: 'insert',
-                  recordId: record.id,
+                  recordId: sanitizedRecord.id,
                   error: replicateError.message
                 });
 
                 if (this.config.logErrors && this.database) {
-                  await this.logError(replicator, resourceName, 'insert', record.id, record, replicateError);
+                  await this.logError(replicator, resourceName, 'insert', sanitizedRecord.id, sanitizedRecord, replicateError);
                 }
 
                 throw replicateError;
@@ -1072,7 +1073,7 @@ export class ReplicatorPlugin extends Plugin {
                 replicator: replicator.name || replicator.id,
                 resourceName,
                 operation: 'insert',
-                recordId: record.id,
+                recordId: sanitizedRecord.id,
                 result,
                 success: true
               });

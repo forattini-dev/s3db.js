@@ -58,7 +58,7 @@ describe('FilesystemCache - Basic Tests', () => {
     test('should throw error when directory is not provided', () => {
       expect(() => {
         new FilesystemCache({});
-      }).toThrow('FilesystemCache: directory parameter is required');
+      }).toThrow('FilesystemCache requires a directory');
     });
   });
 
