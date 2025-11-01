@@ -100,7 +100,7 @@ describe('IP Address Utilities', () => {
     });
 
     test('should throw error on invalid encoded IPv4', () => {
-      expect(() => decodeIPv4('invalid')).toThrow('Failed to decode IPv4');
+      expect(() => decodeIPv4('invalid')).toThrow('Invalid encoded IPv4 length');
       expect(() => decodeIPv4('wKgB')).toThrow('Invalid encoded IPv4 length'); // Too short
       expect(() => decodeIPv4(123)).toThrow('Encoded IPv4 must be a string');
     });
@@ -211,7 +211,7 @@ describe('IP Address Utilities', () => {
     });
 
     test('should throw error on invalid encoded IPv6', () => {
-      expect(() => decodeIPv6('invalid')).toThrow('Failed to decode IPv6');
+      expect(() => decodeIPv6('invalid')).toThrow('Invalid encoded IPv6 length');
       expect(() => decodeIPv6('wKgBAQ==')).toThrow('Invalid encoded IPv6 length'); // Too short
       expect(() => decodeIPv6(123)).toThrow('Encoded IPv6 must be a string');
     });
