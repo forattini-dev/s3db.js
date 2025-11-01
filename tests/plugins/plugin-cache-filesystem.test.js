@@ -200,16 +200,19 @@ describe('FilesystemCache - Permission Tests', () => {
       // IMPORTANT: This test documents a known behavior where FilesystemCache
       // calls async _init() in constructor without await, causing uncaught promise rejections
       // when directory creation fails due to permissions.
-      
+
       // Test with createDirectory=false to avoid permission issues
       const tempDir = await createTemporaryPathForTest('permission-test-safe');
       await rmdir(tempDir, { recursive: true }); // Remove directory
-      
-      cache = new FilesystemCache({ 
+
+      cache = new FilesystemCache({
         directory: tempDir,
         createDirectory: false // Don't try to create directory
       });
-      
+
+      // Wait for _init() to complete (it throws in background)
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // This should fail because directory doesn't exist and createDirectory is disabled
       await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
     });
@@ -232,35 +235,41 @@ describe('FilesystemCache - Permission Tests', () => {
 
     test('should handle createDirectory=false with non-existent directory', async () => {
       const nonExistentDir = await createTemporaryPathForTest('non-existent');
-      
+
       // Remove the directory that was created by createTemporaryPathForTest
       await rmdir(nonExistentDir, { recursive: true });
-      
+
       // Create cache with createDirectory=false
-      cache = new FilesystemCache({ 
+      cache = new FilesystemCache({
         directory: nonExistentDir,
         createDirectory: false
       });
-      
+
+      // Wait for _init() to complete (it throws in background)
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Operations should fail because directory doesn't exist and won't be created
       await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
     });
 
     test('should demonstrate FilesystemCache error handling for missing directories', async () => {
       // This test documents how FilesystemCache handles missing directories
-      
+
       // Test: createDirectory=false with missing directory = ENOENT
       const missingDir = await createTemporaryPathForTest('demo-missing');
       await rmdir(missingDir, { recursive: true });
-      
-      const cacheNoCreate = new FilesystemCache({ 
+
+      const cacheNoCreate = new FilesystemCache({
         directory: missingDir,
         createDirectory: false
       });
-      
+
+      // Wait for _init() to complete (it throws in background)
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Should fail when trying to write to non-existent directory with createDirectory disabled
       await expect(cacheNoCreate.set('test', 'value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
-      
+
       // Cleanup
       if (cacheNoCreate && cacheNoCreate.destroy) cacheNoCreate.destroy();
     });
