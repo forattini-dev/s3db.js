@@ -51,6 +51,7 @@
 
 - [🚀 Quick Start](#-quick-start)
 - [🏗️ Plugin Architecture](#️-plugin-architecture)
+  - [🔖 Namespaces & Multi-instance Support](#-namespaces--multi-instance-support)
 - [⏰ Plugin Timing](#-plugin-timing-before-vs-after-resource-creation)
 - [💡 Plugin Combinations](#-plugin-combinations)
 - [🔧 Build Your Own Plugin](#-build-your-own-plugin)
@@ -174,24 +175,534 @@ class MyPlugin extends Plugin {
    - Cleanup internal state
    - Optionally purge all data from S3 (`purgeData: true`)
 
-### Namespaces & Multi-instance
+### 🔖 Namespaces & Multi-instance Support
 
-All plugins can be installed more than once—just provide a unique namespace or alias. The base `Plugin` class slugifies the namespace and automatically scopes:
+**All plugins support running multiple instances simultaneously** with isolated data through namespace support. This is handled automatically by the base `Plugin` class.
 
-- PluginStorage keys (e.g., `plugin=cache--analytics/...`)
-- Internal resources (`plg_namespace_plugin_*`)
-- Resource helpers exposed by plugins (cache drivers, key resolvers, etc.)
+#### Automatic Namespace Detection
+
+When you create a plugin with a namespace, the system automatically:
+
+1. ✅ **Scans storage** to find existing namespaces
+2. ✅ **Emits console warnings** listing detected namespaces
+3. ✅ **Warns which namespace** the current instance will use
+4. ✅ **Isolates all data** (storage paths, database resources, events)
 
 ```javascript
-await db.usePlugin(new CachePlugin({ driver: 'memory', namespace: 'hot-path' }), 'cacheHot');
-await db.usePlugin(new CachePlugin({ driver: 's3', namespace: 'analytics' }), 'cacheCold');
+// First instance
+const uptimePlugin = new ReconPlugin({ namespace: 'uptime' });
+await db.use(uptimePlugin);
+// Console: [ReconPlugin] Using namespace: "uptime"
 
-const users = db.resources.users;
-const hotCache = users.getCacheDriver('cache--hot-path'); // namespaced driver
-const coldKey = await users.getCacheKeyResolver('cache--analytics')({ action: 'list' });
+// Second instance (detects first)
+const stealthPlugin = new ReconPlugin({ namespace: 'stealth' });
+await db.use(stealthPlugin);
+// Console: [ReconPlugin] Detected 1 existing namespace(s): uptime
+// Console: [ReconPlugin] Using namespace: "stealth"
+
+// Third instance (detects both)
+const aggressivePlugin = new ReconPlugin({ namespace: 'aggressive' });
+await db.use(aggressivePlugin);
+// Console: [ReconPlugin] Detected 2 existing namespace(s): stealth, uptime
+// Console: [ReconPlugin] Using namespace: "aggressive"
 ```
 
-> 🔁 Passing a custom alias to `db.usePlugin(plugin, 'alias')` auto-derives the namespace when you omit it.
+#### Storage Isolation
+
+Each namespace has completely isolated storage:
+
+```
+# Uptime namespace
+plugin=recon/uptime/reports/...
+plugin=cache/uptime/entries/...
+
+# Stealth namespace
+plugin=recon/stealth/reports/...
+plugin=cache/stealth/entries/...
+```
+
+#### Resource Isolation
+
+Database resources are namespaced automatically.
+
+**Pattern**: `plg_<namespace>_<plugin>_<resource>` (namespace comes FIRST!)
+
+```
+# No namespace - clean global context
+plg_recon_hosts
+plg_cache_entries
+plg_scheduler_jobs
+
+# With namespace - namespace first for grouping
+plg_uptime_recon_hosts        ✨
+plg_uptime_recon_reports      ✨
+plg_prod_cache_entries        ✨
+plg_prod_scheduler_jobs       ✨
+plg_staging_cache_entries     ✨
+```
+
+**Why namespace first?** Resources are alphabetically grouped by namespace, making it easy to see all resources belonging to a specific namespace (e.g., all `plg_prod_*` resources).
+
+#### Common Use Cases
+
+**1. Multi-Environment Monitoring**
+```javascript
+const prodCache = new CachePlugin({
+  namespace: 'production',
+  driver: 'memory',
+  ttl: 3600000
+});
+
+const stagingCache = new CachePlugin({
+  namespace: 'staging',
+  driver: 's3',
+  ttl: 1800000
+});
+
+await db.use(prodCache);
+await db.use(stagingCache);
+```
+
+**2. Multi-Tenant SaaS**
+```javascript
+const clientAcmeMetrics = new MetricsPlugin({ namespace: 'client-acme' });
+const clientGlobexMetrics = new MetricsPlugin({ namespace: 'client-globex' });
+
+await db.use(clientAcmeMetrics);
+await db.use(clientGlobexMetrics);
+```
+
+**3. Different Behaviors**
+```javascript
+const uptimeRecon = new ReconPlugin({
+  namespace: 'uptime',
+  behavior: 'passive',
+  behaviors: { uptime: { enabled: true } }
+});
+
+const auditRecon = new ReconPlugin({
+  namespace: 'audit',
+  behavior: 'aggressive'
+});
+
+await db.use(uptimeRecon);
+await db.use(auditRecon);
+```
+
+#### Namespace Validation
+
+Namespaces must follow these rules:
+- ✅ Alphanumeric characters, hyphens (`-`), underscores (`_`)
+- ✅ 1-50 characters
+- ❌ No spaces or special characters
+
+**Valid**: `production`, `client-acme`, `env_staging_2`
+**Invalid**: `"prod env"`, `"client@acme"`, `""`
+
+> 📚 **Complete Namespace API Documentation**: See detailed API reference and implementation guide below.
+
+---
+
+## 📘 Plugin Namespace API Reference
+
+> **Standardized namespace detection and logging for all S3DB plugins**
+
+### Overview
+
+The `plugin-namespace` concern provides utilities for consistent namespace support across all plugins. Every plugin that implements namespaces **must** use these functions to ensure uniform behavior.
+
+### Requirements
+
+All plugins with namespace support **MUST**:
+
+1. ✅ **List existing namespaces** on initialization
+2. ✅ **Emit console.warn** showing detected namespaces
+3. ✅ **Emit console.warn** showing which namespace is being used
+4. ✅ **Validate namespace** format (alphanumeric, hyphens, underscores only)
+5. ✅ **Use standardized resource naming** (default namespace has no suffix)
+
+### API Functions
+
+#### `listPluginNamespaces(storage, pluginPrefix)`
+
+Lists all existing namespaces for a plugin by scanning storage.
+
+**Parameters**:
+- `storage` (Object): Plugin storage instance
+- `pluginPrefix` (string): Plugin prefix (e.g., 'recon', 'scheduler', 'cache')
+
+**Returns**: `Promise<string[]>` - Array of namespace strings, sorted alphabetically
+
+**Example**:
+```javascript
+import { listPluginNamespaces } from 's3db.js/concerns/plugin-namespace';
+
+const storage = plugin.getStorage();
+const namespaces = await listPluginNamespaces(storage, 'recon');
+// ['aggressive', 'default', 'stealth', 'uptime']
+```
+
+#### `warnNamespaceUsage(pluginName, currentNamespace, existingNamespaces)`
+
+Emits console warnings about namespace detection and usage.
+
+**Parameters**:
+- `pluginName` (string): Plugin name for logging (e.g., 'ReconPlugin', 'SchedulerPlugin')
+- `currentNamespace` (string): The namespace being used by this instance
+- `existingNamespaces` (string[]): Array of detected namespaces
+
+**Example**:
+```javascript
+import { warnNamespaceUsage } from 's3db.js/concerns/plugin-namespace';
+
+warnNamespaceUsage('ReconPlugin', 'uptime', ['default', 'stealth']);
+// Console output:
+// [ReconPlugin] Detected 2 existing namespace(s): default, stealth
+// [ReconPlugin] Using namespace: "uptime"
+```
+
+#### `detectAndWarnNamespaces(storage, pluginName, pluginPrefix, currentNamespace)`
+
+Complete namespace detection and warning flow (combines listing + warning).
+
+**Parameters**:
+- `storage` (Object): Plugin storage instance
+- `pluginName` (string): Plugin name for logging
+- `pluginPrefix` (string): Plugin prefix for storage scanning
+- `currentNamespace` (string): The namespace being used
+
+**Returns**: `Promise<string[]>` - Array of detected namespaces
+
+**Example**:
+```javascript
+import { detectAndWarnNamespaces } from 's3db.js/concerns/plugin-namespace';
+
+const namespaces = await detectAndWarnNamespaces(
+  plugin.getStorage(),
+  'ReconPlugin',
+  'recon',
+  'uptime'
+);
+// Console output:
+// [ReconPlugin] Detected 2 existing namespace(s): default, stealth
+// [ReconPlugin] Using namespace: "uptime"
+// Returns: ['default', 'stealth']
+```
+
+#### `getNamespacedResourceName(baseResourceName, namespace, pluginPrefix)`
+
+Generates consistent resource names across all plugins.
+
+**Parameters**:
+- `baseResourceName` (string): Base resource name (e.g., 'plg_recon_hosts')
+- `namespace` (string): Namespace to apply
+- `pluginPrefix` (string): Plugin prefix (e.g., 'plg_recon')
+
+**Returns**: `string` - Namespaced resource name
+
+**Example**:
+```javascript
+import { getNamespacedResourceName } from 's3db.js/concerns/plugin-namespace';
+
+// Default namespace (no suffix)
+getNamespacedResourceName('plg_recon_hosts', 'default', 'plg_recon');
+// 'plg_recon_hosts'
+
+// Custom namespace (adds suffix)
+getNamespacedResourceName('plg_recon_hosts', 'uptime', 'plg_recon');
+// 'plg_recon_uptime_hosts'
+
+getNamespacedResourceName('plg_scheduler_jobs', 'prod', 'plg_scheduler');
+// 'plg_scheduler_prod_jobs'
+```
+
+#### `validateNamespace(namespace)`
+
+Validates namespace format.
+
+**Parameters**:
+- `namespace` (string): Namespace to validate
+
+**Throws**: `Error` if namespace is invalid
+
+**Rules**:
+- ✅ Alphanumeric characters
+- ✅ Hyphens (`-`)
+- ✅ Underscores (`_`)
+- ✅ 1-50 characters
+- ❌ Spaces
+- ❌ Special characters
+- ❌ Empty strings
+
+**Example**:
+```javascript
+import { validateNamespace } from 's3db.js/concerns/plugin-namespace';
+
+validateNamespace('uptime');        // OK
+validateNamespace('client-acme');   // OK
+validateNamespace('prod_env_2');    // OK
+validateNamespace('');              // Throws: Namespace must be a non-empty string
+validateNamespace('invalid space'); // Throws: Namespace can only contain...
+validateNamespace('a'.repeat(51));  // Throws: Namespace must be 50 characters or less
+```
+
+#### `getValidatedNamespace(config, defaultNamespace)`
+
+Extracts and validates namespace from plugin config.
+
+**Parameters**:
+- `config` (Object): Plugin configuration
+- `defaultNamespace` (string): Default namespace if not specified (default: 'default')
+
+**Returns**: `string` - Validated namespace
+
+**Throws**: `Error` if namespace is invalid
+
+**Example**:
+```javascript
+import { getValidatedNamespace } from 's3db.js/concerns/plugin-namespace';
+
+getValidatedNamespace({ namespace: 'uptime' });
+// 'uptime'
+
+getValidatedNamespace({});
+// 'default'
+
+getValidatedNamespace({ namespace: 'invalid space' });
+// Throws Error
+```
+
+### Plugin Implementation Guide
+
+#### Step 1: Import Namespace Utilities
+
+```javascript
+import {
+  getValidatedNamespace,
+  detectAndWarnNamespaces,
+  getNamespacedResourceName
+} from 's3db.js/concerns/plugin-namespace';
+```
+
+#### Step 2: Validate Namespace in Constructor
+
+```javascript
+class MyPlugin extends Plugin {
+  static pluginName = 'myplugin';
+
+  constructor(config = {}) {
+    super(config);
+
+    // Validate and set namespace (REQUIRED)
+    this.namespace = getValidatedNamespace(config, 'default');
+
+    // ... rest of constructor
+  }
+}
+```
+
+#### Step 3: Detect and Warn on Initialize
+
+```javascript
+async initialize() {
+  // Detect existing namespaces and emit warnings (REQUIRED)
+  await detectAndWarnNamespaces(
+    this.getStorage(),
+    'MyPlugin',          // Plugin name for console output
+    'myplugin',          // Plugin prefix for storage scanning
+    this.namespace       // Current namespace
+  );
+
+  // ... rest of initialization
+}
+```
+
+#### Step 4: Use Namespaced Resource Names
+
+```javascript
+async createResources() {
+  const namespace = this.namespace;
+
+  // Use standardized resource naming
+  const hostsResourceName = getNamespacedResourceName(
+    'plg_myplugin_hosts',
+    namespace,
+    'plg_myplugin'
+  );
+
+  const resource = await this.database.createResource({
+    name: hostsResourceName,
+    // ... rest of config
+  });
+}
+```
+
+### Complete Example
+
+```javascript
+import { Plugin } from 's3db.js/plugins/plugin.class';
+import {
+  getValidatedNamespace,
+  detectAndWarnNamespaces,
+  getNamespacedResourceName
+} from 's3db.js/concerns/plugin-namespace';
+
+export class MyPlugin extends Plugin {
+  static pluginName = 'myplugin';
+
+  constructor(config = {}) {
+    super(config);
+
+    // Step 1: Validate and set namespace
+    this.namespace = getValidatedNamespace(config, 'default');
+
+    this.config = {
+      ...config,
+      storage: { enabled: true },
+      resources: { persist: true }
+    };
+  }
+
+  async initialize() {
+    await super.initialize();
+
+    // Step 2: Detect and warn about namespaces
+    await detectAndWarnNamespaces(
+      this.getStorage(),
+      'MyPlugin',
+      'myplugin',
+      this.namespace
+    );
+
+    // Step 3: Create namespaced resources
+    await this.createResources();
+  }
+
+  async createResources() {
+    if (!this.database) return;
+
+    const namespace = this.namespace;
+
+    // Step 4: Use standardized resource naming
+    const resourceConfigs = [
+      { name: 'plg_myplugin_hosts', attributes: { /* ... */ } },
+      { name: 'plg_myplugin_reports', attributes: { /* ... */ } }
+    ];
+
+    for (const config of resourceConfigs) {
+      const namespacedName = getNamespacedResourceName(
+        config.name,
+        namespace,
+        'plg_myplugin'
+      );
+
+      await this.database.createResource({
+        ...config,
+        name: namespacedName
+      });
+    }
+  }
+
+  // Storage paths should also use namespace
+  async saveReport(report) {
+    const storage = this.getStorage();
+    const namespace = this.namespace;
+
+    // Use namespace in storage path
+    const key = storage.getPluginKey(null, namespace, 'reports', report.id);
+    await storage.set(key, report);
+  }
+}
+
+// Usage
+const plugin1 = new MyPlugin({ namespace: 'uptime' });
+const plugin2 = new MyPlugin({ namespace: 'monitoring' });
+
+await db.use(plugin1);
+// Console: [MyPlugin] Using namespace: "uptime"
+
+await db.use(plugin2);
+// Console: [MyPlugin] Detected 1 existing namespace(s): uptime
+// Console: [MyPlugin] Using namespace: "monitoring"
+```
+
+### Checklist for Plugin Authors
+
+When adding namespace support to a plugin, ensure:
+
+- [ ] Import namespace utilities from `s3db.js/concerns/plugin-namespace`
+- [ ] Use `getValidatedNamespace()` in constructor
+- [ ] Call `detectAndWarnNamespaces()` in `initialize()`
+- [ ] Use `getNamespacedResourceName()` for all resources
+- [ ] Use namespace in all storage paths (`storage.getPluginKey(null, namespace, ...)`)
+- [ ] Document namespace support in plugin README
+- [ ] Create examples showing multiple instances
+- [ ] Add tests for namespace isolation
+
+### Testing Namespace Support
+
+```javascript
+import { describe, test, expect } from '@jest/globals';
+
+describe('MyPlugin Namespace Support', () => {
+  test('should validate namespace on construction', () => {
+    expect(() => new MyPlugin({ namespace: 'invalid space' })).toThrow();
+    expect(() => new MyPlugin({ namespace: 'valid-name' })).not.toThrow();
+  });
+
+  test('should create namespaced resources', async () => {
+    const plugin = new MyPlugin({ namespace: 'test' });
+    await db.use(plugin);
+
+    const resource = await db.getResource('plg_myplugin_test_hosts');
+    expect(resource).toBeDefined();
+  });
+
+  test('should isolate storage by namespace', async () => {
+    const plugin1 = new MyPlugin({ namespace: 'ns1' });
+    const plugin2 = new MyPlugin({ namespace: 'ns2' });
+
+    await db.use(plugin1);
+    await db.use(plugin2);
+
+    await plugin1.saveReport({ id: 'report1' });
+    await plugin2.saveReport({ id: 'report2' });
+
+    const storage = plugin1.getStorage();
+    const ns1Keys = await storage.list(storage.getPluginKey(null, 'ns1'));
+    const ns2Keys = await storage.list(storage.getPluginKey(null, 'ns2'));
+
+    expect(ns1Keys.length).toBe(1);
+    expect(ns2Keys.length).toBe(1);
+  });
+
+  test('should list existing namespaces', async () => {
+    const plugin1 = new MyPlugin({ namespace: 'ns1' });
+    const plugin2 = new MyPlugin({ namespace: 'ns2' });
+
+    await db.use(plugin1);
+    await plugin1.saveReport({ id: 'report1' });
+
+    await db.use(plugin2);
+    await plugin2.saveReport({ id: 'report2' });
+
+    const { listPluginNamespaces } = await import('s3db.js/concerns/plugin-namespace');
+    const namespaces = await listPluginNamespaces(plugin1.getStorage(), 'myplugin');
+
+    expect(namespaces).toContain('ns1');
+    expect(namespaces).toContain('ns2');
+  });
+});
+```
+
+### Related Documentation
+
+- [ReconPlugin Namespace Implementation](./recon/namespace.md)
+- [Multi-Instance Example](../examples/e45-recon-multi-instance.js)
+- [Namespace Detection Example](../examples/e46-recon-namespace-detection.js)
+- [Custom Plugin Example](../examples/e47-namespace-concern-usage.js)
+
+---
 
 ### Dependency Awareness
 
@@ -2748,6 +3259,18 @@ Each individual plugin file follows a consistent structure:
 - **Advanced Patterns**: Complex use cases and patterns
 - **Best Practices**: Recommendations and guidelines
 - **Troubleshooting**: Common issues and solutions
+
+### Namespace Documentation
+
+For detailed information about namespace support:
+
+- **[Plugin Namespace API](./namespace.md)** - Complete API reference
+- **[Namespace Changes](./NAMESPACE-CHANGES.md)** - Pattern changes and migration guide
+- **[Namespace Tests](./NAMESPACE-TESTS.md)** - Test coverage documentation
+- **[ReconPlugin Namespace Example](./recon-namespace.md)** - Production implementation example
+- **[Multi-Instance Example](../examples/e45-recon-multi-instance.js)** - Running 3 instances simultaneously
+- **[Namespace Detection Example](../examples/e46-recon-namespace-detection.js)** - Automatic detection demo
+- **[Custom Plugin Example](../examples/e47-namespace-concern-usage.js)** - Implementing namespace support
 
 ### Community & Support
 

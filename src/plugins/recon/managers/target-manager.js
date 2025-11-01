@@ -173,7 +173,13 @@ export class TargetManager {
   // ========================================
 
   async _getResource() {
-    return await this.plugin._getResource('targets');
+    // Get namespaced targets resource
+    const namespace = this.plugin.namespace || '';
+    const resourceName = namespace === ''
+      ? 'plg_recon_targets'
+      : `plg_recon_${namespace}_targets`;
+
+    return await this.plugin.database.getResource(resourceName);
   }
 
   _normalizeTarget(targetInput) {

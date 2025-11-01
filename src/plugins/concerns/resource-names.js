@@ -7,9 +7,9 @@ function normalizeNamespace(namespace) {
   const text = String(namespace).trim().toLowerCase();
   if (!text) return null;
   const normalized = text
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+/, '')
-    .replace(/_+$/, '');
+    .replace(/[^a-z0-9]+/g, '-')  // Use hyphens instead of underscores
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
   return normalized || null;
 }
 

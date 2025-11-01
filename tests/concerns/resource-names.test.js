@@ -12,12 +12,13 @@ describe('resource-names namespace support', () => {
     expect(name).toBe('plg_identity_sessions');
   });
 
-  it('applies namespace to default names', () => {
+  it('applies namespace to default names (namespace comes first)', () => {
     const name = resolveResourceName('identity', {
       defaultName: 'plg_identity_sessions'
     }, { namespace: 'tenant-alpha' });
 
-    expect(name).toBe('plg_tenant_alpha_identity_sessions');
+    // Pattern: plg_<namespace>_<plugin>_<resource>
+    expect(name).toBe('plg_tenant-alpha_identity_sessions');
   });
 
   it('does not namespace overrides by default', () => {
@@ -33,7 +34,8 @@ describe('resource-names namespace support', () => {
       override: 'custom_sessions'
     }, { namespace: 'tenant-alpha', applyNamespaceToOverrides: true });
 
-    expect(name).toBe('plg_tenant_alpha_custom_sessions');
+    // Pattern: plg_<namespace>_<custom_name>
+    expect(name).toBe('plg_tenant-alpha_custom_sessions');
   });
 
   it('namespaces every descriptor via resolveResourceNames', () => {
@@ -42,7 +44,9 @@ describe('resource-names namespace support', () => {
       tokens: { defaultName: 'plg_identity_tokens' }
     }, { namespace: 'Tenant-Alpha' });
 
-    expect(names.sessions).toBe('plg_tenant_alpha_identity_sessions');
-    expect(names.tokens).toBe('plg_tenant_alpha_identity_tokens');
+    // Pattern: plg_<namespace>_<plugin>_<resource>
+    // Note: namespace is normalized to lowercase with hyphens
+    expect(names.sessions).toBe('plg_tenant-alpha_identity_sessions');
+    expect(names.tokens).toBe('plg_tenant-alpha_identity_tokens');
   });
 });

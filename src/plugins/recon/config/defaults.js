@@ -123,3 +123,60 @@ export const BEHAVIOR_PRESETS = {
     rateLimit: { enabled: false, delayBetweenStages: 0 }
   }
 };
+
+/**
+ * Default plugin configuration
+ */
+export const DEFAULT_CONFIG = {
+  features: DEFAULT_FEATURES,
+  storage: {
+    enabled: true,
+    historyLimit: 50
+  },
+  scheduler: {
+    enabled: false,
+    defaultCron: '0 2 * * *' // 2 AM daily
+  },
+  resources: {
+    persist: true
+  },
+  behaviors: {
+    uptime: {
+      enabled: false,
+      checkInterval: 20000,         // Check every 20 seconds (3 samples per minute)
+      aggregationInterval: 60000,   // Aggregate and persist every 60 seconds (1 minute cohorts)
+      methods: ['ping', 'http'],    // ping, http, dns
+      alertOnDowntime: true,
+      downtimeThreshold: 3,         // 3 failed checks = downtime (60 seconds)
+      timeout: 5000,                // 5 seconds timeout per check
+      retainHistory: 30 * 24 * 60 * 60 * 1000,  // 30 days
+      persistRawChecks: false       // Only persist aggregated minute data (save storage)
+    }
+  },
+  concurrency: 4,
+  ping: {
+    count: 4,
+    timeout: 5000
+  },
+  traceroute: {
+    cycles: 3,
+    timeout: 10000
+  },
+  curl: {
+    timeout: 10000,
+    userAgent: 'Mozilla/5.0 (compatible; ReconBot/1.0)'
+  },
+  nmap: {
+    topPorts: 20,
+    extraArgs: ['-T4']
+  },
+  masscan: {
+    ports: '1-1000',
+    rate: 1000
+  },
+  rateLimit: {
+    enabled: false,
+    requestsPerMinute: 60,
+    delayBetweenStages: 1000
+  }
+};

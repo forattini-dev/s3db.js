@@ -1,6 +1,7 @@
 import EventEmitter from "events";
 import { PluginStorage } from "../concerns/plugin-storage.js";
 import { PluginError } from "../errors.js";
+import { listPluginNamespaces } from "./namespace.js";
 
 export class Plugin extends EventEmitter {
   constructor(options = {}) {
@@ -139,12 +140,58 @@ export class Plugin extends EventEmitter {
   }
 
   /**
+   * Detect and warn about existing namespaces
+   *
+   * Automatically called during install() if plugin uses namespaces.
+   * Scans storage to find existing namespaces and emits console warnings.
+   *
+   * @returns {Promise<string[]>} Array of detected namespaces
+   */
+  async detectAndWarnNamespaces() {
+    // Only run if plugin explicitly uses namespaces
+    if (!this._namespaceExplicit && !this.namespace) {
+      return [];
+    }
+
+    try {
+      // Get plugin prefix from slug (e.g., 'recon', 'scheduler', 'cache')
+      const pluginPrefix = this.baseSlug;
+      const currentNamespace = this.namespace || '';
+
+      // List existing namespaces in storage
+      const existingNamespaces = await listPluginNamespaces(
+        this.getStorage(),
+        pluginPrefix
+      );
+
+      // Emit console warnings (standardized format)
+      if (existingNamespaces.length > 0) {
+        console.warn(
+          `[${this.name}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
+        );
+      }
+
+      const namespaceDisplay = currentNamespace === '' ? '(none)' : `"${currentNamespace}"`;
+      console.warn(`[${this.name}] Using namespace: ${namespaceDisplay}`);
+
+      return existingNamespaces;
+    } catch (error) {
+      // Silently fail if storage is not available
+      return [];
+    }
+  }
+
+  /**
    * Install plugin
    * @param {Database} database - Database instance
    */
   async install(database) {
     this.database = database;
     this.beforeInstall();
+
+    // Auto-detect and warn about namespaces if plugin uses them
+    await this.detectAndWarnNamespaces();
+
     await this.onInstall();
     this.afterInstall();
   }

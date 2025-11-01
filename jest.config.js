@@ -1,6 +1,7 @@
 export default {
   silent: true,
   maxWorkers: process.env.CI ? 1 : '50%', // Use 1 worker in CI, 50% of CPUs locally
+  workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
   verbose: false,
   testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
   injectGlobals: true,
