@@ -20,6 +20,7 @@ export class TfStateError extends PluginError {
     };
     super(message, merged);
     this.name = 'TfStateError';
+    this.context = context;
   }
 }
 

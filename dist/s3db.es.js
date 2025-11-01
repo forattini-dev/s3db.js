@@ -60386,6 +60386,7 @@ class TfStateError extends PluginError {
     };
     super(message, merged);
     this.name = "TfStateError";
+    this.context = context;
   }
 }
 class InvalidStateFileError extends TfStateError {
@@ -64121,6 +64122,7 @@ class NetworkPlugin extends Plugin {
       features = {},
       storage = {},
       schedule = {},
+      resources: resourceConfig = {},
       targets = []
     } = options;
     this.config = {
@@ -64154,8 +64156,8 @@ class NetworkPlugin extends Plugin {
         runOnStart: schedule.runOnStart ?? false
       },
       resources: {
-        persist: resources.persist !== false,
-        autoCreate: resources.autoCreate !== false
+        persist: resourceConfig.persist !== false,
+        autoCreate: resourceConfig.autoCreate !== false
       },
       targets: Array.isArray(targets) ? targets : []
     };
@@ -64529,14 +64531,22 @@ class NetworkPlugin extends Plugin {
       timestamp: report.endedAt,
       status: report.status,
       reportKey: historyKey,
+      stageKeys: stageStorageKeys,
       summary: {
         latencyMs: report.fingerprint.latencyMs ?? null,
         openPorts: report.fingerprint.openPorts?.length ?? 0,
-        subdomains: report.fingerprint.subdomainCount ?? 0
+        subdomains: report.fingerprint.subdomainCount ?? 0,
+        primaryIp: report.fingerprint.primaryIp ?? null
       }
     });
-    existing.history = existing.history.slice(0, this.config.storage.historyLimit);
+    let pruned = [];
+    if (existing.history.length > this.config.storage.historyLimit) {
+      pruned = existing.history.splice(this.config.storage.historyLimit);
+    }
     await storage.set(indexKey, existing, { behavior: "body-only" });
+    if (pruned.length) {
+      await this._pruneHistory(target, pruned);
+    }
   }
   async _persistToResources(report) {
     if (!this.database || !this.config.resources.persist) {
@@ -64574,6 +64584,7 @@ class NetworkPlugin extends Plugin {
       const diffs = this._computeDiffs(existing, report);
       if (diffs.length) {
         await this._saveDiffs(hostId, report.endedAt, diffs);
+        await this._emitDiffAlerts(hostId, report, diffs);
       }
     }
     if (reportsResource) {
@@ -64625,6 +64636,285 @@ class NetworkPlugin extends Plugin {
       }
     }
   }
+  async _pruneHistory(target, prunedEntries) {
+    const storage = this.getStorage();
+    const hostId = typeof target === "string" ? target : target?.host || target?.target || target;
+    const reportsResource = await this._getResource("reports");
+    const stagesResource = await this._getResource("stages");
+    const diffsResource = await this._getResource("diffs");
+    for (const entry of prunedEntries) {
+      if (entry?.reportKey) {
+        await storage.delete(entry.reportKey).catch(() => {
+        });
+      }
+      if (entry?.stageKeys) {
+        for (const key of Object.values(entry.stageKeys)) {
+          if (key) {
+            await storage.delete(key).catch(() => {
+            });
+          }
+        }
+      }
+      if (reportsResource) {
+        await this._deleteResourceRecord(reportsResource, `${hostId}|${entry.timestamp}`);
+      }
+      if (stagesResource && entry?.stageKeys) {
+        for (const stageName of Object.keys(entry.stageKeys)) {
+          await this._deleteResourceRecord(stagesResource, `${hostId}|${stageName}|${entry.timestamp}`);
+        }
+      }
+      if (diffsResource) {
+        await this._deleteResourceRecord(diffsResource, `${hostId}|${entry.timestamp}`);
+      }
+    }
+  }
+  async _loadLatestReport(hostId) {
+    try {
+      const storage = this.getStorage();
+      const baseKey = storage.getPluginKey(null, "reports", hostId);
+      const latestKey = `${baseKey}/latest.json`;
+      return await storage.get(latestKey);
+    } catch (error) {
+      return null;
+    }
+  }
+  async _loadHostSummary(hostId, fallbackReport) {
+    const hostsResource = await this._getResource("hosts");
+    if (hostsResource) {
+      try {
+        const record = await hostsResource.get(hostId);
+        if (record) {
+          return record;
+        }
+      } catch (error) {
+      }
+    }
+    if (fallbackReport) {
+      return this._buildHostRecord(fallbackReport);
+    }
+    return null;
+  }
+  async _loadRecentDiffs(hostId, limit = 10) {
+    const diffsResource = await this._getResource("diffs");
+    if (diffsResource && typeof diffsResource.query === "function") {
+      try {
+        const result = await diffsResource.query({ host: hostId }, { limit, sort: "-timestamp" });
+        if (Array.isArray(result)) {
+          return result.slice(0, limit).map((entry) => this._normalizeDiffEntry(entry));
+        }
+        if (result?.items) {
+          return result.items.slice(0, limit).map((entry) => this._normalizeDiffEntry(entry));
+        }
+      } catch (error) {
+      }
+    }
+    try {
+      const storage = this.getStorage();
+      const baseKey = storage.getPluginKey(null, "reports", hostId);
+      const index = await storage.get(`${baseKey}/index.json`);
+      if (index?.history?.length > 1) {
+        const [latest, previous] = index.history;
+        if (previous) {
+          const diffs = [];
+          const deltaSubdomains = (latest.summary?.subdomains ?? 0) - (previous.summary?.subdomains ?? 0);
+          if (deltaSubdomains !== 0) {
+            diffs.push(this._normalizeDiffEntry({
+              type: "summary:subdomains",
+              delta: deltaSubdomains,
+              previous: previous.summary?.subdomains ?? 0,
+              current: latest.summary?.subdomains ?? 0,
+              timestamp: latest.timestamp,
+              severity: Math.abs(deltaSubdomains) >= 5 ? "medium" : "info"
+            }));
+          }
+          const deltaPorts = (latest.summary?.openPorts ?? 0) - (previous.summary?.openPorts ?? 0);
+          if (deltaPorts !== 0) {
+            diffs.push(this._normalizeDiffEntry({
+              type: "summary:openPorts",
+              delta: deltaPorts,
+              previous: previous.summary?.openPorts ?? 0,
+              current: latest.summary?.openPorts ?? 0,
+              timestamp: latest.timestamp,
+              severity: deltaPorts > 0 ? "high" : "info",
+              critical: deltaPorts > 0
+            }));
+          }
+          if (latest.summary?.primaryIp && latest.summary?.primaryIp !== previous.summary?.primaryIp) {
+            diffs.push(this._normalizeDiffEntry({
+              type: "field:primaryIp",
+              previous: previous.summary?.primaryIp ?? null,
+              current: latest.summary?.primaryIp,
+              timestamp: latest.timestamp,
+              severity: "high",
+              critical: true
+            }));
+          }
+          return diffs.slice(0, limit);
+        }
+      }
+    } catch (error) {
+    }
+    return [];
+  }
+  _normalizeDiffEntry(entry) {
+    if (!entry || typeof entry !== "object") {
+      return { type: "unknown", severity: "info", critical: false };
+    }
+    const normalized = { ...entry };
+    normalized.severity = (entry.severity || "info").toLowerCase();
+    normalized.critical = entry.critical === true;
+    if (!normalized.description && entry.type && entry.values) {
+      normalized.description = `${entry.type}: ${Array.isArray(entry.values) ? entry.values.join(", ") : entry.values}`;
+    }
+    return normalized;
+  }
+  _collectStageSummaries(report) {
+    const summaries = [];
+    for (const [stageName, stageData] of Object.entries(report.results || {})) {
+      const summary = this._summarizeStage(stageName, stageData);
+      summaries.push({
+        stage: stageName,
+        status: stageData?.status || "unknown",
+        summary
+      });
+    }
+    return summaries;
+  }
+  async generateClientReport(targetInput, options = {}) {
+    const format = (options.format || "markdown").toLowerCase();
+    const diffLimit = options.diffLimit ?? 10;
+    const normalized = this._normalizeTarget(
+      typeof targetInput === "string" ? targetInput : targetInput?.target || targetInput?.host || targetInput
+    );
+    const hostId = normalized.host;
+    const report = options.report || await this._loadLatestReport(hostId);
+    if (!report) {
+      throw new Error(`No network report found for host "${hostId}"`);
+    }
+    const hostSummary = await this._loadHostSummary(hostId, report);
+    const diffs = await this._loadRecentDiffs(hostId, diffLimit);
+    const stages = this._collectStageSummaries(report);
+    if (format === "json") {
+      return {
+        host: hostSummary,
+        report,
+        diffs,
+        stages
+      };
+    }
+    return this._buildMarkdownReport(hostSummary, report, stages, diffs, options);
+  }
+  _buildMarkdownReport(hostSummary, report, stages, diffs, options) {
+    const lines = [];
+    const summary = hostSummary?.summary || this._buildHostRecord(report).summary;
+    hostSummary?.fingerprint || report.fingerprint || {};
+    const target = hostSummary?.target || report.target.original;
+    lines.push(`# Network Report \u2013 ${target}`);
+    lines.push("");
+    lines.push(`- **\xDAltima execu\xE7\xE3o:** ${report.endedAt}`);
+    lines.push(`- **Status geral:** ${report.status || "desconhecido"}`);
+    if (summary.primaryIp) {
+      lines.push(`- **IP prim\xE1rio:** ${summary.primaryIp}`);
+    }
+    if ((summary.ipAddresses || []).length > 1) {
+      lines.push(`- **IPs adicionais:** ${summary.ipAddresses.slice(1).join(", ")}`);
+    }
+    if (summary.cdn) {
+      lines.push(`- **CDN/WAF:** ${summary.cdn}`);
+    }
+    if (summary.server) {
+      lines.push(`- **Servidor:** ${summary.server}`);
+    }
+    if (summary.latencyMs !== null && summary.latencyMs !== void 0) {
+      lines.push(`- **Lat\xEAncia m\xE9dia:** ${summary.latencyMs.toFixed ? summary.latencyMs.toFixed(1) : summary.latencyMs} ms`);
+    }
+    if ((summary.technologies || []).length) {
+      lines.push(`- **Tecnologias:** ${summary.technologies.join(", ")}`);
+    }
+    lines.push("");
+    if ((summary.openPorts || []).length) {
+      lines.push("## Portas abertas");
+      lines.push("");
+      lines.push("| Porta | Servi\xE7o | Detalhe |");
+      lines.push("|-------|---------|---------|");
+      for (const port of summary.openPorts) {
+        const portLabel = port.port || port;
+        const service = port.service || "";
+        const detail = port.detail || port.version || "";
+        lines.push(`| ${portLabel} | ${service} | ${detail} |`);
+      }
+      lines.push("");
+    }
+    if ((summary.subdomains || []).length) {
+      lines.push("## Principais subdom\xEDnios");
+      lines.push("");
+      for (const sub of summary.subdomains.slice(0, 20)) {
+        lines.push(`- ${sub}`);
+      }
+      if (summary.subdomainCount > 20) {
+        lines.push(`- ... (+${summary.subdomainCount - 20} extras)`);
+      }
+      lines.push("");
+    }
+    if (stages.length) {
+      lines.push("## Resumo por est\xE1gio");
+      lines.push("");
+      lines.push("| Est\xE1gio | Status | Observa\xE7\xF5es |");
+      lines.push("|---------|--------|-------------|");
+      for (const stage of stages) {
+        const status = stage.status || "desconhecido";
+        const notes = stage.summary && Object.keys(stage.summary).length ? Object.entries(stage.summary).slice(0, 3).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.length : value}`).join("; ") : "";
+        lines.push(`| ${stage.stage} | ${status} | ${notes} |`);
+      }
+      lines.push("");
+    }
+    if (diffs.length) {
+      lines.push("## Mudan\xE7as recentes");
+      lines.push("");
+      for (const diff of diffs.slice(0, options.diffLimit ?? 10)) {
+        lines.push(`- ${this._formatDiffEntry(diff)}`);
+      }
+      lines.push("");
+    }
+    lines.push("---");
+    lines.push("_Gerado automaticamente pelo NetworkPlugin._");
+    lines.push("");
+    return lines.join("\n");
+  }
+  _formatDiffEntry(diff) {
+    if (!diff) return "Mudan\xE7a n\xE3o especificada";
+    const prefix = diff.severity === "high" ? "\u{1F6A8} " : diff.severity === "medium" ? "\u26A0\uFE0F " : "";
+    if (diff.description) {
+      return `${prefix}${diff.description}`;
+    }
+    const type = diff.type || "desconhecido";
+    switch (type) {
+      case "subdomain:add":
+        return `${prefix}Novos subdom\xEDnios: ${(diff.values || []).join(", ")}`;
+      case "subdomain:remove":
+        return `${prefix}Subdom\xEDnios removidos: ${(diff.values || []).join(", ")}`;
+      case "port:add":
+        return `${prefix}Novas portas expostas: ${(diff.values || []).join(", ")}`;
+      case "port:remove":
+        return `${prefix}Portas fechadas: ${(diff.values || []).join(", ")}`;
+      case "technology:add":
+        return `${prefix}Tecnologias adicionadas: ${(diff.values || []).join(", ")}`;
+      case "technology:remove":
+        return `${prefix}Tecnologias removidas: ${(diff.values || []).join(", ")}`;
+      case "field:primaryIp":
+        return `${prefix}IP prim\xE1rio alterado de ${diff.previous || "desconhecido"} para ${diff.current || "desconhecido"}`;
+      case "field:cdn":
+        return `${prefix}CDN/WAF alterado de ${diff.previous || "desconhecido"} para ${diff.current || "desconhecido"}`;
+      case "field:server":
+        return `${prefix}Servidor alterado de ${diff.previous || "desconhecido"} para ${diff.current || "desconhecido"}`;
+      case "summary:subdomains":
+        return `${prefix}Contagem de subdom\xEDnios mudou de ${diff.previous} para ${diff.current}`;
+      case "summary:openPorts":
+        return `${prefix}Contagem de portas abertas mudou de ${diff.previous} para ${diff.current}`;
+      default:
+        return `${prefix}${type}: ${diff.values ? diff.values.join(", ") : ""}`;
+    }
+  }
   _buildHostRecord(report) {
     const fingerprint = report.fingerprint || {};
     const summary = {
@@ -64634,7 +64924,9 @@ class NetworkPlugin extends Plugin {
       cdn: fingerprint.cdn || null,
       server: fingerprint.server || null,
       latencyMs: fingerprint.latencyMs ?? null,
+      subdomains: fingerprint.subdomains || [],
       subdomainCount: (fingerprint.subdomains || []).length,
+      openPorts: fingerprint.openPorts || [],
       openPortCount: (fingerprint.openPorts || []).length,
       technologies: fingerprint.technologies || []
     };
@@ -64656,10 +64948,16 @@ class NetworkPlugin extends Plugin {
     const addedSubs = [...currSubs].filter((value) => !prevSubs.has(value));
     const removedSubs = [...prevSubs].filter((value) => !currSubs.has(value));
     if (addedSubs.length) {
-      diffs.push({ type: "subdomain:add", values: addedSubs });
+      diffs.push(this._createDiff("subdomain:add", {
+        values: addedSubs,
+        description: `Novos subdom\xEDnios: ${addedSubs.join(", ")}`
+      }, { severity: "medium", critical: false }));
     }
     if (removedSubs.length) {
-      diffs.push({ type: "subdomain:remove", values: removedSubs });
+      diffs.push(this._createDiff("subdomain:remove", {
+        values: removedSubs,
+        description: `Subdom\xEDnios removidos: ${removedSubs.join(", ")}`
+      }, { severity: "low", critical: false }));
     }
     const normalizePort = (entry) => {
       if (!entry) return entry;
@@ -64671,30 +64969,57 @@ class NetworkPlugin extends Plugin {
     const addedPorts = [...currPorts].filter((value) => !prevPorts.has(value));
     const removedPorts = [...prevPorts].filter((value) => !currPorts.has(value));
     if (addedPorts.length) {
-      diffs.push({ type: "port:add", values: addedPorts });
+      diffs.push(this._createDiff("port:add", {
+        values: addedPorts,
+        description: `Novas portas expostas: ${addedPorts.join(", ")}`
+      }, { severity: "high", critical: true }));
     }
     if (removedPorts.length) {
-      diffs.push({ type: "port:remove", values: removedPorts });
+      diffs.push(this._createDiff("port:remove", {
+        values: removedPorts,
+        description: `Portas fechadas: ${removedPorts.join(", ")}`
+      }, { severity: "low", critical: false }));
     }
     const prevTech = new Set((prevFingerprint.technologies || []).map((tech) => tech.toLowerCase()));
     const currTech = new Set((currFingerprint.technologies || []).map((tech) => tech.toLowerCase()));
     const addedTech = [...currTech].filter((value) => !prevTech.has(value));
     const removedTech = [...prevTech].filter((value) => !currTech.has(value));
     if (addedTech.length) {
-      diffs.push({ type: "technology:add", values: addedTech });
+      diffs.push(this._createDiff("technology:add", {
+        values: addedTech,
+        description: `Tecnologias adicionadas: ${addedTech.join(", ")}`
+      }, { severity: "medium", critical: false }));
     }
     if (removedTech.length) {
-      diffs.push({ type: "technology:remove", values: removedTech });
+      diffs.push(this._createDiff("technology:remove", {
+        values: removedTech,
+        description: `Tecnologias removidas: ${removedTech.join(", ")}`
+      }, { severity: "low", critical: false }));
     }
     const primitiveFields = ["primaryIp", "cdn", "server"];
     for (const field of primitiveFields) {
       const previous = prevFingerprint[field] ?? null;
       const current = currFingerprint[field] ?? null;
       if (previous !== current) {
-        diffs.push({ type: `field:${field}`, previous, current });
+        const severity = field === "primaryIp" ? "high" : "medium";
+        const critical = field === "primaryIp";
+        diffs.push(this._createDiff(`field:${field}`, {
+          previous,
+          current,
+          description: `${field} alterado de ${previous ?? "desconhecido"} para ${current ?? "desconhecido"}`
+        }, { severity, critical }));
       }
     }
     return diffs;
+  }
+  _createDiff(type, payload = {}, meta = {}) {
+    const { severity = "info", critical = false } = meta;
+    return {
+      type,
+      severity,
+      critical,
+      ...payload
+    };
   }
   async _saveDiffs(hostId, timestamp, diffs) {
     const diffsResource = await this._getResource("diffs");
@@ -64703,7 +65028,8 @@ class NetworkPlugin extends Plugin {
       id: `${hostId}|${timestamp}`,
       host: hostId,
       timestamp,
-      changes: diffs
+      changes: diffs,
+      alerts: diffs.filter((diff) => diff.critical)
     };
     try {
       await diffsResource.insert(record);
@@ -64756,6 +65082,169 @@ class NetworkPlugin extends Plugin {
       return result;
     }
     return value;
+  }
+  async _emitDiffAlerts(hostId, report, diffs) {
+    const criticalDiffs = diffs.filter((diff) => diff.critical);
+    if (!criticalDiffs.length) {
+      return;
+    }
+    const alerts = criticalDiffs.map((diff) => ({
+      host: hostId,
+      stage: diff.type,
+      severity: diff.severity || "info",
+      description: diff.description,
+      values: diff.values || null,
+      previous: diff.previous,
+      current: diff.current,
+      timestamp: report.endedAt,
+      reportKey: report.storageKey || null
+    }));
+    for (const alert of alerts) {
+      this.emit("recon:alert", alert);
+    }
+  }
+  async _deleteResourceRecord(resource, id) {
+    if (!resource || !id) return;
+    const methods = ["delete", "remove", "del"];
+    for (const method of methods) {
+      if (typeof resource[method] === "function") {
+        try {
+          await resource[method](id);
+        } catch (error) {
+        }
+        return;
+      }
+    }
+  }
+  async getHostSummary(targetInput, options = {}) {
+    const normalized = this._normalizeTarget(
+      typeof targetInput === "string" ? targetInput : targetInput?.target || targetInput?.host || targetInput
+    );
+    const hostId = normalized.host;
+    const report = options.report || await this._loadLatestReport(hostId);
+    if (!report) {
+      return null;
+    }
+    const hostRecord = await this._loadHostSummary(hostId, report);
+    if (!hostRecord) {
+      return null;
+    }
+    if (options.includeDiffs) {
+      hostRecord.diffs = await this._loadRecentDiffs(hostId, options.diffLimit ?? 10);
+    }
+    return hostRecord;
+  }
+  async getRecentAlerts(targetInput, options = {}) {
+    const normalized = this._normalizeTarget(
+      typeof targetInput === "string" ? targetInput : targetInput?.target || targetInput?.host || targetInput
+    );
+    const hostId = normalized.host;
+    const limit = options.limit ?? 5;
+    const diffs = await this._loadRecentDiffs(hostId, limit * 2);
+    return diffs.filter((diff) => diff.critical).slice(0, limit);
+  }
+  getApiRoutes(options = {}) {
+    const normalizeBasePath = (value) => {
+      if (value === void 0 || value === null) {
+        return "/network";
+      }
+      const text = String(value).trim();
+      if (!text || text === "/") {
+        return "";
+      }
+      return `/${text.replace(/^\/+|\/+$/g, "")}`;
+    };
+    const buildPath = (base, suffix) => {
+      const normalizedSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
+      const normalizedBase = base === "/" ? "" : base;
+      const fullPath = `${normalizedBase ?? ""}${normalizedSuffix}`;
+      return fullPath || "/";
+    };
+    const parseBoolean = (value, fallback) => {
+      if (value === void 0 || value === null) return fallback;
+      if (typeof value === "boolean") return value;
+      const normalized = String(value).trim().toLowerCase();
+      if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+      if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+      return fallback;
+    };
+    const parseLimit = (value, fallback, maxCap) => {
+      if (value === void 0 || value === null || value === "") {
+        return fallback;
+      }
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed) || parsed < 0) {
+        return fallback;
+      }
+      if (typeof maxCap === "number" && parsed > maxCap) {
+        return maxCap;
+      }
+      return parsed;
+    };
+    const basePath = normalizeBasePath(options.basePath);
+    const includeDiffsDefault = options.includeDiffs ?? true;
+    const includeReportDefault = options.includeReport ?? true;
+    const includeStagesDefault = options.includeStages ?? true;
+    const includeAlertsDefault = options.includeAlerts ?? true;
+    const diffLimitDefault = options.diffLimit ?? 10;
+    const alertLimitDefault = options.alertLimit ?? 5;
+    const maxDiffLimit = options.maxDiffLimit ?? 50;
+    const maxAlertLimit = options.maxAlertLimit ?? 25;
+    const plugin = this;
+    return {
+      [`GET ${buildPath(basePath, "/hosts/:hostId/summary")}`]: async (c, ctx) => {
+        const hostId = ctx.param("hostId");
+        if (!hostId) {
+          return ctx.error("hostId param is required", 400);
+        }
+        if (!plugin.database) {
+          return ctx.error("NetworkPlugin is not installed in this database", 500);
+        }
+        const includeDiffs = parseBoolean(ctx.query("includeDiffs"), includeDiffsDefault);
+        const includeReport = parseBoolean(ctx.query("includeReport"), includeReportDefault);
+        const includeStages = parseBoolean(ctx.query("includeStages"), includeStagesDefault);
+        const includeAlerts = parseBoolean(ctx.query("includeAlerts"), includeAlertsDefault);
+        const diffLimit = parseLimit(ctx.query("diffLimit"), diffLimitDefault, maxDiffLimit);
+        const alertLimit = parseLimit(ctx.query("alertLimit"), alertLimitDefault, maxAlertLimit);
+        try {
+          const hostSummary = await plugin.getHostSummary(hostId, {
+            includeDiffs,
+            diffLimit
+          });
+          if (!hostSummary) {
+            return ctx.notFound(`No network report found for "${hostId}"`);
+          }
+          const host = plugin._deepClone(hostSummary);
+          let diffs = [];
+          if (includeDiffs) {
+            if (Array.isArray(host.diffs)) {
+              diffs = host.diffs.slice(0, diffLimit);
+            } else {
+              diffs = await plugin._loadRecentDiffs(hostId, diffLimit);
+            }
+          }
+          delete host.diffs;
+          const latestReport = await plugin._loadLatestReport(hostId);
+          const report = includeReport && latestReport ? plugin._stripRawFields(plugin._deepClone(latestReport)) : null;
+          const stages = includeStages && latestReport ? plugin._collectStageSummaries(latestReport) : [];
+          const alerts = includeAlerts && alertLimit > 0 ? await plugin.getRecentAlerts(hostId, { limit: alertLimit }) : [];
+          return ctx.success({
+            host,
+            report,
+            stages,
+            diffs,
+            alerts
+          });
+        } catch (error) {
+          plugin.emit("recon:api-error", {
+            host: hostId,
+            message: error?.message || "Failed to load network summary",
+            stack: error?.stack
+          });
+          return ctx.error("Failed to load network summary", 500);
+        }
+      }
+    };
   }
   async _gatherDns(target) {
     const result = {
