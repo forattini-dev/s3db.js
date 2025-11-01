@@ -21,7 +21,9 @@ async function main() {
   console.log('Target: github.com');
   console.log('Features: ASN + DNSDumpster + Google Dorks + Security Audit\n');
 
-  // Initialize ReconPlugin in standalone mode (no database required)
+  // Initialize ReconPlugin with filesystem storage (no database required)
+  const storagePath = path.join(process.cwd(), 'docs/examples/recon-storage');
+
   const reconPlugin = new ReconPlugin({
     behavior: 'passive', // Minimal, non-intrusive
 
@@ -54,8 +56,13 @@ async function main() {
     },
 
     storage: {
-      enabled: false, // Disable storage (standalone mode)
-      persistRawOutput: true // Keep raw output in memory
+      // NEW: Use filesystem driver for artifact persistence
+      driver: 'filesystem',
+      config: {
+        basePath: storagePath
+      },
+      enabled: true,
+      persistRawOutput: true // Keep raw output
     }
   });
 
@@ -66,7 +73,7 @@ async function main() {
 
   try {
     const report = await reconPlugin.scan('github.com', {
-      persist: false // Explicitly disable persistence
+      persist: true // Enable filesystem persistence
     });
     const duration = Date.now() - startTime;
 

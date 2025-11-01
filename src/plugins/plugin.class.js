@@ -1,5 +1,6 @@
 import EventEmitter from "events";
 import { PluginStorage } from "../concerns/plugin-storage.js";
+import { FilesystemStorageDriver } from "../concerns/storage-drivers/filesystem-driver.js";
 import { PluginError } from "../errors.js";
 import { listPluginNamespaces } from "./namespace.js";
 
@@ -120,21 +121,41 @@ export class Plugin extends EventEmitter {
   }
 
   /**
-   * Get PluginStorage instance (lazy-loaded)
-   * @returns {PluginStorage}
+   * Get storage instance (lazy-loaded)
+   * Supports both S3 and filesystem drivers based on options.storage configuration
+   * @returns {PluginStorage|FilesystemStorageDriver}
    */
   getStorage() {
     if (!this._storage) {
-      if (!this.database || !this.database.client) {
-        throw new PluginError('Plugin storage unavailable until plugin is installed', {
+      // Get storage configuration from options
+      const storageConfig = this.options.storage || {};
+      const driver = storageConfig.driver || 's3'; // Default to S3
+      const config = storageConfig.config || {};
+
+      if (driver === 'filesystem') {
+        // Use filesystem driver
+        this._storage = new FilesystemStorageDriver(config, this.slug);
+      } else if (driver === 's3') {
+        // Use S3-based PluginStorage (default)
+        if (!this.database || !this.database.client) {
+          throw new PluginError('Plugin storage unavailable until plugin is installed', {
+            pluginName: this.name,
+            operation: 'getStorage',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Call db.installPlugin(new Plugin()) or ensure db.connect() completed before accessing storage.'
+          });
+        }
+        this._storage = new PluginStorage(this.database.client, this.slug);
+      } else {
+        throw new PluginError(`Unsupported storage driver: ${driver}`, {
           pluginName: this.name,
           operation: 'getStorage',
           statusCode: 400,
           retriable: false,
-          suggestion: 'Call db.installPlugin(new Plugin()) or ensure db.connect() completed before accessing storage.'
+          suggestion: 'Use "s3" or "filesystem" as storage driver'
         });
       }
-      this._storage = new PluginStorage(this.database.client, this.slug);
     }
     return this._storage;
   }
