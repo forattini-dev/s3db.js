@@ -47,7 +47,7 @@ describe('PuppeteerPlugin', () => {
     it('should install plugin with default config', async () => {
       puppeteerPlugin = new PuppeteerPlugin();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
 
       expect(puppeteerPlugin.name).toBe('PuppeteerPlugin');
       expect(puppeteerPlugin.slug).toBe('puppeteer');
@@ -65,7 +65,7 @@ describe('PuppeteerPlugin', () => {
         }
       });
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
 
       const resource = await db.getResource('test_puppeteer_cookies');
       expect(resource).toBeDefined();
@@ -79,7 +79,7 @@ describe('PuppeteerPlugin', () => {
         }
       });
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
 
       // Should not throw error, cookie resource should not exist
       await expect(db.getResource('puppeteer_cookies')).rejects.toThrow();
@@ -190,7 +190,7 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin.on('plugin.beforeInstall', () => events.push('beforeInstall'));
       puppeteerPlugin.on('plugin.afterInstall', () => events.push('afterInstall'));
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
 
       expect(events).toContain('beforeInstall');
       expect(events).toContain('afterInstall');
@@ -202,7 +202,7 @@ describe('PuppeteerPlugin', () => {
       const events = [];
       puppeteerPlugin.on('puppeteer.installed', () => events.push('installed'));
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
 
       expect(events).toContain('installed');
     });
@@ -219,7 +219,7 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       expect(puppeteerPlugin.cookieManager).toBeDefined();
@@ -238,7 +238,7 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       expect(puppeteerPlugin.cookieManager).toBeNull();
@@ -254,7 +254,7 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       expect(puppeteerPlugin.initialized).toBe(true);
@@ -274,7 +274,7 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       // Start with empty pool
