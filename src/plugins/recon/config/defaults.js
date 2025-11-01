@@ -40,6 +40,7 @@ export const DEFAULT_FEATURES = {
   tlsAudit: {
     sslyze: false,
     testssl: false,
+    sslscan: false,
     openssl: true
   },
   fingerprint: {
@@ -54,14 +55,18 @@ export const DEFAULT_FEATURES = {
     usernames: false,
     sherlock: false,
     maigret: false,
+    whatsmyname: false,  // 100% free - API-based, 400+ sites
+    maxSites: 50,  // Limit sites to check (WhatsMyName)
 
     // Email Collection (100% free - theHarvester only)
     emails: false,
     theHarvester: false,
     harvesterSources: ['bing', 'duckduckgo'],  // Free search engines only
 
-    // Leak Detection (100% free - HIBP v2 public API)
+    // Leak Detection (100% free - HIBP v2 + Scylla.sh)
     leaks: false,
+    hibp: true,  // HaveIBeenPwned v2
+    scylla: true,  // Scylla.sh free API
     maxEmailsToCheck: 5,  // Reduced due to strict rate limits on free API
 
     // GitHub Reconnaissance (100% free - optional token for higher limits)
@@ -83,10 +88,30 @@ export const DEFAULT_FEATURES = {
     twitter: false,
     facebook: false
   },
+  googleDorks: {
+    enabled: false,
+    maxResults: 10,  // Results per query
+    categories: ['github', 'pastebin', 'linkedin', 'documents', 'subdomains', 'loginPages', 'configs', 'errors']
+  },
   secrets: {
     gitleaks: true,
     patterns: true,
     maxUrls: 20
+  },
+  asn: {
+    iptoasn: true,
+    hackertarget: true
+  },
+  dnsdumpster: {
+    enabled: true,
+    fallbackToDig: true
+  },
+  massdns: {
+    enabled: false,
+    wordlist: null,
+    resolvers: '/etc/resolv.conf',
+    rate: 1000,
+    maxSubdomains: 1000
   }
 };
 
@@ -102,7 +127,7 @@ export const BEHAVIOR_PRESETS = {
       ports: { nmap: false, masscan: false },
       web: { ffuf: false, feroxbuster: false, gobuster: false },
       vulnerability: { nikto: false, wpscan: false, droopescan: false },
-      tlsAudit: { openssl: false, sslyze: false, testssl: false },
+      tlsAudit: { openssl: false, sslyze: false, testssl: false, sslscan: false },
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
       osint: {
@@ -114,9 +139,14 @@ export const BEHAVIOR_PRESETS = {
         leaks: false,  // Skip leaks to avoid rate limits
         github: false,
         usernames: false,
+        whatsmyname: false,  // Too many requests for passive
         socialMedia: false
       },
-      secrets: { gitleaks: false, patterns: true, maxUrls: 10 }
+      googleDorks: { enabled: false },  // Too aggressive for passive
+      secrets: { gitleaks: false, patterns: true, maxUrls: 10 },
+      asn: { iptoasn: true, hackertarget: false },  // Only unlimited API for passive
+      dnsdumpster: { enabled: true, fallbackToDig: true },
+      massdns: { enabled: false }  // Too aggressive for passive
     },
     concurrency: 2,
     ping: { count: 3, timeout: 5000 },
@@ -135,7 +165,7 @@ export const BEHAVIOR_PRESETS = {
       ports: { nmap: true, masscan: false },
       web: { ffuf: false, feroxbuster: false, gobuster: false },
       vulnerability: { nikto: false, wpscan: false, droopescan: false },
-      tlsAudit: { openssl: true, sslyze: false, testssl: false },
+      tlsAudit: { openssl: true, sslyze: false, testssl: false, sslscan: false },
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
       osint: {
@@ -145,15 +175,22 @@ export const BEHAVIOR_PRESETS = {
         harvesterSources: ['bing', 'duckduckgo'],
         saas: true,
         leaks: true,
+        hibp: true,
+        scylla: false,  // Skip Scylla for stealth (HIBP is enough)
         maxEmailsToCheck: 3,  // Conservative due to rate limits
         github: true,
         githubRepos: true,
         githubCode: false,
         maxRepos: 5,
         usernames: false,
+        whatsmyname: false,  // Too many requests for stealth
         socialMedia: false
       },
-      secrets: { gitleaks: true, patterns: true, maxUrls: 15 }
+      googleDorks: { enabled: false },  // Too noisy for stealth
+      secrets: { gitleaks: true, patterns: true, maxUrls: 15 },
+      asn: { iptoasn: true, hackertarget: true },  // Both APIs for stealth
+      dnsdumpster: { enabled: true, fallbackToDig: true },
+      massdns: { enabled: false }  // Too aggressive for stealth
     },
     concurrency: 1,
     ping: { count: 3, timeout: 10000 },
@@ -176,7 +213,7 @@ export const BEHAVIOR_PRESETS = {
       ports: { nmap: true, masscan: true },
       web: { ffuf: true, feroxbuster: true, gobuster: true, threads: 100 },
       vulnerability: { nikto: true, wpscan: true, droopescan: true },
-      tlsAudit: { openssl: true, sslyze: true, testssl: true },
+      tlsAudit: { openssl: true, sslyze: true, testssl: true, sslscan: true },
       fingerprint: { whatweb: true },
       screenshots: { aquatone: true, eyewitness: false },
       osint: {
@@ -186,6 +223,8 @@ export const BEHAVIOR_PRESETS = {
         harvesterSources: ['bing', 'duckduckgo', 'yahoo'],
         saas: true,
         leaks: true,
+        hibp: true,
+        scylla: true,  // Both leak sources
         maxEmailsToCheck: 10,  // Moderate to avoid rate limits
         github: true,
         githubRepos: true,
@@ -197,12 +236,22 @@ export const BEHAVIOR_PRESETS = {
         usernames: true,
         sherlock: true,
         maigret: false,  // Too slow for aggressive
+        whatsmyname: true,  // API-based, faster than Sherlock
+        maxSites: 100,  // More sites for aggressive
         socialMedia: true,
         linkedin: true,
         twitter: true,
         facebook: true
       },
-      secrets: { gitleaks: true, patterns: true, maxUrls: 30 }
+      googleDorks: {
+        enabled: true,
+        maxResults: 20,
+        categories: ['github', 'pastebin', 'linkedin', 'documents', 'subdomains', 'loginPages', 'configs', 'errors']
+      },
+      secrets: { gitleaks: true, patterns: true, maxUrls: 30 },
+      asn: { iptoasn: true, hackertarget: true },  // Both APIs for aggressive
+      dnsdumpster: { enabled: true, fallbackToDig: true },
+      massdns: { enabled: true, rate: 5000, maxSubdomains: 5000 }
     },
     concurrency: 8,
     ping: { count: 4, timeout: 5000 },

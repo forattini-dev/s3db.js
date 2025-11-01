@@ -41,12 +41,15 @@ export class DependencyManager {
       'tlsAudit.openssl': 'openssl',
       'tlsAudit.sslyze': 'sslyze',
       'tlsAudit.testssl': 'testssl.sh',
+      'tlsAudit.sslscan': 'sslscan',
       'fingerprint.whatweb': 'whatweb',
       'screenshots.aquatone': 'aquatone',
       'screenshots.eyewitness': 'EyeWitness',
       'osint.theHarvester': 'theHarvester',
       'osint.sherlock': 'sherlock',
-      'osint.maigret': 'maigret'
+      'osint.maigret': 'maigret',
+      'asn': 'dig',
+      'massdns': 'massdns'
     };
 
     for (const [featurePath, commands] of Object.entries(toolMap)) {
@@ -155,12 +158,15 @@ export class DependencyManager {
       openssl: 'Ubuntu: apt-get install openssl | macOS: Pré-instalado',
       sslyze: 'https://github.com/nabla-c0d3/sslyze | pip install sslyze',
       'testssl.sh': 'https://github.com/drwetter/testssl.sh | git clone --depth 1 https://github.com/drwetter/testssl.sh.git',
+      sslscan: 'https://github.com/rbsec/sslscan | Ubuntu: apt-get install sslscan | macOS: brew install sslscan',
       whatweb: 'https://github.com/urbanadventurer/WhatWeb | Ubuntu: apt-get install whatweb | macOS: brew install whatweb',
       aquatone: 'https://github.com/michenriksen/aquatone | Download binário do GitHub Releases',
       EyeWitness: 'https://github.com/FortyNorthSecurity/EyeWitness | git clone e seguir instruções',
       theHarvester: 'https://github.com/laramies/theHarvester | pip install theHarvester',
       sherlock: 'https://github.com/sherlock-project/sherlock | pip install sherlock-project',
-      maigret: 'https://github.com/soxoj/maigret | pip install maigret'
+      maigret: 'https://github.com/soxoj/maigret | pip install maigret',
+      dig: 'Ubuntu: apt-get install dnsutils | macOS: Pré-instalado',
+      massdns: 'https://github.com/blechschmidt/massdns | git clone && make && sudo make install'
     };
 
     return guides[toolName] || `Consulte a documentação oficial da ferramenta "${toolName}" para instruções de instalação.`;
