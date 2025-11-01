@@ -309,8 +309,8 @@ export class ReconPlugin extends Plugin {
       } : null
     };
 
-    // Persist report if storage enabled
-    if (this.config.storage.enabled) {
+    // Persist report if storage enabled and manager is initialized
+    if (this.config.storage.enabled && this.storageManager) {
       // Layer 1 + 2: Persist to PluginStorage (raw + aggregated)
       await this.storageManager.persistReport(normalizedTarget, report);
 
@@ -372,6 +372,9 @@ export class ReconPlugin extends Plugin {
    * Get reports for a specific host
    */
   async getReportsByHost(host, options = {}) {
+    if (!this.storageManager) {
+      return [];
+    }
     return this.storageManager.getReportsByHost(host, options);
   }
 
