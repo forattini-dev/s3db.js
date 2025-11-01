@@ -65,6 +65,9 @@ var https = require('https');
 var nodeHttpHandler = require('@smithy/node-http-handler');
 var glob = require('glob');
 var node_child_process = require('node:child_process');
+var fs$2 = require('node:fs/promises');
+var path$1 = require('node:path');
+var node_crypto = require('node:crypto');
 var dns = require('node:dns/promises');
 var tls = require('node:tls');
 var node_url = require('node:url');
@@ -72,7 +75,6 @@ var zlib$1 = require('zlib');
 var util = require('util');
 var url = require('url');
 var bcrypt = require('bcrypt');
-var node_crypto = require('node:crypto');
 
 var _documentCurrentScript = typeof document !== 'undefined' ? document.currentScript : null;
 function _interopNamespaceDefault(e) {
@@ -1021,14 +1023,16 @@ Example:
 Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
 `.trim();
     }
-    super(message, {
+    const merged = {
       ...rest,
       pluginName,
       operation,
       statusCode: rest.statusCode ?? 500,
       retriable: rest.retriable ?? false,
       description
-    });
+    };
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 class PluginStorageError extends S3dbError {
@@ -17714,6 +17718,7 @@ class Cache extends EventEmitter {
   constructor(config = {}) {
     super();
     this.config = config;
+    this._fallbackStore = /* @__PURE__ */ new Map();
   }
   // to implement:
   async _set(key, data) {
@@ -17738,6 +17743,7 @@ class Cache extends EventEmitter {
   // generic class methods
   async set(key, data) {
     this.validateKey(key);
+    this._fallbackStore.set(key, data);
     await this._set(key, data);
     this.emit("set", { key, value: data });
     return data;
@@ -17745,12 +17751,14 @@ class Cache extends EventEmitter {
   async get(key) {
     this.validateKey(key);
     const data = await this._get(key);
-    this.emit("fetched", { key, value: data });
-    return data;
+    const value = data !== void 0 ? data : this._fallbackStore.get(key);
+    this.emit("fetched", { key, value });
+    return value;
   }
   async del(key) {
     this.validateKey(key);
     const data = await this._del(key);
+    this._fallbackStore.delete(key);
     this.emit("deleted", { key, value: data });
     return data;
   }
@@ -17759,6 +17767,15 @@ class Cache extends EventEmitter {
   }
   async clear(prefix) {
     const data = await this._clear(prefix);
+    if (!prefix) {
+      this._fallbackStore.clear();
+    } else {
+      for (const key of this._fallbackStore.keys()) {
+        if (key.startsWith(prefix)) {
+          this._fallbackStore.delete(key);
+        }
+      }
+    }
     this.emit("clear", { prefix, value: data });
     return data;
   }
@@ -18017,6 +18034,7 @@ class MemoryCache extends Cache {
     }
     if (this.maxMemoryBytes > 0) {
       if (itemSize > this.maxMemoryBytes) {
+        this.evictedDueToMemory++;
         return data;
       }
       while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
@@ -18696,6 +18714,21 @@ class FilesystemCache extends Cache {
   async _init() {
     if (this.createDirectory) {
       await this._ensureDirectory(this.directory);
+    } else {
+      const [exists] = await tryFn(async () => {
+        const stats = await fs$1.stat(this.directory);
+        return stats.isDirectory();
+      });
+      if (!exists) {
+        throw new CacheError(`Cache directory "${this.directory}" does not exist and createDirectory is disabled`, {
+          driver: "filesystem",
+          operation: "init",
+          statusCode: 500,
+          retriable: false,
+          suggestion: "Create the cache directory manually or enable createDirectory in the FilesystemCache configuration.",
+          directory: this.directory
+        });
+      }
     }
     if (this.enableCleanup && this.cleanupInterval > 0) {
       this.cleanupTimer = setInterval(() => {
@@ -18706,6 +18739,23 @@ class FilesystemCache extends Cache {
     }
   }
   async _ensureDirectory(dir) {
+    if (!this.createDirectory) {
+      const [exists] = await tryFn(async () => {
+        const stats = await fs$1.stat(dir);
+        return stats.isDirectory();
+      });
+      if (!exists) {
+        throw new CacheError(`Cache directory "${dir}" is missing (createDirectory disabled)`, {
+          driver: "filesystem",
+          operation: "ensureDirectory",
+          statusCode: 500,
+          retriable: false,
+          suggestion: "Create the directory before writing cache entries or enable createDirectory.",
+          directory: dir
+        });
+      }
+      return;
+    }
     const [ok, err] = await tryFn(async () => {
       await fs$1.mkdir(dir, { recursive: true });
     });
@@ -19176,7 +19226,8 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     if (resource) {
       segments.push(`resource=${this._sanitizePathValue(resource)}`);
     }
-    if (partition) {
+    const hasPartitionValues = partitionValues && Object.values(partitionValues).some((value) => value !== null && value !== void 0 && value !== "");
+    if (partition && hasPartitionValues) {
       segments.push(`partition=${this._sanitizePathValue(partition)}`);
       const sortedFields = Object.entries(partitionValues).filter(([, value]) => value !== null && value !== void 0).sort(([a], [b]) => a.localeCompare(b));
       for (const [field, value] of sortedFields) {
@@ -19186,7 +19237,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     if (action) {
       segments.push(`action=${this._sanitizePathValue(action)}`);
     }
-    if (Object.keys(params).length > 0) {
+    if (params && Object.keys(params).length > 0) {
       const paramsStr = Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("|");
       segments.push(`params=${this._sanitizePathValue(Buffer.from(paramsStr).toString("base64url"))}`);
     }
@@ -19571,6 +19622,35 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
       return JSON.parse(content);
     } catch (error) {
       return { data: content };
+    }
+  }
+  async size() {
+    const keys = await this.keys();
+    return keys.length;
+  }
+  async keys() {
+    const keys = [];
+    await this._collectKeysRecursive(this.directory, [], keys);
+    return keys;
+  }
+  async _collectKeysRecursive(currentDir, segments, result) {
+    const [ok, err, entries] = await tryFn(() => fs$1.readdir(currentDir, { withFileTypes: true }));
+    if (!ok || !entries) {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await this._collectKeysRecursive(entryPath, [...segments, entry.name], result);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.startsWith(`${this.prefix}_`) || !entry.name.endsWith(this.fileExtension)) {
+        continue;
+      }
+      const keyPart = entry.name.slice(this.prefix.length + 1, -this.fileExtension.length);
+      const fullSegments = segments.length > 0 ? [...segments, keyPart] : [keyPart];
+      result.push(fullSegments.join("/"));
     }
   }
 }
@@ -22424,6 +22504,8 @@ class S3QueuePlugin extends Plugin {
     }
     this.deadLetterResourceName = this._resolveDeadLetterResourceName();
     this.config.deadLetterResource = this.deadLetterResourceName;
+    this.queueResourceAlias = options.queueResource || `${this.config.resource}_queue`;
+    this.deadLetterResourceAlias = options.deadLetterResource || null;
     this.queueResource = null;
     this.targetResource = null;
     this.deadLetterResourceObj = null;
@@ -22444,7 +22526,17 @@ class S3QueuePlugin extends Plugin {
   }
   _resolveDeadLetterResourceName() {
     if (!this._deadLetterDescriptor) return null;
-    return resolveResourceName("s3queue", this._deadLetterDescriptor, {
+    const { override, defaultName } = this._deadLetterDescriptor;
+    if (override) {
+      if (override.startsWith("plg_")) {
+        return resolveResourceName("s3queue", { override }, {
+          namespace: this.namespace,
+          applyNamespaceToOverrides: true
+        });
+      }
+      return override;
+    }
+    return resolveResourceName("s3queue", { defaultName }, {
       namespace: this.namespace
     });
   }
@@ -22517,6 +22609,12 @@ class S3QueuePlugin extends Plugin {
       }
     }
     this.queueResourceName = this.queueResource.name;
+    if (this.queueResourceAlias) {
+      const existing = this.database.resources[this.queueResourceAlias];
+      if (!existing || existing === this.queueResource) {
+        this.database.resources[this.queueResourceAlias] = this.queueResource;
+      }
+    }
     this.addHelperMethods();
     if (this.config.deadLetterResource) {
       await this.createDeadLetterResource();
@@ -22957,6 +23055,12 @@ class S3QueuePlugin extends Plugin {
       }
     }
     this.deadLetterResourceName = this.deadLetterResourceObj.name;
+    if (this.deadLetterResourceAlias) {
+      const existing = this.database.resources[this.deadLetterResourceAlias];
+      if (!existing || existing === this.deadLetterResourceObj) {
+        this.database.resources[this.deadLetterResourceAlias] = this.deadLetterResourceObj;
+      }
+    }
     if (this.config.verbose) {
       console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
     }
@@ -48081,7 +48185,11 @@ function createCloudDriver(name, options) {
       suggestion: `Register the driver via registerCloudDriver before creating it. Registered drivers: ${[...CLOUD_DRIVERS.keys()].join(", ") || "none"}`
     });
   }
-  const driver = CLOUD_DRIVERS.get(name)(options);
+  const resolvedOptions = { ...options || {} };
+  if (!resolvedOptions.driver) {
+    resolvedOptions.driver = name;
+  }
+  const driver = CLOUD_DRIVERS.get(name)(resolvedOptions);
   if (!(driver instanceof BaseCloudDriver)) {
     throw new PluginError(`Driver "${name}" factory must return an instance of BaseCloudDriver`, {
       pluginName: "CloudInventoryPlugin",
@@ -63974,7 +64082,56 @@ class CommandRunner {
     }
   }
 }
-class NetworkDiagnosticsPlugin extends Plugin {
+const DEFAULT_FEATURES = {
+  dns: true,
+  certificate: true,
+  http: {
+    curl: true
+  },
+  latency: {
+    ping: true,
+    traceroute: true
+  },
+  subdomains: {
+    amass: true,
+    subfinder: true,
+    assetfinder: false,
+    crtsh: true
+  },
+  ports: {
+    nmap: true,
+    masscan: false
+  },
+  web: {
+    ffuf: false,
+    feroxbuster: false,
+    gobuster: false,
+    wordlist: null,
+    threads: 50
+  },
+  vulnerability: {
+    nikto: false,
+    wpscan: false,
+    droopescan: false
+  },
+  tlsAudit: {
+    sslyze: false,
+    testssl: false,
+    openssl: true
+  },
+  fingerprint: {
+    whatweb: false
+  },
+  screenshots: {
+    aquatone: false,
+    eyewitness: false
+  },
+  osint: {
+    theHarvester: false,
+    reconNg: false
+  }
+};
+class NetworkPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     const {
@@ -63984,10 +64141,14 @@ class NetworkDiagnosticsPlugin extends Plugin {
       traceroute = {},
       curl = {},
       nmap = {},
-      commandRunner = null
+      commandRunner = null,
+      features = {},
+      storage = {},
+      schedule = {},
+      targets = []
     } = options;
     this.config = {
-      defaultTools: tools || ["dns", "certificate", "ping", "traceroute", "curl", "nmap"],
+      defaultTools: tools || ["dns", "certificate", "ping", "traceroute", "curl", "ports", "subdomains"],
       concurrency,
       ping: {
         count: ping.count ?? 4,
@@ -63999,70 +64160,626 @@ class NetworkDiagnosticsPlugin extends Plugin {
       },
       curl: {
         timeout: curl.timeout ?? 8e3,
-        userAgent: curl.userAgent ?? "Mozilla/5.0 (compatible; s3db-network-diagnostics/1.0; +https://github.com/forattini-dev/s3db.js)"
+        userAgent: curl.userAgent ?? "Mozilla/5.0 (compatible; s3db-network/1.0; +https://github.com/forattini-dev/s3db.js)"
       },
       nmap: {
         topPorts: nmap.topPorts ?? 10,
         extraArgs: nmap.extraArgs ?? []
-      }
+      },
+      features: this._mergeFeatures(DEFAULT_FEATURES, features),
+      storage: {
+        persist: storage.persist !== false,
+        persistRawOutput: storage.persistRawOutput ?? true,
+        historyLimit: storage.historyLimit ?? 20
+      },
+      schedule: {
+        enabled: schedule.enabled ?? false,
+        cron: schedule.cron ?? null,
+        runOnStart: schedule.runOnStart ?? false
+      },
+      resources: {
+        persist: resources.persist !== false,
+        autoCreate: resources.autoCreate !== false
+      },
+      targets: Array.isArray(targets) ? targets : []
     };
     this.commandRunner = commandRunner || new CommandRunner();
+    this._cronJob = null;
+    this._cronModule = null;
+    this._resourceCache = /* @__PURE__ */ new Map();
+    const resourceNamesOption = options.resourceNames || {};
+    this._resourceDescriptors = {
+      hosts: { defaultName: "plg_network_hosts", override: resourceNamesOption.hosts },
+      reports: { defaultName: "plg_network_reports", override: resourceNamesOption.reports },
+      diffs: { defaultName: "plg_network_diffs", override: resourceNamesOption.diffs },
+      stages: { defaultName: "plg_network_stage_results", override: resourceNamesOption.stages }
+    };
+    this._resourceNames = {};
+    this._refreshResourceNames();
   }
   async onInstall() {
+    if (this.database && this.config.resources.persist && this.config.resources.autoCreate) {
+      await this._ensureResources();
+    }
     return void 0;
   }
   async onStart() {
-    return void 0;
+    await this._startScheduler();
+    if (this.config.schedule.enabled && this.config.schedule.runOnStart) {
+      await this._triggerScheduledSweep("startup");
+    }
+  }
+  async onStop() {
+    if (this._cronJob) {
+      this._cronJob.stop();
+      this._cronJob = null;
+    }
+    this._resourceCache.clear();
   }
   async runDiagnostics(target, options = {}) {
     const normalizedTarget = this._normalizeTarget(target);
-    const tools = options.tools && Array.isArray(options.tools) ? options.tools : this.config.defaultTools;
+    const features = this._mergeFeatures(this.config.features, options.features || {});
+    const stagePlan = this._resolveStagePlan(normalizedTarget, features, options.tools);
     const results = {};
-    const pool = await promisePool.PromisePool.withConcurrency(options.concurrency ?? this.config.concurrency).for(tools).process(async (tool) => {
+    const stageErrors = {};
+    const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const pool = await promisePool.PromisePool.withConcurrency(options.concurrency ?? this.config.concurrency).for(stagePlan).process(async (stage) => {
+      if (!stage.enabled) {
+        results[stage.name] = { status: "disabled" };
+        return;
+      }
       try {
-        const output = await this._runTool(tool, normalizedTarget, results);
-        results[tool] = output;
-        return { tool, output };
+        const output = await stage.execute();
+        results[stage.name] = output;
       } catch (error) {
-        results[tool] = {
+        stageErrors[stage.name] = error;
+        results[stage.name] = {
           status: "error",
-          message: error?.message || "Unexpected diagnostic failure"
+          message: error?.message || "Stage execution failed"
         };
-        return { tool, error };
       }
     });
     if (pool.errors.length > 0) {
       this.emit("diagnostics:error", {
         target: normalizedTarget.host,
-        errors: pool.errors.map(({ item, error }) => ({ tool: item, message: error.message }))
+        errors: pool.errors.map(({ item, error }) => ({ stage: item?.name || item, message: error.message }))
       });
     }
     const fingerprint = this._buildFingerprint(normalizedTarget, results);
-    return {
+    const endedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const status = Object.values(stageErrors).length === 0 ? "ok" : "partial";
+    const report = {
       target: normalizedTarget,
-      collectedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      startedAt,
+      endedAt,
+      status,
       results,
+      stages: results,
       fingerprint,
-      toolsAttempted: tools
+      toolsAttempted: stagePlan.filter((stage) => stage.enabled).map((stage) => stage.name)
+    };
+    const persist = options.persist ?? this.config.storage.persist;
+    if (persist) {
+      await this._persistReport(normalizedTarget, report);
+    }
+    if (this.database && this.config.resources.persist) {
+      await this._persistToResources(report);
+    }
+    return report;
+  }
+  _resolveStagePlan(normalizedTarget, features, requestedTools) {
+    const requestedSet = requestedTools ? new Set(requestedTools.map((tool) => this._normalizeToolName(tool))) : null;
+    const plan = [];
+    const include = (name, enabled, execute) => {
+      const allowed = requestedSet ? requestedSet.has(name) : true;
+      plan.push({ name, enabled: !!enabled && allowed, execute });
+    };
+    include("dns", features.dns !== false, () => this._gatherDns(normalizedTarget));
+    include("certificate", features.certificate !== false, () => this._gatherCertificate(normalizedTarget));
+    include("ping", features.latency?.ping !== false, () => this._runPing(normalizedTarget));
+    include("traceroute", features.latency?.traceroute !== false, () => this._runTraceroute(normalizedTarget));
+    include("curl", features.http?.curl !== false, () => this._runCurl(normalizedTarget));
+    include("subdomains", this._isAnyEnabled(features.subdomains), () => this._runSubdomainRecon(normalizedTarget, features.subdomains));
+    include("ports", this._isAnyEnabled(features.ports), () => this._runPortScans(normalizedTarget, features.ports));
+    include("tlsAudit", this._isAnyEnabled(features.tlsAudit), () => this._runTlsExtras(normalizedTarget, features.tlsAudit));
+    include("fingerprintTools", this._isAnyEnabled(features.fingerprint), () => this._runFingerprintTools(normalizedTarget, features.fingerprint));
+    include("webDiscovery", this._isAnyEnabled(features.web), () => this._runWebDiscovery(normalizedTarget, features.web));
+    include("vulnerabilityScan", this._isAnyEnabled(features.vulnerability), () => this._runVulnerabilityScans(normalizedTarget, features.vulnerability));
+    include("screenshots", this._isAnyEnabled(features.screenshots), () => this._runScreenshotCapture(normalizedTarget, features.screenshots));
+    include("osint", this._isAnyEnabled(features.osint), () => this._runOsintRecon(normalizedTarget, features.osint));
+    return plan;
+  }
+  _normalizeToolName(name) {
+    if (!name) return name;
+    const lower = String(name).toLowerCase();
+    if (["nmap", "masscan", "ports", "port", "portscan"].includes(lower)) {
+      return "ports";
+    }
+    if (["subdomain", "subdomains", "subdomainscan"].includes(lower)) {
+      return "subdomains";
+    }
+    if (lower === "mtr") {
+      return "traceroute";
+    }
+    if (lower === "latency") {
+      return "ping";
+    }
+    if (["fingerprint", "whatweb"].includes(lower)) {
+      return "fingerprintTools";
+    }
+    if (["vulnerability", "nikto", "wpscan", "droopescan"].includes(lower)) {
+      return "vulnerabilityScan";
+    }
+    if (["web", "ffuf", "feroxbuster", "gobuster"].includes(lower)) {
+      return "webDiscovery";
+    }
+    if (["screenshots", "aquatone", "eyewitness"].includes(lower)) {
+      return "screenshots";
+    }
+    if (["osint", "theharvester", "recon-ng"].includes(lower)) {
+      return "osint";
+    }
+    return lower;
+  }
+  _refreshResourceNames() {
+    const namespace = this.namespace;
+    this._resourceNames = {
+      hosts: resolveResourceName("network-hosts", this._resourceDescriptors.hosts, { namespace }),
+      reports: resolveResourceName("network-reports", this._resourceDescriptors.reports, { namespace }),
+      diffs: resolveResourceName("network-diffs", this._resourceDescriptors.diffs, { namespace }),
+      stages: resolveResourceName("network-stage-results", this._resourceDescriptors.stages, { namespace })
+    };
+    if (this._resourceCache) {
+      this._resourceCache.clear();
+    }
+  }
+  onNamespaceChanged() {
+    this._refreshResourceNames();
+  }
+  async _ensureResources() {
+    if (!this.database) return;
+    const definitions = [
+      {
+        key: "hosts",
+        config: {
+          primaryKey: "id",
+          attributes: {
+            id: "string|required",
+            target: "string",
+            summary: "object",
+            fingerprint: "object",
+            lastScanAt: "string",
+            storageKey: "string"
+          },
+          timestamps: true,
+          behavior: "user-managed"
+        }
+      },
+      {
+        key: "reports",
+        config: {
+          primaryKey: "id",
+          attributes: {
+            id: "string|required",
+            host: "string|required",
+            startedAt: "string",
+            endedAt: "string",
+            status: "string",
+            storageKey: "string",
+            stageKeys: "object"
+          },
+          timestamps: true,
+          behavior: "truncate-data"
+        }
+      },
+      {
+        key: "diffs",
+        config: {
+          primaryKey: "id",
+          attributes: {
+            id: "string|required",
+            host: "string|required",
+            timestamp: "string|required",
+            changes: "object"
+          },
+          timestamps: true,
+          behavior: "truncate-data"
+        }
+      },
+      {
+        key: "stages",
+        config: {
+          primaryKey: "id",
+          attributes: {
+            id: "string|required",
+            host: "string|required",
+            stage: "string|required",
+            status: "string",
+            storageKey: "string",
+            summary: "object",
+            collectedAt: "string"
+          },
+          timestamps: true,
+          behavior: "truncate-data"
+        }
+      }
+    ];
+    for (const def of definitions) {
+      const name = this._resourceNames[def.key];
+      if (!name) continue;
+      const existing = this.database.resources?.[name];
+      if (existing) continue;
+      try {
+        await this.database.createResource({ name, ...def.config });
+      } catch (error) {
+      }
+    }
+    if (this.database.resources) {
+      this._resourceCache.clear();
+    }
+  }
+  async _getResource(key) {
+    if (!this.database || !this.config.resources.persist) {
+      return null;
+    }
+    if (this._resourceCache.has(key)) {
+      return this._resourceCache.get(key);
+    }
+    const name = this._resourceNames[key];
+    if (!name) return null;
+    let resource = this.database.resources?.[name] || null;
+    if (!resource && typeof this.database.getResource === "function") {
+      try {
+        resource = await this.database.getResource(name);
+      } catch (error) {
+        resource = null;
+      }
+    }
+    if (resource) {
+      this._resourceCache.set(key, resource);
+    }
+    return resource;
+  }
+  _isAnyEnabled(featureGroup) {
+    if (!featureGroup || typeof featureGroup !== "object") {
+      return false;
+    }
+    return Object.values(featureGroup).some((value) => value === true || typeof value === "object" && this._isAnyEnabled(value));
+  }
+  _mergeFeatures(base, overrides) {
+    if (!overrides || typeof overrides !== "object") {
+      return JSON.parse(JSON.stringify(base));
+    }
+    const result = Array.isArray(base) ? [] : {};
+    const keys = /* @__PURE__ */ new Set([...Object.keys(base || {}), ...Object.keys(overrides)]);
+    for (const key of keys) {
+      const baseValue = base ? base[key] : void 0;
+      const overrideValue = overrides[key];
+      if (baseValue && typeof baseValue === "object" && !Array.isArray(baseValue) && overrideValue && typeof overrideValue === "object" && !Array.isArray(overrideValue)) {
+        result[key] = this._mergeFeatures(baseValue, overrideValue);
+      } else if (overrideValue !== void 0) {
+        result[key] = overrideValue;
+      } else {
+        result[key] = baseValue;
+      }
+    }
+    return result;
+  }
+  async _startScheduler() {
+    if (!this.config.schedule.enabled || !this.config.schedule.cron) {
+      return;
+    }
+    try {
+      if (!this._cronModule) {
+        this._cronModule = await import('node-cron');
+      }
+      if (this._cronJob) {
+        this._cronJob.stop();
+      }
+      this._cronJob = this._cronModule.schedule(this.config.schedule.cron, () => {
+        this._triggerScheduledSweep("cron").catch((error) => {
+          this.emit("recon:schedule-error", {
+            message: error?.message || "Scheduled sweep failed",
+            error
+          });
+        });
+      });
+    } catch (error) {
+      this.emit("recon:schedule-error", {
+        message: error?.message || "Failed to start cron scheduler",
+        error
+      });
+    }
+  }
+  async _triggerScheduledSweep(reason = "manual") {
+    const targets = this.config.targets || [];
+    if (!targets.length) return;
+    await promisePool.PromisePool.withConcurrency(this.config.concurrency).for(targets).process(async (targetConfig) => {
+      const targetEntry = this._normalizeTargetConfig(targetConfig);
+      try {
+        const report = await this.runDiagnostics(targetEntry.target, {
+          features: targetEntry.features,
+          tools: targetEntry.tools,
+          persist: targetEntry.persist ?? true
+        });
+        this.emit("recon:completed", {
+          reason,
+          target: report.target.host,
+          status: report.status,
+          endedAt: report.endedAt
+        });
+      } catch (error) {
+        this.emit("recon:target-error", {
+          reason,
+          target: targetEntry.target,
+          message: error?.message || "Recon execution failed",
+          error
+        });
+      }
+    });
+  }
+  _normalizeTargetConfig(entry) {
+    if (typeof entry === "string") {
+      return { target: entry };
+    }
+    if (entry && typeof entry === "object") {
+      return {
+        target: entry.target || entry.host || entry.domain,
+        features: entry.features,
+        tools: entry.tools,
+        persist: entry.persist
+      };
+    }
+    throw new Error("Invalid target configuration for NetworkPlugin");
+  }
+  async _persistReport(target, report) {
+    const storage = this.getStorage();
+    const timestamp = report.endedAt.replace(/[:.]/g, "-");
+    const baseKey = storage.getPluginKey(null, "reports", target.host);
+    const historyKey = `${baseKey}/${timestamp}.json`;
+    const stageStorageKeys = {};
+    for (const [stageName, stageData] of Object.entries(report.results || {})) {
+      const stageKey = `${baseKey}/stages/${timestamp}/${stageName}.json`;
+      await storage.set(stageKey, stageData, { behavior: "body-only" });
+      stageStorageKeys[stageName] = stageKey;
+    }
+    report.stageStorageKeys = stageStorageKeys;
+    report.storageKey = historyKey;
+    await storage.set(historyKey, report, { behavior: "body-only" });
+    await storage.set(`${baseKey}/latest.json`, report, { behavior: "body-only" });
+    const indexKey = `${baseKey}/index.json`;
+    const existing = await storage.get(indexKey) || { target: target.host, history: [] };
+    existing.history.unshift({
+      timestamp: report.endedAt,
+      status: report.status,
+      reportKey: historyKey,
+      summary: {
+        latencyMs: report.fingerprint.latencyMs ?? null,
+        openPorts: report.fingerprint.openPorts?.length ?? 0,
+        subdomains: report.fingerprint.subdomainCount ?? 0
+      }
+    });
+    existing.history = existing.history.slice(0, this.config.storage.historyLimit);
+    await storage.set(indexKey, existing, { behavior: "body-only" });
+  }
+  async _persistToResources(report) {
+    if (!this.database || !this.config.resources.persist) {
+      return;
+    }
+    const hostId = report.target.host;
+    const hostsResource = await this._getResource("hosts");
+    const stagesResource = await this._getResource("stages");
+    const reportsResource = await this._getResource("reports");
+    if (hostsResource) {
+      let existing = null;
+      try {
+        existing = await hostsResource.get(hostId);
+      } catch (error) {
+        existing = null;
+      }
+      const hostRecord = this._buildHostRecord(report);
+      if (existing) {
+        try {
+          await hostsResource.update(hostId, hostRecord);
+        } catch (error) {
+          if (typeof hostsResource.replace === "function") {
+            await hostsResource.replace(hostId, hostRecord);
+          }
+        }
+      } else {
+        try {
+          await hostsResource.insert(hostRecord);
+        } catch (error) {
+          if (typeof hostsResource.replace === "function") {
+            await hostsResource.replace(hostRecord.id, hostRecord);
+          }
+        }
+      }
+      const diffs = this._computeDiffs(existing, report);
+      if (diffs.length) {
+        await this._saveDiffs(hostId, report.endedAt, diffs);
+      }
+    }
+    if (reportsResource) {
+      const reportRecord = {
+        id: `${hostId}|${report.endedAt}`,
+        host: hostId,
+        startedAt: report.startedAt,
+        endedAt: report.endedAt,
+        status: report.status,
+        storageKey: report.storageKey || null,
+        stageKeys: report.stageStorageKeys || {}
+      };
+      try {
+        await reportsResource.insert(reportRecord);
+      } catch (error) {
+        try {
+          await reportsResource.update(reportRecord.id, reportRecord);
+        } catch (err) {
+          if (typeof reportsResource.replace === "function") {
+            await reportsResource.replace(reportRecord.id, reportRecord);
+          }
+        }
+      }
+    }
+    if (stagesResource && report.stageStorageKeys) {
+      for (const [stageName, stageData] of Object.entries(report.results || {})) {
+        const storageKey = report.stageStorageKeys[stageName] || null;
+        const summary = this._summarizeStage(stageName, stageData);
+        const stageRecord = {
+          id: `${hostId}|${stageName}|${report.endedAt}`,
+          host: hostId,
+          stage: stageName,
+          status: stageData?.status || "unknown",
+          storageKey,
+          summary,
+          collectedAt: report.endedAt
+        };
+        try {
+          await stagesResource.insert(stageRecord);
+        } catch (error) {
+          try {
+            await stagesResource.update(stageRecord.id, stageRecord);
+          } catch (err) {
+            if (typeof stagesResource.replace === "function") {
+              await stagesResource.replace(stageRecord.id, stageRecord);
+            }
+          }
+        }
+      }
+    }
+  }
+  _buildHostRecord(report) {
+    const fingerprint = report.fingerprint || {};
+    const summary = {
+      target: report.target.original,
+      primaryIp: fingerprint.primaryIp || null,
+      ipAddresses: fingerprint.ipAddresses || [],
+      cdn: fingerprint.cdn || null,
+      server: fingerprint.server || null,
+      latencyMs: fingerprint.latencyMs ?? null,
+      subdomainCount: (fingerprint.subdomains || []).length,
+      openPortCount: (fingerprint.openPorts || []).length,
+      technologies: fingerprint.technologies || []
+    };
+    return {
+      id: report.target.host,
+      target: report.target.original,
+      summary,
+      fingerprint,
+      lastScanAt: report.endedAt,
+      storageKey: report.storageKey || null
     };
   }
-  async _runTool(tool, normalizedTarget, cache) {
-    switch (tool) {
-      case "dns":
-        return this._gatherDns(normalizedTarget);
-      case "certificate":
-        return this._gatherCertificate(normalizedTarget);
-      case "ping":
-        return this._runPing(normalizedTarget);
-      case "traceroute":
-        return this._runTraceroute(normalizedTarget);
-      case "curl":
-        return this._runCurl(normalizedTarget);
-      case "nmap":
-        return this._runNmap(normalizedTarget);
-      default:
-        throw new Error(`Unknown diagnostic tool "${tool}"`);
+  _computeDiffs(existingRecord, report) {
+    const diffs = [];
+    const prevFingerprint = existingRecord?.fingerprint || {};
+    const currFingerprint = report.fingerprint || {};
+    const prevSubs = new Set(prevFingerprint.subdomains || []);
+    const currSubs = new Set(currFingerprint.subdomains || (report.results?.subdomains?.list || []));
+    const addedSubs = [...currSubs].filter((value) => !prevSubs.has(value));
+    const removedSubs = [...prevSubs].filter((value) => !currSubs.has(value));
+    if (addedSubs.length) {
+      diffs.push({ type: "subdomain:add", values: addedSubs });
     }
+    if (removedSubs.length) {
+      diffs.push({ type: "subdomain:remove", values: removedSubs });
+    }
+    const normalizePort = (entry) => {
+      if (!entry) return entry;
+      if (typeof entry === "string") return entry;
+      return entry.port || `${entry.service || "unknown"}`;
+    };
+    const prevPorts = new Set((prevFingerprint.openPorts || []).map(normalizePort));
+    const currPorts = new Set((currFingerprint.openPorts || []).map(normalizePort));
+    const addedPorts = [...currPorts].filter((value) => !prevPorts.has(value));
+    const removedPorts = [...prevPorts].filter((value) => !currPorts.has(value));
+    if (addedPorts.length) {
+      diffs.push({ type: "port:add", values: addedPorts });
+    }
+    if (removedPorts.length) {
+      diffs.push({ type: "port:remove", values: removedPorts });
+    }
+    const prevTech = new Set((prevFingerprint.technologies || []).map((tech) => tech.toLowerCase()));
+    const currTech = new Set((currFingerprint.technologies || []).map((tech) => tech.toLowerCase()));
+    const addedTech = [...currTech].filter((value) => !prevTech.has(value));
+    const removedTech = [...prevTech].filter((value) => !currTech.has(value));
+    if (addedTech.length) {
+      diffs.push({ type: "technology:add", values: addedTech });
+    }
+    if (removedTech.length) {
+      diffs.push({ type: "technology:remove", values: removedTech });
+    }
+    const primitiveFields = ["primaryIp", "cdn", "server"];
+    for (const field of primitiveFields) {
+      const previous = prevFingerprint[field] ?? null;
+      const current = currFingerprint[field] ?? null;
+      if (previous !== current) {
+        diffs.push({ type: `field:${field}`, previous, current });
+      }
+    }
+    return diffs;
+  }
+  async _saveDiffs(hostId, timestamp, diffs) {
+    const diffsResource = await this._getResource("diffs");
+    if (!diffsResource) return;
+    const record = {
+      id: `${hostId}|${timestamp}`,
+      host: hostId,
+      timestamp,
+      changes: diffs
+    };
+    try {
+      await diffsResource.insert(record);
+    } catch (error) {
+      try {
+        await diffsResource.update(record.id, record);
+      } catch (err) {
+        if (typeof diffsResource.replace === "function") {
+          await diffsResource.replace(record.id, record);
+        }
+      }
+    }
+  }
+  _summarizeStage(stageName, stageResult) {
+    if (!stageResult) return null;
+    const clone = this._deepClone(stageResult);
+    const sanitized = this._stripRawFields(clone);
+    if (stageName === "subdomains" && Array.isArray(sanitized.list)) {
+      sanitized.total = sanitized.list.length;
+      sanitized.sample = sanitized.list.slice(0, 20);
+      delete sanitized.list;
+    }
+    if (stageName === "ports" && Array.isArray(sanitized.openPorts)) {
+      sanitized.total = sanitized.openPorts.length;
+      sanitized.sample = sanitized.openPorts.slice(0, 10);
+    }
+    return sanitized;
+  }
+  _deepClone(value) {
+    if (typeof structuredClone === "function") {
+      try {
+        return structuredClone(value);
+      } catch (error) {
+      }
+    }
+    return JSON.parse(JSON.stringify(value));
+  }
+  _stripRawFields(value) {
+    if (Array.isArray(value)) {
+      return value.map((entry) => this._stripRawFields(entry));
+    }
+    if (value && typeof value === "object") {
+      const result = {};
+      for (const [key, nested] of Object.entries(value)) {
+        if (["raw", "stderr", "stdout"].includes(key)) {
+          continue;
+        }
+        result[key] = this._stripRawFields(nested);
+      }
+      return result;
+    }
+    return value;
   }
   async _gatherDns(target) {
     const result = {
@@ -64104,6 +64821,37 @@ class NetworkDiagnosticsPlugin extends Plugin {
       result.records.txt = txtRecords.status === "fulfilled" ? txtRecords.value : [];
       if (txtRecords.status === "rejected") {
         result.errors.txt = txtRecords.reason?.message;
+      }
+      const allIps = [
+        ...result.records.a || [],
+        ...result.records.aaaa || []
+      ];
+      if (allIps.length > 0) {
+        const reverseLookups = await Promise.allSettled(
+          allIps.map(async (ip) => {
+            try {
+              const hosts = await dns.reverse(ip);
+              return { ip, hosts };
+            } catch (error) {
+              return { ip, hosts: [], error };
+            }
+          })
+        );
+        result.records.reverse = {};
+        for (const entry of reverseLookups) {
+          if (entry.status === "fulfilled") {
+            const { ip, hosts, error } = entry.value;
+            result.records.reverse[ip] = hosts;
+            if (error) {
+              result.errors[`reverse:${ip}`] = error?.message;
+            }
+          } else if (entry.reason?.ip) {
+            result.records.reverse[entry.reason.ip] = [];
+            result.errors[`reverse:${entry.reason.ip}`] = entry.reason.error?.message;
+          }
+        }
+      } else {
+        result.records.reverse = {};
       }
     } catch (error) {
       result.status = "error";
@@ -64241,6 +64989,117 @@ class NetworkDiagnosticsPlugin extends Plugin {
       message: "mtr/traceroute commands not available"
     };
   }
+  async _runSubdomainRecon(target, featureConfig = {}) {
+    const aggregated = /* @__PURE__ */ new Set();
+    const sources = {};
+    const executeCliCollector = async (name, command, args, parser) => {
+      if (!featureConfig[name]) {
+        return;
+      }
+      const run = await this.commandRunner.run(command, args, { timeout: 6e4, maxBuffer: 8 * 1024 * 1024 });
+      if (!run.ok) {
+        sources[name] = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || `${command} failed`,
+          stderr: run.stderr
+        };
+        return;
+      }
+      const items = parser(run.stdout, run.stderr);
+      items.forEach((item) => aggregated.add(item));
+      sources[name] = {
+        status: "ok",
+        count: items.length,
+        sample: items.slice(0, 10)
+      };
+      if (this.config.storage.persistRawOutput) {
+        sources[name].raw = this._truncateOutput(run.stdout);
+      }
+    };
+    await executeCliCollector(
+      "amass",
+      "amass",
+      ["enum", "-d", target.host, "-o", "-"],
+      (stdout) => stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    );
+    await executeCliCollector(
+      "subfinder",
+      "subfinder",
+      ["-d", target.host, "-silent"],
+      (stdout) => stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    );
+    await executeCliCollector(
+      "assetfinder",
+      "assetfinder",
+      ["--subs-only", target.host],
+      (stdout) => stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    );
+    if (featureConfig.crtsh) {
+      try {
+        const response = await fetch(`https://crt.sh/?q=%25.${target.host}&output=json`, {
+          headers: { "User-Agent": this.config.curl.userAgent },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(1e4) : void 0
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const entries = Array.isArray(data) ? data : [];
+          const hostnames = entries.map((entry) => entry.name_value).filter(Boolean).flatMap((value) => value.split("\n")).map((value) => value.trim()).filter(Boolean);
+          hostnames.forEach((hostname) => aggregated.add(hostname));
+          sources.crtsh = {
+            status: "ok",
+            count: hostnames.length,
+            sample: hostnames.slice(0, 10)
+          };
+        } else {
+          sources.crtsh = {
+            status: "error",
+            message: `crt.sh responded with status ${response.status}`
+          };
+        }
+      } catch (error) {
+        sources.crtsh = {
+          status: "error",
+          message: error?.message || "crt.sh lookup failed"
+        };
+      }
+    }
+    const list = Array.from(aggregated).sort();
+    return {
+      status: list.length > 0 ? "ok" : "empty",
+      total: list.length,
+      list,
+      sources
+    };
+  }
+  async _runPortScans(target, featureConfig = {}) {
+    const scanners = {};
+    const openPorts = /* @__PURE__ */ new Map();
+    if (featureConfig.nmap) {
+      const result = await this._runNmap(target, { extraArgs: featureConfig.nmapArgs });
+      scanners.nmap = result;
+      if (result.status === "ok" && Array.isArray(result.summary?.openPorts)) {
+        for (const entry of result.summary.openPorts) {
+          openPorts.set(entry.port, entry);
+        }
+      }
+    }
+    if (featureConfig.masscan) {
+      const result = await this._runMasscan(target, featureConfig.masscan);
+      scanners.masscan = result;
+      if (result.status === "ok" && Array.isArray(result.openPorts)) {
+        for (const entry of result.openPorts) {
+          if (!openPorts.has(entry.port)) {
+            openPorts.set(entry.port, entry);
+          }
+        }
+      }
+    }
+    return {
+      status: openPorts.size > 0 ? "ok" : "empty",
+      openPorts: Array.from(openPorts.values()),
+      scanners
+    };
+  }
   async _runCurl(target) {
     const url = this._buildUrl(target);
     const args = [
@@ -64268,22 +65127,24 @@ class NetworkDiagnosticsPlugin extends Plugin {
       status: "ok",
       url,
       headers,
-      raw: result.stdout
+      raw: this.config.storage.persistRawOutput ? this._truncateOutput(result.stdout) : void 0
     };
   }
-  async _runNmap(target) {
+  async _runNmap(target, options = {}) {
     if (!await this.commandRunner.isAvailable("nmap")) {
       return {
         status: "unavailable",
         message: "nmap is not available on this system"
       };
     }
+    const topPorts = options.topPorts ?? this.config.nmap.topPorts;
+    const extraArgs = options.extraArgs ?? this.config.nmap.extraArgs;
     const args = [
       "-Pn",
       "--top-ports",
-      String(this.config.nmap.topPorts),
+      String(topPorts),
       target.host,
-      ...this.config.nmap.extraArgs
+      ...extraArgs
     ];
     const result = await this.commandRunner.run("nmap", args, {
       timeout: 2e4,
@@ -64299,8 +65160,303 @@ class NetworkDiagnosticsPlugin extends Plugin {
     return {
       status: "ok",
       summary: this._parseNmapOutput(result.stdout),
-      raw: result.stdout
+      raw: this.config.storage.persistRawOutput ? this._truncateOutput(result.stdout) : void 0
     };
+  }
+  async _runMasscan(target, featureConfig = {}) {
+    if (!await this.commandRunner.isAvailable("masscan")) {
+      return {
+        status: "unavailable",
+        message: "masscan is not available on this system"
+      };
+    }
+    const ports = featureConfig.ports ?? "1-65535";
+    const rate = featureConfig.rate ?? 1e3;
+    const args = ["-p", ports, target.host, "--rate", String(rate), "--wait", "0"];
+    const result = await this.commandRunner.run("masscan", args, {
+      timeout: featureConfig.timeout ?? 3e4,
+      maxBuffer: 4 * 1024 * 1024
+    });
+    if (!result.ok) {
+      return {
+        status: result.error?.code === "ENOENT" ? "unavailable" : "error",
+        message: result.error?.message || "masscan scan failed",
+        stderr: result.stderr
+      };
+    }
+    const openPorts = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.toLowerCase().startsWith("discovered open port")).map((line) => {
+      const parts = line.split(" ");
+      const portProto = parts[3];
+      const ip = parts[5];
+      return {
+        port: portProto,
+        ip
+      };
+    });
+    return {
+      status: openPorts.length ? "ok" : "empty",
+      openPorts,
+      raw: this.config.storage.persistRawOutput ? this._truncateOutput(result.stdout) : void 0
+    };
+  }
+  async _runWebDiscovery(target, featureConfig = {}) {
+    if (!featureConfig) {
+      return { status: "disabled" };
+    }
+    const tools = {};
+    const discovered = {};
+    const wordlist = featureConfig.wordlist;
+    const threads = featureConfig.threads ?? 50;
+    const runDirBuster = async (name, command, args) => {
+      const run = await this.commandRunner.run(command, args, {
+        timeout: featureConfig.timeout ?? 6e4,
+        maxBuffer: 8 * 1024 * 1024
+      });
+      if (!run.ok) {
+        tools[name] = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || `${command} failed`,
+          stderr: run.stderr
+        };
+        return;
+      }
+      const findings = run.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      discovered[name] = findings;
+      tools[name] = {
+        status: "ok",
+        count: findings.length,
+        sample: findings.slice(0, 10)
+      };
+      if (this.config.storage.persistRawOutput) {
+        tools[name].raw = this._truncateOutput(run.stdout);
+      }
+    };
+    if (featureConfig.ffuf && wordlist) {
+      await runDirBuster("ffuf", "ffuf", ["-u", `${this._buildUrl(target)}/FUZZ`, "-w", wordlist, "-t", String(threads), "-mc", "200,204,301,302,307,401,403"]);
+    }
+    if (featureConfig.feroxbuster && wordlist) {
+      await runDirBuster("feroxbuster", "feroxbuster", ["-u", this._buildUrl(target), "-w", wordlist, "--threads", String(threads), "--silent"]);
+    }
+    if (featureConfig.gobuster && wordlist) {
+      await runDirBuster("gobuster", "gobuster", ["dir", "-u", this._buildUrl(target), "-w", wordlist, "-t", String(threads)]);
+    }
+    const total = Object.values(discovered).reduce((acc, list) => acc + list.length, 0);
+    if (!total) {
+      return {
+        status: wordlist ? "empty" : "skipped",
+        message: wordlist ? "No endpoints discovered" : "Wordlist not provided",
+        tools
+      };
+    }
+    return {
+      status: "ok",
+      total,
+      tools
+    };
+  }
+  async _runVulnerabilityScans(target, featureConfig = {}) {
+    const tools = {};
+    const execute = async (name, command, args) => {
+      const run = await this.commandRunner.run(command, args, {
+        timeout: featureConfig.timeout ?? 6e4,
+        maxBuffer: 8 * 1024 * 1024
+      });
+      if (!run.ok) {
+        tools[name] = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || `${command} failed`,
+          stderr: run.stderr
+        };
+        return;
+      }
+      tools[name] = {
+        status: "ok"
+      };
+      if (this.config.storage.persistRawOutput) {
+        tools[name].raw = this._truncateOutput(run.stdout);
+      }
+    };
+    if (featureConfig.nikto) {
+      await execute("nikto", "nikto", ["-h", this._buildUrl(target), "-ask", "no"]);
+    }
+    if (featureConfig.wpscan) {
+      await execute("wpscan", "wpscan", ["--url", this._buildUrl(target), "--random-user-agent"]);
+    }
+    if (featureConfig.droopescan) {
+      await execute("droopescan", "droopescan", ["scan", "drupal", "-u", this._buildUrl(target)]);
+    }
+    if (Object.keys(tools).length === 0) {
+      return { status: "skipped" };
+    }
+    return {
+      status: Object.values(tools).some((tool) => tool.status === "ok") ? "ok" : "empty",
+      tools
+    };
+  }
+  async _runTlsExtras(target, featureConfig = {}) {
+    const tools = {};
+    const port = target.port || 443;
+    const execute = async (name, command, args) => {
+      const run = await this.commandRunner.run(command, args, {
+        timeout: featureConfig.timeout ?? 2e4,
+        maxBuffer: 4 * 1024 * 1024
+      });
+      if (!run.ok) {
+        tools[name] = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || `${command} failed`,
+          stderr: run.stderr
+        };
+        return;
+      }
+      tools[name] = {
+        status: "ok"
+      };
+      if (this.config.storage.persistRawOutput) {
+        tools[name].raw = this._truncateOutput(run.stdout);
+      }
+    };
+    if (featureConfig.openssl) {
+      await execute("openssl", "openssl", ["s_client", "-servername", target.host, "-connect", `${target.host}:${port}`, "-brief"]);
+    }
+    if (featureConfig.sslyze) {
+      await execute("sslyze", "sslyze", [target.host]);
+    }
+    if (featureConfig.testssl) {
+      await execute("testssl", "testssl.sh", ["--quiet", `${target.host}:${port}`]);
+    }
+    if (Object.keys(tools).length === 0) {
+      return { status: "skipped" };
+    }
+    return {
+      status: Object.values(tools).some((tool) => tool.status === "ok") ? "ok" : "empty",
+      tools
+    };
+  }
+  async _runFingerprintTools(target, featureConfig = {}) {
+    const technologies = /* @__PURE__ */ new Set();
+    const tools = {};
+    if (featureConfig.whatweb) {
+      const run = await this.commandRunner.run("whatweb", ["-q", this._buildUrl(target)], {
+        timeout: featureConfig.timeout ?? 2e4,
+        maxBuffer: 2 * 1024 * 1024
+      });
+      if (run.ok) {
+        const parsed = run.stdout.split(/[\r\n]+/).flatMap((line) => line.split(" ")).map((token) => token.trim()).filter((token) => token.includes("[") && token.includes("]")).map((token) => token.substring(0, token.indexOf("[")));
+        parsed.forEach((tech) => technologies.add(tech));
+        tools.whatweb = { status: "ok", technologies: parsed.slice(0, 20) };
+        if (this.config.storage.persistRawOutput) {
+          tools.whatweb.raw = this._truncateOutput(run.stdout);
+        }
+      } else {
+        tools.whatweb = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || "whatweb failed"
+        };
+      }
+    }
+    if (technologies.size === 0 && Object.keys(tools).length === 0) {
+      return { status: "skipped" };
+    }
+    return {
+      status: technologies.size ? "ok" : "empty",
+      technologies: Array.from(technologies),
+      tools
+    };
+  }
+  async _runScreenshotCapture(target, featureConfig = {}) {
+    if (!featureConfig.aquatone && !featureConfig.eyewitness) {
+      return { status: "skipped" };
+    }
+    const screenshots = {};
+    const hostsFile = await this._writeTempHostsFile([this._buildUrl(target)]);
+    const execute = async (name, command, args) => {
+      const run = await this.commandRunner.run(command, args, {
+        timeout: featureConfig.timeout ?? 6e4,
+        maxBuffer: 4 * 1024 * 1024
+      });
+      if (!run.ok) {
+        screenshots[name] = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || `${command} failed`
+        };
+        return;
+      }
+      screenshots[name] = { status: "ok" };
+    };
+    if (featureConfig.aquatone) {
+      const outputDir = featureConfig.outputDir || path$1.join(os$1.tmpdir(), `aquatone-${node_crypto.randomUUID()}`);
+      await fs$2.mkdir(outputDir, { recursive: true });
+      await execute("aquatone", "aquatone", ["-scan-timeout", "20000", "-out", outputDir, "-list", hostsFile]);
+      screenshots.aquatone.outputDir = outputDir;
+    }
+    if (featureConfig.eyewitness) {
+      const outputDir = featureConfig.outputDir || path$1.join(os$1.tmpdir(), `eyewitness-${node_crypto.randomUUID()}`);
+      await fs$2.mkdir(outputDir, { recursive: true });
+      await execute("eyewitness", "EyeWitness", ["--web", "--timeout", "20", "--threads", "5", "--headless", "-f", hostsFile, "-d", outputDir]);
+      screenshots.eyewitness = { status: "ok", outputDir };
+    }
+    await fs$2.rm(hostsFile, { force: true });
+    if (Object.values(screenshots).some((entry) => entry.status === "ok")) {
+      return {
+        status: "ok",
+        tools: screenshots
+      };
+    }
+    return {
+      status: "empty",
+      tools: screenshots
+    };
+  }
+  async _runOsintRecon(target, featureConfig = {}) {
+    const tools = {};
+    if (featureConfig.theHarvester) {
+      const run = await this.commandRunner.run("theHarvester", ["-d", target.host, "-b", "all"], {
+        timeout: featureConfig.timeout ?? 6e4,
+        maxBuffer: 4 * 1024 * 1024
+      });
+      if (run.ok) {
+        tools.theHarvester = {
+          status: "ok"
+        };
+        if (this.config.storage.persistRawOutput) {
+          tools.theHarvester.raw = this._truncateOutput(run.stdout);
+        }
+      } else {
+        tools.theHarvester = {
+          status: run.error?.code === "ENOENT" ? "unavailable" : "error",
+          message: run.error?.message || "theHarvester failed"
+        };
+      }
+    }
+    if (featureConfig.reconNg) {
+      tools.reconNg = {
+        status: "manual",
+        message: "recon-ng requires interactive scripting; run via custom scripts"
+      };
+    }
+    if (Object.keys(tools).length === 0) {
+      return { status: "skipped" };
+    }
+    return {
+      status: Object.values(tools).some((entry) => entry.status === "ok") ? "ok" : "empty",
+      tools
+    };
+  }
+  async _writeTempHostsFile(hosts) {
+    const filePath = path$1.join(os$1.tmpdir(), `network-plugin-${node_crypto.randomUUID()}.txt`);
+    await fs$2.writeFile(filePath, hosts.join("\n"), { encoding: "utf8" });
+    return filePath;
+  }
+  _truncateOutput(text, limit = 32768) {
+    if (typeof text !== "string") {
+      return text;
+    }
+    if (text.length <= limit) {
+      return text;
+    }
+    return `${text.slice(0, limit)}
+\u2026 truncated ${text.length - limit} characters`;
   }
   _buildFingerprint(target, results) {
     const summary = {
@@ -64318,8 +65474,10 @@ class NetworkDiagnosticsPlugin extends Plugin {
     const dnsInfo = results.dns;
     const curlInfo = results.curl;
     const pingInfo = results.ping;
-    const nmapInfo = results.nmap;
+    const portsInfo = results.ports;
     const certificateInfo = results.certificate;
+    const subdomainInfo = results.subdomains;
+    const fingerprintTools = results.fingerprintTools;
     if (dnsInfo?.records?.a?.length) {
       summary.ipAddresses.push(...dnsInfo.records.a);
       summary.primaryIp = dnsInfo.records.a[0];
@@ -64359,15 +65517,36 @@ class NetworkDiagnosticsPlugin extends Plugin {
         summary.notes.push(`Cache hint: ${curlInfo.headers["x-cache"]}`);
       }
     }
-    if (nmapInfo?.summary?.openPorts?.length) {
-      summary.openPorts = nmapInfo.summary.openPorts;
-      summary.technologies.push(...nmapInfo.summary.detectedServices);
+    if (portsInfo?.openPorts?.length) {
+      summary.openPorts = portsInfo.openPorts;
+      if (portsInfo.scanners?.nmap?.summary?.detectedServices) {
+        summary.technologies.push(...portsInfo.scanners.nmap.summary.detectedServices);
+      }
+    }
+    if (subdomainInfo?.list) {
+      summary.subdomains = subdomainInfo.list;
+      summary.subdomainCount = subdomainInfo.list.length;
+      summary.subdomainsSample = subdomainInfo.list.slice(0, 20);
+    } else {
+      summary.subdomains = [];
+    }
+    if (fingerprintTools?.technologies) {
+      summary.technologies.push(...fingerprintTools.technologies);
+    }
+    const reverseRecords = dnsInfo?.records?.reverse || {};
+    const relatedDomains = Object.values(reverseRecords).flat().filter(Boolean);
+    if (relatedDomains.length > 0) {
+      summary.relatedHosts = Array.from(new Set(relatedDomains));
+    } else {
+      summary.relatedHosts = [];
     }
     summary.technologies = Array.from(
       new Set(
-        summary.technologies.filter(Boolean).map((value) => value.split(",").map((v) => v.trim()).filter(Boolean)).flat()
+        summary.technologies.filter(Boolean).flatMap((value) => value.split(",").map((v) => v.trim()).filter(Boolean))
       )
     );
+    summary.ipAddresses = Array.from(new Set(summary.ipAddresses));
+    summary.openPorts = summary.openPorts || [];
     return summary;
   }
   _parsePingOutput(text) {
@@ -76725,7 +77904,7 @@ exports.MongoDBAtlasInventoryDriver = MongoDBAtlasInventoryDriver;
 exports.MongoDBReplicator = MongoDBReplicator;
 exports.MultiBackupDriver = MultiBackupDriver;
 exports.MySQLReplicator = MySQLReplicator;
-exports.NetworkDiagnosticsPlugin = NetworkDiagnosticsPlugin;
+exports.NetworkPlugin = NetworkPlugin;
 exports.NoSuchBucket = NoSuchBucket;
 exports.NoSuchKey = NoSuchKey;
 exports.NotFound = NotFound;

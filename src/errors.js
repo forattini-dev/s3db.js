@@ -693,14 +693,17 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
 `.trim();
     }
 
-    super(message, {
+    const merged = {
       ...rest,
       pluginName,
       operation,
       statusCode: rest.statusCode ?? 500,
       retriable: rest.retriable ?? false,
       description
-    });
+    };
+
+    super(message, merged);
+    Object.assign(this, merged);
   }
 }
 
