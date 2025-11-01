@@ -426,12 +426,17 @@
  */
 
 import { Plugin } from "./plugin.class.js";
+import { getValidatedNamespace } from "./namespace.js";
 import tryFn from "../concerns/try-fn.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
 
 export class AuditPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // Validate and set namespace (standardized)
+    this.namespace = getValidatedNamespace(options, '');
+
     const resourceNames = options.resourceNames || {};
     this.auditResource = null;
     this._auditResourceDescriptor = {

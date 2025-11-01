@@ -1,6 +1,7 @@
 import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import { resolveResourceNames } from './concerns/resource-names.js';
+import { getValidatedNamespace } from './namespace.js';
 import tryFn from '../concerns/try-fn.js';
 import { PluginError } from '../errors.js';
 
@@ -21,6 +22,9 @@ import { PluginError } from '../errors.js';
 export class PuppeteerPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // Validate and set namespace (standardized)
+    this.namespace = getValidatedNamespace(options, '');
 
     // Default configuration
     this.config = {

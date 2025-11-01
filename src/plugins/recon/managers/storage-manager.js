@@ -8,9 +8,80 @@
  * - Diff computation and alerts
  */
 
+import { getAllResourceConfigs } from '../config/resources.js';
+import {
+  getNamespacedResourceName,
+  listPluginNamespaces
+} from '../../namespace.js';
+
 export class StorageManager {
   constructor(plugin) {
     this.plugin = plugin;
+    this.resources = {};
+  }
+
+  /**
+   * List all existing namespaces in storage
+   * Uses standardized plugin namespace detection
+   */
+  async listNamespaces() {
+    return await listPluginNamespaces(this.plugin.getStorage(), 'recon');
+  }
+
+  /**
+   * Initialize plugin storage resources
+   * Note: Namespace detection is now handled automatically by Plugin base class
+   */
+  async initialize() {
+    if (!this.plugin.database) {
+      return; // No database configured, skip resource creation
+    }
+
+    const namespace = this.plugin.namespace || '';
+    const resourceConfigs = getAllResourceConfigs();
+
+    for (const config of resourceConfigs) {
+      try {
+        // Add namespace to resource name using standardized helper
+        const namespacedName = getNamespacedResourceName(config.name, namespace, 'plg_recon');
+
+        const namespacedConfig = {
+          ...config,
+          name: namespacedName
+        };
+
+        // Check if resource already exists
+        let resource = null;
+        try {
+          resource = await this.plugin.database.getResource(namespacedConfig.name);
+        } catch (error) {
+          // Resource doesn't exist, create it
+        }
+
+        if (!resource) {
+          resource = await this.plugin.database.createResource(namespacedConfig);
+        }
+
+        this.resources[config.name] = resource;  // Use original name as key
+      } catch (error) {
+        console.error(`Failed to initialize resource ${config.name}:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * Get a resource by name
+   */
+  getResource(name) {
+    return this.resources[name];
+  }
+
+  /**
+   * Extract timestampDay from ISO timestamp for partitioning
+   */
+  _extractTimestampDay(isoTimestamp) {
+    if (!isoTimestamp) return null;
+    return isoTimestamp.split('T')[0]; // "2025-01-01T12:00:00.000Z" -> "2025-01-01"
   }
 
   /**
@@ -19,7 +90,8 @@ export class StorageManager {
   async persistReport(target, report) {
     const storage = this.plugin.getStorage();
     const timestamp = report.endedAt.replace(/[:.]/g, '-');
-    const baseKey = storage.getPluginKey(null, 'reports', target.host);
+    const namespace = this.plugin.namespace || '';
+    const baseKey = storage.getPluginKey(null, namespace, 'reports', target.host);
     const historyKey = `${baseKey}/${timestamp}.json`;
     const stageStorageKeys = {};
     const toolStorageKeys = {};
@@ -160,15 +232,26 @@ export class StorageManager {
 
     // Update reports resource
     if (reportsResource) {
+      const timestamp = report.timestamp || report.endedAt || new Date().toISOString();
       const reportRecord = {
-        id: `${hostId}|${report.endedAt}`,
-        host: hostId,
-        startedAt: report.startedAt,
-        endedAt: report.endedAt,
-        status: report.status,
-        storageKey: report.storageKey || null,
-        stageKeys: report.stageStorageKeys || {},
-        toolKeys: report.toolStorageKeys || {}
+        id: report.id || `${hostId}|${timestamp}`,
+        reportId: report.id || `rpt_${Date.now()}`,
+        target: report.target || { host: hostId, original: hostId },
+        timestamp,
+        timestampDay: this._extractTimestampDay(timestamp),
+        duration: report.duration || 0,
+        status: report.status || 'completed',
+        results: report.results || {},
+        fingerprint: report.fingerprint || {},
+        summary: {
+          totalIPs: report.fingerprint?.infrastructure?.ips?.ipv4?.length || 0,
+          totalPorts: report.fingerprint?.attackSurface?.openPorts?.length || 0,
+          totalSubdomains: report.fingerprint?.attackSurface?.subdomains?.total || 0,
+          totalPaths: report.fingerprint?.attackSurface?.discoveredPaths?.total || 0,
+          detectedTechnologies: report.fingerprint?.technologies?.detected?.length || 0,
+          riskLevel: report.riskLevel || 'low'
+        },
+        uptime: report.uptime || null  // Include uptime status from scan time
       };
       try {
         await reportsResource.insert(reportRecord);
@@ -184,18 +267,24 @@ export class StorageManager {
     }
 
     // Update stages resource
-    if (stagesResource && report.stageStorageKeys) {
+    if (stagesResource && report.results) {
+      const reportTimestamp = report.timestamp || report.endedAt || new Date().toISOString();
+
       for (const [stageName, stageData] of Object.entries(report.results || {})) {
-        const storageKey = report.stageStorageKeys[stageName] || null;
-        const summary = this._summarizeStage(stageName, stageData);
         const stageRecord = {
-          id: `${hostId}|${stageName}|${report.endedAt}`,
+          id: `${hostId}|${stageName}|${reportTimestamp}`,
+          reportId: report.id || `rpt_${Date.now()}`,
+          stageName,
           host: hostId,
-          stage: stageName,
+          timestamp: reportTimestamp,
+          timestampDay: this._extractTimestampDay(reportTimestamp),
+          duration: stageData?.duration || 0,
           status: stageData?.status || 'unknown',
-          storageKey,
-          summary,
-          collectedAt: report.endedAt
+          toolsUsed: this._extractToolNames(stageData, 'all'),
+          toolsSucceeded: this._extractToolNames(stageData, 'succeeded'),
+          toolsFailed: this._extractToolNames(stageData, 'failed'),
+          resultCount: this._countResults(stageData),
+          errorMessage: stageData?.error || null
         };
         try {
           await stagesResource.insert(stageRecord);
@@ -587,5 +676,70 @@ export class StorageManager {
         // try next
       }
     }
+  }
+
+  /**
+   * Extract tool names from stage data
+   */
+  _extractToolNames(stageData, filter = 'all') {
+    if (!stageData) return [];
+
+    const tools = [];
+
+    // Check for _individual tools
+    if (stageData._individual && typeof stageData._individual === 'object') {
+      for (const [toolName, toolData] of Object.entries(stageData._individual)) {
+        const status = toolData?.status;
+
+        if (filter === 'all') {
+          tools.push(toolName);
+        } else if (filter === 'succeeded' && status === 'ok') {
+          tools.push(toolName);
+        } else if (filter === 'failed' && status !== 'ok' && status) {
+          tools.push(toolName);
+        }
+      }
+    }
+
+    // Check for tools object (legacy format)
+    if (stageData.tools && typeof stageData.tools === 'object') {
+      for (const [toolName, toolData] of Object.entries(stageData.tools)) {
+        const status = toolData?.status;
+
+        if (filter === 'all' && !tools.includes(toolName)) {
+          tools.push(toolName);
+        } else if (filter === 'succeeded' && status === 'ok' && !tools.includes(toolName)) {
+          tools.push(toolName);
+        } else if (filter === 'failed' && status !== 'ok' && status && !tools.includes(toolName)) {
+          tools.push(toolName);
+        }
+      }
+    }
+
+    return tools;
+  }
+
+  /**
+   * Count results in stage data
+   */
+  _countResults(stageData) {
+    if (!stageData) return 0;
+
+    // Try common result fields
+    if (stageData.openPorts?.length) return stageData.openPorts.length;
+    if (stageData.list?.length) return stageData.list.length; // subdomains
+    if (stageData.paths?.length) return stageData.paths.length;
+    if (stageData.records && typeof stageData.records === 'object') {
+      return Object.values(stageData.records).flat().length; // DNS records
+    }
+
+    // Count _aggregated results
+    if (stageData._aggregated) {
+      if (stageData._aggregated.openPorts?.length) return stageData._aggregated.openPorts.length;
+      if (stageData._aggregated.list?.length) return stageData._aggregated.list.length;
+      if (stageData._aggregated.paths?.length) return stageData._aggregated.paths.length;
+    }
+
+    return 0;
   }
 }

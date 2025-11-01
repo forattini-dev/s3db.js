@@ -687,7 +687,8 @@ export class PluginStorage {
         throw err;
       }
 
-      if (timeout && Date.now() - startTime >= timeout) {
+      // Check timeout (0 means don't wait, undefined means wait indefinitely)
+      if (timeout !== undefined && Date.now() - startTime >= timeout) {
         return null;
       }
 
