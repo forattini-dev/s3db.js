@@ -45,7 +45,8 @@ export class DependencyManager {
       'screenshots.aquatone': 'aquatone',
       'screenshots.eyewitness': 'EyeWitness',
       'osint.theHarvester': 'theHarvester',
-      'osint.reconNg': 'recon-ng'
+      'osint.sherlock': 'sherlock',
+      'osint.maigret': 'maigret'
     };
 
     for (const [featurePath, commands] of Object.entries(toolMap)) {
@@ -158,7 +159,8 @@ export class DependencyManager {
       aquatone: 'https://github.com/michenriksen/aquatone | Download binário do GitHub Releases',
       EyeWitness: 'https://github.com/FortyNorthSecurity/EyeWitness | git clone e seguir instruções',
       theHarvester: 'https://github.com/laramies/theHarvester | pip install theHarvester',
-      'recon-ng': 'https://github.com/lanmaster53/recon-ng | pip install recon-ng'
+      sherlock: 'https://github.com/sherlock-project/sherlock | pip install sherlock-project',
+      maigret: 'https://github.com/soxoj/maigret | pip install maigret'
     };
 
     return guides[toolName] || `Consulte a documentação oficial da ferramenta "${toolName}" para instruções de instalação.`;

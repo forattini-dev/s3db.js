@@ -50,8 +50,40 @@ export const DEFAULT_FEATURES = {
     eyewitness: false
   },
   osint: {
+    // Username Enumeration
+    usernames: false,
+    sherlock: false,
+    maigret: false,
+
+    // Email Collection
+    emails: false,
     theHarvester: false,
-    reconNg: false
+    hunter: false,
+    hunterApiKey: null,
+
+    // Leak Detection
+    leaks: false,
+    hibpApiKey: null,
+    maxEmailsToCheck: 10,
+
+    // GitHub Reconnaissance
+    github: false,
+    githubToken: null,
+    githubRepos: false,
+    githubCode: false,
+    githubUsers: false,
+    maxRepos: 10,
+    maxCodeResults: 10,
+    maxUsers: 10,
+
+    // SaaS Footprint Detection
+    saas: false,
+
+    // Social Media Mapping
+    socialMedia: false,
+    linkedin: false,
+    twitter: false,
+    facebook: false
   },
   secrets: {
     gitleaks: true,
@@ -75,7 +107,16 @@ export const BEHAVIOR_PRESETS = {
       tlsAudit: { openssl: false, sslyze: false, testssl: false },
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
-      osint: { theHarvester: true, reconNg: false },
+      osint: {
+        // Only passive OSINT for passive preset
+        emails: true,
+        theHarvester: true,
+        saas: true,  // DNS-based SaaS detection
+        leaks: false,
+        github: false,
+        usernames: false,
+        socialMedia: false
+      },
       secrets: { gitleaks: false, patterns: true, maxUrls: 10 }
     },
     concurrency: 2,
@@ -98,7 +139,20 @@ export const BEHAVIOR_PRESETS = {
       tlsAudit: { openssl: true, sslyze: false, testssl: false },
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
-      osint: { theHarvester: false, reconNg: false },
+      osint: {
+        // Balanced OSINT for stealth preset
+        emails: true,
+        theHarvester: true,
+        saas: true,
+        leaks: true,
+        maxEmailsToCheck: 5,
+        github: true,
+        githubRepos: true,
+        githubCode: false,
+        maxRepos: 5,
+        usernames: false,
+        socialMedia: false
+      },
       secrets: { gitleaks: true, patterns: true, maxUrls: 15 }
     },
     concurrency: 1,
@@ -125,7 +179,28 @@ export const BEHAVIOR_PRESETS = {
       tlsAudit: { openssl: true, sslyze: true, testssl: true },
       fingerprint: { whatweb: true },
       screenshots: { aquatone: true, eyewitness: false },
-      osint: { theHarvester: true, reconNg: false },
+      osint: {
+        // Full OSINT for aggressive preset
+        emails: true,
+        theHarvester: true,
+        saas: true,
+        leaks: true,
+        maxEmailsToCheck: 20,
+        github: true,
+        githubRepos: true,
+        githubCode: true,
+        githubUsers: true,
+        maxRepos: 20,
+        maxCodeResults: 20,
+        maxUsers: 20,
+        usernames: true,
+        sherlock: true,
+        maigret: false,  // Too slow for aggressive
+        socialMedia: true,
+        linkedin: true,
+        twitter: true,
+        facebook: true
+      },
       secrets: { gitleaks: true, patterns: true, maxUrls: 30 }
     },
     concurrency: 8,
