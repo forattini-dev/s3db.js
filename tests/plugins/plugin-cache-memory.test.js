@@ -714,8 +714,8 @@ describe('Cache Plugin - MemoryCache Driver', () => {
       const count1 = await ttlUsers.count();
       expect(count1).toBe(1);
 
-      // Wait for TTL to expire
-      await new Promise(resolve => setTimeout(resolve, 60));
+      // Wait for TTL to expire (TTL is 50ms, wait 100ms to be safe)
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Insert another user
       await ttlUsers.insert({ name: 'TTL User 2' });

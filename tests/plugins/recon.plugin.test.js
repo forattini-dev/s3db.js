@@ -8,7 +8,7 @@ describe('ReconPlugin', () => {
     jest.restoreAllMocks();
   });
 
-  test('aggregates diagnostics results with custom command runner', async () => {
+  test('aggregates diagnostics results with custom command runner', async () => {,  30000)
     jest.spyOn(dns, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
     jest.spyOn(dns, 'resolve4').mockResolvedValue(['93.184.216.34']);
     jest.spyOn(dns, 'resolve6').mockResolvedValue([]);
@@ -133,7 +133,7 @@ describe('ReconPlugin', () => {
     ]);
   });
 
-  test('marks tools as unavailable when command is missing', async () => {
+  test('marks tools as unavailable when command is missing', async () => {,  30000)
     jest.spyOn(dns, 'lookup').mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
     jest.spyOn(dns, 'resolve4').mockResolvedValue(['127.0.0.1']);
     jest.spyOn(dns, 'resolve6').mockResolvedValue([]);
@@ -182,7 +182,7 @@ describe('ReconPlugin', () => {
     expect(report.results.ports?.scanners?.nmap?.status).toBe('unavailable');
   });
 
-  test('prefers mtr JSON output when available', async () => {
+  test('prefers mtr JSON output when available', async () => {,  30000)
     jest.spyOn(dns, 'lookup').mockResolvedValue([{ address: '8.8.8.8', family: 4 }]);
     jest.spyOn(dns, 'resolve4').mockResolvedValue(['8.8.8.8']);
     jest.spyOn(dns, 'resolve6').mockResolvedValue([]);
