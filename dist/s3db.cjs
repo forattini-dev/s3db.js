@@ -64,6 +64,10 @@ var http = require('http');
 var https = require('https');
 var nodeHttpHandler = require('@smithy/node-http-handler');
 var glob = require('glob');
+var node_child_process = require('node:child_process');
+var dns = require('node:dns/promises');
+var tls = require('node:tls');
+var node_url = require('node:url');
 var zlib$1 = require('zlib');
 var util = require('util');
 var url = require('url');
@@ -8502,7 +8506,8 @@ class Router {
    * @private
    */
   mountAdminRoutes(app) {
-    if (this.metrics?.enabled) {
+    const metricsEnabled = this.metrics?.options?.enabled ?? false;
+    if (metricsEnabled) {
       app.get("/metrics", (c) => {
         const summary = this.metrics.getSummary();
         const response = success$1(summary);
@@ -11398,7 +11403,19 @@ class ApiPlugin extends Plugin {
         reportUri: options.csp?.reportUri || null
       },
       // Custom global middlewares
-      middlewares: options.middlewares || []
+      middlewares: options.middlewares || [],
+      requestId: options.requestId || { enabled: false },
+      sessionTracking: options.sessionTracking || { enabled: false },
+      events: options.events || { enabled: false },
+      metrics: options.metrics || { enabled: false },
+      failban: {
+        ...options.failban || {},
+        enabled: options.failban?.enabled === true,
+        resourceNames: resourceNamesOption.failban || options.failban?.resourceNames || {}
+      },
+      static: Array.isArray(options.static) ? options.static : [],
+      health: typeof options.health === "object" ? options.health : { enabled: options.health !== false },
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024
     };
     this.config.resources = this._normalizeResourcesConfig(options.resources);
     this.server = null;
@@ -23718,7 +23735,7 @@ class TTLPlugin extends Plugin {
   }
 }
 
-function sanitizeNamespace$1(value) {
+function sanitizeNamespace(value) {
   return (value || "persona").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 function defaultJobsResource(namespace) {
@@ -23728,7 +23745,7 @@ class CookieFarmSuitePlugin extends Plugin {
   constructor(options = {}) {
     const namespace = options.namespace || "persona";
     super({ ...options, namespace });
-    this.namespace = this.namespace || sanitizeNamespace$1(namespace);
+    this.namespace = this.namespace || sanitizeNamespace(namespace);
     const jobsResource = options.jobsResource || options.resources && options.resources.jobs || defaultJobsResource(this.namespace);
     this.config = {
       namespace: this.namespace,
@@ -37842,217 +37859,6 @@ class MLPlugin extends Plugin {
       currentVersion: targetVersion,
       ...result
     };
-  }
-}
-
-function sanitizeNamespace(value) {
-  return (value || "spider").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-}
-function defaultTargetsResource(namespace) {
-  return `${namespace.replace(/[^a-z0-9]+/g, "_")}_targets`;
-}
-class SpiderPlugin extends Plugin {
-  constructor(options = {}) {
-    const namespace = options.namespace || "spider";
-    super({ ...options, namespace });
-    this.namespace = this.namespace || sanitizeNamespace(namespace);
-    const targetsResource = options.targetsResource || options.resources && options.resources.targets || defaultTargetsResource(this.namespace);
-    this.config = {
-      namespace: this.namespace,
-      targetsResource,
-      queue: {
-        resource: targetsResource,
-        deadLetterResource: options.queue?.deadLetterResource || null,
-        visibilityTimeout: options.queue?.visibilityTimeout || 3e4,
-        pollInterval: options.queue?.pollInterval || 1e3,
-        maxAttempts: options.queue?.maxAttempts || 3,
-        concurrency: options.queue?.concurrency || 3,
-        autoStart: options.queue?.autoStart === true,
-        ...options.queue
-      },
-      puppeteer: {
-        // Disable pool warmup by default to avoid immediate browser launches
-        pool: { enabled: false },
-        ...options.puppeteer
-      },
-      ttl: options.ttl || null,
-      processor: typeof options.processor === "function" ? options.processor : null
-    };
-    this.pluginFactories = {
-      puppeteer: options.pluginFactories?.puppeteer || ((pluginOptions) => new PuppeteerPlugin(pluginOptions)),
-      queue: options.pluginFactories?.queue || ((queueOptions) => new S3QueuePlugin(queueOptions)),
-      ttl: options.pluginFactories?.ttl || ((ttlOptions) => new TTLPlugin(ttlOptions))
-    };
-    this.dependencies = [];
-    this.targetsResource = null;
-    this.puppeteerPlugin = null;
-    this.queuePlugin = null;
-    this.ttlPlugin = null;
-    this.processor = this.config.processor;
-    this.queueHandler = this.queueHandler.bind(this);
-  }
-  _dependencyName(alias) {
-    return `${this.namespace}-${alias}`.toLowerCase();
-  }
-  async _installDependency(alias, plugin) {
-    const name = this._dependencyName(alias);
-    const instance = await this.database.usePlugin(plugin, name);
-    this.dependencies.push({ name, instance });
-    return instance;
-  }
-  async _ensureTargetsResource() {
-    if (this.database.resources?.[this.config.targetsResource]) {
-      this.targetsResource = this.database.resources[this.config.targetsResource];
-      return;
-    }
-    const [created, err, resource] = await tryFn(() => this.database.createResource({
-      name: this.config.targetsResource,
-      attributes: {
-        id: "string|required",
-        url: "string|required",
-        method: "string|optional",
-        depth: "number|optional",
-        priority: "number|default:0",
-        headers: "json|optional",
-        metadata: "json|optional",
-        createdAt: "string|required"
-      },
-      behavior: "body-overflow",
-      timestamps: true,
-      asyncPartitions: true,
-      partitions: {
-        byPriority: { fields: { priority: "number" } },
-        byDate: { fields: { createdAt: "string|maxlength:10" } }
-      }
-    }));
-    if (!created) {
-      if (resource) {
-        this.targetsResource = resource;
-        return;
-      }
-      throw err;
-    }
-    this.targetsResource = this.database.resources[this.config.targetsResource];
-  }
-  async onInstall() {
-    await this._ensureTargetsResource();
-    this.puppeteerPlugin = await this._installDependency(
-      "puppeteer",
-      this.pluginFactories.puppeteer({
-        namespace: this.namespace,
-        ...this.config.puppeteer
-      })
-    );
-    const queueOptions = {
-      namespace: this.namespace,
-      resource: this.config.queue.resource,
-      deadLetterResource: this.config.queue.deadLetterResource,
-      visibilityTimeout: this.config.queue.visibilityTimeout,
-      pollInterval: this.config.queue.pollInterval,
-      maxAttempts: this.config.queue.maxAttempts,
-      concurrency: this.config.queue.concurrency,
-      autoStart: this.config.queue.autoStart && typeof this.processor === "function",
-      onMessage: this.queueHandler,
-      verbose: this.config.queue.verbose
-    };
-    this.queuePlugin = await this._installDependency("queue", this.pluginFactories.queue(queueOptions));
-    if (this.config.ttl) {
-      const ttlConfig = {
-        namespace: this.namespace,
-        ...this.config.ttl
-      };
-      ttlConfig.resources = ttlConfig.resources || {};
-      if (!ttlConfig.resources[this.queuePlugin.queueResourceName]) {
-        ttlConfig.resources[this.queuePlugin.queueResourceName] = {
-          ttl: ttlConfig.queue?.ttl || 3600,
-          onExpire: ttlConfig.queue?.onExpire || "hard-delete",
-          field: ttlConfig.queue?.field || null
-        };
-      }
-      delete ttlConfig.queue;
-      this.ttlPlugin = await this._installDependency("ttl", this.pluginFactories.ttl(ttlConfig));
-    }
-    this.emit("spider.installed", {
-      namespace: this.namespace,
-      targetsResource: this.config.targetsResource
-    });
-  }
-  async onStart() {
-    if (this.config.queue.autoStart && typeof this.processor === "function") {
-      await this.startProcessing();
-    }
-  }
-  async onStop() {
-    await this.stopProcessing();
-  }
-  async onUninstall(options = {}) {
-    await this.onStop();
-    for (const dep of [...this.dependencies].reverse()) {
-      await this.database.uninstallPlugin(dep.name, { purgeData: options.purgeData === true });
-    }
-    this.dependencies = [];
-  }
-  /**
-   * Register a queue processor.
-   */
-  async setProcessor(handler, { autoStart = true, concurrency } = {}) {
-    this.processor = handler;
-    if (autoStart && typeof handler === "function") {
-      await this.startProcessing({ concurrency });
-    }
-  }
-  /**
-   * Enqueue a target for crawling.
-   */
-  async enqueueTarget(data, options = {}) {
-    if (!this.targetsResource?.enqueue) {
-      throw new PluginError("[SpiderPlugin] Queue helpers not initialized yet", {
-        pluginName: "SpiderPlugin",
-        operation: "enqueueTarget",
-        statusCode: 500,
-        retriable: false,
-        suggestion: "Call plugin.initialize() before enqueueing targets so queue helpers are registered."
-      });
-    }
-    return await this.targetsResource.enqueue({
-      createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
-      ...data
-    }, options);
-  }
-  /**
-   * Start processing queued targets.
-   */
-  async startProcessing(options = {}) {
-    if (!this.targetsResource?.startProcessing) return;
-    const concurrency = options.concurrency || this.config.queue.concurrency;
-    await this.targetsResource.startProcessing(this.queueHandler, { concurrency });
-  }
-  /**
-   * Stop processing queued targets.
-   */
-  async stopProcessing() {
-    if (this.targetsResource?.stopProcessing) {
-      await this.targetsResource.stopProcessing();
-    }
-  }
-  async queueHandler(record, context) {
-    if (typeof this.processor !== "function") {
-      throw new PluginError("[SpiderPlugin] No processor registered. Call setProcessor(fn) first.", {
-        pluginName: "SpiderPlugin",
-        operation: "queueHandler",
-        statusCode: 500,
-        retriable: false,
-        suggestion: "Register a processor via plugin.setProcessor(jobHandler) before starting the queue."
-      });
-    }
-    const helpers = {
-      puppeteer: this.puppeteerPlugin,
-      queue: this.queuePlugin,
-      enqueue: this.enqueueTarget.bind(this),
-      resource: this.targetsResource,
-      plugin: this
-    };
-    return await this.processor(record, context, helpers);
   }
 }
 
@@ -64115,6 +63921,553 @@ class VectorPlugin extends Plugin {
   }
 }
 
+const execFileAsync = node_util.promisify(node_child_process.execFile);
+class CommandRunner {
+  constructor(options = {}) {
+    this.execFile = options.execFile || execFileAsync;
+    this.availabilityCache = /* @__PURE__ */ new Map();
+  }
+  async isAvailable(command, overridePath) {
+    if (overridePath) {
+      return true;
+    }
+    if (this.availabilityCache.has(command)) {
+      return this.availabilityCache.get(command);
+    }
+    try {
+      await this.execFile("which", [command], { timeout: 1500 });
+      this.availabilityCache.set(command, true);
+      return true;
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        this.availabilityCache.set(command, false);
+        return false;
+      }
+      this.availabilityCache.set(command, false);
+      return false;
+    }
+  }
+  async run(command, args = [], options = {}) {
+    const resolvedCommand = options?.path || command;
+    if (!await this.isAvailable(command, options?.path)) {
+      const error = new Error(`Command "${command}" is not available on this system`);
+      error.code = "ENOENT";
+      return { ok: false, error, stdout: "", stderr: "" };
+    }
+    try {
+      const result = await this.execFile(resolvedCommand, args, {
+        timeout: options.timeout ?? 1e4,
+        maxBuffer: options.maxBuffer ?? 2 * 1024 * 1024
+      });
+      return {
+        ok: true,
+        stdout: result.stdout?.toString() ?? "",
+        stderr: result.stderr?.toString() ?? ""
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error,
+        stdout: error?.stdout?.toString() ?? "",
+        stderr: error?.stderr?.toString() ?? ""
+      };
+    }
+  }
+}
+class NetworkDiagnosticsPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    const {
+      tools,
+      concurrency = 4,
+      ping = {},
+      traceroute = {},
+      curl = {},
+      nmap = {},
+      commandRunner = null
+    } = options;
+    this.config = {
+      defaultTools: tools || ["dns", "certificate", "ping", "traceroute", "curl", "nmap"],
+      concurrency,
+      ping: {
+        count: ping.count ?? 4,
+        timeout: ping.timeout ?? 7e3
+      },
+      traceroute: {
+        cycles: traceroute.cycles ?? 4,
+        timeout: traceroute.timeout ?? 12e3
+      },
+      curl: {
+        timeout: curl.timeout ?? 8e3,
+        userAgent: curl.userAgent ?? "Mozilla/5.0 (compatible; s3db-network-diagnostics/1.0; +https://github.com/forattini-dev/s3db.js)"
+      },
+      nmap: {
+        topPorts: nmap.topPorts ?? 10,
+        extraArgs: nmap.extraArgs ?? []
+      }
+    };
+    this.commandRunner = commandRunner || new CommandRunner();
+  }
+  async onInstall() {
+    return void 0;
+  }
+  async onStart() {
+    return void 0;
+  }
+  async runDiagnostics(target, options = {}) {
+    const normalizedTarget = this._normalizeTarget(target);
+    const tools = options.tools && Array.isArray(options.tools) ? options.tools : this.config.defaultTools;
+    const results = {};
+    const pool = await promisePool.PromisePool.withConcurrency(options.concurrency ?? this.config.concurrency).for(tools).process(async (tool) => {
+      try {
+        const output = await this._runTool(tool, normalizedTarget, results);
+        results[tool] = output;
+        return { tool, output };
+      } catch (error) {
+        results[tool] = {
+          status: "error",
+          message: error?.message || "Unexpected diagnostic failure"
+        };
+        return { tool, error };
+      }
+    });
+    if (pool.errors.length > 0) {
+      this.emit("diagnostics:error", {
+        target: normalizedTarget.host,
+        errors: pool.errors.map(({ item, error }) => ({ tool: item, message: error.message }))
+      });
+    }
+    const fingerprint = this._buildFingerprint(normalizedTarget, results);
+    return {
+      target: normalizedTarget,
+      collectedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      results,
+      fingerprint,
+      toolsAttempted: tools
+    };
+  }
+  async _runTool(tool, normalizedTarget, cache) {
+    switch (tool) {
+      case "dns":
+        return this._gatherDns(normalizedTarget);
+      case "certificate":
+        return this._gatherCertificate(normalizedTarget);
+      case "ping":
+        return this._runPing(normalizedTarget);
+      case "traceroute":
+        return this._runTraceroute(normalizedTarget);
+      case "curl":
+        return this._runCurl(normalizedTarget);
+      case "nmap":
+        return this._runNmap(normalizedTarget);
+      default:
+        throw new Error(`Unknown diagnostic tool "${tool}"`);
+    }
+  }
+  async _gatherDns(target) {
+    const result = {
+      status: "ok",
+      records: {},
+      errors: {}
+    };
+    try {
+      const lookups = await Promise.allSettled([
+        dns.lookup(target.host, { all: true }),
+        dns.resolve4(target.host),
+        dns.resolve6(target.host).catch(() => []),
+        dns.resolveNs(target.host).catch(() => []),
+        dns.resolveMx(target.host).catch(() => []),
+        dns.resolveTxt(target.host).catch(() => [])
+      ]);
+      const [lookupAll, aRecords, aaaaRecords, nsRecords, mxRecords, txtRecords] = lookups;
+      if (lookupAll.status === "fulfilled") {
+        result.records.lookup = lookupAll.value;
+      } else {
+        result.errors.lookup = lookupAll.reason?.message;
+      }
+      result.records.a = aRecords.status === "fulfilled" ? aRecords.value : [];
+      if (aRecords.status === "rejected") {
+        result.errors.a = aRecords.reason?.message;
+      }
+      result.records.aaaa = aaaaRecords.status === "fulfilled" ? aaaaRecords.value : [];
+      if (aaaaRecords.status === "rejected") {
+        result.errors.aaaa = aaaaRecords.reason?.message;
+      }
+      result.records.ns = nsRecords.status === "fulfilled" ? nsRecords.value : [];
+      if (nsRecords.status === "rejected") {
+        result.errors.ns = nsRecords.reason?.message;
+      }
+      result.records.mx = mxRecords.status === "fulfilled" ? mxRecords.value : [];
+      if (mxRecords.status === "rejected") {
+        result.errors.mx = mxRecords.reason?.message;
+      }
+      result.records.txt = txtRecords.status === "fulfilled" ? txtRecords.value : [];
+      if (txtRecords.status === "rejected") {
+        result.errors.txt = txtRecords.reason?.message;
+      }
+    } catch (error) {
+      result.status = "error";
+      result.message = error?.message || "DNS lookup failed";
+    }
+    return result;
+  }
+  async _gatherCertificate(target) {
+    const shouldCheckTls = target.protocol === "https" || !target.protocol && (target.port === 443 || target.host.includes(":") === false);
+    if (!shouldCheckTls) {
+      return {
+        status: "skipped",
+        message: "TLS inspection skipped for non-HTTPS target"
+      };
+    }
+    const port = target.port || 443;
+    return new Promise((resolve) => {
+      const socket = tls.connect(
+        {
+          host: target.host,
+          port,
+          servername: target.host,
+          rejectUnauthorized: false,
+          timeout: 5e3
+        },
+        () => {
+          const certificate = socket.getPeerCertificate(true);
+          socket.end();
+          if (!certificate || Object.keys(certificate).length === 0) {
+            resolve({
+              status: "error",
+              message: "No certificate information available"
+            });
+            return;
+          }
+          resolve({
+            status: "ok",
+            subject: certificate.subject,
+            issuer: certificate.issuer,
+            validFrom: certificate.valid_from,
+            validTo: certificate.valid_to,
+            fingerprint: certificate.fingerprint256 || certificate.fingerprint,
+            subjectAltName: certificate.subjectaltname ? certificate.subjectaltname.split(",").map((entry) => entry.trim()) : [],
+            raw: certificate
+          });
+        }
+      );
+      socket.on("error", (error) => {
+        resolve({
+          status: "error",
+          message: error?.message || "Unable to retrieve certificate"
+        });
+      });
+      socket.setTimeout(6e3, () => {
+        socket.destroy();
+        resolve({
+          status: "timeout",
+          message: "TLS handshake timed out"
+        });
+      });
+    });
+  }
+  async _runPing(target) {
+    const args = ["-n", "-c", String(this.config.ping.count), target.host];
+    const run = await this.commandRunner.run("ping", args, {
+      timeout: this.config.ping.timeout
+    });
+    if (!run.ok) {
+      return {
+        status: "unavailable",
+        message: run.error?.message || "Ping failed",
+        stderr: run.stderr
+      };
+    }
+    const metrics = this._parsePingOutput(run.stdout);
+    return {
+      status: "ok",
+      stdout: run.stdout,
+      metrics
+    };
+  }
+  async _runTraceroute(target) {
+    if (await this.commandRunner.isAvailable("mtr")) {
+      const args = [
+        "--report",
+        "--report-cycles",
+        String(this.config.traceroute.cycles),
+        "--json",
+        target.host
+      ];
+      const mtrResult = await this.commandRunner.run("mtr", args, {
+        timeout: this.config.traceroute.timeout,
+        maxBuffer: 4 * 1024 * 1024
+      });
+      if (mtrResult.ok) {
+        try {
+          const parsed = JSON.parse(mtrResult.stdout);
+          return {
+            status: "ok",
+            type: "mtr",
+            report: parsed
+          };
+        } catch (error) {
+          return {
+            status: "ok",
+            type: "mtr",
+            stdout: mtrResult.stdout
+          };
+        }
+      }
+    }
+    if (await this.commandRunner.isAvailable("traceroute")) {
+      const tracerouteResult = await this.commandRunner.run(
+        "traceroute",
+        ["-n", target.host],
+        {
+          timeout: this.config.traceroute.timeout
+        }
+      );
+      if (tracerouteResult.ok) {
+        return {
+          status: "ok",
+          type: "traceroute",
+          stdout: tracerouteResult.stdout
+        };
+      }
+      return {
+        status: "error",
+        message: tracerouteResult.error?.message || "Traceroute failed",
+        stderr: tracerouteResult.stderr
+      };
+    }
+    return {
+      status: "unavailable",
+      message: "mtr/traceroute commands not available"
+    };
+  }
+  async _runCurl(target) {
+    const url = this._buildUrl(target);
+    const args = [
+      "-I",
+      "-sS",
+      "-L",
+      "--max-time",
+      String(Math.ceil(this.config.curl.timeout / 1e3)),
+      "--user-agent",
+      this.config.curl.userAgent,
+      url
+    ];
+    const result = await this.commandRunner.run("curl", args, {
+      timeout: this.config.curl.timeout
+    });
+    if (!result.ok) {
+      return {
+        status: "unavailable",
+        message: result.error?.message || "curl failed",
+        stderr: result.stderr
+      };
+    }
+    const headers = this._parseCurlHeaders(result.stdout);
+    return {
+      status: "ok",
+      url,
+      headers,
+      raw: result.stdout
+    };
+  }
+  async _runNmap(target) {
+    if (!await this.commandRunner.isAvailable("nmap")) {
+      return {
+        status: "unavailable",
+        message: "nmap is not available on this system"
+      };
+    }
+    const args = [
+      "-Pn",
+      "--top-ports",
+      String(this.config.nmap.topPorts),
+      target.host,
+      ...this.config.nmap.extraArgs
+    ];
+    const result = await this.commandRunner.run("nmap", args, {
+      timeout: 2e4,
+      maxBuffer: 4 * 1024 * 1024
+    });
+    if (!result.ok) {
+      return {
+        status: "error",
+        message: result.error?.message || "nmap scan failed",
+        stderr: result.stderr
+      };
+    }
+    return {
+      status: "ok",
+      summary: this._parseNmapOutput(result.stdout),
+      raw: result.stdout
+    };
+  }
+  _buildFingerprint(target, results) {
+    const summary = {
+      target: target.host,
+      primaryIp: null,
+      ipAddresses: [],
+      cdn: null,
+      server: null,
+      technologies: [],
+      openPorts: [],
+      latencyMs: null,
+      certificate: null,
+      notes: []
+    };
+    const dnsInfo = results.dns;
+    const curlInfo = results.curl;
+    const pingInfo = results.ping;
+    const nmapInfo = results.nmap;
+    const certificateInfo = results.certificate;
+    if (dnsInfo?.records?.a?.length) {
+      summary.ipAddresses.push(...dnsInfo.records.a);
+      summary.primaryIp = dnsInfo.records.a[0];
+    } else if (dnsInfo?.records?.lookup?.length) {
+      summary.ipAddresses.push(...dnsInfo.records.lookup.map((entry) => entry.address));
+      summary.primaryIp = summary.ipAddresses[0] || null;
+    }
+    if (pingInfo?.metrics?.avg !== void 0) {
+      summary.latencyMs = pingInfo.metrics.avg;
+    }
+    if (certificateInfo?.status === "ok") {
+      summary.certificate = {
+        subject: certificateInfo.subject,
+        issuer: certificateInfo.issuer,
+        validFrom: certificateInfo.validFrom,
+        validTo: certificateInfo.validTo
+      };
+    }
+    if (curlInfo?.headers) {
+      if (curlInfo.headers.server) {
+        summary.server = curlInfo.headers.server;
+        summary.technologies.push(curlInfo.headers.server);
+      }
+      if (curlInfo.headers["x-powered-by"]) {
+        summary.technologies.push(curlInfo.headers["x-powered-by"]);
+      }
+      if (curlInfo.headers["cf-cache-status"] || curlInfo.headers["cf-ray"]) {
+        summary.cdn = "Cloudflare";
+      }
+      if (!summary.cdn && curlInfo.headers.via?.includes("cloudfront.net")) {
+        summary.cdn = "AWS CloudFront";
+      }
+      if (!summary.cdn && curlInfo.headers["x-akamai-request-id"]) {
+        summary.cdn = "Akamai";
+      }
+      if (curlInfo.headers["x-cache"]) {
+        summary.notes.push(`Cache hint: ${curlInfo.headers["x-cache"]}`);
+      }
+    }
+    if (nmapInfo?.summary?.openPorts?.length) {
+      summary.openPorts = nmapInfo.summary.openPorts;
+      summary.technologies.push(...nmapInfo.summary.detectedServices);
+    }
+    summary.technologies = Array.from(
+      new Set(
+        summary.technologies.filter(Boolean).map((value) => value.split(",").map((v) => v.trim()).filter(Boolean)).flat()
+      )
+    );
+    return summary;
+  }
+  _parsePingOutput(text) {
+    const metrics = {
+      packetsTransmitted: null,
+      packetsReceived: null,
+      packetLoss: null,
+      min: null,
+      avg: null,
+      max: null,
+      stdDev: null
+    };
+    const packetLine = text.split("\n").find((line) => line.includes("packets transmitted"));
+    if (packetLine) {
+      const match = packetLine.match(/(\d+)\s+packets transmitted,\s+(\d+)\s+received,.*?([\d.]+)% packet loss/);
+      if (match) {
+        metrics.packetsTransmitted = Number(match[1]);
+        metrics.packetsReceived = Number(match[2]);
+        metrics.packetLoss = Number(match[3]);
+      }
+    }
+    const statsLine = text.split("\n").find((line) => line.includes("min/avg/max"));
+    if (statsLine) {
+      const match = statsLine.match(/=\s*([\d.]+)\/([\d.]+)\/([\d.]+)\/([\d.]+)/);
+      if (match) {
+        metrics.min = Number(match[1]);
+        metrics.avg = Number(match[2]);
+        metrics.max = Number(match[3]);
+        metrics.stdDev = Number(match[4]);
+      }
+    }
+    return metrics;
+  }
+  _parseCurlHeaders(raw) {
+    const lines = raw.split(/\r?\n/).filter(Boolean);
+    const headers = {};
+    for (const line of lines) {
+      if (!line.includes(":")) continue;
+      const [key, ...rest] = line.split(":");
+      headers[key.trim().toLowerCase()] = rest.join(":").trim();
+    }
+    return headers;
+  }
+  _parseNmapOutput(raw) {
+    const lines = raw.split("\n");
+    const openPorts = [];
+    const detectedServices = [];
+    for (const line of lines) {
+      const match = line.match(/^(\d+\/[a-z]+)\s+(open|filtered|closed)\s+([^\s]+)(.*)$/);
+      if (match && match[2] === "open") {
+        const port = match[1];
+        const service = match[3];
+        const detail = match[4]?.trim();
+        openPorts.push({ port, service, detail });
+        detectedServices.push(`${service}${detail ? ` ${detail}` : ""}`.trim());
+      }
+    }
+    return {
+      openPorts,
+      detectedServices: Array.from(new Set(detectedServices))
+    };
+  }
+  _normalizeTarget(target) {
+    if (!target || typeof target !== "string") {
+      throw new Error("Target must be a non-empty string");
+    }
+    let url;
+    try {
+      url = new node_url.URL(target.includes("://") ? target : `https://${target}`);
+    } catch (error) {
+      url = new node_url.URL(`https://${target}`);
+    }
+    const protocol = url.protocol ? url.protocol.replace(":", "") : null;
+    const host = url.hostname || target;
+    const port = url.port ? Number(url.port) : this._defaultPortForProtocol(protocol);
+    return {
+      original: target,
+      host,
+      protocol,
+      port,
+      path: url.pathname === "/" ? null : url.pathname
+    };
+  }
+  _buildUrl(target) {
+    const protocol = target.protocol || (target.port === 443 ? "https" : "http");
+    const portPart = target.port && ![80, 443].includes(target.port) ? `:${target.port}` : "";
+    return `${protocol}://${target.host}${portPart}${target.path ?? ""}`;
+  }
+  _defaultPortForProtocol(protocol) {
+    switch (protocol) {
+      case "https":
+        return 443;
+      case "http":
+        return 80;
+      default:
+        return null;
+    }
+  }
+}
+
 class MemoryStorage {
   constructor(config = {}) {
     this.objects = /* @__PURE__ */ new Map();
@@ -76372,6 +76725,7 @@ exports.MongoDBAtlasInventoryDriver = MongoDBAtlasInventoryDriver;
 exports.MongoDBReplicator = MongoDBReplicator;
 exports.MultiBackupDriver = MultiBackupDriver;
 exports.MySQLReplicator = MySQLReplicator;
+exports.NetworkDiagnosticsPlugin = NetworkDiagnosticsPlugin;
 exports.NoSuchBucket = NoSuchBucket;
 exports.NoSuchKey = NoSuchKey;
 exports.NotFound = NotFound;
@@ -76410,7 +76764,6 @@ exports.SchedulerPlugin = SchedulerPlugin;
 exports.Schema = Schema;
 exports.SchemaError = SchemaError;
 exports.Seeder = Seeder;
-exports.SpiderPlugin = SpiderPlugin;
 exports.SqsConsumer = SqsConsumer;
 exports.SqsReplicator = SqsReplicator;
 exports.StateMachinePlugin = StateMachinePlugin;
