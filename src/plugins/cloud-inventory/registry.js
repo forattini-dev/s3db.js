@@ -59,7 +59,12 @@ export function createCloudDriver(name, options) {
     });
   }
 
-  const driver = CLOUD_DRIVERS.get(name)(options);
+  const resolvedOptions = { ...(options || {}) };
+  if (!resolvedOptions.driver) {
+    resolvedOptions.driver = name;
+  }
+
+  const driver = CLOUD_DRIVERS.get(name)(resolvedOptions);
   if (!(driver instanceof BaseCloudDriver)) {
     throw new PluginError(`Driver "${name}" factory must return an instance of BaseCloudDriver`, {
       pluginName: 'CloudInventoryPlugin',

@@ -1523,6 +1523,8 @@ registerCloudDriver('fixture', (options) => new FixtureDriver(options));
 
 Point a cloud definition at `driver: "fixture"` to load deterministic data without altering production code paths.
 
+> 🙌 When you call `createCloudDriver('fixture', options)` you no longer have to copy the driver name into `options.driver` yourself—the registry injects it automatically before instantiating your factory or subclass.
+
 ---
 
 ## 🚨 Error Handling

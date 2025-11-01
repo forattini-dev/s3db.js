@@ -116,6 +116,9 @@ export class S3QueuePlugin extends Plugin {
     this.deadLetterResourceName = this._resolveDeadLetterResourceName();
     this.config.deadLetterResource = this.deadLetterResourceName;
 
+    this.queueResourceAlias = options.queueResource || `${this.config.resource}_queue`;
+    this.deadLetterResourceAlias = options.deadLetterResource || null;
+
     this.queueResource = null;       // Resource: <resource>_queue
     this.targetResource = null;      // Resource original do usuário
     this.deadLetterResourceObj = null;
@@ -141,7 +144,18 @@ export class S3QueuePlugin extends Plugin {
 
   _resolveDeadLetterResourceName() {
     if (!this._deadLetterDescriptor) return null;
-    return resolveResourceName('s3queue', this._deadLetterDescriptor, {
+    const { override, defaultName } = this._deadLetterDescriptor;
+    if (override) {
+      // Honor explicit overrides verbatim unless user opted into plg_* naming.
+      if (override.startsWith('plg_')) {
+        return resolveResourceName('s3queue', { override }, {
+          namespace: this.namespace,
+          applyNamespaceToOverrides: true
+        });
+      }
+      return override;
+    }
+    return resolveResourceName('s3queue', { defaultName }, {
       namespace: this.namespace
     });
   }
@@ -215,6 +229,13 @@ export class S3QueuePlugin extends Plugin {
       }
     }
     this.queueResourceName = this.queueResource.name;
+
+    if (this.queueResourceAlias) {
+      const existing = this.database.resources[this.queueResourceAlias];
+      if (!existing || existing === this.queueResource) {
+        this.database.resources[this.queueResourceAlias] = this.queueResource;
+      }
+    }
 
     // Locks are now managed by PluginStorage with TTL - no Resource needed
     // Lock acquisition is handled via storage.acquireLock() with automatic expiration
@@ -818,6 +839,14 @@ export class S3QueuePlugin extends Plugin {
     }
 
     this.deadLetterResourceName = this.deadLetterResourceObj.name;
+
+    if (this.deadLetterResourceAlias) {
+      const existing = this.database.resources[this.deadLetterResourceAlias];
+      if (!existing || existing === this.deadLetterResourceObj) {
+        this.database.resources[this.deadLetterResourceAlias] = this.deadLetterResourceObj;
+      }
+    }
+
     if (this.config.verbose) {
       console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
     }

@@ -319,6 +319,8 @@ The cache plugin ships without hard plugin dependencies. When you enable the Red
 | `enableCompression` | boolean | `false` | Compress cached values with gzip |
 | `compressionThreshold` | number | `1024` | Minimum size (bytes) to trigger compression |
 
+Oversized payloads that exceed `maxMemoryBytes` are skipped, and the driver increments `evictedDueToMemory` so monitoring dashboards can spot workloads that need a larger ceiling (or compression).
+
 ### Redis Driver Config
 
 | Parameter | Type | Default | Description |
@@ -540,6 +542,8 @@ await products.count();  // Cached to disk
 console.log('Cache stored in ./cache directory');
 ```
 
+> ℹ️ When you pass `createDirectory: false`, the driver now refuses to create the folder for you. Make sure the path already exists or the filesystem cache will raise a `CacheError` during installation.
+
 ### Example 3: S3 Cache (Shared, Distributed)
 
 Best for multi-server deployments:
@@ -600,6 +604,25 @@ await users.cache.clear();
 
 console.log('Manual cache control enabled');
 ```
+
+### Inspecting Cache Statistics
+
+```javascript
+const plugin = new CachePlugin({
+  driver: 'filesystem',
+  partitionAware: true,
+  config: { directory: './cache' }
+});
+
+await db.usePlugin(plugin);
+// ...
+const stats = await plugin.getCacheStats();
+console.log(stats.driver); // e.g. "PartitionAwareFilesystemCache"
+console.log(stats.size);   // Number of cached entries (nested partitions included)
+console.log(stats.keys.slice(0, 5)); // Sample cache keys
+```
+
+`getCacheStats()` now returns consistent `size`, `keys`, and driver metadata for every backend. The partition-aware filesystem cache traverses nested directories, so `size` and `keys` reflect the on-disk structure—even when partitions fan out into multiple folders. Cache keys omit the `partition=` segment when no partition values were provided, matching the runtime key shape produced by read/write operations.
 
 ---
 

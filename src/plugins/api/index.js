@@ -313,7 +313,22 @@ export class ApiPlugin extends Plugin {
       },
 
       // Custom global middlewares
-      middlewares: options.middlewares || []
+      middlewares: options.middlewares || [],
+
+      requestId: options.requestId || { enabled: false },
+      sessionTracking: options.sessionTracking || { enabled: false },
+      events: options.events || { enabled: false },
+      metrics: options.metrics || { enabled: false },
+      failban: {
+        ...(options.failban || {}),
+        enabled: options.failban?.enabled === true,
+        resourceNames: resourceNamesOption.failban || options.failban?.resourceNames || {}
+      },
+      static: Array.isArray(options.static) ? options.static : [],
+      health: typeof options.health === 'object'
+        ? options.health
+        : { enabled: options.health !== false },
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024
     };
 
     this.config.resources = this._normalizeResourcesConfig(options.resources);

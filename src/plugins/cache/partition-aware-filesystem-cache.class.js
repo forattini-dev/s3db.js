@@ -63,7 +63,9 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
       segments.push(`resource=${this._sanitizePathValue(resource)}`);
     }
 
-    if (partition) {
+    const hasPartitionValues = partitionValues && Object.values(partitionValues).some(value => value !== null && value !== undefined && value !== '');
+
+    if (partition && hasPartitionValues) {
       segments.push(`partition=${this._sanitizePathValue(partition)}`);
 
       const sortedFields = Object.entries(partitionValues)
@@ -79,7 +81,7 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
       segments.push(`action=${this._sanitizePathValue(action)}`);
     }
 
-    if (Object.keys(params).length > 0) {
+    if (params && Object.keys(params).length > 0) {
       const paramsStr = Object.entries(params)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([k, v]) => `${k}=${v}`)
@@ -579,6 +581,42 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
       return JSON.parse(content);
     } catch (error) {
       return { data: content }; // Fallback for non-JSON data
+    }
+  }
+
+  async size() {
+    const keys = await this.keys();
+    return keys.length;
+  }
+
+  async keys() {
+    const keys = [];
+    await this._collectKeysRecursive(this.directory, [], keys);
+    return keys;
+  }
+
+  async _collectKeysRecursive(currentDir, segments, result) {
+    const [ok, err, entries] = await tryFn(() => readdir(currentDir, { withFileTypes: true }));
+    if (!ok || !entries) {
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await this._collectKeysRecursive(entryPath, [...segments, entry.name], result);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+
+      if (!entry.name.startsWith(`${this.prefix}_`) || !entry.name.endsWith(this.fileExtension)) {
+        continue;
+      }
+
+      const keyPart = entry.name.slice(this.prefix.length + 1, -this.fileExtension.length);
+      const fullSegments = segments.length > 0 ? [...segments, keyPart] : [keyPart];
+      result.push(fullSegments.join('/'));
     }
   }
 } 
