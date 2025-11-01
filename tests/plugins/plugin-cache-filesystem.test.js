@@ -210,8 +210,8 @@ describe('FilesystemCache - Permission Tests', () => {
         createDirectory: false // Don't try to create directory
       });
       
-      // This should fail with ENOENT because directory doesn't exist
-      await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*ENOENT|no such file or directory/i);
+      // This should fail because directory doesn't exist and createDirectory is disabled
+      await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
     });
 
     test('should work correctly with valid temporary directories', async () => {
@@ -243,7 +243,7 @@ describe('FilesystemCache - Permission Tests', () => {
       });
       
       // Operations should fail because directory doesn't exist and won't be created
-      await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*no such file or directory|ENOENT/i);
+      await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
     });
 
     test('should demonstrate FilesystemCache error handling for missing directories', async () => {
@@ -258,8 +258,8 @@ describe('FilesystemCache - Permission Tests', () => {
         createDirectory: false
       });
       
-      // Should fail with ENOENT when trying to write to non-existent directory
-      await expect(cacheNoCreate.set('test', 'value')).rejects.toThrow(/Failed to set cache key.*ENOENT/i);
+      // Should fail when trying to write to non-existent directory with createDirectory disabled
+      await expect(cacheNoCreate.set('test', 'value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
       
       // Cleanup
       if (cacheNoCreate && cacheNoCreate.destroy) cacheNoCreate.destroy();
