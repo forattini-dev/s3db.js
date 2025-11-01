@@ -16,19 +16,22 @@ import {
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../config.js';
 
-async function waitForServer(port, maxAttempts = 30) {
+async function waitForServer(port, maxAttempts = 100) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`);
       if (response.ok || response.status === 503) {
         return;
       }
-    } catch {
+    } catch (err) {
       // swallow connection errors until server is ready
+      if (attempt % 10 === 0) {
+        console.log(`[waitForServer] Attempt ${attempt}/${maxAttempts} for port ${port} - ${err.code || err.message}`);
+      }
     }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error(`API server on port ${port} did not become ready in time`);
+  throw new Error(`API server on port ${port} did not become ready in time after ${maxAttempts * 100}ms`);
 }
 
 describe('API Plugin - resource configuration', () => {

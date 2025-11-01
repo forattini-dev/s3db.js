@@ -63,9 +63,10 @@ describe('PuppeteerPlugin', () => {
 
       await db.usePlugin(puppeteerPlugin);
 
-      const resource = await db.getResource('test_puppeteer_cookies');
+      // Plugin adds 'plg_' prefix to resource names
+      const resource = await db.getResource('plg_test_puppeteer_cookies');
       expect(resource).toBeDefined();
-      expect(resource.name).toBe('test_puppeteer_cookies');
+      expect(resource.name).toBe('plg_test_puppeteer_cookies');
     });
 
     it('should not create cookie storage when disabled', async () => {
