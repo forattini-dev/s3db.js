@@ -288,7 +288,7 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin = new PuppeteerPlugin();
 
       expect(() => puppeteerPlugin.getStorage()).toThrow(
-        'Plugin must be installed before accessing storage'
+        'Plugin storage unavailable until plugin is installed'
       );
     });
   });

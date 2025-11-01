@@ -1,5 +1,11 @@
 # 💾 Cache Plugin
 
+> **Adaptive multi-tier caching for s3db.js with memory, Redis, and S3 layers.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Drastically** reduces S3 costs and latency with intelligent caching (memory/redis/S3).

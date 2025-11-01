@@ -21,6 +21,7 @@ Complete configuration reference for the Identity Plugin. All options with descr
 | `issuer` | string | **required** | Issuer URL (MUST match public URL) |
 | `verbose` | boolean | `false` | Enable verbose logging |
 | `userResource` | string | `'users'` | Name of users resource |
+| `resourceNames` | object | auto-generated | Override internal resource names (`oauthKeys`, `authCodes`, `sessions`, `passwordResetTokens`, `mfaDevices`) |
 
 **Example:**
 ```javascript
@@ -29,7 +30,11 @@ const identityPlugin = new IdentityPlugin({
   host: '0.0.0.0',
   issuer: 'http://localhost:4000',
   verbose: true,
-  userResource: 'users'
+  userResource: 'users',
+  resourceNames: {
+    oauthKeys: 'plg_identity_oauth_keys_primary',
+    authCodes: 'plg_identity_auth_codes_primary'
+  }
 });
 ```
 
@@ -226,6 +231,43 @@ const identityPlugin = new IdentityPlugin({
   }
 });
 ```
+
+---
+
+## Authentication Drivers
+
+Customize how the Identity plugin authenticates users and OAuth clients. Built-in drivers can be tuned, disabled, or replaced with your own implementations.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `authDrivers.disableBuiltIns` | boolean | `false` | Disable all built-in drivers (`password`, `client_credentials`) |
+| `authDrivers.password.identifierField` | string | `'email'` | User attribute used to authenticate (e.g., `username`) |
+| `authDrivers.password.caseInsensitive` | boolean | `true` | Lowercase identifiers before lookup (useful for emails) |
+| `authDrivers.clientCredentials` | object | `{}` | Reserved for future built-in options (still required to keep secrets hashed) |
+| `authDrivers.drivers` | array | `[]` | Custom `AuthDriver` instances or `[DriverClass, options]` tuples to register |
+
+**Example – rename identifier + custom driver:**
+```javascript
+import { CustomSAMLDriver } from './custom-auth/saml-driver.js';
+
+await db.use(new IdentityPlugin({
+  issuer: 'https://sso.example.com',
+  authDrivers: {
+    password: {
+      identifierField: 'username',
+      caseInsensitive: false
+    },
+    drivers: [
+      [CustomSAMLDriver, { metadataUrl: 'https://idp.example.com/metadata' }]
+    ]
+  }
+}));
+```
+
+Implementation notes:
+- Built-in drivers automatically gain access to the S3DB resources (`users`, `clients`) and password helper used by the plugin.
+- Custom drivers must extend `AuthDriver` and implement `initialize(context)` plus `authenticate(request)`. Supported grant types can be advertised via `supportsGrant(grantType)`.
+- Driver instances are deduplicated by their supported types; attempting to register two drivers for the same type throws during startup.
 
 ---
 

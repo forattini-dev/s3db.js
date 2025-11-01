@@ -396,7 +396,13 @@
  *   const hourlyCost = currentCosts - hourStartCosts;
  *
  *   if (hourlyCost > HOURLY_COST_LIMIT) {
- *     throw new Error('Hourly cost limit exceeded');
+ *     throw new PluginError('Hourly cost limit exceeded', {
+ *       pluginName: 'CostsPlugin',
+ *       operation: 'rateLimiter',
+ *       statusCode: 429,
+ *       retriable: true,
+ *       suggestion: 'Delay the operation until costs fall below the configured threshold.'
+ *     });
  *   }
  *
  *   // Proceed with operation

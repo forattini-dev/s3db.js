@@ -24,6 +24,9 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 - ✅ Automatic retry with exponential backoff
 - ✅ Dead letter queue for failures
 - ✅ Complete event monitoring
+- ✅ **Sanitized Payloads**: Full records are reloaded and internal fields removed before replication
+
+Behind the scenes the plugin re-fetches every insert/update from S3DB (respecting overflow/truncate behaviors) and removes bookkeeping keys such as `_version`, `_plugin`, `$overflow`. The payload you replicate is exactly what was persisted.
 
 **When to use:**
 - 📊 Real-time analytics pipelines
@@ -722,15 +725,39 @@ await users.insert({ name: 'John', email: 'john@example.com' });
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable replication globally |
-| `replicators` | array | `[]` | Array of replicator configurations (required) |
-| `verbose` | boolean | `false` | Enable detailed console logging for debugging |
-| `persistReplicatorLog` | boolean | `false` | Store replication logs in database resource |
-| `replicatorLogResource` | string | `'replicator_log'` | Name of log resource for persistence |
-| `logErrors` | boolean | `true` | Log errors to replication log resource |
-| `batchSize` | number | `100` | Batch size for bulk replication operations |
-| `maxRetries` | number | `3` | Maximum retry attempts for failed replications |
-| `timeout` | number | `30000` | Timeout for replication operations (ms) |
+| `enabled` | boolean | `true` | Enable or disable replication globally. |
+| `replicators` | array | `[]` | Array of replicator configurations (required). |
+| `verbose` | boolean | `false` | Emit diagnostic logs for every replication attempt. |
+| `persistReplicatorLog` | boolean | `false` | Persist replication attempts to an internal log resource. |
+| `replicatorLogResource` | string | `'plg_replicator_logs'` | Override the auto-namespaced log resource name. |
+| `logErrors` | boolean | `true` | Write failed attempts to the log resource when available. |
+| `replicatorConcurrency` | number | `5` | Max replicators processed in parallel for a single event (PromisePool-controlled). |
+| `stopConcurrency` | number | `replicatorConcurrency` | Max replicators stopped in parallel when the plugin shuts down. |
+| `batchSize` | number | `100` | Page size when running `syncAllData`. |
+| `maxRetries` | number | `3` | Retry attempts for transient replication failures before surfacing errors. |
+| `timeout` | number | `30000` | Per-operation timeout in milliseconds. |
+
+Both concurrency knobs leverage `@supercharge/promise-pool` to keep replication bursts bounded even when dozens of drivers are configured.
+
+> **Log schema** — When `persistReplicatorLog` is enabled, the plugin provisions a `truncate-data` resource with the following fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | string | Auto-generated (`<resource>-<recordId>-<timestamp>`) |
+| `replicator` | string | Replicator identifier (`name`/`id`) |
+| `resource` / `resourceName` | string | Source resource name |
+| `action` | string | `insert`, `update`, `delete` |
+| `data` | json | Sanitized record payload (internal fields removed) |
+| `status` | string | `pending`, `failed`, or custom statuses |
+| `error` | string | Optional error message |
+| `timestamp` | number | Unix epoch (ms) |
+| `createdAt` | string | `YYYY-MM-DD` partition column |
+
+Errors are stored with `status: 'failed'`, allowing `retryFailedReplicators()` to query `{ status: 'failed' }` and replay them. Success logs can flip `status` to `success` via `updateReplicatorLog()`.
+
+> 🪝 **Automatic defaults:** the plugin installs `beforeInsert`, `beforeUpdate`, and `beforePatch` hooks on the log resource so every entry (even ones inserted manually for audits) gains an id, `timestamp`, normalized `resourceName`, `createdAt` partition key, and a numeric `retryCount`. That keeps the log parallelizable and consistent without requiring callers to remember those fields.
+
+`retryFailedReplicators()` respects `replicatorConcurrency`, replaying the backlog with a PromisePool so dozens of dead-letter items can recover in parallel without overwhelming downstream systems.
 
 ---
 
@@ -2047,20 +2074,24 @@ const getReplicatorConfig = () => {
 
 The Replicator Plugin uses standardized error classes with comprehensive context and recovery guidance:
 
-### ReplicatorError
+### ReplicationError
 
-All replication operations throw `ReplicatorError` instances with detailed context:
+All replication operations throw `ReplicationError` instances with detailed context:
 
 ```javascript
 try {
   await replicatorPlugin.replicateBatch('users', records);
 } catch (error) {
-  console.error(error.name);        // 'ReplicatorError'
-  console.error(error.message);     // Brief error summary
-  console.error(error.description); // Detailed explanation with guidance
-  console.error(error.context);     // Replicator, resource, operation details
+  console.error(error.name);        // 'ReplicationError'
+  console.error(error.statusCode);  // REST-friendly status (e.g. 409)
+  console.error(error.retriable);   // Should workers retry automatically?
+  console.error(error.suggestion);  // How to fix (normalized guidance)
+  console.error(error.operation);   // 'schemaSync', 'replicate', 'verify', ...
+  console.error(error.metadata);    // { resourceName, tableName, replicatorClass }
 }
 ```
+
+Tip: surface `suggestion` in dashboards/alerts so engineers instantly know the next action.
 
 ### Common Errors
 
@@ -2068,6 +2099,9 @@ try {
 
 **When**: Referencing non-existent replicator ID
 **Error**: `Replicator not found: {replicatorId}`
+- `statusCode`: 404
+- `retriable`: false
+- `suggestion`: List available replicators before invoking `syncAllData`.
 **Recovery**:
 ```javascript
 // Bad
@@ -2087,6 +2121,9 @@ if (replicators.find(r => r.id === 'my-replicator')) {
 
 **When**: Transform function throws or returns invalid data
 **Error**: `Transform function failed for resource '{resourceName}': {errorMessage}`
+- `statusCode`: 422
+- `retriable`: false
+- `suggestion`: Guard your transform with try/catch and return `null` when skipping a record.
 **Recovery**:
 ```javascript
 // Robust transform functions

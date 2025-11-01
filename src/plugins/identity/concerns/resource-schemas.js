@@ -4,6 +4,7 @@
  * These are the REQUIRED attributes that the Identity Plugin needs to function.
  * Users can extend these with custom attributes, but cannot override base fields.
  */
+import { PluginError } from '../../../errors.js';
 
 /**
  * Base attributes for Users resource
@@ -189,7 +190,14 @@ export function mergeResourceConfig(baseConfig, userConfig = {}, resourceType) {
         `Invalid extra attributes for ${resourceType} resource:`,
         ...validation.errors.map(err => `  - ${err}`)
       ].join('\n');
-      throw new Error(errorMsg);
+      throw new PluginError('Invalid extra attributes for identity resource', {
+        pluginName: 'IdentityPlugin',
+        operation: 'mergeResourceConfig',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Update the resource schema to match IdentityPlugin validation requirements.',
+        description: errorMsg
+      });
     }
   }
 

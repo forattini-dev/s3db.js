@@ -10,20 +10,7 @@ import { HetznerInventoryDriver } from './drivers/hetzner-driver.js';
 import { AlibabaInventoryDriver } from './drivers/alibaba-driver.js';
 import { CloudflareInventoryDriver } from './drivers/cloudflare-driver.js';
 import { MongoDBAtlasInventoryDriver } from './drivers/mongodb-atlas-driver.js';
-import {
-  AwsMockDriver,
-  GcpMockDriver,
-  DigitalOceanMockDriver,
-  OracleMockDriver,
-  AzureMockDriver,
-  VultrMockDriver,
-  LinodeMockDriver,
-  HetznerMockDriver,
-  AlibabaMockDriver,
-  CloudflareMockDriver,
-  MongoDBAtlasMockDriver
-} from './drivers/mock-drivers.js';
-
+import { PluginError } from '../../errors.js';
 const CLOUD_DRIVERS = new Map();
 
 /**
@@ -33,11 +20,23 @@ const CLOUD_DRIVERS = new Map();
  */
 export function registerCloudDriver(name, factory) {
   if (!name || typeof name !== 'string') {
-    throw new Error('registerCloudDriver: name must be a non-empty string');
+    throw new PluginError('registerCloudDriver: name must be a non-empty string', {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:register',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Call registerCloudDriver with a string identifier, e.g. registerCloudDriver("aws", factory).'
+    });
   }
 
   if (typeof factory !== 'function') {
-    throw new Error(`registerCloudDriver("${name}") expects a factory function`);
+    throw new PluginError(`registerCloudDriver("${name}") expects a factory function`, {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:register',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Pass a factory function that returns an instance of BaseCloudDriver.'
+    });
   }
 
   CLOUD_DRIVERS.set(name, factory);
@@ -51,12 +50,24 @@ export function registerCloudDriver(name, factory) {
  */
 export function createCloudDriver(name, options) {
   if (!CLOUD_DRIVERS.has(name)) {
-    throw new Error(`Cloud driver "${name}" is not registered. Registered drivers: ${[...CLOUD_DRIVERS.keys()].join(', ') || 'none'}`);
+    throw new PluginError(`Cloud driver "${name}" is not registered.`, {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:create',
+      statusCode: 400,
+      retriable: false,
+      suggestion: `Register the driver via registerCloudDriver before creating it. Registered drivers: ${[...CLOUD_DRIVERS.keys()].join(', ') || 'none'}`
+    });
   }
 
   const driver = CLOUD_DRIVERS.get(name)(options);
   if (!(driver instanceof BaseCloudDriver)) {
-    throw new Error(`Driver "${name}" factory must return an instance of BaseCloudDriver`);
+    throw new PluginError(`Driver "${name}" factory must return an instance of BaseCloudDriver`, {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:create',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Ensure the factory returns a class extending BaseCloudDriver.'
+    });
   }
   return driver;
 }
@@ -76,24 +87,48 @@ export function listCloudDrivers() {
  */
 export function validateCloudDefinition(cloud) {
   if (!cloud || typeof cloud !== 'object') {
-    throw new Error('Each cloud configuration must be an object');
+    throw new PluginError('Each cloud configuration must be an object', {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:validateDefinition',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide cloud definitions as objects (e.g. { driver: "aws", credentials: {...} }).'
+    });
   }
 
   const { driver, credentials } = cloud;
   if (!driver || typeof driver !== 'string') {
-    throw new Error('Cloud configuration requires a "driver" string');
+    throw new PluginError('Cloud configuration requires a "driver" string', {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:validateDefinition',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Set the driver field to a registered driver name.'
+    });
   }
 
   if (!CLOUD_DRIVERS.has(driver)) {
-    throw new Error(`Cloud driver "${driver}" is not registered`);
+    throw new PluginError(`Cloud driver "${driver}" is not registered`, {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:validateDefinition',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Register the driver via registerCloudDriver before referencing it in configuration.'
+    });
   }
 
   if (!credentials || typeof credentials !== 'object') {
-    throw new Error(`Cloud "${driver}" requires a credentials object`);
+    throw new PluginError(`Cloud "${driver}" requires a credentials object`, {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'registry:validateDefinition',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide credentials for each cloud entry (e.g. credentials: { token: "..." }).'
+    });
   }
 }
 
-// Register a no-op driver as a placeholder / mock implementation.
+// Register a no-op driver as a placeholder implementation.
 registerCloudDriver('noop', (options = {}) => {
   class NoopDriver extends BaseCloudDriver {
     async listResources() {
@@ -106,13 +141,6 @@ registerCloudDriver('noop', (options = {}) => {
     driver: options.driver || 'noop'
   });
 });
-
-function registerMockDriver(names, DriverClass) {
-  const list = Array.isArray(names) ? names : [names];
-  for (const name of list) {
-    registerCloudDriver(name, (options = {}) => new DriverClass(options));
-  }
-}
 
 registerCloudDriver('aws', (options = {}) => new AwsInventoryDriver(options));
 registerCloudDriver('gcp', (options = {}) => new GcpInventoryDriver(options));
@@ -131,16 +159,5 @@ registerCloudDriver('cloudflare', (options = {}) => new CloudflareInventoryDrive
 registerCloudDriver('cf', (options = {}) => new CloudflareInventoryDriver(options));
 registerCloudDriver('mongodb-atlas', (options = {}) => new MongoDBAtlasInventoryDriver(options));
 registerCloudDriver('atlas', (options = {}) => new MongoDBAtlasInventoryDriver(options));
-registerMockDriver('aws-mock', AwsMockDriver);
-registerMockDriver('gcp-mock', GcpMockDriver);
-registerMockDriver('vultr-mock', VultrMockDriver);
-registerMockDriver(['digitalocean-mock', 'do-mock'], DigitalOceanMockDriver);
-registerMockDriver(['oracle-mock', 'oci-mock'], OracleMockDriver);
-registerMockDriver(['azure-mock', 'az-mock'], AzureMockDriver);
-registerMockDriver('linode-mock', LinodeMockDriver);
-registerMockDriver('hetzner-mock', HetznerMockDriver);
-registerMockDriver(['alibaba-mock', 'aliyun-mock'], AlibabaMockDriver);
-registerMockDriver(['cloudflare-mock', 'cf-mock'], CloudflareMockDriver);
-registerMockDriver(['mongodb-atlas-mock', 'atlas-mock'], MongoDBAtlasMockDriver);
 
 export { BaseCloudDriver } from './drivers/base-driver.js';

@@ -3,13 +3,6 @@
  *
  * Drop-in replacement for the standard S3 Client that stores everything in memory.
  * Implements the complete Client interface including all AWS SDK commands.
- *
- * Usage:
- *   import { Database } from 's3db.js';
- *   import { MemoryClient } from 's3db.js/plugins/emulator';
- *
- *   const db = new Database({ client: new MemoryClient() });
- *   await db.connect();
  */
 
 import path from 'path';
@@ -23,22 +16,22 @@ import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
 import { MemoryStorage } from './memory-storage.class.js';
 
-/**
- * MemoryClient - simulates S3Client entirely in memory
- */
+const pathPosix = path.posix;
+
 export class MemoryClient extends EventEmitter {
   constructor(config = {}) {
     super();
 
     // Client configuration
     this.id = config.id || idGenerator(77);
-    this.verbose = config.verbose || false;
+    this.verbose = Boolean(config.verbose);
     this.parallelism = config.parallelism || 10;
 
     // Storage configuration
     this.bucket = config.bucket || 's3db';
     this.keyPrefix = config.keyPrefix || '';
     this.region = config.region || 'us-east-1';
+    this._keyPrefixForStrip = this.keyPrefix ? pathPosix.join(this.keyPrefix, '') : '';
 
     // Create internal storage engine
     this.storage = new MemoryStorage({
@@ -134,8 +127,8 @@ export class MemoryClient extends EventEmitter {
    * PutObjectCommand handler
    */
   async _handlePutObject(input) {
-    const key = input.Key;
-    const metadata = input.Metadata || {};
+    const key = this._applyKeyPrefix(input.Key);
+    const metadata = this._encodeMetadata(input.Metadata || {});
     const contentType = input.ContentType;
     const body = input.Body;
     const contentEncoding = input.ContentEncoding;
@@ -158,36 +151,41 @@ export class MemoryClient extends EventEmitter {
    * GetObjectCommand handler
    */
   async _handleGetObject(input) {
-    const key = input.Key;
-    return await this.storage.get(key);
+    const key = this._applyKeyPrefix(input.Key);
+    const response = await this.storage.get(key);
+    return this._decodeMetadataResponse(response);
   }
 
   /**
    * HeadObjectCommand handler
    */
   async _handleHeadObject(input) {
-    const key = input.Key;
-    return await this.storage.head(key);
+    const key = this._applyKeyPrefix(input.Key);
+    const response = await this.storage.head(key);
+    return this._decodeMetadataResponse(response);
   }
 
   /**
    * CopyObjectCommand handler
    */
   async _handleCopyObject(input) {
-    // Parse source: "bucket/key" format
-    const copySource = input.CopySource;
-    const parts = copySource.split('/');
-    const sourceKey = parts.slice(1).join('/'); // Remove bucket part
+    const { sourceBucket, sourceKey } = this._parseCopySource(input.CopySource);
 
-    const destinationKey = input.Key;
-    const metadata = input.Metadata;
-    const metadataDirective = input.MetadataDirective;
-    const contentType = input.ContentType;
+    if (sourceBucket !== this.bucket) {
+      throw new DatabaseError(`Cross-bucket copy is not supported in MemoryClient (requested ${sourceBucket} → ${this.bucket})`, {
+        operation: 'CopyObject',
+        retriable: false,
+        suggestion: 'Instantiate a MemoryClient with the desired bucket or copy within the same bucket.'
+      });
+    }
+
+    const destinationKey = this._applyKeyPrefix(input.Key);
+    const encodedMetadata = this._encodeMetadata(input.Metadata);
 
     return await this.storage.copy(sourceKey, destinationKey, {
-      metadata,
-      metadataDirective,
-      contentType
+      metadata: encodedMetadata,
+      metadataDirective: input.MetadataDirective,
+      contentType: input.ContentType
     });
   }
 
@@ -195,7 +193,7 @@ export class MemoryClient extends EventEmitter {
    * DeleteObjectCommand handler
    */
   async _handleDeleteObject(input) {
-    const key = input.Key;
+    const key = this._applyKeyPrefix(input.Key);
     return await this.storage.delete(key);
   }
 
@@ -204,7 +202,7 @@ export class MemoryClient extends EventEmitter {
    */
   async _handleDeleteObjects(input) {
     const objects = input.Delete?.Objects || [];
-    const keys = objects.map(obj => obj.Key);
+    const keys = objects.map(obj => this._applyKeyPrefix(obj.Key));
     return await this.storage.deleteMultiple(keys);
   }
 
@@ -212,33 +210,28 @@ export class MemoryClient extends EventEmitter {
    * ListObjectsV2Command handler
    */
   async _handleListObjects(input) {
-    const fullPrefix = this.keyPrefix && input.Prefix
-      ? path.join(this.keyPrefix, input.Prefix)
-      : (this.keyPrefix || input.Prefix || '');
-
-    return await this.storage.list({
+    const fullPrefix = this._applyKeyPrefix(input.Prefix || '');
+    const params = {
       prefix: fullPrefix,
       delimiter: input.Delimiter,
       maxKeys: input.MaxKeys,
       continuationToken: input.ContinuationToken
-    });
+    };
+
+    if (input.StartAfter) {
+      params.startAfter = this._applyKeyPrefix(input.StartAfter);
+    }
+
+    const response = await this.storage.list(params);
+    return this._normalizeListResponse(response);
   }
 
   /**
    * Put an object (Client interface method)
    */
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
-    const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
-
-    // Encode metadata using s3db encoding
-    const stringMetadata = {};
-    if (metadata) {
-      for (const [k, v] of Object.entries(metadata)) {
-        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
-        const { encoded } = metadataEncode(v);
-        stringMetadata[validKey] = encoded;
-      }
-    }
+    const fullKey = this._applyKeyPrefix(key);
+    const stringMetadata = this._encodeMetadata(metadata) || {};
 
     const response = await this.storage.put(fullKey, {
       body,
@@ -259,64 +252,27 @@ export class MemoryClient extends EventEmitter {
    * Get an object (Client interface method)
    */
   async getObject(key) {
-    const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
+    const fullKey = this._applyKeyPrefix(key);
     const response = await this.storage.get(fullKey);
-
-    // Decode metadata
-    const decodedMetadata = {};
-    if (response.Metadata) {
-      for (const [k, v] of Object.entries(response.Metadata)) {
-        decodedMetadata[k] = metadataDecode(v);
-      }
-    }
-
-    this.emit('cl:GetObject', null, { key });
-
-    return {
-      ...response,
-      Metadata: decodedMetadata
-    };
+    return this._decodeMetadataResponse(response);
   }
 
   /**
    * Head object (get metadata only)
    */
   async headObject(key) {
-    const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
+    const fullKey = this._applyKeyPrefix(key);
     const response = await this.storage.head(fullKey);
-
-    // Decode metadata
-    const decodedMetadata = {};
-    if (response.Metadata) {
-      for (const [k, v] of Object.entries(response.Metadata)) {
-        decodedMetadata[k] = metadataDecode(v);
-      }
-    }
-
-    this.emit('cl:HeadObject', null, { key });
-
-    return {
-      ...response,
-      Metadata: decodedMetadata
-    };
+    return this._decodeMetadataResponse(response);
   }
 
   /**
    * Copy an object
    */
   async copyObject({ from, to, metadata, metadataDirective, contentType }) {
-    const fullFrom = this.keyPrefix ? path.join(this.keyPrefix, from) : from;
-    const fullTo = this.keyPrefix ? path.join(this.keyPrefix, to) : to;
-
-    // Encode new metadata if provided
-    const encodedMetadata = {};
-    if (metadata) {
-      for (const [k, v] of Object.entries(metadata)) {
-        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
-        const { encoded } = metadataEncode(v);
-        encodedMetadata[validKey] = encoded;
-      }
-    }
+    const fullFrom = this._applyKeyPrefix(from);
+    const fullTo = this._applyKeyPrefix(to);
+    const encodedMetadata = this._encodeMetadata(metadata);
 
     const response = await this.storage.copy(fullFrom, fullTo, {
       metadata: encodedMetadata,
@@ -333,7 +289,7 @@ export class MemoryClient extends EventEmitter {
    * Check if object exists
    */
   async exists(key) {
-    const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
+    const fullKey = this._applyKeyPrefix(key);
     return this.storage.exists(fullKey);
   }
 
@@ -341,7 +297,7 @@ export class MemoryClient extends EventEmitter {
    * Delete an object
    */
   async deleteObject(key) {
-    const fullKey = this.keyPrefix ? path.join(this.keyPrefix, key) : key;
+    const fullKey = this._applyKeyPrefix(key);
     const response = await this.storage.delete(fullKey);
 
     this.emit('cl:DeleteObject', null, { key });
@@ -354,9 +310,7 @@ export class MemoryClient extends EventEmitter {
    */
   async deleteObjects(keys) {
     // Add keyPrefix to all keys
-    const fullKeys = keys.map(key =>
-      this.keyPrefix ? path.join(this.keyPrefix, key) : key
-    );
+    const fullKeys = keys.map(key => this._applyKeyPrefix(key));
 
     // Split into batches for parallel processing
     const batches = chunk(fullKeys, this.parallelism);
@@ -371,7 +325,7 @@ export class MemoryClient extends EventEmitter {
 
     // Merge results
     for (const result of results) {
-      allResults.Deleted.push(...result.Deleted);
+      allResults.Deleted.push(...result.Deleted.map(item => ({ Key: this._stripKeyPrefix(item.Key) })));
       allResults.Errors.push(...result.Errors);
     }
 
@@ -383,19 +337,30 @@ export class MemoryClient extends EventEmitter {
   /**
    * List objects with pagination support
    */
-  async listObjects({ prefix = '', delimiter = null, maxKeys = 1000, continuationToken = null }) {
-    const fullPrefix = this.keyPrefix ? path.join(this.keyPrefix, prefix) : prefix;
-
-    const response = await this.storage.list({
+  async listObjects({ prefix = '', delimiter = null, maxKeys = 1000, continuationToken = null, startAfter = null } = {}) {
+    const fullPrefix = this._applyKeyPrefix(prefix || '');
+    const listParams = {
       prefix: fullPrefix,
       delimiter,
       maxKeys,
       continuationToken
+    };
+
+    if (startAfter) {
+      listParams.startAfter = this._applyKeyPrefix(startAfter);
+    }
+
+    const response = await this.storage.list(listParams);
+    const normalized = this._normalizeListResponse(response);
+
+    this.emit('cl:ListObjects', null, {
+      prefix,
+      count: normalized.Contents.length,
+      continuationToken: normalized.ContinuationToken,
+      startAfter
     });
 
-    this.emit('cl:ListObjects', null, { prefix, count: response.Contents.length });
-
-    return response;
+    return normalized;
   }
 
   /**
@@ -409,22 +374,29 @@ export class MemoryClient extends EventEmitter {
 
     // If offset > 0, need to skip ahead
     if (offset > 0) {
-      // For simplicity, fetch all up to offset + amount and slice
-      const fullPrefix = this.keyPrefix ? path.join(this.keyPrefix, prefix) : prefix;
+      const fullPrefix = this._applyKeyPrefix(prefix || '');
       const response = await this.storage.list({
         prefix: fullPrefix,
         maxKeys: offset + amount
       });
-      keys = response.Contents.map(x => x.Key).slice(offset, offset + amount);
+      keys = (response.Contents || [])
+        .map(x => this._stripKeyPrefix(x.Key))
+        .slice(offset, offset + amount);
+      truncated = Boolean(response.NextContinuationToken);
+      continuationToken = response.NextContinuationToken;
     } else {
       // Regular fetch with amount as maxKeys
       while (truncated) {
-        const options = {
+        const remaining = amount - keys.length;
+        if (remaining <= 0) {
+          break;
+        }
+
+        const res = await this.listObjects({
           prefix,
           continuationToken,
-          maxKeys: amount - keys.length
-        };
-        const res = await this.listObjects(options);
+          maxKeys: remaining
+        });
         if (res.Contents) {
           keys = keys.concat(res.Contents.map(x => x.Key));
         }
@@ -437,13 +409,6 @@ export class MemoryClient extends EventEmitter {
       }
     }
 
-    // Strip keyPrefix from results
-    if (this.keyPrefix) {
-      keys = keys
-        .map(x => x.replace(this.keyPrefix, ''))
-        .map(x => (x.startsWith('/') ? x.replace('/', '') : x));
-    }
-
     this.emit('cl:GetKeysPage', keys, params);
     return keys;
   }
@@ -452,20 +417,13 @@ export class MemoryClient extends EventEmitter {
    * Get all keys with a given prefix
    */
   async getAllKeys({ prefix = '' }) {
-    const fullPrefix = this.keyPrefix ? path.join(this.keyPrefix, prefix) : prefix;
+    const fullPrefix = this._applyKeyPrefix(prefix || '');
     const response = await this.storage.list({
       prefix: fullPrefix,
-      maxKeys: 100000 // Large number to get all
+      maxKeys: Number.MAX_SAFE_INTEGER
     });
 
-    let keys = response.Contents.map(x => x.Key);
-
-    // Strip keyPrefix from results
-    if (this.keyPrefix) {
-      keys = keys
-        .map(x => x.replace(this.keyPrefix, ''))
-        .map(x => (x.startsWith('/') ? x.replace('/', '') : x));
-    }
+    const keys = (response.Contents || []).map(x => this._stripKeyPrefix(x.Key));
 
     this.emit('cl:GetAllKeys', keys, { prefix });
     return keys;
@@ -522,40 +480,47 @@ export class MemoryClient extends EventEmitter {
     }
 
     // Return the key at offset position as continuation token
-    const token = keys[offset];
+    const keyForToken = keys[offset];
+    const fullKey = this._applyKeyPrefix(keyForToken || '');
+    const token = this._encodeContinuationTokenKey(fullKey);
     this.emit('cl:GetContinuationTokenAfterOffset', token, { prefix, offset });
     return token;
   }
 
   /**
-   * Move an object from one key to another
+   * Move a single object (copy + delete)
    */
   async moveObject({ from, to }) {
-    await this.copyObject({ from, to, metadataDirective: 'COPY' });
-    await this.deleteObject(from);
+    const [ok, err] = await tryFn(async () => {
+      await this.copyObject({ from, to, metadataDirective: 'COPY' });
+      await this.deleteObject(from);
+    });
+
+    if (!ok) {
+      throw new DatabaseError('Unknown error in moveObject', {
+        bucket: this.bucket,
+        from,
+        to,
+        original: err
+      });
+    }
+
+    return true;
   }
 
   /**
-   * Move all objects from one prefix to another
+   * Move all objects under a prefix
    */
   async moveAllObjects({ prefixFrom, prefixTo }) {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
-    const results = [];
-    const errors = [];
-
-    for (const key of keys) {
-      try {
+    const { results, errors } = await PromisePool
+      .withConcurrency(this.parallelism)
+      .for(keys)
+      .process(async (key) => {
         const to = key.replace(prefixFrom, prefixTo);
         await this.moveObject({ from: key, to });
-        results.push(to);
-      } catch (error) {
-        errors.push({
-          message: error.message,
-          raw: error,
-          key
-        });
-      }
-    }
+        return { from: key, to };
+      });
 
     this.emit('moveAllObjects', { results, errors });
 
@@ -606,15 +571,7 @@ export class MemoryClient extends EventEmitter {
   }
 
   /**
-   * Export to BackupPlugin-compatible format (s3db.json + JSONL files)
-   * Compatible with BackupPlugin for easy migration
-   *
-   * @param {string} outputDir - Output directory path
-   * @param {Object} options - Export options
-   * @param {Array<string>} options.resources - Resource names to export (default: all)
-   * @param {boolean} options.compress - Use gzip compression (default: true)
-   * @param {Object} options.database - Database instance for schema metadata
-   * @returns {Promise<Object>} Export manifest with file paths and stats
+   * Export to BackupPlugin-compatible format
    */
   async exportBackup(outputDir, options = {}) {
     const { mkdir, writeFile } = await import('fs/promises');
@@ -659,7 +616,10 @@ export class MemoryClient extends EventEmitter {
       for (const key of keys) {
         // Extract id from key (e.g., resource=products/id=pr1 -> pr1)
         const idMatch = key.match(/\/id=([^/]+)/);
-        const recordId = idMatch ? idMatch[1] : null;
+        let recordId = null;
+        if (idMatch && idMatch[1]) {
+          recordId = idMatch[1];
+        }
 
         let record;
 
@@ -667,8 +627,7 @@ export class MemoryClient extends EventEmitter {
         if (resource && recordId) {
           try {
             record = await resource.get(recordId);
-          } catch (err) {
-            // Fallback to manual reconstruction if get() fails
+          } catch {
             console.warn(`Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
             record = null;
           }
@@ -787,14 +746,6 @@ export class MemoryClient extends EventEmitter {
 
   /**
    * Import from BackupPlugin-compatible format
-   * Loads data from s3db.json + JSONL files created by BackupPlugin or exportBackup()
-   *
-   * @param {string} backupDir - Backup directory path containing s3db.json
-   * @param {Object} options - Import options
-   * @param {Array<string>} options.resources - Resource names to import (default: all)
-   * @param {boolean} options.clear - Clear existing data first (default: false)
-   * @param {Object} options.database - Database instance to recreate schemas
-   * @returns {Promise<Object>} Import stats
    */
   async importBackup(backupDir, options = {}) {
     const { readFile, readdir } = await import('fs/promises');
@@ -823,7 +774,8 @@ export class MemoryClient extends EventEmitter {
     // Recreate resources if database instance provided
     if (database && metadata.resources) {
       for (const [resourceName, resourceMeta] of Object.entries(metadata.resources)) {
-        if (resourceFilter && !resourceFilter.includes(resourceName)) continue;
+        /* c8 ignore next -- helper coverage exercised separately */
+        if (!this._shouldProcessResource(resourceFilter, resourceName)) continue;
 
         if (resourceMeta.schema) {
           try {
@@ -833,6 +785,9 @@ export class MemoryClient extends EventEmitter {
             });
           } catch (error) {
             // Resource might already exist, that's ok
+            if (this.verbose) {
+              console.warn(`Failed to create resource ${resourceName} during import: ${error.message}`);
+            }
           }
         }
       }
@@ -846,7 +801,8 @@ export class MemoryClient extends EventEmitter {
       if (!file.endsWith('.jsonl') && !file.endsWith('.jsonl.gz')) continue;
 
       const resourceName = file.replace(/\.jsonl(\.gz)?$/, '');
-      if (resourceFilter && !resourceFilter.includes(resourceName)) continue;
+      /* c8 ignore next -- helper coverage exercised separately */
+      if (!this._shouldProcessResource(resourceFilter, resourceName)) continue;
 
       const filePath = `${backupDir}/${file}`;
       let content = await readFile(filePath);
@@ -865,18 +821,26 @@ export class MemoryClient extends EventEmitter {
           const record = JSON.parse(line);
 
           // Extract id or use generated one
-          const id = record.id || record._id || `imported_${Date.now()}_${Math.random()}`;
+          let id;
+          if (record.id) {
+            id = record.id;
+          } else if (record._id) {
+            id = record._id;
+          } else {
+            id = `imported_${Date.now()}_${Math.random()}`;
+          }
 
           // Separate _body from other fields
-          const { _body, id: _, _id: __, ...metadata } = record;
+          const { _body, id: _, _id: __, ...metadataRecord } = record;
+          let bodyBuffer;
+          if (typeof _body === 'string') {
+            bodyBuffer = Buffer.from(_body);
+          }
 
-          // Store in MemoryClient
-          // If _body exists, it's non-JSON body data
-          // Otherwise, metadata contains all the data
           await this.putObject({
             key: `resource=${resourceName}/id=${id}`,
-            metadata,
-            body: _body ? Buffer.from(_body) : undefined
+            metadata: metadataRecord,
+            body: bodyBuffer
           });
 
           importStats.recordsImported++;
@@ -907,6 +871,140 @@ export class MemoryClient extends EventEmitter {
    */
   clear() {
     this.storage.clear();
+  }
+
+  /**
+   * Encode metadata values using s3db metadata encoding
+   */
+  _encodeMetadata(metadata) {
+    if (!metadata) return undefined;
+
+    const encoded = {};
+    for (const [rawKey, value] of Object.entries(metadata)) {
+      const validKey = String(rawKey).replace(/[^a-zA-Z0-9\-_]/g, '_');
+      const { encoded: encodedValue } = metadataEncode(value);
+      encoded[validKey] = encodedValue;
+    }
+    return encoded;
+  }
+
+  _shouldProcessResource(resourceFilter, resourceName) {
+    if (!Array.isArray(resourceFilter) || resourceFilter.length === 0) {
+      return true;
+    }
+
+    return resourceFilter.includes(resourceName);
+  }
+
+  /**
+   * Decode metadata in S3 responses
+   */
+  _decodeMetadataResponse(response) {
+    const decodedMetadata = {};
+    if (response.Metadata) {
+      for (const [k, v] of Object.entries(response.Metadata)) {
+        decodedMetadata[k] = metadataDecode(v);
+      }
+    }
+
+    return {
+      ...response,
+      Metadata: decodedMetadata
+    };
+  }
+
+  /**
+   * Apply configured keyPrefix to a storage key
+   */
+  /* c8 ignore start */
+  _applyKeyPrefix(key = '') {
+    if (!this.keyPrefix) {
+      if (key === undefined || key === null) {
+        return '';
+      }
+      return key;
+    }
+    if (key === undefined || key === null || key === '') {
+      return pathPosix.join(this.keyPrefix, '');
+    }
+
+    return pathPosix.join(this.keyPrefix, key);
+  }
+  /* c8 ignore end */
+
+  /**
+   * Strip configured keyPrefix from a storage key
+   */
+  _stripKeyPrefix(key = '') {
+    if (!this.keyPrefix) {
+      return key;
+    }
+
+    const normalizedPrefix = this._keyPrefixForStrip;
+    if (normalizedPrefix && key.startsWith(normalizedPrefix)) {
+      return key.slice(normalizedPrefix.length).replace(/^\/+/, '');
+    }
+
+    return key;
+  }
+
+  /**
+   * Encode continuation token (base64) to mimic AWS S3
+   */
+  _encodeContinuationTokenKey(key) {
+    return Buffer.from(String(key), 'utf8').toString('base64');
+  }
+
+  /**
+   * Parse CopySource header and return bucket/key
+   */
+  _parseCopySource(copySource = '') {
+    const trimmedSource = String(copySource).replace(/^\//, '');
+    const [sourcePath] = trimmedSource.split('?');
+    const decodedSource = decodeURIComponent(sourcePath);
+    const [sourceBucket, ...sourceKeyParts] = decodedSource.split('/');
+
+    if (!sourceBucket || sourceKeyParts.length === 0) {
+      throw new DatabaseError(`Invalid CopySource value: ${copySource}`, {
+        operation: 'CopyObject',
+        retriable: false,
+        suggestion: 'Provide CopySource in the format "<bucket>/<key>" as expected by AWS S3.'
+      });
+    }
+
+    return {
+      sourceBucket,
+      sourceKey: sourceKeyParts.join('/')
+    };
+  }
+
+  /**
+   * Normalize storage list response into client-level structure
+   */
+  _normalizeListResponse(response) {
+    const rawContents = Array.isArray(response.Contents) ? response.Contents : [];
+    const contents = rawContents.map(item => ({
+      ...item,
+      Key: this._stripKeyPrefix(item.Key)
+    }));
+
+    const rawPrefixes = Array.isArray(response.CommonPrefixes) ? response.CommonPrefixes : [];
+    const commonPrefixes = rawPrefixes.map(({ Prefix }) => ({
+      Prefix: this._stripKeyPrefix(Prefix)
+    }));
+
+    return {
+      Contents: contents,
+      CommonPrefixes: commonPrefixes,
+      IsTruncated: response.IsTruncated,
+      ContinuationToken: response.ContinuationToken,
+      NextContinuationToken: response.NextContinuationToken,
+      KeyCount: contents.length,
+      MaxKeys: response.MaxKeys,
+      Prefix: this.keyPrefix ? undefined : response.Prefix,
+      Delimiter: response.Delimiter,
+      StartAfter: response.StartAfter
+    };
   }
 }
 

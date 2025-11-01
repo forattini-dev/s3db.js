@@ -30,6 +30,7 @@
 
 import { requirePluginDependency } from '../../concerns/plugin-dependencies.js';
 import { idGenerator } from '../../../concerns/id.js';
+import { PluginError } from '../../../errors.js';
 
 export class MFAManager {
   constructor(options = {}) {
@@ -64,7 +65,13 @@ export class MFAManager {
    */
   generateEnrollment(accountName) {
     if (!this.OTPAuth) {
-      throw new Error('[MFA] OTPAuth library not initialized');
+      throw new PluginError('[MFA] OTPAuth library not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'mfaGenerateEnrollment',
+        statusCode: 500,
+        retriable: true,
+        suggestion: 'Call MFAManager.initialize() before generating enrollments or ensure otpauth dependency installs successfully.'
+      });
     }
 
     // Generate TOTP secret
@@ -103,7 +110,13 @@ export class MFAManager {
    */
   verifyTOTP(secret, token) {
     if (!this.OTPAuth) {
-      throw new Error('[MFA] OTPAuth library not initialized');
+      throw new PluginError('[MFA] OTPAuth library not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'mfaVerify',
+        statusCode: 500,
+        retriable: true,
+        suggestion: 'Initialize MFAManager before verifying codes and confirm otpauth dependency is available.'
+      });
     }
 
     try {

@@ -1,6 +1,12 @@
 # 🏗️ TfState Plugin - Terraform Infrastructure Inventory
 
-## ⚡ TL;DR
+> **Index Terraform/OpenTofu state files, detect drift, and power infra analytics.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
+## ⚡ TLDR
 
 **Import and query** your Terraform/OpenTofu states as s3db resources with **automatic change tracking** and **intelligent partition-based queries**.
 

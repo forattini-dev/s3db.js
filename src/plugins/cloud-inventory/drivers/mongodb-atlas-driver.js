@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready MongoDB Atlas inventory driver using mongodb-atlas-api-client.
@@ -54,7 +55,13 @@ export class MongoDBAtlasInventoryDriver extends BaseCloudDriver {
     this._organizationId = credentials.organizationId || this._organizationId;
 
     if (!this._publicKey || !this._privateKey) {
-      throw new Error('MongoDB Atlas API keys are required. Provide via credentials.publicKey/privateKey or env vars.');
+      throw new PluginError('MongoDB Atlas API keys are required. Provide via credentials.publicKey/privateKey or env vars.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'mongodbAtlas:initClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Set credentials.publicKey/privateKey or env variables MONGODB_ATLAS_PUBLIC_KEY / MONGODB_ATLAS_PRIVATE_KEY.'
+      });
     }
 
     this.logger('info', 'MongoDB Atlas credentials initialized', {

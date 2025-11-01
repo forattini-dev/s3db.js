@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready Microsoft Azure inventory driver using official @azure SDK.
@@ -69,7 +70,13 @@ export class AzureInventoryDriver extends BaseCloudDriver {
     this._subscriptionId = credentials.subscriptionId || this.config?.subscriptionId;
 
     if (!this._subscriptionId) {
-      throw new Error('Azure subscription ID is required. Provide via credentials.subscriptionId or config.subscriptionId.');
+      throw new PluginError('Azure subscription ID is required. Provide via credentials.subscriptionId or config.subscriptionId.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'azure:initCredential',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Set credentials.subscriptionId or config.subscriptionId before initializing the Azure inventory driver.'
+      });
     }
 
     this.logger('info', 'Azure credential initialized', {

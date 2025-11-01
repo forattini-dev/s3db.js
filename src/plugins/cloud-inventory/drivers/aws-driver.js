@@ -138,8 +138,8 @@ import {
 } from '@aws-sdk/client-sfn';
 import {
   EventBridgeClient,
-  paginateListEventBuses,
-  paginateListRules,
+  ListEventBusesCommand,
+  ListRulesCommand,
   ListTagsForResourceCommand as ListEventBridgeTagsCommand
 } from '@aws-sdk/client-eventbridge';
 import {
@@ -171,12 +171,12 @@ import {
 } from '@aws-sdk/client-acm';
 import {
   WAFClient,
-  paginateListWebACLs as paginateListWAFWebACLs,
+  ListWebACLsCommand as ListWAFWebACLsCommand,
   ListTagsForResourceCommand as ListWAFTagsCommand
 } from '@aws-sdk/client-waf';
 import {
   WAFV2Client,
-  paginateListWebACLs as paginateListWAFV2WebACLs,
+  ListWebACLsCommand as ListWAFV2WebACLsCommand,
   ListTagsForResourceCommand as ListWAFV2TagsCommand
 } from '@aws-sdk/client-wafv2';
 import {
@@ -1200,9 +1200,12 @@ export class AwsInventoryDriver extends BaseCloudDriver {
       const client = this._getEventBridgeClient(region);
 
       // Event Buses
-      const busPaginator = paginateListEventBuses({ client }, {});
-      for await (const page of busPaginator) {
-        const buses = page.EventBuses || [];
+      let nextBusToken;
+      do {
+        const busResponse = await client.send(new ListEventBusesCommand({ NextToken: nextBusToken }));
+        const buses = busResponse.EventBuses || [];
+        nextBusToken = busResponse.NextToken;
+
         for (const bus of buses) {
           const tags = await this._safeListEventBridgeTags(client, bus.Arn);
           yield {
@@ -1217,12 +1220,15 @@ export class AwsInventoryDriver extends BaseCloudDriver {
             configuration: sanitizeConfiguration(bus)
           };
         }
-      }
+      } while (nextBusToken);
 
       // Rules
-      const rulePaginator = paginateListRules({ client }, {});
-      for await (const page of rulePaginator) {
-        const rules = page.Rules || [];
+      let nextRuleToken;
+      do {
+        const ruleResponse = await client.send(new ListRulesCommand({ NextToken: nextRuleToken }));
+        const rules = ruleResponse.Rules || [];
+        nextRuleToken = ruleResponse.NextToken;
+
         for (const rule of rules) {
           const tags = await this._safeListEventBridgeTags(client, rule.Arn);
           yield {
@@ -1237,7 +1243,7 @@ export class AwsInventoryDriver extends BaseCloudDriver {
             configuration: sanitizeConfiguration(rule)
           };
         }
-      }
+      } while (nextRuleToken);
     }
   }
 
@@ -1383,9 +1389,12 @@ export class AwsInventoryDriver extends BaseCloudDriver {
   async *_collectWAFResources() {
     // WAF Classic (global)
     const wafClient = this._getWafClient();
-    const classicPaginator = paginateListWAFWebACLs({ client: wafClient }, {});
-    for await (const page of classicPaginator) {
-      const webACLs = page.WebACLs || [];
+    let nextMarker;
+    do {
+      const response = await wafClient.send(new ListWAFWebACLsCommand({ NextMarker: nextMarker }));
+      const webACLs = response.WebACLs || [];
+      nextMarker = response.NextMarker;
+
       for (const acl of webACLs) {
         const tags = await this._safeListWAFTags(wafClient, acl.WebACLId);
         yield {
@@ -1400,7 +1409,7 @@ export class AwsInventoryDriver extends BaseCloudDriver {
           configuration: sanitizeConfiguration(acl)
         };
       }
-    }
+    } while (nextMarker);
   }
 
   async *_collectWAFV2Resources() {
@@ -1408,9 +1417,12 @@ export class AwsInventoryDriver extends BaseCloudDriver {
       const client = this._getWafv2Client(region);
 
       // Regional WebACLs
-      const regionalPaginator = paginateListWAFV2WebACLs({ client }, { Scope: 'REGIONAL' });
-      for await (const page of regionalPaginator) {
-        const webACLs = page.WebACLs || [];
+      let nextMarker;
+      do {
+        const response = await client.send(new ListWAFV2WebACLsCommand({ Scope: 'REGIONAL', NextMarker: nextMarker }));
+        const webACLs = response.WebACLs || [];
+        nextMarker = response.NextMarker;
+
         for (const acl of webACLs) {
           const tags = await this._safeListWAFV2Tags(client, acl.ARN);
           yield {
@@ -1425,14 +1437,17 @@ export class AwsInventoryDriver extends BaseCloudDriver {
             configuration: sanitizeConfiguration(acl)
           };
         }
-      }
+      } while (nextMarker);
     }
 
     // CloudFront WebACLs (us-east-1 only)
     const cfClient = this._getWafv2Client(GLOBAL_REGION);
-    const cfPaginator = paginateListWAFV2WebACLs({ client: cfClient }, { Scope: 'CLOUDFRONT' });
-    for await (const page of cfPaginator) {
-      const webACLs = page.WebACLs || [];
+    let cfNextMarker;
+    do {
+      const cfResponse = await cfClient.send(new ListWAFV2WebACLsCommand({ Scope: 'CLOUDFRONT', NextMarker: cfNextMarker }));
+      const webACLs = cfResponse.WebACLs || [];
+      cfNextMarker = cfResponse.NextMarker;
+
       for (const acl of webACLs) {
         const tags = await this._safeListWAFV2Tags(cfClient, acl.ARN);
         yield {
@@ -1447,7 +1462,7 @@ export class AwsInventoryDriver extends BaseCloudDriver {
           configuration: sanitizeConfiguration(acl)
         };
       }
-    }
+    } while (cfNextMarker);
   }
 
   async *_collectCognitoUserPools() {

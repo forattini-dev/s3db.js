@@ -1,5 +1,11 @@
 # 🔌 s3db.js Plugin System
 
+> **Explore the full plugin ecosystem for s3db.js—performance, observability, automation, and more.**
+>
+> **Navigation:** [Quick Start ↓](#-quick-start) | [Architecture ↓](#️-plugin-architecture) | [Plugin List ↓](#-all-available-plugins)
+
+---
+
 <p align="center">
   <strong>Extend your database with powerful plugins</strong><br>
   <em>22 production-ready plugins • Zero core modifications • Infinite possibilities</em>

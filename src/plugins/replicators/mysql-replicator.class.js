@@ -242,7 +242,15 @@ class MySQLReplicator extends BaseReplicator {
           const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
 
           if (this.schemaSync.onMismatch === 'error') {
-            throw new Error(message);
+            throw this.createError(message, {
+              operation: 'schemaSync',
+              resourceName,
+              tableName,
+              statusCode: 409,
+              retriable: errSync?.retriable ?? false,
+              suggestion: 'Update the MySQL table schema to match the resource definition or adjust schemaSync.onMismatch.',
+              docs: 'docs/plugins/replicator.md'
+            });
           } else if (this.schemaSync.onMismatch === 'warn') {
             console.warn(`[MySQLReplicator] ${message}`);
           }
@@ -268,11 +276,23 @@ class MySQLReplicator extends BaseReplicator {
 
       if (!existingSchema) {
         if (!this.schemaSync.autoCreateTable) {
-          throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+          throw this.createError(`Table ${tableName} does not exist and autoCreateTable is disabled`, {
+            operation: 'schemaSync',
+            tableName,
+            statusCode: 404,
+            retriable: false,
+            suggestion: 'Provision the table manually or enable schemaSync.autoCreateTable.'
+          });
         }
 
         if (this.schemaSync.strategy === 'validate-only') {
-          throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+          throw this.createError(`Table ${tableName} does not exist (validate-only mode)`, {
+            operation: 'schemaSync',
+            tableName,
+            statusCode: 404,
+            retriable: false,
+            suggestion: 'Create the table before running validate-only checks or choose the alter strategy.'
+          });
         }
 
         // Create table
@@ -336,7 +356,13 @@ class MySQLReplicator extends BaseReplicator {
         const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
 
         if (alterStatements.length > 0) {
-          throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+          throw this.createError(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`, {
+            operation: 'schemaValidation',
+            tableName,
+            statusCode: 409,
+            retriable: false,
+            suggestion: 'Add the missing columns to the MySQL table or enable schemaSync.autoCreateColumns.'
+          });
         }
       }
     } finally {
@@ -498,20 +524,24 @@ class MySQLReplicator extends BaseReplicator {
   }
 
   async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
+    const { results, errors } = await this.processBatch(
+      records,
+      async (record) => {
+        const [ok, err, result] = await tryFn(() =>
+          this.replicate(resourceName, record.operation, record.data, record.id)
+        );
 
-    for (const record of records) {
-      const [ok, err, result] = await tryFn(() =>
-        this.replicate(resourceName, record.operation, record.data, record.id)
-      );
+        if (!ok) {
+          throw err;
+        }
 
-      if (ok) {
-        results.push(result);
-      } else {
-        errors.push({ id: record.id, error: err.message });
+        return result;
+      },
+      {
+        concurrency: this.config.batchConcurrency,
+        mapError: (error, record) => ({ id: record.id, error: error.message })
       }
-    }
+    );
 
     return {
       success: errors.length === 0,
@@ -524,7 +554,12 @@ class MySQLReplicator extends BaseReplicator {
   async testConnection() {
     const [ok, err] = await tryFn(async () => {
       if (!this.pool) {
-        throw new Error('Pool not initialized');
+        throw this.createError('Pool not initialized', {
+          operation: 'testConnection',
+          statusCode: 503,
+          retriable: true,
+          suggestion: 'Call initialize() before testing the connection or ensure the pool was not cleaned up prematurely.'
+        });
       }
 
       const connection = await this.pool.promise().getConnection();

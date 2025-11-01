@@ -1,6 +1,12 @@
 # Cloud Inventory Plugin
 
-The **Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery and inventory system that ingests configuration metadata from **11 cloud providers** with support for **200+ resource types** across IaaS, PaaS, Serverless, Edge Computing, and Database-as-a-Service platforms.
+> **Multi-cloud inventory, drift detection, and Terraform export for 200+ resource types.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [Terraform Export →](#terraformopentofu-export) | [FAQ ↓](#-faq)
+
+---
+
+The **Cloud Inventory Plugin**Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery and inventory system that ingests configuration metadata from **11 cloud providers** with support for **200+ resource types** across IaaS, PaaS, Serverless, Edge Computing, and Database-as-a-Service platforms.
 
 ## 🚀 What's New
 
@@ -99,7 +105,7 @@ const plugin = new CloudInventoryPlugin({
     concurrency: 5,
     runOnInstall: true
   },
-  resources: {
+  resourceNames: {
     snapshots: 'plg_cloud_inventory_snapshots',
     versions: 'plg_cloud_inventory_versions',
     changes: 'plg_cloud_inventory_changes',
@@ -146,10 +152,10 @@ await plugin.syncAll(); // Trigger a manual crawl (+ auto-export if configured)
 | `discovery.include` / `discovery.exclude` | `Array<string>` | Optional filters your drivers may honour (services, regions, etc.). |
 | `discovery.runOnInstall` | `boolean` | Run `syncAll()` automatically during `onInstall`. Default `true`. |
 | `discovery.dryRun` | `boolean` | Flag available for drivers to avoid persisting mutations. |
-| `resources.snapshots` | `string` | Resource name for the canonical registry. |
-| `resources.versions` | `string` | Resource name that stores frozen configurations. |
-| `resources.changes` | `string` | Resource name that stores diffs between versions. |
-| `resources.clouds` | `string` | Resource name that stores per-cloud summaries. |
+| `resourceNames.snapshots` | `string` | Resource name for the canonical registry. |
+| `resourceNames.versions` | `string` | Resource name that stores frozen configurations. |
+| `resourceNames.changes` | `string` | Resource name that stores diffs between versions. |
+| `resourceNames.clouds` | `string` | Resource name that stores per-cloud summaries. |
 | `terraform.enabled` | `boolean` | Enable Terraform auto-export. Default `false`. |
 | `terraform.autoExport` | `boolean` | Auto-export after each discovery. Default `false`. |
 | `terraform.output` | `string\|function` | Output path (file or S3 URL) or custom function. |
@@ -1485,46 +1491,49 @@ const results = await plugin.syncAll();
 
 ---
 
-### Mock Drivers
+### Driver Customisation
 
-- `aws-mock`, `gcp-mock`, `vultr-mock`, `digitalocean-mock` (alias `do-mock`), `oracle-mock` (alias `oci-mock`), `azure-mock` (alias `az-mock`), `linode-mock`, `hetzner-mock`, `alibaba-mock` (alias `aliyun-mock`), `cloudflare-mock` (alias `cf-mock`), `mongodb-atlas-mock` (alias `atlas-mock`) – Deterministic mocks for fast development and testing.
+Built-in drivers now map 1:1 with their respective providers (`aws`, `gcp`, `azure`, `digitalocean`, `oracle`, `vultr`, `linode`, `hetzner`, `alibaba`, `cloudflare`, `mongodb-atlas`). Each driver talks to the real cloud API and requires valid credentials – no stub adapters are bundled.
 
-Mock drivers emit static resources to exercise the workflow (e.g., `driver: "aws-mock"`). You can override the default samples by passing `config.sampleResources`:
+For development sandboxes you can register your own lightweight driver:
 
-```jsonc
-{
-  "driver": "aws-mock",
-  "credentials": {},
-  "config": {
-    "accountId": "123456789012",
-    "sampleResources": [
+```js
+import { registerCloudDriver, BaseCloudDriver } from 's3db.js/plugins/cloud-inventory';
+
+class FixtureDriver extends BaseCloudDriver {
+  async listResources() {
+    return [
       {
-        "resourceId": "i-1234567890abcdef0",
-        "region": "us-east-1",
-        "service": "ec2",
-        "resourceType": "ec2.instance",
-        "name": "demo-instance",
-        "configuration": {
-          "instanceId": "i-1234567890abcdef0",
-          "instanceType": "t3.micro",
-          "state": "running"
-        },
-        "tags": {
-          "Environment": "sandbox"
-        }
+        provider: 'fixture',
+        driver: 'fixture',
+        resourceId: 'local-instance-1',
+        region: 'local',
+        service: 'compute',
+        resourceType: 'fixture.compute.instance',
+        name: 'local-instance-1',
+        tags: { environment: 'sandbox' },
+        configuration: { cpu: 2, memoryGb: 4 }
       }
-    ]
+    ];
   }
 }
+
+registerCloudDriver('fixture', (options) => new FixtureDriver(options));
 ```
 
-If you need to use a custom driver, call `registerCloudDriver('aws', factory)` to override the default implementation (the mock version remains available as `aws-mock`).
+Point a cloud definition at `driver: "fixture"` to load deterministic data without altering production code paths.
 
 ---
 
 ## 🚨 Error Handling
 
 CloudInventoryPlugin now emits structured `PluginError` responses for common misconfigurations. Each error includes `statusCode`, `retriable`, and an English `suggestion` to help operators recover quickly.
+
+Examples:
+- Missing API tokens/keys for SaaS drivers such as Cloudflare, DigitalOcean, Linode, Hetzner, Vultr, and MongoDB Atlas → `statusCode: 400`, `retriable: false`, suggestion points to the relevant credential names or environment variables.
+- Azure driver without `subscriptionId` → `statusCode: 400`, suggestion to set `credentials.subscriptionId` or `config.subscriptionId`.
+- Attempting to instantiate an unknown driver via `createCloudDriver()` → `statusCode: 400`, suggestion lists registered drivers.
+- Custom driver factories that do not return `BaseCloudDriver` → `statusCode: 500`, with guidance to extend the base class.
 
 ### Missing Resource Definitions
 
@@ -1558,7 +1567,7 @@ Refer to `error.toJson()` for complete context (command input, bucket/key, retry
 
 ## Notes
 
-- The plugin ships with minimal defaults; feel free to rename the managed resources.
+- The plugin ships with minimal defaults; customise resource identifiers via `resourceNames` to align with your naming conventions.
 - Drivers are free to interpret `discovery.include` / `discovery.exclude`.
 - When `latestDigest` remains unchanged the plugin simply refreshes `lastSeenAt`.
 - All locking and checkpointing is handled automatically, but drivers should regularly emit checkpoints to guarantee at-least-once coverage without duplicates.

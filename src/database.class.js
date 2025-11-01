@@ -2,6 +2,7 @@ import EventEmitter from "events";
 import { createHash } from "crypto";
 import { isEmpty, isFunction } from "lodash-es";
 import jsonStableStringify from "json-stable-stringify";
+import { PromisePool } from "@supercharge/promise-pool";
 
 import { S3Client } from "./clients/s3-client.class.js";
 import tryFn from "./concerns/try-fn.js";
@@ -444,28 +445,54 @@ export class Database extends EventEmitter {
     if (!isEmpty(this.pluginList)) {
       const plugins = this.pluginList.map(p => isFunction(p) ? new p(this) : p)
 
-      const installProms = plugins.map(async (plugin) => {
-        const pluginName = this._getPluginName(plugin);
+      const concurrency = Math.max(1, Number.isFinite(this.parallelism) ? this.parallelism : 5);
 
-        if (typeof plugin.setInstanceName === 'function') {
-          plugin.setInstanceName(pluginName);
-        } else {
-          plugin.instanceName = pluginName;
-        }
+      const installResult = await PromisePool
+        .withConcurrency(concurrency)
+        .for(plugins)
+        .process(async (plugin) => {
+          const pluginName = this._getPluginName(plugin);
 
-        await plugin.install(db);
+          if (typeof plugin.setInstanceName === 'function') {
+            plugin.setInstanceName(pluginName);
+          } else {
+            plugin.instanceName = pluginName;
+          }
 
-        // Register the plugin
-        this.pluginRegistry[pluginName] = plugin;
-      });
+          await plugin.install(db);
 
-      await Promise.all(installProms);
+          // Register the plugin
+          this.pluginRegistry[pluginName] = plugin;
+          return pluginName;
+        });
 
-      const startProms = plugins.map(async (plugin) => {
-        await plugin.start()
-      });
+      if (installResult.errors.length > 0) {
+        const { item: failedPlugin, error } = installResult.errors[0];
+        const failedName = this._getPluginName(failedPlugin);
+        throw new DatabaseError(`Failed to install plugin '${failedName}': ${error.message}`, {
+          operation: "startPlugins.install",
+          pluginName: failedName,
+          original: error
+        });
+      }
 
-      await Promise.all(startProms);
+      const startResult = await PromisePool
+        .withConcurrency(concurrency)
+        .for(plugins)
+        .process(async (plugin) => {
+          await plugin.start();
+          return plugin;
+        });
+
+      if (startResult.errors.length > 0) {
+        const { item: failedPlugin, error } = startResult.errors[0];
+        const failedName = this._getPluginName(failedPlugin);
+        throw new DatabaseError(`Failed to start plugin '${failedName}': ${error.message}`, {
+          operation: "startPlugins.start",
+          pluginName: failedName,
+          original: error
+        });
+      }
     }
   }
 
@@ -1279,15 +1306,18 @@ export class Database extends EventEmitter {
           }
         }
         // Also stop plugins if they have a stop method
-        const stopProms = this.pluginList.map(async (plugin) => {
-          // Silently ignore errors on exit
-          await tryFn(async () => {
-            if (plugin && typeof plugin.stop === 'function') {
-              await plugin.stop();
-            }
+        const stopConcurrency = Math.max(1, Number.isFinite(this.parallelism) ? this.parallelism : 5);
+        await PromisePool
+          .withConcurrency(stopConcurrency)
+          .for(this.pluginList)
+          .process(async (plugin) => {
+            // Silently ignore errors on exit
+            await tryFn(async () => {
+              if (plugin && typeof plugin.stop === 'function') {
+                await plugin.stop();
+              }
+            });
           });
-        });
-        await Promise.all(stopProms);
       }
 
       // 2. Remove all listeners from all resources

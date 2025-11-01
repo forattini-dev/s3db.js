@@ -315,22 +315,24 @@ class DynamoDBReplicator extends BaseReplicator {
   }
 
   async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
+    const { results, errors } = await this.processBatch(
+      records,
+      async (record) => {
+        const [ok, err, result] = await tryFn(() =>
+          this.replicate(resourceName, record.operation, record.data, record.id)
+        );
 
-    // DynamoDB batch operations (up to 25 items)
-    // For now, process sequentially (can be optimized with BatchWriteItem)
-    for (const record of records) {
-      const [ok, err, result] = await tryFn(() =>
-        this.replicate(resourceName, record.operation, record.data, record.id)
-      );
+        if (!ok) {
+          throw err;
+        }
 
-      if (ok) {
-        results.push(result);
-      } else {
-        errors.push({ id: record.id, error: err.message });
+        return result;
+      },
+      {
+        concurrency: this.config.batchConcurrency,
+        mapError: (error, record) => ({ id: record.id, error: error.message })
       }
-    }
+    );
 
     return {
       success: errors.length === 0,
@@ -343,7 +345,12 @@ class DynamoDBReplicator extends BaseReplicator {
   async testConnection() {
     const [ok, err] = await tryFn(async () => {
       if (!this.client) {
-        throw new Error('Client not initialized');
+        throw this.createError('Client not initialized', {
+          operation: 'testConnection',
+          statusCode: 503,
+          retriable: true,
+          suggestion: 'Call initialize() before testing connectivity or ensure the DynamoDB client was created successfully.'
+        });
       }
 
       const { ListTablesCommand } = requirePluginDependency('@aws-sdk/client-dynamodb', 'DynamoDBReplicator');

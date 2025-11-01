@@ -2,6 +2,7 @@ import { Plugin } from './plugin.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import { resolveResourceNames } from './concerns/resource-names.js';
 import tryFn from '../concerns/try-fn.js';
+import { PluginError } from '../errors.js';
 
 /**
  * PuppeteerPlugin - Headless browser automation with anti-bot detection
@@ -1012,7 +1013,13 @@ export class PuppeteerPlugin extends Plugin {
    */
   async withSession(sessionId, handler, options = {}) {
     if (!sessionId) {
-      throw new Error('withSession requires a sessionId');
+      throw new PluginError('withSession requires a sessionId', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'withSession',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass a sessionId when invoking withSession so cookies/proxies can be resolved.'
+      });
     }
     if (typeof handler !== 'function') {
       throw new TypeError('withSession handler must be a function');
@@ -1020,7 +1027,13 @@ export class PuppeteerPlugin extends Plugin {
 
     const { url, ...navigateOptions } = options;
     if (!url) {
-      throw new Error('withSession requires an options.url value');
+      throw new PluginError('withSession requires an options.url value', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'withSession',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide options.url to navigate before executing the session handler.'
+      });
     }
 
     this.emit('puppeteer.withSession.start', { sessionId, url });
@@ -1065,7 +1078,16 @@ export class PuppeteerPlugin extends Plugin {
     // Human click
     page.humanClick = async (selector, options = {}) => {
       const element = await page.$(selector);
-      if (!element) throw new Error(`Element not found: ${selector}`);
+      if (!element) {
+        throw new PluginError(`Element not found: ${selector}`, {
+          pluginName: 'PuppeteerPlugin',
+          operation: 'humanClick',
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Ensure the selector matches an element on the page before invoking humanClick.',
+          metadata: { selector }
+        });
+      }
 
       if (this.config.humanBehavior.mouse.pathThroughElements && page._cursor) {
         // Move through elements to destination
@@ -1079,7 +1101,13 @@ export class PuppeteerPlugin extends Plugin {
     // Human move
     page.humanMoveTo = async (selector, options = {}) => {
       if (!page._cursor) {
-        throw new Error('Ghost cursor not initialized');
+        throw new PluginError('Ghost cursor not initialized', {
+          pluginName: 'PuppeteerPlugin',
+          operation: 'humanMoveTo',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Enable humanBehavior.mouse.enableGhostCursor in configuration before using humanMoveTo.'
+        });
       }
 
       await page._cursor.moveTo(selector);
@@ -1088,7 +1116,16 @@ export class PuppeteerPlugin extends Plugin {
     // Human type
     page.humanType = async (selector, text, options = {}) => {
       const element = await page.$(selector);
-      if (!element) throw new Error(`Element not found: ${selector}`);
+      if (!element) {
+        throw new PluginError(`Element not found: ${selector}`, {
+          pluginName: 'PuppeteerPlugin',
+          operation: 'humanMoveTo',
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Ensure the selector is present on the page when calling humanMoveTo.',
+          metadata: { selector }
+        });
+      }
 
       await element.click();
 
@@ -1198,7 +1235,13 @@ export class PuppeteerPlugin extends Plugin {
    */
   async farmCookies(sessionId) {
     if (!this.cookieManager) {
-      throw new Error('Cookie manager not initialized');
+      throw new PluginError('Cookie manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'farmCookies',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Enable cookieManager during plugin initialization before calling farmCookies.'
+      });
     }
 
     return await this.cookieManager.farmCookies(sessionId);
@@ -1210,7 +1253,13 @@ export class PuppeteerPlugin extends Plugin {
    */
   async getCookieStats() {
     if (!this.cookieManager) {
-      throw new Error('Cookie manager not initialized');
+      throw new PluginError('Cookie manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'getCookieStats',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure cookieManager is configured before requesting cookie stats.'
+      });
     }
 
     return await this.cookieManager.getStats();
@@ -1222,7 +1271,13 @@ export class PuppeteerPlugin extends Plugin {
    */
   getProxyStats() {
     if (!this.proxyManager) {
-      throw new Error('Proxy manager not initialized');
+      throw new PluginError('Proxy manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'getProxyStats',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Configure proxyManager before attempting to read proxy statistics.'
+      });
     }
 
     return this.proxyManager.getProxyStats();
@@ -1234,7 +1289,13 @@ export class PuppeteerPlugin extends Plugin {
    */
   getSessionProxyBindings() {
     if (!this.proxyManager) {
-      throw new Error('Proxy manager not initialized');
+      throw new PluginError('Proxy manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'getSessionProxyBindings',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Initialize proxyManager before retrieving session-proxy bindings.'
+      });
     }
 
     return this.proxyManager.getSessionBindings();
@@ -1246,7 +1307,13 @@ export class PuppeteerPlugin extends Plugin {
    */
   async checkProxyHealth() {
     if (!this.proxyManager) {
-      throw new Error('Proxy manager not initialized');
+      throw new PluginError('Proxy manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'checkProxyHealth',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Set up proxyManager before running health checks.'
+      });
     }
 
     return await this.proxyManager.checkAllProxies();

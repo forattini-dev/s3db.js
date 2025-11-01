@@ -4,6 +4,7 @@ import { PuppeteerPlugin } from "./puppeteer.plugin.js";
 import { CookieFarmPlugin } from "./cookie-farm.plugin.js";
 import { S3QueuePlugin } from "./s3-queue.plugin.js";
 import { TTLPlugin } from "./ttl.plugin.js";
+import { PluginError } from "../errors.js";
 
 function sanitizeNamespace(value) {
   return (value || 'persona')
@@ -224,7 +225,13 @@ export class CookieFarmSuitePlugin extends Plugin {
    */
   async enqueueJob(data, options = {}) {
     if (!this.jobsResource?.enqueue) {
-      throw new Error('[CookieFarmSuitePlugin] Queue helpers not initialized yet');
+      throw new PluginError('[CookieFarmSuitePlugin] Queue helpers not initialized yet', {
+        pluginName: 'CookieFarmSuitePlugin',
+        operation: 'enqueueJob',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Call plugin.initialize() before enqueuing jobs so queue helpers are registered.'
+      });
     }
     return await this.jobsResource.enqueue({
       createdAt: new Date().toISOString().slice(0, 10),
@@ -246,7 +253,13 @@ export class CookieFarmSuitePlugin extends Plugin {
 
   async queueHandler(record, context) {
     if (typeof this.processor !== 'function') {
-      throw new Error('[CookieFarmSuitePlugin] No processor registered. Call setProcessor(fn) first.');
+      throw new PluginError('[CookieFarmSuitePlugin] No processor registered. Call setProcessor(fn) first.', {
+        pluginName: 'CookieFarmSuitePlugin',
+        operation: 'queueHandler',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Register a processor via plugin.setProcessor(jobHandler) before starting the queue.'
+      });
     }
 
     const helpers = {

@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready DigitalOcean inventory driver using digitalocean-js library.
@@ -59,7 +60,13 @@ export class DigitalOceanInventoryDriver extends BaseCloudDriver {
     this._apiToken = credentials.token || credentials.apiToken || process.env.DIGITALOCEAN_TOKEN;
 
     if (!this._apiToken) {
-      throw new Error('DigitalOcean API token is required. Provide via credentials.token or DIGITALOCEAN_TOKEN env var.');
+      throw new PluginError('DigitalOcean API token is required. Provide via credentials.token or DIGITALOCEAN_TOKEN env var.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'digitalocean:initClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Set credentials.token or the DIGITALOCEAN_TOKEN environment variable before initializing the driver.'
+      });
     }
 
     // Lazy import to keep core package lightweight

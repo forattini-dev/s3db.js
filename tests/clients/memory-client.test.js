@@ -4,9 +4,11 @@
  * Tests all functionality of the in-memory S3 client emulator
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import path from 'path';
 import { createMemoryDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
+import { MemoryStorage } from '#src/clients/memory-storage.class.js';
 import Database from '#src/database.class.js';
 import { unlinkSync } from 'fs';
 
@@ -622,6 +624,23 @@ describe('MemoryClient - Direct API Tests', () => {
 
       expect(destBody).toBe(bodyContent);
     });
+
+    it('should merge metadata when directive is default', async () => {
+      await client.putObject({
+        key: 'merge-source',
+        metadata: { original: 'true' }
+      });
+
+      await client.copyObject({
+        from: 'merge-source',
+        to: 'merge-dest',
+        metadata: { added: 'true' }
+      });
+
+      const head = await client.headObject('merge-dest');
+      expect(head.Metadata.original).toBe('true');
+      expect(head.Metadata.added).toBe('true');
+    });
   });
 
   describe('Listing Operations', () => {
@@ -647,6 +666,9 @@ describe('MemoryClient - Direct API Tests', () => {
       expect(result.Contents).toHaveLength(2);
       expect(result.IsTruncated).toBe(true);
       expect(result.NextContinuationToken).toBeDefined();
+      const decoded = Buffer.from(result.NextContinuationToken, 'base64').toString('utf8');
+      const lastKey = result.Contents[result.Contents.length - 1].Key;
+      expect(decoded).toBe(lastKey);
     });
 
     it('should continue pagination with continuation token', async () => {
@@ -660,6 +682,15 @@ describe('MemoryClient - Direct API Tests', () => {
 
       expect(page2.Contents).toBeDefined();
       expect(page2.Contents.length).toBeGreaterThan(0);
+    });
+
+    it('should respect startAfter parameter', async () => {
+      const firstPage = await client.listObjects({ maxKeys: 1 });
+      const startAfterKey = firstPage.Contents[0].Key;
+
+      const secondPage = await client.listObjects({ startAfter: startAfterKey });
+
+      expect(secondPage.Contents.every(item => item.Key > startAfterKey)).toBe(true);
     });
 
     it('should get all keys with getAllKeys', async () => {
@@ -689,6 +720,34 @@ describe('MemoryClient - Direct API Tests', () => {
       const page2 = await client.getKeysPage({ amount: 2, offset: 2 });
       expect(Array.isArray(page2)).toBe(true);
       expect(page2.length).toBeGreaterThan(0);
+    });
+
+    it('should return empty array when requesting zero keys', async () => {
+      const keys = await client.getKeysPage({ amount: 0 });
+      expect(keys).toHaveLength(0);
+    });
+
+    it('should strip keyPrefix from listObjects results', async () => {
+      const prefClient = new MemoryClient({ bucket: 'pref', keyPrefix: 'tenant/' });
+
+      await prefClient.putObject({ key: 'items/file', metadata: {} });
+
+      const response = await prefClient.listObjects({ prefix: 'items/' });
+
+      expect(response.Prefix).toBeUndefined();
+      expect(response.Contents[0].Key).toBe('items/file');
+    });
+
+    it('should normalize common prefixes when keyPrefix is configured', async () => {
+      const prefClient = new MemoryClient({ bucket: 'pref', keyPrefix: 'tenant/' });
+
+      await prefClient.putObject({ key: 'folders/a/file1', metadata: {} });
+      await prefClient.putObject({ key: 'folders/b/file1', metadata: {} });
+
+      const response = await prefClient.listObjects({ prefix: 'folders/', delimiter: '/' });
+
+      expect(response.CommonPrefixes.some(p => p.Prefix === 'folders/a/')).toBe(true);
+      expect(response.CommonPrefixes.some(p => p.Prefix === 'folders/b/')).toBe(true);
     });
   });
 
@@ -990,7 +1049,7 @@ describe('MemoryClient - Direct API Tests', () => {
 
       await expect(
         limitedClient.putObject({ key: 'test', metadata: largeMetadata })
-      ).rejects.toThrow('Metadata size');
+      ).rejects.toThrow('Metadata limit exceeded');
     });
 
     it('should enforce object size limit', async () => {
@@ -1042,6 +1101,49 @@ describe('MemoryClient - Direct API Tests', () => {
           ifMatch: 'wrong-etag'
         })
       ).rejects.toThrow('Precondition failed');
+    });
+  });
+
+  describe('Conditional Put (ifNoneMatch)', () => {
+    it('should allow write when object does not exist', async () => {
+      await client.putObject({
+        key: 'conditional-none-success',
+        metadata: { version: '1' },
+        ifNoneMatch: '*'
+      });
+
+      const head = await client.headObject('conditional-none-success');
+      expect(head.Metadata.version).toBe('1');
+    });
+
+    it('should block writes when object already exists and wildcard is used', async () => {
+      await client.putObject({
+        key: 'conditional-none',
+        metadata: { version: '1' }
+      });
+
+      await expect(
+        client.putObject({
+          key: 'conditional-none',
+          metadata: { version: '2' },
+          ifNoneMatch: '*'
+        })
+      ).rejects.toThrow('object already exists');
+    });
+
+    it('should block writes when ETag matches a specific value', async () => {
+      const original = await client.putObject({
+        key: 'conditional-none-specific',
+        metadata: { version: '1' }
+      });
+
+      await expect(
+        client.putObject({
+          key: 'conditional-none-specific',
+          metadata: { version: '2' },
+          ifNoneMatch: original.ETag
+        })
+      ).rejects.toThrow('object already exists');
     });
   });
 
@@ -1295,6 +1397,251 @@ describe('MemoryClient - Direct API Tests', () => {
       // Cleanup
       await fs.rm(tmpDir, { recursive: true, force: true });
     });
+
+    it('should include schema metadata when database provides schema', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-schema-include-${Date.now()}`);
+
+      await client.putObject({
+        key: 'resource=products/id=p1',
+        metadata: { name: 'Product 1' }
+      });
+
+      const schemaResource = {
+        schema: {
+          attributes: { id: 'string', name: 'string' },
+          partitions: null,
+          behavior: { storage: 'metadata' },
+          timestamps: false
+        },
+        get: jest.fn().mockResolvedValue({ id: 'p1', name: 'Product 1', description: 'from resource' })
+      };
+
+      const result = await client.exportBackup(tmpDir, {
+        compress: false,
+        database: {
+          resources: {
+            products: schemaResource
+          }
+        }
+      });
+
+      expect(result.stats.resources.products.schema).not.toBeNull();
+
+      const jsonlContent = await fs.readFile(`${tmpDir}/products.jsonl`, 'utf-8');
+      const record = JSON.parse(jsonlContent.trim());
+      expect(record.description).toBe('from resource');
+
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should include schema metadata and fallback when resource get fails', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-schema-${Date.now()}`);
+
+      await client.putObject({
+        key: 'resource=logs/id=log1',
+        metadata: { level: 'info' },
+        body: Buffer.from('plain text body')
+      });
+
+      await client.putObject({
+        key: 'resource=logs/id=log2',
+        metadata: { level: 'warn' },
+        body: Buffer.from('{"level":"warn"') // malformed JSON to trigger fallback catch
+      });
+
+      await client.putObject({
+        key: 'resource=logs/meta',
+        metadata: { summary: 'no id key' }
+      });
+
+      const failingResource = {
+        get: jest.fn().mockRejectedValue(new Error('not available')),
+        schema: null
+      };
+
+      const mockDatabase = {
+        resources: { logs: failingResource }
+      };
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = await client.exportBackup(tmpDir, {
+        compress: false,
+        database: mockDatabase
+      });
+
+      expect(result.files.logs).toContain('logs.jsonl');
+      expect(result.stats.resources.logs.schema).toBeNull();
+
+      const jsonlContent = await fs.readFile(`${tmpDir}/logs.jsonl`, 'utf-8');
+      const records = jsonlContent.trim().split('\n').map(line => JSON.parse(line));
+      const plainRecord = records.find(r => r.id === 'log1');
+      const malformedRecord = records.find(r => r.id === 'log2');
+      const metaRecord = records.find(r => !r.id && r.summary === 'no id key');
+
+      expect(plainRecord._body).toBe('plain text body');
+      expect(malformedRecord._body).toContain('{"level":"warn"');
+      expect(metaRecord).toBeDefined();
+
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should recreate schemas during import when database is provided', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-import-schema-${Date.now()}`);
+      await fs.mkdir(tmpDir, { recursive: true });
+
+      const s3dbData = {
+        version: '1.0',
+        bucket: 'test-direct-api',
+        keyPrefix: '',
+        compressed: false,
+        resources: {
+          items: {
+            schema: {
+              attributes: { id: 'string', name: 'string' },
+              partitions: null,
+              behavior: { storage: 'metadata' },
+              timestamps: false
+            },
+            stats: { recordCount: 1, fileSize: 10 }
+          }
+        },
+        totalRecords: 1,
+        totalSize: 10
+      };
+
+      await fs.writeFile(`${tmpDir}/s3db.json`, JSON.stringify(s3dbData, null, 2), 'utf-8');
+      const jsonlData = `${JSON.stringify({ id: 'i1', name: 'Item 1' })}\n{"invalid":}\n`;
+      await fs.writeFile(`${tmpDir}/items.jsonl`, jsonlData, 'utf-8');
+
+      await client.putObject({ key: 'resource=temp/id=temp', metadata: { temp: 'true' } });
+
+      client.verbose = true;
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const createResource = jest.fn().mockRejectedValue(new Error('already exists'));
+      const database = { createResource };
+
+      const stats = await client.importBackup(tmpDir, {
+        clear: true,
+        database
+      });
+
+      expect(createResource).toHaveBeenCalledWith(expect.objectContaining({ name: 'items' }));
+      expect(stats.resourcesImported).toBe(1);
+      expect(stats.recordsImported).toBe(1);
+      expect(stats.errors.length).toBe(1);
+      expect(client.getStats().objectCount).toBeGreaterThanOrEqual(1);
+
+      expect(warnSpy).toHaveBeenCalled();
+      client.verbose = false;
+      warnSpy.mockRestore();
+
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should honour resource filter during import', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-import-filter-${Date.now()}`);
+      await fs.mkdir(tmpDir, { recursive: true });
+
+      const s3dbData = {
+        version: '1.0',
+        bucket: 'test-direct-api',
+        keyPrefix: '',
+        compressed: false,
+        resources: {
+          keep: { schema: null, stats: { recordCount: 1, fileSize: 5 } },
+          skip: { schema: null, stats: { recordCount: 1, fileSize: 5 } }
+        },
+        totalRecords: 2,
+        totalSize: 10
+      };
+
+      await fs.writeFile(`${tmpDir}/s3db.json`, JSON.stringify(s3dbData, null, 2), 'utf-8');
+      await fs.writeFile(`${tmpDir}/keep.jsonl`, `${JSON.stringify({ id: 'k1', value: 1 })}\n`, 'utf-8');
+      await fs.writeFile(`${tmpDir}/skip.jsonl`, `${JSON.stringify({ id: 's1', value: 1 })}\n`, 'utf-8');
+
+      const importClient = new MemoryClient();
+
+      const stats = await importClient.importBackup(tmpDir, {
+        clear: true,
+        resources: ['keep']
+      });
+
+      expect(stats.resourcesImported).toBe(1);
+      expect(stats.recordsImported).toBe(1);
+      expect(stats.errors.length).toBe(0);
+
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should create resources when schema metadata is present during import', async () => {
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const path = await import('path');
+
+      const tmpDir = path.join(os.tmpdir(), `test-backup-import-schema-create-${Date.now()}`);
+      await fs.mkdir(tmpDir, { recursive: true });
+
+      const s3dbData = {
+        version: '1.0',
+        bucket: 'test-direct-api',
+        keyPrefix: '',
+        compressed: false,
+        resources: {
+          items: {
+            schema: {
+              attributes: { id: 'string', name: 'string' },
+              partitions: null,
+              behavior: { storage: 'metadata' },
+              timestamps: false
+            },
+            stats: { recordCount: 1, fileSize: 10 }
+          }
+        },
+        totalRecords: 1,
+        totalSize: 10
+      };
+
+      await fs.writeFile(`${tmpDir}/s3db.json`, JSON.stringify(s3dbData, null, 2), 'utf-8');
+      const itemsJsonl = [
+        JSON.stringify({ id: 'i1', name: 'Item 1', _body: 'raw import body' }),
+        JSON.stringify({ _id: 'legacy1', name: 'Legacy Item' }),
+        JSON.stringify({ name: 'Generated Item' })
+      ].join('\n') + '\n';
+      await fs.writeFile(`${tmpDir}/items.jsonl`, itemsJsonl, 'utf-8');
+
+      const createResource = jest.fn().mockResolvedValue(undefined);
+      const importClient = new MemoryClient();
+
+      await importClient.importBackup(tmpDir, {
+        clear: true,
+        database: { createResource }
+      });
+
+      expect(createResource).toHaveBeenCalledWith(expect.objectContaining({ name: 'items' }));
+
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
   });
 
   describe('Persistence', () => {
@@ -1414,6 +1761,124 @@ describe('MemoryClient - Direct API Tests', () => {
       expect(keys).toContain('file1');
       expect(keys).toContain('file2');
       expect(keys.some(k => k.includes('app/data/'))).toBe(false);
+    });
+  });
+
+  describe('MemoryClient Edge Cases', () => {
+    it('should honour constructor configuration overrides', async () => {
+      const configured = new MemoryClient({
+        bucket: 'custom-bucket',
+        keyPrefix: 'tenant/',
+        region: 'eu-west-1',
+        verbose: true,
+        parallelism: 4,
+        enforceLimits: true,
+        metadataLimit: 128,
+        maxObjectSize: 4096
+      });
+
+      expect(configured.bucket).toBe('custom-bucket');
+      expect(configured.keyPrefix).toBe('tenant/');
+      expect(configured.config.region).toBe('eu-west-1');
+      expect(configured.storage.enforceLimits).toBe(true);
+    });
+
+    it('should handle sendCommand with undefined input', async () => {
+      const noInputClient = new MemoryClient();
+      await noInputClient.putObject({ key: 'autogen/no-input', metadata: {} });
+
+      const ListObjectsV2Command = class {};
+      const response = await noInputClient.sendCommand(new ListObjectsV2Command());
+
+      expect(Array.isArray(response.Contents)).toBe(true);
+      expect(response.Contents.length).toBeGreaterThan(0);
+    });
+
+    it('should handle DeleteObjectsCommand without payload', async () => {
+      const deleteClient = new MemoryClient();
+      const DeleteObjectsCommand = class {};
+
+      const response = await deleteClient.sendCommand(new DeleteObjectsCommand());
+      expect(response.Deleted).toEqual([]);
+      expect(response.Errors).toEqual([]);
+    });
+
+    it('should return null continuation token when offset is zero', async () => {
+      const token = await client.getContinuationTokenAfterOffset({ prefix: '', offset: 0 });
+      expect(token).toBeNull();
+    });
+
+    it('should favour fallback when key for token is empty', async () => {
+      const stubClient = new MemoryClient();
+      jest.spyOn(stubClient, 'getAllKeys').mockResolvedValue(['first', '']);
+
+      const token = await stubClient.getContinuationTokenAfterOffset({ prefix: '', offset: 1 });
+      expect(Buffer.from(token, 'base64').toString('utf8')).toBe('');
+    });
+
+    it('should aggregate deleteObjects errors', async () => {
+      const errorClient = new MemoryClient();
+      const originalDeleteMultiple = errorClient.storage.deleteMultiple.bind(errorClient.storage);
+      jest.spyOn(errorClient.storage, 'deleteMultiple').mockResolvedValue({
+        Deleted: [],
+        Errors: [{ Key: 'fail', Code: 'Boom', Message: 'boom' }]
+      });
+
+      const result = await errorClient.deleteObjects(['fail']);
+      expect(result.Errors).toHaveLength(1);
+
+      errorClient.storage.deleteMultiple.mockRestore();
+      errorClient.storage.deleteMultiple = originalDeleteMultiple;
+    });
+
+    it('should handle storage.list returning empty object in getKeysPage', async () => {
+      const listClient = new MemoryClient();
+      const originalList = listClient.storage.list.bind(listClient.storage);
+      jest.spyOn(listClient.storage, 'list').mockResolvedValue({});
+
+      const keys = await listClient.getKeysPage({ prefix: 'none/', offset: 5, amount: 2 });
+      expect(keys).toEqual([]);
+
+      listClient.storage.list.mockRestore();
+      listClient.storage.list = originalList;
+    });
+
+    it('should handle storage.list returning empty object in getAllKeys', async () => {
+      const allKeysClient = new MemoryClient();
+      const originalList = allKeysClient.storage.list.bind(allKeysClient.storage);
+      jest.spyOn(allKeysClient.storage, 'list').mockResolvedValue({});
+
+      const keys = await allKeysClient.getAllKeys({ prefix: 'missing/' });
+      expect(keys).toEqual([]);
+
+      allKeysClient.storage.list.mockRestore();
+      allKeysClient.storage.list = originalList;
+    });
+
+    it('should normalize list response when arrays are missing', () => {
+      const normalizeClient = new MemoryClient();
+      const normalized = normalizeClient._normalizeListResponse({});
+      expect(normalized.Contents).toEqual([]);
+      expect(normalized.CommonPrefixes).toEqual([]);
+    });
+
+    it('should evaluate resource filters through helper', () => {
+      const helperClient = new MemoryClient();
+      expect(helperClient._shouldProcessResource(undefined, 'any')).toBe(true);
+      expect(helperClient._shouldProcessResource([], 'any')).toBe(true);
+      expect(helperClient._shouldProcessResource(['keep'], 'keep')).toBe(true);
+      expect(helperClient._shouldProcessResource(['keep'], 'skip')).toBe(false);
+    });
+
+    it('should default applyKeyPrefix to empty string', () => {
+      const helperClient = new MemoryClient();
+      expect(helperClient._applyKeyPrefix()).toBe('');
+    });
+
+    it('should handle empty keys when prefix is configured', () => {
+      const helperClient = new MemoryClient({ keyPrefix: 'tenant/' });
+      expect(helperClient._applyKeyPrefix('')).toBe(path.posix.join('tenant/', ''));
+      expect(helperClient._applyKeyPrefix('file')).toBe(path.posix.join('tenant/', 'file'));
     });
   });
 
@@ -1567,6 +2032,116 @@ describe('MemoryClient - Direct API Tests', () => {
     });
   });
 
+  describe('MemoryStorage Internals', () => {
+    it('should normalize undefined ETag header to empty array', () => {
+      const storage = new MemoryStorage();
+      expect(storage._normalizeEtagHeader()).toEqual([]);
+    });
+
+    it('should throw on invalid continuation token decode', () => {
+      const storage = new MemoryStorage();
+      expect(() => storage._decodeContinuationToken('%')).toThrow('Invalid continuation token');
+    });
+
+    it('should return null when prefix does not match key for delimiter grouping', () => {
+      const storage = new MemoryStorage();
+      expect(storage._extractCommonPrefix('folder/', '/', 'other/file')).toBeNull();
+    });
+
+    it('should return null when delimiter is absent after prefix', () => {
+      const storage = new MemoryStorage();
+      expect(storage._extractCommonPrefix('folder/', '/', 'folderfile')).toBeNull();
+    });
+
+    it('should keep key unchanged when prefix does not match', () => {
+      const prefixClient = new MemoryClient({ bucket: 'test', keyPrefix: 'tenant/' });
+      expect(prefixClient._stripKeyPrefix('other/key')).toBe('other/key');
+    });
+
+    it('should remove matching keyPrefix when stripping', () => {
+      const prefixClient = new MemoryClient({ bucket: 'test', keyPrefix: 'tenant/' });
+      expect(prefixClient._stripKeyPrefix('tenant/path/file')).toBe('path/file');
+    });
+
+    it('should compute metadata size correctly', () => {
+      const storage = new MemoryStorage();
+      expect(storage._calculateMetadataSize(null)).toBe(0);
+      expect(storage._calculateMetadataSize({ a: 'a' })).toBeGreaterThan(0);
+    });
+
+    it('should extract common prefix when delimiter is present', () => {
+      const storage = new MemoryStorage();
+      const prefix = storage._extractCommonPrefix('folder/', '/', 'folder/sub/file');
+      expect(prefix).toBe('folder/sub/');
+    });
+
+    it('should decode valid continuation token', () => {
+      const storage = new MemoryStorage();
+      const encoded = storage._encodeContinuationToken('key123');
+      expect(storage._decodeContinuationToken(encoded)).toBe('key123');
+    });
+
+    it('should generate identical ETags for Buffer and string bodies', () => {
+      const storage = new MemoryStorage();
+      const fromString = storage._generateETag('content');
+      const fromBuffer = storage._generateETag(Buffer.from('content'));
+      expect(fromString).toBe(fromBuffer);
+    });
+
+    it('should create empty buffers when body is undefined', async () => {
+      const storage = new MemoryStorage();
+      await storage.put('empty', { body: undefined, metadata: {} });
+      const head = await storage.head('empty');
+      expect(head.ContentLength).toBe(0);
+    });
+
+    it('should allow ifNoneMatch on new keys', async () => {
+      const storage = new MemoryStorage();
+      await storage.put('new-key', { body: 'body', metadata: {} , ifNoneMatch: '*' });
+      const head = await storage.head('new-key');
+      expect(head.ContentLength).toBeGreaterThan(0);
+    });
+
+    it('should store string bodies without loss', async () => {
+      const storage = new MemoryStorage();
+      await storage.put('string-key', { body: 'hello world', metadata: {} });
+      const head = await storage.head('string-key');
+      expect(head.ContentLength).toBe(Buffer.byteLength('hello world'));
+    });
+
+    it('should validate object size limits without throwing when under max', async () => {
+      const storage = new MemoryStorage({ enforceLimits: true, maxObjectSize: 1024 });
+      await expect(storage.put('small-object', { body: 'tiny', metadata: {} })).resolves.toBeDefined();
+    });
+
+    it('should allow conditional put with matching ETag', async () => {
+      const storage = new MemoryStorage();
+      const first = await storage.put('conditional-etag', { body: 'v1', metadata: {} });
+      await expect(storage.put('conditional-etag', {
+        body: 'v2',
+        metadata: {},
+        ifMatch: first.ETag
+      })).resolves.toBeDefined();
+    });
+
+    it('should allow ifNoneMatch when ETag differs', async () => {
+      const storage = new MemoryStorage();
+      await storage.put('conditional-none-match', { body: 'value', metadata: {} });
+      await expect(storage.put('conditional-none-match', {
+        body: 'value2',
+        metadata: {},
+        ifNoneMatch: '"different"'
+      })).resolves.toBeDefined();
+    });
+
+    it('should honour explicit contentLength override', async () => {
+      const storage = new MemoryStorage();
+      await storage.put('length-override', { body: 'abcd', metadata: {}, contentLength: 10 });
+      const obj = storage.objects.get('length-override');
+      expect(obj.contentLength).toBe(10);
+    });
+  });
+
   describe('AWS SDK Command Interface', () => {
     it('should handle sendCommand with PutObjectCommand', async () => {
       // Simulate AWS SDK command
@@ -1587,6 +2162,25 @@ describe('MemoryClient - Direct API Tests', () => {
 
       const obj = await client.headObject('sdk-test');
       expect(obj.Metadata.source).toBe('sdk');
+    });
+
+    it('should handle sendCommand PutObjectCommand without metadata', async () => {
+      const PutObjectCommand = class {
+        constructor(input) {
+          this.input = input;
+        }
+      };
+
+      const command = new PutObjectCommand({
+        Key: 'sdk-default',
+        Body: Buffer.from('body')
+      });
+
+      const response = await client.sendCommand(command);
+      expect(response.ETag).toBeDefined();
+
+      const obj = await client.headObject('sdk-default');
+      expect(obj.Metadata).toEqual({});
     });
 
     it('should handle sendCommand with GetObjectCommand', async () => {
@@ -1639,6 +2233,38 @@ describe('MemoryClient - Direct API Tests', () => {
 
       const dest = await client.headObject('copy-dest');
       expect(dest.Metadata.name).toBe('Source');
+    });
+
+    it('should reject CopyObject across different buckets', async () => {
+      await client.putObject({ key: 'copy-source-bucket', metadata: {} });
+
+      const CopyObjectCommand = class {
+        constructor(input) {
+          this.input = input;
+        }
+      };
+
+      const command = new CopyObjectCommand({
+        CopySource: 'other-bucket/copy-source-bucket',
+        Key: 'copy-dest-bucket'
+      });
+
+      await expect(client.sendCommand(command)).rejects.toThrow('Cross-bucket copy');
+    });
+
+    it('should reject invalid CopySource format', async () => {
+      const CopyObjectCommand = class {
+        constructor(input) {
+          this.input = input;
+        }
+      };
+
+      const command = new CopyObjectCommand({
+        CopySource: 'invalid-format',
+        Key: 'invalid'
+      });
+
+      await expect(client.sendCommand(command)).rejects.toThrow('Invalid CopySource');
     });
 
     it('should handle sendCommand with DeleteObjectCommand', async () => {
@@ -1701,6 +2327,48 @@ describe('MemoryClient - Direct API Tests', () => {
 
       expect(response.Contents).toBeDefined();
       expect(response.KeyCount).toBeGreaterThan(0);
+    });
+
+    it('should handle sendCommand StartAfter parameter', async () => {
+      await client.putObject({ key: 'startafter/a', metadata: {} });
+      await client.putObject({ key: 'startafter/b', metadata: {} });
+
+      const ListObjectsV2Command = class {
+        constructor(input) {
+          this.input = input;
+        }
+      };
+
+      const command = new ListObjectsV2Command({
+        Prefix: 'startafter/',
+        StartAfter: 'startafter/a'
+      });
+
+      const response = await client.sendCommand(command);
+
+      expect(response.Contents.every(item => item.Key > 'startafter/a')).toBe(true);
+    });
+
+    it('should map unexpected errors to AWS-style responses', async () => {
+      const originalGet = client.storage.get.bind(client.storage);
+      client.storage.get = () => {
+        throw new Error('boom');
+      };
+
+      const GetObjectCommand = class {
+        constructor(input) {
+          this.input = input;
+        }
+      };
+
+      const command = new GetObjectCommand({ Key: 'error-test' });
+
+      await expect(client.sendCommand(command)).rejects.toMatchObject({
+        message: expect.stringContaining('boom'),
+        code: expect.any(String)
+      });
+
+      client.storage.get = originalGet;
     });
 
     it('should throw error for unsupported command', async () => {

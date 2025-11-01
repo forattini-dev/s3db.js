@@ -13,11 +13,18 @@ import {
   InsufficientDataError,
   TensorFlowDependencyError
 } from '../ml.errors.js';
+import { PluginError } from '../../errors.js';
 
 export class BaseModel {
   constructor(config = {}) {
     if (this.constructor === BaseModel) {
-      throw new Error('BaseModel is an abstract class and cannot be instantiated directly');
+      throw new PluginError('BaseModel is an abstract class and cannot be instantiated directly', {
+        pluginName: 'MLPlugin',
+        operation: 'baseModel:constructor',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Extend BaseModel and instantiate the concrete subclass instead.'
+      });
     }
 
     this.config = {
@@ -92,7 +99,13 @@ export class BaseModel {
    * @abstract
    */
   buildModel() {
-    throw new Error('buildModel() must be implemented by subclass');
+    throw new PluginError('buildModel() must be implemented by subclass', {
+      pluginName: 'MLPlugin',
+      operation: 'baseModel:buildModel',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Override buildModel() in your model subclass to define the underlying ML architecture.'
+    });
   }
 
   /**

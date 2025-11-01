@@ -5,7 +5,8 @@
  * Zero external dependencies - uses Node.js crypto only
  */
 
-import { generateKeyPairSync, createSign, createVerify, createHash } from 'crypto';
+import { generateKeyPairSync, createSign, createVerify, createHash, createPublicKey } from 'crypto';
+import { PluginError } from '../../errors.js';
 
 /**
  * Generate RSA key pair for RS256
@@ -74,7 +75,13 @@ export function createRS256Token(payload, privateKey, kid, expiresIn = '15m') {
   // Parse expiresIn
   const match = expiresIn.match(/^(\d+)([smhd])$/);
   if (!match) {
-    throw new Error('Invalid expiresIn format. Use: 60s, 30m, 24h, 7d');
+    throw new PluginError('Invalid expiresIn format. Use: 60s, 30m, 24h, 7d', {
+      pluginName: 'IdentityPlugin',
+      operation: 'createToken',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide a duration string ending with s, m, h, or d (e.g., "15m" for 15 minutes).'
+    });
   }
 
   const [, value, unit] = match;
@@ -173,11 +180,6 @@ export function getKidFromToken(token) {
     return null;
   }
 }
-
-/**
- * Import createPublicKey for JWK conversion
- */
-import { createPublicKey } from 'crypto';
 
 /**
  * Key Manager class - manages key rotation and storage
@@ -312,7 +314,14 @@ export class KeyManager {
     const activeKey = this.currentKeys.get(normalizedPurpose);
 
     if (!activeKey) {
-      throw new Error(`No active key available for purpose "${normalizedPurpose}"`);
+      throw new PluginError(`No active key available for purpose "${normalizedPurpose}"`, {
+        pluginName: 'IdentityPlugin',
+        operation: 'createToken',
+        statusCode: 503,
+        retriable: true,
+        suggestion: 'Generate or rotate keys before issuing tokens for this purpose.',
+        metadata: { purpose: normalizedPurpose }
+      });
     }
 
     return createRS256Token(

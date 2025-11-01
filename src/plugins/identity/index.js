@@ -33,6 +33,16 @@ import { OAuth2Server } from './oauth2-server.js';
 import { RateLimiter } from './concerns/rate-limit.js';
 import { resolveResourceNames } from '../concerns/resource-names.js';
 import { prepareResourceConfigs } from './concerns/config.js';
+import { PluginError } from '../../errors.js';
+import {
+  BASE_USER_ATTRIBUTES,
+  BASE_TENANT_ATTRIBUTES,
+  BASE_CLIENT_ATTRIBUTES,
+  mergeResourceConfig
+} from './concerns/resource-schemas.js';
+import { verifyPassword } from './concerns/password.js';
+import { createBuiltInAuthDrivers } from './drivers/index.js';
+import { AuthDriver } from './drivers/auth-driver.interface.js';
 
 /**
  * Identity Provider Plugin class
@@ -72,32 +82,6 @@ export class IdentityPlugin extends Plugin {
     };
     this.internalResourceNames = this._resolveInternalResourceNames();
 
-    // Validate required resources configuration
-    const resourcesValidation = validateResourcesConfig(options.resources);
-    if (!resourcesValidation.valid) {
-      throw new Error(
-        'IdentityPlugin configuration error:\n' +
-        resourcesValidation.errors.join('\n')
-      );
-    }
-
-    // Validate resource configs (will throw if invalid)
-    mergeResourceConfig(
-      { attributes: BASE_USER_ATTRIBUTES },
-      options.resources.users,
-      'users'
-    );
-    mergeResourceConfig(
-      { attributes: BASE_TENANT_ATTRIBUTES },
-      options.resources.tenants,
-      'tenants'
-    );
-    mergeResourceConfig(
-      { attributes: BASE_CLIENT_ATTRIBUTES },
-      options.resources.clients,
-      'clients'
-    );
-
     const normalizedResources = prepareResourceConfigs(options.resources);
 
     this.config = {
@@ -109,7 +93,7 @@ export class IdentityPlugin extends Plugin {
       // OAuth2/OIDC configuration
       issuer: options.issuer || `http://localhost:${options.port || 4000}`,
       supportedScopes: options.supportedScopes || ['openid', 'profile', 'email', 'offline_access'],
-      supportedGrantTypes: options.supportedGrantTypes || ['authorization_code', 'client_credentials', 'refresh_token'],
+      supportedGrantTypes: options.supportedGrantTypes || ['authorization_code', 'refresh_token', 'client_credentials', 'password'],
       supportedResponseTypes: options.supportedResponseTypes || ['code', 'token', 'id_token'],
 
       // Token expiration
@@ -381,7 +365,9 @@ export class IdentityPlugin extends Plugin {
         // emailVerification: { enabled: false, required: false },
         // passwordPolicy: { enabled: false, minLength: 8, ... },
         // webhooks: { enabled: false, endpoints: [], events: [] }
-      }
+      },
+
+      authDrivers: options.authDrivers || {}
     };
 
     this.server = null;
@@ -406,6 +392,8 @@ export class IdentityPlugin extends Plugin {
 
     // Rate limiters
     this.rateLimiters = this._createRateLimiters();
+    this.authDrivers = new Map();
+    this.authDriverInstances = [];
   }
 
   _resolveInternalResourceNames() {
@@ -499,6 +487,9 @@ export class IdentityPlugin extends Plugin {
 
     // Initialize MFA Manager
     await this._initializeMFAManager();
+
+    // Initialize authentication drivers
+    await this._initializeAuthDrivers();
 
     if (this.config.verbose) {
       console.log('[Identity Plugin] Installed successfully');
@@ -822,6 +813,7 @@ export class IdentityPlugin extends Plugin {
     });
 
     await this.oauth2Server.initialize();
+    this.oauth2Server.setIdentityPlugin(this);
 
     if (this.config.verbose) {
       console.log('[Identity Plugin] OAuth2 Server initialized');
@@ -1010,6 +1002,277 @@ export class IdentityPlugin extends Plugin {
       console.log(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
       console.log(`[Identity Plugin] Required: ${this.config.mfa.required}`);
     }
+  }
+
+  async _initializeAuthDrivers() {
+    const driverConfig = this.config.authDrivers;
+
+    if (driverConfig === false) {
+      this.authDrivers = new Map();
+      this.authDriverInstances = [];
+      return;
+    }
+    const disableBuiltIns = this._isPlainObject(driverConfig) && driverConfig.disableBuiltIns === true;
+
+    const context = {
+      database: this.database,
+      config: this.config,
+      resources: {
+        users: this.usersResource,
+        tenants: this.tenantsResource,
+        clients: this.clientsResource
+      },
+      helpers: {
+        password: {
+          verify: verifyPassword
+        }
+      }
+    };
+
+    const drivers = [];
+
+    if (!disableBuiltIns) {
+      const builtInOptions = this._extractBuiltInDriverOptions(driverConfig);
+      drivers.push(...createBuiltInAuthDrivers(builtInOptions));
+    }
+
+    drivers.push(...this._collectCustomAuthDrivers(driverConfig));
+
+    if (!drivers.length) {
+      this.authDrivers = new Map();
+      this.authDriverInstances = [];
+      return;
+    }
+
+    this.authDrivers = new Map();
+    this.authDriverInstances = [];
+
+    for (const driver of drivers) {
+      if (!driver || typeof driver.initialize !== 'function') {
+        throw new PluginError('Auth drivers must implement initialize(context)', {
+          pluginName: 'IdentityPlugin',
+          operation: 'initializeAuthDrivers',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Ensure custom auth drivers extend AuthDriver and implement initialize(context).'
+        });
+      }
+
+      try {
+        await driver.initialize(context);
+      } catch (error) {
+        const driverName = driver.name || driver.constructor?.name || 'UnknownDriver';
+        throw new PluginError(`Failed to initialize auth driver "${driverName}": ${error.message}`, {
+          pluginName: 'IdentityPlugin',
+          operation: 'initializeAuthDrivers',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Review driver configuration and ensure required dependencies are available.',
+          original: error,
+          metadata: { driverName }
+        });
+      }
+
+      const supportedTypes = Array.isArray(driver.supportedTypes) && driver.supportedTypes.length > 0
+        ? driver.supportedTypes
+        : driver.name
+          ? [driver.name]
+          : [];
+
+      if (!supportedTypes.length) {
+        const driverName = driver.constructor?.name || 'AuthDriver';
+        throw new PluginError(`Auth driver "${driverName}" must declare supportedTypes or name`, {
+          pluginName: 'IdentityPlugin',
+          operation: 'registerAuthDriver',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Set driver.supportedTypes = ["password"] or provide a name property to map grants.',
+          metadata: { driverName }
+        });
+      }
+
+      for (const type of supportedTypes) {
+        if (!type) continue;
+        if (this.authDrivers.has(type)) {
+          const existingDriver = this.authDrivers.get(type);
+          const existingName = existingDriver?.name || existingDriver?.constructor?.name || 'AuthDriver';
+          const newName = driver.name || driver.constructor?.name || 'AuthDriver';
+          throw new PluginError(`Duplicate auth driver registration for type "${type}"`, {
+            pluginName: 'IdentityPlugin',
+            operation: 'registerAuthDriver',
+            statusCode: 409,
+            retriable: false,
+            suggestion: 'Remove duplicate registrations or use distinct driver types for each grant.',
+            metadata: { type, existingDriver: existingName, newDriver: newName }
+          });
+        }
+        this.authDrivers.set(type, driver);
+      }
+
+      this.authDriverInstances.push(driver);
+    }
+  }
+
+  getAuthDriver(type) {
+    return this.authDrivers.get(type);
+  }
+
+  _sanitizeAuthSubject(subject) {
+    if (!subject || typeof subject !== 'object') {
+      return subject;
+    }
+
+    const sensitiveFields = [
+      'password',
+      'passwordHash',
+      'password_hash',
+      'salt',
+      'secret',
+      'secrets',
+      'clientSecret',
+      'mfaSecret',
+      'totpSecret',
+      'backupCodes'
+    ];
+
+    const sanitized = { ...subject };
+    for (const field of sensitiveFields) {
+      if (sanitized[field] !== undefined) {
+        delete sanitized[field];
+      }
+    }
+
+    return sanitized;
+  }
+
+  async authenticateWithPassword({ email, password, user }) {
+    const driver = this.getAuthDriver('password');
+    if (!driver) {
+      return {
+        success: false,
+        error: 'password_driver_not_configured',
+        statusCode: 500
+      };
+    }
+
+    const result = await driver.authenticate({
+      type: 'password',
+      email,
+      password,
+      user
+    });
+
+    if (result?.success && result.user) {
+      return {
+        ...result,
+        user: this._sanitizeAuthSubject(result.user)
+      };
+    }
+
+    return result;
+  }
+
+  _collectCustomAuthDrivers(config) {
+    const candidates = [];
+
+    const addCandidate = (candidate) => {
+      if (!candidate) return;
+
+      if (Array.isArray(candidate)) {
+        if (candidate.length > 0 && typeof candidate[0] === 'function') {
+          const [Ctor, options] = candidate;
+          const instance = new Ctor(options);
+          if (!(instance instanceof AuthDriver)) {
+            throw new PluginError('Custom auth driver constructors must extend AuthDriver', {
+              pluginName: 'IdentityPlugin',
+              operation: 'collectCustomAuthDrivers',
+              statusCode: 500,
+              retriable: false,
+              suggestion: 'Extend AuthDriver to ensure consistent interface for initialize/authenticate.'
+            });
+          }
+          candidates.push(instance);
+          return;
+        }
+        for (const item of candidate) {
+          addCandidate(item);
+        }
+        return;
+      }
+
+      if (candidate instanceof AuthDriver) {
+        candidates.push(candidate);
+        return;
+      }
+
+      if (typeof candidate === 'function') {
+        const instance = new candidate();
+        if (!(instance instanceof AuthDriver)) {
+          throw new PluginError('Custom auth driver constructors must extend AuthDriver', {
+            pluginName: 'IdentityPlugin',
+            operation: 'collectCustomAuthDrivers',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Update the constructor to extend AuthDriver before registering it.'
+          });
+        }
+        candidates.push(instance);
+        return;
+      }
+
+      if (candidate && typeof candidate === 'object' &&
+        typeof candidate.initialize === 'function' &&
+        typeof candidate.authenticate === 'function'
+      ) {
+        candidates.push(candidate);
+        return;
+      }
+
+      throw new PluginError('Invalid auth driver provided. Drivers must extend AuthDriver.', {
+        pluginName: 'IdentityPlugin',
+        operation: 'collectCustomAuthDrivers',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide an AuthDriver instance, subclass, or plain object with initialize/authenticate methods.'
+      });
+    };
+
+    if (Array.isArray(config)) {
+      addCandidate(config);
+      return candidates;
+    }
+
+    if (this._isPlainObject(config)) {
+      addCandidate(config.drivers);
+      addCandidate(config.custom);
+      addCandidate(config.customDrivers);
+    }
+
+    return candidates;
+  }
+
+  _extractBuiltInDriverOptions(config) {
+    if (!this._isPlainObject(config)) {
+      return {};
+    }
+
+    if (this._isPlainObject(config.builtIns)) {
+      return config.builtIns;
+    }
+
+    const {
+      drivers,
+      custom,
+      customDrivers,
+      disableBuiltIns,
+      ...builtInOptions
+    } = config;
+
+    return builtInOptions;
+  }
+
+  _isPlainObject(value) {
+    return value != null && typeof value === 'object' && !Array.isArray(value);
   }
 
   /**

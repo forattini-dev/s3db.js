@@ -99,7 +99,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
       }
     });
 
-    await expect(plugin.install(db)).rejects.toThrow('must have an "onExpire" value');
+    await expect(plugin.install(db)).rejects.toThrow('[TTLPlugin] Invalid onExpire strategy');
     await db.disconnect();
   });
 
@@ -169,7 +169,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
       }
     });
 
-    await expect(plugin.install(db)).rejects.toThrow('must have an "archiveResource" specified');
+    await expect(plugin.install(db)).rejects.toThrow('[TTLPlugin] Archive resource required');
     await db.disconnect();
   });
 
@@ -186,7 +186,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
       }
     });
 
-    await expect(plugin.install(db)).rejects.toThrow('must have a "callback" function');
+    await expect(plugin.install(db)).rejects.toThrow('[TTLPlugin] Callback handler required');
     await db.disconnect();
   });
 });

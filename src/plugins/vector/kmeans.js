@@ -5,6 +5,7 @@
  * and comprehensive optimal K analysis using multiple metrics.
  */
 
+import { ValidationError } from '../../errors.js';
 import { euclideanDistance } from './distances.js';
 
 /**
@@ -31,15 +32,27 @@ export function kmeans(vectors, k, options = {}) {
   } = options;
 
   if (vectors.length === 0) {
-    throw new Error('Cannot cluster empty vector array');
+    throw new ValidationError('Cannot cluster empty vector array', {
+      operation: 'kmeans',
+      retriable: false,
+      suggestion: 'Provide at least one vector before invoking k-means.'
+    });
   }
 
   if (k < 1) {
-    throw new Error(`k must be at least 1, got ${k}`);
+    throw new ValidationError(`k must be at least 1, got ${k}`, {
+      operation: 'kmeans',
+      retriable: false,
+      suggestion: 'Use a positive integer for the number of clusters.'
+    });
   }
 
   if (k > vectors.length) {
-    throw new Error(`k (${k}) cannot be greater than number of vectors (${vectors.length})`);
+    throw new ValidationError(`k (${k}) cannot be greater than number of vectors (${vectors.length})`, {
+      operation: 'kmeans',
+      retriable: false,
+      suggestion: 'Reduce k or provide more vectors before clustering.'
+    });
   }
 
   const dimensions = vectors[0].length;
@@ -47,7 +60,16 @@ export function kmeans(vectors, k, options = {}) {
   // Validate all vectors have same dimensions
   for (let i = 1; i < vectors.length; i++) {
     if (vectors[i].length !== dimensions) {
-      throw new Error(`All vectors must have same dimensions. Expected ${dimensions}, got ${vectors[i].length} at index ${i}`);
+      throw new ValidationError('All vectors must have same dimensions.', {
+        operation: 'kmeans',
+        retriable: false,
+        suggestion: 'Pad or trim vectors so every row has identical dimensionality.',
+        metadata: {
+          expectedDimensions: dimensions,
+          actualDimensions: vectors[i].length,
+          index: i
+        }
+      });
     }
   }
 
