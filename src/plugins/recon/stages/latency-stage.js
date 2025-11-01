@@ -14,6 +14,23 @@ export class LatencyStage {
     this.config = plugin.config;
   }
 
+  async execute(target, options = {}) {
+    const config = { ...this.config.latency, ...options };
+    const results = {};
+
+    // Execute ping if enabled
+    if (config.ping !== false) {
+      results.ping = await this.executePing(target);
+    }
+
+    // Execute traceroute if enabled
+    if (config.traceroute !== false) {
+      results.traceroute = await this.executeTraceroute(target);
+    }
+
+    return results;
+  }
+
   async executePing(target) {
     const args = ['-n', '-c', String(this.config.ping.count), target.host];
     const run = await this.commandRunner.run('ping', args, {
