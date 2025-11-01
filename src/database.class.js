@@ -481,9 +481,11 @@ export class Database extends EventEmitter {
         });
 
       if (installResult.errors.length > 0) {
-        const { item: failedPlugin, error } = installResult.errors[0];
+        const errorInfo = installResult.errors[0];
+        const failedPlugin = errorInfo.item;
+        const error = errorInfo.raw || errorInfo.error || errorInfo;
         const failedName = this._getPluginName(failedPlugin);
-        throw new DatabaseError(`Failed to install plugin '${failedName}': ${error.message}`, {
+        throw new DatabaseError(`Failed to install plugin '${failedName}': ${error?.message || error}`, {
           operation: "startPlugins.install",
           pluginName: failedName,
           original: error
@@ -499,9 +501,11 @@ export class Database extends EventEmitter {
         });
 
       if (startResult.errors.length > 0) {
-        const { item: failedPlugin, error } = startResult.errors[0];
+        const errorInfo = startResult.errors[0];
+        const failedPlugin = errorInfo.item;
+        const error = errorInfo.raw || errorInfo.error || errorInfo;
         const failedName = this._getPluginName(failedPlugin);
-        throw new DatabaseError(`Failed to start plugin '${failedName}': ${error.message}`, {
+        throw new DatabaseError(`Failed to start plugin '${failedName}': ${error?.message || error}`, {
           operation: "startPlugins.start",
           pluginName: failedName,
           original: error

@@ -160,12 +160,12 @@ export function getNamespacedResourceName(baseResourceName, namespace, pluginPre
  * validateNamespace('a'.repeat(51));  // Throws
  */
 export function validateNamespace(namespace) {
-  // Empty string and null are allowed (no namespace)
-  if (namespace === '' || namespace === null || namespace === undefined) {
+  // Empty string is allowed (no namespace)
+  if (namespace === '') {
     return;
   }
 
-  if (typeof namespace !== 'string') {
+  if (!namespace || typeof namespace !== 'string') {
     throw new Error('Namespace must be a string');
   }
 
