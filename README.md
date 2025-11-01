@@ -358,9 +358,7 @@ s3db.js supports multiple connection string formats for different S3 providers:
 "http://test:test@localhost:4566/mybucket/databases/myapp"
 
 // MemoryClient (ultra-fast in-memory testing - no S3 required!)
-// Note: MemoryClient doesn't use a connection string, instantiate directly:
-//   const db = new S3db({ client: new MemoryClient({ bucket: 'test-bucket' }) });
-// See MemoryClient section below for full documentation
+"memory://mybucket/databases/myapp"
 
 // Backblaze B2
 "https://KEY_ID:APPLICATION_KEY@s3.us-west-002.backblazeb2.com/BUCKET/databases/myapp"
@@ -418,6 +416,21 @@ For testing, s3db.js provides **MemoryClient** - a pure in-memory implementation
 - 🧪 **Perfect for tests** - instant setup and teardown
 - 💾 **Optional persistence** - save/load snapshots to disk
 
+**Quick Start with Connection String:**
+
+```javascript
+import { S3db } from 's3db.js';
+
+// Simple - just use memory:// protocol!
+const db = new S3db({
+  connectionString: 'memory://mybucket'
+});
+
+await db.connect();
+```
+
+**Alternative - Manual Instantiation:**
+
 ```javascript
 import { S3db, MemoryClient } from 's3db.js';
 
@@ -441,17 +454,41 @@ await users.insert({ id: 'u1', name: 'John', email: 'john@test.com' });
 const user = await users.get('u1');
 ```
 
-**Advanced Features:**
+**Connection String Options:**
 
 ```javascript
-import { MemoryClient } from 's3db.js';
+// Basic usage
+"memory://mybucket"
 
-const client = new MemoryClient({
-  bucket: 'test-bucket',
-  keyPrefix: 'tests/',              // Optional prefix for all keys
-  enforceLimits: true,               // Enforce S3 2KB metadata limit
-  persistPath: './test-data.json',  // Optional: persist to disk
-  verbose: false                     // Disable logging
+// With key prefix (path)
+"memory://mybucket/databases/myapp"
+
+// With multiple path segments
+"memory://testdb/level1/level2/level3"
+
+// With query parameters
+"memory://mybucket?region=us-west-2"
+```
+
+**Advanced Features (Manual Client):**
+
+```javascript
+import { S3db, MemoryClient } from 's3db.js';
+
+// Option 1: Connection string (recommended)
+const db1 = new S3db({
+  connectionString: 'memory://test-bucket/tests/'
+});
+
+// Option 2: Manual client configuration
+const db2 = new S3db({
+  client: new MemoryClient({
+    bucket: 'test-bucket',
+    keyPrefix: 'tests/',              // Optional prefix for all keys
+    enforceLimits: true,               // Enforce S3 2KB metadata limit
+    persistPath: './test-data.json',  // Optional: persist to disk
+    verbose: false                     // Disable logging
+  })
 });
 
 // Snapshot/Restore (perfect for tests)
@@ -474,15 +511,19 @@ client.clear();
 **Testing Example:**
 
 ```javascript
-import { describe, test, beforeEach } from '@jest/globals';
-import { S3db, MemoryClient } from 's3db.js';
+import { describe, test, beforeEach, afterEach } from '@jest/globals';
+import { S3db } from 's3db.js';
 
 describe('User Tests', () => {
   let db, users, snapshot;
 
   beforeEach(async () => {
-    db = new S3db({ client: new MemoryClient({ bucket: 'test' }) });
+    // Simple connection string setup!
+    db = new S3db({
+      connectionString: 'memory://test-db/my-tests'
+    });
     await db.connect();
+
     users = await db.createResource({
       name: 'users',
       attributes: { name: 'string', email: 'email' }
