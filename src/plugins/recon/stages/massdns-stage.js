@@ -35,13 +35,25 @@ export class MassDNSStage {
       errors: {}
     };
 
+    // Track individual tool results for artifact persistence
+    const individual = {
+      massdns: { status: 'ok', raw: null, subdomains: [], resolvedCount: 0 },
+      wordlist: { status: 'ok', path: null, entriesUsed: 0 }
+    };
+
     // Check if massdns is available
     const isAvailable = await this.commandRunner.isAvailable('massdns');
 
     if (!isAvailable) {
       result.status = 'unavailable';
       result.errors.massdns = 'massdns not found in PATH';
-      return result;
+      individual.massdns.status = 'unavailable';
+
+      return {
+        _individual: individual,
+        _aggregated: result,
+        ...result
+      };
     }
 
     // Check if wordlist is provided
@@ -50,8 +62,16 @@ export class MassDNSStage {
     if (!wordlist) {
       result.status = 'error';
       result.errors.wordlist = 'No wordlist provided for massdns';
-      return result;
+      individual.wordlist.status = 'error';
+
+      return {
+        _individual: individual,
+        _aggregated: result,
+        ...result
+      };
     }
+
+    individual.wordlist.path = wordlist;
 
     // Check if resolvers file exists
     const resolvers = options.resolvers || this.config.massdns?.resolvers || '/etc/resolv.conf';
@@ -63,16 +83,31 @@ export class MassDNSStage {
       if (domainList.length === 0) {
         result.status = 'empty';
         result.errors.domains = 'No domains generated from wordlist';
-        return result;
+        individual.wordlist.status = 'empty';
+
+        return {
+          _individual: individual,
+          _aggregated: result,
+          ...result
+        };
       }
 
       result.totalAttempts = domainList.length;
+      individual.wordlist.entriesUsed = domainList.length;
 
       // Run massdns
       const massdnsResults = await this.runMassDNS(domainList, resolvers, options);
 
       result.subdomains = massdnsResults.subdomains;
       result.resolvedCount = massdnsResults.resolvedCount;
+
+      individual.massdns.subdomains = massdnsResults.subdomains;
+      individual.massdns.resolvedCount = massdnsResults.resolvedCount;
+
+      // Save raw output if persistRawOutput is enabled
+      if (this.config?.storage?.persistRawOutput && massdnsResults.raw) {
+        individual.massdns.raw = massdnsResults.raw;
+      }
 
       if (result.resolvedCount === 0) {
         result.status = 'empty';
@@ -81,9 +116,14 @@ export class MassDNSStage {
     } catch (error) {
       result.status = 'error';
       result.errors.general = error.message;
+      individual.massdns.status = 'error';
     }
 
-    return result;
+    return {
+      _individual: individual,
+      _aggregated: result,
+      ...result // Root level for compatibility
+    };
   }
 
   /**
@@ -196,6 +236,7 @@ export class MassDNSStage {
 
       result.subdomains = subdomains;
       result.resolvedCount = subdomains.length;
+      result.raw = massdnsRun.stdout;
 
     } catch (error) {
       // Return empty result on error

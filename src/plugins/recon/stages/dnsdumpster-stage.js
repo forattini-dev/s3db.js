@@ -42,6 +42,12 @@ export class DNSDumpsterStage {
       errors: {}
     };
 
+    // Track individual tool results for artifact persistence
+    const individual = {
+      dnsdumpster: { status: 'ok', data: null, raw: null },
+      dig: { status: 'ok', records: {} }
+    };
+
     try {
       // DNSDumpster requires two-step process:
       // 1. GET to obtain CSRF token
@@ -55,7 +61,13 @@ export class DNSDumpsterStage {
       if (!csrfToken) {
         result.status = 'error';
         result.errors.csrf = 'Failed to obtain CSRF token from DNSDumpster';
-        return result;
+        individual.dnsdumpster.status = 'error';
+
+        return {
+          _individual: individual,
+          _aggregated: result,
+          ...result
+        };
       }
 
       // Step 2: Submit query
@@ -64,7 +76,18 @@ export class DNSDumpsterStage {
       if (!data) {
         result.status = 'error';
         result.errors.query = 'Failed to retrieve data from DNSDumpster';
-        return result;
+        individual.dnsdumpster.status = 'error';
+
+        return {
+          _individual: individual,
+          _aggregated: result,
+          ...result
+        };
+      }
+
+      // Save raw HTML if persistRawOutput is enabled
+      if (this.config?.storage?.persistRawOutput) {
+        individual.dnsdumpster.raw = data.substring(0, 50000); // Truncate to 50KB
       }
 
       // Step 3: Parse HTML response
@@ -74,12 +97,28 @@ export class DNSDumpsterStage {
       result.subdomains = parsed.subdomains;
       result.relatedDomains = parsed.relatedDomains;
 
+      // Store parsed data in individual results
+      individual.dnsdumpster.data = parsed;
+
     } catch (error) {
       result.status = 'error';
       result.errors.general = error.message;
+      individual.dnsdumpster.status = 'error';
     }
 
-    return result;
+    // Fallback to dig if DNSDumpster fails
+    if (result.status === 'error' && options.fallbackToDig !== false) {
+      const digResults = await this.fallbackDigLookup(target.host);
+      result.dnsRecords = digResults.dnsRecords;
+      result.status = 'ok_fallback';
+      individual.dig = digResults;
+    }
+
+    return {
+      _individual: individual,
+      _aggregated: result,
+      ...result // Root level for compatibility
+    };
   }
 
   /**

@@ -52,6 +52,9 @@ export class GoogleDorksStage {
       }
     };
 
+    // Track individual category results for artifact persistence
+    const individual = {};
+
     const enabledCategories = options.categories || [
       'github', 'pastebin', 'linkedin', 'documents',
       'subdomains', 'loginPages', 'configs', 'errors'
@@ -60,34 +63,44 @@ export class GoogleDorksStage {
     // Execute each category
     for (const category of enabledCategories) {
       try {
+        let categoryData = null;
+
         switch (category) {
           case 'github':
-            result.categories.github = await this.searchGitHub(domain, companyName, options);
+            categoryData = await this.searchGitHub(domain, companyName, options);
             break;
           case 'pastebin':
-            result.categories.pastebin = await this.searchPastebin(domain, companyName, options);
+            categoryData = await this.searchPastebin(domain, companyName, options);
             break;
           case 'linkedin':
-            result.categories.linkedin = await this.searchLinkedIn(domain, companyName, options);
+            categoryData = await this.searchLinkedIn(domain, companyName, options);
             break;
           case 'documents':
-            result.categories.documents = await this.searchDocuments(domain, options);
+            categoryData = await this.searchDocuments(domain, options);
             break;
           case 'subdomains':
-            result.categories.subdomains = await this.searchSubdomains(domain, options);
+            categoryData = await this.searchSubdomains(domain, options);
             break;
           case 'loginPages':
-            result.categories.loginPages = await this.searchLoginPages(domain, options);
+            categoryData = await this.searchLoginPages(domain, options);
             break;
           case 'configs':
-            result.categories.configs = await this.searchConfigs(domain, options);
+            categoryData = await this.searchConfigs(domain, options);
             break;
           case 'errors':
-            result.categories.errors = await this.searchErrors(domain, options);
+            categoryData = await this.searchErrors(domain, options);
             break;
         }
+
+        result.categories[category] = categoryData;
+        individual[category] = categoryData; // Store in individual too
+
       } catch (error) {
         result.categories[category] = {
+          status: 'error',
+          message: error.message
+        };
+        individual[category] = {
           status: 'error',
           message: error.message
         };
@@ -110,7 +123,11 @@ export class GoogleDorksStage {
     result.summary.totalResults = totalResults;
     result.summary.totalCategories = totalCategories;
 
-    return result;
+    return {
+      _individual: individual,
+      _aggregated: result,
+      ...result // Root level for compatibility
+    };
   }
 
   /**
