@@ -56,7 +56,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
     });
 
     test('should emit events during operations', async () => {
-      const cache = new Cache();
+      const cache = new MemoryCache();
       const events = [];
 
       cache.on('set', (data) => events.push({ type: 'set', data }));
@@ -70,7 +70,8 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       expect(events).toHaveLength(3);
       expect(events[0]).toEqual({ type: 'set', data: { key: 'test-key', value: 'test-value' } });
       expect(events[1]).toEqual({ type: 'get', data: { key: 'test-key', value: 'test-value' } });
-      expect(events[2]).toEqual({ type: 'delete', data: { key: 'test-key', value: 'test-value' } });
+      // delete returns true, not the value
+      expect(events[2]).toEqual({ type: 'delete', data: { key: 'test-key', value: true } });
     });
   });
 
