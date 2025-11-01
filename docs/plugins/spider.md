@@ -1,4 +1,4 @@
-# 🕷️ Spider Suite Plugin
+# 🕷️ Spider Plugin
 
 > **Crawler toolkit bundling Puppeteer, S3Queue, and TTL under one namespace.**
 >
@@ -13,9 +13,9 @@ Bundle that wires **Puppeteer**, **S3 Queue**, and optional **TTL** under a sing
 ## ⚡ TLDR
 
 ```javascript
-import { SpiderSuitePlugin } from 's3db.js/plugins';
+import { SpiderPlugin } from 's3db.js/plugins';
 
-await db.usePlugin(new SpiderSuitePlugin({
+await db.usePlugin(new SpiderPlugin({
   namespace: 'spider',
   queue: { autoStart: false },
   processor: async (task, context, { puppeteer }) => {
@@ -41,12 +41,12 @@ await spiderSuite.startProcessing();
 ## 🚀 Quick Start
 
 ```javascript
-import { Database, SpiderSuitePlugin } from 's3db.js';
+import { Database, SpiderPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
 
-const spider = new SpiderSuitePlugin({ namespace: 'crawler', queue: { autoStart: true } });
+const spider = new SpiderPlugin({ namespace: 'crawler', queue: { autoStart: true } });
 await db.usePlugin(spider);
 
 spider.setProcessor(async (task, ctx, helpers) => {
@@ -111,7 +111,7 @@ flowchart TB
 ### Registering the processor later
 
 ```javascript
-const suite = new SpiderSuitePlugin({ namespace: 'crawler' });
+const suite = new SpiderPlugin({ namespace: 'crawler' });
 await db.usePlugin(suite, 'crawler-suite');
 
 suite.setProcessor(async (task, ctx, helpers) => {
@@ -138,7 +138,7 @@ console.log('Pending jobs:', stats.pending);
 ### Wiring TTL for stale queue entries
 
 ```javascript
-await db.usePlugin(new SpiderSuitePlugin({
+await db.usePlugin(new SpiderPlugin({
   namespace: 'spider',
   ttl: { queue: { ttl: 3600, onExpire: 'hard-delete' } }
 }));

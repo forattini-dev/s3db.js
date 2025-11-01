@@ -315,3 +315,537 @@ s3db insert <resource> -d '<json>'  # Insert
 - Field-level encryption for `secret` types
 - Paranoid mode prevents destructive deletes
 - Credentials need URL encoding in connection strings
+
+---
+
+## Plugin Documentation Standard
+
+**All plugin documentation must follow the standardized format** established by PuppeteerPlugin (`docs/plugins/puppeteer.md`). This ensures consistency, discoverability, and user-friendliness across the entire plugin ecosystem.
+
+### Required Sections (in order)
+
+#### 1. **Header Block**
+```markdown
+# 🎭 Plugin Name
+
+> **One-line description of plugin purpose and key features.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
+
+---
+```
+
+**Requirements**:
+- Emoji in title (represents plugin category/function)
+- One-line description (max 100 characters)
+- Navigation links to: Plugin Index, Configuration section, FAQ section
+- Horizontal rule separator
+
+#### 2. **TLDR Section**
+```markdown
+## ⚡ TLDR
+
+**One-sentence summary of what this plugin does.**
+
+**1 line to get started:**
+```javascript
+await db.usePlugin(new PluginName({ /* minimal config */ }));
+```
+
+**Production-ready setup:**
+```javascript
+await db.usePlugin(new PluginName({
+  option1: value1,  // Explanation
+  option2: value2,  // Explanation
+  option3: value3   // Explanation
+}));
+
+// Usage example
+const result = await plugin.doSomething();
+```
+
+**Key features:**
+- ✅ **Feature 1** - Brief description
+- ✅ **Feature 2** - Brief description
+- ✅ **Feature 3** - Brief description
+- ✅ **Feature 4** - Brief description
+
+**Performance comparison:** (optional, but recommended)
+```javascript
+// ❌ Without plugin
+// ... inefficient code
+
+// ✅ With plugin
+// ... optimized code
+```
+```
+
+**Requirements**:
+- One-sentence summary at top
+- Minimal "1 line to get started" example
+- Production-ready example with inline comments
+- 4-7 key features with checkmarks
+- Optional performance comparison showing value proposition
+
+#### 3. **Table of Contents**
+```markdown
+## 📑 Table of Contents
+
+1. [⚡ TLDR](#-tldr)
+2. [⚡ Quickstart](#-quickstart)
+3. [Usage Journey](#usage-journey) or [Usage Patterns](#usage-patterns)
+   - [Level 1: Basic Usage](#level-1-basic-usage)
+   - [Level 2: Intermediate](#level-2-intermediate)
+   - [Level 3: Advanced](#level-3-advanced)
+4. [📊 Configuration Reference](#-configuration-reference)
+5. [📚 Configuration Examples](#-configuration-examples)
+6. [🔧 API Reference](#-api-reference)
+7. [✅ Best Practices](#-best-practices)
+8. [🚨 Error Handling](#-error-handling)
+9. [🔗 See Also](#-see-also)
+10. [❓ FAQ](#-faq)
+
+---
+```
+
+**Requirements**:
+- All sections linked with anchor tags
+- Progressive learning path (Level 1 → Level 7 or similar)
+- Standard sections for Configuration, API, Best Practices, Error Handling, FAQ
+
+#### 4. **Quickstart Section**
+```markdown
+## ⚡ Quickstart
+
+```javascript
+import { Database } from 's3db.js';
+import { PluginName } from 's3db.js/plugins';
+
+const db = new Database({
+  connectionString: 's3://key:secret@bucket/path'
+});
+
+// Create and use plugin
+const plugin = new PluginName({
+  // essential options only
+});
+
+await db.usePlugin(plugin);
+await db.connect();
+
+// Complete working example (10-20 lines)
+const result = await plugin.doSomething();
+console.log(result);
+
+await db.disconnect();
+```
+
+---
+```
+
+**Requirements**:
+- Complete, copy-paste-ready example
+- Only essential imports
+- Standard database setup
+- 10-20 lines of functional code
+- Shows plugin initialization, usage, and cleanup
+
+#### 5. **Usage Journey / Usage Patterns**
+```markdown
+## Usage Journey
+
+### Level 1: Basic [Feature]
+
+Brief explanation of what this level demonstrates.
+
+```javascript
+// Complete example
+```
+
+**What's happening:**
+- Point 1
+- Point 2
+
+---
+
+### Level 2: Intermediate [Feature]
+
+Progressive example building on Level 1.
+
+```javascript
+// Complete example
+```
+
+**New concepts:**
+- Concept 1
+- Concept 2
+
+---
+
+[Continue through Level 7 or appropriate progression]
+```
+
+**Requirements**:
+- 5-7 progressive levels OR 3-5 common usage patterns
+- Each level/pattern is self-contained
+- Builds complexity gradually
+- Includes "What's happening" or "New concepts" explanations
+- Real-world scenarios
+
+#### 6. **Configuration Reference**
+```markdown
+## 📊 Configuration Reference
+
+Complete configuration object with inline comments:
+
+```javascript
+new PluginName({
+  // ============================================
+  // SECTION 1: Category Name
+  // ============================================
+  option1: {
+    subOption1: defaultValue,  // Description
+    subOption2: defaultValue,  // Description
+  },
+
+  // ============================================
+  // SECTION 2: Another Category
+  // ============================================
+  option2: {
+    // ...
+  }
+})
+```
+
+**Table format for complex options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `option1` | string | `'default'` | What it does |
+| `option2.subOption` | number | `100` | What it controls |
+
+---
+```
+
+**Requirements**:
+- Complete configuration object (not partial)
+- Organized by logical sections with visual separators
+- Inline comments for every option
+- Table format for complex/nested options
+- Default values clearly shown
+
+#### 7. **Configuration Examples**
+```markdown
+## 📚 Configuration Examples
+
+### Use Case 1: Scenario Name
+
+```javascript
+new PluginName({
+  // Focused configuration for this use case
+})
+```
+
+---
+
+### Use Case 2: Another Scenario
+
+```javascript
+new PluginName({
+  // Different configuration
+})
+```
+
+---
+
+[5-10 common use cases]
+```
+
+**Requirements**:
+- 5-10 real-world scenarios
+- Each scenario has descriptive name
+- Configuration focused on that specific use case
+- Brief explanation of when to use
+
+#### 8. **API Reference**
+```markdown
+## 🔧 API Reference
+
+### Plugin Methods
+
+#### `methodName(param1, param2?): Promise<ReturnType>`
+
+Description of what method does.
+
+**Parameters:**
+- `param1` (type, required): Description
+- `param2` (type, optional): Description
+
+**Returns:** `Promise<ReturnType>` - Description
+
+**Example:**
+```javascript
+const result = await plugin.methodName('value', { option: true });
+```
+
+**Throws:**
+- `PluginError` - When and why
+
+---
+
+[Document all public methods]
+
+### Events
+
+#### `event.name`
+
+Emitted when [condition].
+
+**Payload:**
+```javascript
+{
+  field1: 'value',
+  field2: 123
+}
+```
+
+**Example:**
+```javascript
+plugin.on('event.name', ({ field1, field2 }) => {
+  console.log(`Event fired: ${field1}`);
+});
+```
+
+---
+
+[Document all events]
+```
+
+**Requirements**:
+- Every public method documented
+- Clear parameter types and requirements
+- Return types specified
+- Example for each method
+- Error conditions listed
+- All events documented with payload structure
+
+#### 9. **Best Practices**
+```markdown
+## ✅ Best Practices
+
+### Do's ✅
+
+1. **Practice name**
+   ```javascript
+   // ✅ Good example
+   ```
+
+2. **Another practice**
+   ```javascript
+   // ✅ Good example
+   ```
+
+[5-10 do's]
+
+---
+
+### Don'ts ❌
+
+1. **Anti-pattern name**
+   ```javascript
+   // ❌ Bad example
+
+   // ✅ Correct way
+   ```
+
+[5-10 don'ts with corrections]
+
+---
+
+### Performance Tips
+
+- **Tip 1**: Explanation
+- **Tip 2**: Explanation
+
+---
+
+### Security Considerations
+
+- **Warning 1**: What to avoid and why
+- **Best practice 1**: What to do instead
+
+---
+```
+
+**Requirements**:
+- Separate Do's and Don'ts sections
+- Each with working code examples
+- Don'ts show both bad and good approach
+- Performance tips section
+- Security considerations section
+
+#### 10. **Error Handling**
+```markdown
+## 🚨 Error Handling
+
+### Common Errors
+
+#### Error 1: Descriptive Name
+
+**Problem**: What causes this error.
+
+**Solution:**
+```javascript
+try {
+  await plugin.method();
+} catch (error) {
+  if (error.code === 'SPECIFIC_ERROR') {
+    // Handle specifically
+  }
+}
+```
+
+---
+
+[Document 5-10 common errors]
+
+### Troubleshooting
+
+#### Issue 1: Symptom
+
+**Diagnosis:**
+1. Check X
+2. Verify Y
+
+**Fix:**
+```javascript
+// Solution code
+```
+
+---
+
+[5-10 troubleshooting scenarios]
+```
+
+**Requirements**:
+- Common errors documented with codes
+- Solutions provided with code
+- Troubleshooting decision tree
+- Real-world debugging scenarios
+
+#### 11. **See Also / Related Documentation**
+```markdown
+## 🔗 See Also
+
+- [Related Plugin 1](./related-plugin.md) - How they work together
+- [Core Concept](../concepts/concept.md) - Background info
+- [Example](../examples/e42-example.js) - Working code
+
+---
+```
+
+**Requirements**:
+- Links to related plugins
+- Links to core concepts
+- Links to examples
+- Brief description of relationship
+
+#### 12. **FAQ Section**
+```markdown
+## ❓ FAQ
+
+### General
+
+**Q: Question about basic usage?**
+
+A: Detailed answer with code example.
+
+```javascript
+// Example demonstrating answer
+```
+
+---
+
+**Q: Another common question?**
+
+A: Answer with explanation.
+
+[10-20 questions organized by category]
+
+---
+
+### Advanced
+
+**Q: Complex scenario question?**
+
+A: Detailed technical answer.
+
+---
+
+### Performance
+
+**Q: Performance-related question?**
+
+A: Answer with benchmarks or metrics.
+
+---
+
+### Troubleshooting
+
+**Q: Common error question?**
+
+A: Diagnostic steps and solution.
+
+---
+```
+
+**Requirements**:
+- Minimum 10-20 questions
+- Organized by categories (General, Advanced, Performance, Troubleshooting)
+- Code examples where helpful
+- Real questions from users or anticipated needs
+
+---
+
+### Documentation Quality Checklist
+
+Before publishing plugin documentation, verify:
+
+- [ ] All 12 required sections present
+- [ ] Navigation links functional (Plugin Index, Configuration, FAQ)
+- [ ] Code examples are complete and runnable
+- [ ] All configuration options documented
+- [ ] All public methods in API reference
+- [ ] All events documented
+- [ ] At least 10 FAQ entries
+- [ ] Progressive learning path (5-7 levels)
+- [ ] Performance comparisons included
+- [ ] Error handling comprehensive
+- [ ] Best practices with examples
+- [ ] Troubleshooting scenarios covered
+- [ ] Cross-links to related docs
+- [ ] Consistent emoji usage
+- [ ] Proper markdown formatting
+- [ ] Table of contents matches sections
+
+---
+
+### Example Reference
+
+**Gold Standard**: See `docs/plugins/puppeteer.md` for the exemplar implementation of this standard.
+
+**Current Status**:
+- ✅ **PuppeteerPlugin**: 100% compliant (1,850+ lines, 80+ FAQ entries)
+- 🟡 **ReconPlugin**: Needs reformatting (has content, needs restructure)
+- 🟡 **SpiderSuitePlugin**: Needs FAQ and Usage Journey expansion
+- 🟡 **CookieFarmSuitePlugin**: Needs FAQ and Usage Journey expansion
+
+---
+
+### Templates
+
+Quick-start templates are available:
+- `docs/templates/plugin-doc-template.md` - Full template with all sections
+- `docs/templates/plugin-doc-minimal.md` - Minimal viable documentation
+
+When creating new plugin documentation, copy the appropriate template and fill in plugin-specific content.

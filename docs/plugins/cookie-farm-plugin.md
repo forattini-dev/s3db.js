@@ -1,4 +1,4 @@
-# 🍪 Cookie Farm Suite Plugin
+# 🍪 Cookie Farm Plugin
 
 > **Persona farming pipeline combining Cookie Farm, Puppeteer, S3Queue, and optional TTL.**
 >
@@ -13,10 +13,10 @@ Bundle that orchestrates **CookieFarmPlugin**, **PuppeteerPlugin**, **S3QueuePlu
 ## ⚡ TLDR
 
 ```javascript
-import { CookieFarmSuitePlugin } from 's3db.js/plugins';
+import { CookieFarmPlugin } from 's3db.js/plugins';
 import { PluginError } from 's3db.js';
 
-const suite = new CookieFarmSuitePlugin({
+const suite = new CookieFarmPlugin({
   namespace: 'persona',
   queue: { autoStart: false },
   cookieFarm: {
