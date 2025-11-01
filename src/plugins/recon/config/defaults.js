@@ -5,6 +5,7 @@
 export const DEFAULT_FEATURES = {
   dns: true,
   certificate: true,
+  whois: true,
   http: {
     curl: true
   },
@@ -57,6 +58,7 @@ export const BEHAVIOR_PRESETS = {
     features: {
       dns: true,
       certificate: false,
+      whois: true,
       http: { curl: false },
       latency: { ping: false, traceroute: false },
       subdomains: { amass: false, subfinder: false, assetfinder: false, crtsh: true },
@@ -78,6 +80,7 @@ export const BEHAVIOR_PRESETS = {
     features: {
       dns: true,
       certificate: true,
+      whois: true,
       http: { curl: true },
       latency: { ping: true, traceroute: false },
       subdomains: { amass: false, subfinder: true, assetfinder: false, crtsh: true },
@@ -103,6 +106,7 @@ export const BEHAVIOR_PRESETS = {
     features: {
       dns: true,
       certificate: true,
+      whois: true,
       http: { curl: true },
       latency: { ping: true, traceroute: true },
       subdomains: { amass: true, subfinder: true, assetfinder: true, crtsh: true },

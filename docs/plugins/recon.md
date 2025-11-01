@@ -31,7 +31,7 @@ console.log(report.fingerprint);
 
 **Key features:**
 - ✅ **Behavior Presets** - Passive (OSINT), Stealth (rate-limited), Aggressive (full arsenal)
-- ✅ **Multi-Tool Orchestration** - DNS, ports, TLS, subdomains, vulnerability scanning
+- ✅ **Multi-Tool Orchestration** - DNS, WHOIS, ports, TLS, subdomains, vulnerability scanning
 - ✅ **3-Layer Storage** - Raw artifacts, aggregated results, queryable database resources
 - ✅ **Tool Dependency Manager** - Automatic fallback when tools unavailable
 - ✅ **Scheduled Monitoring** - Cron-driven sweeps with change detection
@@ -227,6 +227,7 @@ const plugin = new ReconPlugin({
   features: {
     dns: true,
     certificate: true,
+    whois: true,
     latency: {
       ping: true,
       traceroute: true
@@ -275,6 +276,20 @@ console.log('TLS Certificate:', report.results.certificate);
 //   daysUntilExpiry: 180
 // }
 
+console.log('WHOIS Data:', report.results.whois);
+// {
+//   status: 'ok',
+//   domain: 'example.com',
+//   registrar: 'Example Registrar Inc.',
+//   dates: {
+//     created: '2020-01-15T00:00:00.000Z',
+//     expiration: '2026-01-15T00:00:00.000Z',
+//     daysUntilExpiration: 365
+//   },
+//   nameservers: ['ns1.example.com', 'ns2.example.com'],
+//   dnssec: 'unsigned'
+// }
+
 console.log('Subdomains:', report.results.subdomains);
 // {
 //   status: 'ok',
@@ -290,6 +305,7 @@ console.log('Subdomains:', report.results.subdomains);
 **Full capabilities:**
 - DNS + reverse lookups
 - TLS certificate validation
+- WHOIS domain registration lookup
 - Ping latency + traceroute
 - Port scanning + service detection
 - Subdomain discovery (multiple sources)
@@ -727,6 +743,9 @@ console.log(markdown);
 
     // TLS/SSL Base Certificate Check (Node.js tls)
     certificate: true,
+
+    // WHOIS Domain Registration Lookup
+    whois: true,
 
     // HTTP Headers (curl -I)
     http: {

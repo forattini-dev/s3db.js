@@ -22,6 +22,7 @@ export class DependencyManager {
     const missing = {};
 
     const toolMap = {
+      'whois': 'whois',
       'latency.ping': 'ping',
       'latency.traceroute': ['mtr', 'traceroute'],
       'http.curl': 'curl',
@@ -132,6 +133,7 @@ export class DependencyManager {
 
   _getInstallGuide(toolName) {
     const guides = {
+      whois: 'Ubuntu: apt-get install whois | macOS: brew install whois',
       ping: 'Geralmente pré-instalado. No Ubuntu: apt-get install iputils-ping',
       mtr: 'Ubuntu: apt-get install mtr-tiny | macOS: brew install mtr',
       traceroute: 'Ubuntu: apt-get install traceroute | macOS: Pré-instalado',
