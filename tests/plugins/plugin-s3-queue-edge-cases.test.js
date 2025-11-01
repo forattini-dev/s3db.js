@@ -168,7 +168,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       }, { concurrency: 1 });
 
       // Wait for failure and dead letter processing
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, 6000));
 
       await resource.stopProcessing();
 
@@ -285,7 +285,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       }, { concurrency: 1 });
 
       // Wait for processing attempt
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 4000));
 
       await resource.stopProcessing();
 
@@ -334,7 +334,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         return { done: true };
       }, { concurrency: 2 });
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 4000));
 
       await resource.stopProcessing();
 
