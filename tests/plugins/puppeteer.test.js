@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventEmitter } from 'events';
-import { createMockDatabase } from './helpers/mock-database.js';
+import { Database } from '../../src/database.class.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
   requirePluginDependency: jest.fn()
@@ -13,7 +14,10 @@ describe('PuppeteerPlugin', () => {
   let puppeteerPlugin;
 
   beforeAll(async () => {
-    db = createMockDatabase();
+    // Use real Database with MemoryClient like all other plugin tests
+    db = new Database({
+      client: new MemoryClient()
+    });
     await db.connect();
   });
 
