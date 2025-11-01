@@ -2705,4 +2705,5 @@ export class ReconPlugin extends Plugin {
   }
 }
 
+export { ReconPlugin as NetworkPlugin };
 export default ReconPlugin;

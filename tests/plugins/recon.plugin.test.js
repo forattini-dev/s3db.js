@@ -285,7 +285,7 @@ describe('ReconPlugin', () => {
     plugin._getResource = jest.fn().mockResolvedValue(null);
 
     const markdown = await plugin.generateClientReport('example.com');
-    expect(markdown).toContain('# Network Report – https://example.com');
+    expect(markdown).toContain('# Recon Report – https://example.com');
     expect(markdown).toContain('Portas abertas');
     expect(markdown).toContain('app.example.com');
 
@@ -432,5 +432,22 @@ describe('ReconPlugin', () => {
       paths: ['/admin', '/login'],
       total: 2
     }));
+  });
+
+  test('registers legacy database.plugins.network alias', () => {
+    const plugin = new ReconPlugin({
+      commandRunner: {},
+      storage: { persist: false },
+      resources: { persist: false }
+    });
+
+    const database = { plugins: {} };
+    plugin.database = database;
+
+    plugin.afterInstall();
+    expect(database.plugins.network).toBe(plugin);
+
+    plugin.afterUninstall();
+    expect(database.plugins.network).toBeUndefined();
   });
 });
