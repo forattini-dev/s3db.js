@@ -64194,7 +64194,9 @@ class NetworkPlugin extends Plugin {
       hosts: { defaultName: "plg_network_hosts", override: resourceNamesOption.hosts },
       reports: { defaultName: "plg_network_reports", override: resourceNamesOption.reports },
       diffs: { defaultName: "plg_network_diffs", override: resourceNamesOption.diffs },
-      stages: { defaultName: "plg_network_stage_results", override: resourceNamesOption.stages }
+      stages: { defaultName: "plg_network_stage_results", override: resourceNamesOption.stages },
+      subdomains: { defaultName: "plg_network_subdomains", override: resourceNamesOption.subdomains },
+      paths: { defaultName: "plg_network_paths", override: resourceNamesOption.paths }
     };
     this._resourceNames = {};
     this._refreshResourceNames();
@@ -64329,7 +64331,9 @@ class NetworkPlugin extends Plugin {
       hosts: resolveResourceName("network-hosts", this._resourceDescriptors.hosts, { namespace }),
       reports: resolveResourceName("network-reports", this._resourceDescriptors.reports, { namespace }),
       diffs: resolveResourceName("network-diffs", this._resourceDescriptors.diffs, { namespace }),
-      stages: resolveResourceName("network-stage-results", this._resourceDescriptors.stages, { namespace })
+      stages: resolveResourceName("network-stage-results", this._resourceDescriptors.stages, { namespace }),
+      subdomains: resolveResourceName("network-subdomains", this._resourceDescriptors.subdomains, { namespace }),
+      paths: resolveResourceName("network-paths", this._resourceDescriptors.paths, { namespace })
     };
     if (this._resourceCache) {
       this._resourceCache.clear();

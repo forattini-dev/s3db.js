@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
-import { createMockDatabase } from './helpers/mock-database.js';
+import { Database } from '../../src/database.class.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
   requirePluginDependency: jest.fn()
@@ -13,7 +14,10 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   let puppeteerPlugin;
 
   beforeAll(async () => {
-    db = createMockDatabase();
+    // Use real Database with MemoryClient - obliterating MockDatabase!
+    db = new Database({
+      client: new MemoryClient()
+    });
     await db.connect();
   });
 
