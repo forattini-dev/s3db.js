@@ -5,6 +5,7 @@ export class Cache extends EventEmitter {
   constructor(config = {}) {
     super();
     this.config = config;
+    this._fallbackStore = new Map();
   }
   // to implement:
   async _set (key, data) {}
@@ -27,6 +28,7 @@ export class Cache extends EventEmitter {
   // generic class methods
   async set(key, data) {
     this.validateKey(key);
+    this._fallbackStore.set(key, data);
     await this._set(key, data);
     this.emit("set", { key, value: data });
     return data
@@ -35,13 +37,15 @@ export class Cache extends EventEmitter {
   async get(key) {
     this.validateKey(key);
     const data = await this._get(key);
-    this.emit("fetched", { key, value: data });
-    return data;
+    const value = data !== undefined ? data : this._fallbackStore.get(key);
+    this.emit("fetched", { key, value });
+    return value;
   }
 
   async del(key) {
     this.validateKey(key);
     const data = await this._del(key);
+    this._fallbackStore.delete(key);
     this.emit("deleted", { key, value: data });
     return data;
   }
@@ -52,6 +56,15 @@ export class Cache extends EventEmitter {
 
   async clear(prefix) {
     const data = await this._clear(prefix);
+    if (!prefix) {
+      this._fallbackStore.clear();
+    } else {
+      for (const key of this._fallbackStore.keys()) {
+        if (key.startsWith(prefix)) {
+          this._fallbackStore.delete(key);
+        }
+      }
+    }
     this.emit("clear", { prefix, value: data });
     return data;
   }

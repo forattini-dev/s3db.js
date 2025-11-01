@@ -162,6 +162,22 @@ export class FilesystemCache extends Cache {
     // Create cache directory if needed
     if (this.createDirectory) {
       await this._ensureDirectory(this.directory);
+    } else {
+      const [exists] = await tryFn(async () => {
+        const stats = await stat(this.directory);
+        return stats.isDirectory();
+      });
+
+      if (!exists) {
+        throw new CacheError(`Cache directory "${this.directory}" does not exist and createDirectory is disabled`, {
+          driver: 'filesystem',
+          operation: 'init',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Create the cache directory manually or enable createDirectory in the FilesystemCache configuration.',
+          directory: this.directory
+        });
+      }
     }
     
     // Start cleanup timer if enabled
@@ -175,6 +191,25 @@ export class FilesystemCache extends Cache {
   }
 
   async _ensureDirectory(dir) {
+    if (!this.createDirectory) {
+      const [exists] = await tryFn(async () => {
+        const stats = await stat(dir);
+        return stats.isDirectory();
+      });
+
+      if (!exists) {
+        throw new CacheError(`Cache directory "${dir}" is missing (createDirectory disabled)`, {
+          driver: 'filesystem',
+          operation: 'ensureDirectory',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Create the directory before writing cache entries or enable createDirectory.',
+          directory: dir
+        });
+      }
+      return;
+    }
+
     const [ok, err] = await tryFn(async () => {
       await mkdir(dir, { recursive: true });
     });

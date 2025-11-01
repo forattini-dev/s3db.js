@@ -446,7 +446,8 @@ export class Router {
    */
   mountAdminRoutes(app) {
     // Metrics endpoint
-    if (this.metrics?.enabled) {
+    const metricsEnabled = this.metrics?.options?.enabled ?? false;
+    if (metricsEnabled) {
       app.get('/metrics', (c) => {
         const summary = this.metrics.getSummary();
         const response = formatter.success(summary);

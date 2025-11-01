@@ -30,6 +30,7 @@
 | **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
 | **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
 | **[🤖 ML](./ml-plugin.md)** | Machine learning model management | Model inference, predictions | [→](./ml-plugin.md) |
+| **[🛰️ Recon](./recon.md)** | Full-stack recon (DNS, ports, TLS, subdomains) with scheduled sweeps | Incident response, asset discovery, continuous monitoring | [→](./recon.md) |
 | **[📬 Queue Consumer](./queue-consumer.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](./queue-consumer.md) |
 | **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
 | **[🔄 Replicator](./replicator.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator.md) |

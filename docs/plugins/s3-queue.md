@@ -885,6 +885,8 @@ Key tuning knobs:
 - `recoveryBatchSize` – limits how many stalled entries are recovered per sweep.
 - `processedCacheTTL` – how long dedup markers live across workers.
 
+> 🧭 Custom names are respected. If you pass `queueResource: 'tasks_queue'` or `deadLetterResource: 'dead_tasks'`, the plugin keeps those aliases available under `database.resources` while still provisioning the namespaced `plg_*` helpers it uses internally. To opt into namespacing for overrides, prefix them with `plg_...`.
+
 ### Configuration Patterns
 
 #### Dependency Graph

@@ -45,13 +45,14 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       expect(() => cache.validateKey(123)).toThrow('Invalid cache key');
     });
 
-    test('should handle base cache operations (no-op implementation)', async () => {
+    test('should handle base cache operations with fallback store', async () => {
       const cache = new Cache();
-      
-      // Base cache methods should complete without errors but return undefined
+
+      // Base cache has _fallbackStore that works even with no-op _get/_set
       await expect(cache.set('test-key', 'value')).resolves.toBe('value');
-      await expect(cache.get('test-key')).resolves.toBeUndefined();
+      await expect(cache.get('test-key')).resolves.toBe('value');
       await expect(cache.delete('test-key')).resolves.toBeUndefined();
+      await expect(cache.get('test-key')).resolves.toBeUndefined();
       await expect(cache.clear()).resolves.toBeUndefined();
     });
 

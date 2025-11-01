@@ -330,7 +330,7 @@ export class MemoryCache extends Cache {
     if (this.maxMemoryBytes > 0) {
       // If item is too large to fit even in empty cache, don't cache it
       if (itemSize > this.maxMemoryBytes) {
-        // Silently skip caching - item too large
+        this.evictedDueToMemory++;
         return data;
       }
 

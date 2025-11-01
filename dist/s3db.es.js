@@ -64108,43 +64108,125 @@ const DEFAULT_FEATURES = {
     reconNg: false
   }
 };
+const BEHAVIOR_PRESETS = {
+  passive: {
+    features: {
+      dns: true,
+      certificate: false,
+      http: { curl: false },
+      latency: { ping: false, traceroute: false },
+      subdomains: { amass: false, subfinder: false, assetfinder: false, crtsh: true },
+      ports: { nmap: false, masscan: false },
+      web: { ffuf: false, feroxbuster: false, gobuster: false },
+      vulnerability: { nikto: false, wpscan: false, droopescan: false },
+      tlsAudit: { openssl: false, sslyze: false, testssl: false },
+      fingerprint: { whatweb: false },
+      screenshots: { aquatone: false, eyewitness: false },
+      osint: { theHarvester: true, reconNg: false }
+    },
+    concurrency: 2,
+    ping: { count: 3, timeout: 5e3 },
+    curl: { timeout: 1e4 },
+    nmap: { topPorts: 0 },
+    rateLimit: { enabled: false, delayBetweenStages: 0 }
+  },
+  stealth: {
+    features: {
+      dns: true,
+      certificate: true,
+      http: { curl: true },
+      latency: { ping: true, traceroute: false },
+      subdomains: { amass: false, subfinder: true, assetfinder: false, crtsh: true },
+      ports: { nmap: true, masscan: false },
+      web: { ffuf: false, feroxbuster: false, gobuster: false },
+      vulnerability: { nikto: false, wpscan: false, droopescan: false },
+      tlsAudit: { openssl: true, sslyze: false, testssl: false },
+      fingerprint: { whatweb: false },
+      screenshots: { aquatone: false, eyewitness: false },
+      osint: { theHarvester: false, reconNg: false }
+    },
+    concurrency: 1,
+    ping: { count: 3, timeout: 1e4 },
+    traceroute: { cycles: 3, timeout: 15e3 },
+    curl: {
+      timeout: 15e3,
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    nmap: { topPorts: 10, extraArgs: ["-T2", "--max-retries", "1"] },
+    rateLimit: { enabled: true, requestsPerMinute: 10, delayBetweenStages: 5e3 }
+  },
+  aggressive: {
+    features: {
+      dns: true,
+      certificate: true,
+      http: { curl: true },
+      latency: { ping: true, traceroute: true },
+      subdomains: { amass: true, subfinder: true, assetfinder: true, crtsh: true },
+      ports: { nmap: true, masscan: true },
+      web: { ffuf: true, feroxbuster: true, gobuster: true, threads: 100 },
+      vulnerability: { nikto: true, wpscan: true, droopescan: true },
+      tlsAudit: { openssl: true, sslyze: true, testssl: true },
+      fingerprint: { whatweb: true },
+      screenshots: { aquatone: true, eyewitness: false },
+      osint: { theHarvester: true, reconNg: false }
+    },
+    concurrency: 8,
+    ping: { count: 4, timeout: 5e3 },
+    traceroute: { cycles: 3, timeout: 1e4 },
+    curl: { timeout: 8e3 },
+    nmap: { topPorts: 100, extraArgs: ["-T4", "-sV", "--version-intensity", "5"] },
+    masscan: { ports: "1-65535", rate: 5e3 },
+    rateLimit: { enabled: false, delayBetweenStages: 0 }
+  }
+};
 class ReconPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     const {
+      behavior = null,
+      behaviorOverrides = {},
       tools,
-      concurrency = 4,
+      concurrency,
       ping = {},
       traceroute = {},
       curl = {},
       nmap = {},
+      masscan = {},
       commandRunner = null,
       features = {},
       storage = {},
       schedule = {},
       resources: resourceConfig = {},
-      targets = []
+      targets = [],
+      rateLimit = {}
     } = options;
+    const behaviorPreset = this._resolveBehaviorPreset(behavior, behaviorOverrides);
     this.config = {
-      defaultTools: tools || ["dns", "certificate", "ping", "traceroute", "curl", "ports", "subdomains"],
-      concurrency,
+      behavior: behavior || "default",
+      defaultTools: tools || behaviorPreset.tools || ["dns", "certificate", "ping", "traceroute", "curl", "ports", "subdomains"],
+      concurrency: concurrency ?? behaviorPreset.concurrency ?? 4,
       ping: {
-        count: ping.count ?? 4,
-        timeout: ping.timeout ?? 7e3
+        count: ping.count ?? behaviorPreset.ping?.count ?? 4,
+        timeout: ping.timeout ?? behaviorPreset.ping?.timeout ?? 7e3
       },
       traceroute: {
-        cycles: traceroute.cycles ?? 4,
-        timeout: traceroute.timeout ?? 12e3
+        cycles: traceroute.cycles ?? behaviorPreset.traceroute?.cycles ?? 4,
+        timeout: traceroute.timeout ?? behaviorPreset.traceroute?.timeout ?? 12e3
       },
       curl: {
-        timeout: curl.timeout ?? 8e3,
-        userAgent: curl.userAgent ?? "Mozilla/5.0 (compatible; s3db-recon/1.0; +https://github.com/forattini-dev/s3db.js)"
+        timeout: curl.timeout ?? behaviorPreset.curl?.timeout ?? 8e3,
+        userAgent: curl.userAgent ?? behaviorPreset.curl?.userAgent ?? "Mozilla/5.0 (compatible; s3db-recon/1.0; +https://github.com/forattini-dev/s3db.js)"
       },
       nmap: {
-        topPorts: nmap.topPorts ?? 10,
-        extraArgs: nmap.extraArgs ?? []
+        topPorts: nmap.topPorts ?? behaviorPreset.nmap?.topPorts ?? 10,
+        extraArgs: nmap.extraArgs ?? behaviorPreset.nmap?.extraArgs ?? []
       },
-      features: this._mergeFeatures(DEFAULT_FEATURES, features),
+      masscan: {
+        ports: masscan.ports ?? behaviorPreset.masscan?.ports ?? "1-1000",
+        rate: masscan.rate ?? behaviorPreset.masscan?.rate ?? 1e3,
+        timeout: masscan.timeout ?? behaviorPreset.masscan?.timeout ?? 3e4
+      },
+      features: this._mergeFeatures(behaviorPreset.features || DEFAULT_FEATURES, features),
       storage: {
         persist: storage.persist !== false,
         persistRawOutput: storage.persistRawOutput ?? true,
@@ -64159,7 +64241,12 @@ class ReconPlugin extends Plugin {
         persist: resourceConfig.persist !== false,
         autoCreate: resourceConfig.autoCreate !== false
       },
-      targets: Array.isArray(targets) ? targets : []
+      targets: Array.isArray(targets) ? targets : [],
+      rateLimit: {
+        enabled: rateLimit.enabled ?? behaviorPreset.rateLimit?.enabled ?? false,
+        requestsPerMinute: rateLimit.requestsPerMinute ?? behaviorPreset.rateLimit?.requestsPerMinute ?? 60,
+        delayBetweenStages: rateLimit.delayBetweenStages ?? behaviorPreset.rateLimit?.delayBetweenStages ?? 0
+      }
     };
     this.commandRunner = commandRunner || new CommandRunner();
     this._cronJob = null;
@@ -64208,6 +64295,7 @@ class ReconPlugin extends Plugin {
         results[stage.name] = { status: "disabled" };
         return;
       }
+      await this._applyRateLimit(stage.name);
       try {
         const output = await stage.execute();
         results[stage.name] = output;
@@ -64317,6 +64405,18 @@ class ReconPlugin extends Plugin {
   }
   onNamespaceChanged() {
     this._refreshResourceNames();
+  }
+  afterInstall() {
+    super.afterInstall();
+    if (this.database?.plugins) {
+      this.database.plugins.network = this;
+    }
+  }
+  afterUninstall() {
+    if (this.database?.plugins?.network === this) {
+      delete this.database.plugins.network;
+    }
+    super.afterUninstall();
   }
   async _ensureResources() {
     if (!this.database) return;
@@ -64453,6 +64553,43 @@ class ReconPlugin extends Plugin {
       this._resourceCache.set(key, resource);
     }
     return resource;
+  }
+  _resolveBehaviorPreset(behavior, overrides = {}) {
+    if (!behavior || !BEHAVIOR_PRESETS[behavior]) {
+      return overrides;
+    }
+    const preset = BEHAVIOR_PRESETS[behavior];
+    const merged = {
+      features: this._mergeFeatures(preset.features || {}, overrides.features || {}),
+      concurrency: overrides.concurrency ?? preset.concurrency,
+      ping: { ...preset.ping || {}, ...overrides.ping || {} },
+      traceroute: { ...preset.traceroute || {}, ...overrides.traceroute || {} },
+      curl: { ...preset.curl || {}, ...overrides.curl || {} },
+      nmap: { ...preset.nmap || {}, ...overrides.nmap || {} },
+      masscan: { ...preset.masscan || {}, ...overrides.masscan || {} },
+      rateLimit: { ...preset.rateLimit || {}, ...overrides.rateLimit || {} },
+      tools: overrides.tools ?? preset.tools
+    };
+    this.emit("recon:behavior-applied", {
+      mode: behavior,
+      preset,
+      overrides,
+      final: merged
+    });
+    return merged;
+  }
+  async _applyRateLimit(stageName) {
+    if (!this.config.rateLimit.enabled) {
+      return;
+    }
+    const delayMs = this.config.rateLimit.delayBetweenStages;
+    if (delayMs > 0) {
+      this.emit("recon:rate-limit-delay", {
+        stage: stageName,
+        delayMs
+      });
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
   _isAnyEnabled(featureGroup) {
     if (!featureGroup || typeof featureGroup !== "object") {
@@ -64872,7 +65009,7 @@ class ReconPlugin extends Plugin {
     const summary = hostSummary?.summary || this._buildHostRecord(report).summary;
     hostSummary?.fingerprint || report.fingerprint || {};
     const target = hostSummary?.target || report.target.original;
-    lines.push(`# Network Report \u2013 ${target}`);
+    lines.push(`# Recon Report \u2013 ${target}`);
     lines.push("");
     lines.push(`- **\xDAltima execu\xE7\xE3o:** ${report.endedAt}`);
     lines.push(`- **Status geral:** ${report.status || "desconhecido"}`);

@@ -28,6 +28,7 @@ export * from './state-machine.plugin.js'
 export * from './tfstate/index.js'
 export * from './ttl.plugin.js'
 export * from './vector.plugin.js'
+export * from './recon.plugin.js'
 
 // plugin drivers & utilities:
 export * from './backup/index.js'
