@@ -31,6 +31,7 @@ import { TlsAuditStage } from './stages/tls-audit-stage.js';
 import { FingerprintStage } from './stages/fingerprint-stage.js';
 import { ScreenshotStage } from './stages/screenshot-stage.js';
 import { OsintStage } from './stages/osint-stage.js';
+import { WhoisStage } from './stages/whois-stage.js';
 
 // Concerns
 import { CommandRunner } from './concerns/command-runner.js';
@@ -146,7 +147,8 @@ export class ReconPlugin extends Plugin {
       tlsAudit: new TlsAuditStage(this),
       fingerprint: new FingerprintStage(this),
       screenshot: new ScreenshotStage(this),
-      osint: new OsintStage(this)
+      osint: new OsintStage(this),
+      whois: new WhoisStage(this)
     };
   }
 
@@ -226,6 +228,11 @@ export class ReconPlugin extends Plugin {
     // Certificate stage
     if (scanConfig.certificate !== false) {
       results.certificate = await this.stages.certificate.execute(normalizedTarget, scanConfig.certificate);
+    }
+
+    // WHOIS stage
+    if (scanConfig.whois !== false) {
+      results.whois = await this.stages.whois.execute(normalizedTarget, scanConfig.whois);
     }
 
     // Latency stage
