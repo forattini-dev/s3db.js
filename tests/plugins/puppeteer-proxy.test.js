@@ -109,7 +109,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       expect(puppeteerPlugin.proxyManager).toBeDefined();
@@ -128,7 +128,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       expect(puppeteerPlugin.proxyManager).toBeNull();
@@ -155,7 +155,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
     });
 
@@ -215,7 +215,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
     });
 
@@ -329,7 +329,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
     });
 
@@ -390,7 +390,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
     });
 
@@ -431,7 +431,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       const stats = puppeteerPlugin.getProxyStats();
@@ -471,7 +471,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(puppeteerPlugin);
+      await db.usePlugin(puppeteerPlugin);
       await db.start();
 
       // Mark all proxies as unhealthy

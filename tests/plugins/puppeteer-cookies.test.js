@@ -53,7 +53,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
     puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
     puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-    await db.installPlugin(puppeteerPlugin);
+    await db.usePlugin(puppeteerPlugin);
     await db.start();
 
     cookieManager = puppeteerPlugin.cookieManager;
@@ -373,7 +373,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       disabledPlugin._importDependencies = jest.fn().mockResolvedValue();
       disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(disabledPlugin);
+      await db.usePlugin(disabledPlugin);
 
       await db.start();
 
@@ -397,7 +397,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       disabledPlugin._importDependencies = jest.fn().mockResolvedValue();
       disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
-      await db.installPlugin(disabledPlugin);
+      await db.usePlugin(disabledPlugin);
       await db.start();
 
       await expect(disabledPlugin.cookieManager.getBestCookie()).rejects.toThrow(
