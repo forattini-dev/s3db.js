@@ -22,9 +22,6 @@ describe('PuppeteerPlugin', () => {
   });
 
   afterAll(async () => {
-    if (puppeteerPlugin) {
-      await db.stop();
-    }
     await db.disconnect();
   });
 
@@ -36,10 +33,6 @@ describe('PuppeteerPlugin', () => {
   afterEach(async () => {
     if (puppeteerPlugin && typeof puppeteerPlugin.stop === 'function') {
       await puppeteerPlugin.stop().catch(() => {});
-    }
-    if (db) {
-      db.installedPlugins = [];
-      db.resources.clear();
     }
   });
 
@@ -220,12 +213,10 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
-      await db.start();
 
       expect(puppeteerPlugin.cookieManager).toBeDefined();
       expect(puppeteerPlugin.cookieManager.storage).toBeDefined();
 
-      await db.stop();
     });
 
     it('should not initialize cookie manager when disabled', async () => {
@@ -239,11 +230,9 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
-      await db.start();
 
       expect(puppeteerPlugin.cookieManager).toBeNull();
 
-      await db.stop();
     });
   });
 
@@ -255,11 +244,10 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
-      await db.start();
 
       expect(puppeteerPlugin.initialized).toBe(true);
 
-      await db.stop();
+      await puppeteerPlugin.stop();
 
       expect(puppeteerPlugin.initialized).toBe(false);
     });
@@ -275,12 +263,11 @@ describe('PuppeteerPlugin', () => {
       puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
-      await db.start();
 
       // Start with empty pool
       expect(puppeteerPlugin.browserPool.length).toBe(0);
 
-      await db.stop();
+      await puppeteerPlugin.stop();
 
       // Pool should be cleared
       expect(puppeteerPlugin.browserPool.length).toBe(0);
