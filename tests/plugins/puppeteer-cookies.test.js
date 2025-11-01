@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
-import { createMockDatabase } from './helpers/mock-database.js';
+import { Database } from '../../src/database.class.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
   requirePluginDependency: jest.fn()
@@ -14,7 +15,10 @@ describe('PuppeteerPlugin - CookieManager', () => {
   let cookieManager;
 
   beforeAll(async () => {
-    db = createMockDatabase();
+    // Use real Database with MemoryClient - no more MockDatabase!
+    db = new Database({
+      client: new MemoryClient()
+    });
     await db.connect();
     puppeteerPlugin = new PuppeteerPlugin({
       namespace: null, // Disable namespace to use exact resource name
