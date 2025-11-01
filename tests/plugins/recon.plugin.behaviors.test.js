@@ -39,7 +39,7 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.rateLimit.enabled).toBe(false);
     });
 
-    test('emits behavior-applied event', () => {
+    test('emits behavior-applied event', async () => {
       emitSpy = jest.spyOn(ReconPlugin.prototype, 'emit');
 
       new ReconPlugin({
@@ -47,6 +47,9 @@ describe('ReconPlugin - Behavior Modes', () => {
         storage: { persist: false },
         resources: { persist: false }
       });
+
+      // Wait for setTimeout to complete
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(emitSpy).toHaveBeenCalledWith('recon:behavior-applied', expect.objectContaining({
         mode: 'passive',

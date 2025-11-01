@@ -94,6 +94,7 @@ export class ReconPlugin extends Plugin {
 
     // Apply behavior preset if specified
     let baseConfig = DEFAULT_CONFIG;
+    const behaviorMode = config.behavior || 'default';
 
     if (config.behavior && BEHAVIOR_PRESETS[config.behavior]) {
       const preset = BEHAVIOR_PRESETS[config.behavior];
@@ -121,6 +122,7 @@ export class ReconPlugin extends Plugin {
     this.config = {
       ...baseConfig,
       ...config,
+      behavior: behaviorMode,
       features: deepMerge(
         deepMerge(baseConfig.features, config.features || {}),
         config.behaviorOverrides?.features || {}
