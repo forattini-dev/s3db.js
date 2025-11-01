@@ -54,13 +54,14 @@ describe('PuppeteerPlugin - CookieManager', () => {
     puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
     await db.usePlugin(puppeteerPlugin);
-    await db.start();
 
     cookieManager = puppeteerPlugin.cookieManager;
   });
 
   afterAll(async () => {
-    await db.stop();
+    if (puppeteerPlugin && typeof puppeteerPlugin.stop === 'function') {
+      await puppeteerPlugin.stop().catch(() => {});
+    }
     await db.disconnect();
   });
 
@@ -375,13 +376,11 @@ describe('PuppeteerPlugin - CookieManager', () => {
 
       await db.usePlugin(disabledPlugin);
 
-      await db.start();
 
       await expect(disabledPlugin.farmCookies('test')).rejects.toThrow(
         'Cookie farming is not enabled'
       );
 
-      await db.stop();
     });
 
     it('should throw error when getting best cookie with farming disabled', async () => {
@@ -398,13 +397,11 @@ describe('PuppeteerPlugin - CookieManager', () => {
       disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
 
       await db.usePlugin(disabledPlugin);
-      await db.start();
 
       await expect(disabledPlugin.cookieManager.getBestCookie()).rejects.toThrow(
         'Cookie farming reputation must be enabled to select best cookies'
       );
 
-      await db.stop();
     });
   });
 });
