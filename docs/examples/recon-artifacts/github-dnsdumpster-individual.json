@@ -1,0 +1,11 @@
+{
+  "dnsdumpster": {
+    "status": "error",
+    "data": null,
+    "raw": null
+  },
+  "dig": {
+    "status": "ok",
+    "records": {}
+  }
+}

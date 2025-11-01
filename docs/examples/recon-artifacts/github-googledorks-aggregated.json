@@ -1,0 +1,27 @@
+{
+  "status": "ok",
+  "domain": "github.com",
+  "companyName": "Github",
+  "categories": {
+    "github": null,
+    "pastebin": null,
+    "linkedin": null,
+    "documents": {
+      "status": "ok",
+      "results": [],
+      "count": 0
+    },
+    "subdomains": {
+      "status": "ok",
+      "results": [],
+      "count": 0
+    },
+    "loginPages": null,
+    "configs": null,
+    "errors": null
+  },
+  "summary": {
+    "totalResults": 0,
+    "totalCategories": 2
+  }
+}

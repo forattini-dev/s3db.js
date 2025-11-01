@@ -1,0 +1,29 @@
+{
+  "iptoasn": {
+    "status": "unavailable",
+    "results": []
+  },
+  "hackertarget": {
+    "status": "ok",
+    "results": [
+      {
+        "ip": "4.228.31.150",
+        "asn": "AS4",
+        "asnNumber": 4,
+        "organization": "US",
+        "country": "4.224.0.0/12",
+        "network": "8075",
+        "source": "hackertarget.com",
+        "_source": "hackertarget"
+      }
+    ]
+  },
+  "dig": {
+    "status": "ok",
+    "ipv4": [
+      "4.228.31.150"
+    ],
+    "ipv6": [],
+    "raw_ipv4": "4.228.31.150\n"
+  }
+}
