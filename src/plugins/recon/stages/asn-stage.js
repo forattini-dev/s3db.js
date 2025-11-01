@@ -38,14 +38,27 @@ export class ASNStage {
       errors: {}
     };
 
+    // Track individual tool results for artifact persistence
+    const individual = {
+      iptoasn: { status: 'ok', results: [] },
+      hackertarget: { status: 'ok', results: [] },
+      dig: { status: 'ok', ipv4: [], ipv6: [] }
+    };
+
     // Step 1: Resolve host to IP addresses
-    const ipAddresses = await this.resolveHostToIPs(target.host);
+    const ipAddresses = await this.resolveHostToIPs(target.host, individual.dig);
     result.ipAddresses = ipAddresses;
 
     if (ipAddresses.length === 0) {
       result.status = 'error';
       result.errors.dns = 'Could not resolve host to IP addresses';
-      return result;
+      individual.dig.status = 'error';
+
+      return {
+        _individual: individual,
+        _aggregated: result,
+        ...result // Root level for compatibility
+      };
     }
 
     // Step 2: Lookup ASN for each IP
@@ -54,12 +67,9 @@ export class ASNStage {
         // Try iptoasn.com first (faster, unlimited)
         let asnData = await this.lookupASNViaIPToASN(ip, options);
 
-        // Fallback to hackertarget if iptoasn fails
-        if (!asnData && options.hackertarget !== false) {
-          asnData = await this.lookupASNViaHackerTarget(ip, options);
-        }
-
         if (asnData) {
+          asnData._source = 'iptoasn';
+          individual.iptoasn.results.push({ ip, ...asnData });
           result.asns.push(asnData);
 
           if (asnData.network) {
@@ -68,6 +78,23 @@ export class ASNStage {
 
           if (asnData.organization) {
             result.organizations.add(asnData.organization);
+          }
+        } else if (options.hackertarget !== false) {
+          // Fallback to hackertarget if iptoasn fails
+          asnData = await this.lookupASNViaHackerTarget(ip, options);
+
+          if (asnData) {
+            asnData._source = 'hackertarget';
+            individual.hackertarget.results.push({ ip, ...asnData });
+            result.asns.push(asnData);
+
+            if (asnData.network) {
+              result.networks.push(asnData.network);
+            }
+
+            if (asnData.organization) {
+              result.organizations.add(asnData.organization);
+            }
           }
         }
 
@@ -82,13 +109,25 @@ export class ASNStage {
     // Deduplicate ASNs by ASN number
     result.asns = this.deduplicateASNs(result.asns);
 
-    return result;
+    // Mark tools as unavailable if no results
+    if (individual.iptoasn.results.length === 0) {
+      individual.iptoasn.status = 'unavailable';
+    }
+    if (individual.hackertarget.results.length === 0 && options.hackertarget !== false) {
+      individual.hackertarget.status = 'unavailable';
+    }
+
+    return {
+      _individual: individual,
+      _aggregated: result,
+      ...result // Root level for compatibility
+    };
   }
 
   /**
    * Resolve host to IP addresses using dig
    */
-  async resolveHostToIPs(host) {
+  async resolveHostToIPs(host, digResults = null) {
     const ips = [];
 
     // Resolve A records (IPv4)
@@ -99,6 +138,13 @@ export class ASNStage {
         .map(line => line.trim())
         .filter(line => /^\d+\.\d+\.\d+\.\d+$/.test(line));
       ips.push(...ipv4s);
+
+      if (digResults) {
+        digResults.ipv4 = ipv4s;
+        if (this.config?.storage?.persistRawOutput) {
+          digResults.raw_ipv4 = aRun.stdout;
+        }
+      }
     }
 
     // Resolve AAAA records (IPv6)
@@ -109,6 +155,13 @@ export class ASNStage {
         .map(line => line.trim())
         .filter(line => /^[0-9a-f:]+$/i.test(line) && line.includes(':'));
       ips.push(...ipv6s);
+
+      if (digResults) {
+        digResults.ipv6 = ipv6s;
+        if (this.config?.storage?.persistRawOutput) {
+          digResults.raw_ipv6 = aaaaRun.stdout;
+        }
+      }
     }
 
     return [...new Set(ips)]; // Deduplicate
