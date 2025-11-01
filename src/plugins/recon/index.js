@@ -32,6 +32,7 @@ import { FingerprintStage } from './stages/fingerprint-stage.js';
 import { ScreenshotStage } from './stages/screenshot-stage.js';
 import { OsintStage } from './stages/osint-stage.js';
 import { WhoisStage } from './stages/whois-stage.js';
+import { SecretsStage } from './stages/secrets-stage.js';
 
 // Concerns
 import { CommandRunner } from './concerns/command-runner.js';
@@ -148,7 +149,8 @@ export class ReconPlugin extends Plugin {
       fingerprint: new FingerprintStage(this),
       screenshot: new ScreenshotStage(this),
       osint: new OsintStage(this),
-      whois: new WhoisStage(this)
+      whois: new WhoisStage(this),
+      secrets: new SecretsStage(this)
     };
   }
 
@@ -283,6 +285,11 @@ export class ReconPlugin extends Plugin {
     // OSINT stage
     if (scanConfig.osint !== false) {
       results.osint = await this.stages.osint.execute(normalizedTarget, scanConfig.osint);
+    }
+
+    // Secrets detection stage
+    if (scanConfig.secrets !== false) {
+      results.secrets = await this.stages.secrets.execute(normalizedTarget, scanConfig.secrets);
     }
 
     // Build consolidated fingerprint

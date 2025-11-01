@@ -23,6 +23,7 @@ export class DependencyManager {
 
     const toolMap = {
       'whois': 'whois',
+      'secrets.gitleaks': 'gitleaks',
       'latency.ping': 'ping',
       'latency.traceroute': ['mtr', 'traceroute'],
       'http.curl': 'curl',
@@ -134,6 +135,7 @@ export class DependencyManager {
   _getInstallGuide(toolName) {
     const guides = {
       whois: 'Ubuntu: apt-get install whois | macOS: brew install whois',
+      gitleaks: 'https://github.com/gitleaks/gitleaks | go install github.com/gitleaks/gitleaks/v8@latest | brew install gitleaks',
       ping: 'Geralmente pré-instalado. No Ubuntu: apt-get install iputils-ping',
       mtr: 'Ubuntu: apt-get install mtr-tiny | macOS: brew install mtr',
       traceroute: 'Ubuntu: apt-get install traceroute | macOS: Pré-instalado',

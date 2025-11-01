@@ -17,7 +17,9 @@ export const DEFAULT_FEATURES = {
     amass: true,
     subfinder: true,
     assetfinder: false,
-    crtsh: true
+    crtsh: true,
+    checkTakeover: false,
+    maxSubdomains: 50
   },
   ports: {
     nmap: true,
@@ -50,6 +52,11 @@ export const DEFAULT_FEATURES = {
   osint: {
     theHarvester: false,
     reconNg: false
+  },
+  secrets: {
+    gitleaks: true,
+    patterns: true,
+    maxUrls: 20
   }
 };
 
@@ -61,14 +68,15 @@ export const BEHAVIOR_PRESETS = {
       whois: true,
       http: { curl: false },
       latency: { ping: false, traceroute: false },
-      subdomains: { amass: false, subfinder: false, assetfinder: false, crtsh: true },
+      subdomains: { amass: false, subfinder: false, assetfinder: false, crtsh: true, checkTakeover: false, maxSubdomains: 20 },
       ports: { nmap: false, masscan: false },
       web: { ffuf: false, feroxbuster: false, gobuster: false },
       vulnerability: { nikto: false, wpscan: false, droopescan: false },
       tlsAudit: { openssl: false, sslyze: false, testssl: false },
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
-      osint: { theHarvester: true, reconNg: false }
+      osint: { theHarvester: true, reconNg: false },
+      secrets: { gitleaks: false, patterns: true, maxUrls: 10 }
     },
     concurrency: 2,
     ping: { count: 3, timeout: 5000 },
@@ -83,14 +91,15 @@ export const BEHAVIOR_PRESETS = {
       whois: true,
       http: { curl: true },
       latency: { ping: true, traceroute: false },
-      subdomains: { amass: false, subfinder: true, assetfinder: false, crtsh: true },
+      subdomains: { amass: false, subfinder: true, assetfinder: false, crtsh: true, checkTakeover: true, maxSubdomains: 30 },
       ports: { nmap: true, masscan: false },
       web: { ffuf: false, feroxbuster: false, gobuster: false },
       vulnerability: { nikto: false, wpscan: false, droopescan: false },
       tlsAudit: { openssl: true, sslyze: false, testssl: false },
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
-      osint: { theHarvester: false, reconNg: false }
+      osint: { theHarvester: false, reconNg: false },
+      secrets: { gitleaks: true, patterns: true, maxUrls: 15 }
     },
     concurrency: 1,
     ping: { count: 3, timeout: 10000 },
@@ -109,14 +118,15 @@ export const BEHAVIOR_PRESETS = {
       whois: true,
       http: { curl: true },
       latency: { ping: true, traceroute: true },
-      subdomains: { amass: true, subfinder: true, assetfinder: true, crtsh: true },
+      subdomains: { amass: true, subfinder: true, assetfinder: true, crtsh: true, checkTakeover: true, maxSubdomains: 100 },
       ports: { nmap: true, masscan: true },
       web: { ffuf: true, feroxbuster: true, gobuster: true, threads: 100 },
       vulnerability: { nikto: true, wpscan: true, droopescan: true },
       tlsAudit: { openssl: true, sslyze: true, testssl: true },
       fingerprint: { whatweb: true },
       screenshots: { aquatone: true, eyewitness: false },
-      osint: { theHarvester: true, reconNg: false }
+      osint: { theHarvester: true, reconNg: false },
+      secrets: { gitleaks: true, patterns: true, maxUrls: 30 }
     },
     concurrency: 8,
     ping: { count: 4, timeout: 5000 },
