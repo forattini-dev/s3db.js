@@ -154,8 +154,12 @@ export class FilesystemCache extends Cache {
     
     this.locks = new Map(); // For file locking
     this.cleanupTimer = null;
-    
-    this._init();
+
+    // Store _init promise to allow tests to handle initialization errors
+    this._initPromise = this._init().catch(err => {
+      this._initError = err;
+      // Silently capture initialization error - will be thrown on first operation
+    });
   }
 
   async _init() {

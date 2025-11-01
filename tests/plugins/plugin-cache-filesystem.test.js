@@ -198,30 +198,20 @@ describe('FilesystemCache - Permission Tests', () => {
   describe('Permission Error Behavior Documentation', () => {
     test('should demonstrate permission error behavior with restricted directories', async () => {
       // IMPORTANT: This test documents a known behavior where FilesystemCache
-      // calls async _init() in constructor without await, causing uncaught promise rejections
-      // when directory creation fails due to permissions.
+      // calls async _init() in constructor without await
+      // Now _init() promise is captured to prevent unhandled rejections
 
       // Test with createDirectory=false to avoid permission issues
       const tempDir = await createTemporaryPathForTest('permission-test-safe');
       await rmdir(tempDir, { recursive: true }); // Remove directory
-
-      // Suppress unhandled rejection warnings from _init() throwing in constructor
-      const originalOnUnhandled = process.listeners('unhandledRejection');
-      process.removeAllListeners('unhandledRejection');
-      const unhandledErrors = [];
-      process.on('unhandledRejection', (err) => unhandledErrors.push(err));
 
       cache = new FilesystemCache({
         directory: tempDir,
         createDirectory: false // Don't try to create directory
       });
 
-      // Wait for _init() to complete (it throws in background)
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Restore original handlers
-      process.removeAllListeners('unhandledRejection');
-      originalOnUnhandled.forEach(handler => process.on('unhandledRejection', handler));
+      // Wait for _init() to complete (error is captured in _initPromise)
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // This should fail because directory doesn't exist and createDirectory is disabled
       await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
@@ -249,24 +239,14 @@ describe('FilesystemCache - Permission Tests', () => {
       // Remove the directory that was created by createTemporaryPathForTest
       await rmdir(nonExistentDir, { recursive: true });
 
-      // Suppress unhandled rejection warnings
-      const originalOnUnhandled = process.listeners('unhandledRejection');
-      process.removeAllListeners('unhandledRejection');
-      const unhandledErrors = [];
-      process.on('unhandledRejection', (err) => unhandledErrors.push(err));
-
       // Create cache with createDirectory=false
       cache = new FilesystemCache({
         directory: nonExistentDir,
         createDirectory: false
       });
 
-      // Wait for _init() to complete (it throws in background)
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Restore original handlers
-      process.removeAllListeners('unhandledRejection');
-      originalOnUnhandled.forEach(handler => process.on('unhandledRejection', handler));
+      // Wait for _init() to complete (error is captured in _initPromise)
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Operations should fail because directory doesn't exist and won't be created
       await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
@@ -279,23 +259,13 @@ describe('FilesystemCache - Permission Tests', () => {
       const missingDir = await createTemporaryPathForTest('demo-missing');
       await rmdir(missingDir, { recursive: true });
 
-      // Suppress unhandled rejection warnings
-      const originalOnUnhandled = process.listeners('unhandledRejection');
-      process.removeAllListeners('unhandledRejection');
-      const unhandledErrors = [];
-      process.on('unhandledRejection', (err) => unhandledErrors.push(err));
-
       const cacheNoCreate = new FilesystemCache({
         directory: missingDir,
         createDirectory: false
       });
 
-      // Wait for _init() to complete (it throws in background)
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Restore original handlers
-      process.removeAllListeners('unhandledRejection');
-      originalOnUnhandled.forEach(handler => process.on('unhandledRejection', handler));
+      // Wait for _init() to complete (error is captured in _initPromise)
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Should fail when trying to write to non-existent directory with createDirectory disabled
       await expect(cacheNoCreate.set('test', 'value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
