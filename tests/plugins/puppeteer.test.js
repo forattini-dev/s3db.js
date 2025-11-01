@@ -58,6 +58,9 @@ describe('PuppeteerPlugin', () => {
         }
       });
 
+      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+
       await db.usePlugin(puppeteerPlugin);
 
       const resource = await db.getResource('test_puppeteer_cookies');

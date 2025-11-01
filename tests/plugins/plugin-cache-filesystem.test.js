@@ -211,7 +211,7 @@ describe('FilesystemCache - Permission Tests', () => {
       });
 
       // Wait for _init() to complete (it throws in background)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // This should fail because directory doesn't exist and createDirectory is disabled
       await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
@@ -246,7 +246,7 @@ describe('FilesystemCache - Permission Tests', () => {
       });
 
       // Wait for _init() to complete (it throws in background)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Operations should fail because directory doesn't exist and won't be created
       await expect(cache.set('test-key', 'test-value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
@@ -265,7 +265,7 @@ describe('FilesystemCache - Permission Tests', () => {
       });
 
       // Wait for _init() to complete (it throws in background)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Should fail when trying to write to non-existent directory with createDirectory disabled
       await expect(cacheNoCreate.set('test', 'value')).rejects.toThrow(/Failed to set cache key.*missing.*createDirectory disabled/i);
