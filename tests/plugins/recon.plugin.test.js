@@ -178,8 +178,8 @@ describe('ReconPlugin', () => {
       tools: ['dns', 'ping', 'ports']
     });
 
-    expect(report.results.ping.status).toBe('unavailable');
-    expect(report.results.ports.scanners.nmap.status).toBe('unavailable');
+    expect(report.results.latency?.ping?.status).toBe('unavailable');
+    expect(report.results.ports?.scanners?.nmap?.status).toBe('unavailable');
   });
 
   test('prefers mtr JSON output when available', async () => {
@@ -232,8 +232,8 @@ describe('ReconPlugin', () => {
       tools: ['traceroute', 'dns']
     });
 
-    expect(report.results.traceroute.type).toBe('mtr');
-    expect(report.results.traceroute.report.report.hubs).toHaveLength(1);
+    expect(report.results.latency?.traceroute?.type).toBe('mtr');
+    expect(report.results.latency?.traceroute?.report?.report?.hubs).toHaveLength(1);
   });
 
   test('generateClientReport produces markdown and json summaries', async () => {
