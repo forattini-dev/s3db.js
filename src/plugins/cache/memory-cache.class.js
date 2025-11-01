@@ -217,6 +217,9 @@ export class MemoryCache extends Cache {
     this.currentMemoryBytes = 0;
     this.evictedDueToMemory = 0;
 
+    // Monotonic counter for LRU ordering (prevents timestamp collisions)
+    this._accessCounter = 0;
+
     this.stats = {
       hits: 0,
       misses: 0,
@@ -244,10 +247,11 @@ export class MemoryCache extends Cache {
     }
 
     if (this.evictionPolicy === 'lru') {
-      entries.sort((a, b) => (a[1].lastAccess ?? a[1].ts) - (b[1].lastAccess ?? b[1].ts));
+      // Use accessOrder (monotonic counter) for stable LRU ordering
+      entries.sort((a, b) => (a[1].accessOrder ?? a[1].insertOrder ?? 0) - (b[1].accessOrder ?? b[1].insertOrder ?? 0));
     } else {
       // Default to FIFO (order of insertion)
-      entries.sort((a, b) => (a[1].createdAt ?? a[1].ts) - (b[1].createdAt ?? b[1].ts));
+      entries.sort((a, b) => (a[1].insertOrder ?? a[1].createdAt ?? a[1].ts) - (b[1].insertOrder ?? b[1].createdAt ?? b[1].ts));
     }
 
     return entries[0]?.[0] || null;
@@ -362,10 +366,13 @@ export class MemoryCache extends Cache {
     // Store the item
     this.cache[normalizedKey] = finalData;
     const timestamp = Date.now();
+    const insertOrder = ++this._accessCounter;
     this.meta[normalizedKey] = {
       ts: timestamp,
       createdAt: timestamp,
       lastAccess: timestamp,
+      insertOrder,
+      accessOrder: insertOrder,
       compressed,
       originalSize,
       compressedSize: itemSize,
@@ -415,6 +422,7 @@ export class MemoryCache extends Cache {
         this._recordStat('hits');
         if (this.evictionPolicy === 'lru' && this.meta[normalizedKey]) {
           this.meta[normalizedKey].lastAccess = Date.now();
+          this.meta[normalizedKey].accessOrder = ++this._accessCounter;
         }
         return value;
       } catch (error) {
@@ -432,6 +440,7 @@ export class MemoryCache extends Cache {
       this._recordStat('hits');
       if (this.evictionPolicy === 'lru' && this.meta[normalizedKey]) {
         this.meta[normalizedKey].lastAccess = Date.now();
+        this.meta[normalizedKey].accessOrder = ++this._accessCounter;
       }
       return value;
     } catch (error) {
