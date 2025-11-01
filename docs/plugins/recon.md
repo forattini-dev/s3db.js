@@ -2156,6 +2156,20 @@ const reports = await reportsResource.listPartition('byDay', {
 
 ### Examples
 
+#### Real-World Scan Examples (github.com)
+
+- **[Full Examples README](./recon/examples/README.md)** - Complete guide to all examples
+- **[Full Scan Report](./recon/examples/01-full-report.json)** - Complete reconnaissance scan (50 KB)
+- **[DNS Results](./recon/examples/02-dns-stage.json)** - A/AAAA/MX/TXT/NS records (3 KB)
+- **[Certificate Info](./recon/examples/03-certificate-stage.json)** - TLS/SSL certificate (17 KB)
+- **[WHOIS Data](./recon/examples/04-whois-stage.json)** - Domain registration info (8 KB) ⭐
+- **[HTTP Headers](./recon/examples/05-http-stage.json)** - Web server metadata (4.6 KB)
+- **[Latency Metrics](./recon/examples/06-latency-stage.json)** - Ping results (701 bytes)
+- **[Subdomains](./recon/examples/07-subdomains-stage.json)** - CT log discovery (4.5 KB)
+- **[Fingerprint](./recon/examples/08-fingerprint.json)** - Consolidated view (14 KB)
+
+#### Code Examples
+
 - **Basic Recon Scan**: `docs/examples/e48-recon-basic.js`
 - **Multi-Instance Setup**: `docs/examples/e45-recon-multi-instance.js`
 - **Namespace Detection**: `docs/examples/e46-recon-namespace-detection.js`
