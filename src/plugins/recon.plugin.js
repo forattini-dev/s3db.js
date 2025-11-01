@@ -768,13 +768,27 @@ export class ReconPlugin extends Plugin {
     const baseKey = storage.getPluginKey(null, 'reports', target.host);
     const historyKey = `${baseKey}/${timestamp}.json`;
     const stageStorageKeys = {};
+    const toolStorageKeys = {};
+
     for (const [stageName, stageData] of Object.entries(report.results || {})) {
-      const stageKey = `${baseKey}/stages/${timestamp}/${stageName}.json`;
-      await storage.set(stageKey, stageData, { behavior: 'body-only' });
+      // Persist individual tools if present
+      if (stageData._individual && typeof stageData._individual === 'object') {
+        for (const [toolName, toolData] of Object.entries(stageData._individual)) {
+          const toolKey = `${baseKey}/stages/${timestamp}/tools/${toolName}.json`;
+          await storage.set(toolKey, toolData, { behavior: 'body-only' });
+          toolStorageKeys[toolName] = toolKey;
+        }
+      }
+
+      // Persist aggregated stage view
+      const aggregatedData = stageData._aggregated || stageData;
+      const stageKey = `${baseKey}/stages/${timestamp}/aggregated/${stageName}.json`;
+      await storage.set(stageKey, aggregatedData, { behavior: 'body-only' });
       stageStorageKeys[stageName] = stageKey;
     }
 
     report.stageStorageKeys = stageStorageKeys;
+    report.toolStorageKeys = toolStorageKeys;
     report.storageKey = historyKey;
 
     await storage.set(historyKey, report, { behavior: 'body-only' });
@@ -788,6 +802,7 @@ export class ReconPlugin extends Plugin {
       status: report.status,
       reportKey: historyKey,
       stageKeys: stageStorageKeys,
+      toolKeys: toolStorageKeys,
       summary: {
         latencyMs: report.fingerprint.latencyMs ?? null,
         openPorts: report.fingerprint.openPorts?.length ?? 0,
@@ -1527,146 +1542,6 @@ export class ReconPlugin extends Plugin {
     return diffs.filter((diff) => diff.critical).slice(0, limit);
   }
 
-  getApiRoutes(options = {}) {
-    const normalizeBasePath = (value) => {
-      if (value === undefined || value === null) {
-        return '/recon';
-      }
-      const text = String(value).trim();
-      if (!text || text === '/') {
-        return '';
-      }
-      return `/${text.replace(/^\/+|\/+$/g, '')}`;
-    };
-
-    const buildPath = (base, suffix) => {
-      const normalizedSuffix = suffix.startsWith('/') ? suffix : `/${suffix}`;
-      const normalizedBase = base === '/' ? '' : base;
-      const fullPath = `${normalizedBase ?? ''}${normalizedSuffix}`;
-      return fullPath || '/';
-    };
-
-    const parseBoolean = (value, fallback) => {
-      if (value === undefined || value === null) return fallback;
-      if (typeof value === 'boolean') return value;
-      const normalized = String(value).trim().toLowerCase();
-      if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
-      if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
-      return fallback;
-    };
-
-    const parseLimit = (value, fallback, maxCap) => {
-      if (value === undefined || value === null || value === '') {
-        return fallback;
-      }
-      const parsed = Number.parseInt(value, 10);
-      if (Number.isNaN(parsed) || parsed < 0) {
-        return fallback;
-      }
-      if (typeof maxCap === 'number' && parsed > maxCap) {
-        return maxCap;
-      }
-      return parsed;
-    };
-
-    const basePath = normalizeBasePath(options.basePath);
-    const includeDiffsDefault = options.includeDiffs ?? true;
-    const includeReportDefault = options.includeReport ?? true;
-    const includeStagesDefault = options.includeStages ?? true;
-    const includeAlertsDefault = options.includeAlerts ?? true;
-    const includePathsDefault = options.includePaths ?? false;
-    const diffLimitDefault = options.diffLimit ?? 10;
-    const alertLimitDefault = options.alertLimit ?? 5;
-    const maxDiffLimit = options.maxDiffLimit ?? 50;
-    const maxAlertLimit = options.maxAlertLimit ?? 25;
-    const plugin = this;
-
-    return {
-      [`GET ${buildPath(basePath, '/hosts/:hostId/summary')}`]: async (c, ctx) => {
-        const hostId = ctx.param('hostId');
-        if (!hostId) {
-          return ctx.error('hostId param is required', 400);
-        }
-
-        if (!plugin.database) {
-          return ctx.error('ReconPlugin is not installed in this database', 500);
-        }
-
-        const includeDiffs = parseBoolean(ctx.query('includeDiffs'), includeDiffsDefault);
-        const includeReport = parseBoolean(ctx.query('includeReport'), includeReportDefault);
-        const includeStages = parseBoolean(ctx.query('includeStages'), includeStagesDefault);
-        const includeAlerts = parseBoolean(ctx.query('includeAlerts'), includeAlertsDefault);
-        const includePaths = parseBoolean(ctx.query('includePaths'), includePathsDefault);
-        const diffLimit = parseLimit(ctx.query('diffLimit'), diffLimitDefault, maxDiffLimit);
-        const alertLimit = parseLimit(ctx.query('alertLimit'), alertLimitDefault, maxAlertLimit);
-
-        try {
-          const hostSummary = await plugin.getHostSummary(hostId, {
-            includeDiffs,
-            diffLimit
-          });
-
-          if (!hostSummary) {
-            return ctx.notFound(`No recon report found for "${hostId}"`);
-          }
-
-          const host = plugin._deepClone(hostSummary);
-          let diffs = [];
-
-          if (includeDiffs) {
-            if (Array.isArray(host.diffs)) {
-              diffs = host.diffs.slice(0, diffLimit);
-            } else {
-              diffs = await plugin._loadRecentDiffs(hostId, diffLimit);
-            }
-          }
-
-          delete host.diffs;
-
-          const latestReport = await plugin._loadLatestReport(hostId);
-          const report =
-            includeReport && latestReport
-              ? plugin._stripRawFields(plugin._deepClone(latestReport))
-              : null;
-
-          const stages =
-            includeStages && latestReport
-              ? plugin._collectStageSummaries(latestReport)
-              : [];
-
-          const alerts =
-            includeAlerts && alertLimit > 0
-              ? await plugin.getRecentAlerts(hostId, { limit: alertLimit })
-              : [];
-
-          const webDiscoveryStage = report.results?.webDiscovery || {};
-          const pathsPayload = includePaths
-            ? {
-                items: Array.isArray(webDiscoveryStage.paths) ? webDiscoveryStage.paths : [],
-                total: Array.isArray(webDiscoveryStage.paths) ? webDiscoveryStage.paths.length : 0,
-                sources: plugin._stripRawFields(webDiscoveryStage.tools || webDiscoveryStage.sources || {})
-              }
-            : undefined;
-
-          return ctx.success({
-            host,
-            report,
-            stages,
-            diffs,
-            alerts,
-            paths: pathsPayload
-          });
-        } catch (error) {
-          plugin.emit('recon:api-error', {
-            host: hostId,
-            message: error?.message || 'Failed to load recon summary',
-            stack: error?.stack
-          });
-          return ctx.error('Failed to load recon summary', 500);
-        }
-      }
-    };
-  }
 
   async _gatherDns(target) {
     const result = {
@@ -1998,6 +1873,13 @@ export class ReconPlugin extends Plugin {
     const list = Array.from(aggregated).sort();
 
     return {
+      _individual: sources,
+      _aggregated: {
+        status: list.length > 0 ? 'ok' : 'empty',
+        total: list.length,
+        list,
+        sources
+      },
       status: list.length > 0 ? 'ok' : 'empty',
       total: list.length,
       list,
@@ -2032,6 +1914,12 @@ export class ReconPlugin extends Plugin {
     }
 
     return {
+      _individual: scanners,
+      _aggregated: {
+        status: openPorts.size > 0 ? 'ok' : 'empty',
+        openPorts: Array.from(openPorts.values()),
+        scanners
+      },
       status: openPorts.size > 0 ? 'ok' : 'empty',
       openPorts: Array.from(openPorts.values()),
       scanners
@@ -2223,6 +2111,13 @@ export class ReconPlugin extends Plugin {
     const paths = Array.from(allPaths);
 
     return {
+      _individual: tools,
+      _aggregated: {
+        status: 'ok',
+        total,
+        tools,
+        paths
+      },
       status: 'ok',
       total,
       tools,
@@ -2271,6 +2166,11 @@ export class ReconPlugin extends Plugin {
     }
 
     return {
+      _individual: tools,
+      _aggregated: {
+        status: Object.values(tools).some((tool) => tool.status === 'ok') ? 'ok' : 'empty',
+        tools
+      },
       status: Object.values(tools).some((tool) => tool.status === 'ok') ? 'ok' : 'empty',
       tools
     };
@@ -2318,6 +2218,11 @@ export class ReconPlugin extends Plugin {
     }
 
     return {
+      _individual: tools,
+      _aggregated: {
+        status: Object.values(tools).some((tool) => tool.status === 'ok') ? 'ok' : 'empty',
+        tools
+      },
       status: Object.values(tools).some((tool) => tool.status === 'ok') ? 'ok' : 'empty',
       tools
     };
@@ -2357,6 +2262,12 @@ export class ReconPlugin extends Plugin {
     }
 
     return {
+      _individual: tools,
+      _aggregated: {
+        status: technologies.size ? 'ok' : 'empty',
+        technologies: Array.from(technologies),
+        tools
+      },
       status: technologies.size ? 'ok' : 'empty',
       technologies: Array.from(technologies),
       tools
@@ -2404,12 +2315,22 @@ export class ReconPlugin extends Plugin {
 
     if (Object.values(screenshots).some((entry) => entry.status === 'ok')) {
       return {
+        _individual: screenshots,
+        _aggregated: {
+          status: 'ok',
+          tools: screenshots
+        },
         status: 'ok',
         tools: screenshots
       };
     }
 
     return {
+      _individual: screenshots,
+      _aggregated: {
+        status: 'empty',
+        tools: screenshots
+      },
       status: 'empty',
       tools: screenshots
     };
@@ -2450,6 +2371,11 @@ export class ReconPlugin extends Plugin {
     }
 
     return {
+      _individual: tools,
+      _aggregated: {
+        status: Object.values(tools).some((entry) => entry.status === 'ok') ? 'ok' : 'empty',
+        tools
+      },
       status: Object.values(tools).some((entry) => entry.status === 'ok') ? 'ok' : 'empty',
       tools
     };

@@ -246,168 +246,63 @@ type Target = {
 
 ---
 
-## REST API Routes
+## 🌐 API Integration (DIY)
 
-When integrated with `ApiPlugin`, the following routes are available:
+**Note**: ReconPlugin does NOT provide built-in API routes. You must implement your own API layer.
 
-### `GET /recon/targets`
+### Example: Custom API with ApiPlugin
 
-List all targets.
+```javascript
+import { ApiPlugin, ReconPlugin } from 's3db.js';
 
-**Query Parameters:**
-- `includeDisabled` (boolean, default: `true`) - Include disabled targets
-- `limit` (number, default: `1000`, max: `5000`) - Max results
+const reconPlugin = new ReconPlugin({ ... });
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "targets": [
-      {
-        "id": "example.com",
-        "target": "https://example.com",
-        "enabled": true,
-        "behavior": "stealth",
-        "scanCount": 12,
-        "lastScanAt": "2025-01-01T00:05:00.000Z",
-        "tags": ["production"]
-      }
-    ],
-    "total": 1,
-    "includeDisabled": true
-  }
-}
-```
+const apiPlugin = new ApiPlugin({
+  port: 3000,
+  routes: {
+    // List targets
+    'GET /recon/targets': async (c, ctx) => {
+      const targets = await reconPlugin.listTargets();
+      return ctx.success({ targets });
+    },
 
----
+    // Add target
+    'POST /recon/targets': async (c, ctx) => {
+      const { target, ...options } = await ctx.body();
+      const created = await reconPlugin.addTarget(target, options);
+      return ctx.success({ target: created }, 201);
+    },
 
-### `GET /recon/targets/:targetId`
+    // Get target
+    'GET /recon/targets/:id': async (c, ctx) => {
+      const target = await reconPlugin.getTarget(ctx.param('id'));
+      if (!target) return ctx.notFound();
+      return ctx.success({ target });
+    },
 
-Get specific target details.
+    // Update target
+    'PATCH /recon/targets/:id': async (c, ctx) => {
+      const updates = await ctx.body();
+      const target = await reconPlugin.updateTarget(ctx.param('id'), updates);
+      return ctx.success({ target });
+    },
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "target": {
-      "id": "example.com",
-      "target": "https://example.com",
-      "enabled": true,
-      "behavior": "stealth",
-      "features": {},
-      "tools": [],
-      "schedule": { "enabled": true, "cron": "0 */6 * * *" },
-      "metadata": { "owner": "DevOps" },
-      "scanCount": 12,
-      "lastScanAt": "2025-01-01T00:05:00.000Z",
-      "lastScanStatus": "ok",
-      "tags": ["production"],
-      "addedBy": "api",
-      "createdAt": "2024-12-01T00:00:00.000Z",
-      "updatedAt": "2025-01-01T00:05:00.000Z"
+    // Delete target
+    'DELETE /recon/targets/:id': async (c, ctx) => {
+      await reconPlugin.removeTarget(ctx.param('id'));
+      return ctx.success({ removed: true });
+    },
+
+    // Trigger scan
+    'POST /recon/targets/:id/scan': async (c, ctx) => {
+      const target = await reconPlugin.getTarget(ctx.param('id'));
+      if (!target) return ctx.notFound();
+
+      const report = await reconPlugin.runDiagnostics(target.target);
+      return ctx.success({ report });
     }
   }
-}
-```
-
----
-
-### `POST /recon/targets`
-
-Add a new target.
-
-**Request Body:**
-```json
-{
-  "target": "api.example.com",
-  "enabled": true,
-  "behavior": "stealth",
-  "features": { "certificate": true },
-  "tools": ["dns", "certificate", "ping"],
-  "schedule": { "enabled": true, "cron": "0 */4 * * *" },
-  "metadata": { "owner": "Platform Team" },
-  "tags": ["production", "api"],
-  "addedBy": "automation"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "target": { "id": "api.example.com", ... }
-  }
-}
-```
-
----
-
-### `PATCH /recon/targets/:targetId`
-
-Update target configuration.
-
-**Request Body:**
-```json
-{
-  "enabled": false,
-  "metadata": { "reason": "maintenance" }
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "target": { "id": "api.example.com", "enabled": false, ... }
-  }
-}
-```
-
----
-
-### `DELETE /recon/targets/:targetId`
-
-Remove target.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "targetId": "api.example.com",
-    "removed": true
-  }
-}
-```
-
----
-
-### `POST /recon/targets/:targetId/scan`
-
-Trigger immediate scan on a specific target.
-
-**Request Body (optional):**
-```json
-{
-  "features": { "certificate": true, "ports": { "nmap": true } },
-  "tools": ["dns", "certificate", "ports"],
-  "persist": true
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "report": { "status": "ok", "fingerprint": { ... } },
-    "target": { "id": "api.example.com", "scanCount": 13, ... }
-  }
-}
+});
 ```
 
 ---
