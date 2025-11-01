@@ -443,7 +443,21 @@ export class Database extends EventEmitter {
     const db = this
 
     if (!isEmpty(this.pluginList)) {
-      const plugins = this.pluginList.map(p => isFunction(p) ? new p(this) : p)
+      // Instantiate plugin classes, wrapping errors in DatabaseError
+      const plugins = [];
+      for (const p of this.pluginList) {
+        try {
+          const plugin = isFunction(p) ? new p(this) : p;
+          plugins.push(plugin);
+        } catch (error) {
+          const pluginName = p.name || p.constructor?.name || 'Unknown';
+          throw new DatabaseError(`Failed to instantiate plugin '${pluginName}': ${error.message}`, {
+            operation: "startPlugins.instantiate",
+            pluginName,
+            original: error
+          });
+        }
+      }
 
       const concurrency = Math.max(1, Number.isFinite(this.parallelism) ? this.parallelism : 5);
 
