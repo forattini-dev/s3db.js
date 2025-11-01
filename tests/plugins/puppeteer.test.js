@@ -52,6 +52,7 @@ describe('PuppeteerPlugin', () => {
 
     it('should create cookie storage resource when enabled', async () => {
       puppeteerPlugin = new PuppeteerPlugin({
+        namespace: null, // Disable namespace to use exact resource name
         cookies: {
           enabled: true,
           storage: {
