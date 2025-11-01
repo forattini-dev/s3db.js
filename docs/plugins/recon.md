@@ -195,13 +195,13 @@ type TargetConfig = {
 
 ```mermaid
 flowchart TD
-  ReconPlugin -->|Optional| ApiPlugin
   ReconPlugin -->|Optional| CachePlugin
   ReconPlugin -->|Optional| SchedulerPlugin
 ```
 
-> ℹ️ The plugin integrates well with `ApiPlugin` (expose `/diagnostics/:host`), `SchedulerPlugin` (chain follow-up jobs), and `CachePlugin` (memoise expensive sweeps).
+> ℹ️ The plugin integrates well with `SchedulerPlugin` (chain follow-up jobs) and `CachePlugin` (memoise expensive sweeps).
 > Legacy alias: the plugin also registers as `db.plugins.network` for backward compatibility with older setups.
+> **Note**: This plugin does NOT provide built-in API routes. Implement your own API layer if needed.
 
 ---
 
@@ -487,108 +487,92 @@ Exemplo de saída (trecho):
     "latencyMs": 18.5
   },
   "toolsAttempted": ["dns","ping","traceroute","curl","ports","subdomains","vulnerabilityScan","fingerprintTools"],
-  "storageKey": "plugin=recon/reports/example.com/2025-01-01T06-00-00Z.json"
+  "storageKey": "plugin=recon/reports/example.com/2025-01-01T06-00-00Z.json",
+  "stageStorageKeys": {
+    "dns": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/aggregated/dns.json",
+    "ports": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/aggregated/ports.json",
+    "subdomains": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/aggregated/subdomains.json"
+  },
+  "toolStorageKeys": {
+    "nmap": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/tools/nmap.json",
+    "masscan": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/tools/masscan.json",
+    "amass": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/tools/amass.json",
+    "subfinder": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/tools/subfinder.json",
+    "crtsh": "plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/tools/crtsh.json"
+  }
 }
 ```
 
-- **results** – Structured output for each enabled stage (status, counts, raw/truncated stdout).
+- **results** – Structured output for each enabled stage (status, counts, raw/truncated stdout). Each stage result may contain `_individual` (per-tool artifacts) and `_aggregated` (combined view) keys.
 - **fingerprint** – Curated snapshot intended for dashboards or alert payloads.
 - **fingerprint.relatedHosts** – PTR results highlighting other hostnames mapped to the same IPs.
-- **storageKey** – Where the report is stored when persistence is enabled.
+- **storageKey** – Where the complete report is stored when persistence is enabled.
+- **stageStorageKeys** – Storage keys for aggregated stage artifacts (combined view of multiple tools).
+- **toolStorageKeys** – Storage keys for individual tool artifacts (per-tool granular output).
 - **toolsAttempted** – List of stages executed for the run.
 
----
+### 🔧 Per-Tool Artifact Storage
 
-## 🌐 API Integration
+**NEW**: Each individual tool now generates its own artifact and persists it separately!
 
-Expose the Recon Plugin via the API Plugin with a single helper:
+**Benefits:**
+- ✅ Granular tracking of each tool execution
+- ✅ Performance analysis per tool
+- ✅ Debug specific tool failures
+- ✅ Compare results between similar tools (e.g., nmap vs masscan)
+- ✅ Rerun only failed tools independently
+
+**Storage Structure:**
+```
+plugin=recon/reports/example.com/stages/2025-01-01T06-00-00Z/
+├── tools/                       # Individual tool artifacts
+│   ├── nmap.json               # nmap-specific output
+│   ├── masscan.json            # masscan-specific output
+│   ├── amass.json              # amass-specific output
+│   ├── subfinder.json          # subfinder-specific output
+│   ├── crtsh.json              # crt.sh-specific output
+│   ├── ffuf.json               # ffuf-specific output
+│   └── nikto.json              # nikto-specific output
+│
+└── aggregated/                  # Combined stage views
+    ├── ports.json              # Combined nmap + masscan results
+    ├── subdomains.json         # Combined amass + subfinder + crtsh results
+    └── webDiscovery.json       # Combined ffuf + feroxbuster + gobuster results
+```
+
+**Example: Accessing Individual Tool Artifacts**
 
 ```javascript
-import { ApiPlugin, ReconPlugin } from 's3db.js';
+// Run diagnostics
+const report = await plugin.runDiagnostics('example.com', { persist: true });
 
-const reconPlugin = new ReconPlugin({
-  storage: { persist: true },
-  resources: { persist: true }
-});
+// Access individual tool artifacts
+const storage = plugin.getStorage();
 
-const apiPlugin = new ApiPlugin({
-  port: 3000,
-  routes: {
-    ...reconPlugin.getApiRoutes({
-      // basePath: '/ops',    // optional (defaults to /recon)
-      // includeReport: true  // include sanitized report payload (default: true)
-    })
-  }
-});
+// Load nmap artifact
+const nmapArtifact = await storage.get(report.toolStorageKeys.nmap);
+console.log('Nmap found:', nmapArtifact.summary?.openPorts?.length, 'ports');
+
+// Load masscan artifact
+const masscanArtifact = await storage.get(report.toolStorageKeys.masscan);
+console.log('Masscan found:', masscanArtifact.openPorts?.length, 'ports');
+
+// Compare tool performance
+console.log('Nmap vs Masscan port count:', nmapArtifact.summary?.openPorts?.length, 'vs', masscanArtifact.openPorts?.length);
+
+// Load aggregated stage view
+const portsStage = await storage.get(report.stageStorageKeys.ports);
+console.log('Combined unique ports:', portsStage.openPorts?.length);
 ```
 
-### `GET /recon/hosts/:hostId/summary`
-
-- Returns:
-  - `host`: consolidated fingerprint (IPs, CDN, technologies, open ports)
-  - `report`: latest report, without raw/stdout fields (omit with `includeReport=false`)
-  - `stages`: stage-level summaries derived from the report
-  - `diffs`: recent changes (`diffLimit` query, default `10`, capped at `50`)
-  - `alerts`: critical diffs (`alertLimit` query, default `5`, capped at `25`)
-  - Set `includePaths=true` to return every discovered path (`paths.items`) and the tools that surfaced them.
-- Query parameters:
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `includeDiffs` | `boolean` | `true` | Toggle diff collection. |
-| `includeReport` | `boolean` | `true` | Include sanitized report payload. |
-| `includeStages` | `boolean` | `true` | Attach stage summaries. |
-| `includeAlerts` | `boolean` | `true` | Return recent critical diffs. |
-| `includePaths` | `boolean` | `false` | Attach full path discovery results (`paths.items` + sources metadata). |
-| `diffLimit` | `number` | `10` | Max diffs returned (capped at `50`). |
-| `alertLimit` | `number` | `5` | Max alerts returned (capped at `25`). |
-
-Example response (truncated):
-
-```jsonc
-{
-  "success": true,
-  "data": {
-    "host": {
-      "id": "example.com",
-      "target": "https://example.com",
-      "summary": {
-        "primaryIp": "93.184.216.34",
-        "cdn": "Cloudflare",
-        "openPorts": [{ "port": "443/tcp", "service": "https", "detail": "nginx 1.18" }]
-      },
-      "lastScanAt": "2025-01-01T00:05:00.000Z"
-    },
-    "report": {
-      "status": "ok",
-      "storageKey": "plugin=recon/reports/example.com/2025-01-01T00-05-00.000Z.json",
-      "results": {
-        "dns": { "status": "ok", "records": { "a": ["93.184.216.34"] } },
-        "ports": { "status": "ok", "total": 1 }
-      }
-    },
-    "stages": [
-      { "stage": "dns", "status": "ok", "summary": { "records": { "a": ["93.184.216.34"] } } },
-      { "stage": "ports", "status": "ok", "summary": { "total": 1 } }
-    ],
-    "diffs": [
-      { "type": "port:add", "severity": "high", "values": ["8443/tcp"] }
-    ],
-    "alerts": [
-      { "stage": "port:add", "severity": "high", "values": ["8443/tcp"] }
-    ]
-  }
-}
-```
-
-Customize `basePath` if you prefer `/ops/recon/...` or disable portions (diffs, report, alerts) per environment.
+**See**: `docs/examples/e48-recon-per-tool-artifacts.js` for complete demonstration.
 
 ---
 
 ## 🧩 Usage Patterns
 
-1. **Incident Response Dashboard**  
-   Cache the fingerprint in a resource or KV store, expose via `ApiPlugin`, and refresh on demand.
+1. **Incident Response Dashboard**
+   Cache the fingerprint in a resource or KV store, expose via your own API layer, and refresh on demand.
 
 2. **Asset Inventory**  
    Pair with the `SchedulerPlugin` to periodically scan critical domains and raise alerts when the certificate is near expiry or a new port opens.
