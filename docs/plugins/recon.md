@@ -96,6 +96,171 @@ console.log(results);
 
 ---
 
+## 🎨 Behavior Presets
+
+ReconPlugin includes three pre-configured behavior modes for different scanning scenarios. These presets automatically configure all tools with appropriate settings for your operational context.
+
+### Passive Mode
+
+**Use Case**: Minimal footprint reconnaissance using only passive sources (OSINT).
+
+```javascript
+const recon = new ReconPlugin({
+  behavior: 'passive',
+  namespace: 'osint-scan'
+});
+
+await db.use(recon);
+
+// Only passive tools will execute
+const results = await recon.scan('example.com');
+```
+
+**Features Enabled**:
+- ✅ DNS resolution (basic A/AAAA records only)
+- ✅ Certificate Transparency logs via crt.sh
+- ✅ OSINT via theHarvester
+- ✅ Public WHOIS data
+- ❌ No active scanning (nmap, masscan)
+- ❌ No intrusive probing (port scans, vulnerability scans)
+- ❌ No HTTP requests to target
+
+**Configuration**:
+- Concurrency: 2
+- Rate limiting: Disabled (passive sources only)
+- Timeout: 10 seconds
+- Tools: dig, crt.sh, theHarvester, whois
+
+**When to Use**:
+- Pre-engagement reconnaissance
+- Bug bounty initial recon (before scope confirmation)
+- Compliance-restricted environments
+- Educational/research purposes
+
+---
+
+### Stealth Mode
+
+**Use Case**: Balanced reconnaissance with minimal noise and rate limiting for authorized penetration testing.
+
+```javascript
+const recon = new ReconPlugin({
+  behavior: 'stealth',
+  namespace: 'pentest',
+  targets: ['client.example.com']
+});
+
+await db.use(recon);
+```
+
+**Features Enabled**:
+- ✅ DNS enumeration + Certificate analysis
+- ✅ HTTP probing with custom user-agent
+- ✅ Ping latency checks (3 packets, longer timeout)
+- ✅ Subdomain discovery (subfinder + crt.sh only)
+- ✅ Port scanning (top 10 ports only, `-T2` timing)
+- ✅ TLS audit (OpenSSL only, no aggressive scans)
+- ❌ No web fuzzing or directory brute-forcing
+- ❌ No vulnerability scanning
+
+**Configuration**:
+- Concurrency: 1 (sequential execution)
+- Rate limiting: 10 requests/minute, 5 second delay between stages
+- nmap timing: `-T2 --max-retries 1` (polite)
+- Port range: Top 10 common ports (80, 443, 22, 21, 25, 3389, 8080, 8443, 3000, 5000)
+- Custom user-agent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`
+
+**When to Use**:
+- Authorized penetration testing
+- Red team engagements (low-noise phase)
+- IDS/IPS evasion required
+- Client requests minimal impact
+
+---
+
+### Aggressive Mode
+
+**Use Case**: Comprehensive deep-dive reconnaissance with all tools enabled for internal audits.
+
+```javascript
+const recon = new ReconPlugin({
+  behavior: 'aggressive',
+  namespace: 'internal-audit',
+  targets: ['intranet.corp.local']
+});
+
+await db.use(recon);
+```
+
+**Features Enabled**:
+- ✅ All reconnaissance tools activated
+- ✅ Multiple subdomain tools (amass + subfinder + assetfinder + crt.sh)
+- ✅ Full port range scanning (nmap + masscan)
+- ✅ Web directory fuzzing (ffuf + feroxbuster + gobuster)
+- ✅ Vulnerability scanning (nikto + wpscan + droopescan)
+- ✅ TLS comprehensive audit (openssl + sslyze + testssl)
+- ✅ Fingerprinting (whatweb, wappalyzer)
+- ✅ Screenshot capture (aquatone, eyewitness)
+
+**Configuration**:
+- Concurrency: 8 (parallel execution)
+- Rate limiting: Disabled
+- nmap: Top 100 ports, `-T4 -sV --version-intensity 5`
+- masscan: Full port range (1-65535) at 5000 packets/sec
+- Web fuzzing: 100 threads, common wordlists
+- Timeout: Generous (30-60 seconds per operation)
+
+**Performance Impact**: Expect 5-10x longer scan time than default mode.
+
+**When to Use**:
+- Internal network audits
+- Asset discovery on owned infrastructure
+- Security posture assessment
+- Pre-deployment validation
+
+---
+
+### Overriding Preset Defaults
+
+You can apply a preset and selectively override specific settings:
+
+```javascript
+const recon = new ReconPlugin({
+  behavior: 'stealth',  // Start with stealth preset
+
+  // Override specific settings
+  behaviorOverrides: {
+    features: {
+      ports: {
+        nmap: true,
+        topPorts: 50  // Scan more ports than stealth default (10)
+      },
+      subdomains: {
+        amass: true   // Enable amass (disabled in stealth)
+      }
+    },
+    concurrency: 3,     // Increase from 1 to 3
+    rateLimit: {
+      requestsPerMinute: 20  // Increase from 10 to 20
+    }
+  }
+});
+```
+
+**Event Notification**:
+
+The `recon:behavior-applied` event is emitted after configuration merge:
+
+```javascript
+recon.on('recon:behavior-applied', ({ mode, preset, overrides, final }) => {
+  console.log(`Applied ${mode} preset`);
+  console.log(`Overrides: ${Object.keys(overrides).length} settings changed`);
+  console.log(`Final config:`, final);
+});
+```
+
+---
+
 ## 🎯 Key Features
 
 ### 1. Multi-Tool Reconnaissance
@@ -237,6 +402,13 @@ const recon = new ReconPlugin({
     checkHTTPS: true,
     checkPing: true,
     alertThreshold: 3  // Alert after 3 failures
+  },
+
+  // Rate Limiting (prevent triggering IDS/IPS)
+  rateLimit: {
+    enabled: false,             // Enable throttling
+    requestsPerMinute: 30,      // Max requests per minute
+    delayBetweenStages: 2000    // Delay between stages (ms)
   },
 
   // Performance
@@ -443,7 +615,39 @@ const recon = new ReconPlugin({
 });
 ```
 
-### 3. Use Partitioned Queries
+### 3. Enable Rate Limiting for Stealth Operations
+
+```javascript
+// Prevent triggering IDS/IPS alerts
+const recon = new ReconPlugin({
+  rateLimit: {
+    enabled: true,
+    requestsPerMinute: 30,      // Max 30 requests per minute
+    delayBetweenStages: 2000    // 2 second delay between stages
+  }
+});
+```
+
+**Options**:
+- `enabled` (boolean): Enable rate limiting (default: `false`)
+- `requestsPerMinute` (number): Maximum requests per minute (default: `60`)
+- `delayBetweenStages` (number): Delay in milliseconds between reconnaissance stages (default: `1000`)
+
+**Event Notification**:
+
+```javascript
+recon.on('recon:rate-limit-delay', ({ stage, delayMs }) => {
+  console.log(`Waiting ${delayMs}ms before ${stage} stage`);
+});
+```
+
+**Best Practices**:
+- Enable for authorized penetration testing
+- Increase delay for sensitive/monitored targets
+- Disable only for internal networks you own
+- Combine with `behavior: 'stealth'` preset for maximum stealth
+
+### 4. Use Partitioned Queries
 
 ```javascript
 // O(1) lookup by partition
@@ -546,6 +750,95 @@ const recon = new ReconPlugin({
     }
   }
 });
+```
+
+### Tool Dependency Issues
+
+**Problem**: Missing reconnaissance tools cause scan stages to fail or be skipped.
+
+**Check Tool Availability**:
+
+```javascript
+// Check all tools status
+const status = await recon.getToolStatus();
+console.log(status);
+/*
+{
+  dns: { available: true, command: 'dig', version: '9.18.1' },
+  nmap: { available: true, command: 'nmap', version: '7.94' },
+  amass: { available: false, error: 'Command not found: amass' },
+  subfinder: { available: true, command: 'subfinder', version: '2.5.4' },
+  masscan: { available: false, error: 'Command not found: masscan' }
+}
+*/
+
+// Check specific tool
+const hasNmap = await recon.isToolAvailable('nmap');
+if (!hasNmap) {
+  console.error('nmap not installed');
+}
+```
+
+**Automatic Fallback**:
+
+ReconPlugin automatically skips stages when tools are unavailable:
+
+```javascript
+recon.on('recon:tool-unavailable', ({ tool, stage }) => {
+  console.warn(`Skipping ${stage} stage - ${tool} not installed`);
+});
+
+// Scan continues with available tools only
+const results = await recon.scan('example.com');
+// Only dns, subfinder results if amass/masscan missing
+```
+
+**Installing Missing Tools**:
+
+```bash
+# Subdomain enumeration
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install github.com/OWASP/Amass/v3/...@master
+go install github.com/tomnomnom/assetfinder@latest
+
+# Port scanning
+sudo apt install nmap
+go install github.com/robertdavidgraham/masscan@latest
+
+# Web fuzzing
+go install github.com/ffuf/ffuf/v2@latest
+cargo install feroxbuster
+go install github.com/OJ/gobuster/v3@latest
+
+# TLS auditing
+apt install testssl.sh sslyze
+
+# Fingerprinting
+apt install whatweb
+
+# Screenshots
+go install github.com/michenriksen/aquatone@latest
+```
+
+**Tool Priority**:
+
+When multiple tools serve the same purpose, ReconPlugin uses priority order:
+
+```javascript
+// Subdomain discovery priority
+1. amass (most comprehensive)
+2. subfinder (fast, reliable)
+3. assetfinder (fallback)
+4. crt.sh (passive, always available)
+
+// Port scanning priority
+1. masscan (fastest for full range)
+2. nmap (most features, service detection)
+
+// Web fuzzing priority
+1. ffuf (fastest)
+2. feroxbuster (good features)
+3. gobuster (fallback)
 ```
 
 ---

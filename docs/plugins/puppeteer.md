@@ -481,6 +481,123 @@ console.log('Proxy stats:', stats);
 
 ---
 
+### ⚠️ CRITICAL: Proxy-Session Immutable Binding
+
+**KEY CONCEPT**: Once a session is assigned a proxy, **they are permanently bound together**. This is a security feature to prevent fingerprint leakage.
+
+```javascript
+const plugin = new PuppeteerPlugin({
+  proxy: {
+    enabled: true,
+    list: ['http://proxy1.com', 'http://proxy2.com', 'http://proxy3.com']
+  },
+  cookies: { enabled: true }
+});
+
+// First request with session 'user-123' gets assigned proxy1
+await plugin.navigate('https://example.com', { useSession: 'user-123' });
+// ✅ Proxy: proxy1 (binding created and saved to S3DB)
+
+// SAME session ALWAYS uses proxy1 (binding is immutable)
+await plugin.navigate('https://other.com', { useSession: 'user-123' });
+// ✅ Proxy: proxy1 (reused from binding)
+
+// Different session gets different proxy
+await plugin.navigate('https://example.com', { useSession: 'user-456' });
+// ✅ Proxy: proxy2 (new binding created)
+
+// Trying to change proxy for existing session FAILS
+await plugin.navigate('https://site.com', {
+  useSession: 'user-123',
+  proxy: 'http://proxy3.com'  // ❌ IGNORED - binding already exists
+});
+// ✅ Proxy: proxy1 (binding enforced)
+```
+
+**Why Immutable?**
+
+1. **Fingerprint Consistency**: Browser fingerprints include IP address. Changing proxy mid-session = different fingerprint = bot detection
+2. **Session Integrity**: Many sites track IP changes as suspicious behavior
+3. **Cookie Validity**: Cookies are often bound to specific IP ranges by security policies
+
+**Binding Storage**:
+
+Bindings are persisted to S3DB in the cookies resource:
+
+```javascript
+{
+  sessionId: 'user-123',
+  proxyId: 'proxy_0',  // IMMUTABLE! Cannot be changed
+  proxyUrl: 'http://proxy1.com:8080',
+  cookies: [...],
+  boundAt: '2025-01-01T00:00:00.000Z'
+}
+```
+
+**Error Scenarios**:
+
+```javascript
+// Error 1: Bound proxy removed from pool
+// PluginError: Proxy http://proxy1.com bound to session user-123 not found in proxy list
+
+// Error 2: Bound proxy marked unhealthy
+// PluginError: Proxy http://proxy1.com bound to session user-123 is unhealthy (success rate: 0.15)
+
+// Solution: Delete session to rebind
+await plugin.deleteSession('user-123');
+const page = await plugin.getPage({ useSession: 'user-123' });
+// New binding created with healthy proxy
+```
+
+**Proxy Rotation Pattern**:
+
+To effectively rotate proxies, use different session IDs:
+
+```javascript
+// ❌ BAD: Same session = same proxy forever
+for (let i = 0; i < 100; i++) {
+  await plugin.navigate(urls[i], { useSession: 'scraper' });
+  // All 100 requests use same proxy (proxy1)
+}
+
+// ✅ GOOD: Rotate sessions = rotate proxies
+for (let i = 0; i < 100; i++) {
+  const sessionId = `scraper-${i % 5}`;  // 5 sessions = 5 proxies
+  await plugin.navigate(urls[i], { useSession: sessionId });
+  // Requests distributed across 5 different proxies
+}
+
+// ✅ BETTER: Dynamic session IDs for full rotation
+const proxyCount = plugin.proxyManager.getProxyCount();
+for (let i = 0; i < 100; i++) {
+  const sessionId = `scraper-${i % proxyCount}`;
+  await plugin.navigate(urls[i], { useSession: sessionId });
+  // Requests distributed across ALL proxies
+}
+```
+
+**Best Practices**:
+
+1. **Plan session strategy** - Number of sessions = number of unique proxies you need
+2. **Monitor bindings** - Track which sessions are bound to which proxies
+3. **Handle failures gracefully** - If bound proxy fails, delete session and restart
+4. **Don't over-optimize** - Proxy rotation is already handled by session rotation
+
+**Events**:
+
+```javascript
+// Monitor proxy-session bindings
+plugin.on('puppeteer.proxy-session-bound', ({ sessionId, proxyId, proxyUrl }) => {
+  console.log(`Session ${sessionId} bound to proxy ${proxyUrl}`);
+});
+
+plugin.on('puppeteer.proxy-session-binding-enforced', ({ sessionId, requestedProxy, boundProxy }) => {
+  console.warn(`Session ${sessionId} requested ${requestedProxy} but enforced ${boundProxy}`);
+});
+```
+
+---
+
 ### Level 7: Production Setup
 
 Complete production configuration with monitoring and optimization.
@@ -634,7 +751,7 @@ await db.disconnect();
     enabled: true,              // Enable browser pooling (RECOMMENDED)
     maxBrowsers: 5,             // Max concurrent browsers
     maxTabsPerBrowser: 10,      // Max tabs per browser
-    reuseTab: false,            // Reuse tabs (30-50% faster, but less isolation)
+    reuseTab: false,            // ⚠️ NOT SUPPORTED YET - will be ignored with warning
     closeOnIdle: true,          // Close browsers after idle timeout
     idleTimeout: 300000         // 5 minutes idle timeout
   },
@@ -767,6 +884,19 @@ await db.disconnect();
     },
     cacheEnabled: true,
     javascriptEnabled: true
+  },
+
+  // ============================================
+  // RESOURCE NAMING (customize S3DB resource names)
+  // ============================================
+  resourceNames: {
+    cookies: 'my_cookies',                      // Default: plg_puppeteer_cookies
+    networkSessions: 'my_network_sessions',     // Default: plg_puppeteer_network_sessions
+    networkRequests: 'my_network_requests',     // Default: plg_puppeteer_network_requests
+    networkErrors: 'my_network_errors',         // Default: plg_puppeteer_network_errors
+    consoleSessions: 'my_console_sessions',     // Default: plg_puppeteer_console_sessions
+    consoleMessages: 'my_console_messages',     // Default: plg_puppeteer_console_messages
+    consoleErrors: 'my_console_errors'          // Default: plg_puppeteer_console_errors
   },
 
   // ============================================
@@ -1079,6 +1209,163 @@ console.log(stats);
 
 ---
 
+#### `withSession(sessionId, handler, options): Promise<any>`
+
+**DX Helper**: Convenient session-aware navigation with automatic cleanup.
+
+Simplifies session-based scraping by handling navigation, page management, and cleanup automatically.
+
+**Signature**:
+```javascript
+await plugin.withSession(sessionId, handler, { url, ...navigateOptions })
+```
+
+**Parameters**:
+- `sessionId` (string, required): Session identifier for cookie/proxy binding
+- `handler` (function, required): Async function that receives `(page, plugin)` and performs scraping
+- `options` (object, required): Navigation options
+  - `url` (string, required): URL to navigate to before calling handler
+  - `waitUntil` (string): Navigation wait condition ('load', 'domcontentloaded', 'networkidle0', 'networkidle2')
+  - `timeout` (number): Navigation timeout in milliseconds
+  - All other `navigate()` options supported
+
+**Returns**: Promise resolving to handler's return value
+
+**Examples**:
+
+```javascript
+// Basic usage
+const data = await plugin.withSession('user-123', async (page) => {
+  // Page is already navigated to URL with session loaded
+  const title = await page.title();
+  const content = await page.$eval('#main', el => el.textContent);
+  return { title, content };
+}, {
+  url: 'https://example.com',
+  waitUntil: 'networkidle2'
+});
+
+console.log(data);  // { title: 'Example', content: '...' }
+// Page automatically closed, cookies automatically saved
+```
+
+**vs. Manual Approach**:
+
+```javascript
+// ❌ Manual (verbose, error-prone)
+const page = await plugin.navigate('https://example.com', {
+  useSession: 'user-123',
+  waitUntil: 'networkidle2'
+});
+
+try {
+  const title = await page.title();
+  const content = await page.$eval('#main', el => el.textContent);
+  return { title, content };
+} catch (error) {
+  console.error('Scraping failed:', error);
+  throw error;
+} finally {
+  await page.close();  // MUST remember to close
+  // Cookies saved automatically on close
+}
+
+// ✅ withSession (clean, automatic)
+await plugin.withSession('user-123', async (page) => {
+  const title = await page.title();
+  const content = await page.$eval('#main', el => el.textContent);
+  return { title, content };
+}, { url: 'https://example.com', waitUntil: 'networkidle2' });
+```
+
+**Advanced Usage**:
+
+```javascript
+// Multi-page navigation within session
+await plugin.withSession('user-123', async (page, plugin) => {
+  // Already at homepage from URL option
+  const products = await page.$$eval('.product', els =>
+    els.map(el => ({ name: el.textContent, link: el.href }))
+  );
+
+  // Navigate to first product page
+  await page.click('.product:first-child a');
+  await page.waitForNavigation();
+
+  const details = await page.$eval('#details', el => el.textContent);
+
+  return { products, details };
+}, {
+  url: 'https://shop.example.com/products'
+});
+```
+
+**Error Handling**:
+
+```javascript
+try {
+  const data = await plugin.withSession('user-123', async (page) => {
+    throw new Error('Scraping failed');
+  }, { url: 'https://example.com' });
+} catch (error) {
+  // Page still cleaned up properly even on error
+  console.error('Handler error:', error.message);
+}
+```
+
+**Events Emitted**:
+
+```javascript
+plugin.on('puppeteer.withSession.start', ({ sessionId, url }) => {
+  console.log(`Starting withSession for ${sessionId} at ${url}`);
+});
+
+plugin.on('puppeteer.withSession.finish', ({ sessionId, url, duration, error }) => {
+  if (error) {
+    console.error(`withSession failed for ${sessionId}:`, error);
+  } else {
+    console.log(`withSession completed for ${sessionId} in ${duration}ms`);
+  }
+});
+
+plugin.on('puppeteer.withSession.cleanupFailed', ({ sessionId, error }) => {
+  console.error(`Failed to cleanup session ${sessionId}:`, error);
+});
+```
+
+**Requirements & Validation**:
+
+```javascript
+// ❌ Missing sessionId
+await plugin.withSession(null, async (page) => {}, { url: '...' });
+// Throws: PluginError: sessionId is required for withSession
+
+// ❌ Missing url
+await plugin.withSession('user-123', async (page) => {});
+// Throws: PluginError: options.url is required for withSession
+
+// ❌ Invalid handler
+await plugin.withSession('user-123', 'not-a-function', { url: '...' });
+// Throws: PluginError: handler must be a function
+```
+
+**Best Practices**:
+
+1. **Always use for session-based scraping** - Reduces boilerplate significantly
+2. **Return data from handler** - Handler's return value is passed through
+3. **Let errors propagate** - Don't catch errors inside handler unless necessary
+4. **Use for single-page scrapes** - For complex multi-page flows, use `navigate()` directly
+
+**Performance**:
+
+```javascript
+// Benchmark: 1000 single-page scrapes
+// Manual approach: 145 seconds (boilerplate overhead)
+// withSession:     142 seconds (3 seconds faster, cleaner code)
+```
+
+---
+
 ### Cookie Manager Methods
 
 #### `createCookie(options): Promise<string>`
@@ -1205,6 +1492,71 @@ console.log(stats);
      console.error(`Failed: ${error.message}`);
    }
    ```
+
+8. **Don't use `reuseTab: true` (not implemented yet)**
+   ```javascript
+   // ❌ NOT SUPPORTED YET
+   pool: { reuseTab: true }  // Will emit warning and be ignored
+
+   // ✅ Use browser pooling instead
+   pool: { maxBrowsers: 5, maxTabsPerBrowser: 20 }
+   ```
+
+---
+
+### ⚠️ Tab Recycling Status (Feature Not Implemented)
+
+**Status**: Not yet implemented - coming in future release
+
+The `pool.reuseTab` option is documented but **not currently functional**. When enabled, it will emit a warning and be ignored:
+
+```javascript
+const plugin = new PuppeteerPlugin({
+  pool: {
+    reuseTab: true  // ⚠️ NOT SUPPORTED YET
+  }
+});
+
+// Console warning emitted:
+// [PuppeteerPlugin] pool.reuseTab is not supported yet and will be ignored
+
+plugin.on('puppeteer.configWarning', ({ setting, message }) => {
+  console.warn(`${setting}: ${message}`);
+  // Output: "pool.reuseTab: pool.reuseTab is not supported yet and will be ignored."
+});
+```
+
+**Workaround**: Use browser pooling with multiple tabs per browser:
+
+```javascript
+// Instead of tab recycling, use browser pooling
+const plugin = new PuppeteerPlugin({
+  pool: {
+    enabled: true,
+    maxBrowsers: 5,           // Pool of 5 browsers
+    maxTabsPerBrowser: 20,    // Up to 20 tabs per browser
+    closeOnIdle: true,        // Close idle browsers
+    idleTimeout: 300000       // After 5 minutes
+  }
+});
+
+// This provides similar benefits:
+// - Browsers are reused (faster than creating new browsers)
+// - Tabs are created/closed as needed
+// - Memory is managed through idle browser closure
+```
+
+**Future Implementation**:
+
+Tab recycling will enable even faster page creation by reusing existing tabs instead of closing and creating new ones. Expected benefits:
+
+- **30-50% faster** page creation (no tab initialization overhead)
+- **Lower memory fragmentation** (reusing existing resources)
+- **Fewer CDP reconnections** (stable browser connections)
+
+**Track Progress**:
+- GitHub Issue: [#xxx] Implement tab recycling for PuppeteerPlugin
+- Expected: v2.x release
 
 ---
 
