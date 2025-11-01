@@ -55,20 +55,18 @@ export const DEFAULT_FEATURES = {
     sherlock: false,
     maigret: false,
 
-    // Email Collection
+    // Email Collection (100% free - theHarvester only)
     emails: false,
     theHarvester: false,
-    hunter: false,
-    hunterApiKey: null,
+    harvesterSources: ['bing', 'duckduckgo'],  // Free search engines only
 
-    // Leak Detection
+    // Leak Detection (100% free - HIBP v2 public API)
     leaks: false,
-    hibpApiKey: null,
-    maxEmailsToCheck: 10,
+    maxEmailsToCheck: 5,  // Reduced due to strict rate limits on free API
 
-    // GitHub Reconnaissance
+    // GitHub Reconnaissance (100% free - optional token for higher limits)
     github: false,
-    githubToken: null,
+    githubToken: null,  // Optional: increases rate limit from 60 to 5000 req/hour
     githubRepos: false,
     githubCode: false,
     githubUsers: false,
@@ -76,10 +74,10 @@ export const DEFAULT_FEATURES = {
     maxCodeResults: 10,
     maxUsers: 10,
 
-    // SaaS Footprint Detection
+    // SaaS Footprint Detection (100% free - DNS + HTTP)
     saas: false,
 
-    // Social Media Mapping
+    // Social Media Mapping (100% free - manual URLs)
     socialMedia: false,
     linkedin: false,
     twitter: false,
@@ -108,11 +106,12 @@ export const BEHAVIOR_PRESETS = {
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
       osint: {
-        // Only passive OSINT for passive preset
+        // Only passive OSINT for passive preset (100% free)
         emails: true,
         theHarvester: true,
+        harvesterSources: ['bing', 'duckduckgo'],
         saas: true,  // DNS-based SaaS detection
-        leaks: false,
+        leaks: false,  // Skip leaks to avoid rate limits
         github: false,
         usernames: false,
         socialMedia: false
@@ -140,12 +139,13 @@ export const BEHAVIOR_PRESETS = {
       fingerprint: { whatweb: false },
       screenshots: { aquatone: false, eyewitness: false },
       osint: {
-        // Balanced OSINT for stealth preset
+        // Balanced OSINT for stealth preset (100% free)
         emails: true,
         theHarvester: true,
+        harvesterSources: ['bing', 'duckduckgo'],
         saas: true,
         leaks: true,
-        maxEmailsToCheck: 5,
+        maxEmailsToCheck: 3,  // Conservative due to rate limits
         github: true,
         githubRepos: true,
         githubCode: false,
@@ -180,12 +180,13 @@ export const BEHAVIOR_PRESETS = {
       fingerprint: { whatweb: true },
       screenshots: { aquatone: true, eyewitness: false },
       osint: {
-        // Full OSINT for aggressive preset
+        // Full OSINT for aggressive preset (100% free)
         emails: true,
         theHarvester: true,
+        harvesterSources: ['bing', 'duckduckgo', 'yahoo'],
         saas: true,
         leaks: true,
-        maxEmailsToCheck: 20,
+        maxEmailsToCheck: 10,  // Moderate to avoid rate limits
         github: true,
         githubRepos: true,
         githubCode: true,

@@ -280,17 +280,6 @@ export class OsintStage {
       }
     }
 
-    // Hunter.io API (if API key provided)
-    if (options.hunter !== false && options.hunterApiKey) {
-      const hunterResult = await this.runHunterIo(domain, options);
-      if (hunterResult.status === 'ok') {
-        result.sources.hunter = hunterResult;
-        result.addresses.push(...hunterResult.emails);
-      } else {
-        result.sources.hunter = hunterResult;
-      }
-    }
-
     // Deduplicate emails
     result.addresses = [...new Set(result.addresses)].sort();
 
@@ -332,44 +321,6 @@ export class OsintStage {
     };
   }
 
-  /**
-   * Run Hunter.io API for email search
-   */
-  async runHunterIo(domain, options = {}) {
-    try {
-      const apiKey = options.hunterApiKey;
-      const url = `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${apiKey}`;
-
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined
-      });
-
-      if (!response.ok) {
-        return {
-          status: 'error',
-          message: `Hunter.io API returned ${response.status}`
-        };
-      }
-
-      const data = await response.json();
-      const emails = (data.data?.emails || []).map(e => e.value);
-
-      return {
-        status: 'ok',
-        emails,
-        count: emails.length,
-        meta: {
-          organization: data.data?.organization,
-          pattern: data.data?.pattern
-        }
-      };
-    } catch (error) {
-      return {
-        status: 'error',
-        message: error.message
-      };
-    }
-  }
 
   /**
    * 3. Leak Detection
@@ -422,19 +373,17 @@ export class OsintStage {
 
   /**
    * Check HaveIBeenPwned API for email breaches
+   * NOTE: Uses public API (no key required) but has strict rate limits
    */
   async checkHaveIBeenPwned(email, options = {}) {
     try {
-      const url = `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}`;
+      // Using v2 API which is still free (v3 requires paid API key)
+      // Note: v2 is deprecated but still works for basic breach checking
+      const url = `https://haveibeenpwned.com/api/v2/breachedaccount/${encodeURIComponent(email)}`;
 
       const headers = {
         'User-Agent': this.config.curl?.userAgent || 'ReconPlugin/1.0'
       };
-
-      // API key is required for v3 API (add if available)
-      if (options.hibpApiKey) {
-        headers['hibp-api-key'] = options.hibpApiKey;
-      }
 
       const response = await fetch(url, {
         headers,
@@ -446,6 +395,11 @@ export class OsintStage {
         return [];
       }
 
+      if (response.status === 429) {
+        // Rate limited - too many requests
+        return [];
+      }
+
       if (!response.ok) {
         throw new Error(`HIBP API returned ${response.status}`);
       }
@@ -454,7 +408,7 @@ export class OsintStage {
       return breaches;
 
     } catch (error) {
-      // Rate limited or error
+      // Rate limited or error - continue gracefully
       return [];
     }
   }
