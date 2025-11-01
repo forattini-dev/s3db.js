@@ -33,6 +33,10 @@ import { ScreenshotStage } from './stages/screenshot-stage.js';
 import { OsintStage } from './stages/osint-stage.js';
 import { WhoisStage } from './stages/whois-stage.js';
 import { SecretsStage } from './stages/secrets-stage.js';
+import { ASNStage } from './stages/asn-stage.js';
+import { DNSDumpsterStage } from './stages/dnsdumpster-stage.js';
+import { MassDNSStage } from './stages/massdns-stage.js';
+import { GoogleDorksStage } from './stages/google-dorks-stage.js';
 
 // Concerns
 import { CommandRunner } from './concerns/command-runner.js';
@@ -40,6 +44,7 @@ import { TargetNormalizer } from './concerns/target-normalizer.js';
 import { FingerprintBuilder } from './concerns/fingerprint-builder.js';
 import { ReportGenerator } from './concerns/report-generator.js';
 import { DiffDetector } from './concerns/diff-detector.js';
+import { SecurityAnalyzer } from './concerns/security-analyzer.js';
 
 // Behaviors
 import { UptimeBehavior } from './behaviors/uptime-behavior.js';
@@ -150,7 +155,11 @@ export class ReconPlugin extends Plugin {
       screenshot: new ScreenshotStage(this),
       osint: new OsintStage(this),
       whois: new WhoisStage(this),
-      secrets: new SecretsStage(this)
+      secrets: new SecretsStage(this),
+      asn: new ASNStage(this),
+      dnsdumpster: new DNSDumpsterStage(this),
+      massdns: new MassDNSStage(this),
+      googleDorks: new GoogleDorksStage(this)
     };
   }
 
@@ -292,6 +301,26 @@ export class ReconPlugin extends Plugin {
       results.secrets = await this.stages.secrets.execute(normalizedTarget, scanConfig.secrets);
     }
 
+    // ASN stage
+    if (scanConfig.asn !== false) {
+      results.asn = await this.stages.asn.execute(normalizedTarget, scanConfig.asn);
+    }
+
+    // DNSDumpster stage
+    if (scanConfig.dnsdumpster !== false) {
+      results.dnsdumpster = await this.stages.dnsdumpster.execute(normalizedTarget, scanConfig.dnsdumpster);
+    }
+
+    // MassDNS stage
+    if (scanConfig.massdns !== false) {
+      results.massdns = await this.stages.massdns.execute(normalizedTarget, scanConfig.massdns);
+    }
+
+    // Google Dorks stage
+    if (scanConfig.googleDorks !== false) {
+      results.googleDorks = await this.stages.googleDorks.execute(normalizedTarget, scanConfig.googleDorks);
+    }
+
     // Build consolidated fingerprint
     const fingerprint = FingerprintBuilder.build(results);
 
@@ -430,6 +459,25 @@ export class ReconPlugin extends Plugin {
    */
   generateExecutiveSummary(report) {
     return ReportGenerator.generateExecutiveSummary(report);
+  }
+
+  /**
+   * Generate security audit checklist from scan report
+   * @param {Object} report - Scan report
+   * @returns {Object} Security audit with findings and recommendations
+   */
+  generateSecurityAudit(report) {
+    return SecurityAnalyzer.analyze(report);
+  }
+
+  /**
+   * Generate security audit markdown report
+   * @param {Object} report - Scan report
+   * @returns {String} Markdown formatted security audit
+   */
+  generateSecurityAuditMarkdown(report) {
+    const audit = SecurityAnalyzer.analyze(report);
+    return SecurityAnalyzer.generateMarkdownReport(audit);
   }
 
   /**

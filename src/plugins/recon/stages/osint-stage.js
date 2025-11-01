@@ -11,8 +11,8 @@
  *
  * Categories:
  * 1. Username Enumeration (Sherlock, Maigret, WhatsMyName)
- * 2. Email Collection (theHarvester, Hunter.io)
- * 3. Leak Detection (HaveIBeenPwned, Dehashed)
+ * 2. Email Collection (theHarvester - 100% free)
+ * 3. Leak Detection (HaveIBeenPwned v2, Scylla.sh - 100% free)
  * 4. GitHub Reconnaissance (repos, mentions, code search)
  * 5. SaaS Footprint (DNS records, JS fingerprinting)
  * 6. Social Media Mapping (LinkedIn, Twitter, etc.)
@@ -150,6 +150,23 @@ export class OsintStage {
         result.profiles.push(...maigretResult.profiles);
       } else {
         result.sources.maigret = maigretResult;
+      }
+    }
+
+    // Try WhatsMyName (API-based, 400+ sites)
+    if (options.whatsmyname !== false) {
+      const wmnResult = await this.runWhatsMyName(companyName, options);
+      if (wmnResult.status === 'ok') {
+        result.sources.whatsmyname = wmnResult;
+        result.profiles.push(...wmnResult.found.map(item => ({
+          platform: item.site,
+          url: item.url,
+          username: companyName,
+          category: item.category,
+          source: 'whatsmyname'
+        })));
+      } else {
+        result.sources.whatsmyname = wmnResult;
       }
     }
 
@@ -331,7 +348,11 @@ export class OsintStage {
       status: 'ok',
       checked: 0,
       breaches: [],
-      emailBreaches: {}
+      emailBreaches: {},
+      sources: {
+        hibp: [],
+        scylla: []
+      }
     };
 
     const maxEmails = options.maxEmailsToCheck || 10;
@@ -341,29 +362,58 @@ export class OsintStage {
       try {
         result.checked++;
 
-        const breaches = await this.checkHaveIBeenPwned(email, options);
+        // Check HaveIBeenPwned
+        if (options.hibp !== false) {
+          const breaches = await this.checkHaveIBeenPwned(email, options);
 
-        if (breaches.length > 0) {
-          result.emailBreaches[email] = breaches;
-          result.breaches.push(...breaches.map(b => ({
-            ...b,
-            email
-          })));
+          if (breaches.length > 0) {
+            result.emailBreaches[email] = result.emailBreaches[email] || [];
+            result.emailBreaches[email].push(...breaches);
+            result.sources.hibp.push(...breaches.map(b => ({
+              ...b,
+              email,
+              source: 'HaveIBeenPwned'
+            })));
+          }
+
+          // Rate limiting (HIBP requires 1.5s between requests)
+          await this.sleep(1500);
         }
 
-        // Rate limiting (HIBP requires 1.5s between requests)
-        await this.sleep(1500);
+        // Check Scylla.sh
+        if (options.scylla !== false) {
+          const scyllaResult = await this.checkScylla(email, options);
+
+          if (scyllaResult.status === 'ok' && scyllaResult.breaches.length > 0) {
+            result.emailBreaches[email] = result.emailBreaches[email] || [];
+            result.emailBreaches[email].push(...scyllaResult.breaches);
+            result.sources.scylla.push(...scyllaResult.breaches.map(b => ({
+              ...b,
+              source: 'Scylla.sh'
+            })));
+          }
+
+          // Rate limiting for Scylla
+          await this.sleep(1000);
+        }
 
       } catch (error) {
         // Continue with next email
       }
     }
 
-    // Deduplicate breaches by name
+    // Combine all breaches from both sources
+    result.breaches = [
+      ...result.sources.hibp,
+      ...result.sources.scylla
+    ];
+
+    // Deduplicate breaches by name/source
     const uniqueBreaches = new Map();
     for (const breach of result.breaches) {
-      if (!uniqueBreaches.has(breach.Name)) {
-        uniqueBreaches.set(breach.Name, breach);
+      const key = `${breach.Name || breach.source}-${breach.email}`;
+      if (!uniqueBreaches.has(key)) {
+        uniqueBreaches.set(key, breach);
       }
     }
     result.breaches = Array.from(uniqueBreaches.values());
@@ -632,7 +682,7 @@ export class OsintStage {
   }
 
   /**
-   * Detect SaaS from DNS records (MX, TXT, CNAME)
+   * Detect SaaS from DNS records (MX, TXT, CNAME, A, NS)
    */
   async detectSaasFromDNS(domain, options = {}) {
     const services = {};
@@ -648,24 +698,78 @@ export class OsintStage {
         services.email = { provider: 'Microsoft 365', evidence: 'MX records' };
       } else if (mx.includes('mail.protection.outlook')) {
         services.email = { provider: 'Microsoft Exchange Online', evidence: 'MX records' };
+      } else if (mx.includes('mailgun')) {
+        services.email = { provider: 'Mailgun', evidence: 'MX records' };
+      } else if (mx.includes('sendgrid')) {
+        services.email = { provider: 'SendGrid', evidence: 'MX records' };
+      } else if (mx.includes('postmark')) {
+        services.email = { provider: 'Postmark', evidence: 'MX records' };
+      } else if (mx.includes('zoho')) {
+        services.email = { provider: 'Zoho Mail', evidence: 'MX records' };
+      } else if (mx.includes('protonmail')) {
+        services.email = { provider: 'ProtonMail', evidence: 'MX records' };
       }
     }
 
-    // Check TXT records for SPF/DKIM
+    // Check TXT records for SPF/DKIM/DMARC
     const txtRun = await this.commandRunner.run('dig', ['+short', 'TXT', domain], { timeout: 5000 });
     if (txtRun.ok && txtRun.stdout) {
       const txt = txtRun.stdout.toLowerCase();
 
+      // SPF providers
       if (txt.includes('spf') && txt.includes('include:')) {
         const spfIncludes = txt.match(/include:([^\s"]+)/g) || [];
+        const providers = spfIncludes.map(s => s.replace('include:', ''));
+
         services.spf = {
-          providers: spfIncludes.map(s => s.replace('include:', '')),
+          providers,
           evidence: 'SPF TXT record'
         };
+
+        // Identify specific services from SPF
+        if (providers.some(p => p.includes('mailgun'))) {
+          services.emailSending = services.emailSending || [];
+          services.emailSending.push({ provider: 'Mailgun', evidence: 'SPF include' });
+        }
+        if (providers.some(p => p.includes('sendgrid'))) {
+          services.emailSending = services.emailSending || [];
+          services.emailSending.push({ provider: 'SendGrid', evidence: 'SPF include' });
+        }
+        if (providers.some(p => p.includes('mailchimp'))) {
+          services.emailMarketing = { provider: 'Mailchimp', evidence: 'SPF include' };
+        }
+        if (providers.some(p => p.includes('constantcontact'))) {
+          services.emailMarketing = { provider: 'Constant Contact', evidence: 'SPF include' };
+        }
       }
 
+      // DMARC
       if (txt.includes('v=dmarc')) {
         services.dmarc = { enabled: true, evidence: 'DMARC TXT record' };
+      }
+
+      // Domain verification TXT records
+      if (txt.includes('google-site-verification')) {
+        services.domainVerification = services.domainVerification || [];
+        services.domainVerification.push({ provider: 'Google', evidence: 'TXT record' });
+      }
+      if (txt.includes('facebook-domain-verification')) {
+        services.domainVerification = services.domainVerification || [];
+        services.domainVerification.push({ provider: 'Facebook', evidence: 'TXT record' });
+      }
+      if (txt.includes('ms=ms')) {
+        services.domainVerification = services.domainVerification || [];
+        services.domainVerification.push({ provider: 'Microsoft', evidence: 'TXT record' });
+      }
+    }
+
+    // Check DKIM selectors (common ones)
+    const dkimSelectors = ['default', 'google', 'k1', 's1', 'selector1', 'selector2', 'dkim', 'mail'];
+    for (const selector of dkimSelectors) {
+      const dkimRun = await this.commandRunner.run('dig', ['+short', 'TXT', `${selector}._domainkey.${domain}`], { timeout: 3000 });
+      if (dkimRun.ok && dkimRun.stdout && dkimRun.stdout.includes('v=DKIM1')) {
+        services.dkim = services.dkim || { selectors: [], evidence: 'DKIM TXT records' };
+        services.dkim.selectors.push(selector);
       }
     }
 
@@ -682,6 +786,63 @@ export class OsintStage {
         services.cdn = { provider: 'Akamai', evidence: 'CNAME record' };
       } else if (cname.includes('cloudfront')) {
         services.cdn = { provider: 'AWS CloudFront', evidence: 'CNAME record' };
+      } else if (cname.includes('vercel')) {
+        services.hosting = { provider: 'Vercel', evidence: 'CNAME record' };
+      } else if (cname.includes('netlify')) {
+        services.hosting = { provider: 'Netlify', evidence: 'CNAME record' };
+      } else if (cname.includes('herokuapp')) {
+        services.hosting = { provider: 'Heroku', evidence: 'CNAME record' };
+      } else if (cname.includes('github.io')) {
+        services.hosting = { provider: 'GitHub Pages', evidence: 'CNAME record' };
+      } else if (cname.includes('digitaloceanspaces')) {
+        services.hosting = { provider: 'DigitalOcean Spaces', evidence: 'CNAME record' };
+      } else if (cname.includes('s3.amazonaws') || cname.includes('s3-website')) {
+        services.hosting = { provider: 'AWS S3', evidence: 'CNAME record' };
+      }
+    }
+
+    // Check A records for hosting providers (common IP ranges)
+    const aRun = await this.commandRunner.run('dig', ['+short', 'A', domain], { timeout: 5000 });
+    if (aRun.ok && aRun.stdout) {
+      const ips = aRun.stdout.split('\n').filter(line => line.trim());
+
+      for (const ip of ips) {
+        // Cloudflare IP ranges
+        if (ip.startsWith('104.') || ip.startsWith('172.') || ip.startsWith('173.')) {
+          services.cdn = services.cdn || { provider: 'Cloudflare (detected by IP)', evidence: 'A record IP range' };
+        }
+        // AWS IP ranges (partial detection)
+        else if (ip.startsWith('52.') || ip.startsWith('54.') || ip.startsWith('18.')) {
+          services.cloud = services.cloud || { provider: 'AWS (likely)', evidence: 'A record IP range' };
+        }
+        // DigitalOcean IP ranges
+        else if (ip.startsWith('159.') || ip.startsWith('167.')) {
+          services.cloud = services.cloud || { provider: 'DigitalOcean (likely)', evidence: 'A record IP range' };
+        }
+      }
+    }
+
+    // Check NS records for DNS providers
+    const nsRun = await this.commandRunner.run('dig', ['+short', 'NS', domain], { timeout: 5000 });
+    if (nsRun.ok && nsRun.stdout) {
+      const ns = nsRun.stdout.toLowerCase();
+
+      if (ns.includes('cloudflare')) {
+        services.dns = { provider: 'Cloudflare DNS', evidence: 'NS records' };
+      } else if (ns.includes('awsdns')) {
+        services.dns = { provider: 'AWS Route53', evidence: 'NS records' };
+      } else if (ns.includes('googledomains') || ns.includes('ns-cloud')) {
+        services.dns = { provider: 'Google Cloud DNS', evidence: 'NS records' };
+      } else if (ns.includes('nsone')) {
+        services.dns = { provider: 'NS1', evidence: 'NS records' };
+      } else if (ns.includes('dnsimple')) {
+        services.dns = { provider: 'DNSimple', evidence: 'NS records' };
+      } else if (ns.includes('digitalocean')) {
+        services.dns = { provider: 'DigitalOcean DNS', evidence: 'NS records' };
+      } else if (ns.includes('namecheap')) {
+        services.dns = { provider: 'Namecheap DNS', evidence: 'NS records' };
+      } else if (ns.includes('godaddy')) {
+        services.dns = { provider: 'GoDaddy DNS', evidence: 'NS records' };
       }
     }
 
@@ -697,6 +858,9 @@ export class OsintStage {
     try {
       const url = `https://${domain}`;
       const response = await fetch(url, {
+        headers: {
+          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (compatible; ReconBot/1.0)'
+        },
         signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
       });
 
@@ -708,6 +872,16 @@ export class OsintStage {
           software: headers['server'],
           evidence: 'Server header'
         };
+
+        // Detect server-specific services
+        const server = headers['server'].toLowerCase();
+        if (server.includes('cloudflare')) {
+          services.cdn = services.cdn || { provider: 'Cloudflare', evidence: 'Server header' };
+        } else if (server.includes('vercel')) {
+          services.hosting = { provider: 'Vercel', evidence: 'Server header' };
+        } else if (server.includes('netlify')) {
+          services.hosting = { provider: 'Netlify', evidence: 'Server header' };
+        }
       }
 
       if (headers['x-powered-by']) {
@@ -717,27 +891,252 @@ export class OsintStage {
         };
       }
 
-      // Check body for analytics/tracking
+      // CDN/hosting-specific headers
+      if (headers['cf-ray']) {
+        services.cdn = services.cdn || { provider: 'Cloudflare', evidence: 'CF-Ray header' };
+      }
+      if (headers['x-vercel-id'] || headers['x-vercel-cache']) {
+        services.hosting = { provider: 'Vercel', evidence: 'Vercel headers' };
+      }
+      if (headers['x-nf-request-id']) {
+        services.hosting = { provider: 'Netlify', evidence: 'Netlify headers' };
+      }
+      if (headers['x-amz-cf-id'] || headers['x-amz-request-id']) {
+        services.cloud = { provider: 'AWS', evidence: 'AWS headers' };
+      }
+
+      // Check body for analytics/tracking/SaaS
       const html = await response.text();
 
-      if (html.includes('google-analytics') || html.includes('gtag.js')) {
-        services.analytics = { provider: 'Google Analytics', evidence: 'JavaScript tag' };
+      // Analytics
+      const analytics = [];
+      if (html.includes('google-analytics') || html.includes('gtag.js') || html.includes('ga.js')) {
+        analytics.push({ provider: 'Google Analytics', evidence: 'JavaScript tag' });
       }
-
       if (html.includes('googletagmanager')) {
-        services.tagManager = { provider: 'Google Tag Manager', evidence: 'JavaScript tag' };
+        analytics.push({ provider: 'Google Tag Manager', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('segment.com') || html.includes('analytics.js')) {
+        analytics.push({ provider: 'Segment', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('mixpanel')) {
+        analytics.push({ provider: 'Mixpanel', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('amplitude')) {
+        analytics.push({ provider: 'Amplitude', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('heap.io') || html.includes('heapanalytics')) {
+        analytics.push({ provider: 'Heap Analytics', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('matomo') || html.includes('piwik')) {
+        analytics.push({ provider: 'Matomo', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('plausible.io')) {
+        analytics.push({ provider: 'Plausible', evidence: 'JavaScript tag' });
+      }
+      if (analytics.length > 0) {
+        services.analytics = analytics;
       }
 
+      // Heatmap / Session Recording
+      const heatmap = [];
       if (html.includes('hotjar')) {
-        services.heatmap = { provider: 'Hotjar', evidence: 'JavaScript tag' };
+        heatmap.push({ provider: 'Hotjar', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('fullstory')) {
+        heatmap.push({ provider: 'FullStory', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('logrocket')) {
+        heatmap.push({ provider: 'LogRocket', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('smartlook')) {
+        heatmap.push({ provider: 'Smartlook', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('mouseflow')) {
+        heatmap.push({ provider: 'Mouseflow', evidence: 'JavaScript tag' });
+      }
+      if (heatmap.length > 0) {
+        services.heatmap = heatmap;
       }
 
+      // Chat / Customer Support
+      const chat = [];
       if (html.includes('intercom')) {
-        services.chat = { provider: 'Intercom', evidence: 'JavaScript tag' };
+        chat.push({ provider: 'Intercom', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('drift') && html.includes('drift.com')) {
+        chat.push({ provider: 'Drift', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('zendesk')) {
+        chat.push({ provider: 'Zendesk', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('livechat')) {
+        chat.push({ provider: 'LiveChat', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('crisp.chat')) {
+        chat.push({ provider: 'Crisp', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('tawk.to')) {
+        chat.push({ provider: 'Tawk.to', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('olark')) {
+        chat.push({ provider: 'Olark', evidence: 'JavaScript tag' });
+      }
+      if (chat.length > 0) {
+        services.chat = chat;
       }
 
-      if (html.includes('stripe')) {
-        services.payment = { provider: 'Stripe', evidence: 'JavaScript tag' };
+      // Error Tracking / Monitoring
+      const monitoring = [];
+      if (html.includes('sentry.io') || html.includes('sentry-cdn')) {
+        monitoring.push({ provider: 'Sentry', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('bugsnag')) {
+        monitoring.push({ provider: 'Bugsnag', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('rollbar')) {
+        monitoring.push({ provider: 'Rollbar', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('newrelic')) {
+        monitoring.push({ provider: 'New Relic', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('datadoghq')) {
+        monitoring.push({ provider: 'Datadog', evidence: 'JavaScript tag' });
+      }
+      if (monitoring.length > 0) {
+        services.monitoring = monitoring;
+      }
+
+      // Payment Processors
+      const payment = [];
+      if (html.includes('stripe.com') || html.includes('stripe.js')) {
+        payment.push({ provider: 'Stripe', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('paypal.com')) {
+        payment.push({ provider: 'PayPal', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('braintree')) {
+        payment.push({ provider: 'Braintree', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('adyen')) {
+        payment.push({ provider: 'Adyen', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('square.com')) {
+        payment.push({ provider: 'Square', evidence: 'JavaScript tag' });
+      }
+      if (payment.length > 0) {
+        services.payment = payment;
+      }
+
+      // Authentication
+      const auth = [];
+      if (html.includes('auth0')) {
+        auth.push({ provider: 'Auth0', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('firebase')) {
+        auth.push({ provider: 'Firebase Auth', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('okta')) {
+        auth.push({ provider: 'Okta', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('clerk.dev') || html.includes('clerk.com')) {
+        auth.push({ provider: 'Clerk', evidence: 'JavaScript tag' });
+      }
+      if (auth.length > 0) {
+        services.auth = auth;
+      }
+
+      // CRM / Marketing
+      const crm = [];
+      if (html.includes('hubspot')) {
+        crm.push({ provider: 'HubSpot', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('salesforce')) {
+        crm.push({ provider: 'Salesforce', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('marketo')) {
+        crm.push({ provider: 'Marketo', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('pardot')) {
+        crm.push({ provider: 'Pardot', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('activecampaign')) {
+        crm.push({ provider: 'ActiveCampaign', evidence: 'JavaScript tag' });
+      }
+      if (crm.length > 0) {
+        services.crm = crm;
+      }
+
+      // A/B Testing / Personalization
+      const abTesting = [];
+      if (html.includes('optimizely')) {
+        abTesting.push({ provider: 'Optimizely', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('vwo.com')) {
+        abTesting.push({ provider: 'VWO', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('launchdarkly')) {
+        abTesting.push({ provider: 'LaunchDarkly', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('split.io')) {
+        abTesting.push({ provider: 'Split', evidence: 'JavaScript tag' });
+      }
+      if (abTesting.length > 0) {
+        services.abTesting = abTesting;
+      }
+
+      // Content / CMS
+      const cms = [];
+      if (html.includes('wordpress') || html.includes('wp-content')) {
+        cms.push({ provider: 'WordPress', evidence: 'HTML structure' });
+      }
+      if (html.includes('contentful')) {
+        cms.push({ provider: 'Contentful', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('sanity.io')) {
+        cms.push({ provider: 'Sanity', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('prismic.io')) {
+        cms.push({ provider: 'Prismic', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('strapi')) {
+        cms.push({ provider: 'Strapi', evidence: 'JavaScript tag' });
+      }
+      if (cms.length > 0) {
+        services.cms = cms;
+      }
+
+      // Social Media Pixels
+      const socialPixels = [];
+      if (html.includes('facebook.net/en_US/fbevents.js') || html.includes('fbq(')) {
+        socialPixels.push({ provider: 'Facebook Pixel', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('linkedin.com/insight')) {
+        socialPixels.push({ provider: 'LinkedIn Insight Tag', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('twitter.com/i/adsct')) {
+        socialPixels.push({ provider: 'Twitter Pixel', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('pinterest.com/ct/')) {
+        socialPixels.push({ provider: 'Pinterest Tag', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('reddit.com/pixel')) {
+        socialPixels.push({ provider: 'Reddit Pixel', evidence: 'JavaScript tag' });
+      }
+      if (socialPixels.length > 0) {
+        services.socialPixels = socialPixels;
+      }
+
+      // Advertising
+      const advertising = [];
+      if (html.includes('googleadservices') || html.includes('googlesyndication')) {
+        advertising.push({ provider: 'Google Ads', evidence: 'JavaScript tag' });
+      }
+      if (html.includes('doubleclick')) {
+        advertising.push({ provider: 'DoubleClick', evidence: 'JavaScript tag' });
+      }
+      if (advertising.length > 0) {
+        services.advertising = advertising;
       }
 
     } catch (error) {
@@ -811,6 +1210,145 @@ export class OsintStage {
   extractCompanyName(domain) {
     // Extract company name from domain (simple heuristic)
     return domain.split('.')[0];
+  }
+
+  /**
+   * WhatsMyName - Username enumeration across 400+ sites
+   * Uses JSON data from WhatsMyName project
+   */
+  async runWhatsMyName(username, options = {}) {
+    const results = {
+      status: 'ok',
+      username,
+      found: [],
+      notFound: [],
+      errors: []
+    };
+
+    try {
+      // Fetch WhatsMyName data
+      const wmn_url = 'https://raw.githubusercontent.com/WebBreacher/WhatsMyName/main/wmn-data.json';
+      const response = await fetch(wmn_url, {
+        signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
+      });
+
+      if (!response.ok) {
+        results.status = 'error';
+        results.message = 'Failed to fetch WhatsMyName data';
+        return results;
+      }
+
+      const data = await response.json();
+      const sites = data.sites || [];
+
+      // Limit sites to check (to avoid rate limiting)
+      const maxSites = options.maxSites || 50;
+      const sitesToCheck = sites.slice(0, maxSites);
+
+      // Check each site
+      for (const site of sitesToCheck) {
+        if (!site.uri_check) continue;
+
+        try {
+          const checkUrl = site.uri_check.replace('{account}', encodeURIComponent(username));
+
+          const siteResponse = await fetch(checkUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (compatible; ReconBot/1.0)'
+            },
+            signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+            redirect: 'follow'
+          });
+
+          // Determine if profile exists based on status code
+          const exists = siteResponse.status === 200;
+
+          if (exists) {
+            results.found.push({
+              site: site.name,
+              url: checkUrl,
+              category: site.cat || 'unknown'
+            });
+          } else {
+            results.notFound.push(site.name);
+          }
+
+        } catch (error) {
+          results.errors.push({
+            site: site.name,
+            error: error.message
+          });
+        }
+
+        // Rate limiting - small delay between requests
+        await this.sleep(200);
+      }
+
+    } catch (error) {
+      results.status = 'error';
+      results.message = error.message;
+    }
+
+    return results;
+  }
+
+  /**
+   * Scylla.sh - Free breach data API
+   * Check if email/domain appears in breaches
+   */
+  async checkScylla(email, options = {}) {
+    const results = {
+      status: 'ok',
+      email,
+      breaches: []
+    };
+
+    try {
+      // Scylla.sh API endpoint
+      const url = `https://scylla.sh/search?q=email:${encodeURIComponent(email)}`;
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (compatible; ReconBot/1.0)',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          // No breaches found
+          return results;
+        }
+
+        results.status = 'error';
+        results.message = `Scylla API returned ${response.status}`;
+        return results;
+      }
+
+      const data = await response.json();
+
+      // Parse Scylla response
+      if (Array.isArray(data)) {
+        results.breaches = data.map(breach => ({
+          source: breach.Source || breach.Database || 'Unknown',
+          email: breach.Email || email,
+          username: breach.Username,
+          password: breach.Password ? '[REDACTED]' : null, // Don't store actual passwords
+          hash: breach.Hash,
+          salt: breach.Salt,
+          ip: breach.IP,
+          fields: Object.keys(breach)
+        }));
+      }
+
+    } catch (error) {
+      results.status = 'error';
+      results.message = error.message;
+    }
+
+    return results;
   }
 
   deduplicateProfiles(profiles) {

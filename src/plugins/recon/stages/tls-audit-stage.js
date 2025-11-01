@@ -5,6 +5,7 @@
  * - openssl (basic TLS info)
  * - sslyze (comprehensive TLS scanner)
  * - testssl.sh (detailed SSL/TLS testing)
+ * - sslscan (fast SSL/TLS scanner)
  */
 
 export class TlsAuditStage {
@@ -49,6 +50,10 @@ export class TlsAuditStage {
 
     if (featureConfig.testssl) {
       await executeAudit('testssl', 'testssl.sh', ['--quiet', `${target.host}:${port}`]);
+    }
+
+    if (featureConfig.sslscan) {
+      await executeAudit('sslscan', 'sslscan', [`${target.host}:${port}`]);
     }
 
     if (Object.keys(tools).length === 0) {
