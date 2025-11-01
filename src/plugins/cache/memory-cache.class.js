@@ -346,8 +346,9 @@ export class MemoryCache extends Cache {
       }
     }
 
-    // Item count eviction (original logic)
-    if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
+    // Item count eviction: only evict if we're about to exceed maxSize
+    // Check length before adding the new item (so maxSize=2 allows 2 items, not 1)
+    if (this.maxSize > 0 && !Object.prototype.hasOwnProperty.call(this.cache, normalizedKey) && Object.keys(this.cache).length >= this.maxSize) {
       const candidate = this._selectEvictionCandidate();
       if (candidate) {
         const evictedSize = this.meta[candidate]?.compressedSize || 0;
