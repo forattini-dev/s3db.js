@@ -1,0 +1,156 @@
+{
+  "target": "github.com",
+  "timestamp": "2025-11-01T20:05:52.351Z",
+  "summary": {
+    "score": 76,
+    "grade": "C",
+    "total": 7,
+    "passed": 3,
+    "failed": 1,
+    "critical": 1,
+    "high": 0,
+    "medium": 1,
+    "low": 1
+  },
+  "checklist": [
+    {
+      "id": "A",
+      "name": "Inventory",
+      "description": "Subdomains, IPs, certificates, CDN detection",
+      "status": "pass",
+      "findings": [
+        {
+          "type": "info",
+          "severity": "info",
+          "item": "Subdomains Enumeration",
+          "detail": "0 subdomains discovered",
+          "action": "OK"
+        },
+        {
+          "type": "pass",
+          "severity": "info",
+          "item": "Certificate Validity",
+          "detail": "SSL certificate valid for 97 days"
+        },
+        {
+          "type": "warning",
+          "severity": "low",
+          "item": "No CDN Detected",
+          "detail": "No CDN detected",
+          "action": "Consider Cloudflare, Fastly, or AWS CloudFront for DDoS protection"
+        }
+      ],
+      "score": 95
+    },
+    {
+      "id": "B",
+      "name": "Secrets",
+      "description": "Leaked API keys, credentials, tokens",
+      "status": "pass",
+      "findings": [
+        {
+          "type": "pass",
+          "severity": "info",
+          "item": "No Secrets Detected",
+          "detail": "No exposed secrets found",
+          "action": "Continue monitoring. Implement pre-commit hooks (gitleaks, truffleHog)"
+        }
+      ],
+      "score": 100
+    },
+    {
+      "id": "C",
+      "name": "Dependencies",
+      "description": "Vulnerable packages (requires manual setup)",
+      "status": "manual",
+      "findings": [
+        {
+          "type": "info",
+          "severity": "info",
+          "item": "Manual Check Required",
+          "detail": "Dependency scanning requires package.json/requirements.txt access",
+          "action": "Run: npm audit, yarn audit, snyk test, or GitHub Dependabot. Patch high/critical vulnerabilities."
+        }
+      ],
+      "score": 0
+    },
+    {
+      "id": "D1",
+      "name": "Security Headers",
+      "description": "HSTS, CSP, X-Frame-Options, etc.",
+      "status": "pass",
+      "findings": [
+        {
+          "type": "pass",
+          "severity": "info",
+          "item": "HSTS Enabled",
+          "detail": "max-age=31536000; includeSubdomains; preload"
+        },
+        {
+          "type": "pass",
+          "severity": "info",
+          "item": "CSP Present",
+          "detail": "Content-Security-Policy configured"
+        }
+      ],
+      "score": 100
+    },
+    {
+      "id": "D2",
+      "name": "TLS Configuration",
+      "description": "TLS 1.2+, modern ciphers",
+      "status": "fail",
+      "findings": [
+        {
+          "type": "fail",
+          "severity": "critical",
+          "item": "TLS Connection Failed",
+          "detail": "Unable to establish TLS connection",
+          "action": "Verify SSL/TLS configuration and certificate validity"
+        }
+      ],
+      "score": 0
+    },
+    {
+      "id": "E",
+      "name": "WAF & Rate Limiting",
+      "description": "Web Application Firewall detection",
+      "status": "warning",
+      "findings": [
+        {
+          "type": "warning",
+          "severity": "medium",
+          "item": "No WAF Detected",
+          "detail": "No Web Application Firewall detected",
+          "action": "Implement WAF (Cloudflare, AWS WAF, Akamai) for OWASP Top 10 protection. Configure rate limiting."
+        }
+      ],
+      "score": 85
+    },
+    {
+      "id": "F",
+      "name": "Authentication",
+      "description": "Password policies, MFA, sessions (manual)",
+      "status": "manual",
+      "findings": [
+        {
+          "type": "info",
+          "severity": "info",
+          "item": "Manual Check Required",
+          "detail": "Authentication audit requires authenticated scan",
+          "action": "Verify: password policies (min 12 chars, complexity), MFA enforcement, session timeouts (15-30 min), brute-force protection (rate limiting, CAPTCHA)"
+        }
+      ],
+      "score": 0
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": 1,
+      "severity": "critical",
+      "category": "TLS Configuration",
+      "item": "TLS Connection Failed",
+      "action": "Verify SSL/TLS configuration and certificate validity"
+    }
+  ]
+}

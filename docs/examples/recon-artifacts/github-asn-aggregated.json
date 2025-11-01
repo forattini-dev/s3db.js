@@ -1,0 +1,26 @@
+{
+  "status": "ok",
+  "host": "github.com",
+  "ipAddresses": [
+    "4.228.31.150"
+  ],
+  "asns": [
+    {
+      "ip": "4.228.31.150",
+      "asn": "AS4",
+      "asnNumber": 4,
+      "organization": "US",
+      "country": "4.224.0.0/12",
+      "network": "8075",
+      "source": "hackertarget.com",
+      "_source": "hackertarget"
+    }
+  ],
+  "networks": [
+    "8075"
+  ],
+  "organizations": [
+    "US"
+  ],
+  "errors": {}
+}

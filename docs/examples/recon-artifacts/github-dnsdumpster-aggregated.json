@@ -1,0 +1,16 @@
+{
+  "status": "error",
+  "host": "github.com",
+  "dnsRecords": {
+    "A": [],
+    "AAAA": [],
+    "MX": [],
+    "TXT": [],
+    "NS": []
+  },
+  "subdomains": [],
+  "relatedDomains": [],
+  "errors": {
+    "csrf": "Failed to obtain CSRF token from DNSDumpster"
+  }
+}
