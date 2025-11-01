@@ -1,5 +1,11 @@
 # 🤖 State Machine Plugin
 
+> **Enforce complex workflow transitions with guards, events, and audit trails.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ IMPORTANT FIX (v13.4.0)
 
 **Fixed race condition with resource events:**

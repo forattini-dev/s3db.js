@@ -1,3 +1,5 @@
+import { PluginError } from '../../errors.js';
+
 const PREFIX = 'plg_';
 
 function normalizeNamespace(namespace) {
@@ -27,7 +29,13 @@ function applyNamespace(name, namespace) {
 
 function sanitizeName(name) {
   if (!name || typeof name !== 'string') {
-    throw new Error('[resource-names] Resource name must be a non-empty string');
+    throw new PluginError('[resource-names] Resource name must be a non-empty string', {
+      pluginName: 'SharedConcerns',
+      operation: 'resourceNames:sanitize',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Pass a non-empty string when deriving resource names.'
+    });
   }
   return name.trim();
 }
@@ -45,7 +53,13 @@ export function resolveResourceName(pluginKey, { defaultName, override, suffix }
   const applyOverrideNamespace = options.applyNamespaceToOverrides === true;
 
   if (!defaultName && !override && !suffix) {
-    throw new Error(`[resource-names] Missing name parameters for plugin "${pluginKey}"`);
+    throw new PluginError(`[resource-names] Missing name parameters for plugin "${pluginKey}"`, {
+      pluginName: 'SharedConcerns',
+      operation: 'resourceNames:resolve',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide at least one of defaultName, override, or suffix when resolving resource names.'
+    });
   }
 
   if (override) {
@@ -59,7 +73,13 @@ export function resolveResourceName(pluginKey, { defaultName, override, suffix }
   }
 
   if (!suffix) {
-    throw new Error(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`);
+    throw new PluginError(`[resource-names] Cannot derive resource name for plugin "${pluginKey}" without suffix`, {
+      pluginName: 'SharedConcerns',
+      operation: 'resourceNames:resolve',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Provide a suffix or defaultName when computing derived resource names.'
+    });
   }
 
   const ensured = ensurePlgPrefix(`${pluginKey}_${suffix}`);

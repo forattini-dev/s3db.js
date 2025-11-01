@@ -10,6 +10,7 @@
 
 import { randomBytes } from 'crypto';
 import { idGenerator } from '../../../concerns/id.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Generate a secure random token
@@ -31,7 +32,13 @@ export function generateToken(bytes = 32, encoding = 'hex') {
       return buffer.toString('base64url');
 
     default:
-      throw new Error(`Invalid encoding: ${encoding}. Use 'hex', 'base64', or 'base64url'.`);
+      throw new PluginError(`Invalid encoding: ${encoding}. Use 'hex', 'base64', or 'base64url'.`, {
+        pluginName: 'IdentityPlugin',
+        operation: 'generateToken',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass encoding as "hex", "base64", or "base64url" when calling generateToken.'
+      });
   }
 }
 
@@ -122,7 +129,13 @@ export function calculateExpiration(duration) {
     const match = duration.match(/^(\d+)([smhd])$/);
 
     if (!match) {
-      throw new Error(`Invalid duration format: ${duration}. Use '15m', '1h', '7d', etc.`);
+      throw new PluginError(`Invalid duration format: ${duration}. Use '15m', '1h', '7d', etc.`, {
+        pluginName: 'IdentityPlugin',
+        operation: 'calculateExpiration',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide durations using number + unit (s, m, h, d), for example "30m" or "1d".'
+      });
     }
 
     const value = parseInt(match[1], 10);
@@ -134,10 +147,22 @@ export function calculateExpiration(duration) {
       case 'h': ms = value * 60 * 60 * 1000; break; // hours
       case 'd': ms = value * 24 * 60 * 60 * 1000; break; // days
       default:
-        throw new Error(`Invalid duration unit: ${unit}`);
+        throw new PluginError(`Invalid duration unit: ${unit}`, {
+          pluginName: 'IdentityPlugin',
+          operation: 'calculateExpiration',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Use s, m, h, or d for seconds, minutes, hours, or days respectively.'
+        });
     }
   } else {
-    throw new Error('Duration must be a string or number');
+    throw new PluginError('Duration must be a string or number', {
+      pluginName: 'IdentityPlugin',
+      operation: 'calculateExpiration',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Pass durations as milliseconds (number) or a string like "15m".'
+    });
   }
 
   return Date.now() + ms;

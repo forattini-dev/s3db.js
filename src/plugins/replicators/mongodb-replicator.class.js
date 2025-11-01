@@ -324,22 +324,24 @@ class MongoDBReplicator extends BaseReplicator {
   }
 
   async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
+    const { results, errors } = await this.processBatch(
+      records,
+      async (record) => {
+        const [ok, err, result] = await tryFn(() =>
+          this.replicate(resourceName, record.operation, record.data, record.id)
+        );
 
-    // MongoDB supports bulk operations, but for consistency with other replicators
-    // and error handling, we process sequentially
-    for (const record of records) {
-      const [ok, err, result] = await tryFn(() =>
-        this.replicate(resourceName, record.operation, record.data, record.id)
-      );
+        if (!ok) {
+          throw err;
+        }
 
-      if (ok) {
-        results.push(result);
-      } else {
-        errors.push({ id: record.id, error: err.message });
+        return result;
+      },
+      {
+        concurrency: this.config.batchConcurrency,
+        mapError: (error, record) => ({ id: record.id, error: error.message })
       }
-    }
+    );
 
     return {
       success: errors.length === 0,
@@ -352,7 +354,12 @@ class MongoDBReplicator extends BaseReplicator {
   async testConnection() {
     const [ok, err] = await tryFn(async () => {
       if (!this.client) {
-        throw new Error('Client not initialized');
+        throw this.createError('Client not initialized', {
+          operation: 'testConnection',
+          statusCode: 503,
+          retriable: true,
+          suggestion: 'Ensure initialize() was called and the MongoDB client connected before testing connectivity.'
+        });
       }
 
       await this.db.admin().ping();

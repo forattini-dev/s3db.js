@@ -1,6 +1,12 @@
-# VectorPlugin
+# 🧭 Vector Plugin
 
-## ⚡ TL;DR
+> **Lightweight vector store with compression, similarity search, and clustering.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [FAQ ↓](#-faq)
+
+---
+
+## ⚡ TLDR
 
 **Store, search, and cluster** vector embeddings with **automatic compression** (77% savings), **multiple distance metrics**, and **intelligent K-means clustering**.
 
@@ -51,7 +57,7 @@ console.log(`Optimal clusters: ${optimalK.bestK} (score: ${optimalK.bestScore})`
 
 ---
 
-## Table of Contents
+## 📋 Table of Contents
 
 - [Overview](#overview)
 - [Installation](#installation)
@@ -2258,6 +2264,12 @@ if (dimensions.size > 1) {
   // Fix: regenerate embeddings with consistent model
 }
 ```
+
+`cosineDistance`, `euclideanDistance`, and clustering helpers now throw a `ValidationError` with:
+- `statusCode: 422`
+- `retriable: false`
+- `suggestion: 'Ensure both vectors have identical lengths before calling distance utilities.'`
+- `metadata: { vectorALength, vectorBLength }`
 
 ### Warning: "Vector fields exceed metadata limit"
 

@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready Alibaba Cloud (Aliyun) inventory driver using @alicloud SDK.
@@ -57,7 +58,13 @@ export class AlibabaInventoryDriver extends BaseCloudDriver {
     this._accessKeySecret = credentials.accessKeySecret || process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET;
 
     if (!this._accessKeyId || !this._accessKeySecret) {
-      throw new Error('Alibaba Cloud AccessKeyId and AccessKeySecret are required. Provide via credentials or env vars.');
+      throw new PluginError('Alibaba Cloud AccessKeyId and AccessKeySecret are required. Provide via credentials or env vars.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'alibaba:initCredentials',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass credentials.accessKeyId/accessKeySecret or set ALIBABA_CLOUD_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_SECRET environment variables.'
+      });
     }
 
     this.logger('info', 'Alibaba Cloud credentials initialized', {

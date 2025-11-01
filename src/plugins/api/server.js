@@ -29,6 +29,11 @@ import { createFailbanMiddleware, setupFailbanViolationListener, createFailbanAd
 import { FailbanManager } from './concerns/failban-manager.js';
 import { ApiEventEmitter } from './concerns/event-emitter.js';
 import { MetricsCollector } from './concerns/metrics-collector.js';
+import { OpenAPIGeneratorCached } from './utils/openapi-generator-cached.class.js';
+import { AuthStrategyFactory } from './auth/strategies/factory.class.js';
+import { Router } from './server/router.class.js';
+import { MiddlewareChain } from './server/middleware-chain.class.js';
+import { HealthManager } from './server/health-manager.class.js';
 
 /**
  * API Server class
@@ -348,228 +353,32 @@ export class ApiServer {
    * @private
    */
   _setupRoutes() {
-    // Request tracking for graceful shutdown (must be first!)
-    this._setupRequestTracking();
-
-    // Failban middleware (check banned IPs early)
-    if (this.failban) {
-      const failbanMiddleware = createFailbanMiddleware({
-        plugin: this.failban,
-        events: this.events
-      });
-      this.app.use('*', failbanMiddleware);
-
-      // Setup violation listeners (connects events to failban)
-      setupFailbanViolationListener({
-        plugin: this.failban,
-        events: this.events
-      });
-
-      if (this.options.verbose) {
-        console.log('[API Server] Failban protection enabled');
-      }
-    }
-
-    // Request ID middleware (before all other middlewares)
-    if (this.options.requestId?.enabled) {
-      const requestIdMiddleware = createRequestIdMiddleware(this.options.requestId);
-      this.app.use('*', requestIdMiddleware);
-
-      if (this.options.verbose) {
-        console.log(`[API Server] Request ID tracking enabled (header: ${this.options.requestId.headerName || 'X-Request-ID'})`);
-      }
-    }
-
-    // CORS middleware
-    if (this.options.cors?.enabled) {
-      const corsConfig = this.options.cors;
-      this.app.use('*', this.cors({
-        origin: corsConfig.origin || '*',
-        allowMethods: corsConfig.allowMethods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowHeaders: corsConfig.allowHeaders || ['Content-Type', 'Authorization', 'X-Request-ID'],
-        exposeHeaders: corsConfig.exposeHeaders || ['X-Request-ID'],
-        credentials: corsConfig.credentials || false,
-        maxAge: corsConfig.maxAge || 86400  // 24 hours cache by default
-      }));
-
-      if (this.options.verbose) {
-        console.log(`[API Server] CORS enabled (maxAge: ${corsConfig.maxAge || 86400}s, origin: ${corsConfig.origin || '*'})`);
-      }
-    }
-
-    // Security headers middleware
-    if (this.options.security?.enabled) {
-      const securityMiddleware = createSecurityHeadersMiddleware(this.options.security);
-      this.app.use('*', securityMiddleware);
-
-      if (this.options.verbose) {
-        console.log('[API Server] Security headers enabled');
-      }
-    }
-
-    // Session tracking middleware
-    if (this.options.sessionTracking?.enabled) {
-      const sessionMiddleware = createSessionTrackingMiddleware(
-        this.options.sessionTracking,
-        this.options.database
-      );
-      this.app.use('*', sessionMiddleware);
-
-      if (this.options.verbose) {
-        const resource = this.options.sessionTracking.resource ? ` (resource: ${this.options.sessionTracking.resource})` : ' (in-memory)';
-        console.log(`[API Server] Session tracking enabled${resource}`);
-      }
-    }
-
-    // Apply global middlewares
-    this.options.middlewares.forEach(middleware => {
-      this.app.use('*', middleware);
+    // Use MiddlewareChain to apply all middlewares in correct order
+    const middlewareChain = new MiddlewareChain({
+      requestId: this.options.requestId,
+      cors: this.options.cors,
+      security: this.options.security,
+      sessionTracking: this.options.sessionTracking,
+      middlewares: this.options.middlewares,
+      templates: this.options.templates,
+      maxBodySize: this.options.maxBodySize,
+      failban: this.failban,
+      events: this.events,
+      verbose: this.options.verbose,
+      database: this.options.database,
+      inFlightRequests: this.inFlightRequests,
+      acceptingRequests: this.acceptingRequests,
+      corsMiddleware: this.cors
     });
+    middlewareChain.apply(this.app);
 
-    // Template engine middleware (if enabled)
-    if (this.options.templates?.enabled) {
-      const templateMiddleware = setupTemplateEngine(this.options.templates);
-      this.app.use('*', templateMiddleware);
-
-      if (this.options.verbose) {
-        console.log(`[API Server] Template engine enabled: ${this.options.templates.engine}`);
-      }
-    }
-
-    // Body size limit middleware (only for POST, PUT, PATCH)
-    this.app.use('*', async (c, next) => {
-      const method = c.req.method;
-
-      if (['POST', 'PUT', 'PATCH'].includes(method)) {
-        const contentLength = c.req.header('content-length');
-
-        if (contentLength) {
-          const size = parseInt(contentLength);
-
-          if (size > this.options.maxBodySize) {
-            const response = formatter.payloadTooLarge(size, this.options.maxBodySize);
-            c.header('Connection', 'close'); // Close connection for large payloads
-            return c.json(response, response._status);
-          }
-        }
-      }
-
-      await next();
+    // Use HealthManager for health check endpoints
+    const healthManager = new HealthManager({
+      database: this.options.database,
+      healthConfig: this.options.health,
+      verbose: this.options.verbose
     });
-
-    // Kubernetes Liveness Probe - checks if app is alive
-    // If this fails, k8s will restart the pod
-    this.app.get('/health/live', (c) => {
-      // Simple check: if we can respond, we're alive
-      const response = formatter.success({
-        status: 'alive',
-        timestamp: new Date().toISOString()
-      });
-      return c.json(response);
-    });
-
-    // Kubernetes Readiness Probe - checks if app is ready to receive traffic
-    // If this fails, k8s will remove pod from service endpoints
-    this.app.get('/health/ready', async (c) => {
-      const checks = {};
-      let isHealthy = true;
-
-      // Get custom checks configuration
-      const healthConfig = this.options.health || {};
-      const customChecks = healthConfig.readiness?.checks || [];
-
-      // Built-in: Database check
-      try {
-        const startTime = Date.now();
-        const isDbReady = this.options.database &&
-                         this.options.database.connected &&
-                         Object.keys(this.options.database.resources).length > 0;
-        const latency = Date.now() - startTime;
-
-        if (isDbReady) {
-          checks.s3db = {
-            status: 'healthy',
-            latency_ms: latency,
-            resources: Object.keys(this.options.database.resources).length
-          };
-        } else {
-          checks.s3db = {
-            status: 'unhealthy',
-            connected: this.options.database?.connected || false,
-            resources: Object.keys(this.options.database?.resources || {}).length
-          };
-          isHealthy = false;
-        }
-      } catch (err) {
-        checks.s3db = {
-          status: 'unhealthy',
-          error: err.message
-        };
-        isHealthy = false;
-      }
-
-      // Execute custom checks
-      for (const check of customChecks) {
-        try {
-          const startTime = Date.now();
-          const timeout = check.timeout || 5000;
-
-          // Run check with timeout
-          const result = await Promise.race([
-            check.check(),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout')), timeout)
-            )
-          ]);
-
-          const latency = Date.now() - startTime;
-
-          checks[check.name] = {
-            status: result.healthy ? 'healthy' : 'unhealthy',
-            latency_ms: latency,
-            ...result
-          };
-
-          // Only mark as unhealthy if check is not optional
-          if (!result.healthy && !check.optional) {
-            isHealthy = false;
-          }
-        } catch (err) {
-          checks[check.name] = {
-            status: 'unhealthy',
-            error: err.message
-          };
-
-          // Only mark as unhealthy if check is not optional
-          if (!check.optional) {
-            isHealthy = false;
-          }
-        }
-      }
-
-      const status = isHealthy ? 200 : 503;
-
-      return c.json({
-        status: isHealthy ? 'healthy' : 'unhealthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        checks
-      }, status);
-    });
-
-    // Generic Health Check endpoint
-    this.app.get('/health', (c) => {
-      const response = formatter.success({
-        status: 'ok',
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString(),
-        checks: {
-          liveness: '/health/live',
-          readiness: '/health/ready'
-        }
-      });
-      return c.json(response);
-    });
+    healthManager.register(this.app);
 
     // Metrics endpoint
     if (this.options.metrics?.enabled) {
@@ -608,11 +417,11 @@ export class ApiServer {
     // Setup static file serving (before resource routes to give static files priority)
     this._setupStaticRoutes();
 
-    // OpenAPI spec endpoint
+    // OpenAPI spec endpoint (with caching)
     if (this.options.docsEnabled) {
       this.app.get('/openapi.json', (c) => {
         if (!this.openAPISpec) {
-          this.openAPISpec = this._generateOpenAPISpec();
+          this.openAPISpec = this.openAPIGenerator.generate();
         }
         return c.json(this.openAPISpec);
       });
@@ -646,31 +455,22 @@ export class ApiServer {
       }
     }
 
-    // Setup resource routes
-    this._setupResourceRoutes();
-
-    // Setup authentication routes if JWT driver is configured
-    const hasJwtDriver = Array.isArray(this.options.auth?.drivers)
-      ? this.options.auth.drivers.some(d => d.driver === 'jwt')
-      : false;
-
-    if (this.options.auth?.driver || hasJwtDriver) {
-      this._setupAuthRoutes();
-    }
-
-    // Setup OIDC routes if configured
-    const oidcDriver = this.options.auth?.drivers?.find(d => d.driver === 'oidc');
-    if (oidcDriver) {
-      this._setupOIDCRoutes(oidcDriver.config);
-    }
-
-    // Setup relational routes if RelationPlugin is active
-    if (this.relationsPlugin) {
-      this._setupRelationalRoutes();
-    }
-
-    // Setup plugin-level custom routes
-    this._setupPluginRoutes();
+    // Use Router to mount all routes
+    const router = new Router({
+      database: this.options.database,
+      resources: this.options.resources,
+      routes: this.options.routes,
+      versionPrefix: this.options.versionPrefix,
+      auth: this.options.auth,
+      static: this.options.static,
+      failban: this.failban,
+      metrics: this.metrics,
+      relationsPlugin: this.relationsPlugin,
+      authMiddleware: this.authMiddleware,
+      verbose: this.options.verbose,
+      Hono: this.Hono
+    });
+    router.mount(this.app, this.events);
 
     // Global error handler
     this.app.onError((err, c) => {
@@ -1457,6 +1257,17 @@ export class ApiServer {
       if (this.failban) {
         await this.failban.initialize();
       }
+
+      // Initialize OpenAPI generator with caching
+      this.openAPIGenerator = new OpenAPIGeneratorCached({
+        database: this.options.database,
+        resources: this.options.resources,
+        auth: this.options.auth,
+        versionPrefix: this.options.versionPrefix,
+        apiInfo: this.options.apiInfo,
+        namespace: this.options.namespace,
+        verbose: this.options.verbose
+      });
 
       // Setup all routes
       this._setupRoutes();

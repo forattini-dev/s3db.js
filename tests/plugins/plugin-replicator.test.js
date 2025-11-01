@@ -42,6 +42,30 @@ describe('ReplicatorPlugin - config parsing and validation', () => {
     });
     expect(plugin.logResourceName).toBe('plg_custom_logs');
   });
+
+  test('applies bounded concurrency defaults', () => {
+    const plugin = new ReplicatorPlugin({
+      replicators: [
+        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
+      ]
+    });
+
+    expect(plugin.config.replicatorConcurrency).toBe(5);
+    expect(plugin.config.stopConcurrency).toBe(plugin.config.replicatorConcurrency);
+  });
+
+  test('sanitizes custom concurrency values', () => {
+    const plugin = new ReplicatorPlugin({
+      replicatorConcurrency: 12.7,
+      stopConcurrency: -3,
+      replicators: [
+        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
+      ]
+    });
+
+    expect(plugin.config.replicatorConcurrency).toBe(12);
+    expect(plugin.config.stopConcurrency).toBe(1);
+  });
 });
 
 describe('ReplicatorPlugin - config syntaxes', () => {
@@ -210,6 +234,33 @@ describe('ReplicatorPlugin - data handling', () => {
       name: 'test'
     });
   });
+
+  test('processReplicatorEvent sanitizes payload before invoking replicator', async () => {
+    const plugin = new ReplicatorPlugin({
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const replicator = {
+      name: 'test-replicator',
+      shouldReplicateResource: jest.fn().mockReturnValue(true),
+      replicate: jest.fn().mockResolvedValue({ success: true })
+    };
+
+    plugin.replicators = [replicator];
+
+    await plugin.processReplicatorEvent('insert', 'users', '1', {
+      id: '1',
+      _internal: 'ignore'
+    });
+
+    expect(replicator.replicate).toHaveBeenCalledWith(
+      'users',
+      'insert',
+      { id: '1' },
+      '1',
+      null
+    );
+  });
 });
 
 describe('ReplicatorPlugin - previously untested methods', () => {
@@ -317,14 +368,14 @@ describe('ReplicatorPlugin - previously untested methods', () => {
     });
 
     const failedLogs = [
-      { operation: 'insert', resourceName: 'users', recordId: '1', data: { id: '1' } }
+      { operation: 'insert', resourceName: 'users', recordId: '1', data: { id: '1' }, status: 'failed' }
     ];
 
     plugin.replicatorLog = {
       query: jest.fn().mockResolvedValue(failedLogs)
     };
 
-    plugin.processReplicatorEvent = jest.fn().mockResolvedValue({ success: true });
+    plugin.processReplicatorEvent = jest.fn().mockResolvedValue([{ status: 'fulfilled' }]);
 
     const result = await plugin.retryFailedReplicators();
 
@@ -333,9 +384,118 @@ describe('ReplicatorPlugin - previously untested methods', () => {
       'insert',
       'users',
       '1',
-      { id: '1' }
+      { id: '1' },
+      null
     );
     expect(result.retried).toBe(1);
+  });
+
+  test('retryFailedReplicators marks successful retries in the log', async () => {
+    const plugin = new ReplicatorPlugin({
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const logEntry = {
+      id: 'log-1',
+      operation: 'insert',
+      resourceName: 'users',
+      recordId: '1',
+      data: { id: '1' },
+      retryCount: 2,
+      status: 'failed'
+    };
+
+    plugin.replicatorLog = {
+      query: jest.fn().mockResolvedValue([logEntry])
+    };
+
+    plugin.processReplicatorEvent = jest.fn().mockResolvedValue([{ status: 'fulfilled' }]);
+    plugin.updateReplicatorLog = jest.fn();
+
+    await plugin.retryFailedReplicators();
+
+    expect(plugin.updateReplicatorLog).toHaveBeenCalledWith(
+      'log-1',
+      expect.objectContaining({
+        status: 'success',
+        error: null,
+        retryCount: 2,
+        lastSuccessAt: expect.any(String)
+      })
+    );
+  });
+
+  test('retryFailedReplicators increments retryCount when retry fails', async () => {
+    const plugin = new ReplicatorPlugin({
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const logEntry = {
+      id: 'log-2',
+      operation: 'update',
+      resourceName: 'users',
+      recordId: '42',
+      data: { id: '42' },
+      retryCount: 1,
+      status: 'failed'
+    };
+
+    plugin.replicatorLog = {
+      query: jest.fn().mockResolvedValue([logEntry])
+    };
+
+    const error = new Error('still broken');
+    plugin.processReplicatorEvent = jest.fn().mockResolvedValue([
+      { status: 'rejected', reason: error }
+    ]);
+    plugin.updateReplicatorLog = jest.fn();
+
+    await plugin.retryFailedReplicators();
+
+    expect(plugin.updateReplicatorLog).toHaveBeenCalledWith(
+      'log-2',
+      expect.objectContaining({
+        status: 'failed',
+        error: 'still broken',
+        retryCount: 2
+      })
+    );
+  });
+
+  test('retryFailedReplicators treats unsuccessful fulfilled entries as failures', async () => {
+    const plugin = new ReplicatorPlugin({
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const logEntry = {
+      id: 'log-3',
+      operation: 'delete',
+      resourceName: 'users',
+      recordId: '55',
+      data: { id: '55' },
+      retryCount: 0,
+      status: 'failed'
+    };
+
+    plugin.replicatorLog = {
+      query: jest.fn().mockResolvedValue([logEntry])
+    };
+
+    plugin.processReplicatorEvent = jest.fn().mockResolvedValue([
+      { status: 'fulfilled', value: { success: false, error: 'downstream refused request' } }
+    ]);
+    plugin.updateReplicatorLog = jest.fn();
+
+    await plugin.retryFailedReplicators();
+
+    expect(plugin.updateReplicatorLog).toHaveBeenCalledWith(
+      'log-3',
+      expect.objectContaining({
+        status: 'failed',
+        error: 'downstream refused request',
+        retryCount: 1
+      })
+    );
   });
 
   test('syncAllData uses pagination instead of getAll', async () => {
@@ -413,6 +573,29 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       operation: 'insert',
       resource: 'users'
     }));
+  });
+
+  test('processReplicatorEvent updates replication statistics', async () => {
+    const plugin = new ReplicatorPlugin({
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const replicator = {
+      name: 'stats-replicator',
+      shouldReplicateResource: jest.fn().mockReturnValue(true),
+      replicate: jest.fn().mockResolvedValue({ success: true })
+    };
+
+    plugin.replicators = [replicator];
+
+    await plugin.processReplicatorEvent('insert', 'users', '1', { id: '1' });
+    expect(plugin.stats.totalReplications).toBe(1);
+
+    replicator.replicate.mockRejectedValue(new Error('boom'));
+
+    const results = await plugin.processReplicatorEvent('insert', 'users', '2', { id: '2' });
+    expect(results[0].status).toBe('rejected');
+    expect(plugin.stats.totalErrors).toBe(1);
   });
 
   test('handles errors in update event listener gracefully', async () => {
@@ -555,14 +738,133 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     await plugin.logReplicator({
       resource: 'users',
       operation: 'insert',
-      data: { id: '1' }
+      data: { id: '1', _internal: 'ignore' }
     });
 
     expect(mockLogResource.insert).toHaveBeenCalledWith(expect.objectContaining({
+      replicator: expect.any(String),
       resource: 'users',
+      resourceName: 'users',
       action: 'insert',
-      data: { id: '1' }
+      data: { id: '1' },
+      status: 'pending',
+      timestamp: expect.any(Number)
     }));
+  });
+
+  test('replicator log beforeInsert hook normalizes payload defaults', async () => {
+    const plugin = new ReplicatorPlugin({
+      persistReplicatorLog: true,
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const hooks = {};
+    const mockLogResource = {
+      addHook: jest.fn((event, fn) => {
+        if (!hooks[event]) {
+          hooks[event] = [];
+        }
+        hooks[event].push(fn);
+      })
+    };
+
+    plugin.replicatorLog = mockLogResource;
+    plugin.installReplicatorLogHooks();
+
+    expect(hooks.beforeInsert).toBeDefined();
+    const beforeInsert = hooks.beforeInsert[0];
+
+    const payload = {
+      resourceName: 'Users',
+      action: 'insert',
+      data: { id: '123' },
+      status: 'failed',
+      retryCount: '3'
+    };
+
+    const result = await beforeInsert(payload);
+
+    expect(result).toBe(payload);
+    expect(payload.id).toMatch(/^repl-/);
+    expect(payload.timestamp).toEqual(expect.any(Number));
+    expect(payload.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(payload.resourceName).toBe('users');
+    expect(payload.resource).toBe('users');
+    expect(payload.retryCount).toBe(3);
+    expect(payload.status).toBe('failed');
+  });
+
+  test('replicator log beforeUpdate hook corrects timestamp and retryCount', async () => {
+    const plugin = new ReplicatorPlugin({
+      persistReplicatorLog: true,
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const hooks = {};
+    const mockLogResource = {
+      addHook: jest.fn((event, fn) => {
+        if (!hooks[event]) hooks[event] = [];
+        hooks[event].push(fn);
+      })
+    };
+
+    plugin.replicatorLog = mockLogResource;
+    plugin.installReplicatorLogHooks();
+
+    const beforeUpdate = hooks.beforeUpdate[0];
+    const payload = {
+      id: 'existing-log',
+      resourceName: 'Users',
+      timestamp: 'not-a-number',
+      status: '',
+      retryCount: -5
+    };
+
+    const result = await beforeUpdate(payload);
+
+    expect(result).toBe(payload);
+    expect(payload.id).toBe('existing-log');
+    expect(payload.timestamp).toEqual(expect.any(Number));
+    expect(payload.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(payload.resourceName).toBe('users');
+    expect(payload.retryCount).toBe(0);
+    expect(payload.status).toBe('pending');
+  });
+
+  test('replicator log beforePatch hook normalizes partial fields', async () => {
+    const plugin = new ReplicatorPlugin({
+      persistReplicatorLog: true,
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
+    });
+
+    const hooks = {};
+    const mockLogResource = {
+      addHook: jest.fn((event, fn) => {
+        if (!hooks[event]) hooks[event] = [];
+        hooks[event].push(fn);
+      })
+    };
+
+    plugin.replicatorLog = mockLogResource;
+    plugin.installReplicatorLogHooks();
+
+    const beforePatch = hooks.beforePatch[0];
+    const payload = {
+      fields: {
+        resourceName: 'Users',
+        operation: 'insert',
+        retryCount: '9',
+        status: ''
+      }
+    };
+
+    const result = await beforePatch(payload);
+
+    expect(result).toBe(payload);
+    expect(payload.fields.resourceName).toBe('users');
+    expect(payload.fields.resource).toBe('users');
+    expect(payload.fields.retryCount).toBe(9);
+    expect(payload.fields.status).toBe('pending');
   });
 
   test('logReplicator emits event when log resource not found', async () => {
@@ -719,7 +1021,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
     });
 
-    const mockLogResource = { name: 'custom_log' };
+    const mockLogResource = { name: 'custom_log', addHook: jest.fn() };
     const mockDatabase = {
       resources: {},
       createResource: jest.fn().mockResolvedValue(mockLogResource),
@@ -735,6 +1037,9 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       behavior: 'truncate-data'
     }));
     expect(plugin.replicatorLog).toBe(mockLogResource);
+    expect(mockLogResource.addHook).toHaveBeenCalledWith('beforeInsert', expect.any(Function));
+    expect(mockLogResource.addHook).toHaveBeenCalledWith('beforeUpdate', expect.any(Function));
+    expect(mockLogResource.addHook).toHaveBeenCalledWith('beforePatch', expect.any(Function));
   });
 
   test('setup with persistReplicatorLog uses existing resource on error', async () => {
@@ -744,7 +1049,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
     });
 
-    const existingLog = { name: 'plg_existing_log' };
+    const existingLog = { name: 'plg_existing_log', addHook: jest.fn() };
     const mockDatabase = {
       resources: { plg_existing_log: existingLog },
       createResource: jest.fn().mockRejectedValue(new Error('Already exists')),
@@ -756,6 +1061,9 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     await plugin.install(mockDatabase);
 
     expect(plugin.replicatorLog).toBe(existingLog);
+    expect(existingLog.addHook).toHaveBeenCalledWith('beforeInsert', expect.any(Function));
+    expect(existingLog.addHook).toHaveBeenCalledWith('beforeUpdate', expect.any(Function));
+    expect(existingLog.addHook).toHaveBeenCalledWith('beforePatch', expect.any(Function));
   });
 
   test('retryWithBackoff exhausts all retries and throws', async () => {
@@ -792,11 +1100,11 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     expect(mockLogResource.insert).toHaveBeenCalledWith(expect.objectContaining({
       replicator: 'test-replicator',
+      resource: 'users',
       resourceName: 'users',
-      operation: 'insert',
-      recordId: '123',
+      action: 'insert',
       error: 'Replication error',
-      status: 'error'
+      status: 'failed'
     }));
   });
 
@@ -864,14 +1172,14 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       resourceName: 'users',
       operation: 'insert',
       recordId: '1',
-      data: { id: '1', name: 'Test' }
+      data: { id: '1', name: 'Test', _internal: 'ignore' }
     };
 
     const eventSpy = jest.spyOn(plugin, 'emit');
 
     await plugin.processReplicatorItem(item);
 
-    expect(mockReplicator.replicate).toHaveBeenCalledWith('users', 'insert', { id: '1', name: 'Test' }, '1', undefined);
+    expect(mockReplicator.replicate).toHaveBeenCalledWith('users', 'insert', { id: '1', name: 'Test' }, '1', null);
     expect(eventSpy).toHaveBeenCalledWith('plg:replicator:replicated', expect.objectContaining({
       replicator: 'test-replicator',
       success: true

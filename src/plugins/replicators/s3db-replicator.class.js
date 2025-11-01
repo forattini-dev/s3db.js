@@ -359,26 +359,33 @@ class S3dbReplicator extends BaseReplicator {
       return { skipped: true, reason: 'resource_not_included' };
     }
 
-    const results = [];
-    const errors = [];
+    const { results, errors } = await this.processBatch(
+      records,
+      async (record) => {
+        const [ok, err, result] = await tryFn(() => this.replicate({
+          resource: resourceName,
+          operation: record.operation,
+          id: record.id,
+          data: record.data,
+          beforeData: record.beforeData
+        }));
 
-    for (const record of records) {
-      const [ok, err, result] = await tryFn(() => this.replicate({
-        resource: resourceName, 
-        operation: record.operation, 
-        id: record.id, 
-        data: record.data, 
-        beforeData: record.beforeData
-      }));
-      if (ok) {
-        results.push(result);
-      } else {
-        if (this.config.verbose) {
-          console.warn(`[S3dbReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+        if (!ok) {
+          throw err;
         }
-        errors.push({ id: record.id, error: err.message });
+
+        return result;
+      },
+      {
+        concurrency: this.config.batchConcurrency,
+        mapError: (error, record) => {
+          if (this.config.verbose) {
+            console.warn(`[S3dbReplicator] Batch replication failed for record ${record.id}: ${error.message}`);
+          }
+          return { id: record.id, error: error.message };
+        }
       }
-    }
+    );
 
     // Log errors if any occurred during batch processing
     if (errors.length > 0) {

@@ -87,7 +87,12 @@ class BigqueryReplicator extends BaseReplicator {
   _validateMutability(mutability) {
     const validModes = ['append-only', 'mutable', 'immutable'];
     if (!validModes.includes(mutability)) {
-      throw new Error(`Invalid mutability mode: ${mutability}. Must be one of: ${validModes.join(', ')}`);
+      throw this.createError(`Invalid mutability mode: ${mutability}`, {
+        operation: 'config',
+        statusCode: 400,
+        retriable: false,
+        suggestion: `Use one of the supported mutability modes: ${validModes.join(', ')}.`
+      });
     }
   }
 
@@ -236,7 +241,15 @@ class BigqueryReplicator extends BaseReplicator {
           const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
 
           if (this.schemaSync.onMismatch === 'error') {
-            throw new Error(message);
+            throw this.createError(message, {
+              operation: 'schemaSync',
+              resourceName,
+              tableName,
+              statusCode: 409,
+              retriable: errSync?.retriable ?? false,
+              suggestion: 'Review the BigQuery table schema and align it with the S3DB resource definition or relax schemaSync.onMismatch.',
+              docs: 'docs/plugins/replicator.md'
+            });
           } else if (this.schemaSync.onMismatch === 'warn') {
             console.warn(`[BigQueryReplicator] ${message}`);
           }
@@ -262,11 +275,23 @@ class BigqueryReplicator extends BaseReplicator {
 
     if (!exists) {
       if (!this.schemaSync.autoCreateTable) {
-        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+        throw this.createError(`Table ${tableName} does not exist and autoCreateTable is disabled`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Create the BigQuery table manually or enable schemaSync.autoCreateTable.'
+        });
       }
 
       if (this.schemaSync.strategy === 'validate-only') {
-        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+        throw this.createError(`Table ${tableName} does not exist (validate-only mode)`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Provision the table before running validate-only checks or switch the schemaSync.strategy to alter.'
+        });
       }
 
       // Create table with schema (including tracking fields based on mutability)
@@ -340,7 +365,13 @@ class BigqueryReplicator extends BaseReplicator {
       const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema, mutability);
 
       if (newFields.length > 0) {
-        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${newFields.length}`);
+        throw this.createError(`Table ${tableName} schema mismatch. Missing columns: ${newFields.length}`, {
+          operation: 'schemaValidation',
+          tableName,
+          statusCode: 409,
+          retriable: false,
+          suggestion: 'Update the BigQuery table schema to include the missing columns or enable schemaSync.autoCreateColumns.'
+        });
       }
     }
   }
@@ -556,7 +587,14 @@ class BigqueryReplicator extends BaseReplicator {
               throw error;
             }
           } else {
-            throw new Error(`Unsupported operation: ${operation}`);
+            throw this.createError(`Unsupported operation: ${operation}`, {
+              operation: 'replicate',
+              resourceName,
+              tableName: tableConfig.table,
+              statusCode: 400,
+              retriable: false,
+              suggestion: 'Replicator supports insert, update, or delete actions. Adjust the resources configuration accordingly.'
+            });
           }
 
           results.push({
@@ -635,26 +673,31 @@ class BigqueryReplicator extends BaseReplicator {
   }
 
   async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
-
-    for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
+    const { results, errors } = await this.processBatch(
+      records,
+      async (record) => {
+        const [ok, err, res] = await tryFn(() => this.replicate(
         resourceName,
         record.operation,
         record.data,
         record.id,
         record.beforeData
       ));
-      if (ok) {
-        results.push(res);
-      } else {
-        if (this.config.verbose) {
-          console.warn(`[BigqueryReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+        if (!ok) {
+          throw err;
         }
-        errors.push({ id: record.id, error: err.message });
+        return res;
+      },
+      {
+        concurrency: this.config.batchConcurrency,
+        mapError: (error, record) => {
+          if (this.config.verbose) {
+            console.warn(`[BigqueryReplicator] Batch replication failed for record ${record.id}: ${error.message}`);
+          }
+          return { id: record.id, error: error.message };
+        }
       }
-    }
+    );
 
     // Log errors if any occurred during batch processing
     if (errors.length > 0) {

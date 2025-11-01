@@ -1,5 +1,11 @@
 # ⏱️ TTL Plugin v2
 
+> **Automated record expiration with O(1) indexing and flexible cleanup strategies.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-options) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Automatic Time-To-Live cleanup** with partition-based indexing for O(1) performance.

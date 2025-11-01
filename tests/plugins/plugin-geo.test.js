@@ -463,7 +463,7 @@ describe('GeoPlugin - findNearby Method', () => {
   test('should throw error when lat/lon are missing', async () => {
     await expect(
       restaurants.findNearby({ radius: 10 })
-    ).rejects.toThrow('lat and lon are required for findNearby');
+    ).rejects.toThrow('Latitude and longitude are required for findNearby()');
   });
 
   test('should use default radius and limit', async () => {
@@ -563,7 +563,7 @@ describe('GeoPlugin - findInBounds Method', () => {
   test('should throw error when bounds are missing', async () => {
     await expect(
       locations.findInBounds({ north: -23.4, south: -23.7 })
-    ).rejects.toThrow('north, south, east, west are required for findInBounds');
+    ).rejects.toThrow('Bounding box requires north, south, east, west coordinates');
   });
 
   test('should filter locations within exact bounds', async () => {

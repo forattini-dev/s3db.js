@@ -15,13 +15,7 @@ import {
   registerCloudDriver,
   BaseCloudDriver
 } from './cloud-inventory/index.js';
-
-const DEFAULT_RESOURCES = {
-  snapshots: 'plg_cloud_inventory_snapshots',
-  versions: 'plg_cloud_inventory_versions',
-  changes: 'plg_cloud_inventory_changes',
-  clouds: 'plg_cloud_inventory_clouds'
-};
+import { resolveResourceNames } from './concerns/resource-names.js';
 
 const DEFAULT_DISCOVERY = {
   concurrency: 3,
@@ -78,16 +72,34 @@ export class CloudInventoryPlugin extends Plugin {
       (level, message, meta) => pendingLogs.push({ level, message, meta })
     );
 
+    this._internalResourceOverrides = options.resourceNames || {};
+    this._internalResourceDescriptors = {
+      snapshots: {
+        defaultName: 'plg_cloud_inventory_snapshots',
+        override: this._internalResourceOverrides.snapshots
+      },
+      versions: {
+        defaultName: 'plg_cloud_inventory_versions',
+        override: this._internalResourceOverrides.versions
+      },
+      changes: {
+        defaultName: 'plg_cloud_inventory_changes',
+        override: this._internalResourceOverrides.changes
+      },
+      clouds: {
+        defaultName: 'plg_cloud_inventory_clouds',
+        override: this._internalResourceOverrides.clouds
+      }
+    };
+    this.internalResourceNames = this._resolveInternalResourceNames();
+
     this.config = {
       clouds: normalizedClouds,
       discovery: {
         ...DEFAULT_DISCOVERY,
         ...(options.discovery || {})
       },
-      resources: {
-        ...DEFAULT_RESOURCES,
-        ...(options.resources || {})
-      },
+      resourceNames: this.internalResourceNames,
       logger: typeof options.logger === 'function' ? options.logger : null,
       verbose: options.verbose === true,
       scheduled: normalizeSchedule(options.scheduled),
@@ -109,6 +121,7 @@ export class CloudInventoryPlugin extends Plugin {
     this._resourceHandles = {};
     this._scheduledJobs = [];
     this._cron = null;
+    this.resourceNames = this.internalResourceNames;
 
     for (const entry of pendingLogs) {
       this._log(entry.level, entry.message, entry.meta);
@@ -137,6 +150,15 @@ export class CloudInventoryPlugin extends Plugin {
   async onUninstall() {
     await this._teardownSchedules();
     await this._destroyDrivers();
+  }
+
+  onNamespaceChanged() {
+    this.internalResourceNames = this._resolveInternalResourceNames();
+    if (this.config) {
+      this.config.resourceNames = this.internalResourceNames;
+    }
+    this.resourceNames = this.internalResourceNames;
+    this._resourceHandles = {};
   }
 
   async syncAll(options = {}) {
@@ -635,12 +657,11 @@ export class CloudInventoryPlugin extends Plugin {
   }
 
   async _ensureResources() {
-    const {
-      snapshots,
-      versions,
-      changes,
-      clouds
-    } = this.config.resources;
+    const names = this.internalResourceNames;
+    const snapshots = names.snapshots;
+    const versions = names.versions;
+    const changes = names.changes;
+    const clouds = names.clouds;
 
     const resourceDefinitions = [
       {
@@ -796,6 +817,13 @@ export class CloudInventoryPlugin extends Plugin {
     this._resourceHandles.versions = this.database.resources[versions];
     this._resourceHandles.changes = this.database.resources[changes];
     this._resourceHandles.clouds = this.database.resources[clouds];
+    this.resourceNames = this.internalResourceNames;
+  }
+
+  _resolveInternalResourceNames() {
+    return resolveResourceNames('cloud_inventory', this._internalResourceDescriptors, {
+      namespace: this.namespace
+    });
   }
 
   async _initializeDrivers() {

@@ -1,5 +1,11 @@
 # 💾 Backup Plugin
 
+> **Streaming backups and restores with filesystem, S3, and multi-target drivers.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 Backup/restore system with **streaming architecture** (~10KB constant memory), **JSONL format**, and **multiple drivers** (filesystem/S3/multi).
@@ -1295,13 +1301,22 @@ The Backup Plugin uses `BackupError` for all backup-related errors. All errors i
 try {
   await backupPlugin.backup('full');
 } catch (error) {
-  console.log(error.name);         // 'BackupError'
-  console.log(error.message);      // Brief error message
-  console.log(error.description);  // Detailed diagnostic information
-  console.log(error.driver);       // 'filesystem', 's3', 'multi'
-  console.log(error.operation);    // 'backup', 'restore', 'list', etc.
+  console.log(error.name);        // 'BackupError'
+  console.log(error.message);     // Human readable summary
+  console.log(error.statusCode);  // HTTP-aligned status (e.g. 409)
+  console.log(error.retriable);   // Should we retry automatically?
+  console.log(error.suggestion);  // Actionable remediation tip
+  console.log(error.operation);   // 'backup', 'restore', 'verify', etc.
+  console.log(error.metadata);    // Extra context (backupId, driver info, ...)
 }
 ```
+
+Every `BackupError` now includes:
+
+- `statusCode`: REST-friendly status to map into API responses.
+- `retriable`: Boolean hint for schedulers/workers.
+- `suggestion`: English remediation guidance you can surface to operators.
+- `metadata`: Structured payload (e.g. `{ backupId, checksum }`) for logging.
 
 ### Common Errors
 
@@ -1315,6 +1330,9 @@ new BackupPlugin({
 
 // Error: BackupError
 // Operation: validateConfig
+// statusCode: 400
+// retriable: false
+// Suggestion: Provide a valid config.path for the filesystem driver.
 // Description: Invalid backup driver configuration
 ```
 
@@ -1326,6 +1344,9 @@ await backupPlugin.backup('full');
 // Error: BackupError
 // Operation: upload
 // Driver: filesystem
+// statusCode: 502
+// retriable: true
+// Suggestion: Check disk space/permissions or network connectivity, then retry the upload.
 // Description: Failed to upload backup file
 // Common causes:
 // 1. Insufficient disk space
@@ -1341,6 +1362,9 @@ await backupPlugin.restore('invalid-backup-id');
 
 // Error: BackupError
 // Operation: restore
+// statusCode: 404
+// retriable: false
+// Suggestion: Confirm the backupId exists or run backupPlugin.list() before restoring.
 // Description: Failed to restore from backup
 // Common causes:
 // 1. Backup ID does not exist
@@ -1366,6 +1390,9 @@ new BackupPlugin({
 // Error: BackupError
 // Operation: backup
 // Driver: multi
+// statusCode: 502
+// retriable: true
+// Suggestion: Inspect individual driver errors in error.metadata.destinations and fix the failing target.
 // Description: Multi-destination backup failed
 // Strategy: all (requires all destinations to succeed)
 ```

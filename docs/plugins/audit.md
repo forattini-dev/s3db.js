@@ -1,5 +1,11 @@
 # 📝 Audit Plugin
 
+> **Compliance-grade operation logging for every insert, update, and delete.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 Automatic tracking of **all** database operations (insert/update/delete) with complete history for compliance, security and debugging.

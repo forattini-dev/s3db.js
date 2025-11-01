@@ -44,6 +44,21 @@ import tryFn from '../../concerns/try-fn.js';
 import { verifyPassword } from './concerns/password.js';
 import { PluginError } from '../../errors.js';
 
+function constantTimeEqual(a, b) {
+  const valueA = Buffer.from(String(a ?? ''), 'utf8');
+  const valueB = Buffer.from(String(b ?? ''), 'utf8');
+
+  if (valueA.length !== valueB.length) {
+    return false;
+  }
+
+  let mismatch = 0;
+  for (let i = 0; i < valueA.length; i += 1) {
+    mismatch |= valueA[i] ^ valueB[i];
+  }
+  return mismatch === 0;
+}
+
 /**
  * OAuth2/OIDC Authorization Server
  */
@@ -56,7 +71,7 @@ export class OAuth2Server {
       clientResource,
       authCodeResource,
       supportedScopes = ['openid', 'profile', 'email', 'offline_access'],
-      supportedGrantTypes = ['authorization_code', 'client_credentials', 'refresh_token'],
+      supportedGrantTypes = ['authorization_code', 'client_credentials', 'refresh_token', 'password'],
       supportedResponseTypes = ['code', 'token', 'id_token'],
       accessTokenExpiry = '15m',
       idTokenExpiry = '15m',
@@ -108,6 +123,7 @@ export class OAuth2Server {
     this.authCodeExpiry = authCodeExpiry;
 
     this.keyManager = new KeyManager(keyResource);
+    this.identityPlugin = null;
   }
 
   /**
@@ -115,6 +131,10 @@ export class OAuth2Server {
    */
   async initialize() {
     await this.keyManager.initialize();
+  }
+
+  setIdentityPlugin(identityPlugin) {
+    this.identityPlugin = identityPlugin;
   }
 
   /**
@@ -191,27 +211,45 @@ export class OAuth2Server {
         });
       }
 
-      // Authenticate client if clientResource is provided
+      let authenticatedClient = null;
+
       if (this.clientResource) {
-        const client = await this.authenticateClient(client_id, client_secret);
-        if (!client) {
+        authenticatedClient = await this.authenticateClient(client_id, client_secret);
+        if (!authenticatedClient) {
           return res.status(401).json({
             error: 'invalid_client',
             error_description: 'Client authentication failed'
           });
         }
+      } else if (client_id) {
+        authenticatedClient = { clientId: client_id };
       }
+
+      req.authenticatedClient = authenticatedClient;
 
       // Handle different grant types
       switch (grant_type) {
         case 'client_credentials':
-          return await this.handleClientCredentials(req, res, { client_id, scope });
+          return await this.handleClientCredentials(req, res, {
+            client: authenticatedClient,
+            client_id,
+            scope
+          });
 
         case 'authorization_code':
           return await this.handleAuthorizationCode(req, res);
 
         case 'refresh_token':
-          return await this.handleRefreshToken(req, res);
+          return await this.handleRefreshToken(req, res, {
+            client: authenticatedClient,
+            scope
+          });
+
+        case 'password':
+          return await this.handlePasswordGrant(req, res, {
+            client: authenticatedClient,
+            scope
+          });
 
         default:
           return res.status(400).json({
@@ -230,7 +268,30 @@ export class OAuth2Server {
   /**
    * Client Credentials flow handler
    */
-  async handleClientCredentials(req, res, { client_id, scope }) {
+  async handleClientCredentials(req, res, { client, client_id, scope } = {}) {
+    const resolvedClient = client || (client_id ? { clientId: client_id } : null);
+    const resolvedClientId = resolvedClient?.clientId || client_id;
+
+    if (!resolvedClientId) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'client_id is required'
+      });
+    }
+
+    const allowedGrantTypes = Array.isArray(resolvedClient?.grantTypes)
+      ? resolvedClient.grantTypes
+      : Array.isArray(resolvedClient?.allowedGrantTypes)
+        ? resolvedClient.allowedGrantTypes
+        : null;
+
+    if (allowedGrantTypes && allowedGrantTypes.length > 0 && !allowedGrantTypes.includes('client_credentials')) {
+      return res.status(400).json({
+        error: 'unauthorized_client',
+        error_description: 'Client is not allowed to use client_credentials grant'
+      });
+    }
+
     const scopes = parseScopes(scope);
 
     // Validate scopes
@@ -242,10 +303,20 @@ export class OAuth2Server {
       });
     }
 
+    if (Array.isArray(resolvedClient?.allowedScopes) && resolvedClient.allowedScopes.length > 0) {
+      const disallowedScopes = scopeValidation.scopes.filter(scopeValue => !resolvedClient.allowedScopes.includes(scopeValue));
+      if (disallowedScopes.length > 0) {
+        return res.status(400).json({
+          error: 'invalid_scope',
+          error_description: `Client is not allowed to request scopes: ${disallowedScopes.join(', ')}`
+        });
+      }
+    }
+
     // Create access token
     const accessToken = this.keyManager.createToken({
       iss: this.issuer,
-      sub: client_id,
+      sub: resolvedClientId,
       aud: this.issuer,
       scope: scopeValidation.scopes.join(' '),
       token_type: 'access_token'
@@ -401,11 +472,148 @@ export class OAuth2Server {
     return res.status(200).json(response);
   }
 
+  async handlePasswordGrant(req, res, context = {}) {
+    if (!this.identityPlugin || typeof this.identityPlugin.authenticateWithPassword !== 'function') {
+      return res.status(400).json({
+        error: 'unsupported_grant_type',
+        error_description: 'Password grant is not configured'
+      });
+    }
+
+    const driver = this.identityPlugin.getAuthDriver?.('password');
+    if (!driver || (typeof driver.supportsGrant === 'function' && !driver.supportsGrant('password'))) {
+      return res.status(400).json({
+        error: 'unsupported_grant_type',
+        error_description: 'Password grant is not available'
+      });
+    }
+
+    const client = context.client ?? req.authenticatedClient ?? null;
+
+    if (client) {
+      if (client.active === false) {
+        return res.status(400).json({
+          error: 'unauthorized_client',
+          error_description: 'Client is inactive'
+        });
+      }
+
+      const allowedGrantTypes = Array.isArray(client.grantTypes)
+        ? client.grantTypes
+        : Array.isArray(client.allowedGrantTypes)
+          ? client.allowedGrantTypes
+          : null;
+
+      if (allowedGrantTypes && allowedGrantTypes.length > 0 && !allowedGrantTypes.includes('password')) {
+        return res.status(400).json({
+          error: 'unauthorized_client',
+          error_description: 'Client is not allowed to use password grant'
+        });
+      }
+    }
+
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'username and password are required'
+      });
+    }
+
+    const authResult = await this.identityPlugin.authenticateWithPassword({
+      email: username,
+      password
+    });
+
+    if (!authResult?.success || !authResult.user) {
+      return res.status(authResult?.statusCode || 400).json({
+        error: authResult?.error || 'invalid_grant',
+        error_description: 'Invalid credentials'
+      });
+    }
+
+    const user = authResult.user;
+    if (user.active !== undefined && user.active === false) {
+      return res.status(400).json({
+        error: 'invalid_grant',
+        error_description: 'User account is inactive'
+      });
+    }
+
+    const requestedScope = context.scope ?? req.body.scope;
+    const scopes = parseScopes(requestedScope);
+    const scopeValidation = validateScopes(scopes, this.supportedScopes);
+    if (!scopeValidation.valid) {
+      return res.status(400).json({
+        error: 'invalid_scope',
+        error_description: scopeValidation.error
+      });
+    }
+
+    if (client && Array.isArray(client.allowedScopes) && client.allowedScopes.length > 0) {
+      const disallowedScopes = scopeValidation.scopes.filter(scopeValue => !client.allowedScopes.includes(scopeValue));
+      if (disallowedScopes.length > 0) {
+        return res.status(400).json({
+          error: 'invalid_scope',
+          error_description: `Client is not allowed to request scopes: ${disallowedScopes.join(', ')}`
+        });
+      }
+    }
+
+    const resolvedAudience = client?.clientId || req.body.client_id || this.issuer;
+
+    const accessToken = this.keyManager.createToken({
+      iss: this.issuer,
+      sub: user.id,
+      aud: resolvedAudience,
+      scope: scopeValidation.scopes.join(' '),
+      token_type: 'access_token'
+    }, this.accessTokenExpiry);
+
+    const response = {
+      access_token: accessToken,
+      token_type: 'Bearer',
+      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry),
+      scope: scopeValidation.scopes.join(' ')
+    };
+
+    const allowRefreshToken = scopeValidation.scopes.includes('offline_access') &&
+      this.supportedGrantTypes.includes('refresh_token');
+
+    if (allowRefreshToken) {
+      const refreshToken = this.keyManager.createToken({
+        iss: this.issuer,
+        sub: user.id,
+        aud: this.issuer,
+        scope: scopeValidation.scopes.join(' '),
+        token_type: 'refresh_token'
+      }, this.refreshTokenExpiry);
+
+      response.refresh_token = refreshToken;
+    }
+
+    if (scopeValidation.scopes.includes('openid')) {
+      const userClaims = extractUserClaims(user, scopeValidation.scopes);
+
+      const idToken = this.keyManager.createToken({
+        iss: this.issuer,
+        sub: user.id,
+        aud: resolvedAudience,
+        ...userClaims
+      }, this.idTokenExpiry);
+
+      response.id_token = idToken;
+    }
+
+    return res.status(200).json(response);
+  }
+
   /**
    * Refresh Token flow handler
    */
-  async handleRefreshToken(req, res) {
+  async handleRefreshToken(req, res, context = {}) {
     const { refresh_token, scope } = req.body;
+    const client = context.client ?? req.authenticatedClient ?? null;
 
     if (!refresh_token) {
       return res.status(400).json({
@@ -434,6 +642,33 @@ export class OAuth2Server {
       });
     }
 
+    if (client?.clientId && payload.aud && payload.aud !== client.clientId) {
+      return res.status(400).json({
+        error: 'invalid_grant',
+        error_description: 'Refresh token does not belong to this client'
+      });
+    }
+
+    if (client?.active === false) {
+      return res.status(400).json({
+        error: 'unauthorized_client',
+        error_description: 'Client is inactive'
+      });
+    }
+
+    const allowedGrantTypes = Array.isArray(client?.grantTypes)
+      ? client.grantTypes
+      : Array.isArray(client?.allowedGrantTypes)
+        ? client.allowedGrantTypes
+        : null;
+
+    if (allowedGrantTypes && allowedGrantTypes.length > 0 && !allowedGrantTypes.includes('refresh_token')) {
+      return res.status(400).json({
+        error: 'unauthorized_client',
+        error_description: 'Client is not allowed to use refresh_token grant'
+      });
+    }
+
     // Validate claims
     const claimValidation = validateClaims(payload, {
       issuer: this.issuer,
@@ -448,7 +683,8 @@ export class OAuth2Server {
     }
 
     // Parse scopes (use original scopes if not provided)
-    const requestedScopes = scope ? parseScopes(scope) : parseScopes(payload.scope);
+    const overrideScope = context.scope ?? scope;
+    const requestedScopes = overrideScope ? parseScopes(overrideScope) : parseScopes(payload.scope);
     const originalScopes = parseScopes(payload.scope);
 
     // Requested scopes must be subset of original scopes
@@ -458,6 +694,16 @@ export class OAuth2Server {
         error: 'invalid_scope',
         error_description: `Cannot request scopes not in original grant: ${invalidScopes.join(', ')}`
       });
+    }
+
+    if (client && Array.isArray(client.allowedScopes) && client.allowedScopes.length > 0) {
+      const disallowedScopes = requestedScopes.filter(scopeValue => !client.allowedScopes.includes(scopeValue));
+      if (disallowedScopes.length > 0) {
+        return res.status(400).json({
+          error: 'invalid_scope',
+          error_description: `Client is not allowed to request scopes: ${disallowedScopes.join(', ')}`
+        });
+      }
     }
 
     // Get user
@@ -481,7 +727,8 @@ export class OAuth2Server {
     const response = {
       access_token: accessToken,
       token_type: 'Bearer',
-      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry)
+      expires_in: this.parseExpiryToSeconds(this.accessTokenExpiry),
+      scope: requestedScopes.join(' ')
     };
 
     // Create new ID token if openid scope requested
@@ -630,24 +877,96 @@ export class OAuth2Server {
       return null;
     }
 
-    try {
-      const clients = await this.clientResource.query({ clientId });
-
-      if (clients.length === 0) {
-        return null;
+    const driver = this.identityPlugin?.getAuthDriver?.('client_credentials');
+    if (driver) {
+      const authResult = await driver.authenticate({ clientId, clientSecret });
+      if (authResult?.success) {
+        return authResult.client || { clientId };
       }
-
-      const client = clients[0];
-
-      // Verify client secret
-      if (client.clientSecret !== clientSecret) {
-        return null;
-      }
-
-      return client;
-    } catch (error) {
       return null;
     }
+
+    const [ok, err, clients] = await tryFn(() => this.clientResource.query({ clientId }));
+    if (!ok) {
+      if (err && this.identityPlugin?.config?.verbose) {
+        console.error('[Identity Plugin] Failed to query clients resource:', err.message);
+      }
+      return null;
+    }
+
+    if (!clients || clients.length === 0) {
+      return null;
+    }
+
+    const client = clients[0];
+
+    if (client.active === false) {
+      return null;
+    }
+
+    const secrets = [];
+    if (Array.isArray(client.secrets)) {
+      secrets.push(...client.secrets);
+    }
+    if (client.clientSecret) {
+      secrets.push(client.clientSecret);
+    }
+    if (client.secret) {
+      secrets.push(client.secret);
+    }
+
+    if (!secrets.length) {
+      return null;
+    }
+
+    let secretMatches = false;
+    for (const storedSecret of secrets) {
+      if (!storedSecret) continue;
+
+      if (this._isHashedSecret(storedSecret)) {
+        try {
+          const okHash = await verifyPassword(clientSecret, storedSecret);
+          if (okHash) {
+            secretMatches = true;
+            break;
+          }
+        } catch (error) {
+          if (this.identityPlugin?.config?.verbose) {
+            console.error('[Identity Plugin] Failed to verify client secret hash:', error.message);
+          }
+        }
+        continue;
+      }
+
+      if (constantTimeEqual(clientSecret, storedSecret)) {
+        secretMatches = true;
+        break;
+      }
+    }
+
+    if (!secretMatches) {
+      return null;
+    }
+
+    const sanitizedClient = { ...client };
+    if (sanitizedClient.clientSecret !== undefined) {
+      delete sanitizedClient.clientSecret;
+    }
+    if (sanitizedClient.secret !== undefined) {
+      delete sanitizedClient.secret;
+    }
+    if (sanitizedClient.secrets !== undefined) {
+      delete sanitizedClient.secrets;
+    }
+
+    return sanitizedClient;
+  }
+
+  _isHashedSecret(value) {
+    if (typeof value !== 'string') {
+      return false;
+    }
+    return value.startsWith('$') || value.startsWith('s3db$');
   }
 
   /**

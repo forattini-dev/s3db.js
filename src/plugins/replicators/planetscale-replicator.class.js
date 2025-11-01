@@ -204,7 +204,15 @@ class PlanetScaleReplicator extends BaseReplicator {
           const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
 
           if (this.schemaSync.onMismatch === 'error') {
-            throw new Error(message);
+            throw this.createError(message, {
+              operation: 'schemaSync',
+              resourceName,
+              tableName,
+              statusCode: 409,
+              retriable: errSync?.retriable ?? false,
+              suggestion: 'Align the PlanetScale table schema with the resource definition or relax schemaSync.onMismatch.',
+              docs: 'docs/plugins/replicator.md'
+            });
           } else if (this.schemaSync.onMismatch === 'warn') {
             console.warn(`[PlanetScaleReplicator] ${message}`);
           }
@@ -227,11 +235,23 @@ class PlanetScaleReplicator extends BaseReplicator {
 
     if (!existingSchema) {
       if (!this.schemaSync.autoCreateTable) {
-        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+        throw this.createError(`Table ${tableName} does not exist and autoCreateTable is disabled`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Create the table manually or enable schemaSync.autoCreateTable.'
+        });
       }
 
       if (this.schemaSync.strategy === 'validate-only') {
-        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+        throw this.createError(`Table ${tableName} does not exist (validate-only mode)`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Provision the table before running validate-only checks or choose the alter strategy.'
+        });
       }
 
       // Create table
@@ -295,7 +315,13 @@ class PlanetScaleReplicator extends BaseReplicator {
       const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
 
       if (alterStatements.length > 0) {
-        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+        throw this.createError(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`, {
+          operation: 'schemaValidation',
+          tableName,
+          statusCode: 409,
+          retriable: false,
+          suggestion: 'Add the missing columns to the PlanetScale table or enable schemaSync.autoCreateColumns.'
+        });
       }
     }
   }

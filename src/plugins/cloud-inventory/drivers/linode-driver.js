@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready Linode (Akamai Cloud) inventory driver using official @linode/api-v4 SDK.
@@ -52,7 +53,13 @@ export class LinodeInventoryDriver extends BaseCloudDriver {
     this._apiToken = credentials.token || credentials.apiToken || process.env.LINODE_TOKEN;
 
     if (!this._apiToken) {
-      throw new Error('Linode API token is required. Provide via credentials.token or LINODE_TOKEN env var.');
+      throw new PluginError('Linode API token is required. Provide via credentials.token or LINODE_TOKEN env var.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'linode:initClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Set credentials.token or LINODE_TOKEN before running the Linode inventory driver.'
+      });
     }
 
     // Import and set token

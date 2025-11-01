@@ -1,3 +1,4 @@
+import { PromisePool } from "@supercharge/promise-pool";
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
@@ -119,7 +120,7 @@ function normalizeResourceName(name) {
  */
 export class ReplicatorPlugin extends Plugin {
   constructor(options = {}) {
-    super();
+    super(options);
     // Validation for config tests
     if (!options.replicators || !Array.isArray(options.replicators)) {
       throw new ReplicationError('ReplicatorPlugin requires replicators array', {
@@ -157,8 +158,14 @@ export class ReplicatorPlugin extends Plugin {
         });
       }
     }
-    
+
     const resourceNamesOption = options.resourceNames || {};
+    const resolvedReplicatorConcurrency = Number.isFinite(options.replicatorConcurrency)
+      ? Math.max(1, Math.floor(options.replicatorConcurrency))
+      : 5;
+    const resolvedStopConcurrency = Number.isFinite(options.stopConcurrency)
+      ? Math.max(1, Math.floor(options.stopConcurrency))
+      : resolvedReplicatorConcurrency;
     this.config = {
       replicators: options.replicators || [],
       logErrors: options.logErrors !== false,
@@ -167,7 +174,9 @@ export class ReplicatorPlugin extends Plugin {
       batchSize: options.batchSize || 100,
       maxRetries: options.maxRetries || 3,
       timeout: options.timeout || 30000,
-      verbose: options.verbose || false
+      verbose: options.verbose || false,
+      replicatorConcurrency: resolvedReplicatorConcurrency,
+      stopConcurrency: resolvedStopConcurrency
     };
     this._logResourceDescriptor = {
       defaultName: 'plg_replicator_logs',
@@ -187,6 +196,7 @@ export class ReplicatorPlugin extends Plugin {
     };
     this._afterCreateResourceHook = null;
     this.replicatorLog = null;
+    this._logResourceHooksInstalled = false;
   }
 
   _resolveLogResourceName() {
@@ -214,11 +224,28 @@ export class ReplicatorPlugin extends Plugin {
     return filtered;
   }
 
+  async prepareReplicationData(resource, data) {
+    const complete = await this.getCompleteData(resource, data);
+    return this.filterInternalFields(complete);
+  }
+
+  sanitizeBeforeData(beforeData) {
+    if (!beforeData) return null;
+    return this.filterInternalFields(beforeData);
+  }
+
   async getCompleteData(resource, data) {
-    // Always get the complete record from the resource to ensure we have all data
-    // This handles all behaviors: body-overflow, truncate-data, body-only, etc.
     const [ok, err, completeRecord] = await tryFn(() => resource.get(data.id));
-    return ok ? completeRecord : data;
+    if (ok && completeRecord) {
+      return completeRecord;
+    }
+
+    if (this.config.verbose) {
+      const reason = err?.message || 'record not found';
+      console.warn(`[ReplicatorPlugin] Falling back to provided data for ${resource?.name || 'unknown'}#${data?.id}: ${reason}`);
+    }
+
+    return data;
   }
 
   installEventListeners(resource, database, plugin) {
@@ -230,8 +257,8 @@ export class ReplicatorPlugin extends Plugin {
     // Create handler functions and save references for later removal
     const insertHandler = async (data) => {
       const [ok, error] = await tryFn(async () => {
-        const completeData = { ...data, createdAt: new Date().toISOString() };
-        await plugin.processReplicatorEvent('insert', resource.name, completeData.id, completeData);
+        const payload = await plugin.prepareReplicationData(resource, data);
+        await plugin.processReplicatorEvent('insert', resource.name, payload.id, payload);
       });
 
       if (!ok) {
@@ -244,10 +271,9 @@ export class ReplicatorPlugin extends Plugin {
 
     const updateHandler = async (data, beforeData) => {
       const [ok, error] = await tryFn(async () => {
-        // For updates, we need to get the complete updated record, not just the changed fields
-        const completeData = await plugin.getCompleteData(resource, data);
-        const dataWithTimestamp = { ...completeData, updatedAt: new Date().toISOString() };
-        await plugin.processReplicatorEvent('update', resource.name, completeData.id, dataWithTimestamp, beforeData);
+        const payload = await plugin.prepareReplicationData(resource, data);
+        const beforePayload = plugin.sanitizeBeforeData(beforeData);
+        await plugin.processReplicatorEvent('update', resource.name, payload.id, payload, beforePayload);
       });
 
       if (!ok) {
@@ -260,7 +286,8 @@ export class ReplicatorPlugin extends Plugin {
 
     const deleteHandler = async (data) => {
       const [ok, error] = await tryFn(async () => {
-        await plugin.processReplicatorEvent('delete', resource.name, data.id, data);
+        const sanitized = await plugin.prepareReplicationData(resource, data);
+        await plugin.processReplicatorEvent('delete', resource.name, sanitized.id, sanitized);
       });
 
       if (!ok) {
@@ -294,21 +321,33 @@ export class ReplicatorPlugin extends Plugin {
         name: logResourceName,
         attributes: {
           id: 'string|required',
+          replicator: 'string|required',
           resource: 'string|required',
           action: 'string|required',
           data: 'json',
           timestamp: 'number|required',
-          createdAt: 'string|required'
+          createdAt: 'string|required',
+          status: 'string|required',
+          error: 'string|optional'
         },
-        behavior: 'truncate-data'
+        behavior: 'truncate-data',
+        partitions: {
+          byDate: {
+            fields: {
+              createdAt: 'string|maxlength:10'
+            }
+          }
+        }
       }));
 
       if (ok) {
         this.replicatorLog = logResource;
+        this.installReplicatorLogHooks();
       } else {
         const existing = this.database.resources[logResourceName];
         if (existing) {
           this.replicatorLog = existing;
+          this.installReplicatorLogHooks();
         } else {
           throw err;
         }
@@ -350,6 +389,51 @@ export class ReplicatorPlugin extends Plugin {
       this.database.removeHook('afterCreateResource', this._afterCreateResourceHook);
       this._afterCreateResourceHook = null;
     }
+  }
+
+  installReplicatorLogHooks() {
+    if (!this.replicatorLog || typeof this.replicatorLog.addHook !== 'function') {
+      return;
+    }
+
+    if (this.replicatorLog._replicatorDefaultsInstalled) {
+      this._logResourceHooksInstalled = true;
+      return;
+    }
+
+    if (this._logResourceHooksInstalled) {
+      return;
+    }
+
+    const ensureInsertDefaults = (data) => {
+      if (!data || typeof data !== 'object') {
+        return data;
+      }
+      this._normalizeLogEntry(data, { assignId: true, ensureTimestamp: true });
+      return data;
+    };
+
+    const ensureUpdateDefaults = (data) => {
+      if (!data || typeof data !== 'object') {
+        return data;
+      }
+      this._normalizeLogEntry(data, { assignId: false, ensureTimestamp: false });
+      return data;
+    };
+
+    const ensurePatchDefaults = (payload) => {
+      if (payload && typeof payload === 'object' && payload.fields && typeof payload.fields === 'object') {
+        this._normalizeLogEntry(payload.fields, { assignId: false, ensureTimestamp: false });
+      }
+      return payload;
+    };
+
+    this.replicatorLog.addHook('beforeInsert', ensureInsertDefaults);
+    this.replicatorLog.addHook('beforeUpdate', ensureUpdateDefaults);
+    this.replicatorLog.addHook('beforePatch', ensurePatchDefaults);
+
+    this.replicatorLog._replicatorDefaultsInstalled = true;
+    this._logResourceHooksInstalled = true;
   }
 
   createReplicator(driver, config, resources, client) {
@@ -408,19 +492,108 @@ export class ReplicatorPlugin extends Plugin {
     throw lastError;
   }
 
+  _generateLogEntryId() {
+    const random = Math.random().toString(36).slice(2, 8);
+    return `repl-${Date.now()}-${random}`;
+  }
+
+  _normalizeLogEntry(entry, options = {}) {
+    if (!entry || typeof entry !== 'object') {
+      return entry;
+    }
+
+    const {
+      assignId = false,
+      ensureTimestamp = false
+    } = options;
+
+    if (assignId && !entry.id) {
+      entry.id = this._generateLogEntryId();
+    }
+
+    const numericTimestamp = Number(entry.timestamp);
+    const hasNumericTimestamp = Number.isFinite(numericTimestamp);
+    if (hasNumericTimestamp) {
+      entry.timestamp = numericTimestamp;
+    }
+
+    if (ensureTimestamp && !hasNumericTimestamp) {
+      entry.timestamp = Date.now();
+    } else if (!ensureTimestamp && entry.timestamp !== undefined && !hasNumericTimestamp) {
+      entry.timestamp = Date.now();
+    }
+
+    if (!entry.createdAt && entry.timestamp) {
+      const iso = new Date(entry.timestamp).toISOString();
+      entry.createdAt = iso.slice(0, 10);
+    }
+
+    if (ensureTimestamp && !entry.createdAt) {
+      const iso = new Date().toISOString();
+      entry.createdAt = iso.slice(0, 10);
+    }
+
+    if (entry.resourceName || entry.resource) {
+      const normalized = normalizeResourceName(entry.resourceName || entry.resource);
+      if (normalized) {
+        entry.resourceName = normalized;
+        if (!entry.resource) {
+          entry.resource = normalized;
+        }
+      }
+    }
+
+    if (!entry.action && entry.operation) {
+      entry.action = entry.operation;
+    }
+
+    if (!entry.operation && entry.action) {
+      entry.operation = entry.action;
+    }
+
+    if (!entry.replicator) {
+      entry.replicator = entry.replicatorId || 'unknown';
+    }
+
+    let retryCount = entry.retryCount;
+    if (typeof retryCount !== 'number') {
+      retryCount = Number(retryCount);
+    }
+
+    if (!Number.isFinite(retryCount) || retryCount < 0) {
+      entry.retryCount = 0;
+    } else {
+      entry.retryCount = Math.floor(retryCount);
+    }
+
+    if (!entry.status) {
+      entry.status = 'pending';
+    }
+
+    if (!('error' in entry)) {
+      entry.error = null;
+    }
+
+    return entry;
+  }
+
   async logError(replicator, resourceName, operation, recordId, data, error) {
     const [ok, logError] = await tryFn(async () => {
       if (this.replicatorLog) {
-        await this.replicatorLog.insert({
-          replicator: replicator.name || replicator.id,
+        const logEntry = {
+          id: recordId ? `${resourceName}-${recordId}-${Date.now()}` : undefined,
+          replicator: replicator.name || replicator.id || 'unknown',
+          resource: resourceName,
           resourceName,
+          action: operation,
           operation,
-          recordId,
-          data: JSON.stringify(data),
-          error: error.message,
-          timestamp: new Date().toISOString(),
-          status: 'error'
-        });
+          data: data ? this.filterInternalFields(data) : null,
+          status: 'failed',
+          error: error?.message,
+          retryCount: 0
+        };
+        this._normalizeLogEntry(logEntry, { assignId: true, ensureTimestamp: true });
+        await this.replicatorLog.insert(logEntry);
       }
     });
     
@@ -442,6 +615,18 @@ export class ReplicatorPlugin extends Plugin {
   async processReplicatorEvent(operation, resourceName, recordId, data, beforeData = null) {
     if (!this.config.enabled) return;
 
+    if (!recordId) {
+      throw new ReplicationError('Replication event missing record identifier', {
+        operation,
+        resourceName,
+        pluginName: 'ReplicatorPlugin',
+        suggestion: 'Ensure the replicated record contains an id before emitting change events.'
+      });
+    }
+
+    const sanitizedData = data ? this.filterInternalFields(data) : null;
+    const sanitizedBefore = beforeData ? this.filterInternalFields(beforeData) : null;
+
     const applicableReplicators = this.replicators.filter(replicator => {
       const should = replicator.shouldReplicateResource && replicator.shouldReplicateResource(resourceName, operation);
       return should;
@@ -451,32 +636,42 @@ export class ReplicatorPlugin extends Plugin {
       return;
     }
 
-    const promises = applicableReplicators.map(async (replicator) => {
-      const [ok, error, result] = await tryFn(async () => {
-        const result = await this.retryWithBackoff(
-          () => replicator.replicate(resourceName, operation, data, recordId, beforeData),
-          this.config.maxRetries
-        );
-        
-        this.emit('plg:replicator:replicated', {
-          replicator: replicator.name || replicator.id,
-          resourceName,
-          operation,
-          recordId,
-          result,
-          success: true
+    const entries = applicableReplicators.map((replicator, index) => ({ replicator, index }));
+    const outcomes = new Array(entries.length);
+
+    const poolResult = await PromisePool
+      .withConcurrency(this.config.replicatorConcurrency)
+      .for(entries)
+      .process(async ({ replicator, index }) => {
+        const [ok, error, replicationResult] = await tryFn(async () => {
+          const result = await this.retryWithBackoff(
+            () => replicator.replicate(resourceName, operation, sanitizedData, recordId, sanitizedBefore),
+            this.config.maxRetries
+          );
+
+          this.emit('plg:replicator:replicated', {
+            replicator: replicator.name || replicator.id,
+            resourceName,
+            operation,
+            recordId,
+            result,
+            success: true
+          });
+
+          this.stats.totalReplications += 1;
+
+          return result;
         });
 
-        return result;
-      });
-      
-      if (ok) {
-        return result;
-      } else {
+        if (ok) {
+          outcomes[index] = { status: 'fulfilled', value: replicationResult };
+          return replicationResult;
+        }
+
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Replication failed for ${replicator.name || replicator.id} on ${resourceName}: ${error.message}`);
         }
-        
+
         this.emit('plg:replicator:error', {
           replicator: replicator.name || replicator.id,
           resourceName,
@@ -485,15 +680,25 @@ export class ReplicatorPlugin extends Plugin {
           error: error.message
         });
 
+        this.stats.totalErrors += 1;
+
         if (this.config.logErrors && this.database) {
           await this.logError(replicator, resourceName, operation, recordId, data, error);
         }
 
+        outcomes[index] = { status: 'rejected', reason: error };
         throw error;
-      }
-    });
+      });
 
-    return Promise.allSettled(promises);
+    if (poolResult.errors.length > 0) {
+      for (const { item, error } of poolResult.errors) {
+        if (item && typeof item.index === 'number' && !outcomes[item.index]) {
+          outcomes[item.index] = { status: 'rejected', reason: error };
+        }
+      }
+    }
+
+    return outcomes;
   }
 
   async processReplicatorItem(item) {
@@ -506,51 +711,64 @@ export class ReplicatorPlugin extends Plugin {
       return;
     }
 
-    const promises = applicableReplicators.map(async (replicator) => {
-      const [wrapperOk, wrapperError] = await tryFn(async () => {
-        const [ok, err, result] = await tryFn(() => 
-          replicator.replicate(item.resourceName, item.operation, item.data, item.recordId, item.beforeData)
-        );
+    const entries = applicableReplicators.map((replicator, index) => ({ replicator, index }));
+    const outcomes = new Array(entries.length);
 
-        if (!ok) {
-          if (this.config.verbose) {
-            console.warn(`[ReplicatorPlugin] Replicator item processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${err.message}`);
+    await PromisePool
+      .withConcurrency(this.config.replicatorConcurrency)
+      .for(entries)
+      .process(async ({ replicator, index }) => {
+        const [wrapperOk, wrapperError] = await tryFn(async () => {
+          const preparedData = item.data ? this.filterInternalFields(item.data) : null;
+          const preparedBefore = item.beforeData ? this.filterInternalFields(item.beforeData) : null;
+          const [ok, err, result] = await tryFn(() =>
+            replicator.replicate(item.resourceName, item.operation, preparedData, item.recordId, preparedBefore)
+          );
+
+          if (!ok) {
+            if (this.config.verbose) {
+              console.warn(`[ReplicatorPlugin] Replicator item processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${err.message}`);
+            }
+
+            this.emit('plg:replicator:error', {
+              replicator: replicator.name || replicator.id,
+              resourceName: item.resourceName,
+              operation: item.operation,
+              recordId: item.recordId,
+              error: err.message
+            });
+
+            if (this.config.logErrors && this.database) {
+              await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, err);
+            }
+
+            this.stats.totalErrors += 1;
+            return { success: false, error: err.message };
           }
-          
-          this.emit('plg:replicator:error', {
+
+          this.emit('plg:replicator:replicated', {
             replicator: replicator.name || replicator.id,
             resourceName: item.resourceName,
             operation: item.operation,
             recordId: item.recordId,
-            error: err.message
+            result,
+            success: true
           });
 
-          if (this.config.logErrors && this.database) {
-            await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, err);
-          }
+          this.stats.totalReplications += 1;
 
-          return { success: false, error: err.message };
-        }
-
-        this.emit('plg:replicator:replicated', {
-          replicator: replicator.name || replicator.id,
-          resourceName: item.resourceName,
-          operation: item.operation,
-          recordId: item.recordId,
-          result,
-          success: true
+          return { success: true, result };
         });
 
-        return { success: true, result };
-      });
-      
-      if (wrapperOk) {
-        return wrapperOk;
-      } else {
+        if (wrapperOk) {
+          outcomes[index] = { status: 'fulfilled', value: wrapperOk };
+          return wrapperOk;
+        }
+
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Wrapper processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${wrapperError.message}`);
         }
-        
+
         this.emit('plg:replicator:error', {
           replicator: replicator.name || replicator.id,
           resourceName: item.resourceName,
@@ -563,11 +781,13 @@ export class ReplicatorPlugin extends Plugin {
           await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, wrapperError);
         }
 
-        return { success: false, error: wrapperError.message };
-      }
-    });
+        this.stats.totalErrors += 1;
+        const failure = { success: false, error: wrapperError.message };
+        outcomes[index] = { status: 'fulfilled', value: failure };
+        return failure;
+      });
 
-    return Promise.allSettled(promises);
+    return outcomes;
   }
 
   async logReplicator(item) {
@@ -577,15 +797,29 @@ export class ReplicatorPlugin extends Plugin {
       this.emit('plg:replicator:log-failed', { error: 'replicator log resource not found', item });
       return;
     }
-            // Fix required fields of log resource
+    const sanitizedData = item.data ? this.filterInternalFields(item.data) : {};
+
+    // Fix required fields of log resource
     const logItem = {
-      id: item.id || `repl-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: item.id,
+      replicator: item.replicator || 'unknown',
       resource: item.resource || item.resourceName || '',
+      resourceName: item.resourceName || item.resource || '',
       action: item.operation || item.action || '',
-      data: item.data || {},
-      timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
-      createdAt: item.createdAt || new Date().toISOString().slice(0, 10),
+      operation: item.operation || item.action || '',
+      data: sanitizedData,
+      status: item.status || 'pending',
+      error: item.error || null,
+      retryCount: item.retryCount || 0
     };
+    if (typeof item.timestamp === 'number') {
+      logItem.timestamp = item.timestamp;
+    }
+    if (item.createdAt) {
+      logItem.createdAt = item.createdAt;
+    }
+
+    this._normalizeLogEntry(logItem, { assignId: true, ensureTimestamp: true });
     const [ok, err] = await tryFn(async () => {
       await logRes.insert(logItem);
     });
@@ -615,17 +849,35 @@ export class ReplicatorPlugin extends Plugin {
 
   // Utility methods
   async getReplicatorStats() {
-    const replicatorStats = await Promise.all(
-      this.replicators.map(async (replicator) => {
+    const entries = this.replicators.map((replicator, index) => ({ replicator, index }));
+    const replicatorStats = new Array(entries.length);
+
+    const poolResult = await PromisePool
+      .withConcurrency(this.config.replicatorConcurrency)
+      .for(entries)
+      .process(async ({ replicator, index }) => {
         const status = await replicator.getStatus();
-        return {
+        const info = {
           id: replicator.id,
           driver: replicator.driver,
           config: replicator.config,
           status
         };
-      })
-    );
+        replicatorStats[index] = info;
+        return info;
+      });
+
+    if (poolResult.errors.length > 0) {
+      const { item, error } = poolResult.errors[0];
+      const failedReplicator = item?.replicator;
+      throw new ReplicationError(`Failed to collect status for replicator ${failedReplicator?.name || failedReplicator?.id || 'unknown'}`, {
+        operation: 'getReplicatorStats',
+        pluginName: 'ReplicatorPlugin',
+        replicatorId: failedReplicator?.id,
+        driver: failedReplicator?.driver,
+        original: error
+      });
+    }
 
     return {
       replicators: replicatorStats,
@@ -677,20 +929,75 @@ export class ReplicatorPlugin extends Plugin {
 
     let retried = 0;
 
-    for (const log of failedLogs || []) {
-      const [ok, err] = await tryFn(async () => {
-        // Re-queue the replicator
-        await this.processReplicatorEvent(
-          log.operation,
-          log.resourceName,
-          log.recordId,
-          log.data
-        );
+    const processResult = await PromisePool
+      .withConcurrency(this.config.replicatorConcurrency)
+      .for(failedLogs || [])
+      .process(async (log) => {
+        const sanitizedData = log.data ? this.filterInternalFields(log.data) : null;
+        const sanitizedBefore = log.beforeData ? this.filterInternalFields(log.beforeData) : null;
+
+        const [ok, err, results] = await tryFn(async () => {
+          return await this.processReplicatorEvent(
+            log.operation,
+            log.resourceName,
+            log.recordId,
+            sanitizedData,
+            sanitizedBefore
+          );
+        });
+
+        const isSuccessfulEntry = (entry) => {
+          if (!entry || entry.status !== 'fulfilled') {
+            return false;
+          }
+          if (entry.value && typeof entry.value === 'object' && 'success' in entry.value) {
+            return entry.value.success !== false;
+          }
+          return true;
+        };
+
+        if (ok && Array.isArray(results) && results.every(isSuccessfulEntry)) {
+          retried += 1;
+          await this.updateReplicatorLog(log.id, {
+            status: 'success',
+            error: null,
+            retryCount: log.retryCount || 0,
+            lastSuccessAt: new Date().toISOString()
+          });
+          return;
+        }
+
+        let failureMessage = err?.message || 'Unknown replication failure';
+
+        if (Array.isArray(results)) {
+          const failureEntry = results.find((entry) => {
+            if (!entry) return false;
+            if (entry.status === 'rejected') return true;
+            if (entry.status === 'fulfilled' && entry.value && typeof entry.value === 'object' && 'success' in entry.value) {
+              return entry.value.success === false;
+            }
+            return false;
+          });
+
+          if (failureEntry) {
+            if (failureEntry.status === 'rejected') {
+              failureMessage = failureEntry.reason?.message || failureMessage;
+            } else if (failureEntry.status === 'fulfilled') {
+              failureMessage = failureEntry.value?.error || failureMessage;
+            }
+          }
+        }
+
+        await this.updateReplicatorLog(log.id, {
+          status: 'failed',
+          error: failureMessage,
+          retryCount: (Number(log.retryCount) || 0) + 1
+        });
       });
-      if (ok) {
-        retried++;
-      } else {
-        // Retry failed, continue
+
+    if (processResult.errors.length && this.config.verbose) {
+      for (const { item, error } of processResult.errors) {
+        console.warn(`[ReplicatorPlugin] Failed to retry log ${item?.id ?? 'unknown'}: ${error.message}`);
       }
     }
 
@@ -731,8 +1038,51 @@ export class ReplicatorPlugin extends Plugin {
           const records = Array.isArray(page) ? page : (page.items || []);
           if (records.length === 0) break;
 
-          for (const record of records) {
-            await replicator.replicate(resourceName, 'insert', record, record.id);
+          const poolResult = await PromisePool
+            .withConcurrency(this.config.replicatorConcurrency)
+            .for(records)
+            .process(async (record) => {
+              const [replicateOk, replicateError, result] = await tryFn(() =>
+                replicator.replicate(resourceName, 'insert', record, record.id)
+              );
+
+              if (!replicateOk) {
+                if (this.config.verbose) {
+                  console.warn(`[ReplicatorPlugin] syncAllData failed for ${replicator.name || replicator.id} on ${resourceName}: ${replicateError.message}`);
+                }
+
+                this.stats.totalErrors += 1;
+                this.emit('plg:replicator:error', {
+                  replicator: replicator.name || replicator.id,
+                  resourceName,
+                  operation: 'insert',
+                  recordId: record.id,
+                  error: replicateError.message
+                });
+
+                if (this.config.logErrors && this.database) {
+                  await this.logError(replicator, resourceName, 'insert', record.id, record, replicateError);
+                }
+
+                throw replicateError;
+              }
+
+              this.stats.totalReplications += 1;
+              this.emit('plg:replicator:replicated', {
+                replicator: replicator.name || replicator.id,
+                resourceName,
+                operation: 'insert',
+                recordId: record.id,
+                result,
+                success: true
+              });
+
+              return result;
+            });
+
+          if (poolResult.errors.length > 0) {
+            const { error } = poolResult.errors[0];
+            throw error;
           }
 
           offset += pageSize;
@@ -746,26 +1096,27 @@ export class ReplicatorPlugin extends Plugin {
   async stop() {
     const [ok, error] = await tryFn(async () => {
       if (this.replicators && this.replicators.length > 0) {
-        const cleanupPromises = this.replicators.map(async (replicator) => {
-          const [replicatorOk, replicatorError] = await tryFn(async () => {
-            if (replicator && typeof replicator.stop === 'function') {
-              await replicator.stop();
+        await PromisePool
+          .withConcurrency(this.config.stopConcurrency)
+          .for(this.replicators)
+          .process(async (replicator) => {
+            const [replicatorOk, replicatorError] = await tryFn(async () => {
+              if (replicator && typeof replicator.stop === 'function') {
+                await replicator.stop();
+              }
+            });
+
+            if (!replicatorOk) {
+              if (this.config.verbose) {
+                console.warn(`[ReplicatorPlugin] Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
+              }
+              this.emit('plg:replicator:stop-error', {
+                replicator: replicator.name || replicator.id || 'unknown',
+                driver: replicator.driver || 'unknown',
+                error: replicatorError.message
+              });
             }
           });
-
-          if (!replicatorOk) {
-            if (this.config.verbose) {
-              console.warn(`[ReplicatorPlugin] Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
-            }
-            this.emit('plg:replicator:stop-error', {
-              replicator: replicator.name || replicator.id || 'unknown',
-              driver: replicator.driver || 'unknown',
-              error: replicatorError.message
-            });
-          }
-        });
-        
-        await Promise.allSettled(cleanupPromises);
       }
 
       // Remove database hooks

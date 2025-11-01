@@ -4,7 +4,8 @@ import { describe, expect, test, beforeEach, jest } from '@jest/globals';
 import Database, { S3db } from '../../src/database.class.js';
 import Resource from '#src/resource.class.js';
 import { streamToString } from '#src/stream/index.js';
-import { createDatabaseForTest } from '#tests/config.js';
+import { createDatabaseForTest, createMemoryDatabaseForTest } from '#tests/config.js';
+import { DatabaseError } from '#src/errors.js';
 
 describe('Database Class - Complete Journey', () => {
   let database;
@@ -224,6 +225,60 @@ describe('Database Class - Complete Journey', () => {
 
     // Test connection status
     expect(database.isConnected()).toBe(true);
+  });
+});
+
+describe('Database Plugin Lifecycle', () => {
+  test('connect surfaces plugin install failures as DatabaseError', async () => {
+    const installError = new Error('install explosion');
+    const installSpy = jest.fn().mockRejectedValue(installError);
+    const startSpy = jest.fn().mockResolvedValue();
+
+    class BrokenInstallPlugin {
+      constructor() {
+        this.install = installSpy;
+        this.start = startSpy;
+      }
+      setInstanceName(name) {
+        this.instanceName = name;
+      }
+    }
+
+    const db = createMemoryDatabaseForTest('plugins-install-failure', {
+      plugins: [BrokenInstallPlugin],
+      parallelism: 2
+    });
+
+    await expect(db.connect()).rejects.toBeInstanceOf(DatabaseError);
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).not.toHaveBeenCalled();
+    await db.disconnect().catch(() => {});
+  });
+
+  test('connect surfaces plugin start failures as DatabaseError', async () => {
+    const installSpy = jest.fn().mockResolvedValue();
+    const startError = new Error('start explosion');
+    const startSpy = jest.fn().mockRejectedValue(startError);
+
+    class BrokenStartPlugin {
+      constructor() {
+        this.install = installSpy;
+        this.start = startSpy;
+      }
+      setInstanceName(name) {
+        this.instanceName = name;
+      }
+    }
+
+    const db = createMemoryDatabaseForTest('plugins-start-failure', {
+      plugins: [BrokenStartPlugin],
+      parallelism: 2
+    });
+
+    await expect(db.connect()).rejects.toBeInstanceOf(DatabaseError);
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    await db.disconnect().catch(() => {});
   });
 });
 

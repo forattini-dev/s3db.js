@@ -1,10 +1,12 @@
 # 🔐 Identity Plugin
 
-**Transform s3db.js into a production-ready OAuth2/OIDC Authorization Server.**
+> **Transform s3db.js into a production-ready OAuth2/OIDC Authorization Server.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration →](./identity/configuration.md) | [Architecture →](./identity/architecture.md) | [FAQ ↓](#-faq)
 
 ---
 
-## ⚡ TL;DR
+## ⚡ TLDR
 
 ```javascript
 import { Database, IdentityPlugin } from 's3db.js';
@@ -309,6 +311,26 @@ await db.use(new IdentityPlugin({
 - ✅ Can configure partitions, hooks, behavior
 - ❌ Cannot override base attributes (email, password, clientId, etc.)
 - ⚠️ Optional fields need defaults: `field: 'string|default:value'`
+
+### Internal Resource Names
+
+Every IdentityPlugin instance also creates a handful of internal resources for OAuth2 state (`oauth_keys`, `auth_codes`, `sessions`, `password_reset_tokens`, `mfa_devices`). They default to namespaced identifiers such as `plg_identity_oauth_keys`, but you can override them to match your naming conventions or to avoid cross-plugin collisions:
+
+```javascript
+await db.use(new IdentityPlugin({
+  issuer: 'https://sso.example.com',
+  resourceNames: {
+    oauthKeys: 'plg_identity_oauth_keys_us_west_2',
+    authCodes: 'plg_identity_auth_codes_sessions',
+    sessions: 'plg_identity_sessions_primary'
+  }
+}));
+```
+
+Guidelines:
+- Always keep the `plg_` prefix to avoid clashing with user-managed resources.
+- Each plugin instance automatically scopes overrides by namespace, so `namespace: 'tenant-a'` produces `plg_tenant-a_identity_sessions` unless you supply a custom value.
+- Provide overrides for every plugin instance that shares an S3 bucket to guarantee uniqueness across environments.
 
 **[→ See complete customization guide](./identity/configuration.md#resource-customization)**
 
@@ -1164,11 +1186,39 @@ await db.use(new IdentityPlugin({
 2. **Intermediate:** [Configuration](./identity/configuration.md) → [Integration](./identity/integration.md) → [Whitelabel](./identity/WHITELABEL.md)
 3. **Advanced:** [Architecture](./identity/architecture.md) → [API Reference](./identity/api-reference.md) → [Troubleshooting](./identity/troubleshooting.md)
 
-**Examples:**
-- [e80-sso-oauth2-server.js](../examples/e80-sso-oauth2-server.js) - Complete SSO server
-- [e81-oauth2-resource-server.js](../examples/e81-oauth2-resource-server.js) - API validating tokens
-- [e82-oidc-web-app.js](../examples/e82-oidc-web-app.js) - Web app with login
-- [e60-oauth2-microservices.js](../examples/e60-oauth2-microservices.js) - Full microservices setup
+- **Examples:**
+  - [e80-sso-oauth2-server.js](../examples/e80-sso-oauth2-server.js) - Complete SSO server
+  - [e81-oauth2-resource-server.js](../examples/e81-oauth2-resource-server.js) - API validating tokens
+  - [e82-oidc-web-app.js](../examples/e82-oidc-web-app.js) - Web app with login
+  - [e60-oauth2-microservices.js](../examples/e60-oauth2-microservices.js) - Full microservices setup
+
+---
+
+## 🚨 Error Handling
+
+IdentityPlugin surfaces structured `PluginError` objects so API consumers and admin consoles can react consistently.
+
+```javascript
+try {
+  await identityPlugin._initializeAuthDrivers();
+} catch (error) {
+  console.error(error.name);       // 'PluginError'
+  console.error(error.operation);  // 'initializeAuthDrivers'
+  console.error(error.statusCode); // REST-aligned status (e.g. 500)
+  console.error(error.retriable);  // Retry hint for schedulers
+  console.error(error.suggestion); // Human-friendly remediation
+  console.error(error.metadata);   // { driverName, purpose, ... }
+}
+```
+
+Common structured errors expose:
+
+- **Auth driver misconfiguration** → `statusCode: 500`, `retriable: false`, suggestion to ensure constructors extend `AuthDriver`.
+- **Password/email helpers missing** → `statusCode: 500`, guidance to register the built-in helper via plugin options.
+- **Token duration/encoding issues** → `statusCode: 400`, suggestion describing accepted formats (e.g. `"15m"`, `"base64url"`).
+- **RSA key rotation gaps** → `statusCode: 503`, `retriable: true`, metadata exposing the `purpose` so you can pre-warm key material.
+
+Surface `error.suggestion` inside dashboards or alerts to give operators the next step without digging through logs.
 
 ---
 

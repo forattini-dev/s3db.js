@@ -266,17 +266,17 @@ export function registerUIRoutes(app, plugin) {
           return c.redirect(`/login?error=${encodeURIComponent('Email and password are required')}&email=${encodeURIComponent(email || '')}`);
         }
 
-        const [okVerify, errVerify, isValid] = await tryFn(() =>
-          verifyPassword(password, user.password)
-        );
+        const authResult = await plugin.authenticateWithPassword({
+          email: normalizedEmail,
+          password,
+          user
+        });
 
-        if (!okVerify) {
-          if (config.verbose) {
-            console.error('[Identity Plugin] Password verification error:', errVerify?.message);
+        if (!authResult.success) {
+          if (authResult.statusCode >= 500 && config.verbose) {
+            console.error('[Identity Plugin] Password driver error:', authResult.error);
           }
-        }
 
-        if (!okVerify || !isValid) {
           if (accountLockoutConfig.enabled) {
             const failedAttempts = (user.failedLoginAttempts || 0) + 1;
             const nowIso = new Date().toISOString();
@@ -322,6 +322,8 @@ export function registerUIRoutes(app, plugin) {
             });
           }
         }
+
+        user = authResult.user || user;
       }
 
       // Account active status

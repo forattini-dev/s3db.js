@@ -1,5 +1,11 @@
 # 🎭 Puppeteer Plugin
 
+> **Anti-detection browser automation with pooling, cookie farming, and proxy orchestration.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Enterprise-grade browser automation with anti-bot detection and intelligent cookie farming.**

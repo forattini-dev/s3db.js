@@ -5,6 +5,7 @@ import {
   validateResourcesConfig,
   mergeResourceConfig
 } from './resource-schemas.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Validate and normalize user-provided resource configurations.
@@ -15,10 +16,14 @@ import {
 export function prepareResourceConfigs(resourcesOptions = {}) {
   const resourcesValidation = validateResourcesConfig(resourcesOptions);
   if (!resourcesValidation.valid) {
-    throw new Error(
-      'IdentityPlugin configuration error:\n' +
-      resourcesValidation.errors.join('\n')
-    );
+    throw new PluginError('IdentityPlugin configuration error', {
+      pluginName: 'IdentityPlugin',
+      operation: 'prepareResourceConfigs',
+      statusCode: 400,
+      retriable: false,
+      suggestion: 'Review the resources configuration and fix the validation errors listed in the metadata.',
+      metadata: { validationErrors: resourcesValidation.errors }
+    });
   }
 
   mergeResourceConfig(

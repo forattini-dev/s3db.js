@@ -9,6 +9,7 @@ import { mkdir, writeFile, readFile, unlink, stat, readdir } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import os from 'os';
+import { PluginError } from "../errors.js";
 
 /**
  * BackupPlugin - Automated Database Backup System
@@ -121,15 +122,44 @@ export class BackupPlugin extends Plugin {
     this._validateConfiguration();
   }
 
+  createError(message, details = {}) {
+    const {
+      operation = 'unknown',
+      statusCode = 500,
+      retriable = false,
+      docs = 'docs/plugins/backup.md',
+      ...rest
+    } = details;
+
+    return new PluginError(message, {
+      pluginName: 'BackupPlugin',
+      operation,
+      statusCode,
+      retriable,
+      docs,
+      ...rest
+    });
+  }
+
   _validateConfiguration() {
     // Driver validation is done in constructor
     
     if (this.config.encryption && (!this.config.encryption.key || !this.config.encryption.algorithm)) {
-      throw new Error('BackupPlugin: Encryption requires both key and algorithm');
+      throw this.createError('BackupPlugin: Encryption requires both key and algorithm', {
+        operation: 'validateConfiguration',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide both encryption.key and encryption.algorithm (e.g. aes-256-gcm) or disable encryption.'
+      });
     }
     
     if (this.config.compression && !['none', 'gzip', 'brotli', 'deflate'].includes(this.config.compression)) {
-      throw new Error('BackupPlugin: Invalid compression type. Use: none, gzip, brotli, deflate');
+      throw this.createError('BackupPlugin: Invalid compression type. Use: none, gzip, brotli, deflate', {
+        operation: 'validateConfiguration',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Choose one of the supported compression strategies: none, gzip, brotli, or deflate.'
+      });
     }
   }
 
@@ -194,7 +224,13 @@ export class BackupPlugin extends Plugin {
 
     // Check for race condition
     if (this.activeBackups.has(backupId)) {
-      throw new Error(`Backup '${backupId}' is already in progress`);
+      throw this.createError(`Backup '${backupId}' is already in progress`, {
+        operation: 'createBackup',
+        statusCode: 409,
+        retriable: true,
+        suggestion: 'Wait for the current backup task to finish or use a different backupId before retrying.',
+        metadata: { backupId }
+      });
     }
 
     try {
@@ -223,7 +259,13 @@ export class BackupPlugin extends Plugin {
         
         // Check if we have any files to backup
         if (exportedFiles.length === 0) {
-          throw new Error('No resources were exported for backup');
+          throw this.createError('No resources were exported for backup', {
+            operation: 'exportResources',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Check include/exclude filters and ensure resources have data before starting the backup.',
+            metadata: { backupId, type }
+          });
         }
         
         // Create archive
@@ -241,7 +283,13 @@ export class BackupPlugin extends Plugin {
         if (this.config.verification) {
           const isValid = await this.driver.verify(backupId, checksum, uploadResult);
           if (!isValid) {
-            throw new Error('Backup verification failed');
+            throw this.createError('Backup verification failed', {
+              operation: 'verifyBackup',
+              statusCode: 502,
+              retriable: true,
+              suggestion: 'Inspect driver logs or rerun the backup with verbose logging to diagnose verification failures.',
+              metadata: { backupId, checksum }
+            });
           }
         }
         
@@ -554,7 +602,13 @@ export class BackupPlugin extends Plugin {
     });
 
     if (!ok) {
-      throw new Error(`Failed to generate checksum for ${filePath}: ${err?.message}`);
+      throw this.createError(`Failed to generate checksum for ${filePath}: ${err?.message}`, {
+        operation: 'generateChecksum',
+        statusCode: 500,
+        retriable: true,
+        suggestion: 'Ensure the archive is readable and rerun the backup with verbose logging.',
+        metadata: { filePath }
+      });
     }
 
     return result;
@@ -584,11 +638,23 @@ export class BackupPlugin extends Plugin {
       // Get backup metadata
       const backup = await this.getBackupStatus(backupId);
       if (!backup) {
-        throw new Error(`Backup '${backupId}' not found`);
+        throw this.createError(`Backup '${backupId}' not found`, {
+          operation: 'restore',
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Confirm the backupId exists or create a new backup before attempting restore.',
+          metadata: { backupId }
+        });
       }
       
       if (backup.status !== 'completed') {
-        throw new Error(`Backup '${backupId}' is not in completed status`);
+        throw this.createError(`Backup '${backupId}' is not in completed status`, {
+          operation: 'restore',
+          statusCode: 409,
+          retriable: true,
+          suggestion: 'Allow the running backup to finish or investigate previous errors before retrying restore.',
+          metadata: { backupId, status: backup.status }
+        });
       }
       
       // Create temporary restore directory
@@ -604,7 +670,13 @@ export class BackupPlugin extends Plugin {
         if (this.config.verification && backup.checksum) {
           const actualChecksum = await this._generateChecksum(downloadPath);
           if (actualChecksum !== backup.checksum) {
-            throw new Error('Backup verification failed during restore');
+            throw this.createError('Backup verification failed during restore', {
+              operation: 'restoreVerify',
+              statusCode: 422,
+              retriable: false,
+              suggestion: 'Recreate the backup to generate a fresh checksum or disable verification temporarily.',
+              metadata: { backupId, expectedChecksum: backup.checksum, actualChecksum }
+            });
           }
         }
         
@@ -674,15 +746,33 @@ export class BackupPlugin extends Plugin {
       try {
         archive = JSON.parse(archiveData);
       } catch (parseError) {
-        throw new Error(`Failed to parse backup archive: ${parseError.message}`);
+        throw this.createError(`Failed to parse backup archive: ${parseError.message}`, {
+          operation: 'restoreParse',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Verify the backup file is intact or recreate the backup before restoring.',
+          metadata: { backupPath }
+        });
       }
 
       if (!archive || typeof archive !== 'object') {
-        throw new Error('Invalid backup archive: not a valid JSON object');
+        throw this.createError('Invalid backup archive: not a valid JSON object', {
+          operation: 'restoreParse',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Ensure the uploaded archive has JSON content and is not truncated.',
+          metadata: { backupPath }
+        });
       }
 
       if (!archive.version || !archive.files) {
-        throw new Error('Invalid backup archive format: missing version or files array');
+        throw this.createError('Invalid backup archive format: missing version or files array', {
+          operation: 'restoreParse',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Generate backups with the current plugin version to include version and files metadata.',
+          metadata: { backupPath }
+        });
       }
 
       if (this.config.verbose) {
@@ -786,7 +876,13 @@ export class BackupPlugin extends Plugin {
       if (this.config.verbose) {
         console.error(`[BackupPlugin] Error restoring backup: ${error.message}`);
       }
-      throw new Error(`Failed to restore backup: ${error.message}`);
+      throw this.createError(`Failed to restore backup: ${error.message}`, {
+        operation: 'restore',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Review the nested error message above and address resource-level failures before retrying.',
+        original: error
+      });
     }
   }
 

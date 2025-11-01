@@ -7,6 +7,8 @@
  * Email Service class
  * @class
  */
+import { PluginError } from '../../errors.js';
+
 export class EmailService {
   /**
    * Create Email Service instance
@@ -81,7 +83,14 @@ export class EmailService {
       this.initialized = true;
     } catch (error) {
       console.error('[EmailService] Failed to initialize:', error);
-      throw new Error(`Failed to initialize email service: ${error.message}`);
+      throw new PluginError(`Failed to initialize email service: ${error.message}`, {
+        pluginName: 'IdentityPlugin',
+        operation: 'emailInitialize',
+        statusCode: 502,
+        retriable: true,
+        suggestion: 'Verify SMTP credentials/host settings or disable email service when not configured.',
+        original: error
+      });
     }
   }
 
@@ -112,7 +121,13 @@ export class EmailService {
     const { to, subject, html, text, from, replyTo } = options;
 
     if (!to || !subject || !html) {
-      throw new Error('Email requires to, subject, and html fields');
+      throw new PluginError('Email requires to, subject, and html fields', {
+        pluginName: 'IdentityPlugin',
+        operation: 'sendEmail',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass recipient (to), subject, and html body when calling emailService.sendEmail().'
+      });
     }
 
     try {

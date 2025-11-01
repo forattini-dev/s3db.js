@@ -88,7 +88,13 @@ class SqsReplicator extends BaseReplicator {
     if (this.defaultQueue) {
       return [this.defaultQueue];
     }
-    throw new Error(`No queue URL found for resource '${resource}'`);
+    throw this.createError(`No queue URL found for resource '${resource}'`, {
+      operation: 'resolveQueue',
+      resourceName: resource,
+      statusCode: 404,
+      retriable: false,
+      suggestion: 'Provide queueUrl, defaultQueue, queues mapping, or resourceQueueMap for this resource.'
+    });
   }
 
   _applyTransformer(resource, data) {

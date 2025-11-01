@@ -27,6 +27,8 @@
  * The plugin normalizes the payload, computes configuration digests and
  * manages versioning/diffing.
  */
+import { PluginError } from '../../../errors.js';
+
 export class BaseCloudDriver {
   /**
    * @param {Object} options
@@ -48,7 +50,13 @@ export class BaseCloudDriver {
     } = options;
 
     if (!driver) {
-      throw new Error('Cloud driver requires a "driver" identifier');
+      throw new PluginError('Cloud driver requires a "driver" identifier', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'cloudDriver:constructor',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Specify the driver key (e.g. "aws", "gcp") when instantiating a cloud inventory driver.'
+      });
     }
 
     this.id = id || driver;
@@ -77,7 +85,13 @@ export class BaseCloudDriver {
    */
   // eslint-disable-next-line no-unused-vars
   async listResources(options = {}) {
-    throw new Error(`Driver "${this.driver}" does not implement listResources()`);
+    throw new PluginError(`Driver "${this.driver}" does not implement listResources()`, {
+      pluginName: 'CloudInventoryPlugin',
+      operation: 'cloudDriver:listResources',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Implement listResources(options) in the concrete cloud driver to fetch inventory data.'
+    });
   }
 
   /**

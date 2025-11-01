@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready Vultr inventory driver using official @vultr/vultr-node SDK.
@@ -50,7 +51,13 @@ export class VultrInventoryDriver extends BaseCloudDriver {
     this._apiKey = credentials.apiKey || credentials.token || process.env.VULTR_API_KEY;
 
     if (!this._apiKey) {
-      throw new Error('Vultr API key is required. Provide via credentials.apiKey or VULTR_API_KEY env var.');
+      throw new PluginError('Vultr API key is required. Provide via credentials.apiKey or VULTR_API_KEY env var.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'vultr:initClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Set credentials.apiKey or the VULTR_API_KEY environment variable before initializing the driver.'
+      });
     }
 
     // Lazy import to keep core package lightweight

@@ -198,7 +198,15 @@ class TursoReplicator extends BaseReplicator {
           const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
 
           if (this.schemaSync.onMismatch === 'error') {
-            throw new Error(message);
+            throw this.createError(message, {
+              operation: 'schemaSync',
+              resourceName,
+              tableName,
+              statusCode: 409,
+              retriable: errSync?.retriable ?? false,
+              suggestion: 'Ensure the Turso table schema matches the resource definition or set schemaSync.onMismatch to warn/ignore.',
+              docs: 'docs/plugins/replicator.md'
+            });
           } else if (this.schemaSync.onMismatch === 'warn') {
             console.warn(`[TursoReplicator] ${message}`);
           }
@@ -228,11 +236,23 @@ class TursoReplicator extends BaseReplicator {
 
     if (!tableExists) {
       if (!this.schemaSync.autoCreateTable) {
-        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+        throw this.createError(`Table ${tableName} does not exist and autoCreateTable is disabled`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Create the table manually or enable schemaSync.autoCreateTable.'
+        });
       }
 
       if (this.schemaSync.strategy === 'validate-only') {
-        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+        throw this.createError(`Table ${tableName} does not exist (validate-only mode)`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Provision the destination table before running validate-only checks or choose a different strategy.'
+        });
       }
 
       // Create table

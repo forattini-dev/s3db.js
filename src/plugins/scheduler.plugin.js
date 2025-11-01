@@ -80,7 +80,13 @@ import { SchedulerError } from "./scheduler.errors.js";
  *         if (backupPlugin) {
  *           return await backupPlugin.backup('incremental');
  *         }
- *         throw new Error('BackupPlugin not available');
+ *         throw new PluginError('BackupPlugin not available', {
+ *           pluginName: 'SchedulerPlugin',
+ *           operation: 'backupJob',
+ *           statusCode: 500,
+ *           retriable: false,
+ *           suggestion: 'Ensure BackupPlugin is installed before scheduling backup jobs.'
+ *         });
  *       },
  *       retries: 2
  *     },
@@ -94,7 +100,13 @@ import { SchedulerError } from "./scheduler.errors.js";
  *         if (backupPlugin) {
  *           return await backupPlugin.backup('full');
  *         }
- *         throw new Error('BackupPlugin not available');
+ *         throw new PluginError('BackupPlugin not available', {
+ *           pluginName: 'SchedulerPlugin',
+ *           operation: 'backupJob',
+ *           statusCode: 500,
+ *           retriable: false,
+ *           suggestion: 'Ensure BackupPlugin is installed before scheduling backup jobs.'
+ *         });
  *       }
  *     },
  *     

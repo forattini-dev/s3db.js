@@ -17,6 +17,16 @@
 
 import { Database } from '../../src/index.js';
 import { CloudInventoryPlugin } from '../../src/plugins/cloud-inventory.plugin.js';
+import {
+  registerCloudDriver,
+  BaseCloudDriver
+} from '../../src/plugins/cloud-inventory/index.js';
+
+class FixtureAwsDriver extends BaseCloudDriver {
+  async listResources() {
+    return Array.isArray(this.config.sampleResources) ? this.config.sampleResources : [];
+  }
+}
 
 async function main() {
   console.log('🚀 Cloud Inventory → Terraform State Export Example\n');
@@ -27,12 +37,16 @@ async function main() {
     bucketName: 'cloud-inventory-export-demo'
   });
 
-  // 2. Configure Cloud Inventory Plugin with mock drivers
+  // 2. Register a lightweight fixture driver for local experimentation.
+  //    Production installs should use `driver: "aws"` with real credentials.
+  registerCloudDriver('fixture-aws', (options = {}) => new FixtureAwsDriver(options));
+
+  // 3. Configure Cloud Inventory Plugin with the fixture driver
   const cloudInventory = new CloudInventoryPlugin({
     clouds: [
       {
         id: 'aws-production',
-        driver: 'aws-mock',
+        driver: 'fixture-aws',
         credentials: {},
         config: {
           accountId: '123456789012',
@@ -118,48 +132,6 @@ async function main() {
             }
           ]
         }
-      },
-      {
-        id: 'gcp-staging',
-        driver: 'gcp-mock',
-        credentials: {},
-        config: {
-          projectId: 'my-gcp-project',
-          region: 'us-central1',
-          sampleResources: [
-            {
-              resourceId: 'staging-vm-1',
-              region: 'us-central1',
-              service: 'compute',
-              resourceType: 'gcp.compute.instance',
-              name: 'staging-vm-1',
-              configuration: {
-                id: 'staging-vm-1',
-                name: 'staging-vm-1',
-                machineType: 'e2-medium',
-                status: 'RUNNING',
-                networkInterfaces: [{
-                  network: 'default',
-                  subnetwork: 'default',
-                  networkIP: '10.128.0.2'
-                }],
-                disks: [{
-                  boot: true,
-                  autoDelete: true,
-                  diskSizeGb: '20'
-                }],
-                labels: {
-                  environment: 'staging',
-                  team: 'devops'
-                }
-              },
-              labels: {
-                environment: 'staging',
-                team: 'devops'
-              }
-            }
-          ]
-        }
       }
     ],
     discovery: {
@@ -168,7 +140,7 @@ async function main() {
     verbose: true
   });
 
-  // 3. Install plugin and discover resources
+  // 4. Install plugin and discover resources
   await db.use(cloudInventory);
   console.log('✅ Cloud Inventory Plugin installed\n');
 

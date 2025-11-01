@@ -3,6 +3,7 @@ import { Plugin } from "./plugin.class.js";
 import { PuppeteerPlugin } from "./puppeteer.plugin.js";
 import { S3QueuePlugin } from "./s3-queue.plugin.js";
 import { TTLPlugin } from "./ttl.plugin.js";
+import { PluginError } from "../errors.js";
 
 function sanitizeNamespace(value) {
   return (value || 'spider')
@@ -214,7 +215,13 @@ export class SpiderSuitePlugin extends Plugin {
    */
   async enqueueTarget(data, options = {}) {
     if (!this.targetsResource?.enqueue) {
-      throw new Error('[SpiderSuitePlugin] Queue helpers not initialized yet');
+      throw new PluginError('[SpiderSuitePlugin] Queue helpers not initialized yet', {
+        pluginName: 'SpiderSuitePlugin',
+        operation: 'enqueueTarget',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Call plugin.initialize() before enqueueing targets so queue helpers are registered.'
+      });
     }
     return await this.targetsResource.enqueue({
       createdAt: new Date().toISOString().slice(0, 10),
@@ -242,7 +249,13 @@ export class SpiderSuitePlugin extends Plugin {
 
   async queueHandler(record, context) {
     if (typeof this.processor !== 'function') {
-      throw new Error('[SpiderSuitePlugin] No processor registered. Call setProcessor(fn) first.');
+      throw new PluginError('[SpiderSuitePlugin] No processor registered. Call setProcessor(fn) first.', {
+        pluginName: 'SpiderSuitePlugin',
+        operation: 'queueHandler',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Register a processor via plugin.setProcessor(jobHandler) before starting the queue.'
+      });
     }
 
     const helpers = {

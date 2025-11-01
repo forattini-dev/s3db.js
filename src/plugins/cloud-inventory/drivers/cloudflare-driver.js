@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready Cloudflare inventory driver using official cloudflare SDK.
@@ -47,7 +48,13 @@ export class CloudflareInventoryDriver extends BaseCloudDriver {
     this._accountId = credentials.accountId || this.config?.accountId || process.env.CLOUDFLARE_ACCOUNT_ID;
 
     if (!this._apiToken) {
-      throw new Error('Cloudflare API token is required. Provide via credentials.apiToken or CLOUDFLARE_API_TOKEN env var.');
+      throw new PluginError('Cloudflare API token is required. Provide via credentials.apiToken or CLOUDFLARE_API_TOKEN env var.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'cloudflare:initClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Populate credentials.apiToken or set the CLOUDFLARE_API_TOKEN environment variable before initializing the Cloudflare driver.'
+      });
     }
 
     // Lazy import

@@ -605,6 +605,7 @@
  * - Error handling can be customized via `onError` callback
  */
 
+import { PromisePool } from '@supercharge/promise-pool';
 import { Plugin } from './plugin.class.js';
 import { createConsumer } from './consumers/index.js';
 import tryFn from "../concerns/try-fn.js";
@@ -617,38 +618,92 @@ export class QueueConsumerPlugin extends Plugin {
     // New pattern: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
     this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
     this.consumers = [];
+    this.startConcurrency = Math.max(1, options.startConcurrency ?? 5);
+    this.stopConcurrency = Math.max(1, options.stopConcurrency ?? this.startConcurrency);
   }
 
   async onInstall() {
-    
+    const startTasks = [];
+
     for (const driverDef of this.driversConfig) {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
 
-      // Structured format: { driver: 'sqs', config: {...}, consumers: [{ resources: 'users', ... }] }
       for (const consumerDef of consumerDefs) {
         const { resources, ...consumerConfig } = consumerDef;
         const resourceList = Array.isArray(resources) ? resources : [resources];
+
         for (const resource of resourceList) {
-          const mergedConfig = { ...driverConfig, ...consumerConfig };
-          const consumer = createConsumer(driver, {
-            ...mergedConfig,
-            onMessage: (msg) => this._handleMessage(msg, resource),
-            onError: (err, raw) => this._handleError(err, raw, resource)
+          startTasks.push({
+            driver,
+            resource,
+            start: async () => {
+              const mergedConfig = { ...driverConfig, ...consumerConfig };
+              const consumer = createConsumer(driver, {
+                ...mergedConfig,
+                onMessage: (msg) => this._handleMessage(msg, resource),
+                onError: (err, raw) => this._handleError(err, raw, resource)
+              });
+              await consumer.start();
+              this.consumers.push(consumer);
+            }
           });
-          await consumer.start();
-          this.consumers.push(consumer);
         }
       }
+    }
+
+    if (startTasks.length === 0) {
+      return;
+    }
+
+    const { errors } = await PromisePool
+      .withConcurrency(this.startConcurrency)
+      .for(startTasks)
+      .process(async task => {
+        await task.start();
+        return `${task.driver}:${task.resource}`;
+      });
+
+    if (errors.length > 0) {
+      const messages = errors.map(({ item, reason }) => {
+        const identifier = item ? `${item.driver || 'unknown'}:${item.resource || 'unknown'}` : 'unknown';
+        return `[${identifier}] ${reason?.message || reason}`;
+      });
+
+      throw new QueueError('Failed to start one or more queue consumers', {
+        operation: 'onInstall',
+        details: messages.join('; '),
+        suggestion: 'Review queue consumer configuration and connectivity before retrying.'
+      });
     }
   }
 
   async stop() {
     if (!Array.isArray(this.consumers)) this.consumers = [];
-    for (const consumer of this.consumers) {
-      if (consumer && typeof consumer.stop === 'function') {
-        await consumer.stop();
-      }
+    if (this.consumers.length === 0) {
+      return;
     }
+
+    const stopTasks = this.consumers
+      .filter(consumer => consumer && typeof consumer.stop === 'function')
+      .map(consumer => ({
+        consumer,
+        stop: () => consumer.stop()
+      }));
+
+    const { errors } = await PromisePool
+      .withConcurrency(this.stopConcurrency)
+      .for(stopTasks)
+      .process(async task => {
+        await task.stop();
+        return task.consumer;
+      });
+
+    if (errors.length > 0 && this.options.verbose) {
+      errors.forEach(({ reason }) => {
+        console.warn(`[QueueConsumerPlugin] Failed to stop consumer: ${reason?.message || reason}`);
+      });
+    }
+
     this.consumers = [];
   }
 

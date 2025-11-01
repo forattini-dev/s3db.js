@@ -84,7 +84,12 @@ class WebhookReplicator extends BaseReplicator {
     // Required
     this.url = config.url;
     if (!this.url) {
-      throw new Error('WebhookReplicator requires a "url" configuration');
+      throw this.createError('WebhookReplicator requires a "url" configuration', {
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide the webhook endpoint URL: new WebhookReplicator({ url: "https://example.com/webhook" })'
+      });
     }
 
     // HTTP settings
@@ -441,7 +446,18 @@ class WebhookReplicator extends BaseReplicator {
         return { success: true, status: response.status };
       }
 
-      throw new Error(response.error || `HTTP ${response.status}: ${response.statusText}`);
+      throw this.createError(response.error || `HTTP ${response.status}: ${response.statusText}`, {
+        operation: 'replicate',
+        resourceName: resource,
+        statusCode: response.status ?? 502,
+        retriable: this.retryOnStatus?.includes?.(response.status ?? 0) ?? false,
+        suggestion: 'Inspect the webhook endpoint response and credentials, then retry after the remote service succeeds.',
+        metadata: {
+          status: response.status,
+          statusText: response.statusText,
+          url: this.url
+        }
+      });
     });
 
     if (ok) return result;
@@ -505,7 +521,19 @@ class WebhookReplicator extends BaseReplicator {
           };
         }
 
-        throw new Error(response.error || `HTTP ${response.status}: ${response.statusText}`);
+        throw this.createError(response.error || `HTTP ${response.status}: ${response.statusText}`, {
+          operation: 'replicateBatch',
+          resourceName: resource,
+          statusCode: response.status ?? 502,
+          retriable: this.retryOnStatus?.includes?.(response.status ?? 0) ?? false,
+          suggestion: 'Check the webhook batch payload, remote rate limits, and retry policy before retrying.',
+          metadata: {
+            status: response.status,
+            statusText: response.statusText,
+            url: this.url,
+            batchSize: records.length
+          }
+        });
       }
 
       // Otherwise, send individual requests (parallel)
@@ -562,7 +590,17 @@ class WebhookReplicator extends BaseReplicator {
       const response = await this._makeRequest(testPayload);
 
       if (!response.success) {
-        throw new Error(response.error || `HTTP ${response.status}: ${response.statusText}`);
+        throw this.createError(response.error || `HTTP ${response.status}: ${response.statusText}`, {
+          operation: 'testConnection',
+          statusCode: response.status ?? 502,
+          retriable: this.retryOnStatus?.includes?.(response.status ?? 0) ?? false,
+          suggestion: 'Confirm the webhook endpoint, authentication headers, and retryOnStatus settings before retrying.',
+          metadata: {
+            status: response.status,
+            statusText: response.statusText,
+            url: this.url
+          }
+        });
       }
 
       return true;

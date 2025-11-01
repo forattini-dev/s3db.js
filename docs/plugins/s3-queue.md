@@ -1,5 +1,11 @@
 # 🔒 S3Queue Plugin
 
+> **Distributed worker queues backed by S3 with zero-duplication guarantees.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#️-configuration) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 **Distributed queue system** using S3 as backend, with zero duplication guarantee.

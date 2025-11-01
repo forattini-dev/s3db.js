@@ -247,7 +247,15 @@ class PostgresReplicator extends BaseReplicator {
           const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
 
           if (this.schemaSync.onMismatch === 'error') {
-            throw new Error(message);
+            throw this.createError(message, {
+              operation: 'schemaSync',
+              resourceName,
+              tableName,
+              statusCode: 409,
+              retriable: errSync?.retriable ?? false,
+              suggestion: 'Align the PostgreSQL table schema with the resource definition or relax schemaSync.onMismatch.',
+              docs: 'docs/plugins/replicator.md'
+            });
           } else if (this.schemaSync.onMismatch === 'warn') {
             console.warn(`[PostgresReplicator] ${message}`);
           }
@@ -272,11 +280,23 @@ class PostgresReplicator extends BaseReplicator {
     if (!existingSchema) {
       // Table doesn't exist
       if (!this.schemaSync.autoCreateTable) {
-        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+        throw this.createError(`Table ${tableName} does not exist and autoCreateTable is disabled`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Create the table manually or enable schemaSync.autoCreateTable to let the replicator provision it.'
+        });
       }
 
       if (this.schemaSync.strategy === 'validate-only') {
-        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+        throw this.createError(`Table ${tableName} does not exist (validate-only mode)`, {
+          operation: 'schemaSync',
+          tableName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Provision the destination table before running validate-only schema checks or switch to the alter strategy.'
+        });
       }
 
       // Create table
@@ -343,7 +363,13 @@ class PostgresReplicator extends BaseReplicator {
       const alterStatements = generatePostgresAlterTable(tableName, attributes, existingSchema);
 
       if (alterStatements.length > 0) {
-        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+        throw this.createError(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`, {
+          operation: 'schemaValidation',
+          tableName,
+          statusCode: 409,
+          retriable: false,
+          suggestion: 'Update the PostgreSQL table to include the missing columns or allow the replicator to manage schema changes.'
+        });
       }
     }
   }
@@ -416,7 +442,14 @@ class PostgresReplicator extends BaseReplicator {
             const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
             result = await this.client.query(sql, [id]);
           } else {
-            throw new Error(`Unsupported operation: ${operation}`);
+            throw this.createError(`Unsupported operation: ${operation}`, {
+              operation: 'replicate',
+              resourceName,
+              tableName: table,
+              statusCode: 400,
+              retriable: false,
+              suggestion: 'Use one of the supported actions: insert, update, or delete.'
+            });
           }
 
           results.push({
@@ -484,36 +517,38 @@ class PostgresReplicator extends BaseReplicator {
   }
 
   async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
-    
-    for (const record of records) {
+    const { results, errors } = await this.processBatch(records, async (record) => {
       const [ok, err, res] = await tryFn(() => this.replicate(
-        resourceName, 
-        record.operation, 
-        record.data, 
-        record.id, 
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
         record.beforeData
       ));
-      if (ok) {
-        results.push(res);
-      } else {
-        if (this.config.verbose) {
-          console.warn(`[PostgresReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
-        }
-        errors.push({ id: record.id, error: err.message });
+
+      if (!ok) {
+        throw err;
       }
-    }
-    
-    // Log errors if any occurred during batch processing
+
+      return res;
+    }, {
+      concurrency: this.config.batchConcurrency,
+      mapError: (error, record) => {
+        if (this.config.verbose) {
+          console.warn(`[PostgresReplicator] Batch replication failed for record ${record.id}: ${error.message}`);
+        }
+        return { id: record.id, error: error.message };
+      }
+    });
+
     if (errors.length > 0) {
       console.warn(`[PostgresReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
     }
-    
-    return { 
-      success: errors.length === 0, 
-      results, 
-      errors 
+
+    return {
+      success: errors.length === 0,
+      results,
+      errors
     };
   }
 

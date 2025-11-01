@@ -1,9 +1,23 @@
+import { ValidationError } from '../../errors.js';
+
 /**
  * Vector Distance Functions
  *
  * Provides distance/similarity calculations for vector operations.
  * All distance functions return lower values for more similar vectors.
  */
+
+function assertSameDimensions(a, b, operation) {
+  if (a.length !== b.length) {
+    throw new ValidationError(`Dimension mismatch: ${a.length} vs ${b.length}`, {
+      operation,
+      pluginName: 'VectorPlugin',
+      retriable: false,
+      suggestion: 'Ensure both vectors have identical lengths before calling distance utilities.',
+      metadata: { vectorALength: a.length, vectorBLength: b.length }
+    });
+  }
+}
 
 /**
  * Calculate cosine distance between two vectors
@@ -17,9 +31,7 @@
  * @throws {Error} If vectors have different dimensions
  */
 export function cosineDistance(a, b) {
-  if (a.length !== b.length) {
-    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
-  }
+  assertSameDimensions(a, b, 'cosineDistance');
 
   let dotProduct = 0;
   let normA = 0;
@@ -56,9 +68,7 @@ export function cosineDistance(a, b) {
  * @throws {Error} If vectors have different dimensions
  */
 export function euclideanDistance(a, b) {
-  if (a.length !== b.length) {
-    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
-  }
+  assertSameDimensions(a, b, 'euclideanDistance');
 
   let sum = 0;
   for (let i = 0; i < a.length; i++) {
@@ -81,9 +91,7 @@ export function euclideanDistance(a, b) {
  * @throws {Error} If vectors have different dimensions
  */
 export function manhattanDistance(a, b) {
-  if (a.length !== b.length) {
-    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
-  }
+  assertSameDimensions(a, b, 'manhattanDistance');
 
   let sum = 0;
   for (let i = 0; i < a.length; i++) {
@@ -104,9 +112,7 @@ export function manhattanDistance(a, b) {
  * @throws {Error} If vectors have different dimensions
  */
 export function dotProduct(a, b) {
-  if (a.length !== b.length) {
-    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
-  }
+  assertSameDimensions(a, b, 'dotProduct');
 
   let sum = 0;
   for (let i = 0; i < a.length; i++) {

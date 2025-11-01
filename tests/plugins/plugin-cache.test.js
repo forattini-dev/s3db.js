@@ -58,17 +58,19 @@ describe('Cache Plugin - Comprehensive Tests', () => {
     test('should emit events during operations', async () => {
       const cache = new Cache();
       const events = [];
-      
+
       cache.on('set', (data) => events.push({ type: 'set', data }));
       cache.on('fetched', (data) => events.push({ type: 'get', data }));
       cache.on('deleted', (data) => events.push({ type: 'delete', data }));
-      
+
       await cache.set('test-key', 'test-value');
       await cache.get('test-key');
       await cache.delete('test-key');
-      
+
       expect(events).toHaveLength(3);
-      expect(events[0]).toEqual({ type: 'set', data: 'test-value' });
+      expect(events[0]).toEqual({ type: 'set', data: { key: 'test-key', value: 'test-value' } });
+      expect(events[1]).toEqual({ type: 'get', data: { key: 'test-key', value: 'test-value' } });
+      expect(events[2]).toEqual({ type: 'delete', data: { key: 'test-key', value: 'test-value' } });
     });
   });
 

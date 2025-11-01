@@ -1,10 +1,12 @@
 # 🌐 API Plugin
 
-**Transform s3db.js into a production-ready REST API in one line of code.**
+> **Transform s3db.js into a production-ready REST API in one line of code.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration →](./api/configuration.md) | [Authentication →](./api/authentication.md) | [Guards →](./api/guards.md) | [FAQ ↓](#-faq)
 
 ---
 
-## ⚡ TL;DR
+## ⚡ TLDR
 
 ```javascript
 await db.use(new ApiPlugin({ port: 3000 }));  // That's it!
@@ -546,6 +548,10 @@ await db.use(new ApiPlugin({
   failban: {
     enabled: true,
     maxViolations: 3,
+    resourceNames: {
+      bans: 'plg_security_bans',
+      violations: 'plg_security_violations'
+    },
     geo: {
       enabled: true,
       allowedCountries: ['US', 'BR', 'CA']
@@ -855,6 +861,10 @@ failban: {
   maxViolations: 3,           // Ban after 3 strikes
   violationWindow: 3600000,   // Within 1 hour
   banDuration: 86400000,      // Ban for 24 hours
+  resourceNames: {
+    bans: 'plg_security_bans',          // Optional override
+    violations: 'plg_security_events'
+  },
 
   // Optional: GeoIP country blocking
   geo: {
@@ -871,6 +881,7 @@ failban: {
 - Invalid requests
 
 **Auto-unban:** TTL-based, no manual intervention needed
+<br>**Resource names:** override ban/violation tables via `resourceNames.failban`.
 
 **[→ Learn more: Security features](./api/security.md#failban)**
 </details>
@@ -1028,6 +1039,8 @@ auth: {
 }
 ```
 
+> ℹ️ Static routes are evaluated before resource routes. Combine with `pathRules` (or `pathAuth`) if you need per-path auth.
+
 **[→ Learn more: Static files](./api/static-files.md)**
 </details>
 
@@ -1142,6 +1155,16 @@ readinessProbe:
 3. **Advanced:** [Deployment](./api/deployment.md) → [Auth Patterns](./api/authorization-patterns.md) → [Full Config](./api/configuration.md)
 
 ---
+
+## 🚨 Error Handling
+
+Misconfigurations now surface structured `PluginError` payloads so API operators get instant remediation guidance. Examples include:
+- Missing `usersResource` for `basicAuth`/`apiKeyAuth` → `statusCode: 500`, `retriable: false`, suggestion to wire the correct resource.
+- JWT/OIDC misconfigurations (no secret, bad issuer, invalid duration strings) → `statusCode: 400`, explaining the expected format.
+- Custom auth driver registration issues (duplicate drivers, missing `initialize`) → `statusCode: 400/500` with metadata referencing the driver name.
+- Static asset misconfiguration (`static[]`) now calls out the bad entry with `statusCode: 400` and the mount index so you can fix it quickly.
+
+Surface `error.suggestion` and `error.metadata` in your admin UI/logging to keep response teams fast.
 
 ## 💬 Need Help?
 

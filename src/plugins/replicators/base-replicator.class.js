@@ -1,4 +1,5 @@
 import EventEmitter from 'events';
+import { PromisePool } from '@supercharge/promise-pool';
 import { ReplicationError } from '../replicator.errors.js';
 
 /**
@@ -11,6 +12,7 @@ export class BaseReplicator extends EventEmitter {
     this.config = config;
     this.name = this.constructor.name;
     this.enabled = config.enabled !== false; // Default to enabled unless explicitly disabled
+    this.batchConcurrency = Math.max(1, config.batchConcurrency ?? 5);
   }
 
   /**
@@ -87,6 +89,92 @@ export class BaseReplicator extends EventEmitter {
    */
   async cleanup() {
     this.emit('cleanup', { replicator: this.name });
+  }
+
+  /**
+   * Update the default batch concurrency at runtime
+   * @param {number} value
+   */
+  setBatchConcurrency(value) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new ReplicationError('Batch concurrency must be a positive number', {
+        operation: 'setBatchConcurrency',
+        replicatorClass: this.name,
+        providedValue: value,
+        suggestion: 'Provide a positive integer value greater than zero.'
+      });
+    }
+    this.batchConcurrency = Math.floor(value);
+  }
+
+  /**
+   * Generic helper to process batches with controlled concurrency
+   * @param {Array} records - Items to process
+   * @param {Function} handler - Async handler executed for each record
+   * @param {Object} options
+   * @param {number} [options.concurrency] - Concurrency override
+  * @param {Function} [options.mapError] - Maps thrown errors before collection
+   * @returns {Promise<{results: Array, errors: Array}>}
+   */
+  async processBatch(records = [], handler, { concurrency, mapError } = {}) {
+    if (!Array.isArray(records) || records.length === 0) {
+      return { results: [], errors: [] };
+    }
+
+    if (typeof handler !== 'function') {
+      throw new ReplicationError('processBatch requires an async handler function', {
+        operation: 'processBatch',
+        replicatorClass: this.name,
+        suggestion: 'Provide an async handler: async (record) => { ... }'
+      });
+    }
+
+    const limit = Math.max(1, concurrency ?? this.batchConcurrency ?? 5);
+    const results = [];
+    const errors = [];
+
+    await PromisePool
+      .withConcurrency(limit)
+      .for(records)
+      .process(async record => {
+        try {
+          const result = await handler(record);
+          results.push(result);
+        } catch (error) {
+          if (typeof mapError === 'function') {
+            const mapped = mapError(error, record);
+            if (mapped !== undefined) {
+              errors.push(mapped);
+            }
+          } else {
+            errors.push({ record, error });
+          }
+        }
+      });
+
+    return { results, errors };
+  }
+
+  /**
+   * Helper to build replication errors with contextual metadata
+   * @param {string} message
+   * @param {Object} details
+   * @returns {ReplicationError}
+   */
+  createError(message, details = {}) {
+    return new ReplicationError(message, {
+      replicatorClass: this.name,
+      operation: details.operation || 'unknown',
+      resourceName: details.resourceName,
+      statusCode: details.statusCode ?? 500,
+      retriable: details.retriable ?? false,
+      suggestion: details.suggestion,
+      description: details.description,
+      docs: details.docs,
+      hint: details.hint,
+      metadata: details.metadata,
+      ...details
+    });
   }
 
   /**

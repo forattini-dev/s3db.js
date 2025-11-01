@@ -1,4 +1,5 @@
 import { BaseCloudDriver } from './base-driver.js';
+import { PluginError } from '../../../errors.js';
 
 /**
  * Production-ready Hetzner Cloud inventory driver using hcloud-js library.
@@ -47,7 +48,13 @@ export class HetznerInventoryDriver extends BaseCloudDriver {
     this._apiToken = credentials.token || credentials.apiToken || process.env.HETZNER_TOKEN;
 
     if (!this._apiToken) {
-      throw new Error('Hetzner API token is required. Provide via credentials.token or HETZNER_TOKEN env var.');
+      throw new PluginError('Hetzner API token is required. Provide via credentials.token or HETZNER_TOKEN env var.', {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'hetzner:initClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Set credentials.token or HETZNER_TOKEN prior to initializing the Hetzner driver.'
+      });
     }
 
     // Lazy import to keep core package lightweight

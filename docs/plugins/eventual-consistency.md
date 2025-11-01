@@ -1,5 +1,11 @@
 # EventualConsistencyPlugin
 
+> **Auditable numeric transactions with automatic consolidation and analytics.**
+>
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+
+---
+
 ## ⚡ TLDR
 
 Plugin for numeric fields with **auditable transactions** and **pre-calculated analytics** by hour/day/week/month.
