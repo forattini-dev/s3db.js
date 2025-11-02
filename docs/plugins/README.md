@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Extend your database with powerful plugins</strong><br>
-  <em>22 production-ready plugins • Zero core modifications • Infinite possibilities</em>
+  <em>23 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
 
 ---
@@ -27,6 +27,7 @@
 | **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
 | **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
 | **[🔐 Identity](./identity.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](./identity.md) |
+| **[☸️ Kubernetes Inventory](./kubernetes-inventory.md)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](./kubernetes-inventory.md) |
 | **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
 | **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
 | **[🤖 ML](./ml-plugin.md)** | Machine learning model management | Model inference, predictions | [→](./ml-plugin.md) |
