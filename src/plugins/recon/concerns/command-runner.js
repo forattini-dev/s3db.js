@@ -6,9 +6,11 @@
  * - Timeout handling
  * - Output buffering
  * - Error handling
+ * - Automatic process cleanup via ProcessManager
  */
 
 import { spawn } from 'child_process';
+import { processManager } from './process-manager.js';
 
 export class CommandRunner {
   constructor() {
@@ -23,7 +25,11 @@ export class CommandRunner {
       return this.availabilityCache.get(command);
     }
 
-    const result = await this.run('which', [command], { timeout: 1000 });
+    // Don't track 'which' processes (they're just checks, not actual work)
+    const result = await this.run('which', [command], {
+      timeout: 1000,
+      trackProcess: false
+    });
     const available = result.ok && result.stdout.trim().length > 0;
 
     this.availabilityCache.set(command, available);
@@ -36,12 +42,19 @@ export class CommandRunner {
   async run(command, args = [], options = {}) {
     const timeout = options.timeout || 30000;
     const maxBuffer = options.maxBuffer || 1024 * 1024; // 1MB default
+    const trackProcess = options.trackProcess !== false; // Default: true
 
     return new Promise((resolve) => {
       const proc = spawn(command, args, {
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe']
       });
+
+      // Track process for automatic cleanup (unless disabled for 'which' checks)
+      if (trackProcess && proc.pid) {
+        const commandName = `${command} ${args.slice(0, 2).join(' ')}`.substring(0, 50);
+        processManager.track(proc, { name: commandName });
+      }
 
       let stdout = '';
       let stderr = '';
