@@ -1,11 +1,15 @@
 import { describe, test, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 describe('Resource patch() and replace() Methods', () => {
   let database;
   let enforceLimitsResource, bodyOverflowResource, bodyOnlyResource, truncateDataResource;
 
   beforeAll(async () => {
+    // Clear storage before tests to prevent interference
+    MemoryClient.clearAllStorage();
+
     database = createDatabaseForTest('suite=resources/patch-replace');
     await database.connect();
 
@@ -65,6 +69,8 @@ describe('Resource patch() and replace() Methods', () => {
 
   afterAll(async () => {
     await database.disconnect();
+    // Clear storage after all tests
+    MemoryClient.clearAllStorage();
   });
 
   // ============================================================================
@@ -305,11 +311,17 @@ describe('Resource patch() and replace() Methods', () => {
         total: 100
       });
 
+      // Give time for partition indexing to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Patch status (no partition change)
       const updated = await partitionedResource.patch(id, { status: 'shipped' });
 
       expect(updated.status).toBe('shipped');
       expect(updated.total).toBe(100);
+
+      // Give time for partition updates to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Verify it exists in partition
       const fromPartition = await partitionedResource.getFromPartition({

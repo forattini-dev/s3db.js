@@ -5,6 +5,7 @@
  * Provides common functionality for training, prediction, and persistence
  */
 
+import { createRequire } from 'module';
 import {
   TrainingError,
   PredictionError,
@@ -14,6 +15,8 @@ import {
   TensorFlowDependencyError
 } from '../ml.errors.js';
 import { PluginError } from '../../errors.js';
+
+const require = createRequire(import.meta.url);
 
 export class BaseModel {
   constructor(config = {}) {
@@ -75,21 +78,15 @@ export class BaseModel {
     }
 
     try {
-      // Try CommonJS require first (works in most environments)
+      // Use CommonJS require with createRequire (works reliably in both Node.js and Jest ESM mode)
+      // This avoids TensorFlow.js internal ESM compatibility issues in Jest
       this.tf = require('@tensorflow/tfjs-node');
       this._tfValidated = true;
-    } catch (requireError) {
-      // If require fails (e.g., Jest VM modules), try dynamic import
-      try {
-        const tfModule = await import('@tensorflow/tfjs-node');
-        this.tf = tfModule.default || tfModule;
-        this._tfValidated = true;
-      } catch (importError) {
-        throw new TensorFlowDependencyError(
-          'TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node',
-          { originalError: importError.message }
-        );
-      }
+    } catch (error) {
+      throw new TensorFlowDependencyError(
+        'TensorFlow.js is not installed. Run: pnpm add @tensorflow/tfjs-node',
+        { originalError: error.message }
+      );
     }
   }
 

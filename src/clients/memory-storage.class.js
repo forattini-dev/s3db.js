@@ -273,7 +273,7 @@ export class MemoryStorage {
     const obj = this.objects.get(key);
 
     if (!obj) {
-      throw new ResourceError(`Object not found: ${key}`, {
+      const error = new ResourceError(`Object not found: ${key}`, {
         bucket: this.bucket,
         key,
         code: 'NoSuchKey',
@@ -281,6 +281,9 @@ export class MemoryStorage {
         retriable: false,
         suggestion: 'Ensure the key exists before attempting to read it.'
       });
+      // Set error name to 'NoSuchKey' for S3 compatibility
+      error.name = 'NoSuchKey';
+      throw error;
     }
 
     if (this.verbose) {
@@ -289,6 +292,30 @@ export class MemoryStorage {
 
     // Convert Buffer to Readable stream (same as real S3 Client)
     const bodyStream = Readable.from(obj.body);
+
+    // Add AWS SDK compatible transformToString() method
+    // This mimics the AWS SDK's SdkStreamMixin behavior
+    bodyStream.transformToString = async (encoding = 'utf-8') => {
+      const chunks = [];
+      for await (const chunk of bodyStream) {
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks).toString(encoding);
+    };
+
+    // Add AWS SDK compatible transformToByteArray() method
+    bodyStream.transformToByteArray = async () => {
+      const chunks = [];
+      for await (const chunk of bodyStream) {
+        chunks.push(chunk);
+      }
+      return new Uint8Array(Buffer.concat(chunks));
+    };
+
+    // Add AWS SDK compatible transformToWebStream() method
+    bodyStream.transformToWebStream = () => {
+      return Readable.toWeb(bodyStream);
+    };
 
     return {
       Body: bodyStream,
@@ -308,7 +335,7 @@ export class MemoryStorage {
     const obj = this.objects.get(key);
 
     if (!obj) {
-      throw new ResourceError(`Object not found: ${key}`, {
+      const error = new ResourceError(`Object not found: ${key}`, {
         bucket: this.bucket,
         key,
         code: 'NoSuchKey',
@@ -316,6 +343,9 @@ export class MemoryStorage {
         retriable: false,
         suggestion: 'Ensure the key exists before attempting to read it.'
       });
+      // Set error name to 'NoSuchKey' for S3 compatibility
+      error.name = 'NoSuchKey';
+      throw error;
     }
 
     if (this.verbose) {

@@ -3089,7 +3089,8 @@ export class Resource extends AsyncEventEmitter {
     const key = this.getResourceKey(id);
     const [ok, err, response] = await tryFn(() => this.client.getObject(key));
     if (!ok) {
-      if (err.name === "NoSuchKey") {
+      // Check multiple ways the error might indicate "not found"
+      if (err.name === "NoSuchKey" || err.code === "NoSuchKey" || err.Code === "NoSuchKey" || err.statusCode === 404) {
         return {
           buffer: null,
           contentType: null

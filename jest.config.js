@@ -1,6 +1,6 @@
 export default {
   silent: true,
-  maxWorkers: process.env.CI ? 1 : '50%', // Use 1 worker in CI, 50% of CPUs locally
+  maxWorkers: 1, // Use 1 worker to prevent database connection leaks across parallel tests
   workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
   verbose: false,
   testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
@@ -72,5 +72,10 @@ export default {
     '/node_modules/',
     '/tests/typescript/',
     '/docs/', // Exclude docs/examples (uses Node native test runner)
+  ],
+
+  // Allow TensorFlow.js to be transformed by Jest (fixes ESM import issues)
+  transformIgnorePatterns: [
+    'node_modules/(?!(@tensorflow)/)',
   ],
 };

@@ -181,7 +181,17 @@ export class PluginStorage {
 
     if (!ok) {
       // If not found, return null
-      if (err.name === 'NoSuchKey' || err.Code === 'NoSuchKey') {
+      // Check multiple ways the error might indicate "not found":
+      // 1. error.name is 'NoSuchKey' (standard S3)
+      // 2. error.code is 'NoSuchKey' (ResourceError with code property)
+      // 3. error.Code is 'NoSuchKey' (AWS SDK format)
+      // 4. statusCode is 404
+      if (
+        err.name === 'NoSuchKey' ||
+        err.code === 'NoSuchKey' ||
+        err.Code === 'NoSuchKey' ||
+        err.statusCode === 404
+      ) {
         return null;
       }
       throw new PluginStorageError(`Failed to retrieve plugin data`, {

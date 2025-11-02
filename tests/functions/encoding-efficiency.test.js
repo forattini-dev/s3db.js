@@ -56,17 +56,18 @@ describe('Smart Encoding Efficiency Test', () => {
     ];
 
     console.log('\n=== Encoding Efficiency Comparison ===\n');
-    
+
     let totalOriginalSize = 0;
     let totalSmartSize = 0;
     let totalBase64Size = 0;
+    let testCounter = 0;
 
     for (const { name, text, expectedImprovement } of testCases) {
       // Calculate sizes
       const originalSize = Buffer.byteLength(text, 'utf8');
       const base64Size = Buffer.from(text, 'utf8').toString('base64').length;
       const smartInfo = calculateEncodedSize(text);
-      
+
       totalOriginalSize += originalSize;
       totalBase64Size += base64Size;
       totalSmartSize += smartInfo.encoded;
@@ -81,9 +82,9 @@ describe('Smart Encoding Efficiency Test', () => {
       console.log(`  Smart (${smartInfo.encoding}): ${smartInfo.encoded} bytes (+${smartOverhead.toFixed(1)}%)`);
       console.log(`  Savings: ${improvement.toFixed(1)}% ${improvement > 0 ? '✅' : '❌'}`);
 
-      // Test actual storage and retrieval
+      // Test actual storage and retrieval with unique counter-based ID
       await resource.insert({
-        id: `test-${Date.now()}`,
+        id: `test-${testCounter++}-${Date.now()}`,
         content: text
       });
 

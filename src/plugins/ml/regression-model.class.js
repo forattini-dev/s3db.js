@@ -6,7 +6,7 @@
  */
 
 import { BaseModel } from './base-model.class.js';
-import { ModelConfigError } from '../ml.errors.js';
+import { ModelConfigError, ModelNotTrainedError } from '../ml.errors.js';
 
 export class RegressionModel extends BaseModel {
   constructor(config = {}) {

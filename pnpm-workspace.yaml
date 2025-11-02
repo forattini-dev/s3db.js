@@ -4,5 +4,6 @@ ignoredBuiltDependencies:
 
 onlyBuiltDependencies:
   - '@tensorflow/tfjs-node'
+  - esbuild
   - protobufjs
   - sharp

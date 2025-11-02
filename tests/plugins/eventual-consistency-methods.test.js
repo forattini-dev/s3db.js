@@ -1,5 +1,6 @@
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -9,6 +10,9 @@ describe("EventualConsistencyPlugin Methods", () => {
   let plugin;
 
   beforeEach(async () => {
+    // Clear storage before each test to prevent interference
+    MemoryClient.clearAllStorage();
+
     database = createDatabaseForTest('suite=plugins/ec-methods-test');
     await database.connect();
 
@@ -38,6 +42,8 @@ describe("EventualConsistencyPlugin Methods", () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear storage after each test
+    MemoryClient.clearAllStorage();
   });
 
   describe("Transaction Creation", () => {

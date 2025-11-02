@@ -5,6 +5,7 @@ import jsonStableStringify from "json-stable-stringify";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import { S3Client } from "./clients/s3-client.class.js";
+import { MemoryClient } from "./clients/memory-client.class.js";
 import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
 import { ResourceNotFound, DatabaseError, SchemaError } from "./errors.js";
@@ -106,12 +107,50 @@ export class Database extends EventEmitter {
       }
     }
 
-    this.client = options.client || new S3Client({
-      verbose: this.verbose,
-      parallelism: this.parallelism,
-      connectionString: connectionString,
-    });
-    
+    // Auto-detect client type based on connection string protocol
+    if (!options.client && connectionString) {
+      try {
+        const url = new URL(connectionString);
+        if (url.protocol === 'memory:') {
+          // Use MemoryClient for memory:// protocol
+          const bucket = url.hostname || 'test-bucket';
+          const keyPrefix = url.pathname ? url.pathname.substring(1) : ''; // Remove leading slash
+
+          this.client = new MemoryClient({
+            bucket,
+            keyPrefix,
+            verbose: this.verbose,
+            enforceLimits: url.searchParams.get('enforceLimits') === 'true',
+            persistPath: url.searchParams.get('persistPath') || undefined,
+          });
+        } else {
+          // Use S3Client for s3://, http://, https:// protocols
+          this.client = new S3Client({
+            verbose: this.verbose,
+            parallelism: this.parallelism,
+            connectionString: connectionString,
+          });
+        }
+      } catch (err) {
+        // If URL parsing fails, fall back to S3Client
+        this.client = new S3Client({
+          verbose: this.verbose,
+          parallelism: this.parallelism,
+          connectionString: connectionString,
+        });
+      }
+    } else if (!options.client) {
+      // No connection string provided, use S3Client with defaults
+      this.client = new S3Client({
+        verbose: this.verbose,
+        parallelism: this.parallelism,
+        connectionString: connectionString,
+      });
+    } else {
+      // Use provided client
+      this.client = options.client;
+    }
+
     // Store connection string for CLI access
     this.connectionString = connectionString;
 
