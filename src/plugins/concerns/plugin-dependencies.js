@@ -159,8 +159,14 @@ export const PLUGIN_DEPENDENCIES = {
       'node-cron': {
         version: '^4.0.0',
         description: 'Cron scheduler for automated discovery',
-        installCommand: 'pnpm add -D node-cron',
+        installCommand: 'pnpm add node-cron',
         npmUrl: 'https://www.npmjs.com/package/node-cron'
+      },
+      'flat': {
+        version: '^6.0.0',
+        description: 'Flatten/unflatten nested objects for cloud resource processing',
+        installCommand: 'pnpm add flat',
+        npmUrl: 'https://www.npmjs.com/package/flat'
       }
     }
   },

@@ -104,7 +104,7 @@
     "install:dev:replicators": "pnpm add -D pg @google-cloud/bigquery google-auth-library @planetscale/database @libsql/client @aws-sdk/client-sqs amqplib",
     "install:dev:plugins": "pnpm add -D hono @hono/node-server @hono/swagger-ui jose bcrypt nodemailer node-cron @tensorflow/tfjs-node",
     "install:dev:puppeteer": "pnpm add -D puppeteer-extra puppeteer-extra-plugin-stealth user-agents ghost-cursor",
-    "install:dev:cloud": "pnpm add -D @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2",
+    "install:dev:cloud": "pnpm add -D flat node-cron @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2",
     "install:dev:minimal": "pnpm run install:dev:core && echo '✅ Minimal dev setup complete (core only)'",
     "install:dev:common": "pnpm run install:dev:core && pnpm run install:dev:replicators && pnpm run install:dev:plugins && echo '✅ Common dev setup complete (core + replicators + plugins)'",
     "install:dev:full": "pnpm run install:dev:core && pnpm run install:dev:replicators && pnpm run install:dev:plugins && pnpm run install:dev:puppeteer && pnpm run install:dev:cloud && echo '✅ Full dev setup complete (all dependencies)'"
@@ -169,6 +169,7 @@
     "bcrypt": "^5.0.0 || ^6.0.0",
     "ejs": "^3.0.0",
     "express": "^4.0.0 || ^5.0.0",
+    "flat": "^6.0.0",
     "ghost-cursor": "^1.0.0",
     "google-auth-library": "^9.0.0 || ^10.0.0",
     "hono": "^4.0.0",
@@ -315,6 +316,9 @@
       "optional": true
     },
     "express": {
+      "optional": true
+    },
+    "flat": {
       "optional": true
     },
     "hono": {
