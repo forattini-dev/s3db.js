@@ -446,7 +446,7 @@ export function createOIDCMiddleware(options) {
   // Return async middleware that initializes on first use
   let initialized = false;
 
-  return async (req, res, next) => {
+  const middleware = async (req, res, next) => {
     if (!initialized) {
       await client.initialize();
       initialized = true;
@@ -454,6 +454,12 @@ export function createOIDCMiddleware(options) {
 
     return client.middleware(req, res, next);
   };
+
+  // Expose client for cleanup
+  middleware.client = client;
+  middleware.destroy = () => client.destroy();
+
+  return middleware;
 }
 
 export default {

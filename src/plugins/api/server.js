@@ -268,6 +268,11 @@ export class ApiServer {
     if (this.failban) {
       await this.failban.cleanup();
     }
+
+    // Cleanup OIDC client if present
+    if (this.oidcMiddleware && typeof this.oidcMiddleware.destroy === 'function') {
+      this.oidcMiddleware.destroy();
+    }
   }
 
   getInfo() {
