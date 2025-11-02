@@ -2,6 +2,11 @@
 
 Complete toolkit installation for s3db.js ReconPlugin reconnaissance features.
 
+## 📚 Documentation
+
+- **Quick Start**: [quick-start.md](quick-start.md)
+- **Full Installation Guide**: [tools-installation.md](tools-installation.md)
+
 ## 📊 Current Status
 
 You currently have **6/29** tools installed:

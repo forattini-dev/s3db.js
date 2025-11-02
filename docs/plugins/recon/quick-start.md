@@ -12,6 +12,8 @@ After installation, reload your shell:
 source ~/.bashrc
 ```
 
+**For complete installation details, see:** [tools-installation.md](tools-installation.md)
+
 ## What Gets Installed
 
 ### Tier 1: Essential (No external dependencies)
@@ -123,7 +125,7 @@ source ~/.bashrc
 
 ## Full Documentation
 
-See `docs/recon-tools-installation.md` for complete guide with:
+See [tools-installation.md](tools-installation.md) for complete guide with:
 - Detailed installation steps
 - API key configuration
 - Wordlist setup
