@@ -45,6 +45,7 @@ import { FingerprintBuilder } from './concerns/fingerprint-builder.js';
 import { ReportGenerator } from './concerns/report-generator.js';
 import { DiffDetector } from './concerns/diff-detector.js';
 import { SecurityAnalyzer } from './concerns/security-analyzer.js';
+import { processManager } from './concerns/process-manager.js';
 
 // Behaviors
 import { UptimeBehavior } from './behaviors/uptime-behavior.js';
@@ -135,6 +136,9 @@ export class ReconPlugin extends Plugin {
 
     // Initialize command runner
     this.commandRunner = new CommandRunner();
+
+    // Initialize process manager (for automatic cleanup)
+    this.processManager = processManager;
 
     // Initialize managers
     this.storageManager = null; // Initialized in initialize()
@@ -723,6 +727,24 @@ export class ReconPlugin extends Plugin {
   }
 
   /**
+   * Lifecycle hook: onStop
+   * Cleanup all spawned processes when plugin stops
+   */
+  async onStop() {
+    console.log('[ReconPlugin] Stopping plugin, cleaning up processes...');
+    await this.processManager.cleanup({ silent: false });
+  }
+
+  /**
+   * Lifecycle hook: onUninstall
+   * Cleanup all resources when plugin is uninstalled
+   */
+  async onUninstall(options = {}) {
+    console.log('[ReconPlugin] Uninstalling plugin, cleaning up processes...');
+    await this.processManager.forceCleanup();
+  }
+
+  /**
    * Legacy hook: afterInstall
    * Registers legacy alias database.plugins.network
    */
@@ -741,6 +763,9 @@ export class ReconPlugin extends Plugin {
    */
   afterUninstall() {
     super.afterUninstall();
+
+    // Cleanup processes
+    this.processManager.cleanup({ silent: true }).catch(() => {});
 
     // Remove legacy alias
     if (this.database && this.database.plugins.network === this) {
