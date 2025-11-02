@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
-import { flatten } from 'flat';
+import { flatten } from '../concerns/flatten.js';
 import isEqual from 'lodash-es/isEqual.js';
 
 import { Plugin } from './plugin.class.js';

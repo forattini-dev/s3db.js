@@ -169,7 +169,6 @@
     "bcrypt": "^5.0.0 || ^6.0.0",
     "ejs": "^3.0.0",
     "express": "^4.0.0 || ^5.0.0",
-    "flat": "^6.0.0",
     "ghost-cursor": "^1.0.0",
     "google-auth-library": "^9.0.0 || ^10.0.0",
     "hono": "^4.0.0",
@@ -316,9 +315,6 @@
       "optional": true
     },
     "express": {
-      "optional": true
-    },
-    "flat": {
       "optional": true
     },
     "hono": {

@@ -1,4 +1,4 @@
-import { flatten, unflatten } from "flat";
+import { flatten, unflatten } from "./concerns/flatten.js";
 import { createHash } from "crypto";
 
 import {
