@@ -29,6 +29,7 @@ export * from './tfstate/index.js'
 export * from './ttl.plugin.js'
 export * from './vector.plugin.js'
 export * from './recon.plugin.js'
+export * from './kubernetes-inventory.plugin.js'
 
 // plugin drivers & utilities:
 export * from './backup/index.js'
@@ -36,3 +37,4 @@ export * from './cache/index.js'
 export * from './replicators/index.js'
 export * from './consumers/index.js'
 export * from './cloud-inventory/index.js'
+export * from './kubernetes-inventory/index.js'
