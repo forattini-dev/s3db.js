@@ -231,8 +231,11 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       await walletsResource.set('wallet-set-test', 'balance', 2000);
       await walletsResource.add('wallet-set-test', 'balance', 100);
 
-      // Wait
-      await sleep(100);
+      // Wait for async processing and consolidate
+      await sleep(200);
+
+      // Explicitly consolidate to ensure all operations are applied
+      await walletsResource.consolidate('wallet-set-test', 'balance');
 
       // Get consolidated value
       const value = await walletsResource.getConsolidatedValue('wallet-set-test', 'balance');

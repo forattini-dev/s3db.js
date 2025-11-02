@@ -24,6 +24,8 @@ describe('MemoryClient - Basic Operations', () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear shared storage to prevent test interference
+    MemoryClient.clearAllStorage();
   });
 
   it('should create database with memory client', async () => {
@@ -132,6 +134,8 @@ describe('MemoryClient - Snapshot/Restore', () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear shared storage to prevent test interference
+    MemoryClient.clearAllStorage();
   });
 
   it('should create and restore snapshots', async () => {
@@ -241,6 +245,8 @@ describe('MemoryClient - Limits Enforcement', () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear shared storage to prevent test interference
+    MemoryClient.clearAllStorage();
   });
 
   it('should enforce metadata 2KB limit', async () => {
@@ -320,6 +326,8 @@ describe('MemoryClient - Compatibility with Real Client', () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear shared storage to prevent test interference
+    MemoryClient.clearAllStorage();
   });
 
   it('should work with all behaviors', async () => {
@@ -445,6 +453,8 @@ describe('MemoryClient - Performance', () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear shared storage to prevent test interference
+    MemoryClient.clearAllStorage();
   });
 
   it('should handle bulk inserts efficiently', async () => {
@@ -479,6 +489,11 @@ describe('MemoryClient - Direct API Tests', () => {
       bucket: 'test-direct-api',
       verbose: false
     });
+  });
+
+  afterEach(() => {
+    // Clear shared storage to prevent test interference
+    MemoryClient.clearAllStorage();
   });
 
   describe('Basic Operations', () => {

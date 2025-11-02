@@ -1,17 +1,33 @@
 services:
 
   minio:
-    image: bitnami/minio:latest
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
     volumes:
-      - minio_data:/bitnami/minio/data 
+      - minio_data:/data
     ports:
       - "9100:9000"
       - "9101:9001"
     environment:
-      MINIO_FORCE_NEW_KEYS: yes
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
-      MINIO_DEFAULT_BUCKETS: s3db
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+      mc mb myminio/s3db --ignore-existing;
+      echo 'MinIO bucket s3db created successfully';
+      "
 
   localstack:
     image: localstack/localstack:latest

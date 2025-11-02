@@ -1,10 +1,14 @@
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 describe('Resource Journey - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
+    // Clear storage before each test to prevent interference
+    MemoryClient.clearAllStorage();
+
     database = createDatabaseForTest('suite=resources/journey');
     await database.connect();
   });
@@ -13,6 +17,8 @@ describe('Resource Journey - Real Integration Tests', () => {
     if (database && typeof database.disconnect === 'function') {
       await database.disconnect();
     }
+    // Clear storage after each test
+    MemoryClient.clearAllStorage();
   });
 
   test('Resource Creation and Configuration Journey', async () => {
@@ -690,6 +696,9 @@ describe('Resource Journey - Real Integration Tests', () => {
     expect(updated.embedding).toHaveLength(1536);
     expect(updated.embedding[0]).toBeCloseTo(newEmbedding[0], 5);
     expect(updated.embedding[0]).not.toBeCloseTo(embedding1[0], 5); // Should be different from original
+
+    // Give time for partition indexing to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // 9. Query by partition (category)
     const aiDocs = await resource.listIds({

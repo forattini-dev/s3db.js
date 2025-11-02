@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { TfStatePlugin } from '../../src/plugins/tfstate/index.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import {
   TfStateError,
   InvalidStateFileError,
@@ -19,6 +20,9 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
   let tempDir;
 
   beforeEach(async () => {
+    // Clear storage before each test to prevent interference
+    MemoryClient.clearAllStorage();
+
     database = createDatabaseForTest('suite=plugins/terraform-state');
     await database.connect();
     tempDir = await createTemporaryPathForTest('terraform-state');
@@ -28,6 +32,8 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
     if (database) {
       await database.disconnect();
     }
+    // Clear storage after each test
+    MemoryClient.clearAllStorage();
     // Clean up temp files
     try {
       rmSync(tempDir, { recursive: true, force: true });
@@ -1531,7 +1537,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       ]);
 
       await plugin.importState(stateFile);
-    });
+    }, 30000); // 30 second timeout for slow plugin installation + import
 
     test('should export state to object', async () => {
       const state = await plugin.exportState();

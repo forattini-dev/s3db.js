@@ -18,6 +18,10 @@ import { MemoryStorage } from './memory-storage.class.js';
 
 const pathPosix = path.posix;
 
+// Global storage registry - share storage between MemoryClient instances with same bucket
+// This allows reconnection to work properly (simulates S3 persistence)
+const globalStorageRegistry = new Map();
+
 export class MemoryClient extends EventEmitter {
   constructor(config = {}) {
     super();
@@ -33,16 +37,21 @@ export class MemoryClient extends EventEmitter {
     this.region = config.region || 'us-east-1';
     this._keyPrefixForStrip = this.keyPrefix ? pathPosix.join(this.keyPrefix, '') : '';
 
-    // Create internal storage engine
-    this.storage = new MemoryStorage({
-      bucket: this.bucket,
-      enforceLimits: config.enforceLimits || false,
-      metadataLimit: config.metadataLimit || 2048,
-      maxObjectSize: config.maxObjectSize || 5 * 1024 * 1024 * 1024,
-      persistPath: config.persistPath,
-      autoPersist: config.autoPersist || false,
-      verbose: this.verbose
-    });
+    // Get or create shared storage for this bucket
+    // This allows multiple MemoryClient instances to share the same data (simulating S3 persistence)
+    if (!globalStorageRegistry.has(this.bucket)) {
+      globalStorageRegistry.set(this.bucket, new MemoryStorage({
+        bucket: this.bucket,
+        enforceLimits: config.enforceLimits || false,
+        metadataLimit: config.metadataLimit || 2048,
+        maxObjectSize: config.maxObjectSize || 5 * 1024 * 1024 * 1024,
+        persistPath: config.persistPath,
+        autoPersist: config.autoPersist || false,
+        verbose: this.verbose
+      }));
+    }
+
+    this.storage = globalStorageRegistry.get(this.bucket);
 
     // Mock config object (for compatibility with Client interface)
     this.config = {
@@ -233,6 +242,8 @@ export class MemoryClient extends EventEmitter {
     const fullKey = this._applyKeyPrefix(key);
     const stringMetadata = this._encodeMetadata(metadata) || {};
 
+    const input = { Key: key, Metadata: metadata, ContentType: contentType, Body: body, ContentEncoding: contentEncoding, ContentLength: contentLength, IfMatch: ifMatch, IfNoneMatch: ifNoneMatch };
+
     const response = await this.storage.put(fullKey, {
       body,
       metadata: stringMetadata,
@@ -243,7 +254,8 @@ export class MemoryClient extends EventEmitter {
       ifNoneMatch
     });
 
-    this.emit('cl:PutObject', null, { key, metadata, contentType, body, contentEncoding, contentLength });
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'PutObjectCommand', response, input);
 
     return response;
   }
@@ -253,8 +265,14 @@ export class MemoryClient extends EventEmitter {
    */
   async getObject(key) {
     const fullKey = this._applyKeyPrefix(key);
+    const input = { Key: key };
     const response = await this.storage.get(fullKey);
-    return this._decodeMetadataResponse(response);
+    const decodedResponse = this._decodeMetadataResponse(response);
+
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'GetObjectCommand', decodedResponse, input);
+
+    return decodedResponse;
   }
 
   /**
@@ -262,8 +280,14 @@ export class MemoryClient extends EventEmitter {
    */
   async headObject(key) {
     const fullKey = this._applyKeyPrefix(key);
+    const input = { Key: key };
     const response = await this.storage.head(fullKey);
-    return this._decodeMetadataResponse(response);
+    const decodedResponse = this._decodeMetadataResponse(response);
+
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'HeadObjectCommand', decodedResponse, input);
+
+    return decodedResponse;
   }
 
   /**
@@ -274,13 +298,16 @@ export class MemoryClient extends EventEmitter {
     const fullTo = this._applyKeyPrefix(to);
     const encodedMetadata = this._encodeMetadata(metadata);
 
+    const input = { CopySource: from, Key: to, Metadata: metadata, MetadataDirective: metadataDirective, ContentType: contentType };
+
     const response = await this.storage.copy(fullFrom, fullTo, {
       metadata: encodedMetadata,
       metadataDirective,
       contentType
     });
 
-    this.emit('cl:CopyObject', null, { from, to, metadata, metadataDirective });
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'CopyObjectCommand', response, input);
 
     return response;
   }
@@ -298,9 +325,11 @@ export class MemoryClient extends EventEmitter {
    */
   async deleteObject(key) {
     const fullKey = this._applyKeyPrefix(key);
+    const input = { Key: key };
     const response = await this.storage.delete(fullKey);
 
-    this.emit('cl:DeleteObject', null, { key });
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'DeleteObjectCommand', response, input);
 
     return response;
   }
@@ -311,6 +340,8 @@ export class MemoryClient extends EventEmitter {
   async deleteObjects(keys) {
     // Add keyPrefix to all keys
     const fullKeys = keys.map(key => this._applyKeyPrefix(key));
+
+    const input = { Delete: { Objects: keys.map(key => ({ Key: key })) } };
 
     // Split into batches for parallel processing
     const batches = chunk(fullKeys, this.parallelism);
@@ -329,7 +360,8 @@ export class MemoryClient extends EventEmitter {
       allResults.Errors.push(...result.Errors);
     }
 
-    this.emit('deleteObjects', null, { keys, count: allResults.Deleted.length });
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'DeleteObjectsCommand', allResults, input);
 
     return allResults;
   }
@@ -350,15 +382,13 @@ export class MemoryClient extends EventEmitter {
       listParams.startAfter = this._applyKeyPrefix(startAfter);
     }
 
+    const input = { Prefix: prefix, Delimiter: delimiter, MaxKeys: maxKeys, ContinuationToken: continuationToken, StartAfter: startAfter };
+
     const response = await this.storage.list(listParams);
     const normalized = this._normalizeListResponse(response);
 
-    this.emit('cl:ListObjects', null, {
-      prefix,
-      count: normalized.Contents.length,
-      continuationToken: normalized.ContinuationToken,
-      startAfter
-    });
+    // Emit cl:response event for CostsPlugin compatibility
+    this.emit('cl:response', 'ListObjectsV2Command', normalized, input);
 
     return normalized;
   }
@@ -875,13 +905,14 @@ export class MemoryClient extends EventEmitter {
 
   /**
    * Encode metadata values using s3db metadata encoding
+   * Note: S3 metadata keys are case-insensitive and stored as lowercase
    */
   _encodeMetadata(metadata) {
     if (!metadata) return undefined;
 
     const encoded = {};
     for (const [rawKey, value] of Object.entries(metadata)) {
-      const validKey = String(rawKey).replace(/[^a-zA-Z0-9\-_]/g, '_');
+      const validKey = String(rawKey).replace(/[^a-zA-Z0-9\-_]/g, '_').toLowerCase();
       const { encoded: encodedValue } = metadataEncode(value);
       encoded[validKey] = encodedValue;
     }
@@ -1005,6 +1036,21 @@ export class MemoryClient extends EventEmitter {
       Delimiter: response.Delimiter,
       StartAfter: response.StartAfter
     };
+  }
+
+  /**
+   * Clear all shared storage for a specific bucket (useful for testing)
+   * @param {string} bucket - Bucket name to clear
+   */
+  static clearBucketStorage(bucket) {
+    globalStorageRegistry.delete(bucket);
+  }
+
+  /**
+   * Clear ALL shared storage (useful for test cleanup)
+   */
+  static clearAllStorage() {
+    globalStorageRegistry.clear();
   }
 }
 

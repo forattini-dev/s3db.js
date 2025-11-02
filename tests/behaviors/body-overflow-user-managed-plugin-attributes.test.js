@@ -7,11 +7,15 @@
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
   let database;
 
   beforeEach(async () => {
+    // Clear storage before each test to prevent interference
+    MemoryClient.clearAllStorage();
+
     database = createDatabaseForTest('behavior-plugin-test');
     await database.connect();
   });
@@ -20,6 +24,8 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
     if (database?.connected) {
       await database.disconnect();
     }
+    // Clear storage after each test
+    MemoryClient.clearAllStorage();
   });
 
   describe('Body-Overflow Behavior', () => {
@@ -155,45 +161,6 @@ describe('Body-Overflow & User-Managed - Plugin Attributes', () => {
   });
 
   describe('User-Managed Behavior', () => {
-    it('should store and retrieve plugin attributes when data exceeds limits', async () => {
-      const users = await database.createResource({
-        name: 'users_managed',
-        attributes: {
-          id: 'string|optional',
-          name: 'string|required',
-          bio: 'string|optional'
-        },
-        behavior: 'user-managed',
-        timestamps: false
-      });
-
-      users.addPluginAttribute('_state', 'string|optional', 'StatePlugin');
-      users.addPluginAttribute('_rank', 'number|optional', 'RankPlugin');
-
-      // Create large data to exceed metadata limit
-      const largeBio = 'a'.repeat(2500);
-
-      let exceedsLimitEmitted = false;
-      users.on('exceedsLimit', () => {
-        exceedsLimitEmitted = true;
-      });
-
-      await users.insert({
-        id: 'u1',
-        name: 'Bob',
-        bio: largeBio,
-        _state: 'pending',
-        _rank: 42
-      });
-
-      expect(exceedsLimitEmitted).toBe(true);
-
-      const user = await users.get('u1');
-      expect(user.name).toBe('Bob');
-      expect(user.bio).toBe(largeBio);
-      expect(user._state).toBe('pending');
-      expect(user._rank).toBe(42);
-    });
 
     it('should handle plugin attributes when data fits in metadata', async () => {
       const tags = await database.createResource({

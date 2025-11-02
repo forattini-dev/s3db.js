@@ -287,9 +287,22 @@ function extractEc2Tags(instance) {
   return Object.keys(tags).length ? tags : null;
 }
 
+/**
+ * @typedef {Object} AwsClientMap
+ * @property {Map<string, any>} ec2
+ * @property {any} s3
+ * @property {Map<string, any>} rds
+ * @property {any} iam
+ * @property {Map<string, any>} lambda
+ * @property {any} sts
+ * @property {Map<string, any>} ecs
+ * @property {Map<string, any>} eks
+ */
+
 export class AwsInventoryDriver extends BaseCloudDriver {
   constructor(options = {}) {
     super({ ...options, driver: options.driver || 'aws' });
+    /** @type {AwsClientMap} */
     this._clients = {
       ec2: new Map(),
       s3: null,

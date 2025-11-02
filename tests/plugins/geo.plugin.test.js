@@ -1,11 +1,15 @@
 import { jest } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 import { GeoPlugin } from '../../src/plugins/geo.plugin.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 describe('GeoPlugin', () => {
   let database;
 
   beforeEach(async () => {
+    // Clear storage before each test to prevent interference
+    MemoryClient.clearAllStorage();
+
     database = createDatabaseForTest('suite=plugins/geo');
     await database.connect();
   });
@@ -14,6 +18,8 @@ describe('GeoPlugin', () => {
     if (database && typeof database.disconnect === 'function') {
       await database.disconnect();
     }
+    // Clear storage after each test
+    MemoryClient.clearAllStorage();
   });
 
   describe('Plugin Installation', () => {
@@ -692,9 +698,12 @@ describe('GeoPlugin', () => {
 
       const resource = database.resources.stores;
 
-      // Insert stores
-      await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
-      await resource.insert({ name: 'Store 2', latitude: -23.5555, longitude: -46.6383 });
+      // Insert stores with explicit IDs and await completion
+      await resource.insert({ id: 'store1', name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
+      await resource.insert({ id: 'store2', name: 'Store 2', latitude: -23.5555, longitude: -46.6383 });
+
+      // Give time for partition indexing to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
 
@@ -768,8 +777,11 @@ describe('GeoPlugin', () => {
 
       const resource = database.resources.stores;
 
-      await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
-      await resource.insert({ name: 'Store No Location' }); // No coordinates
+      await resource.insert({ id: 'store1', name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
+      await resource.insert({ id: 'no-loc', name: 'Store No Location' }); // No coordinates
+
+      // Give time for partition indexing to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const nearby = await resource.findNearby({
         lat: -23.5505,
@@ -970,8 +982,11 @@ describe('GeoPlugin', () => {
 
       const resource = database.resources.stores;
 
-      await resource.insert({ name: 'Inside', latitude: -23.5505, longitude: -46.6333 });
-      await resource.insert({ name: 'No Location' });
+      await resource.insert({ id: 'inside', name: 'Inside', latitude: -23.5505, longitude: -46.6333 });
+      await resource.insert({ id: 'no-loc', name: 'No Location' });
+
+      // Give time for partition indexing to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const inBounds = await resource.findInBounds({
         north: -23.5,

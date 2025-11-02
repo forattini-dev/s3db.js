@@ -9,9 +9,9 @@ import {
   SendMessageCommand,
 } from "@aws-sdk/client-sqs";
 
-import { S3Client } from '#src/clients/s3-client.class.js';
 import Database from '#src/database.class.js';
 import { idGenerator } from '#src/concerns/id.js';
+import { S3Client } from '#src/clients/s3-client.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
 
 
@@ -25,7 +25,22 @@ const sqsName = (testName = idGenerator(5)) => ['day_' + new Date().toISOString(
 
 export function createClientForTest(testName, options = {}) {
   if (!options.connectionString) {
-    options.connectionString = process.env.BUCKET_CONNECTION_STRING + `/${s3Prefix(testName)}`;
+    const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
+    options.connectionString = baseConnection + `/${s3Prefix(testName)}`;
+  }
+
+  // Detect protocol and create appropriate client
+  if (options.connectionString.startsWith('memory://')) {
+    // Extract bucket and path from memory:// URL
+    const url = new URL(options.connectionString);
+    const bucket = url.hostname || 'bucket';
+    const keyPrefix = url.pathname.substring(1); // Remove leading /
+
+    return new MemoryClient({
+      bucket,
+      keyPrefix,
+      verbose: options.verbose || false
+    });
   }
 
   return new S3Client(options);
@@ -36,13 +51,44 @@ export function createDatabaseForTest(testName, options = {}) {
     throw new Error('testName must be a string');
   }
 
+  const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
   const params = {
-    connectionString: process.env.BUCKET_CONNECTION_STRING + `/${s3Prefix(testName)}`,
+    connectionString: baseConnection + `/${s3Prefix(testName)}`,
     ...options,
   }
 
   const database = new Database(params);
+
+  // Track database for cleanup on process exit (prevents resource leaks in tests)
+  if (typeof global !== 'undefined') {
+    global._testDatabases = global._testDatabases || new Set();
+    global._testDatabases.add(database);
+
+    // Auto-cleanup on disconnect
+    const originalDisconnect = database.disconnect.bind(database);
+    database.disconnect = async function() {
+      try {
+        await originalDisconnect();
+      } finally {
+        global._testDatabases?.delete(database);
+      }
+    };
+  }
+
   return database;
+}
+
+// Emergency cleanup function for leaked databases
+export async function cleanupAllTestDatabases() {
+  if (typeof global !== 'undefined' && global._testDatabases) {
+    const databases = Array.from(global._testDatabases);
+    await Promise.allSettled(databases.map(db => {
+      if (db && typeof db.disconnect === 'function') {
+        return db.disconnect().catch(() => {});
+      }
+    }));
+    global._testDatabases.clear();
+  }
 }
 
 export function createSqsClientForTest(testName, options = {}) {
