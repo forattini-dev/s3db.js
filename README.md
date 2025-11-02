@@ -272,6 +272,32 @@ npm install pg
 
 **Why manual installation?** These are marked as `peerDependencies` to keep the main package lightweight. Only install what you need!
 
+#### 🛠️ Development Setup
+
+Contributing to s3db.js? Use our **modular installation system** to install only what you need:
+
+```bash
+# Clone the repo
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+
+# Install base dependencies (required)
+pnpm install
+
+# Choose your dev setup:
+./scripts/install-deps.sh minimal     # Core only (~50MB)
+./scripts/install-deps.sh common      # + Replicators + Plugins (~500MB)
+./scripts/install-deps.sh full        # Everything (~2GB)
+
+# Or install specific groups:
+pnpm run install:dev:replicators  # PostgreSQL, BigQuery, etc.
+pnpm run install:dev:plugins      # API, Identity, ML, etc.
+pnpm run install:dev:puppeteer    # Web scraping suite
+pnpm run install:dev:cloud        # AWS SDK clients
+```
+
+See **[DEVELOPMENT.md](DEVELOPMENT.md)** for detailed setup instructions and dependency groups breakdown.
+
 ### 📘 TypeScript Support
 
 s3db.js includes comprehensive TypeScript definitions out of the box. Get full type safety, autocomplete, and IntelliSense support in your IDE!
