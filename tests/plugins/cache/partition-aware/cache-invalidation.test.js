@@ -1,76 +1,69 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
-import { createDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
-import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
-import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { beforeEach, describe, expect, test } from '@jest/globals';
+
+import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Cache Invalidation', () => {
-  let db;
-  let cachePlugin;
-  let users;
-  let testDir;
-
-  beforeAll(async () => {
-    testDir = await createTemporaryPathForTest('cache-partition-aware-simple');
-  });
-
-  afterAll(async () => {
-    // Cleanup done in tests if necessary
-  });
+  const ctx = setupPartitionAwareCacheSuite();
 
   beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-partition-aware');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'filesystem',
-      partitionAware: true,
-      partitionStrategy: 'hierarchical',
-      trackUsage: true,
-      config: {
-        directory: testDir,
-        enableStats: true
-      }
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        region: 'string|required',
-        department: 'string|required'
-      },
-      partitions: {
-        byRegion: { fields: { region: 'string' } },
-        byDepartment: { fields: { department: 'string' } }
-      }
-    });
+    await ctx.seedUsers();
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache().catch(() => {});
-    }
-    if (db) {
-      await db.disconnect();
-    }
-  });
+  test('invalidates partition caches when data is inserted', async () => {
+    const users = ctx.resource;
 
-  test('should handle cache operations with insert', async () => {
-    // Insert data
+    await users.count({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
+
     await users.insert({
-      name: 'Cache Test',
-      email: 'cache@example.com',
+      name: 'New US User',
+      email: 'new-us@example.com',
       region: 'US',
-      department: 'Test'
+      department: 'Support'
     });
 
-    // Cache should work
-    const count1 = await users.count();
-    expect(count1).toBeGreaterThan(0);
+    const refreshedCount = await users.count({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
 
-    const count2 = await users.count();
-    expect(count2).toBe(count1); // Should be cached
+    expect(refreshedCount).toBe(3);
+  });
+
+  test('invalidates partition cache when records move partitions', async () => {
+    const users = ctx.resource;
+    const [user] = await users.list({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
+
+    await users.update(user.id, { region: 'EU' });
+
+    const usCount = await users.count({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
+    const euCount = await users.count({
+      partition: 'byRegion',
+      partitionValues: { region: 'EU' }
+    });
+
+    expect(usCount).toBe(1);
+    expect(euCount).toBe(2);
+  });
+
+  test('clears all caches for deleteMany operations', async () => {
+    const users = ctx.resource;
+
+    await users.count();
+
+    const ids = await users.listIds();
+    await users.deleteMany(ids);
+
+    const count = await users.count();
+    expect(count).toBe(0);
   });
 });
+

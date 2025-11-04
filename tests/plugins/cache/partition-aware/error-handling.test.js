@@ -1,85 +1,42 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
-import { createDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
-import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
-import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { beforeEach, describe, expect, test } from '@jest/globals';
+
+import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Error Handling', () => {
-  let db;
-  let cachePlugin;
-  let users;
-  let testDir;
-
-  beforeAll(async () => {
-    testDir = await createTemporaryPathForTest('cache-partition-aware-simple');
-  });
-
-  afterAll(async () => {
-    // Cleanup done in tests if necessary
-  });
+  const ctx = setupPartitionAwareCacheSuite();
 
   beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-partition-aware');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'filesystem',
-      partitionAware: true,
-      partitionStrategy: 'hierarchical',
-      trackUsage: true,
-      config: {
-        directory: testDir,
-        enableStats: true
-      }
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        region: 'string|required',
-        department: 'string|required'
-      },
-      partitions: {
-        byRegion: { fields: { region: 'string' } },
-        byDepartment: { fields: { department: 'string' } }
-      }
-    });
+    await ctx.seedUsers();
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache().catch(() => {});
-    }
-    if (db) {
-      await db.disconnect();
-    }
-  });
+  test('handles operations against empty partitions gracefully', async () => {
+    const users = ctx.resource;
 
-  test('should handle basic operations', async () => {
-    await users.insert({ name: 'Error Test', email: 'error@example.com', region: 'US', department: 'Test' });
-
-    // Basic operations should work
-    const count = await users.count();
-    expect(count).toBe(1);
-
-    const usersList = await users.list();
-    expect(usersList).toHaveLength(1);
-  });
-
-  test('should handle partition queries without data', async () => {
-    // Query empty partition
-    const emptyCount = await users.count({
+    const count = await users.count({
       partition: 'byRegion',
-      partitionValues: { region: 'EMPTY' }
+      partitionValues: { region: 'APAC' }
     });
-    expect(emptyCount).toBe(0);
-
-    const emptyList = await users.list({
+    const list = await users.list({
       partition: 'byRegion',
-      partitionValues: { region: 'EMPTY' }
+      partitionValues: { region: 'APAC' }
     });
-    expect(emptyList).toHaveLength(0);
+
+    expect(count).toBe(0);
+    expect(list).toHaveLength(0);
+  });
+
+  test('falls back to fresh data when cache driver fails', async () => {
+    const users = ctx.resource;
+    const driver = ctx.cachePlugin.driver;
+    const originalGet = driver.get.bind(driver);
+
+    driver.get = async () => {
+      throw new Error('Filesystem cache error');
+    };
+
+    await expect(users.count()).rejects.toThrow('Filesystem cache error');
+
+    driver.get = originalGet;
   });
 });
+

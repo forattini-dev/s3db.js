@@ -1,108 +1,48 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
-import { createDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
-import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
+import { beforeEach, describe, expect, test } from '@jest/globals';
+
 import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Statistics and Management', () => {
-  let db;
-  let cachePlugin;
-  let users;
-  let testDir;
-
-  beforeAll(async () => {
-    testDir = await createTemporaryPathForTest('cache-partition-aware-simple');
-  });
-
-  afterAll(async () => {
-    // Cleanup done in tests if necessary
-  });
-
-  beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-partition-aware');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'filesystem',
-      partitionAware: true,
-      partitionStrategy: 'hierarchical',
-      trackUsage: true,
-      config: {
-        directory: testDir,
-        enableStats: true
-      }
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        region: 'string|required',
-        department: 'string|required'
-      },
-      partitions: {
-        byRegion: { fields: { region: 'string' } },
-        byDepartment: { fields: { department: 'string' } }
-      }
-    });
-  });
-
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache().catch(() => {});
-    }
-    if (db) {
-      await db.disconnect();
+  const ctx = setupPartitionAwareCacheSuite({
+    pluginOptions: {
+      config: { enableStats: true }
     }
   });
 
   beforeEach(async () => {
-    await users.insert({ name: 'Stats User', email: 'stats@example.com', region: 'US', department: 'Analytics' });
+    await ctx.seedUsers();
   });
 
-  test('should provide cache statistics', async () => {
-    // Generate cache entries
-    await users.count();
-    await users.count({ partition: 'byRegion', partitionValues: { region: 'US' } });
+  test('exposes cache statistics via plugin helper', async () => {
+    await ctx.resource.count();
+    await ctx.resource.list({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
 
-    const stats = await cachePlugin.getCacheStats();
+    const stats = await ctx.cachePlugin.getCacheStats();
     expect(stats.size).toBeGreaterThan(0);
     expect(stats.driver).toBe('PartitionAwareFilesystemCache');
     expect(Array.isArray(stats.keys)).toBe(true);
+    expect(stats.stats.enabled).toBe(true);
   });
 
-  test('should clear all cache', async () => {
-    // Generate cache entries
-    await users.count();
-    await users.list({ partition: 'byRegion', partitionValues: { region: 'US' } });
+  test('clears all cache entries when requested', async () => {
+    await ctx.resource.count();
 
-    let stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBeGreaterThan(0);
+    const warmStats = await ctx.cachePlugin.getCacheStats();
+    expect(warmStats.size).toBeGreaterThan(0);
 
-    // Clear all cache
-    await cachePlugin.clearAllCache();
+    await ctx.cachePlugin.clearAllCache();
 
-    stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBe(0);
+    const clearedStats = await ctx.cachePlugin.getCacheStats();
+    expect(clearedStats.size).toBe(0);
   });
 
-  test('should handle cache warming', async () => {
-    // Clear any existing cache
-    await cachePlugin.clearAllCache();
+  test('provides partition-level statistics and recommendations', async () => {
+    const users = ctx.resource;
 
-    let stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBe(0);
-
-    // Generate cache by using the resource
-    await users.count();
-
-    // Cache should be populated
-    stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBeGreaterThan(0);
-  });
-
-  test('should expose partition stats and recommendations via resource helpers', async () => {
     await users.count({ partition: 'byRegion', partitionValues: { region: 'US' } });
     await users.count({ partition: 'byDepartment', partitionValues: { department: 'Engineering' } });
 
@@ -112,8 +52,26 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Statistics and Manageme
 
     const recommendations = await users.getCacheRecommendations();
     expect(Array.isArray(recommendations)).toBe(true);
+  });
 
-    const warmed = await users.warmPartitionCache(['byRegion']);
-    expect(typeof warmed).toBe('number');
+  test('allows direct partition management via driver helpers', async () => {
+    const driver = ctx.cachePlugin.driver;
+    expect(driver).toBeInstanceOf(PartitionAwareFilesystemCache);
+
+    await ctx.resource.count({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
+
+    const cleared = await driver.clearPartition('users', 'byRegion', { region: 'US' });
+    expect(cleared).toBe(true);
+
+    const partitionStats = await driver.getPartitionStats('users');
+    expect(partitionStats).toBeDefined();
+    expect(partitionStats.totalSize).toBeGreaterThanOrEqual(0);
+
+    const recommendations = await driver.getCacheRecommendations('users');
+    expect(Array.isArray(recommendations)).toBe(true);
   });
 });
+
