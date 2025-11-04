@@ -218,10 +218,10 @@ export function getOperationGuard(guards, operation) {
 }
 
 /**
- * Create guard middleware for Hono (NEW: with RouteContext)
- * @param {Object} guards - Guards configuration
+ * Create guard middleware for Hono (NEW: with RouteContext + global guards)
+ * @param {Object} guards - Resource-specific guards configuration
  * @param {string} operation - Operation name
- * @param {Object} options - Options { resource, database, plugins }
+ * @param {Object} options - Options { resource, database, plugins, globalGuards }
  * @returns {Function} Hono middleware
  */
 export function guardMiddleware(guards, operation, options = {}) {
@@ -230,12 +230,18 @@ export function guardMiddleware(guards, operation, options = {}) {
     const { RouteContext } = await import('../concerns/route-context.js');
 
     const legacyContext = c.get('customRouteContext') || {};
-    const { database, resource, plugins = {} } = { ...legacyContext, ...options };
+    const { database, resource, plugins = {}, globalGuards = null } = { ...legacyContext, ...options };
 
     // Create RouteContext for guard
     const ctx = new RouteContext(c, database, resource, plugins);
 
-    const guard = getOperationGuard(guards, operation);
+    // Priority: resource guards > global guards > no guard (public)
+    let guard = getOperationGuard(guards, operation);
+
+    // If no resource-specific guard, check global guards
+    if (guard === null && globalGuards) {
+      guard = getOperationGuard(globalGuards, operation);
+    }
 
     // Check guard (pass RouteContext)
     const authorized = checkGuard(ctx, guard, null);
