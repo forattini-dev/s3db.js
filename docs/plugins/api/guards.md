@@ -187,6 +187,181 @@ type GuardFunction = (
 
 ---
 
+## 📍 Guards Placement & Precedence
+
+**NEW**: Guards can be defined in three places with clear precedence:
+
+### 1. Resource-Level Guards (Root)
+
+**Recommended** - Cleaner, more intuitive syntax:
+
+```javascript
+await db.createResource({
+  name: 'orders',
+  attributes: { tenantId: 'string', userId: 'string', total: 'number' },
+  guards: {  // ✅ At root level (NEW!)
+    list: (ctx) => {
+      ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
+      return true;
+    },
+    create: (ctx) => {
+      ctx.data.tenantId = ctx.user.tenantId;
+      return true;
+    },
+    delete: ['admin']
+  }
+});
+```
+
+### 2. Resource-Level Guards (Config)
+
+**Legacy** - Still supported for backwards compatibility:
+
+```javascript
+await db.createResource({
+  name: 'orders',
+  attributes: { tenantId: 'string', userId: 'string', total: 'number' },
+  config: {
+    guards: {  // ⚠️ Legacy location (still works)
+      list: (ctx) => { /* ... */ },
+      create: (ctx) => { /* ... */ }
+    }
+  }
+});
+```
+
+### 3. Global Guards (API Plugin Level)
+
+**NEW** - Apply to ALL resources for specific HTTP verbs:
+
+```javascript
+await db.use(new ApiPlugin({
+  port: 3000,
+  guards: {  // ✅ Global guards (NEW!)
+    // Require authentication for ALL list operations across ALL resources
+    list: (ctx) => !!ctx.user,
+
+    // Only admins can delete ANY resource
+    delete: (ctx) => ctx.user?.role === 'admin' || ctx.user?.scopes?.includes('preset:admin'),
+
+    // Require write scope for create operations
+    create: (ctx) => ctx.user?.scopes?.includes('write')
+  },
+  auth: { /* ... */ }
+}));
+```
+
+### Precedence Rules
+
+**Priority: Resource Guards > Global Guards > No Guard (Public)**
+
+```javascript
+// Example: Global guards as baseline + resource-specific overrides
+await db.use(new ApiPlugin({
+  port: 3000,
+  guards: {
+    // Global: Require auth for all list operations
+    list: (ctx) => !!ctx.user,
+
+    // Global: Only admins can delete
+    delete: (ctx) => ctx.user?.role === 'admin'
+  }
+}));
+
+// Resource-specific override
+await db.createResource({
+  name: 'public_articles',
+  attributes: { title: 'string', content: 'string' },
+  guards: {
+    list: true,  // ✅ Override: Public listing (ignores global guard)
+    delete: ['admin', 'editor']  // ✅ Override: Editors can also delete
+  }
+});
+
+// No guards = uses global guards
+await db.createResource({
+  name: 'orders',
+  attributes: { total: 'number' }
+  // ✅ Uses global guards (requires auth for list, admin for delete)
+});
+```
+
+### Use Cases
+
+**Global Guards** are perfect for:
+- ✅ Baseline authentication requirements across ALL resources
+- ✅ Organization-wide policies (e.g., "only admins can delete")
+- ✅ Default multi-tenancy rules
+- ✅ Compliance requirements (GDPR, SOC2)
+
+**Resource Guards** are perfect for:
+- ✅ Resource-specific authorization logic
+- ✅ Overriding global guards for public resources
+- ✅ Complex ownership checks
+- ✅ Fine-grained partition isolation
+
+**Example: Enterprise SaaS with Global Baseline**
+
+```javascript
+// Global baseline: Everything requires auth + tenant isolation
+await db.use(new ApiPlugin({
+  port: 3000,
+  guards: {
+    '*': (ctx) => {
+      // Extract tenant from JWT token
+      ctx.tenantId = ctx.user?.tenantId || ctx.user?.tid;
+      return !!ctx.tenantId;  // Block if no tenant
+    },
+    list: (ctx) => {
+      // Auto-partition ALL resources by tenant
+      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
+      return true;
+    },
+    create: (ctx) => {
+      // Auto-inject tenant on ALL creates
+      ctx.data.tenantId = ctx.tenantId;
+      return true;
+    },
+    delete: ['admin']  // Global: Only admins can delete
+  }
+}));
+
+// Public resource: Override global guards
+await db.createResource({
+  name: 'blog_posts',
+  attributes: { title: 'string', content: 'string' },
+  guards: {
+    list: true,   // Public listing
+    get: true     // Public viewing
+    // create/update/delete still use global guards
+  }
+});
+
+// Orders: Add ownership check on top of global guards
+await db.createResource({
+  name: 'orders',
+  attributes: { userId: 'string', total: 'number' },
+  guards: {
+    // Inherits global '*', 'list', 'create' guards
+    update: (ctx, record) => record.userId === ctx.user.sub,  // Ownership check
+    delete: (ctx, record) => {
+      // Override global: Owners can delete their own orders
+      const isOwner = record.userId === ctx.user.sub;
+      const isAdmin = ctx.user?.role === 'admin';
+      return isOwner || isAdmin;
+    }
+  }
+});
+```
+
+**Benefits:**
+- ✅ **DRY** - Write tenant isolation once, applies everywhere
+- ✅ **Safe by Default** - New resources automatically get global guards
+- ✅ **Flexible** - Override global guards per-resource when needed
+- ✅ **Maintainable** - Update global policy in one place
+
+---
+
 ## 🔌 Framework Integration
 
 **Hono (Recommended):**
