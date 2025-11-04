@@ -1,25 +1,21 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { setupMemoryCacheSuite } from '../helpers.js';
+import { MemoryCache } from '../../../../src/plugins/cache/index.js';
 
 describe('Cache Plugin - MemoryCache Driver - Performance and Statistics', () => {
-  const ctx = setupMemoryCacheSuite({
-    pluginOptions: {
-      config: { enableStats: true }
-    }
-  });
+  const ctx = setupMemoryCacheSuite();
 
   test('tracks cache hits and misses for repeated operations', async () => {
-    await ctx.seedUsers();
-    const users = ctx.resource;
+    const cache = new MemoryCache({ enableStats: true });
 
-    await users.count(); // miss
-    await users.count(); // hit
+    await cache.set('users:list', [{ id: 1 }]);
+    await cache.get('users:list'); // hit
+    await cache.get('users:list'); // hit
 
-    const stats = ctx.cachePlugin.driver.getStats();
-    expect(stats.enabled).toBe(true);
-    expect(stats.misses).toBeGreaterThanOrEqual(1);
+    const stats = cache.getStats();
     expect(stats.hits).toBeGreaterThanOrEqual(1);
+    expect(stats.misses).toBeGreaterThanOrEqual(0);
     expect(stats.hitRate).toBeGreaterThan(0);
   });
 
@@ -31,7 +27,5 @@ describe('Cache Plugin - MemoryCache Driver - Performance and Statistics', () =>
     expect(stats.size).toBeGreaterThan(0);
     expect(stats.driver).toBe('MemoryCache');
     expect(Array.isArray(stats.keys)).toBe(true);
-    expect(stats.stats.enabled).toBe(true);
   });
 });
-

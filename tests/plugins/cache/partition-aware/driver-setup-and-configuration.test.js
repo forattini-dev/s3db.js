@@ -1,7 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
-import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
+import { PartitionAwareFilesystemCache } from '../../../../src/plugins/cache/index.js';
 import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Driver Setup and Configuration', () => {
@@ -30,4 +30,3 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Driver Setup and Config
     expect(plugin.driver.enableStats).toBe(true);
   });
 });
-

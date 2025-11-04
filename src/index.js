@@ -28,6 +28,7 @@ export { generateTypes, printTypes } from './concerns/typescript-generator.js'
 // lifecycle management (prevents memory leaks)
 export { ProcessManager, getProcessManager, resetProcessManager } from './concerns/process-manager.js'
 export { SafeEventEmitter, createSafeEventEmitter } from './concerns/safe-event-emitter.js'
+export { CronManager, getCronManager, resetCronManager, createCronManager, intervalToCron, CRON_PRESETS } from './concerns/cron-manager.js'
 
 // testing utilities
 export { Factory, Seeder } from './testing/index.js'

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from '@jest/globals';
 
-import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { PartitionAwareFilesystemCache } from '../../../../src/plugins/cache/index.js';
 import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Statistics and Management', () => {
@@ -74,4 +74,3 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Statistics and Manageme
     expect(Array.isArray(recommendations)).toBe(true);
   });
 });
-

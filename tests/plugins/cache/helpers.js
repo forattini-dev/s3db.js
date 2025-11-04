@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach } from '@jest/globals';
 import { rm } from 'node:fs/promises';
 
-import { createDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
+import { createMemoryDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
 import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
 
 function createDefaultMemoryResourceConfig() {
@@ -90,7 +90,7 @@ export function setupMemoryCacheSuite(options = {}) {
   };
 
   beforeEach(async () => {
-    context.db = createDatabaseForTest(options.databaseName || 'suite=plugins/cache-memory');
+    context.db = createMemoryDatabaseForTest(options.databaseName || 'suite=plugins/cache-memory');
     await context.db.connect();
 
     context.cachePlugin = new CachePlugin(context.getPluginConfig());
@@ -156,7 +156,7 @@ export function setupPartitionAwareCacheSuite(options = {}) {
   });
 
   beforeEach(async () => {
-    context.db = createDatabaseForTest(options.databaseName || 'suite=plugins/cache-partition-aware');
+    context.db = createMemoryDatabaseForTest(options.databaseName || 'suite=plugins/cache-partition-aware');
     await context.db.connect();
 
     const baseConfig = {
@@ -211,4 +211,3 @@ export function setupPartitionAwareCacheSuite(options = {}) {
 
   return context;
 }
-
