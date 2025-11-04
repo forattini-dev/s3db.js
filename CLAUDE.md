@@ -2,6 +2,105 @@
 
 AI guidance for working with s3db.js codebase.
 
+## Lazy Loading Architecture (v14.1.6+)
+
+**CRITICAL:** All plugin peer dependencies use lazy loading to prevent "module not found" errors.
+
+### Why Lazy Loading?
+
+Before v14.1.6, importing s3db.js loaded ALL plugins and their dependencies (AWS SDK, GCP SDK, Azure SDK, puppeteer, etc.), causing errors if users hadn't installed them. Now dependencies are loaded only when used.
+
+### Implementation Pattern
+
+**❌ OLD (static imports - causes build warnings):**
+```javascript
+import { AwsInventoryDriver } from './drivers/aws-driver.js';
+export { AwsInventoryDriver };
+```
+
+**✅ NEW (lazy loading):**
+```javascript
+const DRIVER_LOADERS = {
+  aws: () => import('./drivers/aws-driver.js').then(m => m.AwsInventoryDriver)
+};
+
+export async function loadDriver(name) {
+  const loader = DRIVER_LOADERS[name];
+  const DriverClass = await loader();
+  return new DriverClass(options);
+}
+```
+
+### Files Using Lazy Loading
+
+| File | Pattern Used |
+|------|--------------|
+| `src/plugins/index.js` | Lazy plugin loaders (`lazyLoadPlugin()`) |
+| `src/plugins/replicators/index.js` | Lazy replicator loaders (`createReplicator()` is async) |
+| `src/plugins/consumers/index.js` | Lazy consumer loaders (`createConsumer()` is async) |
+| `src/plugins/cloud-inventory/index.js` | Lazy cloud driver loaders (`loadCloudDriver()`) |
+| `src/plugins/cloud-inventory/registry.js` | Async `createCloudDriver()` with fallback to lazy loading |
+
+### Rollup External Dependencies
+
+**ALL peer dependencies MUST be marked as `external` in `rollup.config.js`** to prevent bundling and avoid "Unresolved dependencies" warnings.
+
+When adding a new plugin with external dependencies:
+1. Add package to `peerDependencies` in `package.json`
+2. Add package to `peerDependenciesMeta` with `optional: true`
+3. **Add package to `external` array in `rollup.config.js`**
+4. Use lazy loading pattern in plugin index file
+
+Example peer dependency categories in rollup.config.js:
+```javascript
+external: [
+  // Core (bundled)
+  '@aws-sdk/client-s3',
+  'fastest-validator',
+
+  // AWS SDK (peer)
+  '@aws-sdk/client-ec2',
+  '@aws-sdk/client-lambda',
+
+  // GCP (peer)
+  '@google-cloud/compute',
+  '@google-cloud/bigquery',
+
+  // Azure (peer)
+  '@azure/identity',
+  '@azure/arm-compute',
+
+  // Other clouds (peer)
+  '@vultr/vultr-node',
+  '@linode/api-v4',
+  'digitalocean-js',
+  'hcloud-js',
+  'oci-common',
+
+  // Other plugins (peer)
+  'hono',
+  'puppeteer',
+  'pg',
+  '@tensorflow/tfjs-node',
+]
+```
+
+### Testing Without Peer Dependencies
+
+Core functionality must work without ANY peer dependencies installed:
+
+```bash
+cd /tmp && mkdir test-s3db && cd test-s3db
+cat > test.js << 'EOF'
+import { Database } from '/path/to/s3db.js/src/database.class.js';
+const db = new Database({ connectionString: 'memory://test/db' });
+await db.connect();
+await db.createResource({ name: 'users', attributes: { name: 'string' } });
+console.log('✅ Core works without peer dependencies!');
+EOF
+node test.js
+```
+
 ## Validation Engine
 
 **s3db uses [fastest-validator](https://github.com/icebob/fastest-validator)** for all schema validation - a blazing-fast, comprehensive validation library.

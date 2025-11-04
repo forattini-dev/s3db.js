@@ -1,16 +1,23 @@
 import { BaseCloudDriver } from './drivers/base-driver.js';
-import { AwsInventoryDriver } from './drivers/aws-driver.js';
-import { GcpInventoryDriver } from './drivers/gcp-driver.js';
-import { VultrInventoryDriver } from './drivers/vultr-driver.js';
-import { DigitalOceanInventoryDriver } from './drivers/digitalocean-driver.js';
-import { OracleInventoryDriver } from './drivers/oracle-driver.js';
-import { AzureInventoryDriver } from './drivers/azure-driver.js';
-import { LinodeInventoryDriver } from './drivers/linode-driver.js';
-import { HetznerInventoryDriver } from './drivers/hetzner-driver.js';
-import { AlibabaInventoryDriver } from './drivers/alibaba-driver.js';
-import { CloudflareInventoryDriver } from './drivers/cloudflare-driver.js';
-import { MongoDBAtlasInventoryDriver } from './drivers/mongodb-atlas-driver.js';
 import { PluginError } from '../../errors.js';
+
+/**
+ * Lazy loader map for cloud drivers to avoid loading massive peer dependencies
+ */
+const CLOUD_DRIVER_LAZY_LOADERS = {
+  aws: () => import('./drivers/aws-driver.js').then(m => m.AwsInventoryDriver),
+  gcp: () => import('./drivers/gcp-driver.js').then(m => m.GcpInventoryDriver),
+  vultr: () => import('./drivers/vultr-driver.js').then(m => m.VultrInventoryDriver),
+  digitalocean: () => import('./drivers/digitalocean-driver.js').then(m => m.DigitalOceanInventoryDriver),
+  oracle: () => import('./drivers/oracle-driver.js').then(m => m.OracleInventoryDriver),
+  azure: () => import('./drivers/azure-driver.js').then(m => m.AzureInventoryDriver),
+  linode: () => import('./drivers/linode-driver.js').then(m => m.LinodeInventoryDriver),
+  hetzner: () => import('./drivers/hetzner-driver.js').then(m => m.HetznerInventoryDriver),
+  alibaba: () => import('./drivers/alibaba-driver.js').then(m => m.AlibabaInventoryDriver),
+  cloudflare: () => import('./drivers/cloudflare-driver.js').then(m => m.CloudflareInventoryDriver),
+  'mongodb-atlas': () => import('./drivers/mongodb-atlas-driver.js').then(m => m.MongoDBAtlasInventoryDriver),
+};
+
 const CLOUD_DRIVERS = new Map();
 
 /**
@@ -43,37 +50,75 @@ export function registerCloudDriver(name, factory) {
 }
 
 /**
- * Instantiate a driver using the registry.
+ * Instantiate a driver using the registry (now with lazy loading support).
  * @param {string} name
  * @param {Object} options
- * @returns {BaseCloudDriver}
+ * @returns {Promise<BaseCloudDriver>}
  */
-export function createCloudDriver(name, options) {
-  if (!CLOUD_DRIVERS.has(name)) {
-    throw new PluginError(`Cloud driver "${name}" is not registered.`, {
+export async function createCloudDriver(name, options) {
+  // Check if driver is already registered in CLOUD_DRIVERS
+  if (CLOUD_DRIVERS.has(name)) {
+    const resolvedOptions = { ...(options || {}) };
+    if (!resolvedOptions.driver) {
+      resolvedOptions.driver = name;
+    }
+
+    const driver = CLOUD_DRIVERS.get(name)(resolvedOptions);
+    if (!(driver instanceof BaseCloudDriver)) {
+      throw new PluginError(`Driver "${name}" factory must return an instance of BaseCloudDriver`, {
+        pluginName: 'CloudInventoryPlugin',
+        operation: 'registry:create',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure the factory returns a class extending BaseCloudDriver.'
+      });
+    }
+    return driver;
+  }
+
+  // If not registered, try to lazy-load it
+  const normalizedName = name.toLowerCase();
+  const aliases = {
+    'do': 'digitalocean',
+    'oci': 'oracle',
+    'az': 'azure',
+    'aliyun': 'alibaba',
+    'cf': 'cloudflare',
+    'atlas': 'mongodb-atlas',
+  };
+
+  const driverName = aliases[normalizedName] || normalizedName;
+  const loader = CLOUD_DRIVER_LAZY_LOADERS[driverName];
+
+  if (!loader) {
+    throw new PluginError(`Cloud driver "${name}" is not registered or available.`, {
       pluginName: 'CloudInventoryPlugin',
       operation: 'registry:create',
       statusCode: 400,
       retriable: false,
-      suggestion: `Register the driver via registerCloudDriver before creating it. Registered drivers: ${[...CLOUD_DRIVERS.keys()].join(', ') || 'none'}`
+      suggestion: `Available drivers: ${Object.keys(CLOUD_DRIVER_LAZY_LOADERS).join(', ')} or custom drivers registered via registerCloudDriver(). Registered custom drivers: ${[...CLOUD_DRIVERS.keys()].join(', ') || 'none'}`
     });
   }
 
+  // Lazy-load the driver class
+  const DriverClass = await loader();
+
   const resolvedOptions = { ...(options || {}) };
   if (!resolvedOptions.driver) {
-    resolvedOptions.driver = name;
+    resolvedOptions.driver = driverName;
   }
 
-  const driver = CLOUD_DRIVERS.get(name)(resolvedOptions);
+  const driver = new DriverClass(resolvedOptions);
   if (!(driver instanceof BaseCloudDriver)) {
-    throw new PluginError(`Driver "${name}" factory must return an instance of BaseCloudDriver`, {
+    throw new PluginError(`Driver "${name}" must extend BaseCloudDriver`, {
       pluginName: 'CloudInventoryPlugin',
       operation: 'registry:create',
       statusCode: 500,
       retriable: false,
-      suggestion: 'Ensure the factory returns a class extending BaseCloudDriver.'
+      suggestion: 'Ensure the driver class extends BaseCloudDriver.'
     });
   }
+
   return driver;
 }
 
@@ -112,13 +157,30 @@ export function validateCloudDefinition(cloud) {
     });
   }
 
-  if (!CLOUD_DRIVERS.has(driver)) {
-    throw new PluginError(`Cloud driver "${driver}" is not registered`, {
+  // Check if driver is registered or available via lazy-loading
+  const normalizedDriver = driver.toLowerCase();
+  const aliases = {
+    'do': 'digitalocean',
+    'oci': 'oracle',
+    'az': 'azure',
+    'aliyun': 'alibaba',
+    'cf': 'cloudflare',
+    'atlas': 'mongodb-atlas',
+  };
+  const resolvedDriver = aliases[normalizedDriver] || normalizedDriver;
+
+  const isAvailable = CLOUD_DRIVERS.has(driver) ||
+                     CLOUD_DRIVERS.has(normalizedDriver) ||
+                     CLOUD_DRIVER_LAZY_LOADERS[resolvedDriver] ||
+                     driver === 'noop';
+
+  if (!isAvailable) {
+    throw new PluginError(`Cloud driver "${driver}" is not available`, {
       pluginName: 'CloudInventoryPlugin',
       operation: 'registry:validateDefinition',
       statusCode: 400,
       retriable: false,
-      suggestion: 'Register the driver via registerCloudDriver before referencing it in configuration.'
+      suggestion: `Available drivers: ${Object.keys(CLOUD_DRIVER_LAZY_LOADERS).join(', ')}, noop. Or register custom drivers via registerCloudDriver().`
     });
   }
 
@@ -133,7 +195,7 @@ export function validateCloudDefinition(cloud) {
   }
 }
 
-// Register a no-op driver as a placeholder implementation.
+// Register a no-op driver as a placeholder implementation (no external dependencies)
 registerCloudDriver('noop', (options = {}) => {
   class NoopDriver extends BaseCloudDriver {
     async listResources() {
@@ -147,22 +209,8 @@ registerCloudDriver('noop', (options = {}) => {
   });
 });
 
-registerCloudDriver('aws', (options = {}) => new AwsInventoryDriver(options));
-registerCloudDriver('gcp', (options = {}) => new GcpInventoryDriver(options));
-registerCloudDriver('vultr', (options = {}) => new VultrInventoryDriver(options));
-registerCloudDriver('digitalocean', (options = {}) => new DigitalOceanInventoryDriver(options));
-registerCloudDriver('do', (options = {}) => new DigitalOceanInventoryDriver(options));
-registerCloudDriver('oracle', (options = {}) => new OracleInventoryDriver(options));
-registerCloudDriver('oci', (options = {}) => new OracleInventoryDriver(options));
-registerCloudDriver('azure', (options = {}) => new AzureInventoryDriver(options));
-registerCloudDriver('az', (options = {}) => new AzureInventoryDriver(options));
-registerCloudDriver('linode', (options = {}) => new LinodeInventoryDriver(options));
-registerCloudDriver('hetzner', (options = {}) => new HetznerInventoryDriver(options));
-registerCloudDriver('alibaba', (options = {}) => new AlibabaInventoryDriver(options));
-registerCloudDriver('aliyun', (options = {}) => new AlibabaInventoryDriver(options));
-registerCloudDriver('cloudflare', (options = {}) => new CloudflareInventoryDriver(options));
-registerCloudDriver('cf', (options = {}) => new CloudflareInventoryDriver(options));
-registerCloudDriver('mongodb-atlas', (options = {}) => new MongoDBAtlasInventoryDriver(options));
-registerCloudDriver('atlas', (options = {}) => new MongoDBAtlasInventoryDriver(options));
+// NOTE: Built-in drivers (aws, gcp, azure, etc.) are now lazy-loaded via CLOUD_DRIVER_LAZY_LOADERS.
+// They are no longer registered here to avoid loading massive peer dependencies on initialization.
+// Use createCloudDriver('aws', options) and it will lazy-load the driver automatically.
 
 export { BaseCloudDriver } from './drivers/base-driver.js';

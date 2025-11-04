@@ -78,6 +78,7 @@ GET     /metrics         # Prometheus metrics
 - [TL;DR](#-tldr)
 - [Quick Start](#-quick-start)
 - [Documentation Hub](#-documentation-hub)
+- [Context Access Patterns](#-context-access-patterns)
 - [Quick Wins](#-quick-wins)
 - [Real-World Examples](#-real-world-examples)
 - [Killer Features](#-killer-features)
@@ -107,6 +108,449 @@ GET     /metrics         # Prometheus metrics
 | **[Authorization Patterns](./api/authorization-patterns.md)** | Granular scopes, ABAC, hierarchical permissions |
 | **[Guard Design](./api/guards-design.md)** | Framework-agnostic declarative authorization |
 | **[Configuration Deep Dive](./api/configuration.md)** | All configuration options explained |
+
+---
+
+## 🔌 Context Access Patterns
+
+The API Plugin provides **3 ways** to access database and resources in custom routes. Understanding these patterns is crucial for writing clean, maintainable code.
+
+### 1. Enhanced Context (Recommended ✅)
+
+**Best for:** Custom routes, guards, resource-level routes
+
+The enhanced context provides the cleanest developer experience with automatic context injection and helpful utilities.
+
+```javascript
+routes: {
+  '/urls/:id': async (c, ctx) => {
+    // ✅ Clean access to everything
+    const { db, resources, validator, user, session } = ctx;
+
+    // ✅ Resource access with Proxy validation
+    const url = await resources.urls_v1.get(ctx.param('id'));
+
+    // ✅ Validation helpers
+    const { valid, errors } = await ctx.validator.validateBody('urls_v1');
+    if (!valid) return ctx.error(errors[0].message, 400);
+
+    // ✅ Response shortcuts
+    return ctx.success({ url });
+  }
+}
+```
+
+**Key Features:**
+- **Resource Proxy**: Automatic validation and helpful error messages when accessing non-existent resources
+- **Request Helpers**: `ctx.param()`, `ctx.query()`, `ctx.body()`, `ctx.header()`
+- **Response Helpers**: `ctx.success()`, `ctx.error()`, `ctx.notFound()`, `ctx.unauthorized()`, `ctx.forbidden()`
+- **Validator Helpers**: `ctx.validator.validate()`, `ctx.validator.validateBody()`, `ctx.validator.validateOrThrow()`
+- **Auth Helpers**: `ctx.user`, `ctx.session`, `ctx.isAuthenticated`, `ctx.hasScope()`, `ctx.requireAuth()`
+- **Partition Helpers**: `ctx.setPartition()` for tenant isolation in guards
+- **Template Rendering**: `ctx.render()` if template engine is configured
+
+**Auto-Detection Magic:** If your handler has **2 parameters** `(c, ctx)`, the enhanced context is **automatically injected**! No wrapper function needed.
+
+```javascript
+// ✨ This automatically gets enhanced context:
+async (c, ctx) => {
+  // ctx is fully populated with all helpers
+}
+
+// ⚠️ This uses legacy behavior:
+async (c) => {
+  // Must manually access context via c.get()
+}
+```
+
+---
+
+### 2. Context Injection (Direct Access)
+
+**Best for:** Simple routes, middleware, when you prefer minimal abstraction
+
+Resources and database are injected directly into the Hono context for lightweight access.
+
+```javascript
+routes: {
+  '/health': async (c) => {
+    // Direct access via c.get()
+    const db = c.get('db');
+    const urls = c.get('urls_v1');  // Direct resource access
+
+    const count = await urls.count();
+    return c.json({ healthy: true, urls: count });
+  }
+}
+```
+
+**Key Features:**
+- **Direct Resource Access**: `c.get('resourceName')` for each resource
+- **Database Access**: `c.get('db')` or `c.get('database')`
+- **Lighter Weight**: No abstraction layer, direct Hono context usage
+- **Prefixed Access**: `c.get('resource:resourceName')` also works
+
+**How it Works:**
+
+The `context-injection.js` middleware automatically injects all resources:
+
+```javascript
+// Automatic injection (happens behind the scenes):
+c.set('db', database);
+c.set('database', database);
+
+// Each resource is injected
+c.set('urls_v1', urlsResource);
+c.set('resource:urls_v1', urlsResource);
+```
+
+---
+
+### 3. withContext Helper (Destructuring)
+
+**Best for:** When you prefer explicit context extraction with destructuring
+
+Import the `withContext` helper for clean destructuring syntax.
+
+```javascript
+import { withContext } from 's3db.js/plugins/api';
+
+routes: {
+  '/custom': withContext(async (c, { db, resources }) => {
+    // Destructure exactly what you need
+    const { urls_v1, clicks_v1 } = resources;
+
+    const urls = await urls_v1.list();
+    const clicks = await clicks_v1.query({ urlId: urls[0]?.id });
+
+    return c.json({ urls, clicks });
+  })
+}
+```
+
+**Key Features:**
+- **Explicit Wrapper**: You control when context is extracted
+- **Resource Proxy**: Same helpful error messages as enhanced context
+- **Destructuring**: Clean syntax for extracting only what you need
+- **Fallback Support**: Works with both context injection and legacy systems
+
+**How it Works:**
+
+```javascript
+// withContext extracts helpers for you:
+{
+  db: database,              // Database instance
+  database: database,        // Alias
+  resources: Proxy {         // Proxy with validation
+    urls_v1: Resource,
+    clicks_v1: Resource,
+    // ... all resources
+  }
+}
+```
+
+---
+
+### Comparison Table
+
+| Feature | Enhanced Context | Context Injection | withContext |
+|---------|------------------|-------------------|-------------|
+| **Auto-injection** | ✅ Yes (2 params) | ❌ No | ❌ No (explicit wrap) |
+| **Resource Proxy** | ✅ Yes | ❌ No | ✅ Yes |
+| **Request Helpers** | ✅ ctx.param() | ❌ c.req.param() | ❌ c.req.param() |
+| **Response Helpers** | ✅ ctx.success() | ❌ c.json() | ❌ c.json() |
+| **Validator Helpers** | ✅ ctx.validator | ❌ Manual | ❌ Manual |
+| **Auth Helpers** | ✅ ctx.hasScope() | ⚠️ c.get('user') | ⚠️ Manual |
+| **Partition Helpers** | ✅ ctx.setPartition() | ❌ Manual | ❌ Manual |
+| **Best For** | Custom routes, Guards | Simple routes | Explicit control |
+| **Code Style** | Modern, clean | Traditional | Functional |
+
+---
+
+### Migration Guide: Legacy → Enhanced
+
+Upgrading from the old verbose context access pattern is simple:
+
+```javascript
+// ❌ OLD WAY (Legacy - Verbose)
+routes: {
+  '/:id': async (c) => {
+    // Manual context extraction
+    const ctx = c.get('customRouteContext');
+    const { database } = ctx;
+
+    // Verbose resource access
+    const url = await database.resources.urls_v1.get(c.req.param('id'));
+
+    // Manual response
+    return c.json({ success: true, data: { url } });
+  }
+}
+
+// ✅ NEW WAY (Enhanced - Clean)
+routes: {
+  '/:id': async (c, ctx) => {
+    // Auto-injected context (note the 2nd parameter!)
+    const url = await ctx.resources.urls_v1.get(ctx.param('id'));
+
+    // Helper response methods
+    return ctx.success({ url });
+  }
+}
+```
+
+**Step-by-step migration:**
+
+1. **Add `ctx` as second parameter** → Triggers auto-wrapping
+2. **Replace `c.get('customRouteContext')` with `ctx`**
+3. **Use `ctx.resources.xxx`** instead of `database.resources.xxx`
+4. **Use `ctx.param()`** instead of `c.req.param()`
+5. **Use `ctx.success()`** instead of `c.json({ success: true, data })`
+6. **Use `ctx.error()`** instead of manual error responses
+
+**Benefits:**
+- ✅ 50% less code
+- ✅ Better error messages (resource proxy)
+- ✅ Type-safe helpers
+- ✅ Consistent API across routes
+
+---
+
+### Auto-Wrapping Behavior
+
+**How the API Plugin detects which context system to use:**
+
+The plugin automatically inspects your handler's **function signature** (number of parameters):
+
+```javascript
+// 1 parameter (c) → Legacy behavior (no auto-wrap)
+routes: {
+  '/legacy': async (c) => {
+    // Must manually access context
+    const db = c.get('db');
+    const urls = c.get('urls_v1');
+  }
+}
+
+// 2 parameters (c, ctx) → Enhanced context (auto-wrap)
+routes: {
+  '/enhanced': async (c, ctx) => {
+    // ctx is automatically populated with enhanced context!
+    const { resources } = ctx;
+  }
+}
+```
+
+**Technical Details:**
+
+The auto-wrapping happens in `custom-routes.js`:
+
+```javascript
+// If handler expects 2 arguments → auto-wrap with RouteContext
+if (handler.length === 2) {
+  return await withContext(handler, { resource: context.resource })(c);
+}
+// If handler expects 1 argument → use legacy behavior
+else {
+  return await handler(c);
+}
+```
+
+**Why this matters:**
+- ✅ **Backward Compatibility**: Existing routes keep working
+- ✅ **Opt-in Enhancement**: Add `ctx` parameter to upgrade
+- ✅ **Zero Configuration**: No wrapper imports needed
+- ✅ **Type Safety**: TypeScript can infer the correct types
+
+---
+
+### Guards and Enhanced Context
+
+Guards receive the **same enhanced context** for authorization logic:
+
+```javascript
+const projects = await db.createResource({
+  name: 'projects',
+  attributes: { /* ... */ },
+  partitions: {
+    byTenant: { fields: { tenantId: 'string' } }
+  },
+
+  guard: {
+    // Guards receive enhanced context (ctx)
+    list: (ctx) => {
+      // ✅ Access user from context
+      if (ctx.user?.scopes?.includes('admin')) {
+        return true; // Admins see everything
+      }
+
+      // ✅ Use partition helpers for O(1) tenant isolation
+      ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
+      return true;
+    },
+
+    create: (ctx) => {
+      // ✅ Auto-inject tenant from user context
+      ctx.body.tenantId = ctx.user.tenantId;
+      ctx.body.ownerId = ctx.user.sub;
+      return true;
+    },
+
+    update: (ctx, record) => {
+      // ✅ Authorization with scope helpers
+      return ctx.hasScope('admin') || record.ownerId === ctx.user.sub;
+    }
+  }
+});
+```
+
+**Guard Context API:**
+- `ctx.user` - Authenticated user object
+- `ctx.hasScope(scope)` - Check user scopes
+- `ctx.setPartition(name, fields)` - Filter queries by partition (O(1) isolation)
+- `ctx.body` - Request body (for create/update guards)
+- `ctx.isAuthenticated` - Boolean auth check
+
+---
+
+### RouteContext API Reference
+
+When using enhanced context `(c, ctx)`, you have access to:
+
+#### Request Properties
+- `ctx.c` - Raw Hono context
+- `ctx.db` / `ctx.database` - Database instance
+- `ctx.resources` - Proxy to all resources (with validation)
+- `ctx.resource` - Current resource (for resource-level routes)
+- `ctx.user` - Authenticated user (if auth enabled)
+- `ctx.session` - Session object (if session tracking enabled)
+- `ctx.sessionId` - Session ID
+- `ctx.requestId` - Request ID
+- `ctx.isAuthenticated` - Boolean auth status
+
+#### Request Helpers
+- `ctx.param(name)` - Get path parameter
+- `ctx.params()` - Get all path parameters
+- `ctx.query(name)` - Get query parameter
+- `ctx.queries()` - Get all query parameters
+- `ctx.header(name)` - Get request header
+- `ctx.body()` - Parse JSON body (Promise)
+- `ctx.text()` - Get body as text (Promise)
+- `ctx.formData()` - Get FormData (Promise)
+
+#### Response Helpers
+- `ctx.json(data, status?)` - JSON response
+- `ctx.success(data, status?)` - Success response `{ success: true, data }`
+- `ctx.error(message, status?)` - Error response `{ success: false, error }`
+- `ctx.notFound(message?)` - 404 response
+- `ctx.unauthorized(message?)` - 401 response
+- `ctx.forbidden(message?)` - 403 response
+- `ctx.html(html, status?)` - HTML response
+- `ctx.redirect(url, status?)` - Redirect response
+- `ctx.render(template, data, opts?)` - Render template (if configured)
+
+#### Validator Helpers
+- `ctx.validator.validate(data)` - Validate against current resource schema
+- `ctx.validator.validate(resourceName, data)` - Validate against specific resource
+- `ctx.validator.validateOrThrow(data)` - Validate and throw on error
+- `ctx.validator.validateBody(resourceName?)` - Validate request body
+
+#### Auth Helpers
+- `ctx.hasScope(scope)` - Check if user has scope
+- `ctx.hasAnyScope(...scopes)` - Check if user has any scope
+- `ctx.hasAllScopes(...scopes)` - Check if user has all scopes
+- `ctx.requireAuth()` - Throw 401 if not authenticated
+- `ctx.requireScope(scope)` - Throw 403 if scope missing
+
+#### Partition Helpers (for Guards)
+- `ctx.setPartition(name, fields)` - Set partition filter for tenant isolation
+- `ctx.getPartitionFilters()` - Get active partition filters (internal)
+- `ctx.clearPartitionFilters()` - Clear partition filters (internal)
+- `ctx.hasPartitionFilters()` - Check if partitions are set
+
+---
+
+### Best Practices
+
+#### ✅ DO: Use Enhanced Context for Custom Routes
+
+```javascript
+routes: {
+  '/analytics/:userId': async (c, ctx) => {
+    // Clean, readable, maintainable
+    const userId = ctx.param('userId');
+    const clicks = await ctx.resources.clicks.query({ userId });
+    return ctx.success({ clicks });
+  }
+}
+```
+
+#### ✅ DO: Use Partition Helpers in Guards
+
+```javascript
+guard: {
+  list: (ctx) => {
+    // O(1) tenant isolation with partitions
+    ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
+    return true;
+  }
+}
+```
+
+#### ✅ DO: Leverage Validator Helpers
+
+```javascript
+routes: {
+  'POST /urls': async (c, ctx) => {
+    // Automatic validation against schema
+    const { valid, errors, data } = await ctx.validator.validateBody('urls_v1');
+    if (!valid) return ctx.error(errors[0].message, 400);
+
+    const url = await ctx.resources.urls_v1.insert(data);
+    return ctx.success({ url }, 201);
+  }
+}
+```
+
+#### ❌ DON'T: Mix Context Systems
+
+```javascript
+// ❌ BAD: Mixing enhanced context and manual access
+routes: {
+  '/:id': async (c, ctx) => {
+    const db = c.get('db');  // ❌ Unnecessary, use ctx.db
+    const url = await ctx.resources.urls.get(c.req.param('id'));  // ❌ Use ctx.param('id')
+  }
+}
+
+// ✅ GOOD: Consistent enhanced context usage
+routes: {
+  '/:id': async (c, ctx) => {
+    const url = await ctx.resources.urls.get(ctx.param('id'));
+    return ctx.success({ url });
+  }
+}
+```
+
+#### ❌ DON'T: Use Legacy customRouteContext
+
+```javascript
+// ❌ BAD: Legacy verbose pattern
+routes: {
+  '/:id': async (c) => {
+    const { database } = c.get('customRouteContext');
+    const url = await database.resources.urls.get(c.req.param('id'));
+  }
+}
+
+// ✅ GOOD: Enhanced context
+routes: {
+  '/:id': async (c, ctx) => {
+    const url = await ctx.resources.urls.get(ctx.param('id'));
+    return ctx.success({ url });
+  }
+}
+```
 
 ---
 
@@ -319,20 +763,19 @@ await db.use(new ApiPlugin({
   },
 
   routes: {
-    '/r/:id': {
-      GET: async (c) => {
-        const url = await urls.get(c.req.param('id'));
-        if (!url) return c.notFound();
+    'GET /r/:id': async (c, ctx) => {
+      // ✨ Enhanced context with 2 parameters
+      const url = await ctx.resources.urls.get(ctx.param('id'));
+      if (!url) return ctx.notFound();
 
-        // Track click asynchronously
-        clicks.insert({
-          shortId: url.id,
-          ip: c.req.header('x-forwarded-for'),
-          country: c.req.header('cf-ipcountry')
-        });
+      // Track click asynchronously
+      ctx.resources.clicks.insert({
+        shortId: url.id,
+        ip: ctx.header('x-forwarded-for'),
+        country: ctx.header('cf-ipcountry')
+      });
 
-        return c.redirect(url.target, 302);
-      }
+      return ctx.redirect(url.target, 302);
     }
   }
 }));
@@ -362,17 +805,34 @@ const orders = await db.createResource({
   guard: {
     list: (ctx) => {
       // Users see only their orders, admins see all
-      if (!ctx.user.scopes?.includes('admin')) {
+      if (!ctx.hasScope('admin')) {
         ctx.setPartition('byUser', { userId: ctx.user.sub });
       }
       return true;
     },
     create: (ctx) => {
+      // Auto-inject userId from authenticated user
       ctx.body.userId = ctx.user.sub;
       return true;
     }
   }
 });
+
+// Custom route for checkout with validation
+await db.use(new ApiPlugin({
+  routes: {
+    'POST /checkout': async (c, ctx) => {
+      // ✅ Validate cart items
+      const { valid, errors, data } = await ctx.validator.validateBody('orders');
+      if (!valid) return ctx.error(errors[0].message, 400);
+
+      // ✅ Create order
+      const order = await ctx.resources.orders.insert(data);
+
+      return ctx.success({ order, message: 'Order created!' }, 201);
+    }
+  }
+}));
 
 // Event-driven inventory
 apiPlugin.events.on('resource:created', async ({ resource, item }) => {
@@ -1001,6 +1461,175 @@ apiPlugin.events.on('request:end', (data) => {
 
 **[→ Learn more: Events](./api/observability.md#events)**
 </details>
+
+### Custom Routes & Context
+
+<details>
+<summary><strong>What's the difference between (c) and (c, ctx) in route handlers?</strong></summary>
+
+**The number of parameters determines which context system is used:**
+
+```javascript
+// 1 parameter → Legacy/manual context access
+routes: {
+  '/legacy': async (c) => {
+    const db = c.get('db');  // Must manually get from Hono context
+    const urls = c.get('urls_v1');
+    return c.json({ urls: await urls.list() });
+  }
+}
+
+// 2 parameters → Enhanced context (auto-injected!)
+routes: {
+  '/enhanced': async (c, ctx) => {
+    // ctx has everything: resources, validator, helpers
+    const urls = await ctx.resources.urls_v1.list();
+    return ctx.success({ urls });
+  }
+}
+```
+
+**Enhanced context benefits:**
+- ✅ Resource proxy with validation
+- ✅ Request helpers (`ctx.param()`, `ctx.query()`, `ctx.body()`)
+- ✅ Response helpers (`ctx.success()`, `ctx.error()`, `ctx.notFound()`)
+- ✅ Validator helpers (`ctx.validator.validateBody()`)
+- ✅ Auth helpers (`ctx.user`, `ctx.hasScope()`)
+- ✅ Partition helpers (`ctx.setPartition()`)
+
+**When to use each:**
+- **Use (c, ctx)** - Custom routes with complex logic, validation, auth checks
+- **Use (c)** - Simple routes, health checks, redirects
+
+**[→ Learn more: Context Access Patterns](#-context-access-patterns)**
+</details>
+
+<details>
+<summary><strong>How do I access resources in custom routes?</strong></summary>
+
+**There are 3 ways** (enhanced context is recommended):
+
+**1. Enhanced Context (Recommended ✅)**
+```javascript
+routes: {
+  'GET /stats': async (c, ctx) => {
+    // Proxy with validation and helpful errors
+    const users = await ctx.resources.users.count();
+    const orders = await ctx.resources.orders.count();
+    return ctx.success({ users, orders });
+  }
+}
+```
+
+**2. Direct Injection**
+```javascript
+routes: {
+  'GET /stats': async (c) => {
+    const users = c.get('users');
+    const orders = c.get('orders');
+    return c.json({
+      users: await users.count(),
+      orders: await orders.count()
+    });
+  }
+}
+```
+
+**3. withContext Helper**
+```javascript
+import { withContext } from 's3db.js/plugins/api';
+
+routes: {
+  'GET /stats': withContext(async (c, { resources }) => {
+    const { users, orders } = resources;
+    return c.json({
+      users: await users.count(),
+      orders: await orders.count()
+    });
+  })
+}
+```
+
+**Comparison:**
+- **Enhanced**: Best DX, auto-wrap, helpers, validation
+- **Direct**: Lightweight, minimal abstraction
+- **withContext**: Explicit, functional style
+
+**[→ Learn more: Context Access Patterns](#-context-access-patterns)**
+</details>
+
+<details>
+<summary><strong>How do I validate request bodies in custom routes?</strong></summary>
+
+**Use the validator helper from enhanced context:**
+
+```javascript
+routes: {
+  'POST /users': async (c, ctx) => {
+    // Validate body against 'users' resource schema
+    const { valid, errors, data } = await ctx.validator.validateBody('users');
+
+    if (!valid) {
+      return ctx.error(errors[0].message, 400);
+    }
+
+    // data is the validated body
+    const user = await ctx.resources.users.insert(data);
+    return ctx.success({ user }, 201);
+  }
+}
+```
+
+**Validator methods:**
+- `ctx.validator.validate(resourceName, data)` - Validate data against schema
+- `ctx.validator.validateBody(resourceName)` - Validate request body
+- `ctx.validator.validateOrThrow(data)` - Validate or throw 400 error
+
+**[→ Learn more: RouteContext API Reference](#routecontext-api-reference)**
+</details>
+
+<details>
+<summary><strong>Can I use ctx.resources in guards?</strong></summary>
+
+**Yes! Guards receive the same enhanced context:**
+
+```javascript
+guard: {
+  create: async (ctx) => {
+    // ✅ Access other resources in guards
+    const tenant = await ctx.resources.tenants.get(ctx.user.tenantId);
+
+    if (!tenant || !tenant.active) {
+      return false;  // Deny if tenant is inactive
+    }
+
+    // Auto-inject tenant context
+    ctx.body.tenantId = ctx.user.tenantId;
+    return true;
+  },
+
+  update: async (ctx, record) => {
+    // ✅ Use auth helpers
+    if (ctx.hasScope('admin')) return true;
+
+    // ✅ Cross-resource validation
+    const owner = await ctx.resources.users.get(record.ownerId);
+    return owner?.id === ctx.user.sub;
+  }
+}
+```
+
+**Available in guards:**
+- `ctx.user` - Authenticated user
+- `ctx.resources` - All resources (with Proxy validation)
+- `ctx.hasScope(scope)` - Check user scopes
+- `ctx.setPartition(name, fields)` - Partition filters for tenant isolation
+- `ctx.body` - Request body (for create/update)
+
+**[→ Learn more: Guards and Enhanced Context](#guards-and-enhanced-context)**
+</details>
+
+---
 
 ### Full-Stack Apps
 
