@@ -11,6 +11,7 @@ import Resource from "./resource.class.js";
 import { ResourceNotFound, DatabaseError, SchemaError } from "./errors.js";
 import { idGenerator } from "./concerns/id.js";
 import { streamToString } from "./stream/index.js";
+import { ProcessManager } from "./concerns/process-manager.js";
 
 export class Database extends EventEmitter {
   constructor(options) {
@@ -73,6 +74,16 @@ export class Database extends EventEmitter {
     this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
     this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
     this.strictHooks = options.strictHooks || false; // Throw on first hook error instead of continuing
+
+    // Initialize ProcessManager for lifecycle management (prevents memory leaks)
+    this.processManager = options.processManager || new ProcessManager({
+      verbose: this.verbose,
+      exitOnSignal: options.exitOnSignal !== false // Default: true (auto-exit on SIGTERM/SIGINT)
+    });
+
+    if (this.verbose) {
+      console.log(`[Database ${this.id}] ProcessManager initialized`);
+    }
 
     // Initialize hooks system
     this._initHooks();
@@ -573,6 +584,15 @@ export class Database extends EventEmitter {
       plugin.setInstanceName(pluginName);
     } else {
       plugin.instanceName = pluginName;
+    }
+
+    // Pass ProcessManager to plugin (prevents memory leaks)
+    if (!plugin.processManager) {
+      plugin.processManager = this.processManager;
+
+      if (this.verbose) {
+        console.log(`[Database ${this.id}] ProcessManager passed to plugin '${pluginName}'`);
+      }
     }
 
     // Register the plugin

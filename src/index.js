@@ -25,6 +25,9 @@ export {
 // typescript generation
 export { generateTypes, printTypes } from './concerns/typescript-generator.js'
 
+// lifecycle management (prevents memory leaks)
+export { ProcessManager, getProcessManager, resetProcessManager } from './concerns/process-manager.js'
+
 // testing utilities
 export { Factory, Seeder } from './testing/index.js'
 
