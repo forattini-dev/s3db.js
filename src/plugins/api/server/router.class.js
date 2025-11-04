@@ -345,7 +345,7 @@ export class Router {
         // Mount handler
         const mountPath = config.path === '/' ? '/*' : `${config.path}/*`;
         app.get(mountPath, handler);
-        app.head(mountPath, handler);
+        app.on('HEAD', mountPath, handler);  // Explicit HEAD support
 
         if (this.verbose) {
           console.log(

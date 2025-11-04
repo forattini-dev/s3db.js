@@ -11,6 +11,7 @@
 import { generateSessionId, calculateExpiration, isExpired } from './concerns/token-generator.js';
 import tryFn from '../../concerns/try-fn.js';
 import { PluginError } from '../../errors.js';
+import { getCronManager } from '../../concerns/cron-manager.js';
 
 /**
  * Default session configuration
@@ -40,8 +41,8 @@ export class SessionManager {
   constructor(options = {}) {
     this.sessionResource = options.sessionResource;
     this.config = { ...DEFAULT_CONFIG, ...options.config };
-
-    this.cleanupTimer = null;
+    this.cronManager = getCronManager();
+    this.cleanupJobName = null;
 
     if (!this.sessionResource) {
       throw new PluginError('SessionManager requires a sessionResource', {
@@ -430,29 +431,34 @@ export class SessionManager {
    * @private
    */
   _startCleanup() {
-    if (this.cleanupTimer) {
+    if (this.cleanupJobName) {
       return; // Already running
     }
 
-    this.cleanupTimer = setInterval(async () => {
-      try {
-        const count = await this.cleanupExpiredSessions();
-        if (count > 0) {
-          console.log(`[SessionManager] Cleaned up ${count} expired sessions`);
+    this.cleanupJobName = `session-cleanup-${Date.now()}`;
+    this.cronManager.scheduleInterval(
+      this.config.cleanupInterval,
+      async () => {
+        try {
+          const count = await this.cleanupExpiredSessions();
+          if (count > 0) {
+            console.log(`[SessionManager] Cleaned up ${count} expired sessions`);
+          }
+        } catch (error) {
+          console.error('[SessionManager] Cleanup error:', error.message);
         }
-      } catch (error) {
-        console.error('[SessionManager] Cleanup error:', error.message);
-      }
-    }, this.config.cleanupInterval);
+      },
+      this.cleanupJobName
+    );
   }
 
   /**
    * Stop automatic cleanup
    */
   stopCleanup() {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
+    if (this.cleanupJobName) {
+      this.cronManager.stop(this.cleanupJobName);
+      this.cleanupJobName = null;
     }
   }
 

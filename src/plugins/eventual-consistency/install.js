@@ -10,6 +10,7 @@ import { flushPendingTransactions } from "./transactions.js";
 import { startConsolidationTimer } from "./consolidation.js";
 import { startGarbageCollectionTimer } from "./garbage-collection.js";
 import { PluginError } from '../../errors.js';
+import { getCronManager } from "../../concerns/cron-manager.js";
 
 /**
  * Install plugin for all configured resources
@@ -293,19 +294,21 @@ export async function onStart(fieldHandlers, config, runConsolidationFn, runGCFn
  * @returns {Promise<void>}
  */
 export async function onStop(fieldHandlers, emitFn) {
+  const cronManager = getCronManager();
+
   // Stop all timers for all handlers
   for (const [resourceName, resourceHandlers] of fieldHandlers) {
     for (const [fieldName, handler] of resourceHandlers) {
-      // Stop consolidation timer
-      if (handler.consolidationTimer) {
-        clearInterval(handler.consolidationTimer);
-        handler.consolidationTimer = null;
+      // Stop consolidation job
+      if (handler.consolidationJobName) {
+        cronManager.stop(handler.consolidationJobName);
+        handler.consolidationJobName = null;
       }
 
-      // Stop garbage collection timer
-      if (handler.gcTimer) {
-        clearInterval(handler.gcTimer);
-        handler.gcTimer = null;
+      // Stop garbage collection job
+      if (handler.gcJobName) {
+        cronManager.stop(handler.gcJobName);
+        handler.gcJobName = null;
       }
 
       // Flush pending transactions

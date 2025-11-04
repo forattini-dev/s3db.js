@@ -8,6 +8,7 @@ import { PromisePool } from "@supercharge/promise-pool";
 import { idGenerator } from "../../concerns/id.js";
 import { getCohortInfo, createSyntheticSetTransaction, ensureCohortHour } from "./utils.js";
 import { PluginError } from '../../errors.js';
+import { getCronManager } from "../../concerns/cron-manager.js";
 
 /**
  * Start consolidation timer for a handler
@@ -17,10 +18,12 @@ import { PluginError } from '../../errors.js';
  * @param {string} fieldName - Field name
  * @param {Function} runConsolidationCallback - Callback to run consolidation
  * @param {Object} config - Plugin configuration
- * @returns {NodeJS.Timeout} Consolidation timer
+ * @returns {string} Consolidation job name
  */
 export function startConsolidationTimer(handler, resourceName, fieldName, runConsolidationCallback, config) {
   const intervalMs = config.consolidationInterval * 1000; // Convert seconds to ms
+  const cronManager = getCronManager();
+  const jobName = `consolidation-${resourceName}-${fieldName}-${Date.now()}`;
 
   if (config.verbose) {
     const nextRun = new Date(Date.now() + intervalMs);
@@ -31,11 +34,16 @@ export function startConsolidationTimer(handler, resourceName, fieldName, runCon
     );
   }
 
-  handler.consolidationTimer = setInterval(async () => {
-    await runConsolidationCallback(handler, resourceName, fieldName);
-  }, intervalMs);
+  cronManager.scheduleInterval(
+    intervalMs,
+    async () => {
+      await runConsolidationCallback(handler, resourceName, fieldName);
+    },
+    jobName
+  );
 
-  return handler.consolidationTimer;
+  handler.consolidationJobName = jobName;
+  return jobName;
 }
 
 /**

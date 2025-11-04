@@ -3,6 +3,7 @@ import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
 import { QueueError } from "./queue.errors.js";
+import { getCronManager } from "../concerns/cron-manager.js";
 
 /**
  * S3QueuePlugin - Distributed Queue System with ETag-based Atomicity
@@ -129,8 +130,7 @@ export class S3QueuePlugin extends Plugin {
     // Deduplication cache to prevent S3 eventual consistency issues
     // Tracks recently processed messages to avoid reprocessing
     this.processedCache = new Map(); // queueId -> expiresAt
-    this.cacheCleanupInterval = null;
-    this.lockCleanupInterval = null;
+    this.cacheCleanupJobName = null;
     this.messageLocks = new Map();
     this._lastRecovery = 0;
     this._recoveryInFlight = false;
@@ -355,16 +355,21 @@ export class S3QueuePlugin extends Plugin {
     const concurrency = options.concurrency || this.config.concurrency;
 
     // Start cache cleanup (every 5 seconds, remove entries older than 30 seconds)
-    this.cacheCleanupInterval = setInterval(() => {
-      const now = Date.now();
-      const ttl = this.config.processedCacheTTL;
+    const cronManager = getCronManager();
+    this.cacheCleanupJobName = cronManager.scheduleInterval(
+      5000,
+      () => {
+        const now = Date.now();
+        const ttl = this.config.processedCacheTTL;
 
-      for (const [queueId, expiresAt] of this.processedCache.entries()) {
-        if (expiresAt <= now || expiresAt - now > ttl * 4) {
-          this.processedCache.delete(queueId);
+        for (const [queueId, expiresAt] of this.processedCache.entries()) {
+          if (expiresAt <= now || expiresAt - now > ttl * 4) {
+            this.processedCache.delete(queueId);
+          }
         }
-      }
-    }, 5000);
+      },
+      `queue-cache-cleanup-${this.workerId}`
+    );
 
     // Lock cleanup no longer needed - TTL handles expiration automatically
     this._lastRecovery = 0;
@@ -388,12 +393,13 @@ export class S3QueuePlugin extends Plugin {
     this.isRunning = false;
 
     // Stop cache cleanup
-    if (this.cacheCleanupInterval) {
-      clearInterval(this.cacheCleanupInterval);
-      this.cacheCleanupInterval = null;
+    if (this.cacheCleanupJobName) {
+      const cronManager = getCronManager();
+      cronManager.stop(this.cacheCleanupJobName);
+      this.cacheCleanupJobName = null;
     }
 
-    // Lock cleanup interval no longer exists (TTL handles it)
+    // Lock cleanup no longer needed (TTL handles it)
 
     // Wait for workers to finish current tasks
     await Promise.all(this.workers);
