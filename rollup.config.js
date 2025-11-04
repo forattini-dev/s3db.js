@@ -190,6 +190,14 @@ export default {
     'pg',
     'uuid',
 
+    // Peer dependencies - Puppeteer ecosystem (user installs - optional)
+    'puppeteer',
+    'puppeteer-extra',
+    'puppeteer-extra-plugin-stealth',
+    'user-agents',
+    'ghost-cursor',
+    'merge-deep',
+
     // Peer dependencies - Cloud providers (CloudInventoryPlugin)
     '@azure/identity',
     '@azure/arm-compute',
