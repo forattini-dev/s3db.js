@@ -48,6 +48,63 @@ console.log('✓ Task scheduled with auto-cleanup');
 console.log();
 
 // ============================================================================
+// IMPORTANT: Context Preservation with Arrow Functions
+// ============================================================================
+
+console.log('--- IMPORTANT: Context Preservation ---');
+
+class MyPlugin {
+  constructor() {
+    this.count = 0;
+    this.database = { name: 'mydb' };
+  }
+
+  // ❌ WRONG: Context (this) will be lost!
+  badExample() {
+    cronManager.scheduleInterval(
+      1000,
+      this.incrementCounter,  // ← `this` will be undefined inside incrementCounter!
+      'bad-example'
+    );
+  }
+
+  // ✅ CORRECT: Arrow function preserves context
+  goodExample() {
+    cronManager.scheduleInterval(
+      1000,
+      () => this.incrementCounter(),  // ← `this` is preserved! ✅
+      'good-example'
+    );
+  }
+
+  // ✅ ALTERNATIVE: .bind() also works
+  alternativeExample() {
+    cronManager.scheduleInterval(
+      1000,
+      this.incrementCounter.bind(this),  // ← `this` is bound! ✅
+      'alternative-example'
+    );
+  }
+
+  incrementCounter() {
+    this.count++;  // Works only if `this` is preserved!
+    console.log(`Count: ${this.count}, DB: ${this.database.name}`);
+  }
+}
+
+const plugin = new MyPlugin();
+
+// ✅ ALWAYS use arrow functions when passing class methods
+plugin.goodExample();
+
+console.log('✓ Always use arrow functions: () => this.method()');
+console.log('✓ Never pass methods directly: this.method');
+console.log();
+
+// Stop the example job
+cronManager.stop('good-example');
+
+// ============================================================================
 // Level 2: Cron Expressions - More Power Than setInterval
 // ============================================================================
 
