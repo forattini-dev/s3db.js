@@ -57,7 +57,7 @@ describe('Schema mapper/unmapper', () => {
 
     const objKey = schema.map.obj;
     expect(typeof mapped[objKey]).toBe('string');
-    expect(mapped.$meta).toBeUndefined();
+    expect(mapped.$meta).toBe(123);
 
     const unmapped = await schema.unmapper(mapped);
     expect(unmapped.foo).toBe('bar');
@@ -87,6 +87,23 @@ describe('Schema mapper/unmapper', () => {
     expect(unmapped.foo).toBeNull();
     expect(Array.isArray(unmapped.arr)).toBe(true);
     expect(unmapped.obj).toBeUndefined();
+  });
+
+  test('tolerates invalid JSON payloads when unmapping', async () => {
+    const schema = new Schema({
+      name: 'json-resilience',
+      attributes: { foo: 'string', bar: 'json' }
+    });
+
+    const mapped = {
+      [schema.map.foo]: '[object Object]',
+      [schema.map.bar]: '{invalidJson}',
+      _v: '1'
+    };
+
+    const unmapped = await schema.unmapper(mapped);
+    expect(unmapped.foo).toEqual({});
+    expect(unmapped.bar).toBe('{invalidJson}');
   });
 });
 

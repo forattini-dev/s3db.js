@@ -120,6 +120,23 @@ describe('Schema validation options', () => {
     expect(processed.optionalObject.optional).toBe(true);
   });
 
+  test('preprocesses deeply nested optional objects', () => {
+    const attributes = {
+      a: 'string|required',
+      b: { $$type: 'object|optional', x: 'number' },
+      c: { $$type: 'object', y: 'string' },
+      d: { $$type: 'object|optional', z: { $$type: 'object|optional', w: 'string' } }
+    };
+
+    const schema = new Schema({ name: 'nested', attributes });
+    const processed = schema.preprocessAttributesForValidation(attributes);
+
+    expect(processed.b.optional).toBe(true);
+    expect(processed.c.optional).toBeUndefined();
+    expect(processed.d.optional).toBe(true);
+    expect(processed.d.properties.z.optional).toBe(true);
+  });
+
   test('validates nested optional objects', async () => {
     const schema = new Schema({
       name: 'nested-optional',

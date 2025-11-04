@@ -7,6 +7,7 @@
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
+import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 
 /**
  * Parse custom route definition (e.g., "GET /healthcheck" or "async POST /custom")
@@ -227,6 +228,19 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response, response._status);
       }
 
+      // ✅ Generate ETag from record data
+      const etag = generateRecordETag(item);
+      if (etag) {
+        c.header('ETag', etag);
+      }
+
+      // ✅ Check If-None-Match (304 Not Modified)
+      const ifNoneMatch = c.req.header('If-None-Match');
+      if (ifNoneMatch && !validateIfNoneMatch(ifNoneMatch, etag)) {
+        // Resource not modified - return 304
+        return c.body(null, 304);
+      }
+
       const response = formatter.success(item);
       return c.json(response, response._status);
     }));
@@ -271,8 +285,28 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response, response._status);
       }
 
+      // ✅ Validate If-Match header (optimistic concurrency control)
+      const ifMatch = c.req.header('If-Match');
+      if (ifMatch) {
+        const currentETag = generateRecordETag(existing);
+        if (!validateIfMatch(ifMatch, currentETag)) {
+          // ETag mismatch - return 412 Precondition Failed
+          const response = formatter.error('Precondition Failed', {
+            message: 'Resource was modified by another request. Please refetch and retry.',
+            code: 'ETAG_MISMATCH'
+          });
+          return c.json(response, 412);
+        }
+      }
+
       // Full update
       const updated = await resource.update(id, data);
+
+      // ✅ Add ETag to response
+      const newETag = generateRecordETag(updated);
+      if (newETag) {
+        c.header('ETag', newETag);
+      }
 
       // Emit resource:updated event
       if (events) {
@@ -303,9 +337,29 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response, response._status);
       }
 
+      // ✅ Validate If-Match header (optimistic concurrency control)
+      const ifMatch = c.req.header('If-Match');
+      if (ifMatch) {
+        const currentETag = generateRecordETag(existing);
+        if (!validateIfMatch(ifMatch, currentETag)) {
+          // ETag mismatch - return 412 Precondition Failed
+          const response = formatter.error('Precondition Failed', {
+            message: 'Resource was modified by another request. Please refetch and retry.',
+            code: 'ETAG_MISMATCH'
+          });
+          return c.json(response, 412);
+        }
+      }
+
       // Partial update (merge with existing)
       const merged = { ...existing, ...data, id };
       const updated = await resource.update(id, merged);
+
+      // ✅ Add ETag to response
+      const newETag = generateRecordETag(updated);
+      if (newETag) {
+        c.header('ETag', newETag);
+      }
 
       // Emit resource:updated event
       if (events) {
@@ -334,6 +388,20 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       if (!existing) {
         const response = formatter.notFound(resourceName, id);
         return c.json(response, response._status);
+      }
+
+      // ✅ Validate If-Match header (optimistic concurrency control)
+      const ifMatch = c.req.header('If-Match');
+      if (ifMatch) {
+        const currentETag = generateRecordETag(existing);
+        if (!validateIfMatch(ifMatch, currentETag)) {
+          // ETag mismatch - return 412 Precondition Failed
+          const response = formatter.error('Precondition Failed', {
+            message: 'Resource was modified by another request. Please refetch and retry.',
+            code: 'ETAG_MISMATCH'
+          });
+          return c.json(response, 412);
+        }
       }
 
       await resource.delete(id);
@@ -376,9 +444,24 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.body(null, 404);
       }
 
+      // ✅ Generate ETag from record data
+      const etag = generateRecordETag(item);
+      if (etag) {
+        c.header('ETag', etag);
+      }
+
       // Add metadata headers
-      if (item.updatedAt) {
-        c.header('Last-Modified', new Date(item.updatedAt).toUTCString());
+      if (item._updatedAt) {
+        c.header('Last-Modified', new Date(item._updatedAt).toUTCString());
+      } else if (item._createdAt) {
+        c.header('Last-Modified', new Date(item._createdAt).toUTCString());
+      }
+
+      // ✅ Check If-None-Match (304 Not Modified)
+      const ifNoneMatch = c.req.header('If-None-Match');
+      if (ifNoneMatch && !validateIfNoneMatch(ifNoneMatch, etag)) {
+        // Resource not modified - return 304
+        return c.body(null, 304);
       }
 
       return c.body(null, 200);
