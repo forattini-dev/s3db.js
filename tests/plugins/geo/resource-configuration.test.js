@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals';
 
+import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 import { setupGeoSuite } from './helpers.js';
 
 describe('Geo Plugin - Resource configuration', () => {
