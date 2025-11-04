@@ -265,9 +265,21 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       }
 
       const location = `${basePath}/${item.id}`;
-      const response = formatter.created(item, location);
+
+      // ✅ Check Prefer header for minimal response
+      const prefer = c.req.header('Prefer');
+      const preferMinimal = prefer && prefer.includes('return=minimal');
 
       c.header('Location', location);
+
+      if (preferMinimal) {
+        // Return minimal response (no body)
+        c.header('Preference-Applied', 'return=minimal');
+        return c.body(null, 201);
+      }
+
+      // Return full representation (default)
+      const response = formatter.created(item, location);
       return c.json(response, response._status);
     }));
   }
@@ -317,6 +329,16 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           previous: existing,
           user: c.get('user')
         });
+      }
+
+      // ✅ Check Prefer header for minimal response
+      const prefer = c.req.header('Prefer');
+      const preferMinimal = prefer && prefer.includes('return=minimal');
+
+      if (preferMinimal) {
+        // Return minimal response (no body)
+        c.header('Preference-Applied', 'return=minimal');
+        return c.body(null, 200);
       }
 
       const response = formatter.success(updated);
@@ -371,6 +393,16 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           partial: true,
           user: c.get('user')
         });
+      }
+
+      // ✅ Check Prefer header for minimal response
+      const prefer = c.req.header('Prefer');
+      const preferMinimal = prefer && prefer.includes('return=minimal');
+
+      if (preferMinimal) {
+        // Return minimal response (no body)
+        c.header('Preference-Applied', 'return=minimal');
+        return c.body(null, 200);
       }
 
       const response = formatter.success(updated);
@@ -471,7 +503,19 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
   // OPTIONS - OPTIONS /{version}/{resource}
   if (methods.includes('OPTIONS')) {
     app.options('/', asyncHandler(async (c) => {
+      // ✅ HTTP Method Support
       c.header('Allow', methods.join(', '));
+
+      // ✅ Conditional Request Support
+      c.header('Accept-Patch', 'application/json');
+
+      // ✅ ETag Support Declaration
+      if (methods.includes('GET') || methods.includes('HEAD')) {
+        c.header('ETag-Support', 'weak, If-None-Match');
+      }
+      if (methods.includes('PUT') || methods.includes('PATCH') || methods.includes('DELETE')) {
+        c.header('Concurrency-Control', 'If-Match');
+      }
 
       // Return metadata about the resource
       const total = await resource.count();
@@ -483,11 +527,34 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         version,
         totalRecords: total,
         allowedMethods: methods,
+
+        // ✅ Supported Features
+        features: {
+          etag: true,
+          conditionalRequests: true,
+          partitioning: Object.keys(resource.config?.partitions || {}).length > 0,
+          filtering: true,
+          pagination: true,
+          sorting: false // Not yet implemented
+        },
+
+        // ✅ Conditional Headers
+        conditionalHeaders: {
+          'If-Match': 'Prevent conflicts (PUT/PATCH/DELETE) - returns 412 on mismatch',
+          'If-None-Match': 'Cache validation (GET/HEAD) - returns 304 if not modified'
+        },
+
+        // ✅ Preference Headers
+        preferenceHeaders: {
+          'Prefer: return=minimal': 'Request minimal response (POST/PUT/PATCH) - returns status only, no body'
+        },
+
         schema: Object.entries(schema).map(([name, def]) => ({
           name,
           type: typeof def === 'string' ? def.split('|')[0] : def.type,
           rules: typeof def === 'string' ? def.split('|').slice(1) : []
         })),
+
         endpoints: {
           list: `/${version}/${resourceName}`,
           get: `/${version}/${resourceName}/:id`,
@@ -495,12 +562,24 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           update: `/${version}/${resourceName}/:id`,
           delete: `/${version}/${resourceName}/:id`
         },
+
         queryParameters: {
           limit: 'number (1-1000, default: 100)',
           offset: 'number (min: 0, default: 0)',
           partition: 'string (partition name)',
           partitionValues: 'JSON string',
           '[any field]': 'any (filter by field value)'
+        },
+
+        // ✅ Response Codes
+        statusCodes: {
+          200: 'OK - Successful GET/PUT/PATCH',
+          201: 'Created - Successful POST',
+          204: 'No Content - Successful DELETE',
+          304: 'Not Modified - Resource unchanged (If-None-Match)',
+          404: 'Not Found - Resource does not exist',
+          412: 'Precondition Failed - ETag mismatch (If-Match)',
+          422: 'Unprocessable Entity - Validation error'
         }
       };
 
@@ -508,7 +587,18 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
 
     app.options('/:id', (c) => {
-      c.header('Allow', methods.filter(m => m !== 'POST').join(', '));
+      const itemMethods = methods.filter(m => m !== 'POST');
+      c.header('Allow', itemMethods.join(', '));
+
+      // ✅ Conditional Request Support for item endpoints
+      c.header('Accept-Patch', 'application/json');
+      if (itemMethods.includes('GET') || itemMethods.includes('HEAD')) {
+        c.header('ETag-Support', 'weak, If-None-Match');
+      }
+      if (itemMethods.includes('PUT') || itemMethods.includes('PATCH') || itemMethods.includes('DELETE')) {
+        c.header('Concurrency-Control', 'If-Match');
+      }
+
       return c.body(null, 204);
     });
   }
