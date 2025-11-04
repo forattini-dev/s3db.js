@@ -774,6 +774,10 @@ export class TTLPlugin extends Plugin {
     };
   }
 
+  async onStop() {
+    this.isRunning = false;
+  }
+
   /**
    * Uninstall the plugin
    * Auto-cleanup handles cron job cleanup via Plugin.stop()
