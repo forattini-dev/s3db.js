@@ -577,6 +577,7 @@ import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { resolveResourceNames } from "./concerns/resource-names.js";
 import { PluginError } from '../errors.js';
+import { getCronManager } from "../concerns/cron-manager.js";
 
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
@@ -637,7 +638,7 @@ export class MetricsPlugin extends Plugin {
       startTime: new Date().toISOString()
     };
 
-    this.flushTimer = null;
+    this.flushJobName = null;
     this.metricsServer = null; // Standalone HTTP server (if needed)
   }
 
@@ -744,10 +745,11 @@ export class MetricsPlugin extends Plugin {
   }
 
   async stop() {
-    // Stop flush timer
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-      this.flushTimer = null;
+    // Stop flush job
+    if (this.flushJobName) {
+      const cronManager = getCronManager();
+      cronManager.stop(this.flushJobName);
+      this.flushJobName = null;
     }
 
     // Stop standalone metrics server if running
@@ -983,15 +985,20 @@ export class MetricsPlugin extends Plugin {
   }
 
   startFlushTimer() {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
+    if (this.flushJobName) {
+      const cronManager = getCronManager();
+      cronManager.stop(this.flushJobName);
+      this.flushJobName = null;
     }
-    
+
     // Only start timer if flushInterval is greater than 0
     if (this.config.flushInterval > 0) {
-      this.flushTimer = setInterval(() => {
-        this.flushMetrics().catch(() => {});
-      }, this.config.flushInterval);
+      const cronManager = getCronManager();
+      this.flushJobName = cronManager.scheduleInterval(
+        this.config.flushInterval,
+        () => this.flushMetrics().catch(() => {}),
+        `metrics-flush-${Date.now()}`
+      );
     }
   }
 

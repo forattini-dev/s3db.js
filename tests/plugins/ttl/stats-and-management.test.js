@@ -3,6 +3,20 @@ import { afterAll, beforeAll, describe, expect, test } from '@jest/globals';
 import { createDatabaseForTest, sleep } from '../../config.js';
 import { TTLPlugin } from '../../../src/plugins/ttl.plugin.js';
 
+const previousConnectionString = process.env.BUCKET_CONNECTION_STRING;
+
+beforeAll(() => {
+  process.env.BUCKET_CONNECTION_STRING = 'memory://ttl-tests';
+});
+
+afterAll(() => {
+  if (previousConnectionString === undefined) {
+    delete process.env.BUCKET_CONNECTION_STRING;
+  } else {
+    process.env.BUCKET_CONNECTION_STRING = previousConnectionString;
+  }
+});
+
 describe('TTLPlugin v2 - Stats and Monitoring', () => {
   let db;
   let testResource;

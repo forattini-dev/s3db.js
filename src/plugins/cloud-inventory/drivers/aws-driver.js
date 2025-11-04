@@ -341,6 +341,7 @@ export class AwsInventoryDriver extends BaseCloudDriver {
       kinesis: new Map()
     };
     this._accountId = null;
+    /** @type {any} */
     this._credentialProvider = buildCredentialProvider(this.credentials);
     this._services = ensureArray(this.config?.services, DEFAULT_SERVICES)
       .map(normaliseServiceName)

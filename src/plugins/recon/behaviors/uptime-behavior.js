@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process';
 import dns from 'node:dns/promises';
 import https from 'node:https';
 import http from 'node:http';
+import { getCronManager } from '../../../concerns/cron-manager.js';
 
 export class UptimeBehavior {
   constructor(plugin, config = {}) {
@@ -45,8 +46,8 @@ export class UptimeBehavior {
     };
 
     this.checks = new Map();              // target.host -> { status, consecutiveFails, lastCheck, history }
-    this.checkIntervals = new Map();      // target.host -> intervalId (20s checks)
-    this.aggregationIntervals = new Map(); // target.host -> intervalId (60s aggregation)
+    this.checkIntervals = new Map();      // target.host -> jobName (20s checks)
+    this.aggregationIntervals = new Map(); // target.host -> jobName (60s aggregation)
     this.minuteBuffer = new Map();        // target.host -> [check1, check2, check3] (buffer for current minute)
   }
 
@@ -83,20 +84,26 @@ export class UptimeBehavior {
       await this._performCheck(target);
 
       // Schedule periodic checks
-      const checkIntervalId = setInterval(async () => {
-        await this._performCheck(target);
-      }, this.config.checkInterval);
+      const cronManager = getCronManager();
+      const checkJobName = cronManager.scheduleInterval(
+        this.config.checkInterval,
+        () => this._performCheck(target),
+        `uptime-check-${host}-${Date.now()}`
+      );
 
-      this.checkIntervals.set(host, checkIntervalId);
+      this.checkIntervals.set(host, checkJobName);
     }
 
     // Start aggregation interval (every 60 seconds)
     if (!this.aggregationIntervals.has(host)) {
-      const aggregationIntervalId = setInterval(async () => {
-        await this._aggregateMinute(target);
-      }, this.config.aggregationInterval);
+      const cronManager = getCronManager();
+      const aggregationJobName = cronManager.scheduleInterval(
+        this.config.aggregationInterval,
+        () => this._aggregateMinute(target),
+        `uptime-aggregation-${host}-${Date.now()}`
+      );
 
-      this.aggregationIntervals.set(host, aggregationIntervalId);
+      this.aggregationIntervals.set(host, aggregationJobName);
     }
 
     return this.getStatus(host);
@@ -106,17 +113,19 @@ export class UptimeBehavior {
    * Stop monitoring a target
    */
   stopMonitoring(host) {
+    const cronManager = getCronManager();
+
     // Stop check interval
-    const checkIntervalId = this.checkIntervals.get(host);
-    if (checkIntervalId) {
-      clearInterval(checkIntervalId);
+    const checkJobName = this.checkIntervals.get(host);
+    if (checkJobName) {
+      cronManager.stop(checkJobName);
       this.checkIntervals.delete(host);
     }
 
     // Stop aggregation interval
-    const aggregationIntervalId = this.aggregationIntervals.get(host);
-    if (aggregationIntervalId) {
-      clearInterval(aggregationIntervalId);
+    const aggregationJobName = this.aggregationIntervals.get(host);
+    if (aggregationJobName) {
+      cronManager.stop(aggregationJobName);
       this.aggregationIntervals.delete(host);
     }
 
