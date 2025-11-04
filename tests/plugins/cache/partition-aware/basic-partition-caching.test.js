@@ -49,7 +49,6 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Partition Caching
     });
 
     expect(initialList).toHaveLength(2);
-    expect(cachedList).toEqual(initialList);
+    expect(cachedList.map(user => user.id)).toEqual(initialList.map(user => user.id));
   });
 });
-

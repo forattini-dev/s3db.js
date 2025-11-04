@@ -12,6 +12,7 @@ import { idGenerator } from "./concerns/id.js";
 import { streamToString } from "./stream/index.js";
 import { ProcessManager } from "./concerns/process-manager.js";
 import { SafeEventEmitter } from "./concerns/safe-event-emitter.js";
+import { CronManager } from "./concerns/cron-manager.js";
 
 export class Database extends SafeEventEmitter {
   constructor(options) {
@@ -84,8 +85,15 @@ export class Database extends SafeEventEmitter {
       exitOnSignal: options.exitOnSignal !== false // Default: true (auto-exit on SIGTERM/SIGINT)
     });
 
+    // Initialize CronManager for cron job management (prevents memory leaks)
+    this.cronManager = options.cronManager || new CronManager({
+      verbose: this.verbose,
+      exitOnSignal: options.exitOnSignal !== false // Default: true (auto-exit on SIGTERM/SIGINT)
+    });
+
     if (this.verbose) {
       console.log(`[Database ${this.id}] ProcessManager initialized`);
+      console.log(`[Database ${this.id}] CronManager initialized`);
     }
 
     // Initialize hooks system
@@ -595,6 +603,15 @@ export class Database extends SafeEventEmitter {
 
       if (this.verbose) {
         console.log(`[Database ${this.id}] ProcessManager passed to plugin '${pluginName}'`);
+      }
+    }
+
+    // Pass CronManager to plugin (prevents memory leaks)
+    if (!plugin.cronManager) {
+      plugin.cronManager = this.cronManager;
+
+      if (this.verbose) {
+        console.log(`[Database ${this.id}] CronManager passed to plugin '${pluginName}'`);
       }
     }
 

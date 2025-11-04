@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { PartitionAwareFilesystemCache } from '../../../../src/plugins/cache/index.js';
 import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Driver Internals', () => {
