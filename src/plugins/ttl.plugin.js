@@ -57,6 +57,14 @@ const SECONDS_TO_MS = 1000;
  *       field: 'endsAt',         // Absolute expiration date
  *       onExpire: 'soft-delete'
  *     }
+ *   },
+ *
+ *   // Optional: Override cleanup schedule per granularity (cron expressions)
+ *   schedules: {
+ *     minute: '_/30 * * * * *',    // Every 30 seconds (replace _ with *)
+ *     hour: '_/15 * * * *',        // Every 15 minutes (replace _ with *)
+ *     day: '0 * * * *',            // Every hour at :00
+ *     week: '0 0 * * *'            // Daily at midnight
  *   }
  * })
  */
@@ -65,25 +73,25 @@ const SECONDS_TO_MS = 1000;
 const GRANULARITIES = {
   minute: {
     threshold: ONE_HOUR_SEC,      // TTL < 1 hour
-    interval: TEN_SECONDS_MS,     // Check every 10 seconds
+    cronExpression: '*/10 * * * * *',  // Check every 10 seconds
     cohortsToCheck: 3,            // Check last 3 minutes
     cohortFormat: (date) => date.toISOString().substring(0, 16)  // '2024-10-25T14:30'
   },
   hour: {
     threshold: ONE_DAY_SEC,       // TTL < 24 hours
-    interval: TEN_MINUTES_MS,     // Check every 10 minutes
+    cronExpression: '*/10 * * * *',    // Check every 10 minutes
     cohortsToCheck: 2,            // Check last 2 hours
     cohortFormat: (date) => date.toISOString().substring(0, 13)  // '2024-10-25T14'
   },
   day: {
     threshold: THIRTY_DAYS_SEC,   // TTL < 30 days
-    interval: ONE_HOUR_MS,        // Check every 1 hour
+    cronExpression: '0 * * * *',       // Check every 1 hour (at :00)
     cohortsToCheck: 2,            // Check last 2 days
     cohortFormat: (date) => date.toISOString().substring(0, 10)  // '2024-10-25'
   },
   week: {
     threshold: Infinity,          // TTL >= 30 days
-    interval: ONE_DAY_MS,         // Check every 24 hours
+    cronExpression: '0 0 * * *',       // Check every day at midnight
     cohortsToCheck: 2,            // Check last 2 weeks
     cohortFormat: (date) => {
       const year = date.getUTCFullYear();
@@ -154,6 +162,9 @@ export class TTLPlugin extends Plugin {
     this.verbose = config.verbose !== undefined ? config.verbose : false;
     this.resources = config.resources || {};
     this.batchSize = config.batchSize || 100;
+
+    // Cleanup schedule configuration (cron expressions only)
+    this.schedules = config.schedules || {};   // { minute: '*/30 * * * * *', hour: '*/15 * * * *', ... }
 
     // Statistics
     this.stats = {
@@ -483,16 +494,20 @@ export class TTLPlugin extends Plugin {
 
       const granularityConfig = GRANULARITIES[granularity];
 
-      // Use Plugin.scheduleInterval() for auto-tracking (no manual cleanup needed!)
-      await this.scheduleInterval(
-        granularityConfig.interval,
+      // Use custom cron expression or default from GRANULARITIES
+      const cronExpression = this.schedules[granularity] || granularityConfig.cronExpression;
+
+      // Schedule with cron expression
+      await this.scheduleCron(
+        cronExpression,
         () => this._cleanupGranularity(granularity, resources),
         `cleanup-${granularity}` // Auto-prefixed with 'ttl-'
       );
 
       if (this.verbose) {
+        const source = this.schedules[granularity] ? 'custom' : 'default';
         console.log(
-          `[TTLPlugin] Scheduled ${granularity} cleanup (${granularityConfig.interval}ms) ` +
+          `[TTLPlugin] Scheduled ${granularity} cleanup (${source} cron: ${cronExpression}) ` +
           `for ${resources.length} resources`
         );
       }
