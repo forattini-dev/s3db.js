@@ -345,7 +345,7 @@ export class Router {
         // Mount handler
         const mountPath = config.path === '/' ? '/*' : `${config.path}/*`;
         app.get(mountPath, handler);
-        app.head(mountPath, handler);
+        // Note: Hono doesn't have app.head(), but HEAD requests are auto-handled by GET
 
         if (this.verbose) {
           console.log(
