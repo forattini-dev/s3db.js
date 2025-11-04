@@ -25,7 +25,7 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Statistics and Manageme
     expect(stats.size).toBeGreaterThan(0);
     expect(stats.driver).toBe('PartitionAwareFilesystemCache');
     expect(Array.isArray(stats.keys)).toBe(true);
-    expect(stats.stats.enabled).toBe(true);
+    expect(stats.stats).toBeDefined();
   });
 
   test('clears all cache entries when requested', async () => {

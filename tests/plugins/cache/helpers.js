@@ -4,6 +4,10 @@ import { rm } from 'node:fs/promises';
 import { createMemoryDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
 import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
 
+if (typeof process.setMaxListeners === 'function' && process.getMaxListeners() < 50) {
+  process.setMaxListeners(50);
+}
+
 function createDefaultMemoryResourceConfig() {
   return {
     name: 'users',
@@ -108,6 +112,9 @@ export function setupMemoryCacheSuite(options = {}) {
       await context.cachePlugin.clearAllCache().catch(() => {});
     }
     if (context.db) {
+      if (context.db.cronManager?.removeSignalHandlers) {
+        context.db.cronManager.removeSignalHandlers();
+      }
       await context.db.disconnect();
     }
     context.db = null;
@@ -192,6 +199,9 @@ export function setupPartitionAwareCacheSuite(options = {}) {
       await context.cachePlugin.clearAllCache().catch(() => {});
     }
     if (context.db) {
+      if (context.db.cronManager?.removeSignalHandlers) {
+        context.db.cronManager.removeSignalHandlers();
+      }
       await context.db.disconnect();
     }
     context.db = null;

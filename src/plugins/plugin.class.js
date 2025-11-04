@@ -24,6 +24,10 @@ export class Plugin extends EventEmitter {
     this.namespace = null;
     this._namespaceExplicit = false;
 
+    // CronManager integration (passed by database)
+    this.cronManager = null;
+    this._cronJobs = []; // Track job names for auto-cleanup
+
     if (options.namespace || options.instanceId) {
       this.setNamespace(options.namespace || options.instanceId, { explicit: true });
     }
@@ -118,6 +122,89 @@ export class Plugin extends EventEmitter {
   // eslint-disable-next-line no-unused-vars
   onNamespaceChanged(namespace) {
     // Subclasses may override
+  }
+
+  /**
+   * Schedule a cron job (auto-tracked for cleanup)
+   *
+   * @param {string} expression - Cron expression (e.g., '0 * * * *')
+   * @param {Function} fn - Function to execute
+   * @param {string} suffix - Job name suffix (auto-prefixed with plugin slug)
+   * @param {Object} options - Cron options (timezone, etc.)
+   * @returns {Promise<Object>} Scheduled task
+   *
+   * @example
+   * // Auto-generates job name: 'my-plugin-cleanup'
+   * await this.scheduleCron('0 * * * *', () => this.cleanup(), 'cleanup');
+   */
+  async scheduleCron(expression, fn, suffix = 'job', options = {}) {
+    if (!this.cronManager) {
+      console.warn(`[${this.name}] CronManager not available, cannot schedule job '${suffix}'`);
+      return null;
+    }
+
+    const jobName = `${this.slug}-${suffix}`;
+    const task = await this.cronManager.schedule(expression, fn, jobName, options);
+
+    if (task) {
+      this._cronJobs.push(jobName);
+    }
+
+    return task;
+  }
+
+  /**
+   * Schedule an interval-based job (auto-tracked for cleanup)
+   * Converts milliseconds to cron expression automatically
+   *
+   * @param {number} ms - Interval in milliseconds
+   * @param {Function} fn - Function to execute
+   * @param {string} suffix - Job name suffix (auto-prefixed with plugin slug)
+   * @param {Object} options - Cron options (timezone, etc.)
+   * @returns {Promise<Object>} Scheduled task
+   *
+   * @example
+   * // Auto-generates job name: 'my-plugin-sync'
+   * await this.scheduleInterval(60000, () => this.sync(), 'sync');
+   */
+  async scheduleInterval(ms, fn, suffix = 'interval', options = {}) {
+    if (!this.cronManager) {
+      console.warn(`[${this.name}] CronManager not available, cannot schedule interval '${suffix}'`);
+      return null;
+    }
+
+    const jobName = `${this.slug}-${suffix}`;
+    const task = await this.cronManager.scheduleInterval(ms, fn, jobName, options);
+
+    if (task) {
+      this._cronJobs.push(jobName);
+    }
+
+    return task;
+  }
+
+  /**
+   * Stop all auto-tracked cron jobs
+   * Called automatically in onStop() lifecycle
+   *
+   * @returns {number} Number of jobs stopped
+   *
+   * @example
+   * // Manually stop all jobs
+   * this.stopAllCronJobs();
+   */
+  stopAllCronJobs() {
+    if (!this.cronManager) return 0;
+
+    let stopped = 0;
+    for (const jobName of this._cronJobs) {
+      if (this.cronManager.stop(jobName)) {
+        stopped++;
+      }
+    }
+
+    this._cronJobs = [];
+    return stopped;
   }
 
   /**
@@ -226,6 +313,10 @@ export class Plugin extends EventEmitter {
   async stop() {
     this.beforeStop();
     await this.onStop();
+
+    // Auto-cleanup all cron jobs
+    this.stopAllCronJobs();
+
     this.afterStop();
   }
 
