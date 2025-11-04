@@ -4,7 +4,7 @@ import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 import { setupGeoSuite } from './helpers.js';
 
 describe('Geo Plugin - Installation', () => {
-  setupGeoSuite();
+  const ctx = setupGeoSuite();
 
   test('installs plugin successfully', async () => {
     const plugin = new GeoPlugin({
@@ -17,10 +17,9 @@ describe('Geo Plugin - Installation', () => {
       }
     });
 
-    const db = await importDatabase();
-    await db.usePlugin(plugin);
+    await ctx.db.usePlugin(plugin);
 
-    expect(plugin.database).toBe(db);
+    expect(plugin.database).toBe(ctx.db);
     expect(Object.keys(plugin.resources)).toHaveLength(1);
   });
 
@@ -38,8 +37,7 @@ describe('Geo Plugin - Installation', () => {
       }
     });
 
-    const db = await importDatabase();
-    await db.usePlugin(plugin);
+    await ctx.db.usePlugin(plugin);
 
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('[GeoPlugin] Installed with 1 resources')
@@ -64,8 +62,7 @@ describe('Geo Plugin - Installation', () => {
       payload = data;
     });
 
-    const db = await importDatabase();
-    await db.usePlugin(plugin);
+    await ctx.db.usePlugin(plugin);
 
     expect(payload).toEqual({
       plugin: 'GeoPlugin',
@@ -73,8 +70,3 @@ describe('Geo Plugin - Installation', () => {
     });
   });
 });
-
-async function importDatabase() {
-  const { getCurrentDatabase } = await import('./shared-state.js');
-  return getCurrentDatabase();
-}
