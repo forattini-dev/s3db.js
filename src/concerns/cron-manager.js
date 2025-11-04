@@ -33,32 +33,44 @@
 /**
  * Convert milliseconds to cron expression (best effort)
  */
+function createStepExpression(value) {
+  return ['*', '/', String(value)].join('');
+}
+
+function createHourlyStepExpression(value) {
+  return ['0 ', createStepExpression(value), ' * * *'].join('');
+}
+
+function createDailyStepExpression(value) {
+  return ['0 0 ', createStepExpression(value), ' * *'].join('');
+}
+
 export function intervalToCron(ms) {
   const seconds = Math.floor(ms / 1000);
 
   // Every N seconds (max 59)
   if (seconds < 60) {
-    return `*/${seconds} * * * * *`; // Every N seconds
+    return `${createStepExpression(seconds)} * * * * *`; // Every N seconds
   }
 
   const minutes = Math.floor(seconds / 60);
 
   // Every N minutes (max 59)
   if (minutes < 60) {
-    return `*/${minutes} * * * *`; // Every N minutes
+    return `${createStepExpression(minutes)} * * * *`; // Every N minutes
   }
 
   const hours = Math.floor(minutes / 60);
 
   // Every N hours (max 23)
   if (hours < 24) {
-    return `0 */${hours} * * *`; // Every N hours
+    return createHourlyStepExpression(hours); // Every N hours
   }
 
   const days = Math.floor(hours / 24);
 
   // Every N days
-  return `0 0 */${days} * *`; // Every N days at midnight
+  return createDailyStepExpression(days); // Every N days at midnight
 }
 
 /**
@@ -67,23 +79,23 @@ export function intervalToCron(ms) {
 export const CRON_PRESETS = {
   // Seconds (node-cron supports 6-field format with seconds)
   EVERY_SECOND: '* * * * * *',
-  EVERY_5_SECONDS: '*/5 * * * * *',
-  EVERY_10_SECONDS: '*/10 * * * * *',
-  EVERY_15_SECONDS: '*/15 * * * * *',
-  EVERY_30_SECONDS: '*/30 * * * * *',
+  EVERY_5_SECONDS: `${createStepExpression(5)} * * * * *`,
+  EVERY_10_SECONDS: `${createStepExpression(10)} * * * * *`,
+  EVERY_15_SECONDS: `${createStepExpression(15)} * * * * *`,
+  EVERY_30_SECONDS: `${createStepExpression(30)} * * * * *`,
 
   // Minutes
   EVERY_MINUTE: '* * * * *',
-  EVERY_5_MINUTES: '*/5 * * * *',
-  EVERY_10_MINUTES: '*/10 * * * *',
-  EVERY_15_MINUTES: '*/15 * * * *',
-  EVERY_30_MINUTES: '*/30 * * * *',
+  EVERY_5_MINUTES: `${createStepExpression(5)} * * * *`,
+  EVERY_10_MINUTES: `${createStepExpression(10)} * * * *`,
+  EVERY_15_MINUTES: `${createStepExpression(15)} * * * *`,
+  EVERY_30_MINUTES: `${createStepExpression(30)} * * * *`,
 
   // Hours
   EVERY_HOUR: '0 * * * *',
-  EVERY_2_HOURS: '0 */2 * * *',
-  EVERY_6_HOURS: '0 */6 * * *',
-  EVERY_12_HOURS: '0 */12 * * *',
+  EVERY_2_HOURS: createHourlyStepExpression(2),
+  EVERY_6_HOURS: createHourlyStepExpression(6),
+  EVERY_12_HOURS: createHourlyStepExpression(12),
 
   // Days
   EVERY_DAY: '0 0 * * *',          // Midnight

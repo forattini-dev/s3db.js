@@ -457,6 +457,7 @@ export class TTLPlugin extends Plugin {
 
   /**
    * Start cron-based cleanup for each granularity
+   * Uses Plugin.scheduleInterval() for auto-tracking and cleanup
    */
   async _startIntervals() {
     if (!this.cronManager) {
@@ -482,10 +483,11 @@ export class TTLPlugin extends Plugin {
 
       const granularityConfig = GRANULARITIES[granularity];
 
-      await this.cronManager.scheduleInterval(
+      // Use Plugin.scheduleInterval() for auto-tracking (no manual cleanup needed!)
+      await this.scheduleInterval(
         granularityConfig.interval,
         () => this._cleanupGranularity(granularity, resources),
-        `TTLPlugin-cleanup-${granularity}`
+        `cleanup-${granularity}` // Auto-prefixed with 'ttl-'
       );
 
       if (this.verbose) {
@@ -497,25 +499,6 @@ export class TTLPlugin extends Plugin {
     }
 
     this.isRunning = true;
-  }
-
-  /**
-   * Stop all cron jobs
-   */
-  _stopIntervals() {
-    if (!this.cronManager) return;
-
-    // Stop all granularity cleanup jobs
-    this.cronManager.stop('TTLPlugin-cleanup-minute');
-    this.cronManager.stop('TTLPlugin-cleanup-hour');
-    this.cronManager.stop('TTLPlugin-cleanup-day');
-    this.cronManager.stop('TTLPlugin-cleanup-week');
-
-    this.isRunning = false;
-
-    if (this.verbose) {
-      console.log('[TTLPlugin] Stopped all cleanup jobs');
-    }
   }
 
   /**
@@ -772,15 +755,15 @@ export class TTLPlugin extends Plugin {
       ...this.stats,
       resources: Object.keys(this.resources).length,
       isRunning: this.isRunning,
-      intervals: this.intervals.length
+      cronJobs: this._cronJobs.length
     };
   }
 
   /**
    * Uninstall the plugin
+   * Auto-cleanup handles cron job cleanup via Plugin.stop()
    */
   async uninstall() {
-    this._stopIntervals();
     await super.uninstall();
 
     if (this.verbose) {
