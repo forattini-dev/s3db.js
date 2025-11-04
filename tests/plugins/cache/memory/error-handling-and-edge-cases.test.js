@@ -1,125 +1,61 @@
-import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals';
-import { createDatabaseForTest } from '../../../config.js';
-import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
-import { MemoryCache } from '../../../../src/plugins/cache/index.js';
+import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
+import { setupMemoryCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - MemoryCache Driver - Error Handling and Edge Cases', () => {
-  let db;
-  let cachePlugin;
-  let users;
+  const ctx = setupMemoryCacheSuite();
 
   beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-memory');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'memory',
-      ttl: 60000,
-      maxSize: 100,
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      asyncPartitions: false,
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        department: 'string|required',
-        region: 'string|required',
-        status: 'string|required',
-      },
-      partitions: {
-        byDepartment: { fields: { department: 'string' } },
-        byRegion: { fields: { region: 'string' } },
-      },
-    });
+    await ctx.seedUsers();
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache();
-    }
-    if (db) {
-      await db.disconnect();
-    }
+  test('surface driver errors without breaking resource operations', async () => {
+    const users = ctx.resource;
+    const originalGet = ctx.cachePlugin.driver.get;
+
+    ctx.cachePlugin.driver.get = jest.fn().mockRejectedValue(new Error('Memory cache error'));
+
+    await expect(users.count()).rejects.toThrow('Memory cache error');
+
+    ctx.cachePlugin.driver.get = originalGet;
   });
 
-  test('should handle cache errors gracefully', async () => {
-    await users.insert({ name: 'Error Test', email: 'error@example.com', department: 'Test', region: 'US', status: 'active' });
+  test('treats null cache responses as cache misses', async () => {
+    const users = ctx.resource;
+    const originalGet = ctx.cachePlugin.driver.get;
 
-    // Mock driver error - wrap in try-catch to avoid unhandled promise rejection
-    const originalGet = cachePlugin.driver.get;
-    cachePlugin.driver.get = jest.fn().mockRejectedValue(new Error('Memory cache error'));
+    ctx.cachePlugin.driver.get = jest.fn().mockResolvedValue(null);
 
-    try {
-      // Operations should still work or handle the error
-      const count = await users.count();
-      expect(count).toBe(1);
-    } catch (error) {
-      // If cache error propagates, verify operation handles it
-      expect(error.message).toBe('Memory cache error');
-    } finally {
-      // Restore original method
-      cachePlugin.driver.get = originalGet;
-    }
-  });
-
-  test('should handle null/undefined cache values', async () => {
-    // Mock driver to return null
-    const originalGet = cachePlugin.driver.get;
-    cachePlugin.driver.get = jest.fn().mockResolvedValue(null);
-
-    await users.insert({ name: 'Null Test', email: 'null@example.com', department: 'Test', region: 'US', status: 'active' });
-
-    // Should still work and get fresh data
     const count = await users.count();
-    expect(count).toBe(1);
+    expect(count).toBe(3);
 
-    // Restore original method
-    cachePlugin.driver.get = originalGet;
+    ctx.cachePlugin.driver.get = originalGet;
   });
 
-  test('should handle concurrent cache operations', async () => {
-    await users.insertMany([
-      { name: 'Concurrent 1', email: 'conc1@example.com', department: 'Test', region: 'US', status: 'active' },
-      { name: 'Concurrent 2', email: 'conc2@example.com', department: 'Test', region: 'US', status: 'active' }
-    ]);
+  test('handles concurrent cacheable operations', async () => {
+    const users = ctx.resource;
 
-    // Perform multiple concurrent operations
-    const promises = [
+    const results = await Promise.all([
       users.count(),
       users.list(),
       users.listIds(),
       users.count(),
       users.list()
-    ];
+    ]);
 
-    const results = await Promise.all(promises);
-
-    // All operations should complete successfully
-    expect(results[0]).toBe(2); // count
-    expect(results[1]).toHaveLength(2); // list
-    expect(results[2]).toHaveLength(2); // listIds
-    expect(results[3]).toBe(2); // count (cached)
-    expect(results[4]).toHaveLength(2); // list (should be same length, order may vary)
+    expect(results[0]).toBe(3);
+    expect(results[1]).toHaveLength(3);
+    expect(results[2]).toHaveLength(3);
+    expect(results[3]).toBe(3);
+    expect(results[4]).toHaveLength(3);
   });
 
-  test('should handle resource cleanup', async () => {
-    // Generate cache entries
-    await users.count();
-    await users.list();
+  test('clears cache safely even when already empty', async () => {
+    await ctx.cachePlugin.clearAllCache();
+    const stats = await ctx.cachePlugin.getCacheStats();
 
-    let stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBeGreaterThan(0);
-
-    // Simulate resource cleanup by clearing cache
-    await cachePlugin.clearAllCache();
-
-    // Cache should be accessible and empty
-    stats = await cachePlugin.getCacheStats();
-    expect(stats).toBeDefined();
     expect(stats.size).toBe(0);
+    expect(stats.keys).toEqual([]);
   });
 });
+

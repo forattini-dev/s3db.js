@@ -1,95 +1,48 @@
-import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals';
-import { createDatabaseForTest } from '../../../config.js';
-import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
-import { MemoryCache } from '../../../../src/plugins/cache/index.js';
+import { beforeEach, describe, expect, test } from '@jest/globals';
 
+import { setupMemoryCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - MemoryCache Driver - Cache Management Operations', () => {
-  let db;
-  let cachePlugin;
-  let users;
+  const ctx = setupMemoryCacheSuite();
 
   beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-memory');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'memory',
-      ttl: 60000,
-      maxSize: 100,
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      asyncPartitions: false,
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        department: 'string|required',
-        region: 'string|required',
-        status: 'string|required',
-      },
-      partitions: {
-        byDepartment: { fields: { department: 'string' } },
-        byRegion: { fields: { region: 'string' } },
-      },
-    });
+    await ctx.seedUsers();
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache();
-    }
-    if (db) {
-      await db.disconnect();
-    }
-  });
+  test('clearAllCache removes every cached entry', async () => {
+    const users = ctx.resource;
 
-  beforeEach(async () => {
-    await users.insert({ name: 'Management User', email: 'mgmt@example.com', department: 'Admin', region: 'US', status: 'active' });
-  });
-
-  test('should clear all cache', async () => {
-    // Generate cache entries
     await users.count();
     await users.list();
 
-    let stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBeGreaterThan(0);
+    const warmStats = await ctx.cachePlugin.getCacheStats();
+    expect(warmStats.size).toBeGreaterThan(0);
 
-    // Clear all cache
-    await cachePlugin.clearAllCache();
+    await ctx.cachePlugin.clearAllCache();
 
-    stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBe(0);
+    const clearedStats = await ctx.cachePlugin.getCacheStats();
+    expect(clearedStats.size).toBe(0);
+    expect(clearedStats.keys.length).toBe(0);
   });
 
-  test('should warm cache for resource', async () => {
-    // Clear any existing cache
-    await cachePlugin.clearAllCache();
+  test('warmCache primes cache for a given resource', async () => {
+    await ctx.cachePlugin.clearAllCache();
 
-    // Warm cache
-    await cachePlugin.warmCache('users');
+    await ctx.cachePlugin.warmCache('users');
 
-    // Cache should be populated
-    const stats = await cachePlugin.getCacheStats();
+    const stats = await ctx.cachePlugin.getCacheStats();
     expect(stats.size).toBeGreaterThan(0);
+    expect(stats.keys.some(key => key.includes('resource=users'))).toBe(true);
   });
 
-  test('should handle resource-specific cache clearing', async () => {
-    // Generate cache for users
-    await users.count();
-    await users.list();
+  test('getCacheStats reports driver level information', async () => {
+    const stats = await ctx.cachePlugin.getCacheStats();
 
-    let stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBeGreaterThan(0);
-
-    // Clear cache at plugin level
-    await cachePlugin.clearAllCache();
-
-    // Verify cache was cleared
-    stats = await cachePlugin.getCacheStats();
-    expect(stats.size).toBe(0);
+    expect(stats).toMatchObject({
+      driver: 'MemoryCache',
+      keys: expect.any(Array),
+      size: expect.any(Number)
+    });
   });
 });
+

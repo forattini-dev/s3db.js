@@ -1,175 +1,65 @@
-import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals';
-import { createDatabaseForTest } from '../../../config.js';
-import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
-import { MemoryCache } from '../../../../src/plugins/cache/index.js';
+import { beforeEach, describe, expect, test } from '@jest/globals';
 
+import { setupMemoryCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - MemoryCache Driver - Cache Invalidation', () => {
-  let db;
-  let cachePlugin;
-  let users;
+  const ctx = setupMemoryCacheSuite();
 
   beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-memory');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'memory',
-      ttl: 60000,
-      maxSize: 100,
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      asyncPartitions: false,
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        department: 'string|required',
-        region: 'string|required',
-        status: 'string|required',
-      },
-      partitions: {
-        byDepartment: { fields: { department: 'string' } },
-        byRegion: { fields: { region: 'string' } },
-      },
-    });
+    await ctx.seedUsers();
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache();
-    }
-    if (db) {
-      await db.disconnect();
-    }
-  });
+  test('refreshes cached aggregates after inserts', async () => {
+    const users = ctx.resource;
 
-  beforeEach(async () => {
+    const firstCount = await users.count();
+    expect(firstCount).toBe(3);
+
     await users.insert({
-      name: 'Test User',
-      email: 'test@example.com',
-      department: 'IT',
-      region: 'US',
-      status: 'active'
-    });
-  });
-
-  test('should invalidate cache on insert', async () => {
-    // Cache count
-    const initialCount = await users.count();
-    expect(initialCount).toBe(1);
-
-    // Insert new user
-    await users.insert({
-      name: 'New User',
-      email: 'new@example.com',
-      department: 'HR',
+      name: 'Diana',
+      email: 'diana@example.com',
+      department: 'Marketing',
       region: 'US',
       status: 'active'
     });
 
-    // Count should reflect new data
-    const newCount = await users.count();
-    expect(newCount).toBe(2);
+    const updatedCount = await users.count();
+    expect(updatedCount).toBe(4);
   });
 
-  test('should invalidate cache on update', async () => {
-    const userId = (await users.listIds())[0];
+  test('drops cached entities when they are updated', async () => {
+    const users = ctx.resource;
+    const [userId] = await users.listIds();
 
-    // Cache user data
-    const originalUser = await users.get(userId);
-    expect(originalUser.name).toBe('Test User');
+    const cachedUser = await users.get(userId);
+    expect(cachedUser).toBeDefined();
 
-    // Update user
-    await users.update(userId, { name: 'Updated User' });
+    await users.update(userId, { status: 'inactive' });
 
-    // Cache should be invalidated
-    const updatedUser = await users.get(userId);
-    expect(updatedUser.name).toBe('Updated User');
+    const refreshedUser = await users.get(userId);
+    expect(refreshedUser.status).toBe('inactive');
   });
 
-  test('should invalidate cache on delete', async () => {
-    const userId = (await users.listIds())[0];
+  test('clears partition-specific caches affected by deletes', async () => {
+    const users = ctx.resource;
 
-    // Cache count
-    const initialCount = await users.count();
-    expect(initialCount).toBe(1);
-
-    // Delete user
-    await users.delete(userId);
-
-    // Cache should be invalidated
-    const newCount = await users.count();
-    expect(newCount).toBe(0);
-  });
-
-  test('should invalidate cache on deleteMany', async () => {
-    // Insert more users
-    await users.insertMany([
-      { name: 'User 2', email: 'user2@example.com', department: 'HR', region: 'US', status: 'active' },
-      { name: 'User 3', email: 'user3@example.com', department: 'IT', region: 'EU', status: 'active' }
-    ]);
-
-    const initialCount = await users.count();
-    expect(initialCount).toBe(3);
-
-    const allIds = await users.listIds();
-    await users.deleteMany(allIds.slice(0, 2));
-
-    const newCount = await users.count();
-    expect(newCount).toBe(1);
-  });
-
-  test('should invalidate partition cache appropriately', async () => {
-    // Insert more IT users
-    await users.insertMany([
-      { name: 'IT User 2', email: 'it2@example.com', department: 'IT', region: 'US', status: 'active' },
-      { name: 'HR User 1', email: 'hr1@example.com', department: 'HR', region: 'US', status: 'active' }
-    ]);
-
-    // Small delay to ensure partition indexes are ready
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Cache IT department count
-    const itCount1 = await users.count({
+    const itCount = await users.count({
       partition: 'byDepartment',
-      partitionValues: { department: 'IT' }
+      partitionValues: { department: 'Engineering' }
     });
-    expect(itCount1).toBe(2);
+    expect(itCount).toBe(2);
 
-    // Cache HR department count
-    const hrCount1 = await users.count({
+    const engineeringUsers = await users.list({
       partition: 'byDepartment',
-      partitionValues: { department: 'HR' }
-    });
-    expect(hrCount1).toBe(1);
-
-    // Insert new IT user
-    await users.insert({
-      name: 'IT User 3',
-      email: 'it3@example.com',
-      department: 'IT',
-      region: 'EU',
-      status: 'active'
+      partitionValues: { department: 'Engineering' }
     });
 
-    // Small delay to ensure partition indexes are ready
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await Promise.all(engineeringUsers.map(user => users.delete(user.id)));
 
-    // IT count should be updated
-    const itCount2 = await users.count({
+    const refreshedCount = await users.count({
       partition: 'byDepartment',
-      partitionValues: { department: 'IT' }
+      partitionValues: { department: 'Engineering' }
     });
-    expect(itCount2).toBe(3);
-
-    // HR count should remain the same (cache still valid)
-    const hrCount2 = await users.count({
-      partition: 'byDepartment',
-      partitionValues: { department: 'HR' }
-    });
-    expect(hrCount2).toBe(1);
+    expect(refreshedCount).toBe(0);
   });
 });

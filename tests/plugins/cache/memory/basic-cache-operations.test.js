@@ -1,126 +1,85 @@
-import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals';
-import { createDatabaseForTest } from '../../../config.js';
-import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
-import { MemoryCache } from '../../../../src/plugins/cache/index.js';
-
+import { beforeEach, describe, expect, test } from '@jest/globals';
+import { setupMemoryCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - MemoryCache Driver - Basic Cache Operations', () => {
-  let db;
-  let cachePlugin;
-  let users;
+  const ctx = setupMemoryCacheSuite();
 
   beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-memory');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'memory',
-      ttl: 60000,
-      maxSize: 100,
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      asyncPartitions: false,
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        department: 'string|required',
-        region: 'string|required',
-        status: 'string|required',
-      },
-      partitions: {
-        byDepartment: { fields: { department: 'string' } },
-        byRegion: { fields: { region: 'string' } },
-      },
-    });
+    await ctx.seedUsers();
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache();
-    }
-    if (db) {
-      await db.disconnect();
-    }
-  });
+  test('caches count results after the first miss', async () => {
+    const users = ctx.resource;
 
-  beforeEach(async () => {
-    // Insert test data
-    await users.insertMany([
-      { name: 'Alice', email: 'alice@example.com', department: 'Engineering', region: 'US', status: 'active' },
-      { name: 'Bob', email: 'bob@example.com', department: 'Sales', region: 'US', status: 'active' },
-      { name: 'Charlie', email: 'charlie@example.com', department: 'Engineering', region: 'EU', status: 'inactive' }
-    ]);
-  });
+    const firstCount = await users.count();
+    const secondCount = await users.count();
 
-  test('should cache and retrieve count results', async () => {
-    // First call - cache miss
-    const count1 = await users.count();
-    expect(count1).toBe(3);
+    expect(firstCount).toBe(3);
+    expect(secondCount).toBe(3);
 
-    // Second call - cache hit
-    const count2 = await users.count();
-    expect(count2).toBe(3);
-
-    // Verify cache was used
-    const stats = await cachePlugin.getCacheStats();
+    const stats = await ctx.cachePlugin.getCacheStats();
     expect(stats.size).toBeGreaterThan(0);
   });
 
-  test('should cache and retrieve list results', async () => {
-    // First call - cache miss
-    const list1 = await users.list();
-    expect(list1).toHaveLength(3);
+  test('caches list responses to avoid repeated reads', async () => {
+    const users = ctx.resource;
 
-    // Second call - cache hit
-    const list2 = await users.list();
-    expect(list2).toEqual(list1);
+    const firstList = await users.list();
+    const secondList = await users.list();
+
+    expect(firstList).toHaveLength(3);
+    expect(secondList).toEqual(firstList);
   });
 
-  test('should cache and retrieve listIds results', async () => {
-    const ids1 = await users.listIds();
-    expect(ids1).toHaveLength(3);
+  test('caches listIds so repeated calls avoid database work', async () => {
+    const users = ctx.resource;
 
-    const ids2 = await users.listIds();
-    expect(ids2).toEqual(ids1);
+    const firstIds = await users.listIds();
+    const secondIds = await users.listIds();
+
+    expect(firstIds).toHaveLength(3);
+    expect(secondIds).toEqual(firstIds);
   });
 
-  test('should cache and retrieve getMany results', async () => {
-    const allIds = await users.listIds();
-    const testIds = allIds.slice(0, 2);
+  test('reuses cached getMany calls for the same identifiers', async () => {
+    const users = ctx.resource;
+    const ids = (await users.listIds()).slice(0, 2);
 
-    const many1 = await users.getMany(testIds);
-    expect(many1).toHaveLength(2);
+    const firstMany = await users.getMany(ids);
+    const secondMany = await users.getMany(ids);
 
-    const many2 = await users.getMany(testIds);
-    expect(many2).toEqual(many1);
+    expect(firstMany).toHaveLength(2);
+    expect(secondMany).toEqual(firstMany);
   });
 
-  test('should cache and retrieve getAll results', async () => {
-    const all1 = await users.getAll();
-    expect(all1).toHaveLength(3);
+  test('serves getAll from cache after warm-up', async () => {
+    const users = ctx.resource;
 
-    const all2 = await users.getAll();
-    expect(all2).toEqual(all1);
+    const firstGetAll = await users.getAll();
+    const secondGetAll = await users.getAll();
+
+    expect(firstGetAll).toHaveLength(3);
+    expect(secondGetAll).toEqual(firstGetAll);
   });
 
-  test('should cache and retrieve page results', async () => {
-    const page1 = await users.page({ offset: 0, size: 2 });
-    expect(page1.items).toHaveLength(2);
+  test('keeps cached pages consistent for identical paging arguments', async () => {
+    const users = ctx.resource;
 
-    const page2 = await users.page({ offset: 0, size: 2 });
-    expect(page2.items).toEqual(page1.items);
+    const firstPage = await users.page({ offset: 0, size: 2 });
+    const secondPage = await users.page({ offset: 0, size: 2 });
+
+    expect(firstPage.items).toHaveLength(2);
+    expect(secondPage.items).toEqual(firstPage.items);
   });
 
-  test('should cache individual get results', async () => {
-    const userId = (await users.listIds())[0];
+  test('caches single record lookups via get', async () => {
+    const users = ctx.resource;
+    const [userId] = await users.listIds();
 
-    const user1 = await users.get(userId);
-    expect(user1).toBeDefined();
+    const firstGet = await users.get(userId);
+    const secondGet = await users.get(userId);
 
-    const user2 = await users.get(userId);
-    expect(user2).toEqual(user1);
+    expect(firstGet).toBeDefined();
+    expect(secondGet).toEqual(firstGet);
   });
 });

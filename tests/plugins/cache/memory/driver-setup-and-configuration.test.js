@@ -1,75 +1,31 @@
-import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals';
-import { createDatabaseForTest } from '../../../config.js';
+import { describe, expect, test } from '@jest/globals';
+
 import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
 import { MemoryCache } from '../../../../src/plugins/cache/index.js';
-
+import { setupMemoryCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - MemoryCache Driver - Driver Setup and Configuration', () => {
-  let db;
-  let cachePlugin;
-  let users;
+  const ctx = setupMemoryCacheSuite({ createResource: false });
 
-  beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-memory');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
-      driver: 'memory',
-      ttl: 60000,
-      maxSize: 100,
-    });
-    await cachePlugin.install(db);
-
-    users = await db.createResource({
-      name: 'users',
-      asyncPartitions: false,
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        department: 'string|required',
-        region: 'string|required',
-        status: 'string|required',
-      },
-      partitions: {
-        byDepartment: { fields: { department: 'string' } },
-        byRegion: { fields: { region: 'string' } },
-      },
-    });
+  test('installs memory driver with default configuration', () => {
+    expect(ctx.cachePlugin.driver).toBeInstanceOf(MemoryCache);
+    expect(ctx.cachePlugin.driver.ttl).toBe(60000);
+    expect(ctx.cachePlugin.driver.maxSize).toBe(100);
   });
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache();
-    }
-    if (db) {
-      await db.disconnect();
-    }
+  test('respects explicit ttl configuration during install', async () => {
+    const plugin = new CachePlugin({ driver: 'memory', ttl: 300000 });
+    await plugin.install(ctx.db);
+
+    expect(plugin.driver).toBeInstanceOf(MemoryCache);
+    expect(plugin.driver.ttl).toBe(300000);
   });
 
-  test('should initialize MemoryCache with correct configuration', () => {
-    expect(cachePlugin.driver).toBeInstanceOf(MemoryCache);
-    expect(cachePlugin.driver.ttl).toBe(60000);
-    expect(cachePlugin.driver.maxSize).toBe(100);
-  });
+  test('respects explicit maxSize configuration during install', async () => {
+    const plugin = new CachePlugin({ driver: 'memory', maxSize: 50 });
+    await plugin.install(ctx.db);
 
-  test('should handle default configuration', async () => {
-    const defaultCachePlugin = new CachePlugin({
-      driver: 'memory',
-      ttl: 300000
-    });
-    await defaultCachePlugin.install(db);
-
-    expect(defaultCachePlugin.driver).toBeInstanceOf(MemoryCache);
-    expect(defaultCachePlugin.driver.ttl).toBe(300000);
-  });
-
-  test('should handle custom maxSize configuration', async () => {
-    const customCachePlugin = new CachePlugin({
-      driver: 'memory',
-      maxSize: 50
-    });
-    await customCachePlugin.install(db);
-
-    expect(customCachePlugin.driver.maxSize).toBe(50);
+    expect(plugin.driver.maxSize).toBe(50);
   });
 });
+
