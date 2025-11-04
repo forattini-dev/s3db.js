@@ -7,6 +7,7 @@
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
+import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 
 /**
  * Parse custom route definition (e.g., "GET /healthcheck" or "async POST /custom")
@@ -227,6 +228,19 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response, response._status);
       }
 
+      // ✅ Generate ETag from record data
+      const etag = generateRecordETag(item);
+      if (etag) {
+        c.header('ETag', etag);
+      }
+
+      // ✅ Check If-None-Match (304 Not Modified)
+      const ifNoneMatch = c.req.header('If-None-Match');
+      if (ifNoneMatch && !validateIfNoneMatch(ifNoneMatch, etag)) {
+        // Resource not modified - return 304
+        return c.body(null, 304);
+      }
+
       const response = formatter.success(item);
       return c.json(response, response._status);
     }));
@@ -251,9 +265,21 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       }
 
       const location = `${basePath}/${item.id}`;
-      const response = formatter.created(item, location);
+
+      // ✅ Check Prefer header for minimal response
+      const prefer = c.req.header('Prefer');
+      const preferMinimal = prefer && prefer.includes('return=minimal');
 
       c.header('Location', location);
+
+      if (preferMinimal) {
+        // Return minimal response (no body)
+        c.header('Preference-Applied', 'return=minimal');
+        return c.body(null, 201);
+      }
+
+      // Return full representation (default)
+      const response = formatter.created(item, location);
       return c.json(response, response._status);
     }));
   }
@@ -271,8 +297,28 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response, response._status);
       }
 
+      // ✅ Validate If-Match header (optimistic concurrency control)
+      const ifMatch = c.req.header('If-Match');
+      if (ifMatch) {
+        const currentETag = generateRecordETag(existing);
+        if (!validateIfMatch(ifMatch, currentETag)) {
+          // ETag mismatch - return 412 Precondition Failed
+          const response = formatter.error('Precondition Failed', {
+            message: 'Resource was modified by another request. Please refetch and retry.',
+            code: 'ETAG_MISMATCH'
+          });
+          return c.json(response, 412);
+        }
+      }
+
       // Full update
       const updated = await resource.update(id, data);
+
+      // ✅ Add ETag to response
+      const newETag = generateRecordETag(updated);
+      if (newETag) {
+        c.header('ETag', newETag);
+      }
 
       // Emit resource:updated event
       if (events) {
@@ -283,6 +329,16 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           previous: existing,
           user: c.get('user')
         });
+      }
+
+      // ✅ Check Prefer header for minimal response
+      const prefer = c.req.header('Prefer');
+      const preferMinimal = prefer && prefer.includes('return=minimal');
+
+      if (preferMinimal) {
+        // Return minimal response (no body)
+        c.header('Preference-Applied', 'return=minimal');
+        return c.body(null, 200);
       }
 
       const response = formatter.success(updated);
@@ -303,9 +359,29 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.json(response, response._status);
       }
 
+      // ✅ Validate If-Match header (optimistic concurrency control)
+      const ifMatch = c.req.header('If-Match');
+      if (ifMatch) {
+        const currentETag = generateRecordETag(existing);
+        if (!validateIfMatch(ifMatch, currentETag)) {
+          // ETag mismatch - return 412 Precondition Failed
+          const response = formatter.error('Precondition Failed', {
+            message: 'Resource was modified by another request. Please refetch and retry.',
+            code: 'ETAG_MISMATCH'
+          });
+          return c.json(response, 412);
+        }
+      }
+
       // Partial update (merge with existing)
       const merged = { ...existing, ...data, id };
       const updated = await resource.update(id, merged);
+
+      // ✅ Add ETag to response
+      const newETag = generateRecordETag(updated);
+      if (newETag) {
+        c.header('ETag', newETag);
+      }
 
       // Emit resource:updated event
       if (events) {
@@ -317,6 +393,16 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           partial: true,
           user: c.get('user')
         });
+      }
+
+      // ✅ Check Prefer header for minimal response
+      const prefer = c.req.header('Prefer');
+      const preferMinimal = prefer && prefer.includes('return=minimal');
+
+      if (preferMinimal) {
+        // Return minimal response (no body)
+        c.header('Preference-Applied', 'return=minimal');
+        return c.body(null, 200);
       }
 
       const response = formatter.success(updated);
@@ -334,6 +420,20 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       if (!existing) {
         const response = formatter.notFound(resourceName, id);
         return c.json(response, response._status);
+      }
+
+      // ✅ Validate If-Match header (optimistic concurrency control)
+      const ifMatch = c.req.header('If-Match');
+      if (ifMatch) {
+        const currentETag = generateRecordETag(existing);
+        if (!validateIfMatch(ifMatch, currentETag)) {
+          // ETag mismatch - return 412 Precondition Failed
+          const response = formatter.error('Precondition Failed', {
+            message: 'Resource was modified by another request. Please refetch and retry.',
+            code: 'ETAG_MISMATCH'
+          });
+          return c.json(response, 412);
+        }
       }
 
       await resource.delete(id);
@@ -376,9 +476,24 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.body(null, 404);
       }
 
+      // ✅ Generate ETag from record data
+      const etag = generateRecordETag(item);
+      if (etag) {
+        c.header('ETag', etag);
+      }
+
       // Add metadata headers
-      if (item.updatedAt) {
-        c.header('Last-Modified', new Date(item.updatedAt).toUTCString());
+      if (item._updatedAt) {
+        c.header('Last-Modified', new Date(item._updatedAt).toUTCString());
+      } else if (item._createdAt) {
+        c.header('Last-Modified', new Date(item._createdAt).toUTCString());
+      }
+
+      // ✅ Check If-None-Match (304 Not Modified)
+      const ifNoneMatch = c.req.header('If-None-Match');
+      if (ifNoneMatch && !validateIfNoneMatch(ifNoneMatch, etag)) {
+        // Resource not modified - return 304
+        return c.body(null, 304);
       }
 
       return c.body(null, 200);
@@ -388,7 +503,19 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
   // OPTIONS - OPTIONS /{version}/{resource}
   if (methods.includes('OPTIONS')) {
     app.options('/', asyncHandler(async (c) => {
+      // ✅ HTTP Method Support
       c.header('Allow', methods.join(', '));
+
+      // ✅ Conditional Request Support
+      c.header('Accept-Patch', 'application/json');
+
+      // ✅ ETag Support Declaration
+      if (methods.includes('GET') || methods.includes('HEAD')) {
+        c.header('ETag-Support', 'weak, If-None-Match');
+      }
+      if (methods.includes('PUT') || methods.includes('PATCH') || methods.includes('DELETE')) {
+        c.header('Concurrency-Control', 'If-Match');
+      }
 
       // Return metadata about the resource
       const total = await resource.count();
@@ -400,11 +527,34 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         version,
         totalRecords: total,
         allowedMethods: methods,
+
+        // ✅ Supported Features
+        features: {
+          etag: true,
+          conditionalRequests: true,
+          partitioning: Object.keys(resource.config?.partitions || {}).length > 0,
+          filtering: true,
+          pagination: true,
+          sorting: false // Not yet implemented
+        },
+
+        // ✅ Conditional Headers
+        conditionalHeaders: {
+          'If-Match': 'Prevent conflicts (PUT/PATCH/DELETE) - returns 412 on mismatch',
+          'If-None-Match': 'Cache validation (GET/HEAD) - returns 304 if not modified'
+        },
+
+        // ✅ Preference Headers
+        preferenceHeaders: {
+          'Prefer: return=minimal': 'Request minimal response (POST/PUT/PATCH) - returns status only, no body'
+        },
+
         schema: Object.entries(schema).map(([name, def]) => ({
           name,
           type: typeof def === 'string' ? def.split('|')[0] : def.type,
           rules: typeof def === 'string' ? def.split('|').slice(1) : []
         })),
+
         endpoints: {
           list: `/${version}/${resourceName}`,
           get: `/${version}/${resourceName}/:id`,
@@ -412,12 +562,24 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           update: `/${version}/${resourceName}/:id`,
           delete: `/${version}/${resourceName}/:id`
         },
+
         queryParameters: {
           limit: 'number (1-1000, default: 100)',
           offset: 'number (min: 0, default: 0)',
           partition: 'string (partition name)',
           partitionValues: 'JSON string',
           '[any field]': 'any (filter by field value)'
+        },
+
+        // ✅ Response Codes
+        statusCodes: {
+          200: 'OK - Successful GET/PUT/PATCH',
+          201: 'Created - Successful POST',
+          204: 'No Content - Successful DELETE',
+          304: 'Not Modified - Resource unchanged (If-None-Match)',
+          404: 'Not Found - Resource does not exist',
+          412: 'Precondition Failed - ETag mismatch (If-Match)',
+          422: 'Unprocessable Entity - Validation error'
         }
       };
 
@@ -425,7 +587,18 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
     }));
 
     app.options('/:id', (c) => {
-      c.header('Allow', methods.filter(m => m !== 'POST').join(', '));
+      const itemMethods = methods.filter(m => m !== 'POST');
+      c.header('Allow', itemMethods.join(', '));
+
+      // ✅ Conditional Request Support for item endpoints
+      c.header('Accept-Patch', 'application/json');
+      if (itemMethods.includes('GET') || itemMethods.includes('HEAD')) {
+        c.header('ETag-Support', 'weak, If-None-Match');
+      }
+      if (itemMethods.includes('PUT') || itemMethods.includes('PATCH') || itemMethods.includes('DELETE')) {
+        c.header('Concurrency-Control', 'If-Match');
+      }
+
       return c.body(null, 204);
     });
   }

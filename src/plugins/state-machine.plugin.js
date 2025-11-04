@@ -3,6 +3,7 @@ import tryFn from "../concerns/try-fn.js";
 import { resolveResourceNames } from "./concerns/resource-names.js";
 import { StateMachineError } from "./state-machine.errors.js";
 import { ErrorClassifier } from "../concerns/error-classifier.js";
+import { getCronManager } from "../concerns/cron-manager.js";
 
 /**
  * StateMachinePlugin - Finite State Machine Management
@@ -146,7 +147,7 @@ export class StateMachinePlugin extends Plugin {
 
     this.database = null;
     this.machines = new Map();
-    this.triggerIntervals = [];
+    this.triggerJobNames = [];
     this.schedulerPlugin = null;
     this._pendingEventHandlers = new Set();
 
@@ -1122,10 +1123,13 @@ export class StateMachinePlugin extends Plugin {
    */
   async _setupDateTrigger(machineId, stateName, trigger, triggerName) {
     // Poll for entities approaching trigger date
-    const checkInterval = setInterval(async () => {
-      const entities = await this._getEntitiesInState(machineId, stateName);
+    const cronManager = getCronManager();
+    const jobName = cronManager.scheduleInterval(
+      this.config.triggerCheckInterval,
+      async () => {
+        const entities = await this._getEntitiesInState(machineId, stateName);
 
-      for (const entity of entities) {
+        for (const entity of entities) {
         try {
           // Get trigger date from context field
           const triggerDateValue = entity.context?.[trigger.field];
@@ -1168,14 +1172,16 @@ export class StateMachinePlugin extends Plugin {
             });
           }
         } catch (error) {
-          if (this.config.verbose) {
-            console.error(`[StateMachinePlugin] Date trigger '${triggerName}' failed:`, error.message);
+            if (this.config.verbose) {
+              console.error(`[StateMachinePlugin] Date trigger '${triggerName}' failed:`, error.message);
+            }
           }
         }
-      }
-    }, this.config.triggerCheckInterval);
+      },
+      `date-trigger-${machineId}-${stateName}-${triggerName}`
+    );
 
-    this.triggerIntervals.push(checkInterval);
+    this.triggerJobNames.push(jobName);
   }
 
   /**
@@ -1185,10 +1191,13 @@ export class StateMachinePlugin extends Plugin {
   async _setupFunctionTrigger(machineId, stateName, trigger, triggerName) {
     const interval = trigger.interval || this.config.triggerCheckInterval;
 
-    const checkInterval = setInterval(async () => {
-      const entities = await this._getEntitiesInState(machineId, stateName);
+    const cronManager = getCronManager();
+    const jobName = cronManager.scheduleInterval(
+      interval,
+      async () => {
+        const entities = await this._getEntitiesInState(machineId, stateName);
 
-      for (const entity of entities) {
+        for (const entity of entities) {
         try {
           // Check max triggers
           if (trigger.maxTriggers !== undefined) {
@@ -1225,14 +1234,16 @@ export class StateMachinePlugin extends Plugin {
             });
           }
         } catch (error) {
-          if (this.config.verbose) {
-            console.error(`[StateMachinePlugin] Function trigger '${triggerName}' failed:`, error.message);
+            if (this.config.verbose) {
+              console.error(`[StateMachinePlugin] Function trigger '${triggerName}' failed:`, error.message);
+            }
           }
         }
-      }
-    }, interval);
+      },
+      `function-trigger-${machineId}-${stateName}-${triggerName}`
+    );
 
-    this.triggerIntervals.push(checkInterval);
+    this.triggerJobNames.push(jobName);
   }
 
   /**
@@ -1516,11 +1527,12 @@ export class StateMachinePlugin extends Plugin {
   }
 
   async stop() {
-    // Clear trigger intervals
-    for (const interval of this.triggerIntervals) {
-      clearInterval(interval);
+    // Clear trigger jobs
+    const cronManager = getCronManager();
+    for (const jobName of this.triggerJobNames) {
+      cronManager.stop(jobName);
     }
-    this.triggerIntervals = [];
+    this.triggerJobNames = [];
 
     // Stop scheduler plugin if installed
     if (this.schedulerPlugin) {

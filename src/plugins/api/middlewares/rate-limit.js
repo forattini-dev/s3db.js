@@ -24,6 +24,8 @@
  * app.use('/auth/login', rateLimiter);
  */
 
+import { getCronManager } from '../../../concerns/cron-manager.js';
+
 /**
  * In-memory rate limit store
  * Maps: key -> { attempts: [timestamp, timestamp, ...] }
@@ -33,9 +35,15 @@ class RateLimitStore {
     this.store = new Map();
     this.cleanupInterval = options.cleanupInterval || 60000; // 1 minute
     this.windowMs = options.windowMs || 900000; // 15 minutes
+    this.cronManager = getCronManager();
+    this.cleanupJobName = `rate-limit-cleanup-${Date.now()}`;
 
     // Start cleanup timer
-    this.cleanupTimer = setInterval(() => this.cleanup(), this.cleanupInterval);
+    this.cronManager.scheduleInterval(
+      this.cleanupInterval,
+      () => this.cleanup(),
+      this.cleanupJobName
+    );
   }
 
   /**
@@ -136,9 +144,9 @@ class RateLimitStore {
    * Stop cleanup timer
    */
   stop() {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
+    if (this.cleanupJobName) {
+      this.cronManager.stop(this.cleanupJobName);
+      this.cleanupJobName = null;
     }
   }
 

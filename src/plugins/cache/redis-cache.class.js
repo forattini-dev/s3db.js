@@ -75,6 +75,7 @@ import { promisify } from "node:util";
 import { Cache } from "./cache.class.js";
 import { CacheError } from "../cache.errors.js";
 import { requirePluginDependency } from "../concerns/plugin-dependencies.js";
+import { getCronManager } from "../../concerns/cron-manager.js";
 
 const gzip = promisify(zlib.gzip);
 const unzip = promisify(zlib.unzip);
@@ -143,6 +144,7 @@ export class RedisCache extends Cache {
     this.client = null;
     this.connected = false;
     this.connecting = false;
+    this.connectionCheckJobName = null;
   }
 
   /**
@@ -154,12 +156,20 @@ export class RedisCache extends Cache {
     if (this.connecting) {
       // Wait for existing connection attempt
       await new Promise(resolve => {
-        const check = setInterval(() => {
-          if (this.connected || !this.connecting) {
-            clearInterval(check);
-            resolve();
-          }
-        }, 50);
+        const cronManager = getCronManager();
+        this.connectionCheckJobName = cronManager.scheduleInterval(
+          50,
+          () => {
+            if (this.connected || !this.connecting) {
+              if (this.connectionCheckJobName) {
+                cronManager.stop(this.connectionCheckJobName);
+                this.connectionCheckJobName = null;
+              }
+              resolve();
+            }
+          },
+          `redis-connection-check-${Date.now()}`
+        );
       });
       return;
     }

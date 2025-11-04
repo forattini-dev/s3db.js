@@ -9,6 +9,7 @@ import { Plugin } from './plugin.class.js';
 import { Resource } from '../resource.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import tryFn from '../concerns/try-fn.js';
+import { getCronManager } from '../concerns/cron-manager.js';
 
 import { RegressionModel } from './ml/regression-model.class.js';
 import { ClassificationModel } from './ml/classification-model.class.js';
@@ -90,8 +91,9 @@ export class MLPlugin extends Plugin {
     this._pendingAutoTrainingHandlers = new Map();
     this._autoTrainingInitialized = new Set();
 
-    // Interval handles for auto-training
-    this.intervals = [];
+    // Cron manager and job names for auto-training
+    this.cronManager = getCronManager();
+    this.jobNames = new Map(); // Map modelName -> cronJobName
 
     // Stats
     this.stats = {
@@ -205,11 +207,11 @@ export class MLPlugin extends Plugin {
    * Stop the plugin
    */
   async onStop() {
-    // Stop all intervals
-    for (const handle of this.intervals) {
-      clearInterval(handle);
+    // Stop all cron jobs
+    for (const [modelName, jobName] of this.jobNames.entries()) {
+      this.cronManager.stop(jobName);
     }
-    this.intervals = [];
+    this.jobNames.clear();
 
     // Dispose all models
     for (const [modelName, model] of Object.entries(this.models)) {
@@ -1014,19 +1016,24 @@ export class MLPlugin extends Plugin {
 
     // Interval-based training
     if (config.trainInterval && config.trainInterval > 0) {
-      const handle = setInterval(async () => {
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Auto-training "${modelName}" (interval: ${config.trainInterval}ms)`);
-        }
+      const jobName = `ml-training-${modelName}-${Date.now()}`;
+      this.cronManager.scheduleInterval(
+        config.trainInterval,
+        async () => {
+          if (this.config.verbose) {
+            console.log(`[MLPlugin] Auto-training "${modelName}" (interval: ${config.trainInterval}ms)`);
+          }
 
-        try {
-          await this.train(modelName);
-        } catch (error) {
-          console.error(`[MLPlugin] Auto-training failed for "${modelName}":`, error.message);
-        }
-      }, config.trainInterval);
+          try {
+            await this.train(modelName);
+          } catch (error) {
+            console.error(`[MLPlugin] Auto-training failed for "${modelName}":`, error.message);
+          }
+        },
+        jobName
+      );
 
-      this.intervals.push(handle);
+      this.jobNames.set(modelName, jobName);
 
       if (this.config.verbose) {
         console.log(`[MLPlugin] Setup interval training for "${modelName}" (every ${config.trainInterval}ms)`);

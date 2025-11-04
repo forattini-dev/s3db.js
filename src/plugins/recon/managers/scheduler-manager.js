@@ -8,11 +8,13 @@
  */
 
 import { PromisePool } from '@supercharge/promise-pool';
+import { getCronManager } from '../../../concerns/cron-manager.js';
 
 export class SchedulerManager {
   constructor(plugin) {
     this.plugin = plugin;
     this.cronJobId = null;
+    this.fallbackJobName = null;
   }
 
   /**
@@ -74,9 +76,10 @@ export class SchedulerManager {
       this.plugin.emit('recon:scheduler-stopped', {});
     }
 
-    if (this._fallbackIntervalId) {
-      clearInterval(this._fallbackIntervalId);
-      this._fallbackIntervalId = null;
+    if (this.fallbackJobName) {
+      const cronManager = getCronManager();
+      cronManager.stop(this.fallbackJobName);
+      this.fallbackJobName = null;
     }
   }
 
@@ -143,13 +146,16 @@ export class SchedulerManager {
   // ========================================
 
   _startFallbackScheduler(cronExpression) {
-    // Simple fallback: parse cron and use setInterval
+    // Simple fallback: parse cron and use CronManager
     // NOTE: This is NOT production-ready - use SchedulerPlugin instead
     const intervalMs = this._parseCronToInterval(cronExpression);
 
-    this._fallbackIntervalId = setInterval(async () => {
-      await this.triggerSweep('scheduled-fallback');
-    }, intervalMs);
+    const cronManager = getCronManager();
+    this.fallbackJobName = cronManager.scheduleInterval(
+      intervalMs,
+      () => this.triggerSweep('scheduled-fallback'),
+      `recon-fallback-${Date.now()}`
+    );
 
     this.plugin.emit('recon:scheduler-started', {
       cronJobId: 'fallback',

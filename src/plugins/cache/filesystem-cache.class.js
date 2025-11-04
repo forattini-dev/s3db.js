@@ -85,6 +85,7 @@ import zlib from 'node:zlib';
 import { Cache } from './cache.class.js';
 import tryFn from '../../concerns/try-fn.js';
 import { CacheError } from '../cache.errors.js';
+import { getCronManager } from '../../concerns/cron-manager.js';
 
 export class FilesystemCache extends Cache {
   constructor({
@@ -151,9 +152,10 @@ export class FilesystemCache extends Cache {
       clears: 0,
       errors: 0
     };
-    
+
     this.locks = new Map(); // For file locking
-    this.cleanupTimer = null;
+    this.cronManager = getCronManager();
+    this.cleanupJobName = null;
 
     // Store _init promise to allow tests to handle initialization errors
     this._initPromise = this._init().catch(err => {
@@ -186,11 +188,16 @@ export class FilesystemCache extends Cache {
     
     // Start cleanup timer if enabled
     if (this.enableCleanup && this.cleanupInterval > 0) {
-      this.cleanupTimer = setInterval(() => {
-        this._cleanup().catch(err => {
-          console.warn('FilesystemCache cleanup error:', err.message);
-        });
-      }, this.cleanupInterval);
+      this.cleanupJobName = `filesystem-cache-cleanup-${Date.now()}`;
+      this.cronManager.scheduleInterval(
+        this.cleanupInterval,
+        () => {
+          this._cleanup().catch(err => {
+            console.warn('FilesystemCache cleanup error:', err.message);
+          });
+        },
+        this.cleanupJobName
+      );
     }
   }
 
@@ -765,9 +772,9 @@ export class FilesystemCache extends Cache {
 
   // Cleanup on process exit
   destroy() {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
+    if (this.cleanupJobName) {
+      this.cronManager.stop(this.cleanupJobName);
+      this.cleanupJobName = null;
     }
   }
 

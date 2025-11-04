@@ -34,6 +34,7 @@
 import { requirePluginDependency } from '../../concerns/plugin-dependencies.js';
 import tryFn from '../../../concerns/try-fn.js';
 import { resolveResourceNames } from '../../concerns/resource-names.js';
+import { getCronManager } from '../../../concerns/cron-manager.js';
 
 export class FailbanManager {
   constructor(options = {}) {
@@ -78,7 +79,7 @@ export class FailbanManager {
     this.memoryCache = new Map();
     this.geoCache = new Map();
     this.geoReader = null;
-    this.cleanupTimer = null;
+    this.cleanupJobName = null;  // ✅ CronManager job name instead of timer
   }
 
   _resolveResourceNames() {
@@ -275,32 +276,38 @@ export class FailbanManager {
   }
 
   /**
-   * Setup cleanup timer for memory cache
+   * Setup cleanup timer for memory cache using CronManager
    * @private
    */
   _setupCleanupTimer() {
-    this.cleanupTimer = setInterval(() => {
-      const now = Date.now();
-      let cleaned = 0;
+    // ✅ Use CronManager with cron expression (every minute)
+    const cronManager = getCronManager();
+    this.cleanupJobName = cronManager.scheduleCron(
+      '0 * * * * *',  // Every minute at :00 seconds
+      () => {
+        const now = Date.now();
+        let cleaned = 0;
 
-      for (const [ip, ban] of this.memoryCache.entries()) {
-        if (ban.expiresAt <= now) {
-          this.memoryCache.delete(ip);
-          cleaned++;
+        for (const [ip, ban] of this.memoryCache.entries()) {
+          if (ban.expiresAt <= now) {
+            this.memoryCache.delete(ip);
+            cleaned++;
 
-          // Emit unban event
-          this.database.emit?.('security:unbanned', {
-            ip,
-            reason: 'expired',
-            bannedFor: ban.reason
-          });
+            // Emit unban event
+            this.database.emit?.('security:unbanned', {
+              ip,
+              reason: 'expired',
+              bannedFor: ban.reason
+            });
+          }
         }
-      }
 
-      if (this.options.verbose && cleaned > 0) {
-        console.log(`[Failban] Cleaned ${cleaned} expired bans from cache`);
-      }
-    }, 60000); // Every minute
+        if (this.options.verbose && cleaned > 0) {
+          console.log(`[Failban] Cleaned ${cleaned} expired bans from cache`);
+        }
+      },
+      'failban-cleanup'
+    );
   }
 
   /**
@@ -676,12 +683,14 @@ export class FailbanManager {
   }
 
   /**
-   * Cleanup
+   * Cleanup - Stop cron jobs and clear caches
    */
   async cleanup() {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
+    // ✅ Stop cron job using CronManager
+    if (this.cleanupJobName) {
+      const cronManager = getCronManager();
+      cronManager.stopCronJob(this.cleanupJobName);
+      this.cleanupJobName = null;
     }
 
     this.memoryCache.clear();

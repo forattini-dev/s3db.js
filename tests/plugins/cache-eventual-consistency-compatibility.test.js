@@ -3,12 +3,26 @@
  * Tests that plugin-created resources are not cached and cache is properly invalidated
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { createDatabaseForTest } from '../config.js';
 
 describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
+  const previousConnectionString = process.env.BUCKET_CONNECTION_STRING;
+
+  beforeAll(() => {
+    process.env.BUCKET_CONNECTION_STRING = 'memory://cache-ec';
+  });
+
+  afterAll(() => {
+    if (previousConnectionString === undefined) {
+      delete process.env.BUCKET_CONNECTION_STRING;
+    } else {
+      process.env.BUCKET_CONNECTION_STRING = previousConnectionString;
+    }
+  });
+
   let database;
   let wallets;
   let eventualPlugin;

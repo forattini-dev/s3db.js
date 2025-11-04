@@ -186,8 +186,17 @@ flowchart TB
 new TTLPlugin({
   batchSize: 100,         // Process N records at a time (default: 100)
   verbose: true,          // Enable logging (default: false)
+
   resources: {            // Resource-specific configurations
     // ... resource configs
+  },
+
+  // Optional: Override cleanup schedules per granularity (cron expressions)
+  schedules: {
+    minute: '*/30 * * * * *',    // Every 30 seconds
+    hour: '*/15 * * * *',        // Every 15 minutes
+    day: '0 * * * *',            // Every hour at :00
+    week: '0 0 * * *'            // Daily at midnight
   }
 })
 ```
@@ -197,8 +206,9 @@ new TTLPlugin({
 | `batchSize` | number | 100 | Records to process per batch |
 | `verbose` | boolean | false | Enable console logging |
 | `resources` | object | {} | Resource-specific TTL configurations |
+| `schedules` | object | {} | Override cleanup schedule with cron expressions per granularity (supports seconds!) |
 
-> **Note:** No `checkInterval` in v2! Intervals are automatically configured based on granularity.
+> **Note:** You don't need to specify all granularities - only override the ones you want. Default schedules are optimized for each granularity.
 
 ### Resource-Level Options
 
@@ -475,7 +485,56 @@ console.log(`Cleaned up resource: ${result.resource}`);
 await ttlPlugin.runCleanup();
 ```
 
-### Example 5: Monitoring with Events
+### Example 5: Custom Cleanup Schedules
+
+You can customize cleanup schedules using cron expressions with **second-level granularity**:
+
+```javascript
+const ttlPlugin = new TTLPlugin({
+  resources: {
+    // High-frequency cleanup (minute granularity)
+    temp_codes: {
+      ttl: 300,  // 5 minutes
+      onExpire: 'hard-delete'
+    },
+
+    // Medium-frequency cleanup (hour granularity)
+    sessions: {
+      ttl: 7200,  // 2 hours
+      onExpire: 'soft-delete'
+    },
+
+    // Low-frequency cleanup (day granularity)
+    old_logs: {
+      ttl: 604800,  // 7 days
+      onExpire: 'archive',
+      archiveResource: 'archived_logs'
+    }
+  },
+
+  // Custom cron expressions (supports second-level granularity!)
+  schedules: {
+    minute: '*/30 * * * * *',    // Check every 30 seconds
+    hour: '*/15 * * * *',        // Check every 15 minutes
+    day: '0 2 * * *'             // Check daily at 2 AM
+  }
+});
+
+await db.usePlugin(ttlPlugin);
+
+// Custom schedules applied:
+// - temp_codes: cleaned every 30 seconds (custom schedule)
+// - sessions: cleaned every 15 minutes (custom schedule)
+// - old_logs: cleaned daily at 2 AM (custom schedule)
+```
+
+**When to customize schedules:**
+- **More frequent**: Reduce cleanup delay for time-sensitive data (e.g., `*/5 * * * * *` for every 5 seconds)
+- **Less frequent**: Reduce S3 API calls for large datasets (e.g., `0 */6 * * *` for every 6 hours)
+- **Specific times**: Run cleanup during off-peak hours (e.g., `0 2 * * *` for 2 AM daily)
+- **Business hours only**: Use cron day-of-week patterns (e.g., `0 9-17 * * 1-5` for weekdays 9 AM-5 PM)
+
+### Example 6: Monitoring with Events
 
 ```javascript
 const ttlPlugin = new TTLPlugin({

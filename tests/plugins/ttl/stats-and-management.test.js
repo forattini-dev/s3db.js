@@ -3,6 +3,44 @@ import { afterAll, beforeAll, describe, expect, test } from '@jest/globals';
 import { createDatabaseForTest, sleep } from '../../config.js';
 import { TTLPlugin } from '../../../src/plugins/ttl.plugin.js';
 
+const previousConnectionString = process.env.BUCKET_CONNECTION_STRING;
+
+class FakeCronManager {
+  constructor() {
+    this.jobs = new Map();
+  }
+
+  async schedule(expression, fn, name) {
+    const task = {
+      start: () => {},
+      stop: () => {},
+      destroy: () => {}
+    };
+    this.jobs.set(name, { expression, fn, task });
+    return task;
+  }
+
+  async scheduleInterval(ms, fn, name, options = {}) {
+    return this.schedule(`interval:${ms}`, fn, name, options);
+  }
+
+  stop(name) {
+    return this.jobs.delete(name);
+  }
+}
+
+beforeAll(() => {
+  process.env.BUCKET_CONNECTION_STRING = 'memory://ttl-tests';
+});
+
+afterAll(() => {
+  if (previousConnectionString === undefined) {
+    delete process.env.BUCKET_CONNECTION_STRING;
+  } else {
+    process.env.BUCKET_CONNECTION_STRING = previousConnectionString;
+  }
+});
+
 describe('TTLPlugin v2 - Stats and Monitoring', () => {
   let db;
   let testResource;
@@ -30,10 +68,13 @@ describe('TTLPlugin v2 - Stats and Monitoring', () => {
       }
     });
 
+    plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
+    await plugin.start();
   });
 
   afterAll(async () => {
+    await plugin.stop();
     await plugin.uninstall();
     await db.disconnect();
   });
@@ -62,7 +103,7 @@ describe('TTLPlugin v2 - Stats and Monitoring', () => {
 
   test('should track interval count', () => {
     const stats = plugin.getStats();
-    expect(stats.intervals).toBeGreaterThan(0);
+    expect(stats.cronJobs).toBeGreaterThan(0);
     expect(stats.isRunning).toBe(true);
   });
 });
@@ -94,10 +135,13 @@ describe('TTLPlugin v2 - Manual Cleanup', () => {
       }
     });
 
+    plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
+    await plugin.start();
   });
 
   afterAll(async () => {
+    await plugin.stop();
     await plugin.uninstall();
     await db.disconnect();
   });
@@ -154,17 +198,20 @@ describe('TTLPlugin v2 - Multiple Granularities', () => {
       }
     });
 
+    plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
+    await plugin.start();
   });
 
   afterAll(async () => {
+    await plugin.stop();
     await plugin.uninstall();
     await db.disconnect();
   });
 
   test('should create multiple intervals for different granularities', () => {
     const stats = plugin.getStats();
-    expect(stats.intervals).toBeGreaterThan(0);
+    expect(stats.cronJobs).toBeGreaterThan(0);
     expect(stats.isRunning).toBe(true);
   });
 
@@ -207,21 +254,34 @@ describe('TTLPlugin v2 - Interval Management', () => {
       }
     });
 
+    plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
+    await plugin.start();
   });
 
   afterAll(async () => {
+    if (plugin) {
+      try {
+        await plugin.stop();
+      } catch {}
+      try {
+        await plugin.uninstall();
+      } catch {}
+    }
     await db.disconnect();
   });
 
   test('should start intervals on install', () => {
-    expect(plugin.isRunning).toBe(true);
-    expect(plugin.intervals.length).toBeGreaterThan(0);
+    const stats = plugin.getStats();
+    expect(stats.isRunning).toBe(true);
+    expect(stats.cronJobs).toBeGreaterThan(0);
   });
 
   test('should stop intervals on uninstall', async () => {
+    await plugin.stop();
     await plugin.uninstall();
-    expect(plugin.isRunning).toBe(false);
-    expect(plugin.intervals.length).toBe(0);
+    const stats = plugin.getStats();
+    expect(stats.isRunning).toBe(false);
+    expect(stats.cronJobs).toBe(0);
   });
 });
