@@ -18,6 +18,7 @@ import * as formatter from '../../shared/response-formatter.js';
 import { createFilesystemHandler, validateFilesystemConfig } from '../utils/static-filesystem.js';
 import { createS3Handler, validateS3Config } from '../utils/static-s3.js';
 import { createFailbanAdminRoutes } from '../middlewares/failban.js';
+import { createContextInjectionMiddleware } from '../middlewares/context-injection.js';
 
 export class Router {
   constructor({ database, resources, routes, versionPrefix, auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono }) {
@@ -41,6 +42,14 @@ export class Router {
    * @param {Object} events - Event emitter
    */
   mount(app, events) {
+    // ✅ Context Injection Middleware (FIRST - makes resources accessible via c.get())
+    const contextInjection = createContextInjectionMiddleware(this.database);
+    app.use('*', contextInjection);
+
+    if (this.verbose) {
+      console.log('[API Router] Context injection middleware registered (resources accessible via c.get())');
+    }
+
     // Static files first (give them priority)
     this.mountStaticRoutes(app);
 

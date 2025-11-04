@@ -1132,5 +1132,11 @@ export {
   createAttemptStateMachine
 } from './concerns/state-machine.js';
 
-// Export route context utilities (NEW!)
+// Export route context utilities (Enhanced Context System)
 export { RouteContext, withContext } from './concerns/route-context.js';
+
+// Export route helper utilities (response helpers for backward compatibility)
+export { errorResponse, successResponse } from './utils/route-helper.js';
+
+// Export context injection middleware
+export { createContextInjectionMiddleware } from './middlewares/context-injection.js';

@@ -638,7 +638,7 @@ export class QueueConsumerPlugin extends Plugin {
             resource,
             start: async () => {
               const mergedConfig = { ...driverConfig, ...consumerConfig };
-              const consumer = createConsumer(driver, {
+              const consumer = await createConsumer(driver, {
                 ...mergedConfig,
                 onMessage: (msg) => this._handleMessage(msg, resource),
                 onError: (err, raw) => this._handleError(err, raw, resource)

@@ -834,7 +834,7 @@ export class CloudInventoryPlugin extends Plugin {
       const schedule = normalizeSchedule(cloudDef.scheduled);
       const summary = await this._ensureCloudSummaryRecord(driverId, cloudDef, schedule);
 
-      const driver = createCloudDriver(cloudDef.driver, {
+      const driver = await createCloudDriver(cloudDef.driver, {
         ...cloudDef,
         globals: this.config,
         schedule,

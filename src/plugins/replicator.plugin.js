@@ -436,22 +436,22 @@ export class ReplicatorPlugin extends Plugin {
     this._logResourceHooksInstalled = true;
   }
 
-  createReplicator(driver, config, resources, client) {
-    return createReplicator(driver, config, resources, client);
+  async createReplicator(driver, config, resources, client) {
+    return await createReplicator(driver, config, resources, client);
   }
 
   async initializeReplicators(database) {
     for (const replicatorConfig of this.config.replicators) {
       const { driver, config = {}, resources, client, ...otherConfig } = replicatorConfig;
-      
+
       // Extract resources from replicatorConfig or config
       const replicatorResources = resources || config.resources || {};
-      
+
       // Merge config with other top-level config options (like queueUrlDefault)
       const mergedConfig = { ...config, ...otherConfig };
-      
+
       // Pass config, resources, and client in correct order
-      const replicator = this.createReplicator(driver, mergedConfig, replicatorResources, client);
+      const replicator = await this.createReplicator(driver, mergedConfig, replicatorResources, client);
       if (replicator) {
         await replicator.initialize(database);
         this.replicators.push(replicator);
