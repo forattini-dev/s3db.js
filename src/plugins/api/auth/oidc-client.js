@@ -31,6 +31,7 @@
  */
 
 import { createVerify, createPublicKey } from 'crypto';
+import { getCronManager } from '../../../concerns/cron-manager.js';
 
 /**
  * Validate JWT claims
@@ -129,6 +130,8 @@ export class OIDCClient {
     this.jwksCacheExpiry = null;
     this.discoveryCache = null;
     this.keys = new Map(); // kid → publicKey (PEM)
+    this.cronManager = getCronManager();
+    this.refreshJobName = null;
   }
 
   /**
@@ -365,22 +368,27 @@ export class OIDCClient {
     // Refresh JWKS periodically (half of TTL to ensure fresh keys)
     const refreshInterval = Math.floor(this.jwksCacheTTL / 2);
 
-    this.refreshInterval = setInterval(async () => {
-      try {
-        await this.fetchJWKS(true);
-      } catch (error) {
-        console.error('Failed to refresh JWKS:', error);
-      }
-    }, refreshInterval);
+    this.refreshJobName = `oidc-jwks-refresh-${Date.now()}`;
+    this.cronManager.scheduleInterval(
+      refreshInterval,
+      async () => {
+        try {
+          await this.fetchJWKS(true);
+        } catch (error) {
+          console.error('Failed to refresh JWKS:', error);
+        }
+      },
+      this.refreshJobName
+    );
   }
 
   /**
    * Stop auto-refresh of JWKS
    */
   stopJWKSRefresh() {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
+    if (this.refreshJobName) {
+      this.cronManager.stop(this.refreshJobName);
+      this.refreshJobName = null;
     }
   }
 

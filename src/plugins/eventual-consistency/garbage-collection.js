@@ -5,6 +5,7 @@
 
 import tryFn from "../../concerns/try-fn.js";
 import { PromisePool } from "@supercharge/promise-pool";
+import { getCronManager } from "../../concerns/cron-manager.js";
 
 /**
  * Start garbage collection timer for a handler
@@ -14,16 +15,23 @@ import { PromisePool } from "@supercharge/promise-pool";
  * @param {string} fieldName - Field name
  * @param {Function} runGCCallback - Callback to run GC
  * @param {Object} config - Plugin configuration
- * @returns {NodeJS.Timeout} GC timer
+ * @returns {string} GC job name
  */
 export function startGarbageCollectionTimer(handler, resourceName, fieldName, runGCCallback, config) {
   const gcIntervalMs = config.gcInterval * 1000; // Convert seconds to ms
+  const cronManager = getCronManager();
+  const jobName = `gc-${resourceName}-${fieldName}-${Date.now()}`;
 
-  handler.gcTimer = setInterval(async () => {
-    await runGCCallback(handler, resourceName, fieldName);
-  }, gcIntervalMs);
+  cronManager.scheduleInterval(
+    gcIntervalMs,
+    async () => {
+      await runGCCallback(handler, resourceName, fieldName);
+    },
+    jobName
+  );
 
-  return handler.gcTimer;
+  handler.gcJobName = jobName;
+  return jobName;
 }
 
 /**

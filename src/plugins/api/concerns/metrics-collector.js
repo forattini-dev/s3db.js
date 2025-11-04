@@ -26,6 +26,8 @@
  * const summary = metrics.getSummary();
  */
 
+import { getCronManager } from '../../../concerns/cron-manager.js';
+
 export class MetricsCollector {
   constructor(options = {}) {
     this.options = {
@@ -37,15 +39,22 @@ export class MetricsCollector {
 
     this.metrics = this._createEmptyMetrics();
     this.startTime = Date.now();
+    this.cronManager = getCronManager();
+    this.resetJobName = null;
 
     // Auto-reset metrics periodically to prevent memory growth
     if (this.options.resetInterval > 0) {
-      this.resetTimer = setInterval(() => {
-        if (this.options.verbose) {
-          console.log('[Metrics] Auto-resetting metrics');
-        }
-        this.reset();
-      }, this.options.resetInterval);
+      this.resetJobName = `metrics-collector-reset-${Date.now()}`;
+      this.cronManager.scheduleInterval(
+        this.options.resetInterval,
+        () => {
+          if (this.options.verbose) {
+            console.log('[Metrics] Auto-resetting metrics');
+          }
+          this.reset();
+        },
+        this.resetJobName
+      );
     }
   }
 
@@ -336,9 +345,9 @@ export class MetricsCollector {
    * Stop metrics collection and cleanup
    */
   stop() {
-    if (this.resetTimer) {
-      clearInterval(this.resetTimer);
-      this.resetTimer = null;
+    if (this.resetJobName) {
+      this.cronManager.stop(this.resetJobName);
+      this.resetJobName = null;
     }
   }
 }
