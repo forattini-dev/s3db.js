@@ -61,7 +61,8 @@
     "./concerns/guards-helpers": {
       "import": "./src/concerns/guards-helpers.js",
       "require": "./src/concerns/guards-helpers.js"
-    }
+    },
+    "./src/*": "./src/*"
   },
   "files": [
     "dist/",
