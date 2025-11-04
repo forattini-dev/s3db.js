@@ -168,8 +168,8 @@ export class TTLPlugin extends Plugin {
       lastScanDuration: 0
     };
 
-    // Interval handles
-    this.intervals = [];
+    // CronManager (passed by database)
+    this.cronManager = null;
     this.isRunning = false;
 
     // Expiration index (plugin storage)
@@ -456,9 +456,14 @@ export class TTLPlugin extends Plugin {
   }
 
   /**
-   * Start interval-based cleanup for each granularity
+   * Start cron-based cleanup for each granularity
    */
-  _startIntervals() {
+  async _startIntervals() {
+    if (!this.cronManager) {
+      console.warn('[TTLPlugin] CronManager not available, cleanup intervals will not run');
+      return;
+    }
+
     // Group resources by granularity
     const byGranularity = {
       minute: [],
@@ -471,21 +476,21 @@ export class TTLPlugin extends Plugin {
       byGranularity[config.granularity].push({ name, config });
     }
 
-    // Create interval for each active granularity
+    // Create cron job for each active granularity
     for (const [granularity, resources] of Object.entries(byGranularity)) {
       if (resources.length === 0) continue;
 
       const granularityConfig = GRANULARITIES[granularity];
-      const handle = setInterval(
-        () => this._cleanupGranularity(granularity, resources),
-        granularityConfig.interval
-      );
 
-      this.intervals.push(handle);
+      await this.cronManager.scheduleInterval(
+        granularityConfig.interval,
+        () => this._cleanupGranularity(granularity, resources),
+        `TTLPlugin-cleanup-${granularity}`
+      );
 
       if (this.verbose) {
         console.log(
-          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) ` +
+          `[TTLPlugin] Scheduled ${granularity} cleanup (${granularityConfig.interval}ms) ` +
           `for ${resources.length} resources`
         );
       }
@@ -495,17 +500,21 @@ export class TTLPlugin extends Plugin {
   }
 
   /**
-   * Stop all intervals
+   * Stop all cron jobs
    */
   _stopIntervals() {
-    for (const handle of this.intervals) {
-      clearInterval(handle);
-    }
-    this.intervals = [];
+    if (!this.cronManager) return;
+
+    // Stop all granularity cleanup jobs
+    this.cronManager.stop('TTLPlugin-cleanup-minute');
+    this.cronManager.stop('TTLPlugin-cleanup-hour');
+    this.cronManager.stop('TTLPlugin-cleanup-day');
+    this.cronManager.stop('TTLPlugin-cleanup-week');
+
     this.isRunning = false;
 
     if (this.verbose) {
-      console.log('[TTLPlugin] Stopped all intervals');
+      console.log('[TTLPlugin] Stopped all cleanup jobs');
     }
   }
 
