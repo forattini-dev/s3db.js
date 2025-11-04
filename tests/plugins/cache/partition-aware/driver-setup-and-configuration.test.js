@@ -1,72 +1,33 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
-import { createDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
+import { describe, expect, test } from '@jest/globals';
+
 import { CachePlugin } from '../../../src/plugins/cache.plugin.js';
 import { PartitionAwareFilesystemCache } from '../../../src/plugins/cache/index.js';
+import { setupPartitionAwareCacheSuite } from '../helpers.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Driver Setup and Configuration', () => {
-  let db;
-  let cachePlugin;
-  let users;
-  let testDir;
+  const ctx = setupPartitionAwareCacheSuite({ createResource: false });
 
-  beforeAll(async () => {
-    testDir = await createTemporaryPathForTest('cache-partition-aware-simple');
+  test('installs partition-aware filesystem driver with configured directory', () => {
+    expect(ctx.cachePlugin.driver).toBeInstanceOf(PartitionAwareFilesystemCache);
+    expect(ctx.cachePlugin.driver.directory).toBe(ctx.directory);
+    expect(ctx.cachePlugin.database).toBe(ctx.db);
   });
 
-  afterAll(async () => {
-    // Cleanup done in tests if necessary
-  });
-
-  beforeEach(async () => {
-    db = createDatabaseForTest('suite=plugins/cache-partition-aware');
-    await db.connect();
-
-    cachePlugin = new CachePlugin({
+  test('allows overriding driver options during install', async () => {
+    const plugin = new CachePlugin({
       driver: 'filesystem',
       partitionAware: true,
-      partitionStrategy: 'hierarchical',
-      trackUsage: true,
+      partitionStrategy: 'temporal',
       config: {
-        directory: testDir,
+        directory: ctx.directory,
         enableStats: true
       }
     });
-    await cachePlugin.install(db);
 
-    users = await db.createResource({
-      name: 'users',
-      attributes: {
-        name: 'string|required',
-        email: 'string|required',
-        region: 'string|required',
-        department: 'string|required'
-      },
-      partitions: {
-        byRegion: { fields: { region: 'string' } },
-        byDepartment: { fields: { department: 'string' } }
-      }
-    });
-  });
+    await plugin.install(ctx.db);
 
-  afterEach(async () => {
-    if (cachePlugin && cachePlugin.driver) {
-      await cachePlugin.clearAllCache().catch(() => {});
-    }
-    if (db) {
-      await db.disconnect();
-    }
-  });
-
-  test('should initialize PartitionAwareFilesystemCache with correct configuration', () => {
-    expect(cachePlugin.driver).toBeInstanceOf(PartitionAwareFilesystemCache);
-    expect(cachePlugin.driver.directory).toBe(testDir);
-    expect(cachePlugin.database).toBe(db);
-  });
-
-  test('should handle partition-aware configuration', () => {
-    const driver = cachePlugin.driver;
-
-    expect(driver.enableStats).toBe(true);
-    expect(driver.partitionStrategy).toBeDefined();
+    expect(plugin.driver.partitionStrategy).toBe('temporal');
+    expect(plugin.driver.enableStats).toBe(true);
   });
 });
+

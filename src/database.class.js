@@ -1,4 +1,3 @@
-import EventEmitter from "events";
 import { createHash } from "crypto";
 import { isEmpty, isFunction } from "lodash-es";
 import jsonStableStringify from "json-stable-stringify";
@@ -12,10 +11,14 @@ import { ResourceNotFound, DatabaseError, SchemaError } from "./errors.js";
 import { idGenerator } from "./concerns/id.js";
 import { streamToString } from "./stream/index.js";
 import { ProcessManager } from "./concerns/process-manager.js";
+import { SafeEventEmitter } from "./concerns/safe-event-emitter.js";
 
-export class Database extends EventEmitter {
+export class Database extends SafeEventEmitter {
   constructor(options) {
-    super();
+    super({
+      verbose: options.verbose || false,
+      autoCleanup: options.autoCleanup !== false
+    });
 
     // Generate database ID with fallback for reliability
     this.id = (() => {
