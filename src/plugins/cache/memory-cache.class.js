@@ -136,6 +136,7 @@
  */
 import zlib from 'node:zlib';
 import os from 'node:os';
+import v8 from 'node:v8';
 import { Cache } from "./cache.class.js"
 import { CacheError } from '../cache.errors.js';
 
@@ -158,7 +159,7 @@ export class MemoryCache extends Cache {
 
     this.deserializer = typeof config.deserializer === 'function' ? config.deserializer : defaultDeserializer;
     this.enableStats = config.enableStats === true;
-    this.evictionPolicy = (config.evictionPolicy || 'fifo').toLowerCase();
+    this.evictionPolicy = (config.evictionPolicy || 'lru').toLowerCase();
     if (!['lru', 'fifo'].includes(this.evictionPolicy)) {
       this.evictionPolicy = 'fifo';
     }
@@ -205,6 +206,12 @@ export class MemoryCache extends Cache {
     this.enableCompression = config.enableCompression !== undefined ? config.enableCompression : false;
     this.compressionThreshold = config.compressionThreshold !== undefined ? config.compressionThreshold : 1024;
 
+    this.heapUsageThreshold = config.heapUsageThreshold ?? 0.75; // 75% of heap
+    if (!(this.heapUsageThreshold > 0 && this.heapUsageThreshold < 1)) {
+      this.heapUsageThreshold = 0.9;
+    }
+    this.monitorInterval = config.monitorInterval === undefined ? 15000 : config.monitorInterval;
+
     // Stats for compression
     this.compressionStats = {
       totalCompressed: 0,
@@ -216,6 +223,7 @@ export class MemoryCache extends Cache {
     // Memory tracking
     this.currentMemoryBytes = 0;
     this.evictedDueToMemory = 0;
+    this._monitorHandle = null;
 
     // Monotonic counter for LRU ordering (prevents timestamp collisions)
     this._accessCounter = 0;
@@ -227,6 +235,13 @@ export class MemoryCache extends Cache {
       deletes: 0,
       evictions: 0
     };
+
+    if (this.monitorInterval > 0) {
+      this._monitorHandle = setInterval(() => this._memoryHealthCheck(), this.monitorInterval);
+      if (typeof this._monitorHandle?.unref === 'function') {
+        this._monitorHandle.unref();
+      }
+    }
   }
 
   _normalizeKey(key) {
@@ -255,6 +270,77 @@ export class MemoryCache extends Cache {
     }
 
     return entries[0]?.[0] || null;
+  }
+
+  _evictKey(key) {
+    if (!key || !Object.prototype.hasOwnProperty.call(this.cache, key)) {
+      return 0;
+    }
+    const evictedSize = this.meta[key]?.compressedSize || 0;
+    delete this.cache[key];
+    delete this.meta[key];
+    this.currentMemoryBytes = Math.max(0, this.currentMemoryBytes - evictedSize);
+    this.evictedDueToMemory++;
+    this._recordStat('evictions');
+    return evictedSize;
+  }
+
+  _enforceMemoryLimit(incomingSize = 0) {
+    if (this.maxMemoryBytes > 0) {
+      // if incoming item itself exceeds the limit, deny caching
+      if (incomingSize > this.maxMemoryBytes) {
+        return false;
+      }
+
+      while (this.currentMemoryBytes + incomingSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
+        const candidate = this._selectEvictionCandidate();
+        if (!candidate) break;
+        this._evictKey(candidate);
+      }
+
+      if (this.currentMemoryBytes + incomingSize > this.maxMemoryBytes) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  _reduceMemoryTo(targetBytes) {
+    targetBytes = Math.max(0, targetBytes);
+    while (this.currentMemoryBytes > targetBytes && Object.keys(this.cache).length > 0) {
+      const candidate = this._selectEvictionCandidate();
+      if (!candidate) break;
+      this._evictKey(candidate);
+    }
+  }
+
+  _memoryHealthCheck() {
+    if (this.maxMemoryBytes > 0 && this.currentMemoryBytes > this.maxMemoryBytes) {
+      const before = this.currentMemoryBytes;
+      this._enforceMemoryLimit(0);
+      if (this.config?.logEvictions && before !== this.currentMemoryBytes) {
+        console.warn(`[MemoryCache] Reduced cache size from ${this._formatBytes(before)} to ${this._formatBytes(this.currentMemoryBytes)} to respect maxMemoryBytes.`);
+      }
+    }
+
+    const heapStats = v8.getHeapStatistics();
+    const heapLimit = heapStats?.heap_size_limit;
+    if (heapLimit && heapLimit > 0) {
+      const { heapUsed } = process.memoryUsage();
+      const heapRatio = heapUsed / heapLimit;
+      if (heapRatio >= this.heapUsageThreshold) {
+        const before = this.currentMemoryBytes;
+        const target = this.maxMemoryBytes > 0
+          ? Math.min(Math.floor(this.maxMemoryBytes * 0.5), this.currentMemoryBytes)
+          : Math.floor(this.currentMemoryBytes * 0.5);
+        this._reduceMemoryTo(target);
+        if (this.config?.logEvictions && before !== this.currentMemoryBytes) {
+          const diff = Math.max(0, before - this.currentMemoryBytes);
+          console.warn(`[MemoryCache] Heap usage ${(heapRatio * 100).toFixed(1)}% exceeded threshold ${(this.heapUsageThreshold * 100).toFixed(1)}%. Evicted ${this._formatBytes(diff)} (current: ${this._formatBytes(this.currentMemoryBytes)}).`);
+        }
+      }
+    }
   }
 
   async _set(key, data) {
@@ -327,39 +413,20 @@ export class MemoryCache extends Cache {
     // If replacing existing key, subtract its old size from current memory
     if (Object.prototype.hasOwnProperty.call(this.cache, normalizedKey)) {
       const oldSize = this.meta[normalizedKey]?.compressedSize || 0;
-      this.currentMemoryBytes -= oldSize;
+      this.currentMemoryBytes = Math.max(0, this.currentMemoryBytes - oldSize);
     }
 
     // Memory-aware eviction: Remove items until we have space
-    if (this.maxMemoryBytes > 0) {
-      // If item is too large to fit even in empty cache, don't cache it
-      if (itemSize > this.maxMemoryBytes) {
-        this.evictedDueToMemory++;
-        return data;
-      }
-
-      while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
-        const candidate = this._selectEvictionCandidate();
-        if (!candidate) break;
-        const evictedSize = this.meta[candidate]?.compressedSize || 0;
-        delete this.cache[candidate];
-        delete this.meta[candidate];
-        this.currentMemoryBytes -= evictedSize;
-        this.evictedDueToMemory++;
-        this._recordStat('evictions');
-      }
+    if (!this._enforceMemoryLimit(itemSize)) {
+      this.evictedDueToMemory++;
+      return data;
     }
 
     // Item count eviction: only evict if we're about to exceed maxSize
-    // Check length before adding the new item (so maxSize=2 allows 2 items, not 1)
     if (this.maxSize > 0 && !Object.prototype.hasOwnProperty.call(this.cache, normalizedKey) && Object.keys(this.cache).length >= this.maxSize) {
       const candidate = this._selectEvictionCandidate();
       if (candidate) {
-        const evictedSize = this.meta[candidate]?.compressedSize || 0;
-        delete this.cache[candidate];
-        delete this.meta[candidate];
-        this.currentMemoryBytes -= evictedSize;
-        this._recordStat('evictions');
+        this._evictKey(candidate);
       }
     }
 
@@ -516,7 +583,9 @@ export class MemoryCache extends Cache {
       memoryUsageBytes: this.currentMemoryBytes,
       maxMemoryBytes: this.maxMemoryBytes,
       evictedDueToMemory: this.evictedDueToMemory,
-      hitRate
+      hitRate,
+      monitorInterval: this.monitorInterval,
+      heapUsageThreshold: this.heapUsageThreshold
     };
   }
 

@@ -9,6 +9,7 @@ import RedisCache from "./cache/redis-cache.class.js";
 import { FilesystemCache } from "./cache/filesystem-cache.class.js";
 import { PartitionAwareFilesystemCache } from "./cache/partition-aware-filesystem-cache.class.js";
 import MultiTierCache from "./cache/multi-tier-cache.class.js";
+import { resolveCacheMemoryLimit } from "./cache/utils/memory-limits.js";
 import tryFn from "../concerns/try-fn.js";
 import { CacheError } from "./cache.errors.js";
 
@@ -161,6 +162,26 @@ export class CachePlugin extends Plugin {
       this.driver = this.config.driver;
     } else {
       // Single-tier mode: create single driver
+      if (this.config.driver === 'memory' || this.config.driver === MemoryCache || this.config.driver?.name === 'MemoryCache') {
+        const resolvedLimit = resolveCacheMemoryLimit({
+          maxMemoryBytes: this.config.config?.maxMemoryBytes,
+          maxMemoryPercent: this.config.config?.maxMemoryPercent,
+        });
+
+        if (!this.config.config) {
+          this.config.config = {};
+        }
+
+        // Ensure we don't exceed resolved limit
+        this.config.config.maxMemoryBytes = resolvedLimit.maxMemoryBytes;
+        this.config.config.maxMemoryPercent = resolvedLimit.inferredPercent ?? this.config.config.maxMemoryPercent ?? 0;
+
+        if (this.config.verbose) {
+          const source = resolvedLimit.derivedFromPercent ? 'percent/cgroup' : 'explicit';
+          console.warn(`[CachePlugin] Memory driver capped at ${Math.round(resolvedLimit.maxMemoryBytes / (1024 * 1024))} MB (source: ${source}, heapLimit=${Math.round(resolvedLimit.heapLimit / (1024 * 1024))} MB)`);
+        }
+      }
+
       this.driver = await this._createSingleDriver(this.config.driver, this.config.config);
     }
 
