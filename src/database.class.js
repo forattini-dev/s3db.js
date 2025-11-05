@@ -680,7 +680,8 @@ export class Database extends SafeEventEmitter {
     // Generate versioned definition for each resource
     Object.entries(this.resources).forEach(([name, resource]) => {
       const resourceDef = resource.export();
-      const definitionHash = this.generateDefinitionHash(resourceDef);
+      const serializableDef = this._buildMetadataDefinition(resourceDef);
+      const definitionHash = this.generateDefinitionHash(serializableDef);
       
       // Check if resource exists in saved metadata
       const existingResource = this.savedMetadata?.resources?.[name];
@@ -706,16 +707,16 @@ export class Database extends SafeEventEmitter {
           ...existingResource?.versions, // Preserve previous versions
           [version]: {
             hash: definitionHash,
-            attributes: resourceDef.attributes,
-            behavior: resourceDef.behavior || 'user-managed',
-            timestamps: resource.config.timestamps,
-            partitions: resource.config.partitions,
-            paranoid: resource.config.paranoid,
-            allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
-            autoDecrypt: resource.config.autoDecrypt,
-            cache: resource.config.cache,
-            asyncEvents: resource.config.asyncEvents,
-            hooks: this.persistHooks ? this._serializeHooks(resource.config.hooks) : resource.config.hooks,
+            attributes: serializableDef.attributes,
+            behavior: serializableDef.behavior || 'user-managed',
+            timestamps: serializableDef.timestamps,
+            partitions: serializableDef.partitions,
+            paranoid: serializableDef.paranoid,
+            allNestedObjectsOptional: serializableDef.allNestedObjectsOptional,
+            autoDecrypt: serializableDef.autoDecrypt,
+            cache: serializableDef.cache,
+            asyncEvents: serializableDef.asyncEvents,
+            hooks: serializableDef.hooks,
             idSize: resource.idSize,
             idGenerator: resource.idGeneratorType,
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
@@ -747,6 +748,69 @@ export class Database extends SafeEventEmitter {
       lastUpdated: new Date().toISOString(),
       resources: {},
     };
+  }
+
+  /**
+   * Produce a metadata-friendly copy of the resource definition that strips heavy references
+   * such as raw hook functions (which capture large closures) while keeping useful diagnostics.
+   * @param {Object} resourceDef - Result from resource.export()
+   * @returns {Object} Serializable definition used for hashing and metadata persistence
+   * @private
+   */
+  _buildMetadataDefinition(resourceDef = {}) {
+    const {
+      hooks,
+      ...rest
+    } = resourceDef || {};
+
+    const serializable = { ...rest };
+
+    if (hooks && this.persistHooks) {
+      serializable.hooks = this._serializeHooks(hooks);
+    } else if (hooks) {
+      serializable.hooks = this._summarizeHooks(hooks);
+    } else {
+      serializable.hooks = {};
+    }
+
+    return serializable;
+  }
+
+  /**
+   * Summarize hook arrays into lightweight metadata to avoid retaining heavy closures
+   * while still exposing diagnostic information such as handler counts and names.
+   * @param {Object} hooks - Resource hooks map
+   * @returns {Object} Summary map
+   * @private
+   */
+  _summarizeHooks(hooks = {}) {
+    if (!hooks || typeof hooks !== 'object') {
+      return {};
+    }
+
+    const summary = {};
+
+    for (const [event, handlers] of Object.entries(hooks)) {
+      if (!Array.isArray(handlers) || handlers.length === 0) {
+        continue;
+      }
+
+      summary[event] = {
+        count: handlers.length,
+        handlers: handlers.map((handler) => {
+          if (typeof handler !== 'function') {
+            return { name: null, length: null, type: typeof handler };
+          }
+          return {
+            name: handler.name || null,
+            length: handler.length ?? null,
+            type: 'function'
+          };
+        })
+      };
+    }
+
+    return summary;
   }
 
   /**

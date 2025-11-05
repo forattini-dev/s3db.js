@@ -174,7 +174,13 @@ export class CachePlugin extends Plugin {
 
         // Ensure we don't exceed resolved limit
         this.config.config.maxMemoryBytes = resolvedLimit.maxMemoryBytes;
-        this.config.config.maxMemoryPercent = resolvedLimit.inferredPercent ?? this.config.config.maxMemoryPercent ?? 0;
+
+        // Remove incompatible percent setting, keep inferred metadata for logging
+        if (typeof this.config.config.maxMemoryPercent !== 'undefined') {
+          delete this.config.config.maxMemoryPercent;
+        }
+
+        this.config.config.inferredMaxMemoryPercent = resolvedLimit.inferredPercent;
 
         if (this.config.verbose) {
           const source = resolvedLimit.derivedFromPercent ? 'percent/cgroup' : 'explicit';

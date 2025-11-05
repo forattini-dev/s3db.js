@@ -47,13 +47,13 @@ export function getEffectiveTotalMemoryBytes() {
  * @param {Object} options
  * @param {number|undefined} options.maxMemoryBytes - explicit limit
  * @param {number|undefined} options.maxMemoryPercent - fraction (0..1)
- * @param {number} [options.safetyPercent=0.6] - fraction of effective memory to cap cache (default 60%)
+ * @param {number} [options.safetyPercent=0.75] - fraction of effective memory to cap cache (default 75%)
  * @returns {{ maxMemoryBytes: number, derivedFromPercent: boolean, effectiveTotal: number, heapLimit: number }}
  */
 export function resolveCacheMemoryLimit({
   maxMemoryBytes,
   maxMemoryPercent,
-  safetyPercent = 0.5,
+  safetyPercent = 0.75,
 } = {}) {
   const heapStats = v8.getHeapStatistics();
   const heapLimit = heapStats?.heap_size_limit ?? 0;
