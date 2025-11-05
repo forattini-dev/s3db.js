@@ -8,7 +8,7 @@
  * - Named cron jobs for better debugging
  * - Auto-cleanup on SIGTERM/SIGINT/beforeExit
  * - Graceful shutdown with timeout protection
- * - Lazy loading of node-cron (peer dependency)
+ * - Lazy loading of node-cron (bundled dependency)
  * - Singleton pattern for global access
  * - Helper utilities to convert intervals to cron expressions
  *
@@ -231,7 +231,7 @@ export class CronManager {
       return this._cron;
     } catch (error) {
       throw new Error(
-        'node-cron is not installed. Install it with: pnpm add node-cron\n' +
+        'Failed to load the bundled node-cron dependency. Try reinstalling packages with `pnpm install`.\n' +
         'Error: ' + error.message
       );
     }

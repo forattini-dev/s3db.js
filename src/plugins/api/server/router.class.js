@@ -166,7 +166,8 @@ export class Router {
         customMiddleware: middlewares,
         enableValidation,
         versionPrefix: prefix,
-        events
+        events,
+        relationsPlugin: this.relationsPlugin
       }, this.Hono);
 
       // Mount resource routes

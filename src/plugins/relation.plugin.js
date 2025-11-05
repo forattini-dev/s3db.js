@@ -587,6 +587,38 @@ export class RelationPlugin extends Plugin {
   }
 
   /**
+   * Public API to populate relations for records
+   *
+   * @param {string|Object} resourceOrName - Resource instance or resource name
+   * @param {Object|Array<Object>} records - Record or list of records to hydrate
+   * @param {Array|string|Object} includes - Relations to load (same format as `include` option)
+   * @returns {Promise<Object|Array<Object>>} Populated records (same reference as input)
+   */
+  async populate(resourceOrName, records, includes) {
+    if (!records || !includes || (Array.isArray(records) && records.length === 0)) {
+      return records;
+    }
+
+    const resource = typeof resourceOrName === 'string'
+      ? this.database.resources[resourceOrName]
+      : resourceOrName;
+
+    if (!resource) {
+      throw new RelationError(`Resource "${resourceOrName}" not found for population`, {
+        resource: resourceOrName
+      });
+    }
+
+    const targetRecords = Array.isArray(records) ? records : [records];
+    if (targetRecords.length === 0) {
+      return records;
+    }
+
+    await this._eagerLoad(targetRecords, includes, resource);
+    return records;
+  }
+
+  /**
    * Normalize includes format
    * @private
    */

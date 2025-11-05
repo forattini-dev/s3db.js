@@ -323,6 +323,20 @@ Each relation is defined with:
 | `eager` | boolean | ❌ | Auto-load (default: `false`) |
 | `cascade` | array | ❌ | `['deleted', 'updated']` |
 
+### API Plugin Integration
+
+When you install the [API Plugin](./api.md) after the RelationPlugin, every REST endpoint gains a `?populate=` query parameter:
+
+```http
+GET /orders?populate=customer,items.product
+```
+
+- Works with nested relations (`items.product.manufacturer`)
+- Validates relation names automatically (`400 INVALID_POPULATE` on unknown paths)
+- Uses the same eager-loading engine as the `include` option in code
+
+No additional configuration is required—just ensure the RelationPlugin is registered before the API Plugin.
+
 ---
 
 ## 🔗 Relation Types

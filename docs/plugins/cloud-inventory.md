@@ -192,7 +192,7 @@ Each entry inside `clouds[]` accepts a `scheduled` block mirroring the global sc
 
 Per-cloud schedules run **in addition** to the global one, allowing mixed cadences (e.g., global daily sync plus hourly refresh for mission-critical accounts).
 
-> **Dependency:** Scheduling requires the optional `node-cron` package (`pnpm add -D node-cron`). The plugin automatically verifies its presence when a schedule is enabled.
+> **Dependency:** Scheduling uses `node-cron`, which is bundled with s3db.js (no additional install required).
 
 ---
 

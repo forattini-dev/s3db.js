@@ -103,6 +103,18 @@ new ApiPlugin({
 })
 ```
 
+### RelationPlugin Integration
+
+- Install the [RelationPlugin](../relation.md) before the API plugin to expose relational hydration automatically.
+- All `GET` endpoints gain a `populate` query parameter (e.g., `?populate=customer,items.product`).
+- Unknown relation paths return `400 INVALID_POPULATE` so consumers get immediate feedback.
+
+```javascript
+await db.use(new RelationPlugin({ relations: {/* ... */} }));
+await db.use(new ApiPlugin({ port: 3000 }));
+// GET /orders?populate=customer,items.product
+```
+
 ### Dependency Graph
 
 ```mermaid

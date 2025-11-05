@@ -716,6 +716,11 @@ declare module 's3db.js' {
     attributes: Record<string, any>;
     schema: Schema;
     map: any;
+    cache?: ResourceCacheNamespace;
+    cacheInstances?: Record<string, Cache>;
+    cacheNamespaces?: Record<string, ResourceCacheNamespace>;
+    getCacheDriver(name?: string | null): Cache | null;
+    getCacheNamespace(name?: string | null): ResourceCacheNamespace | null;
     
     // CRUD operations
     insert(data: any): Promise<any>;
@@ -965,6 +970,43 @@ declare module 's3db.js' {
     getStats(): any;
   }
 
+  export interface CacheWarmOptions {
+    forceRefresh?: boolean;
+    returnData?: boolean;
+  }
+
+  export interface CacheInvalidateScope {
+    id?: string;
+    partition?: string;
+    partitionValues?: Record<string, any>;
+  }
+
+  export interface ResourceCacheNamespace extends Cache {
+    driver: Cache;
+    instanceKey: string;
+    driverName: string;
+    keyFor(
+      action: string,
+      options?: { params?: any; partition?: string; partitionValues?: Record<string, any> }
+    ): Promise<string>;
+    resolve(
+      action: string,
+      options?: { params?: any; partition?: string; partitionValues?: Record<string, any> }
+    ): Promise<string>;
+    getDriver(): Cache;
+    warm(options?: Record<string, any>): Promise<any>;
+    warmItem(id: string, control?: CacheWarmOptions): Promise<any | void>;
+    warmMany(ids: string[], control?: CacheWarmOptions): Promise<any | void>;
+    warmList(options?: ListOptions, control?: CacheWarmOptions): Promise<any | void>;
+    warmPage(options?: PageOptions, control?: CacheWarmOptions): Promise<any | void>;
+    warmQuery(filter?: any, options?: QueryOptions, control?: CacheWarmOptions): Promise<any | void>;
+    warmCount(options?: CountOptions, control?: CacheWarmOptions): Promise<any | void>;
+    warmPartition?(partitions?: string[], options?: Record<string, any>): Promise<any>;
+    invalidate(scope?: CacheInvalidateScope): Promise<void>;
+    clearAll(): Promise<void>;
+    stats(): any;
+  }
+
   /** Memory Cache class */
   export class MemoryCache extends Cache {
     constructor(config?: MemoryCacheConfig);
@@ -1017,8 +1059,15 @@ declare module 's3db.js' {
     constructor(config?: CachePluginConfig);
     cacheKeyFor(action: string, params?: any): string;
     getCacheStats(): any;
-    clearCache(): Promise<void>;
-    warmCache(resourceName: string): Promise<void>;
+    clearAllCache(): Promise<void>;
+    warmCache(
+      resourceName: string,
+      options?: { includePartitions?: boolean; sampleSize?: number; [key: string]: any }
+    ): Promise<{
+      resourceName: string;
+      recordsSampled: number;
+      partitionsWarmed: number;
+    } | Record<string, any>>;
   }
 
   /** Costs Plugin */

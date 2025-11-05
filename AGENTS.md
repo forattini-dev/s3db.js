@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Platform Context
+- This repository provides the shared `s3db.js` data layer that other services (for example, `mrt-shortner`) call as both persistence and HTTP API; treat schema changes as cross-repo changes.
+- Front-end clients that consume this API should align with the Jade design system, primarily maintained in `jade-web` and `jade-design-tokens`.
+
 ## Project Structure & Module Organization
 - `src/` – core source, including plugins in `src/plugins/` and shared concerns in `src/concerns/`.
 - `docs/` – plugin documentation and contributor references.
@@ -32,3 +36,9 @@
 - Body should state motivation and high-level changes; reference issues with `Fixes #ID`.
 - PRs must include summary, testing notes, and screenshots/logs when UI or CLI output changes.
 - Keep diffs focused; update docs and peer dependency notes when behaviours change.
+
+## Repository Index
+- `s3db.js/` – Shared database and API surface that backs the platform.
+- `mrt-shortner/` – URL shortener service and dashboard integrating with this API.
+- `jade-web/` – Jade design system components for front-end clients.
+- `jade-design-tokens/` – Source of Jade design tokens consumed by all UIs.
