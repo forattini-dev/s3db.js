@@ -19,6 +19,7 @@ await db.use(new ApiPlugin({ port: 3000 }));  // That's it!
 - ✅ Interactive Swagger UI at `/docs`
 - ✅ Multiple auth methods (JWT, OAuth2/OIDC, API Keys, Basic)
 - ✅ Enterprise security (rate limiting, IP banning, GeoIP blocking)
+- ✅ Relationship hydration via `?populate=` (with RelationPlugin)
 - ✅ Production observability (metrics, events, tracing, health checks)
 - ✅ Zero boilerplate, all features opt-in
 
@@ -57,6 +58,25 @@ await db.use(new ApiPlugin({ port: 3000 }));
 // ✨ API running at http://localhost:3000
 ```
 
+### Populate relationships (RelationPlugin)
+
+Install the [RelationPlugin](./relation.md) before the API plugin to expose relational data effortlessly:
+
+```javascript
+await db.use(new RelationPlugin({ relations: {/* ... */} }));
+await db.use(new ApiPlugin({ port: 3000 }));
+```
+
+Any resource can now hydrate related records with a single query parameter:
+
+```http
+GET /orders?populate=customer,items.product
+```
+
+- `populate=customer` hydrates the belongsTo relation.
+- `populate=items.product` hydrates nested relations (`items` and each item's `product`).
+- Invalid relation names return `400 INVALID_POPULATE` with detailed errors.
+
 **Your API is ready:**
 ```bash
 GET     /users           # List users
@@ -84,6 +104,7 @@ GET     /metrics         # Prometheus metrics
 - [Killer Features](#-killer-features)
 - [Configuration](#-configuration)
 - [Endpoints](#-endpoints)
+- [Integrations](./api/integrations.md)
 - [⚡ Performance Optimizations](#-performance-optimizations)
 - [FAQ](#-faq)
 
@@ -98,6 +119,7 @@ GET     /metrics         # Prometheus metrics
 | **[🔐 Authentication](./api/authentication.md)** | JWT, OAuth2/OIDC, API Keys, Basic Auth | Setting up user authentication |
 | **[🛡️ Guards & Authorization](./api/guards.md)** | Row-level security, multi-tenancy, RBAC | Controlling access to data |
 | **[🔒 Security](./api/security.md)** | Failban, rate limiting, GeoIP blocking, CSP headers | Protecting your API |
+| **[🔌 Integrations](./api/integrations.md)** | RelationPlugin populate, Cloud/Kubernetes inventory exposure | Serving data from other plugins |
 | **[📊 Observability](./api/observability.md)** | Metrics, events, tracing, health checks | Monitoring production APIs |
 | **[📦 Static Files](./api/static-files.md)** | Serve SPAs (React/Vue/Angular) and assets | Building full-stack apps |
 | **[🚀 Deployment](./api/deployment.md)** | Docker, Kubernetes, zero-downtime deploys | Going to production |
@@ -1058,6 +1080,26 @@ DELETE  /{resource}/:id    # Delete
 HEAD    /{resource}        # Count
 OPTIONS /{resource}        # Metadata
 ```
+
+#### Query Parameters (per resource)
+
+| Parameter | Applies To | Description |
+|-----------|------------|-------------|
+| `limit`, `offset` | `GET /{resource}` | Pagination controls (default `limit=100`) |
+| `partition`, `partitionValues` | `GET` routes | Direct partition lookups (O(1) when resource defines partitions) |
+| `populate` | `GET` routes | Hydrate relations on demand (requires RelationPlugin) |
+
+**Populate examples (RelationPlugin installed):**
+
+```http
+GET /orders?populate=customer               # Hydrates belongsTo relation
+GET /orders?populate=customer,items.product # Nested hydration
+GET /orders/ord-1?populate=items.product    # Works on single-record fetches too
+```
+
+- Supports dot notation for nested relations.
+- Validation errors return `400 INVALID_POPULATE` with the offending path.
+- Hints appear automatically in `/openapi.json` and Swagger UI.
 
 ### System Endpoints
 

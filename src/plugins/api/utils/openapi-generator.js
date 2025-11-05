@@ -204,6 +204,7 @@ function generateResourcePaths(resource, version, config = {}) {
   const methods = config.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
   const authMethods = config.auth || [];
   const requiresAuth = authMethods && authMethods.length > 0;
+  const hasRelations = resource._relations && Object.keys(resource._relations).length > 0;
 
   const paths = {};
 
@@ -365,6 +366,15 @@ The response includes pagination metadata in the \`pagination\` object with tota
               example: partitionValuesExample
             }
           ] : []),
+          ...(hasRelations ? [
+            {
+              name: 'populate',
+              in: 'query',
+              description: 'Comma-separated list of relations to populate (e.g., customer,items.product).',
+              schema: { type: 'string' },
+              example: 'customer,items.product'
+            }
+          ] : []),
           ...attributeQueryParams
         ],
         responses: {
@@ -459,6 +469,15 @@ The response includes pagination metadata in the \`pagination\` object with tota
               description: partitionValuesDescription,
               schema: { type: 'string' },
               example: partitionValuesExample
+            }
+          ] : []),
+          ...(hasRelations ? [
+            {
+              name: 'populate',
+              in: 'query',
+              description: 'Comma-separated list of relations to populate (e.g., customer,items.product).',
+              schema: { type: 'string' },
+              example: 'customer,items'
             }
           ] : [])
         ],

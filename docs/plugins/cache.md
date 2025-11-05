@@ -515,10 +515,49 @@ const analyticsKey = await users.getCacheKeyResolver('cache--analytics')({ actio
 const cached = await coldDriver.get(analyticsKey);
 ```
 
-- The **first** installed instance remains available as `resource.cache` for backwards compatibility.
-- Additional drivers live in `resource.cacheInstances`. Retrieve them with `resource.getCacheDriver(<slug>)` and `resource.getCacheKeyResolver(<slug>)`.
+- The first installed instance now exposes a **cache management namespace** at `resource.cache`, which proxies driver calls and adds helpers like `warmPage`, `warmItem`, `invalidate`, `keyFor`, and `stats`.
+- Access the underlying driver via `resource.cache.driver` or `resource.getCacheDriver()`; additional instances are exposed with `resource.getCacheNamespace(<slug>)` and `resource.getCacheKeyResolver(<slug>)`.
 - Namespaces slugify into resource prefixes (`plg_cache--analytics_*`) and PluginStorage keys (`plugin=cache--analytics/...`).
 - Passing a second argument to `db.usePlugin(plugin, 'cacheSecondary')` auto-derives the namespace when you omit it.
+
+### Cache management namespace
+
+Whenever the CachePlugin is installed for a resource, that resource gains `resource.cache`: a lightweight façade that forwards to the driver **and** adds operational helpers.
+
+| Helper | Purpose |
+|--------|---------|
+| `cache.driver` / `cache.getDriver()` | Underlying cache driver instance |
+| `cache.keyFor(action, { params, partition, partitionValues })` | Generate the cache key that plugins/middleware use |
+| `cache.warmPage({ offset, size, partition, partitionValues }, { forceRefresh, returnData })` | Prime page caches without waiting for user traffic |
+| `cache.warmItem(id, { forceRefresh, returnData })` / `cache.warmMany(ids)` | Preload individual documents |
+| `cache.warmList()` / `cache.warmQuery(filter, options)` / `cache.warmCount()` | Preload aggregate queries |
+| `cache.warmPartition(partitions, options)` | Partition-aware warm-up (PartitionAwareFilesystemCache only) |
+| `cache.warm(options)` | Shortcut to the plugin-level `warmCache(resourceName, options)` |
+| `cache.invalidate(scope)` | Invalidate entries (optionally scoped by `{ id, partition, partitionValues }`) |
+| `cache.clearAll()` | Clear every entry for the resource (`resource=${name}` prefix) |
+| `cache.stats()` | Driver stats (falls back to plugin counters when unavailable) |
+
+All driver-specific methods remain available thanks to proxying—`resource.cache.getMemoryStats()` still works with the MemoryCache driver.
+
+```javascript
+const users = db.resources.users;
+const { cache } = users;
+
+// Prime the first page and a specific record
+await cache.warmPage({ offset: 0, size: 25 }, { forceRefresh: true });
+await cache.warmItem('user_123', { forceRefresh: true });
+
+// Inspect the generated key and read it directly from the driver
+const pageKey = await cache.keyFor('page', { params: { offset: 0, size: 25 } });
+const cachedPayload = await cache.get(pageKey);
+
+// Later on, invalidate when the record changes
+await cache.invalidate({ id: 'user_123' });
+
+// Need a different cache instance?
+const analyticsCache = users.getCacheNamespace('cache--analytics');
+await analyticsCache?.warmList({ partition: 'byCustomer', partitionValues: { customerId: 'acme' } });
+```
 
 ### Example 2: Filesystem Cache (Persistent, Local)
 

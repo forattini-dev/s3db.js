@@ -1,286 +1,199 @@
 /**
  * Cache + EventualConsistencyPlugin Compatibility Tests
- * Tests that plugin-created resources are not cached and cache is properly invalidated
+ * Verifica que recursos criados por plugins não são cacheados por padrão e que
+ * o cache invalida corretamente após consolidações.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from '@jest/globals';
-import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+
 import { CachePlugin } from '../../src/plugins/cache.plugin.js';
+import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
-describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
-  const previousConnectionString = process.env.BUCKET_CONNECTION_STRING;
+const WALLET_RESOURCE_CONFIG = {
+  name: 'wallets',
+  attributes: {
+    id: 'string|optional',
+    userId: 'string|required',
+    balance: 'number|default:0'
+  },
+  createdBy: 'user'
+};
 
-  beforeAll(() => {
-    process.env.BUCKET_CONNECTION_STRING = 'memory://cache-ec';
-  });
+const EC_PLUGIN_CONFIG = {
+  resources: {
+    wallets: ['balance']
+  },
+  mode: 'sync',
+  autoConsolidate: false,
+  enableAnalytics: false,
+  verbose: false
+};
 
-  afterAll(() => {
-    if (previousConnectionString === undefined) {
-      delete process.env.BUCKET_CONNECTION_STRING;
-    } else {
-      process.env.BUCKET_CONNECTION_STRING = previousConnectionString;
-    }
-  });
+const TRANSACTION_RESOURCE_NAME = 'plg_wallets_tx_balance';
 
-  let database;
-  let wallets;
-  let eventualPlugin;
-  let cachePlugin;
+const previousConnectionString = process.env.BUCKET_CONNECTION_STRING;
 
-  beforeEach(async () => {
-    database = await createDatabaseForTest('cache-eventual-consistency');
+beforeAll(() => {
+  process.env.BUCKET_CONNECTION_STRING = 'memory://cache-ec';
+});
 
-    // Create wallets resource
-    wallets = await database.createResource({
-      name: 'wallets',
-      attributes: {
-        id: 'string|optional',
-        userId: 'string|required',
-        balance: 'number|default:0'
-      },
-      createdBy: 'user' // Explicitly user-created
-    });
+afterAll(() => {
+  if (previousConnectionString === undefined) {
+    delete process.env.BUCKET_CONNECTION_STRING;
+  } else {
+    process.env.BUCKET_CONNECTION_STRING = previousConnectionString;
+  }
+});
 
-    // Add EventualConsistencyPlugin first
-    eventualPlugin = new EventualConsistencyPlugin({
-      resources: {
-        wallets: ['balance']
-      },
-      mode: 'sync',
-      autoConsolidate: false,
-      enableAnalytics: false,
-      verbose: false
-    });
+async function withScenario(name, { cacheOptions = {} } = {}, run) {
+  const database = await createDatabaseForTest(`cache-ec-${name}`);
 
+  try {
+    const wallets = await database.createResource({ ...WALLET_RESOURCE_CONFIG });
+
+    const eventualPlugin = new EventualConsistencyPlugin({ ...EC_PLUGIN_CONFIG });
     await database.usePlugin(eventualPlugin);
 
-    // Add CachePlugin after (so it can see all resources)
-    cachePlugin = new CachePlugin({
+    const cachePlugin = new CachePlugin({
       driver: 'memory',
-      verbose: false
+      verbose: false,
+      ...cacheOptions
     });
-
     await database.usePlugin(cachePlugin);
-  });
 
-  afterEach(async () => {
-    if (database) {
-      await database.disconnect();
-    }
-  });
-
-  it('should NOT cache plugin-created resources (transactions, locks)', async () => {
-    // Check that transaction resource exists
-    const transactionResourceName = 'plg_wallets_tx_balance';
-    const transactionResource = database.resources[transactionResourceName];
-
-    expect(transactionResource).toBeDefined();
-
-    // Check that transaction resource has createdBy = 'EventualConsistencyPlugin'
-    const transactionMetadata = database.savedMetadata?.resources?.[transactionResourceName];
-    expect(transactionMetadata?.createdBy).toBe('EventualConsistencyPlugin');
-
-    // Check that shouldCacheResource returns false for plugin resources
-    const shouldCache = cachePlugin.shouldCacheResource(transactionResourceName);
-    expect(shouldCache).toBe(false);
-
-    // Verify transaction resource doesn't have cache property
-    expect(transactionResource.cache).toBeUndefined();
-  });
-
-  it('should cache user-created resources (wallets)', async () => {
-    // Check that wallets resource has createdBy = 'user'
-    const walletsMetadata = database.savedMetadata?.resources?.wallets;
-    expect(walletsMetadata?.createdBy).toBe('user');
-
-    // Check that shouldCacheResource returns true for user resources
-    const shouldCache = cachePlugin.shouldCacheResource('wallets');
-    expect(shouldCache).toBe(true);
-
-    // Verify wallets resource HAS cache property
-    expect(wallets.cache).toBeDefined();
-  });
-
-  it('should invalidate cache after consolidation', async () => {
-    // Insert wallet
-    await wallets.insert({ id: 'w1', userId: 'u1', balance: 100 });
-
-    // First get (will be cached)
-    const wallet1 = await wallets.get('w1');
-    expect(wallet1.balance).toBe(100);
-
-    // Generate cache key and manually set cache
-    const cacheKey = await wallets.cacheKeyFor({ id: 'w1' });
-    await wallets.cache.set(cacheKey, { ...wallet1 });
-
-    // Verify it's in cache
-    const cached1 = await wallets.cache.get(cacheKey);
-    expect(cached1).toBeDefined();
-    expect(cached1.balance).toBe(100);
-
-    // Add transactions
-    await wallets.add('w1', 'balance', 50);
-    await wallets.add('w1', 'balance', 25);
-
-    // Consolidate (should invalidate cache)
-    await wallets.consolidate('w1', 'balance');
-
-    // Check that cache was invalidated
-    const cached2 = await wallets.cache.get(cacheKey);
-    expect(cached2).toBeNull(); // Cache should be empty
-
-    // Get again (will fetch from S3 and cache the new value)
-    const wallet2 = await wallets.get('w1');
-    expect(wallet2.balance).toBe(175); // 100 + 50 + 25
-  });
-
-  it('should work correctly when cache is disabled for resource', async () => {
-    // Create resource without cache
-    const accounts = await database.createResource({
-      name: 'accounts',
-      attributes: {
-        id: 'string|optional',
-        balance: 'number|default:0'
-      },
-      cache: false,
-      createdBy: 'user'
-    });
-
-    // Add EventualConsistencyPlugin
-    const accountsPlugin = new EventualConsistencyPlugin({
-      resources: {
-        accounts: ['balance']
-      },
-      mode: 'sync',
-      autoConsolidate: false
-    });
-
-    await database.usePlugin(accountsPlugin);
-
-    // Insert and consolidate
-    await accounts.insert({ id: 'a1', balance: 0 });
-    await accounts.add('a1', 'balance', 100);
-    await accounts.consolidate('a1', 'balance');
-
-    // Verify value was updated
-    const account = await accounts.get('a1');
-    expect(account.balance).toBe(100);
-  });
-
-  it('should allow explicit inclusion of plugin resources in cache', async () => {
-    // Disconnect and reconnect with new cache config
+    await run({ database, cachePlugin, wallets });
+  } finally {
     await database.disconnect();
+  }
+}
 
-    database = await createDatabaseForTest('cache-explicit-include');
+describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
+  it('does not cache plugin-created resources by default', async () => {
+    await withScenario('plugin-resources', {}, async ({ database, cachePlugin }) => {
+      const transactionResource = database.resources[TRANSACTION_RESOURCE_NAME];
 
-    wallets = await database.createResource({
-      name: 'wallets',
-      attributes: {
-        id: 'string|optional',
-        balance: 'number|default:0'
+      expect(transactionResource).toBeDefined();
+
+      const metadata = database.savedMetadata?.resources?.[TRANSACTION_RESOURCE_NAME];
+      expect(metadata?.createdBy).toBe('EventualConsistencyPlugin');
+
+      expect(cachePlugin.shouldCacheResource(TRANSACTION_RESOURCE_NAME)).toBe(false);
+      expect(transactionResource.cache).toBeUndefined();
+    });
+  });
+
+  it('caches recursos criados pelo usuário', async () => {
+    await withScenario('user-resources', {}, async ({ database, cachePlugin, wallets }) => {
+      const metadata = database.savedMetadata?.resources?.wallets;
+      expect(metadata?.createdBy).toBe('user');
+
+      expect(cachePlugin.shouldCacheResource('wallets')).toBe(true);
+      expect(wallets.cache).toBeDefined();
+    });
+  });
+
+  it('invalida o cache após consolidar transações', async () => {
+    await withScenario('invalidation', {}, async ({ cachePlugin, wallets }) => {
+      await wallets.insert({ id: 'w1', userId: 'u1', balance: 100 });
+
+      const wallet1 = await wallets.get('w1');
+      const cacheKey = await wallets.cacheKeyFor({ id: 'w1' });
+      await wallets.cache.set(cacheKey, { ...wallet1 });
+
+      await wallets.add('w1', 'balance', 50);
+      await wallets.add('w1', 'balance', 25);
+      await wallets.consolidate('w1', 'balance');
+
+      const cachedAfter = await wallets.cache.get(cacheKey);
+      expect(cachedAfter).toBeNull();
+
+      const wallet2 = await wallets.get('w1');
+      expect(wallet2.balance).toBe(175);
+    });
+  });
+
+  it('respeita recursos com cache desabilitado', async () => {
+    await withScenario('cache-disabled', {}, async ({ database }) => {
+      const accounts = await database.createResource({
+        name: 'accounts',
+        attributes: {
+          id: 'string|optional',
+          balance: 'number|default:0'
+        },
+        cache: false,
+        createdBy: 'user'
+      });
+
+      const accountsPlugin = new EventualConsistencyPlugin({
+        resources: {
+          accounts: ['balance']
+        },
+        mode: 'sync',
+        autoConsolidate: false
+      });
+      await database.usePlugin(accountsPlugin);
+
+      await accounts.insert({ id: 'a1', balance: 0 });
+      await accounts.add('a1', 'balance', 100);
+      await accounts.consolidate('a1', 'balance');
+
+      const account = await accounts.get('a1');
+      expect(account.balance).toBe(100);
+    });
+  });
+
+  it('permite incluir explicitamente recursos de plugins', async () => {
+    await withScenario(
+      'explicit-include',
+      { cacheOptions: { include: [TRANSACTION_RESOURCE_NAME] } },
+      async ({ database, cachePlugin }) => {
+        const transactionResource = database.resources[TRANSACTION_RESOURCE_NAME];
+
+        expect(cachePlugin.shouldCacheResource(TRANSACTION_RESOURCE_NAME)).toBe(true);
+        expect(transactionResource.cache).toBeDefined();
       }
-    });
-
-    eventualPlugin = new EventualConsistencyPlugin({
-      resources: {
-        wallets: ['balance']
-      },
-      mode: 'sync',
-      autoConsolidate: false,
-      enableAnalytics: false
-    });
-
-    await database.usePlugin(eventualPlugin);
-
-    const transactionResourceName = 'plg_wallets_tx_balance';
-
-    // Add cache with explicit include for transaction resource
-    cachePlugin = new CachePlugin({
-      driver: 'memory',
-      include: [transactionResourceName], // Explicitly include plugin resource
-      verbose: false
-    });
-
-    await database.usePlugin(cachePlugin);
-
-    // Now plugin resource SHOULD be cached
-    const shouldCache = cachePlugin.shouldCacheResource(transactionResourceName);
-    expect(shouldCache).toBe(true);
-
-    const transactionResource = database.resources[transactionResourceName];
-    expect(transactionResource.cache).toBeDefined();
+    );
   });
 
-  it('should handle multiple consolidations with cache correctly', async () => {
-    // Insert wallet
-    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+  it('mantém cache consistente após múltiplas consolidações', async () => {
+    await withScenario('multiple-consolidations', {}, async ({ wallets }) => {
+      await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
-    // First consolidation
-    await wallets.add('w1', 'balance', 100);
-    await wallets.consolidate('w1', 'balance');
+      await wallets.add('w1', 'balance', 100);
+      await wallets.consolidate('w1', 'balance');
+      expect((await wallets.get('w1')).balance).toBe(100);
 
-    const wallet1 = await wallets.get('w1');
-    expect(wallet1.balance).toBe(100);
+      await wallets.add('w1', 'balance', 50);
+      await wallets.consolidate('w1', 'balance');
+      expect((await wallets.get('w1')).balance).toBe(150);
 
-    // Second consolidation
-    await wallets.add('w1', 'balance', 50);
-    await wallets.consolidate('w1', 'balance');
-
-    const wallet2 = await wallets.get('w1');
-    expect(wallet2.balance).toBe(150);
-
-    // Third consolidation
-    await wallets.add('w1', 'balance', 25);
-    await wallets.consolidate('w1', 'balance');
-
-    const wallet3 = await wallets.get('w1');
-    expect(wallet3.balance).toBe(175);
-
-    // Re-fetch to verify no stale cache (objects may be references)
-    const verifyWallet1 = await wallets.get('w1', { skipCache: true });
-    const verifyWallet2 = await wallets.get('w1', { skipCache: true });
-    const verifyWallet3 = await wallets.get('w1', { skipCache: true });
-
-    // All fresh fetches should have the latest value
-    expect(verifyWallet1.balance).toBe(175);
-    expect(verifyWallet2.balance).toBe(175);
-    expect(verifyWallet3.balance).toBe(175);
+      await wallets.add('w1', 'balance', 25);
+      await wallets.consolidate('w1', 'balance');
+      expect((await wallets.get('w1')).balance).toBe(175);
+    });
   });
 
-  it('should handle cache invalidation errors gracefully', async () => {
-    // Insert wallet
-    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+  it('tolera falhas ao invalidar o cache durante consolidação', async () => {
+    await withScenario('cache-invalidation-error', {}, async ({ wallets }) => {
+      await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
-    // Mock cache.delete to throw error
-    const originalDelete = wallets.cache.delete;
-    let deleteCallCount = 0;
-    wallets.cache.delete = async () => {
-      deleteCallCount++;
-      throw new Error('Cache delete failed');
-    };
+      const originalDelete = wallets.cache.delete;
+      let deleteCalls = 0;
+      wallets.cache.delete = async () => {
+        deleteCalls += 1;
+        throw new Error('Cache delete failed');
+      };
 
-    // Add transaction and consolidate
-    await wallets.add('w1', 'balance', 100);
+      await wallets.add('w1', 'balance', 100);
 
-    // Should not throw error (gracefully handles cache invalidation failure)
-    let consolidateResult;
-    let consolidateError;
-    try {
-      consolidateResult = await wallets.consolidate('w1', 'balance');
-    } catch (err) {
-      consolidateError = err;
-    }
+      await wallets.consolidate('w1', 'balance');
 
-    expect(consolidateError).toBeUndefined(); // No error thrown
-    expect(consolidateResult).toBe(100); // Consolidation completed successfully
-    expect(deleteCallCount).toBe(1); // Delete was attempted
+      wallets.cache.delete = originalDelete;
 
-    // Restore original delete
-    wallets.cache.delete = originalDelete;
-
-    // Verify value was still updated despite cache error
-    const wallet = await wallets.get('w1');
-    expect(wallet.balance).toBe(100);
+      expect(deleteCalls).toBe(1);
+      const wallet = await wallets.get('w1');
+      expect(wallet.balance).toBe(100);
+    });
   });
 });

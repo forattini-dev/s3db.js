@@ -1433,7 +1433,6 @@ pnpm add pg                      # PostgreSQL replication (ReplicatorPlugin)
 pnpm add @google-cloud/bigquery  # BigQuery replication (ReplicatorPlugin)
 pnpm add @aws-sdk/client-sqs     # SQS replication/consumption (ReplicatorPlugin, QueueConsumerPlugin)
 pnpm add amqplib                 # RabbitMQ consumption (QueueConsumerPlugin)
-pnpm add node-cron               # Job scheduling (SchedulerPlugin, TfstatePlugin)
 pnpm add ejs                     # Template engine (APIPlugin - optional)
 ```
 

@@ -10,7 +10,7 @@
  * Prerequisites:
  * - Access to multiple Kubernetes clusters
  * - @kubernetes/client-node installed: pnpm add @kubernetes/client-node
- * - node-cron installed (for scheduling): pnpm add node-cron
+ * - node-cron is bundled with s3db.js (no extra install needed)
  */
 
 import { Database } from '../../src/database.class.js';

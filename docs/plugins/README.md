@@ -1297,7 +1297,7 @@ s3db.js uses a **lightweight core** approach - plugin-specific dependencies are 
 1. **Automatic Validation** - When you use a plugin, s3db.js validates its dependencies at runtime
 2. **Clear Error Messages** - If a dependency is missing, you get a helpful error with install commands
 3. **Version Checking** - Ensures installed packages meet minimum version requirements
-4. **Optional Dependencies** - All plugin dependencies are marked as `peerDependencies` (optional)
+4. **Optional Dependencies** - Most plugin dependencies are marked as optional peers (install only what you need)
 
 ### Dependency Matrix
 
@@ -1308,7 +1308,7 @@ s3db.js uses a **lightweight core** approach - plugin-specific dependencies are 
 | SQS Replicator | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | SQS Consumer | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | RabbitMQ Consumer | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
-| Tfstate Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
+| Tfstate Plugin | `node-cron` | `^4.0.0` | _(bundled with s3db.js)_ |
 
 ### Installation Example
 

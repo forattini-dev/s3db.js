@@ -9,6 +9,106 @@ import * as formatter from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 
+function parsePopulateValues(raw) {
+  if (raw === undefined || raw === null) return [];
+
+  const values = Array.isArray(raw) ? raw : [raw];
+
+  return values
+    .flatMap(value => String(value).split(','))
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function addPopulatePath(tree, parts) {
+  if (!parts.length) return;
+  const [head, ...rest] = parts;
+  const existing = tree[head];
+
+  if (rest.length === 0) {
+    if (existing && typeof existing === 'object') {
+      // Keep existing nested config (already converted to object)
+      return;
+    }
+    tree[head] = true;
+    return;
+  }
+
+  let node;
+  if (!existing || existing === true) {
+    node = { include: {} };
+    tree[head] = node;
+  } else {
+    node = existing;
+    if (!node.include || typeof node.include !== 'object') {
+      node.include = {};
+    }
+  }
+
+  addPopulatePath(node.include, rest);
+}
+
+function resolvePopulate(resource, relationsPlugin, paths) {
+  if (!relationsPlugin) {
+    return {
+      errors: ['RelationPlugin must be installed to use populate parameter']
+    };
+  }
+
+  const includesTree = {};
+  const errors = [];
+
+  for (const rawPath of paths) {
+    const segments = rawPath.split('.').map(segment => segment.trim()).filter(Boolean);
+    if (segments.length === 0) continue;
+
+    let currentResource = resource;
+    let isValid = true;
+
+    for (let index = 0; index < segments.length; index++) {
+      const segment = segments[index];
+      const relationDefs =
+        currentResource?._relations ||
+        relationsPlugin.relations?.[currentResource?.name] ||
+        null;
+
+      if (!relationDefs || !relationDefs[segment]) {
+        errors.push(
+          `Relation "${segment}" is not defined on resource "${currentResource?.name || 'unknown'}" (path "${rawPath}")`
+        );
+        isValid = false;
+        break;
+      }
+
+      const relationConfig = relationDefs[segment];
+
+      if (index < segments.length - 1) {
+        const relatedResource = relationsPlugin.database?.resources?.[relationConfig.resource];
+        if (!relatedResource) {
+          errors.push(
+            `Related resource "${relationConfig.resource}" for relation "${segment}" not found (path "${rawPath}")`
+          );
+          isValid = false;
+          break;
+        }
+        currentResource = relatedResource;
+      }
+    }
+
+    if (isValid) {
+      addPopulatePath(includesTree, segments);
+    }
+  }
+
+  if (errors.length > 0) {
+    return { errors };
+  }
+
+  return {
+    includes: Object.keys(includesTree).length > 0 ? includesTree : null
+  };
+}
+
 /**
  * Parse custom route definition (e.g., "GET /healthcheck" or "async POST /custom")
  * @param {string} routeDef - Route definition string
@@ -62,7 +162,8 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
     customMiddleware = [],
     enableValidation = true,
     versionPrefix = '', // Empty string by default (calculated in server.js)
-    events = null // Event emitter for lifecycle hooks
+    events = null, // Event emitter for lifecycle hooks
+    relationsPlugin = null
   } = config;
 
   const resourceName = resource.name;
@@ -129,8 +230,24 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         ? JSON.parse(query.partitionValues)
         : undefined;
 
+      const populateValues = parsePopulateValues(query.populate);
+      let populateIncludes = null;
+
+      if (populateValues.length > 0) {
+        const populateResult = resolvePopulate(resource, relationsPlugin, populateValues);
+        if (populateResult.errors) {
+          const response = formatter.error('Invalid populate parameter', {
+            status: 400,
+            code: 'INVALID_POPULATE',
+            details: { errors: populateResult.errors }
+          });
+          return c.json(response, response._status);
+        }
+        populateIncludes = populateResult.includes;
+      }
+
       // Extract filters from query string (any key that's not limit, offset, partition, partitionValues, sort)
-      const reservedKeys = ['limit', 'offset', 'partition', 'partitionValues', 'sort'];
+      const reservedKeys = ['limit', 'offset', 'partition', 'partitionValues', 'sort', 'populate'];
       const filters = {};
       for (const [key, value] of Object.entries(query)) {
         if (!reservedKeys.includes(key)) {
@@ -184,6 +301,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         total = items.length;
       }
 
+      if (populateIncludes && relationsPlugin && items && items.length > 0) {
+        await relationsPlugin.populate(resource, items, populateIncludes);
+      }
+
       const response = formatter.list(items, {
         total,
         page: Math.floor(offset / limit) + 1,
@@ -208,6 +329,21 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       const partitionValues = query.partitionValues
         ? JSON.parse(query.partitionValues)
         : undefined;
+      const populateValues = parsePopulateValues(query.populate);
+      let populateIncludes = null;
+
+      if (populateValues.length > 0) {
+        const populateResult = resolvePopulate(resource, relationsPlugin, populateValues);
+        if (populateResult.errors) {
+          const response = formatter.error('Invalid populate parameter', {
+            status: 400,
+            code: 'INVALID_POPULATE',
+            details: { errors: populateResult.errors }
+          });
+          return c.json(response, response._status);
+        }
+        populateIncludes = populateResult.includes;
+      }
 
       let item;
 
@@ -226,6 +362,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       if (!item) {
         const response = formatter.notFound(resourceName, id);
         return c.json(response, response._status);
+      }
+
+      if (populateIncludes && relationsPlugin) {
+        await relationsPlugin.populate(resource, item, populateIncludes);
       }
 
       // ✅ Generate ETag from record data

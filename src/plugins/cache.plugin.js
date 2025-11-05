@@ -183,6 +183,225 @@ export class CachePlugin extends Plugin {
     });
   }
 
+  createResourceCacheNamespace(resource, driver, computeCacheKey, instanceKey) {
+    const plugin = this;
+
+    const keyFor = async (action, { params = {}, partition, partitionValues } = {}) => {
+      return computeCacheKey({ action, params, partition, partitionValues });
+    };
+
+    const shouldStore = (value) => value !== undefined && value !== null;
+
+    const namespaceTarget = {
+      driver,
+      instanceKey,
+      driverName: driver?.constructor?.name || 'CacheDriver',
+      async keyFor(action, options = {}) {
+        return keyFor(action, options);
+      },
+      async resolve(action, options = {}) {
+        return keyFor(action, options);
+      },
+      getDriver() {
+        return driver;
+      },
+      async warm(options = {}) {
+        return plugin.warmCache(resource.name, options);
+      },
+      async warmItem(id, control = {}) {
+        if (!id) {
+          throw new CacheError('warmItem requires an id', {
+            resource: resource.name,
+            driver: driver?.constructor?.name
+          });
+        }
+
+        const { forceRefresh = false, returnData = false } = control;
+        let result;
+
+        if (forceRefresh) {
+          result = await resource.get(id, { skipCache: true });
+          if (shouldStore(result)) {
+            const key = await keyFor('get', { params: { id } });
+            await driver.set(key, result);
+          }
+        } else {
+          result = await resource.get(id);
+        }
+
+        return returnData ? result : undefined;
+      },
+      async warmMany(ids = [], control = {}) {
+        if (!Array.isArray(ids) || ids.length === 0) {
+          throw new CacheError('warmMany requires a non-empty array of ids', {
+            resource: resource.name,
+            driver: driver?.constructor?.name
+          });
+        }
+
+        const { forceRefresh = false, returnData = false } = control;
+        const options = forceRefresh ? { skipCache: true } : {};
+        const result = await resource.getMany(ids, options);
+
+        if (forceRefresh && shouldStore(result)) {
+          const key = await keyFor('getMany', { params: { ids } });
+          await driver.set(key, result);
+        }
+
+        return returnData ? result : undefined;
+      },
+      async warmList(listOptions = {}, control = {}) {
+        const { forceRefresh = false, returnData = false } = control;
+        const options = { ...(listOptions || {}) };
+        if (forceRefresh) {
+          options.skipCache = true;
+        }
+
+        const result = await resource.list(options);
+
+        if (forceRefresh && shouldStore(result)) {
+          const { partition, partitionValues } = options;
+          const key = await keyFor('list', { partition, partitionValues });
+          await driver.set(key, result);
+        }
+
+        return returnData ? result : undefined;
+      },
+      async warmPage(pageOptions = {}, control = {}) {
+        const { forceRefresh = false, returnData = false } = control;
+        const { offset = 0, size = 100, partition, partitionValues, ...rest } = pageOptions || {};
+        const options = { offset, size, partition, partitionValues, ...rest };
+        if (forceRefresh) {
+          options.skipCache = true;
+        }
+
+        const result = await resource.page(options);
+
+        if (forceRefresh && shouldStore(result)) {
+          const key = await keyFor('page', {
+            params: { offset, size },
+            partition,
+            partitionValues
+          });
+          await driver.set(key, result);
+        }
+
+        return returnData ? result : undefined;
+      },
+      async warmQuery(filter = {}, queryOptions = {}, control = {}) {
+        const { forceRefresh = false, returnData = false } = control;
+        const options = { ...(queryOptions || {}) };
+
+        if (forceRefresh) {
+          options.skipCache = true;
+        }
+
+        const result = await resource.query(filter, options);
+
+        if (forceRefresh && shouldStore(result)) {
+          const key = await keyFor('query', {
+            params: {
+              filter,
+              options: {
+                limit: options.limit,
+                offset: options.offset
+              }
+            },
+            partition: options.partition,
+            partitionValues: options.partitionValues
+          });
+          await driver.set(key, result);
+        }
+
+        return returnData ? result : undefined;
+      },
+      async warmCount(countOptions = {}, control = {}) {
+        const { forceRefresh = false, returnData = false } = control;
+        const options = { ...(countOptions || {}) };
+        if (forceRefresh) {
+          options.skipCache = true;
+        }
+
+        const result = await resource.count(options);
+
+        if (forceRefresh && shouldStore(result)) {
+          const { partition, partitionValues } = options;
+          const key = await keyFor('count', { partition, partitionValues });
+          await driver.set(key, result);
+        }
+
+        return returnData ? result : undefined;
+      },
+      async warmPartition(partitions = [], options = {}) {
+        if (typeof resource.warmPartitionCache !== 'function') {
+          throw new CacheError('Partition warming is only supported with partition-aware cache drivers', {
+            resource: resource.name,
+            driver: driver?.constructor?.name
+          });
+        }
+
+        return resource.warmPartitionCache(partitions, options);
+      },
+      async invalidate(scope) {
+        await plugin.clearCacheForResource(resource, scope);
+      },
+      async clearAll() {
+        const keyPrefix = `resource=${resource.name}`;
+        await driver.clear(keyPrefix);
+      },
+      stats() {
+        if (typeof driver.stats === 'function') {
+          return driver.stats();
+        }
+        if (typeof driver.getStats === 'function') {
+          return driver.getStats();
+        }
+        return { ...plugin.stats };
+      }
+    };
+
+    return new Proxy(namespaceTarget, {
+      get(target, prop, receiver) {
+        if (prop in target) {
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+
+        const value = driver[prop];
+        if (typeof value === 'function') {
+          return value.bind(driver);
+        }
+        return value;
+      },
+      set(target, prop, value) {
+        if (prop in target) {
+          target[prop] = value;
+          return true;
+        }
+        driver[prop] = value;
+        return true;
+      },
+      has(target, prop) {
+        return prop in target || prop in driver;
+      },
+      ownKeys(target) {
+        const targetKeys = Reflect.ownKeys(target);
+        const driverKeys = Reflect.ownKeys(driver);
+        return Array.from(new Set([...targetKeys, ...driverKeys]));
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        if (Reflect.has(target, prop)) {
+          return Object.getOwnPropertyDescriptor(target, prop);
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(driver, prop);
+        if (descriptor) {
+          descriptor.configurable = true;
+        }
+        return descriptor;
+      }
+    });
+  }
+
   async onStart() {
     // Plugin is ready
   }
@@ -298,9 +517,20 @@ export class CachePlugin extends Plugin {
     resource.cacheInstances = resource.cacheInstances || {};
     resource.cacheInstances[instanceKey] = driver;
 
+    const computeCacheKey = async (options = {}) => {
+      const { action, params = {}, partition, partitionValues } = options;
+      return this.generateCacheKey(resource, action, params, partition, partitionValues);
+    };
+
+    // Create cache namespace for this resource/driver pair
+    const cacheNamespace = this.createResourceCacheNamespace(resource, driver, computeCacheKey, instanceKey);
+
+    resource.cacheNamespaces = resource.cacheNamespaces || {};
+    resource.cacheNamespaces[instanceKey] = cacheNamespace;
+
     if (!Object.prototype.hasOwnProperty.call(resource, 'cache')) {
       Object.defineProperty(resource, 'cache', {
-        value: driver,
+        value: cacheNamespace,
         writable: true,
         configurable: true,
         enumerable: false
@@ -311,7 +541,8 @@ export class CachePlugin extends Plugin {
       Object.defineProperty(resource, 'getCacheDriver', {
         value: (name = null) => {
           if (!name) {
-            return resource.cache;
+            const defaultNamespace = resource.cache;
+            return defaultNamespace?.driver || resource.cacheInstances?.[instanceKey] || null;
           }
           return resource.cacheInstances?.[name] || null;
         },
@@ -320,10 +551,20 @@ export class CachePlugin extends Plugin {
         enumerable: false
       });
     }
-    const computeCacheKey = async (options = {}) => {
-      const { action, params = {}, partition, partitionValues } = options;
-      return this.generateCacheKey(resource, action, params, partition, partitionValues);
-    };
+
+    if (typeof resource.getCacheNamespace !== 'function') {
+      Object.defineProperty(resource, 'getCacheNamespace', {
+        value: (name = null) => {
+          if (!name) {
+            return resource.cache;
+          }
+          return resource.cacheNamespaces?.[name] || null;
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+    }
 
     resource.cacheKeyResolvers = resource.cacheKeyResolvers || {};
     resource.cacheKeyResolvers[instanceKey] = computeCacheKey;
