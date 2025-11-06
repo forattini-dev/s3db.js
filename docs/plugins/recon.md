@@ -58,7 +58,8 @@ const report = await reconPlugin.scan('example.com');
 
 1. [⚡ TLDR](#-tldr)
 2. [⚡ Quickstart](#-quickstart)
-3. [Usage Journey](#usage-journey)
+3. [📦 Dependencies](#-dependencies)
+4. [Usage Journey](#usage-journey)
    - [Level 1: Basic DNS Scan](#level-1-basic-dns-scan)
    - [Level 2: Add Port Scanning](#level-2-add-port-scanning)
    - [Level 3: Full Stack Recon](#level-3-full-stack-recon)
@@ -66,13 +67,13 @@ const report = await reconPlugin.scan('example.com');
    - [Level 5: Rate Limiting & Stealth Operations](#level-5-rate-limiting--stealth-operations)
    - [Level 6: Scheduled Monitoring](#level-6-scheduled-monitoring)
    - [Level 7: Production Setup with All Features](#level-7-production-setup-with-all-features)
-4. [📊 Configuration Reference](#-configuration-reference)
-5. [📚 Configuration Examples](#-configuration-examples)
-6. [🔧 API Reference](#-api-reference)
-7. [✅ Best Practices](#-best-practices)
-8. [🚨 Error Handling](#-error-handling)
-9. [🔗 See Also](#-see-also)
-10. [❓ FAQ](#-faq)
+5. [📊 Configuration Reference](#-configuration-reference)
+6. [📚 Configuration Examples](#-configuration-examples)
+7. [🔧 API Reference](#-api-reference)
+8. [✅ Best Practices](#-best-practices)
+9. [🚨 Error Handling](#-error-handling)
+10. [🔗 See Also](#-see-also)
+11. [❓ FAQ](#-faq)
 
 ---
 
@@ -118,6 +119,146 @@ const history = await reconPlugin.getArtifacts('dns', {
 
 await db.disconnect();
 ```
+
+---
+
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**NO Peer Dependencies!**
+
+ReconPlugin works out-of-the-box with **zero external dependencies**. All reconnaissance capabilities use:
+- ✅ Node.js built-in modules (`dns`, `net`, `tls`, `child_process`)
+- ✅ Core s3db.js functionality
+- ✅ No NPM packages required
+
+**System Tools (Optional - Enhanced Features):**
+
+While ReconPlugin works without any external tools, you can optionally install system-level reconnaissance tools for enhanced capabilities:
+
+**DNS & Network Tools:**
+```bash
+# DNS lookup (fallback to Node.js built-in dns if unavailable)
+apt-get install dnsutils  # Linux (dig, nslookup)
+brew install bind         # macOS (dig, nslookup)
+
+# Network scanning (optional for port scanning)
+apt-get install nmap      # Linux
+brew install nmap         # macOS
+```
+
+**Domain Intelligence:**
+```bash
+# WHOIS lookup (fallback to Node.js implementation)
+apt-get install whois     # Linux
+brew install whois        # macOS
+
+# Subdomain discovery (optional - passive only)
+go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+```
+
+**Tool Availability Detection:**
+
+ReconPlugin automatically detects available tools and gracefully degrades:
+
+```javascript
+// Example: Plugin detects which tools are available
+const plugin = new ReconPlugin();
+await db.usePlugin(plugin);
+
+// Scan works regardless of installed tools
+const report = await plugin.scan('example.com');
+
+console.log(report.toolsAvailable);
+// {
+//   dns: true,          // Always available (Node.js built-in)
+//   nmap: false,        // Not installed, skipped gracefully
+//   whois: true,        // System whois found
+//   subfinder: false    // Not installed, skipped
+// }
+```
+
+**Zero-Dependency Modes:**
+
+ReconPlugin has three operational modes based on tool availability:
+
+1. **Pure Node.js** (no system tools):
+   - DNS resolution (A, AAAA, MX, TXT records)
+   - TLS certificate inspection
+   - HTTP/HTTPS probing
+   - Latency measurements
+   - Service fingerprinting
+
+2. **Enhanced** (system tools like dig, whois):
+   - All Pure Node.js features
+   - Advanced DNS queries (DNSSEC, CAA, SPF)
+   - WHOIS domain registration data
+   - Deeper network analysis
+
+3. **Full Arsenal** (all tools including nmap, subfinder):
+   - All Enhanced features
+   - Comprehensive port scanning with service detection
+   - Passive subdomain discovery
+   - Vulnerability assessment
+
+**Recommended Installation for Full Features:**
+
+```bash
+# Core (required)
+pnpm install s3db.js
+
+# System tools (optional - Linux)
+apt-get update && apt-get install -y \
+  dnsutils \
+  nmap \
+  whois \
+  curl \
+  netcat
+
+# System tools (optional - macOS)
+brew install \
+  bind \
+  nmap \
+  whois
+
+# Subdomain discovery (optional)
+go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+```
+
+**Docker Environments:**
+
+Minimal Dockerfile for ReconPlugin:
+
+```dockerfile
+FROM node:20-slim
+
+# Core only (works with zero tools)
+WORKDIR /app
+RUN npm install -g pnpm
+RUN pnpm install s3db.js
+
+# Optional: Add system tools for enhanced features
+RUN apt-get update && apt-get install -y \
+    dnsutils \
+    nmap \
+    whois \
+    curl \
+    netcat \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+**Why No NPM Dependencies?**
+
+ReconPlugin avoids external NPM packages to:
+- ✅ Reduce attack surface (security tools need minimal dependencies)
+- ✅ Ensure reliability (no breaking changes from upstream packages)
+- ✅ Enable air-gapped environments (run completely offline)
+- ✅ Maximize portability (works on any Node.js environment)
+- ✅ Keep core s3db.js lightweight
 
 ---
 

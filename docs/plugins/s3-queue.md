@@ -35,8 +35,94 @@ await tasks.enqueue({ type: 'send-email', data: {...} });
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**NO Peer Dependencies!**
+
+S3QueuePlugin is **built into s3db.js core** with zero external dependencies!
+
+**Why Zero Dependencies?**
+
+- ✅ Pure JavaScript implementation (no external libraries)
+- ✅ Works instantly after installing s3db.js
+- ✅ No version conflicts or compatibility issues
+- ✅ Lightweight and fast (~20KB plugin code)
+- ✅ Perfect for serverless (AWS Lambda, Cloudflare Workers, Vercel)
+
+**What's Included:**
+
+- **Queue Management**: Enqueue, dequeue, visibility timeout, message lifecycle
+- **Worker Pool**: Configurable concurrent worker threads with graceful shutdown
+- **Distributed Locks**: ETag-based pessimistic locking for zero-duplication guarantee
+- **Dead Letter Queue**: Automatic failed message handling with retry logic
+- **Exponential Backoff**: Intelligent retry delays (2s → 4s → 8s → 16s → 32s)
+- **Event System**: Leverages s3db.js resource events for monitoring
+- **Cache Integration**: Uses CachePlugin for deduplication tracking (optional)
+
+**Architecture:**
+
+S3QueuePlugin uses s3db.js core primitives:
+- **Resources**: Queue and dead-letter resources auto-created
+- **Metadata**: Message status, retry count, visibility timeout stored in S3 metadata
+- **Partitions**: Status-based partitions for O(1) pending message lookup
+- **TTL**: Optional TTLPlugin integration for auto-cleanup of processed messages
+- **Locks**: PluginStorage with ETag validation for distributed locking
+
+**Minimum Node.js Version:** 18.x (for async/await, worker threads, native performance)
+
+**Platform Support:**
+- ✅ Node.js 18+ (server-side, recommended)
+- ✅ AWS Lambda (serverless functions)
+- ✅ Cloudflare Workers (edge computing)
+- ✅ Vercel Edge Functions
+- ⚠️ Browser (limited - no worker pool, single-threaded polling only)
+
+**Production Recommendations:**
+
+1. **Use TTLPlugin** for automatic cleanup of processed messages (prevent S3 bloat)
+2. **Configure worker pool size** based on your workload (default: 3 workers)
+3. **Set visibility timeout** appropriate for your task duration (default: 30s)
+4. **Enable cache** for deduplication tracking (CachePlugin recommended)
+5. **Monitor events** for queue health (`plg:queue:stats`, `plg:queue:error`)
+
+```javascript
+// Production-ready configuration
+import { Database, S3QueuePlugin, CachePlugin, TTLPlugin } from 's3db.js';
+
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+
+// Add cache for deduplication
+await db.usePlugin(new CachePlugin({ driver: 'memory', ttl: 3600000 }));
+
+// Add TTL for auto-cleanup (processed messages deleted after 7 days)
+await db.usePlugin(new TTLPlugin({ defaultTTL: 604800000 }));
+
+// Create queue
+const queue = new S3QueuePlugin({
+  resource: 'tasks',
+  workers: 5,              // 5 concurrent workers
+  visibilityTimeout: 300,  // 5 minutes per task
+  maxRetries: 3,           // Retry 3 times before DLQ
+  onMessage: async (task) => {
+    // Process task
+    console.log('Processing:', task);
+  }
+});
+
+await db.usePlugin(queue);
+await db.connect();
+```
+
+---
+
 ## 📖 Table of Contents
 
+- [📦 Dependencies](#-dependencies)
 - [🎯 What is S3Queue?](#-what-is-s3queue)
 - [✨ Key Features](#-key-features)
 - [🚀 Quick Start](#-quick-start)
@@ -2335,6 +2421,212 @@ A: Automatic exponential backoff: 1s, 2s, 4s, 8s, etc. up to max attempts.
 
 **Q: What's the difference from Queue Consumer Plugin?**
 A: Queue Consumer Plugin reads from external queues (SQS, RabbitMQ). S3Queue Plugin creates queues using S3DB.
+
+### Integration & Deployment
+
+**Q: Can I use S3Queue with multiple databases/buckets?**
+
+**A:** Yes! Create separate queue instances with different connection strings:
+
+```javascript
+// Queue 1: Production tasks
+const db1 = new Database({ connectionString: 's3://key:secret@prod-bucket' });
+const queue1 = new S3QueuePlugin({ resource: 'tasks', onMessage: handleTask });
+await db1.usePlugin(queue1);
+
+// Queue 2: Analytics jobs
+const db2 = new Database({ connectionString: 's3://key:secret@analytics-bucket' });
+const queue2 = new S3QueuePlugin({ resource: 'jobs', onMessage: handleJob });
+await db2.usePlugin(queue2);
+```
+
+**Q: How do I deploy S3Queue in AWS Lambda?**
+
+**A:** S3Queue works great in Lambda with a few considerations:
+
+```javascript
+// Lambda handler
+import { Database, S3QueuePlugin } from 's3db.js';
+
+// Initialize outside handler (reused across invocations)
+const db = new Database({ connectionString: process.env.S3DB_CONNECTION });
+const queue = new S3QueuePlugin({
+  resource: 'tasks',
+  workers: 1,              // Single worker in Lambda
+  pollInterval: 5000,      // Poll every 5 seconds
+  onMessage: async (task) => {
+    // Process task
+  }
+});
+await db.usePlugin(queue);
+await db.connect();
+
+export const handler = async (event) => {
+  // Queue automatically polls in background
+  // Or manually trigger: await queue.processNext();
+  return { statusCode: 200 };
+};
+```
+
+**Important Lambda considerations:**
+- Set `workers: 1` (Lambda is single-threaded)
+- Use environment variable for connection string
+- Increase Lambda timeout to match visibility timeout
+- Consider using EventBridge scheduled rule to trigger polling
+
+**Q: Can I monitor queue health in production?**
+
+**A:** Yes! Subscribe to queue events for monitoring:
+
+```javascript
+// Track queue statistics
+db.on('plg:queue:stats', ({ pending, processing, failed, dlq }) => {
+  console.log(`Queue health: ${pending} pending, ${processing} processing, ${failed} failed, ${dlq} in DLQ`);
+
+  // Send to monitoring service (Datadog, CloudWatch, etc.)
+  metrics.gauge('queue.pending', pending);
+  metrics.gauge('queue.processing', processing);
+  metrics.gauge('queue.dlq', dlq);
+});
+
+// Alert on errors
+db.on('plg:queue:error', ({ error, message }) => {
+  console.error('Queue error:', error);
+  alerts.notify(`Queue error: ${error.message}`);
+});
+
+// Track processing time
+db.on('plg:queue:message:complete', ({ message, duration }) => {
+  metrics.histogram('queue.processing_time', duration);
+});
+```
+
+**Q: How do I gracefully shutdown workers?**
+
+**A:** S3Queue provides automatic graceful shutdown:
+
+```javascript
+const queue = new S3QueuePlugin({
+  resource: 'tasks',
+  onMessage: async (task) => { /* process */ }
+});
+await db.usePlugin(queue);
+
+// Graceful shutdown on SIGTERM/SIGINT
+process.on('SIGTERM', async () => {
+  console.log('Shutting down gracefully...');
+
+  // 1. Stop accepting new messages
+  await queue.stop();
+
+  // 2. Wait for in-flight messages to complete (up to visibility timeout)
+  await queue.drain();
+
+  // 3. Disconnect database
+  await db.disconnect();
+
+  console.log('Shutdown complete');
+  process.exit(0);
+});
+```
+
+The `drain()` method waits for all in-flight messages to complete before returning.
+
+### Advanced Use Cases
+
+**Q: Can I implement priority queues?**
+
+**A:** Yes! Use multiple queues with different polling strategies:
+
+```javascript
+// High-priority queue (poll frequently)
+const highPriorityQueue = new S3QueuePlugin({
+  resource: 'high_priority_tasks',
+  pollInterval: 1000,      // Poll every 1 second
+  workers: 10,
+  onMessage: handleHighPriority
+});
+
+// Low-priority queue (poll less frequently)
+const lowPriorityQueue = new S3QueuePlugin({
+  resource: 'low_priority_tasks',
+  pollInterval: 30000,     // Poll every 30 seconds
+  workers: 2,
+  onMessage: handleLowPriority
+});
+
+await db.usePlugin(highPriorityQueue, 'high');
+await db.usePlugin(lowPriorityQueue, 'low');
+```
+
+Alternatively, add priority metadata and filter in the handler:
+
+```javascript
+await tasks.enqueue({ type: 'email', priority: 'high', ... });
+await tasks.enqueue({ type: 'report', priority: 'low', ... });
+
+const queue = new S3QueuePlugin({
+  resource: 'tasks',
+  onMessage: async (task) => {
+    if (task.priority === 'high') {
+      // Process immediately
+      await processHighPriority(task);
+    } else {
+      // Process in background
+      setTimeout(() => processLowPriority(task), 5000);
+    }
+  }
+});
+```
+
+**Q: How do I handle scheduled/delayed messages?**
+
+**A:** Use TTLPlugin or custom scheduling:
+
+```javascript
+// Option 1: Use TTL for delayed processing
+import { TTLPlugin } from 's3db.js/plugins';
+
+await db.usePlugin(new TTLPlugin());
+
+// Enqueue message with future visibility
+await tasks.insert({
+  type: 'send-reminder',
+  data: { userId: 123 },
+  status: 'scheduled',
+  visibleAt: Date.now() + (24 * 60 * 60 * 1000)  // 24 hours from now
+});
+
+// Queue polls only for visible messages
+const queue = new S3QueuePlugin({
+  resource: 'tasks',
+  onMessage: async (task) => {
+    if (Date.now() < task.visibleAt) {
+      return; // Not ready yet
+    }
+    await processTask(task);
+  }
+});
+
+// Option 2: Use partitions for scheduled messages
+const tasks = await db.createResource({
+  name: 'tasks',
+  attributes: {
+    type: 'string|required',
+    status: 'string|required',
+    scheduledFor: 'number'
+  },
+  partitions: {
+    byStatus: { fields: { status: 'string' } }
+  }
+});
+
+// Query only scheduled messages that are ready
+const ready = await tasks.query({
+  status: 'scheduled',
+  scheduledFor: { $lte: Date.now() }
+});
+```
 
 ---
 

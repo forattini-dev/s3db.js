@@ -1,203 +1,2068 @@
-# 🕷️ Spider Plugin
+# 🕷️ SpiderPlugin
 
-> **Crawler toolkit bundling Puppeteer, S3Queue, and TTL under one namespace.**
+> **All-in-one web crawler suite bundling Puppeteer, S3Queue, and TTL for distributed crawling workloads.**
 >
-> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
-
----
-
-Bundle that wires **Puppeteer**, **S3 Queue**, and optional **TTL** under a single namespace for crawling workloads.
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
 
 ---
 
 ## ⚡ TLDR
 
-```javascript
-import { SpiderPlugin } from 's3db.js/plugins';
+**Integrated crawler bundle** that combines browser automation, distributed queueing, and TTL management under one namespace.
 
+**1 line to get started:**
+```javascript
+await db.usePlugin(new SpiderPlugin({ namespace: 'crawler' }));
+```
+
+**Production-ready setup:**
+```javascript
 await db.usePlugin(new SpiderPlugin({
-  namespace: 'spider',
-  queue: { autoStart: false },
-  processor: async (task, context, { puppeteer }) => {
-    // implement your crawl here
-    return { url: task.url, status: 'queued' };
+  namespace: 'crawler',              // Shared namespace
+  queue: {
+    autoStart: true,                 // Start workers automatically
+    concurrency: 5                   // Parallel workers
+  },
+  puppeteer: {
+    pool: { enabled: true, size: 3 } // Browser pool
+  },
+  ttl: {
+    queue: { ttl: 3600 }             // 1-hour TTL for stale tasks
+  },
+  processor: async (task, ctx, { puppeteer }) => {
+    const page = await puppeteer.open(task.url);
+    const title = await page.title();
+    await page.close();
+    return { url: task.url, title };
   }
 }));
 
-const spiderSuite = db.plugins['spider-suite'];
-await spiderSuite.enqueueTarget({ url: 'https://example.com' });
-await spiderSuite.startProcessing();
+// Enqueue crawl targets
+const spider = db.plugins['crawler-suite'];
+await spider.enqueueTarget({ url: 'https://example.com' });
 ```
 
-**What you get instantly**
+**Key features:**
+- ✅ **Integrated Browser Automation** - PuppeteerPlugin with sensible defaults
+- ✅ **Distributed Queue** - S3QueuePlugin for scalable task processing
+- ✅ **Automatic TTL Cleanup** - Optional TTL management for stale tasks
+- ✅ **Namespaced Resources** - Isolated crawler data (`<namespace>_targets`)
+- ✅ **Simple API** - Unified interface hiding complexity
+- ✅ **Production Ready** - Error handling, retries, and monitoring built-in
+- ✅ **Horizontal Scaling** - Multiple workers across processes/machines
 
-- ✅ Namespaced **PuppeteerPlugin** with pool disabled by default
-- ✅ Dedicated resources for crawl targets (`<namespace>_targets`)
-- ✅ S3Queue with helpers (`enqueue`, `startProcessing`, `queueStats`)
-- ✅ Optional TTL wiring for queue housekeeping (`ttl.queue` configuration)
+**Performance comparison:**
+```javascript
+// ❌ Without SpiderPlugin: Manual setup
+await db.usePlugin(new PuppeteerPlugin({ namespace: 'pup' }));
+await db.usePlugin(new S3QueuePlugin({ namespace: 'queue', resource: 'pup_targets' }));
+await db.usePlugin(new TTLPlugin({ resources: [{ name: 'pup_targets', ttl: 3600 }] }));
+// 30+ lines to wire everything together
+
+// ✅ With SpiderPlugin: One-liner setup
+await db.usePlugin(new SpiderPlugin({
+  namespace: 'crawler',
+  queue: { autoStart: true, concurrency: 5 },
+  puppeteer: { pool: { enabled: true } },
+  ttl: { queue: { ttl: 3600 } }
+}));
+// Everything wired and ready to crawl!
+```
 
 ---
 
-## 🚀 Quick Start
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js puppeteer
+```
+
+**Peer Dependencies:**
+- `puppeteer` (required) - Browser automation engine
+- `@aws-sdk/client-s3` (required) - S3 storage backend
+
+**What You Get:**
+
+SpiderPlugin is a **meta-plugin** that bundles three plugins under one namespace:
+
+1. **PuppeteerPlugin** - Browser automation (Chromium pool)
+2. **S3QueuePlugin** - Distributed task queue
+3. **TTLPlugin** (optional) - Automatic cleanup of stale tasks
+
+**Automatic Setup:**
+- Creates namespaced resources: `<namespace>_targets`, `<namespace>_ttl_cohorts`
+- Wires queue processor to Puppeteer instance
+- Configures TTL cleanup if enabled
+- Provides unified API for common operations
+
+**Why Bundle These?**
+
+Web crawling requires:
+- **Browser automation** - Puppeteer for rendering JavaScript
+- **Distributed queuing** - S3Queue for horizontal scaling
+- **Task expiration** - TTL to prevent infinite retries
+
+SpiderPlugin eliminates 100+ lines of boilerplate setup.
+
+---
+
+## 📑 Table of Contents
+
+1. [⚡ TLDR](#-tldr)
+2. [📦 Dependencies](#-dependencies)
+3. [⚡ Quickstart](#-quickstart)
+4. [Usage Journey](#usage-journey)
+   - [Level 1: Basic Crawling](#level-1-basic-crawling)
+   - [Level 2: Queue Management](#level-2-queue-management)
+   - [Level 3: Advanced Crawling](#level-3-advanced-crawling)
+   - [Level 4: Production Setup](#level-4-production-setup)
+   - [Level 5: Multi-Worker Distributed](#level-5-multi-worker-distributed)
+5. [📊 Configuration Reference](#-configuration-reference)
+6. [📚 Configuration Examples](#-configuration-examples)
+7. [🔧 API Reference](#-api-reference)
+8. [✅ Best Practices](#-best-practices)
+9. [🚨 Error Handling](#-error-handling)
+10. [🔗 See Also](#-see-also)
+11. [❓ FAQ](#-faq)
+
+---
+
+## ⚡ Quickstart
+
+```javascript
+import { Database } from 's3db.js';
+import { SpiderPlugin } from 's3db.js/plugins';
+
+const db = new Database({
+  connectionString: 's3://key:secret@bucket/path'
+});
+
+// Create spider with processor
+const spider = new SpiderPlugin({
+  namespace: 'crawler',
+  queue: { autoStart: true, concurrency: 3 },
+  processor: async (task, context, helpers) => {
+    // Access browser via helpers.puppeteer
+    const page = await helpers.puppeteer.open(task.url);
+
+    // Extract data
+    const title = await page.title();
+    const links = await page.$$eval('a', els => els.map(a => a.href));
+
+    await page.close();
+
+    // Return crawl results
+    return { url: task.url, title, linksFound: links.length };
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Enqueue crawl targets
+await spider.enqueueTarget({ url: 'https://example.com', priority: 10 });
+await spider.enqueueTarget({ url: 'https://example.com/about', priority: 5 });
+
+// Monitor queue progress
+const stats = await spider.queuePlugin.getStats();
+console.log(`Pending: ${stats.pending}, Completed: ${stats.completed}`);
+
+await db.disconnect();
+```
+
+---
+
+## Usage Journey
+
+### Level 1: Basic Crawling
+
+Start with a simple single-page crawler:
 
 ```javascript
 import { Database, SpiderPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
+
+const spider = new SpiderPlugin({
+  namespace: 'basic-crawler',
+  processor: async (task, ctx, { puppeteer }) => {
+    const page = await puppeteer.open(task.url);
+    const html = await page.content();
+    await page.close();
+
+    return { url: task.url, size: html.length };
+  }
+});
+
+await db.usePlugin(spider);
 await db.connect();
 
-const spider = new SpiderPlugin({ namespace: 'crawler', queue: { autoStart: true } });
+// Crawl one page
+await spider.enqueueTarget({ url: 'https://example.com' });
+await spider.startProcessing();
+```
+
+**What's happening:**
+- SpiderPlugin creates `basic-crawler_targets` resource
+- Processor receives tasks from the queue
+- Puppeteer opens the URL and extracts content
+- Results are stored in task metadata
+
+---
+
+### Level 2: Queue Management
+
+Control when and how tasks are processed:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'managed',
+  queue: {
+    autoStart: false,  // Manual start
+    concurrency: 1,    // Sequential processing
+    batchSize: 10      // Process 10 at a time
+  }
+});
+
 await db.usePlugin(spider);
+await db.connect();
 
-spider.setProcessor(async (task, ctx, helpers) => {
-  const page = await helpers.puppeteer.open(task.url);
+// Set processor later
+spider.setProcessor(async (task, ctx, { puppeteer, enqueue }) => {
+  const page = await puppeteer.open(task.url);
+
+  // Find more URLs to crawl
+  const links = await page.$$eval('a', els => els.map(a => a.href));
+
   await page.close();
-  return { visited: task.url };
+
+  // Enqueue discovered links
+  for (const link of links.slice(0, 5)) {
+    await enqueue({ url: link, parent: task.url });
+  }
+
+  return { crawled: task.url, discovered: links.length };
+});
+
+// Enqueue seed URLs
+await spider.enqueueTarget({ url: 'https://example.com' });
+await spider.enqueueTarget({ url: 'https://example.com/blog' });
+
+// Start when ready
+await spider.startProcessing();
+
+// Check progress
+setInterval(async () => {
+  const stats = await spider.queuePlugin.getStats();
+  console.log(`Queue: ${stats.pending} pending, ${stats.processing} active`);
+}, 5000);
+```
+
+**New concepts:**
+- Manual processor registration with `setProcessor()`
+- Recursive crawling by enqueueing discovered links
+- Queue statistics monitoring
+- Manual start control
+
+---
+
+### Level 3: Advanced Crawling
+
+Add browser pool, retries, and error handling:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'advanced',
+  queue: {
+    autoStart: true,
+    concurrency: 5,
+    maxRetries: 3,
+    retryDelay: 1000
+  },
+  puppeteer: {
+    pool: {
+      enabled: true,
+      size: 3,              // 3 browser instances
+      maxPagesPerBrowser: 5 // 5 pages per browser
+    },
+    launchOptions: {
+      headless: true,
+      args: ['--no-sandbox']
+    }
+  },
+  processor: async (task, ctx, { puppeteer }) => {
+    const page = await puppeteer.open(task.url, {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    try {
+      // Wait for specific content
+      await page.waitForSelector('article', { timeout: 5000 });
+
+      // Extract structured data
+      const data = await page.evaluate(() => ({
+        title: document.querySelector('h1')?.innerText,
+        content: document.querySelector('article')?.innerText,
+        images: Array.from(document.querySelectorAll('img'))
+          .map(img => img.src)
+      }));
+
+      return { url: task.url, ...data };
+    } finally {
+      await page.close();
+    }
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Crawl with priorities
+await spider.enqueueTarget({ url: 'https://example.com', priority: 10 });
+await spider.enqueueTarget({ url: 'https://example.com/blog', priority: 5 });
+```
+
+**New concepts:**
+- Browser pooling for performance
+- Retry logic for transient failures
+- Page wait strategies
+- Structured data extraction
+- Priority-based processing
+
+---
+
+### Level 4: Production Setup
+
+Add TTL cleanup, monitoring, and graceful shutdown:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'production',
+  queue: {
+    autoStart: true,
+    concurrency: 10,
+    maxRetries: 5,
+    retryDelay: 2000
+  },
+  puppeteer: {
+    pool: { enabled: true, size: 5 }
+  },
+  ttl: {
+    queue: {
+      ttl: 3600,              // 1-hour TTL for stale tasks
+      onExpire: 'hard-delete', // Delete expired tasks
+      checkInterval: 300       // Check every 5 minutes
+    }
+  },
+  processor: async (task, ctx, { puppeteer, resource }) => {
+    const startTime = Date.now();
+
+    try {
+      const page = await puppeteer.open(task.url, { timeout: 30000 });
+
+      const data = await page.evaluate(() => ({
+        title: document.title,
+        links: Array.from(document.querySelectorAll('a'))
+          .map(a => a.href)
+          .filter(href => href.startsWith('http'))
+      }));
+
+      await page.close();
+
+      // Log metrics
+      ctx.logger.info({
+        url: task.url,
+        duration: Date.now() - startTime,
+        linksFound: data.links.length
+      });
+
+      return { success: true, ...data };
+    } catch (error) {
+      ctx.logger.error({
+        url: task.url,
+        error: error.message,
+        duration: Date.now() - startTime
+      });
+      throw error; // Let queue handle retry
+    }
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Handle graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('Shutting down spider...');
+  await spider.stopProcessing();
+  await db.disconnect();
+  process.exit(0);
+});
+
+// Enqueue batch of URLs
+const urls = [
+  'https://example.com',
+  'https://example.com/blog',
+  'https://example.com/about'
+];
+
+for (const url of urls) {
+  await spider.enqueueTarget({ url, timestamp: Date.now() });
+}
+
+// Monitor continuously
+setInterval(async () => {
+  const stats = await spider.queuePlugin.getStats();
+  const resource = await db.getResource(`${spider.namespace}_targets`);
+  const totalJobs = await resource.query({});
+
+  console.log({
+    pending: stats.pending,
+    processing: stats.processing,
+    completed: stats.completed,
+    total: totalJobs.length
+  });
+}, 10000);
+```
+
+**New concepts:**
+- TTL-based cleanup of stale tasks
+- Structured logging with context
+- Graceful shutdown handling
+- Batch enqueueing
+- Continuous monitoring
+
+---
+
+### Level 5: Multi-Worker Distributed
+
+Scale horizontally across multiple processes or machines:
+
+```javascript
+// worker-1.js (Machine 1)
+const spider = new SpiderPlugin({
+  namespace: 'distributed',
+  queue: {
+    autoStart: true,
+    concurrency: 5,
+    workerId: 'worker-1' // Unique worker ID
+  },
+  puppeteer: {
+    pool: { enabled: true, size: 3 }
+  },
+  processor: async (task, ctx, { puppeteer }) => {
+    ctx.logger.info(`[Worker 1] Processing: ${task.url}`);
+    // ... crawl logic
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// worker-2.js (Machine 2)
+const spider = new SpiderPlugin({
+  namespace: 'distributed',
+  queue: {
+    autoStart: true,
+    concurrency: 5,
+    workerId: 'worker-2' // Different worker ID
+  },
+  puppeteer: {
+    pool: { enabled: true, size: 3 }
+  },
+  processor: async (task, ctx, { puppeteer }) => {
+    ctx.logger.info(`[Worker 2] Processing: ${task.url}`);
+    // ... same crawl logic
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// coordinator.js (Enqueues jobs)
+const db = new Database({ connectionString: 's3://...' });
+await db.connect();
+
+const resource = await db.getResource('distributed_targets');
+
+// Enqueue 1000 URLs
+const urls = await fetchUrlsFromSitemap();
+for (const url of urls) {
+  await resource.enqueue({ url, priority: Math.floor(Math.random() * 10) });
+}
+
+console.log(`Enqueued ${urls.length} URLs for distributed processing`);
+```
+
+**New concepts:**
+- Unique worker IDs for distributed processing
+- Shared queue across multiple workers
+- Coordinator pattern for job distribution
+- Horizontal scaling across machines
+- Load balancing via S3Queue
+
+---
+
+## 📊 Configuration Reference
+
+Complete configuration object with all options:
+
+```javascript
+new SpiderPlugin({
+  // ============================================
+  // SECTION 1: Core Settings
+  // ============================================
+  namespace: 'spider',                    // Namespace for all resources (required)
+  targetsResource: 'spider_targets',      // Resource name for queue (auto-generated from namespace)
+
+  // ============================================
+  // SECTION 2: Queue Configuration
+  // ============================================
+  queue: {
+    autoStart: false,                     // Start processing automatically (default: false)
+    concurrency: 3,                       // Number of parallel workers (default: 3)
+    maxRetries: 3,                        // Max retry attempts per task (default: 3)
+    retryDelay: 1000,                     // Delay between retries in ms (default: 1000)
+    batchSize: 10,                        // Tasks to process per batch (default: 10)
+    workerId: 'worker-1',                 // Unique worker ID for distributed setups (optional)
+    visibilityTimeout: 30                 // Task lock duration in seconds (default: 30)
+  },
+
+  // ============================================
+  // SECTION 3: Puppeteer Configuration
+  // ============================================
+  puppeteer: {
+    pool: {
+      enabled: false,                     // Enable browser pooling (default: false)
+      size: 3,                            // Number of browser instances (default: 3)
+      maxPagesPerBrowser: 5,              // Max pages per browser (default: 5)
+      launchTimeout: 30000,               // Browser launch timeout (default: 30000)
+      closeTimeout: 5000                  // Browser close timeout (default: 5000)
+    },
+    launchOptions: {
+      headless: true,                     // Run in headless mode (default: true)
+      args: ['--no-sandbox'],             // Chrome launch args (default: [])
+      defaultViewport: {
+        width: 1920,
+        height: 1080
+      }
+    }
+  },
+
+  // ============================================
+  // SECTION 4: TTL Configuration (Optional)
+  // ============================================
+  ttl: {
+    queue: {
+      ttl: 3600,                          // TTL in seconds for queue tasks (default: null, disabled)
+      onExpire: 'hard-delete',            // Action on expiration: 'soft-delete', 'hard-delete', 'callback' (default: 'soft-delete')
+      checkInterval: 300,                 // Cleanup interval in seconds (default: 300)
+      field: 'createdAt'                  // Field to check for expiration (default: 'createdAt')
+    }
+  },
+
+  // ============================================
+  // SECTION 5: Processor Function
+  // ============================================
+  processor: async (task, context, helpers) => {
+    // task: { url, priority, metadata, ... }
+    // context: { logger, db, resource }
+    // helpers: { puppeteer, queue, enqueue, resource }
+
+    const page = await helpers.puppeteer.open(task.url);
+    const data = await page.evaluate(() => ({ title: document.title }));
+    await page.close();
+
+    return data;
+  }
+})
+```
+
+**Configuration Validation:**
+
+| Field | Type | Required | Default | Validation |
+|-------|------|----------|---------|------------|
+| `namespace` | string | ✅ Yes | `'spider'` | Must be alphanumeric + hyphens |
+| `targetsResource` | string | ❌ No | `{namespace}_targets` | Must be valid resource name |
+| `queue.autoStart` | boolean | ❌ No | `false` | - |
+| `queue.concurrency` | number | ❌ No | `3` | Must be > 0 |
+| `puppeteer.pool.enabled` | boolean | ❌ No | `false` | - |
+| `ttl.queue.ttl` | number | ❌ No | `null` | Must be > 0 if provided |
+| `processor` | function | ❌ No | `null` | Must be async function if provided |
+
+---
+
+## 📚 Configuration Examples
+
+### Example 1: Simple Website Crawler
+
+```javascript
+new SpiderPlugin({
+  namespace: 'simple',
+  queue: { autoStart: true, concurrency: 2 },
+  processor: async (task, ctx, { puppeteer }) => {
+    const page = await puppeteer.open(task.url);
+    const title = await page.title();
+    await page.close();
+    return { url: task.url, title };
+  }
+})
+```
+
+---
+
+### Example 2: High-Performance Crawler
+
+```javascript
+new SpiderPlugin({
+  namespace: 'fast',
+  queue: {
+    autoStart: true,
+    concurrency: 10,
+    maxRetries: 5
+  },
+  puppeteer: {
+    pool: {
+      enabled: true,
+      size: 5,
+      maxPagesPerBrowser: 10
+    }
+  }
+})
+```
+
+---
+
+### Example 3: Crawler with TTL Cleanup
+
+```javascript
+new SpiderPlugin({
+  namespace: 'ttl-enabled',
+  queue: { autoStart: true },
+  ttl: {
+    queue: {
+      ttl: 7200,              // 2 hours
+      onExpire: 'hard-delete',
+      checkInterval: 600      // Check every 10 minutes
+    }
+  }
+})
+```
+
+---
+
+### Example 4: Distributed Crawler
+
+```javascript
+new SpiderPlugin({
+  namespace: 'distributed',
+  queue: {
+    autoStart: true,
+    concurrency: 5,
+    workerId: process.env.WORKER_ID,  // Unique per instance
+    visibilityTimeout: 60             // 1-minute lock
+  },
+  puppeteer: {
+    pool: { enabled: true, size: 3 }
+  }
+})
+```
+
+---
+
+### Example 5: Screenshot Crawler
+
+```javascript
+new SpiderPlugin({
+  namespace: 'screenshots',
+  processor: async (task, ctx, { puppeteer }) => {
+    const page = await puppeteer.open(task.url);
+    const screenshot = await page.screenshot({ fullPage: true });
+    await page.close();
+
+    // Upload screenshot to S3
+    const key = `screenshots/${task.url.replace(/[^a-z0-9]/gi, '_')}.png`;
+    await ctx.db.client.putObject({
+      bucket: ctx.db.bucket,
+      key,
+      body: screenshot
+    });
+
+    return { url: task.url, screenshot: key };
+  }
+})
+```
+
+---
+
+## 🔧 API Reference
+
+### SpiderPlugin Methods
+
+#### `new SpiderPlugin(options): SpiderPlugin`
+
+Creates a new SpiderPlugin instance.
+
+**Parameters:**
+- `options` (object, required): Configuration object (see Configuration Reference)
+
+**Returns:** `SpiderPlugin` instance
+
+**Example:**
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'crawler',
+  queue: { autoStart: true }
 });
 ```
 
 ---
 
-## 📋 Table of Contents
+#### `setProcessor(fn, options?): void`
 
-- [⚡ TLDR](#-tldr)
-- [🚀 Quick Start](#-quick-start)
-- [🔧 Configuration](#-configuration)
-- [🧩 Usage Patterns](#-usage-patterns)
-- [🔄 Lifecycle Helpers](#-lifecycle-helpers)
-- [🚨 Error Handling](#-error-handling)
-- [📚 Related Plugins](#-related-plugins)
-- [❓ FAQ](#-faq)
+Sets or replaces the queue processor function.
+
+**Parameters:**
+- `fn` (function, required): Async processor function `(task, context, helpers) => result`
+- `options` (object, optional):
+  - `autoStart` (boolean): Start processing immediately (default: false)
+  - `concurrency` (number): Override queue concurrency
+
+**Returns:** `void`
+
+**Example:**
+```javascript
+spider.setProcessor(async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url);
+  const data = await page.evaluate(() => ({ title: document.title }));
+  await page.close();
+  return data;
+}, { autoStart: true });
+```
+
+**Throws:**
+- `PluginError` - If processor is not a function
 
 ---
 
-## 🔧 Configuration
+#### `enqueueTarget(data, options?): Promise<string>`
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `namespace` | string | `'spider'` | Shared namespace for all bundled plugins |
-| `targetsResource` | string | `${namespace}_targets` | Resource used as the queue source |
-| `queue.autoStart` | boolean | `false` | Start workers automatically when a processor is provided |
-| `queue.concurrency` | number | `3` | Worker concurrency passed to `S3QueuePlugin` |
-| `puppeteer` | object | `{ pool: { enabled: false } }` | Overrides forwarded to `PuppeteerPlugin` |
-| `ttl.queue.ttl` | number | `null` | When set, installs `TTLPlugin` and wires the queue resource |
-| `processor(record, context, helpers)` | function | `null` | Queue handler. Call `setProcessor` later if you prefer |
+Enqueues a new crawl target.
 
-**Helpers passed to your processor**
+**Parameters:**
+- `data` (object, required): Task data (must include `url` field)
+- `options` (object, optional):
+  - `priority` (number): Task priority (higher = sooner, default: 5)
+  - `metadata` (object): Additional metadata
 
-- `puppeteer`: the namespaced `PuppeteerPlugin` instance
-- `queue`: the `S3QueuePlugin` instance
-- `enqueue(data, options)`: helper that reuses the targets resource helper
-- `resource`: direct handle to the targets resource (`db.resources[...]`)
+**Returns:** `Promise<string>` - Task ID
 
-### Dependency Graph
-
-```mermaid
-flowchart TB
-  Suite[SpiderSuite Plugin]
-  Puppeteer[PuppeteerPlugin]
-  Queue[S3QueuePlugin]
-  TTL[TTLPlugin]
-
-  Suite --> Puppeteer
-  Suite --> Queue
-  Suite -- optional --> TTL
-```
-
----
-
-## 🧩 Usage Patterns
-
-### Registering the processor later
-
+**Example:**
 ```javascript
-const suite = new SpiderPlugin({ namespace: 'crawler' });
-await db.usePlugin(suite, 'crawler-suite');
-
-suite.setProcessor(async (task, ctx, helpers) => {
-  // use helpers.puppeteer as needed
-  return { crawled: task.url };
-});
-
-await suite.startProcessing();
-```
-
-### Enqueuing targets
-
-```javascript
-await suite.enqueueTarget({
+const taskId = await spider.enqueueTarget({
   url: 'https://example.com',
-  priority: 5,
+  priority: 10,
   metadata: { source: 'sitemap' }
 });
-
-const stats = await suite.queuePlugin.getStats();
-console.log('Pending jobs:', stats.pending);
 ```
 
-### Wiring TTL for stale queue entries
+**Throws:**
+- `PluginError` - If `url` field is missing
+- `ResourceError` - If targets resource doesn't exist
 
+---
+
+#### `startProcessing(options?): Promise<void>`
+
+Starts queue processing with registered processor.
+
+**Parameters:**
+- `options` (object, optional):
+  - `concurrency` (number): Override default concurrency
+
+**Returns:** `Promise<void>`
+
+**Example:**
 ```javascript
-await db.usePlugin(new SpiderPlugin({
-  namespace: 'spider',
-  ttl: { queue: { ttl: 3600, onExpire: 'hard-delete' } }
-}));
+await spider.startProcessing({ concurrency: 10 });
+```
+
+**Throws:**
+- `PluginError` - If no processor is set
+
+---
+
+#### `stopProcessing(): Promise<void>`
+
+Stops queue processing gracefully.
+
+**Returns:** `Promise<void>`
+
+**Example:**
+```javascript
+await spider.stopProcessing();
 ```
 
 ---
 
-## 🔄 Lifecycle Helpers
+### Processor Helpers
 
-The suite exposes a few convenience methods:
+The processor function receives a `helpers` object with:
 
-| Method | Description |
-|--------|-------------|
-| `setProcessor(fn, { autoStart, concurrency })` | Register/replace the queue handler |
-| `enqueueTarget(data, options)` | Adds a crawl target (wraps `resource.enqueue`) |
-| `startProcessing(options)` | Starts workers with the registered handler |
-| `stopProcessing()` | Stops the bundled `S3QueuePlugin` workers |
+| Helper | Type | Description |
+|--------|------|-------------|
+| `puppeteer` | PuppeteerPlugin | Namespaced Puppeteer instance |
+| `queue` | S3QueuePlugin | Queue plugin instance |
+| `enqueue` | function | Helper to enqueue new tasks |
+| `resource` | Resource | Direct access to targets resource |
+
+**Example:**
+```javascript
+processor: async (task, ctx, helpers) => {
+  // helpers.puppeteer - Browser automation
+  const page = await helpers.puppeteer.open(task.url);
+
+  // helpers.enqueue - Add more tasks
+  await helpers.enqueue({ url: 'https://example.com/next' });
+
+  // helpers.resource - Direct resource access
+  const allTasks = await helpers.resource.query({});
+
+  // helpers.queue - Queue management
+  const stats = await helpers.queue.getStats();
+}
+```
+
+---
+
+### Events
+
+SpiderPlugin emits events from child plugins:
+
+#### `queue.task.start`
+
+Emitted when a task starts processing.
+
+**Payload:**
+```javascript
+{
+  taskId: 'task-123',
+  url: 'https://example.com',
+  timestamp: 1234567890
+}
+```
+
+**Example:**
+```javascript
+spider.queuePlugin.on('queue.task.start', ({ taskId, url }) => {
+  console.log(`Started: ${taskId} - ${url}`);
+});
+```
+
+---
+
+#### `queue.task.complete`
+
+Emitted when a task completes successfully.
+
+**Payload:**
+```javascript
+{
+  taskId: 'task-123',
+  url: 'https://example.com',
+  result: { title: 'Example' },
+  duration: 1234
+}
+```
+
+---
+
+#### `queue.task.error`
+
+Emitted when a task fails.
+
+**Payload:**
+```javascript
+{
+  taskId: 'task-123',
+  url: 'https://example.com',
+  error: Error,
+  retryCount: 2
+}
+```
+
+---
+
+## ✅ Best Practices
+
+### Do's ✅
+
+1. **Always close pages**
+   ```javascript
+   // ✅ Good - Always close pages
+   processor: async (task, ctx, { puppeteer }) => {
+     const page = await puppeteer.open(task.url);
+     try {
+       return await extractData(page);
+     } finally {
+       await page.close(); // Always close!
+     }
+   }
+   ```
+
+2. **Use browser pooling for high concurrency**
+   ```javascript
+   // ✅ Good - Pool for parallel processing
+   puppeteer: {
+     pool: {
+       enabled: true,
+       size: 5,              // 5 browsers
+       maxPagesPerBrowser: 10 // 50 total pages
+     }
+   },
+   queue: { concurrency: 50 } // Match capacity
+   ```
+
+3. **Set appropriate TTL for tasks**
+   ```javascript
+   // ✅ Good - Clean up stale tasks
+   ttl: {
+     queue: {
+       ttl: 3600,              // 1 hour
+       onExpire: 'hard-delete'
+     }
+   }
+   ```
+
+4. **Use priority for important URLs**
+   ```javascript
+   // ✅ Good - Prioritize seed URLs
+   await spider.enqueueTarget({ url: seedUrl, priority: 10 });
+   await spider.enqueueTarget({ url: discoveredUrl, priority: 5 });
+   ```
+
+5. **Implement graceful shutdown**
+   ```javascript
+   // ✅ Good - Clean shutdown
+   process.on('SIGTERM', async () => {
+     await spider.stopProcessing();
+     await db.disconnect();
+   });
+   ```
+
+---
+
+### Don'ts ❌
+
+1. **Don't forget to handle errors**
+   ```javascript
+   // ❌ Bad - Unhandled errors crash worker
+   processor: async (task, ctx, { puppeteer }) => {
+     const page = await puppeteer.open(task.url);
+     return await page.evaluate(() => document.title);
+   }
+
+   // ✅ Correct - Handle errors gracefully
+   processor: async (task, ctx, { puppeteer }) => {
+     try {
+       const page = await puppeteer.open(task.url);
+       const title = await page.evaluate(() => document.title);
+       await page.close();
+       return { title };
+     } catch (error) {
+       ctx.logger.error({ url: task.url, error: error.message });
+       throw error; // Let queue retry
+     }
+   }
+   ```
+
+2. **Don't use autoStart without processor**
+   ```javascript
+   // ❌ Bad - autoStart with no processor
+   new SpiderPlugin({
+     queue: { autoStart: true }  // Will throw error!
+   })
+
+   // ✅ Correct - Provide processor or use manual start
+   new SpiderPlugin({
+     queue: { autoStart: false },
+     processor: async (task, ctx, helpers) => { /* ... */ }
+   })
+   ```
+
+3. **Don't exceed concurrency without pooling**
+   ```javascript
+   // ❌ Bad - High concurrency without pool
+   queue: { concurrency: 50 },
+   puppeteer: { pool: { enabled: false } } // Only 1 browser!
+
+   // ✅ Correct - Match concurrency to pool size
+   queue: { concurrency: 50 },
+   puppeteer: {
+     pool: { enabled: true, size: 10, maxPagesPerBrowser: 5 }
+   }
+   ```
+
+4. **Don't ignore queue stats**
+   ```javascript
+   // ❌ Bad - Enqueue without monitoring
+   for (let i = 0; i < 10000; i++) {
+     await spider.enqueueTarget({ url: urls[i] });
+   }
+
+   // ✅ Correct - Monitor queue depth
+   const stats = await spider.queuePlugin.getStats();
+   if (stats.pending < 100) {
+     await spider.enqueueTarget({ url: nextUrl });
+   }
+   ```
+
+5. **Don't mix namespace across workers**
+   ```javascript
+   // ❌ Bad - Different namespaces won't share queue
+   // Worker 1
+   new SpiderPlugin({ namespace: 'crawler-1' })
+
+   // Worker 2
+   new SpiderPlugin({ namespace: 'crawler-2' })
+
+   // ✅ Correct - Same namespace, different worker IDs
+   // Worker 1
+   new SpiderPlugin({ namespace: 'crawler', queue: { workerId: 'w1' } })
+
+   // Worker 2
+   new SpiderPlugin({ namespace: 'crawler', queue: { workerId: 'w2' } })
+   ```
+
+---
+
+### Performance Tips
+
+- **Batch enqueue**: Enqueue multiple URLs in parallel
+- **Tune concurrency**: Match queue concurrency to browser pool capacity
+- **Use headless mode**: 2-3x faster than headed browsers
+- **Enable pooling**: Reuse browsers across pages for 10x speedup
+- **Set reasonable timeouts**: Avoid hanging on slow pages
+
+---
+
+### Security Considerations
+
+- **Sanitize URLs**: Validate URLs before enqueueing
+- **Limit recursion depth**: Prevent infinite crawling loops
+- **Set max retries**: Avoid retry storms on broken sites
+- **Use TTL**: Clean up stale/zombie tasks automatically
+- **Validate extracted data**: Don't trust page content blindly
 
 ---
 
 ## 🚨 Error Handling
 
-Spider Suite simply forwards the structured errors produced by its child plugins. Handle them by checking `error.name`, `statusCode`, and `retriable`:
+### Common Errors
 
+#### Error 1: `Processor function is missing`
+
+**Problem**: Attempted to start processing without setting a processor.
+
+**Solution:**
 ```javascript
-suite.setProcessor(async (task, context, helpers) => {
-  try {
-    return await crawl(task.url, helpers.puppeteer);
-  } catch (error) {
-    if (error.name === 'BrowserPoolError') {
-      // PuppeteerPlugin: usually retriable, inspect `error.hint`
-      context.logger.warn(error.suggestion);
-      throw error; // propagate so S3Queue decides whether to retry
-    }
-    if (error.name === 'QueueError') {
-      // S3QueuePlugin: misconfigured queue or malformed task
-      context.logger.error(error.toJson());
-      throw error;
-    }
+// ❌ Bad
+const spider = new SpiderPlugin({ namespace: 'test' });
+await spider.startProcessing(); // Error!
 
-    // Any other PluginError keeps the structured metadata
-    throw error;
-  }
+// ✅ Good - Set processor first
+spider.setProcessor(async (task, ctx, helpers) => { /* ... */ });
+await spider.startProcessing();
+
+// ✅ Better - Provide processor in constructor
+const spider = new SpiderPlugin({
+  namespace: 'test',
+  processor: async (task, ctx, helpers) => { /* ... */ }
 });
+await spider.startProcessing();
 ```
-
-| Source | Status | Retriable? | Message | Suggested Fix |
-|--------|--------|------------|---------|---------------|
-| `QueueError` | 400 | `false` | `Processor function is missing` | Call `setProcessor()` before `startProcessing()` or provide `processor` in the constructor. |
-| `QueueError` | 404 | `false` | `plg_spider_targets resource not found` | Create the targets resource or change `targetsResource`. |
-| `BrowserPoolError` | 503 | `true` | `No healthy browser instances available` | Relax proxy health thresholds or increase `puppeteer.pool.size`. |
-| `TTLPluginError` | 500 | `true` | `Failed to schedule TTL cleanup` | Review S3 permissions for the TTL namespace and retry. |
-
-Log `error.toJson()` so operators receive the embedded `suggestion` and `docs` URLs.
 
 ---
 
-## 📚 Related Plugins
+#### Error 2: `Resource not found`
 
-- [Puppeteer Plugin](./puppeteer/README.md) – full browser automation API
-- [S3 Queue Plugin](./s3-queue.md) – distributed queue implementation
-- [TTL Plugin](./ttl.md) – resource TTL management
+**Problem**: Targets resource doesn't exist.
+
+**Diagnosis:**
+1. Check if `initialize()` was called
+2. Verify namespace is correct
+3. Check if resource was created manually
+
+**Fix:**
+```javascript
+// SpiderPlugin auto-creates resources during initialize()
+await db.usePlugin(spider); // Calls initialize()
+await db.connect();
+
+// Verify resource exists
+const resources = await db.listResources();
+console.log('Available:', resources.map(r => r.name));
+```
+
+---
+
+#### Error 3: `Browser pool exhausted`
+
+**Problem**: All browser instances are busy.
+
+**Diagnosis:**
+1. Check `puppeteer.pool.size` vs `queue.concurrency`
+2. Look for unclosed pages
+3. Check if browsers are crashing
+
+**Fix:**
+```javascript
+// ✅ Increase pool size
+puppeteer: {
+  pool: {
+    size: 10,              // More browsers
+    maxPagesPerBrowser: 5  // 50 total capacity
+  }
+},
+queue: { concurrency: 50 } // Match capacity
+
+// ✅ Always close pages
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url);
+  try {
+    return await process(page);
+  } finally {
+    await page.close(); // Critical!
+  }
+}
+```
+
+---
+
+#### Error 4: `TTL cleanup failed`
+
+**Problem**: TTL plugin can't delete expired tasks.
+
+**Diagnosis:**
+1. Check S3 permissions
+2. Verify TTL resource exists
+3. Check TTL cohort partitions
+
+**Fix:**
+```javascript
+// Ensure S3 permissions include DeleteObject
+// Verify TTL is properly configured
+ttl: {
+  queue: {
+    ttl: 3600,
+    onExpire: 'hard-delete', // Requires delete permissions
+    checkInterval: 300
+  }
+}
+```
+
+---
+
+### Troubleshooting
+
+#### Issue 1: Slow Crawling Performance
+
+**Diagnosis:**
+1. Check `queue.concurrency` setting
+2. Verify browser pool is enabled
+3. Monitor CPU/memory usage
+
+**Fix:**
+```javascript
+// Increase parallelism
+queue: { concurrency: 20 },
+puppeteer: {
+  pool: { enabled: true, size: 5, maxPagesPerBrowser: 4 }
+}
+
+// Use headless mode
+puppeteer: {
+  launchOptions: { headless: true }
+}
+```
+
+---
+
+#### Issue 2: Memory Leaks
+
+**Diagnosis:**
+1. Monitor memory over time
+2. Check for unclosed pages
+3. Look for large data structures
+
+**Fix:**
+```javascript
+// Always close pages
+finally { await page.close(); }
+
+// Disable browser cache
+puppeteer: {
+  launchOptions: {
+    args: ['--disable-dev-shm-usage', '--disable-setuid-sandbox']
+  }
+}
+```
+
+---
+
+#### Issue 3: Tasks Stuck in Processing
+
+**Diagnosis:**
+1. Check `queue.visibilityTimeout`
+2. Look for infinite loops in processor
+3. Check for unhandled promise rejections
+
+**Fix:**
+```javascript
+// Set appropriate visibility timeout
+queue: {
+  visibilityTimeout: 60, // 1 minute
+  maxRetries: 3          // Retry failed tasks
+}
+
+// Add timeout to processor
+processor: async (task, ctx, helpers) => {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Timeout')), 30000)
+  );
+
+  const work = async () => {
+    const page = await helpers.puppeteer.open(task.url);
+    // ... process
+  };
+
+  return Promise.race([work(), timeout]);
+}
+```
+
+---
+
+## 🔗 See Also
+
+- [PuppeteerPlugin](./puppeteer.md) - Browser automation details
+- [S3QueuePlugin](./s3-queue.md) - Distributed queue implementation
+- [TTLPlugin](./ttl.md) - TTL management
+- [Example: e30-spider-basic.js](../examples/e30-spider-basic.js) - Basic spider example
+- [Example: e31-spider-distributed.js](../examples/e31-spider-distributed.js) - Multi-worker setup
+
+---
+
+## ❓ FAQ
+
+### General
+
+**Q: What is SpiderPlugin and when should I use it?**
+
+A: SpiderPlugin is a **meta-plugin** that bundles PuppeteerPlugin, S3QueuePlugin, and TTLPlugin under one namespace for web crawling. Use it when you need:
+
+- Distributed web scraping across multiple workers
+- Browser automation with queueing
+- Automatic cleanup of stale crawl tasks
+- Simplified setup (100+ lines of boilerplate → 10 lines)
+
+**Don't use it if:**
+- You only need browser automation (use PuppeteerPlugin alone)
+- You don't need distributed processing (use Puppeteer directly)
+- You're not crawling the web (use appropriate plugin)
+
+```javascript
+// ✅ Perfect for SpiderPlugin
+// - Multi-page crawling
+// - Distributed workers
+// - Queue management needed
+const spider = new SpiderPlugin({
+  namespace: 'crawler',
+  queue: { autoStart: true, concurrency: 10 }
+});
+
+// ❌ Overkill for SpiderPlugin
+// - Single page scraping
+// - One-off automation
+// Use PuppeteerPlugin alone instead
+```
+
+---
+
+**Q: How is SpiderPlugin different from PuppeteerPlugin?**
+
+A: SpiderPlugin **includes** PuppeteerPlugin plus adds queuing and TTL:
+
+| Feature | PuppeteerPlugin | SpiderPlugin |
+|---------|----------------|--------------|
+| Browser automation | ✅ Yes | ✅ Yes |
+| Distributed queue | ❌ No | ✅ Yes (S3Queue) |
+| TTL cleanup | ❌ No | ✅ Yes (optional) |
+| Setup complexity | Low | Very Low |
+| Use case | Single worker | Multi-worker |
+
+**Example comparison:**
+```javascript
+// PuppeteerPlugin alone (manual queue setup)
+await db.usePlugin(new PuppeteerPlugin({ namespace: 'pup' }));
+await db.usePlugin(new S3QueuePlugin({ resource: 'tasks' }));
+// ... wire them together manually (30+ lines)
+
+// SpiderPlugin (automatic)
+await db.usePlugin(new SpiderPlugin({ namespace: 'spider' }));
+// Everything wired and ready!
+```
+
+---
+
+**Q: Can I use SpiderPlugin without TTL?**
+
+A: **Yes!** TTL is completely optional:
+
+```javascript
+// Without TTL
+const spider = new SpiderPlugin({
+  namespace: 'crawler',
+  queue: { autoStart: true }
+  // No ttl config = TTLPlugin not installed
+});
+
+// With TTL
+const spider = new SpiderPlugin({
+  namespace: 'crawler',
+  queue: { autoStart: true },
+  ttl: { queue: { ttl: 3600 } } // Enables TTL cleanup
+});
+```
+
+**When to use TTL:**
+- ✅ Long-running crawls (prevent zombie tasks)
+- ✅ Tasks with expiration dates
+- ✅ Retry limits reached (clean up failures)
+
+**When to skip TTL:**
+- ❌ Short-lived crawls (< 1 hour)
+- ❌ All tasks must complete (no expiration)
+- ❌ Manual cleanup preferred
+
+---
+
+**Q: How do I scale SpiderPlugin horizontally?**
+
+A: Run multiple workers with the **same namespace** but **different worker IDs**:
+
+**Worker 1:**
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'distributed',
+  queue: { workerId: 'worker-1', concurrency: 5 }
+});
+```
+
+**Worker 2:**
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'distributed',
+  queue: { workerId: 'worker-2', concurrency: 5 }
+});
+```
+
+**Worker 3:**
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'distributed',
+  queue: { workerId: 'worker-3', concurrency: 5 }
+});
+```
+
+All three workers share the same queue (`distributed_targets`) and process tasks in parallel. S3Queue handles distributed locking automatically.
+
+**Coordinator (optional):**
+```javascript
+// Enqueue jobs without processing
+const db = new Database({ connectionString: 's3://...' });
+await db.connect();
+
+const resource = await db.getResource('distributed_targets');
+for (const url of urls) {
+  await resource.enqueue({ url });
+}
+```
+
+---
+
+### Configuration
+
+**Q: What's the difference between `queue.concurrency` and `puppeteer.pool.size`?**
+
+A: They control different aspects:
+
+- **`queue.concurrency`**: How many tasks process **simultaneously**
+- **`puppeteer.pool.size`**: How many **browser instances** exist
+
+**Rule of thumb:**
+```javascript
+// queue.concurrency <= (pool.size × maxPagesPerBrowser)
+
+// ✅ Good - Concurrency matches capacity
+queue: { concurrency: 20 },
+puppeteer: {
+  pool: { size: 5, maxPagesPerBrowser: 4 } // 5 × 4 = 20 capacity
+}
+
+// ❌ Bad - Concurrency exceeds capacity
+queue: { concurrency: 50 },
+puppeteer: {
+  pool: { size: 2, maxPagesPerBrowser: 5 } // 2 × 5 = 10 capacity
+}
+// 40 workers will be blocked waiting for browsers!
+```
+
+---
+
+**Q: Should I use `autoStart: true` or start manually?**
+
+A: Depends on your setup:
+
+**Use `autoStart: true`** when:
+- Processor is provided in constructor
+- Simple single-worker setup
+- Want immediate processing
+
+```javascript
+// ✅ AutoStart - Simple setup
+const spider = new SpiderPlugin({
+  namespace: 'simple',
+  queue: { autoStart: true },
+  processor: async (task, ctx, helpers) => { /* ... */ }
+});
+// Starts processing immediately after usePlugin()
+```
+
+**Use `autoStart: false`** (manual) when:
+- Setting processor dynamically
+- Coordinating multiple workers
+- Need to enqueue seed URLs first
+
+```javascript
+// ✅ Manual start - More control
+const spider = new SpiderPlugin({
+  namespace: 'controlled',
+  queue: { autoStart: false }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Enqueue seed URLs first
+await spider.enqueueTarget({ url: 'https://example.com' });
+
+// Set processor
+spider.setProcessor(async (task, ctx, helpers) => { /* ... */ });
+
+// Start when ready
+await spider.startProcessing();
+```
+
+---
+
+**Q: How do I change concurrency at runtime?**
+
+A: Use `startProcessing()` with override:
+
+```javascript
+// Initial concurrency: 5
+const spider = new SpiderPlugin({
+  namespace: 'dynamic',
+  queue: { concurrency: 5 }
+});
+
+// Later - increase concurrency
+await spider.stopProcessing();
+await spider.startProcessing({ concurrency: 10 });
+
+// Or change via setProcessor
+spider.setProcessor(
+  async (task, ctx, helpers) => { /* ... */ },
+  { concurrency: 15, autoStart: true }
+);
+```
+
+---
+
+### Queue Management
+
+**Q: How do I check queue status?**
+
+A: Use `queuePlugin.getStats()`:
+
+```javascript
+const stats = await spider.queuePlugin.getStats();
+
+console.log({
+  pending: stats.pending,        // Tasks waiting
+  processing: stats.processing,  // Tasks in progress
+  completed: stats.completed,    // Tasks finished
+  failed: stats.failed          // Tasks that failed
+});
+
+// Or access resource directly
+const resource = await db.getResource(`${spider.namespace}_targets`);
+const allTasks = await resource.query({});
+console.log(`Total tasks: ${allTasks.length}`);
+```
+
+---
+
+**Q: How do I implement priority queuing?**
+
+A: Use the `priority` field when enqueueing:
+
+```javascript
+// Higher priority = processed sooner
+await spider.enqueueTarget({ url: 'https://important.com', priority: 10 });
+await spider.enqueueTarget({ url: 'https://normal.com', priority: 5 });
+await spider.enqueueTarget({ url: 'https://low.com', priority: 1 });
+
+// S3Queue processes in priority order
+// Order: important.com → normal.com → low.com
+```
+
+---
+
+**Q: How do I prevent duplicate URLs from being crawled?**
+
+A: Check before enqueueing:
+
+```javascript
+// Method 1: Query resource before enqueue
+processor: async (task, ctx, { enqueue, resource }) => {
+  const links = await extractLinks(task.url);
+
+  for (const link of links) {
+    // Check if already exists
+    const existing = await resource.query({ url: link });
+    if (existing.length === 0) {
+      await enqueue({ url: link });
+    }
+  }
+}
+
+// Method 2: Use metadata to track visited
+const visited = new Set();
+
+processor: async (task, ctx, { enqueue }) => {
+  const links = await extractLinks(task.url);
+
+  for (const link of links) {
+    if (!visited.has(link)) {
+      visited.add(link);
+      await enqueue({ url: link });
+    }
+  }
+}
+```
+
+---
+
+**Q: How do I handle rate limiting?**
+
+A: Implement delays and retry logic:
+
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  try {
+    const page = await puppeteer.open(task.url);
+    const data = await extractData(page);
+    await page.close();
+
+    // Add delay to respect rate limits
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    return data;
+  } catch (error) {
+    if (error.message.includes('429')) {
+      // Rate limited - throw to trigger retry
+      ctx.logger.warn('Rate limited, retrying...');
+      throw error; // Queue will retry with backoff
+    }
+    throw error;
+  }
+}
+```
+
+---
+
+### Browser & Performance
+
+**Q: How many browsers should I run?**
+
+A: Depends on your resources:
+
+**General formula:**
+```
+pool.size = ceil(queue.concurrency / maxPagesPerBrowser)
+```
+
+**Examples:**
+
+| Concurrency | Pages/Browser | Pool Size | Total Capacity |
+|-------------|---------------|-----------|----------------|
+| 10 | 5 | 2 | 10 |
+| 50 | 10 | 5 | 50 |
+| 100 | 5 | 20 | 100 |
+
+**Resource constraints:**
+- **CPU**: Each browser ≈ 1-2 cores (headless)
+- **Memory**: Each browser ≈ 100-500MB
+- **Disk**: Each browser ≈ 200MB (cache)
+
+**Example for 4-core machine:**
+```javascript
+puppeteer: {
+  pool: {
+    size: 2,              // 2 browsers × 2 cores = 4 cores
+    maxPagesPerBrowser: 5 // 10 total pages
+  }
+},
+queue: { concurrency: 10 }
+```
+
+---
+
+**Q: Should I use headless or headed browsers?**
+
+A: Almost always **headless**:
+
+| Mode | Speed | Resources | Use Case |
+|------|-------|-----------|----------|
+| Headless | 2-3x faster | Low memory | Production |
+| Headed | Slower | High memory | Debugging |
+
+```javascript
+// ✅ Production - Headless
+puppeteer: {
+  launchOptions: { headless: true }
+}
+
+// 🐛 Development - Headed for debugging
+puppeteer: {
+  launchOptions: {
+    headless: false,
+    devtools: true
+  }
+}
+```
+
+---
+
+**Q: How do I optimize crawling speed?**
+
+A: Multiple strategies:
+
+**1. Increase parallelism:**
+```javascript
+queue: { concurrency: 50 },
+puppeteer: {
+  pool: { size: 10, maxPagesPerBrowser: 5 }
+}
+```
+
+**2. Disable unnecessary features:**
+```javascript
+puppeteer: {
+  launchOptions: {
+    args: [
+      '--disable-images',       // Don't load images
+      '--disable-javascript',   // If JS not needed
+      '--disable-setuid-sandbox'
+    ]
+  }
+}
+```
+
+**3. Use waitUntil wisely:**
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  // ❌ Slow - Wait for everything
+  const page = await puppeteer.open(task.url, {
+    waitUntil: 'networkidle0' // Wait for ALL network idle
+  });
+
+  // ✅ Fast - Wait for DOM only
+  const page = await puppeteer.open(task.url, {
+    waitUntil: 'domcontentloaded' // DOM ready, skip images
+  });
+}
+```
+
+**4. Reuse pages when possible:**
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url);
+
+  // Extract multiple things without reopening
+  const title = await page.title();
+  const links = await page.$$eval('a', els => els.map(a => a.href));
+  const meta = await page.$eval('meta', el => el.content);
+
+  await page.close();
+  return { title, links, meta };
+}
+```
+
+---
+
+### Error Handling & Debugging
+
+**Q: How do I debug processor errors?**
+
+A: Add comprehensive logging:
+
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  ctx.logger.info(`[START] ${task.url}`);
+  const startTime = Date.now();
+
+  try {
+    const page = await puppeteer.open(task.url);
+    ctx.logger.debug(`[OPENED] ${task.url}`);
+
+    const data = await page.evaluate(() => ({
+      title: document.title
+    }));
+    ctx.logger.debug(`[EXTRACTED] ${task.url}`, { data });
+
+    await page.close();
+    ctx.logger.info(`[SUCCESS] ${task.url} (${Date.now() - startTime}ms)`);
+
+    return data;
+  } catch (error) {
+    ctx.logger.error(`[ERROR] ${task.url}`, {
+      error: error.message,
+      stack: error.stack,
+      duration: Date.now() - startTime
+    });
+    throw error;
+  }
+}
+```
+
+---
+
+**Q: What happens when a task fails?**
+
+A: S3Queue retries based on `maxRetries`:
+
+1. Task fails → retry count increments
+2. If `retryCount < maxRetries` → task re-queued with delay
+3. If `retryCount >= maxRetries` → task marked as failed
+
+```javascript
+queue: {
+  maxRetries: 3,      // Retry up to 3 times
+  retryDelay: 1000    // Wait 1s between retries
+}
+
+// Monitor failures
+spider.queuePlugin.on('queue.task.error', ({ taskId, error, retryCount }) => {
+  console.log(`Task ${taskId} failed (attempt ${retryCount}): ${error.message}`);
+});
+
+spider.queuePlugin.on('queue.task.failed', ({ taskId, error }) => {
+  console.log(`Task ${taskId} permanently failed after max retries`);
+  // Handle permanent failures (e.g., log to error resource)
+});
+```
+
+---
+
+**Q: How do I handle timeouts?**
+
+A: Set timeouts at multiple levels:
+
+```javascript
+// 1. Browser launch timeout
+puppeteer: {
+  pool: { launchTimeout: 30000 } // 30s to launch browser
+}
+
+// 2. Page load timeout
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url, {
+    timeout: 15000 // 15s to load page
+  });
+}
+
+// 3. Overall task timeout
+processor: async (task, ctx, { puppeteer }) => {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Task timeout')), 30000)
+  );
+
+  const work = async () => {
+    const page = await puppeteer.open(task.url);
+    const data = await page.evaluate(() => ({ title: document.title }));
+    await page.close();
+    return data;
+  };
+
+  return Promise.race([work(), timeout]);
+}
+```
+
+---
+
+### Advanced Usage
+
+**Q: Can I crawl sites requiring authentication?**
+
+A: Yes, use cookies or credentials:
+
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open('https://example.com/login');
+
+  // Method 1: Fill login form
+  await page.type('#username', 'user');
+  await page.type('#password', 'pass');
+  await page.click('button[type="submit"]');
+  await page.waitForNavigation();
+
+  // Method 2: Set cookies directly
+  await page.setCookie({
+    name: 'sessionId',
+    value: 'abc123',
+    domain: 'example.com'
+  });
+
+  // Now navigate to protected page
+  await page.goto(task.url);
+  const data = await extractData(page);
+  await page.close();
+
+  return data;
+}
+```
+
+---
+
+**Q: How do I extract data from infinite scroll pages?**
+
+A: Scroll programmatically:
+
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url);
+
+  let items = [];
+  let previousHeight = 0;
+
+  while (true) {
+    // Extract current items
+    const newItems = await page.$$eval('.item', els =>
+      els.map(el => ({ title: el.textContent }))
+    );
+    items.push(...newItems);
+
+    // Scroll to bottom
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Check if more content loaded
+    const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+    if (currentHeight === previousHeight) break; // No more content
+    previousHeight = currentHeight;
+  }
+
+  await page.close();
+  return { url: task.url, items };
+}
+```
+
+---
+
+**Q: Can I take screenshots during crawling?**
+
+A: Yes, use `page.screenshot()`:
+
+```javascript
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url);
+
+  // Take screenshot
+  const screenshot = await page.screenshot({
+    fullPage: true,
+    type: 'png'
+  });
+
+  // Upload to S3
+  const key = `screenshots/${task.url.replace(/[^a-z0-9]/gi, '_')}.png`;
+  await ctx.db.client.putObject({
+    bucket: ctx.db.bucket,
+    key,
+    body: screenshot
+  });
+
+  await page.close();
+  return { url: task.url, screenshot: key };
+}
+```
+
+---
+
+**Q: How do I implement breadth-first vs depth-first crawling?**
+
+A: Control via priorities:
+
+**Breadth-first** (same priority for all):
+```javascript
+processor: async (task, ctx, { puppeteer, enqueue }) => {
+  const page = await puppeteer.open(task.url);
+  const links = await extractLinks(page);
+  await page.close();
+
+  // All links same priority = breadth-first
+  for (const link of links) {
+    await enqueue({ url: link, priority: 5 });
+  }
+}
+```
+
+**Depth-first** (higher priority for child links):
+```javascript
+processor: async (task, ctx, { puppeteer, enqueue }) => {
+  const page = await puppeteer.open(task.url);
+  const links = await extractLinks(page);
+  await page.close();
+
+  // Child links get higher priority = depth-first
+  const childPriority = (task.priority || 5) + 1;
+  for (const link of links) {
+    await enqueue({ url: link, priority: childPriority });
+  }
+}
+```
+
+---
+
+### Troubleshooting
+
+**Q: Why are my workers not processing tasks?**
+
+A: Check these common issues:
+
+1. **No processor set**:
+   ```javascript
+   // ❌ Forgot to set processor
+   const spider = new SpiderPlugin({ namespace: 'test' });
+   await spider.startProcessing(); // Error!
+
+   // ✅ Set processor first
+   spider.setProcessor(async (task, ctx, helpers) => { /* ... */ });
+   ```
+
+2. **autoStart without processor**:
+   ```javascript
+   // ❌ autoStart with no processor
+   new SpiderPlugin({ queue: { autoStart: true } }); // Error!
+
+   // ✅ Provide processor
+   new SpiderPlugin({
+     queue: { autoStart: true },
+     processor: async (task, ctx, helpers) => { /* ... */ }
+   });
+   ```
+
+3. **Queue empty**:
+   ```javascript
+   // No tasks in queue!
+   await spider.enqueueTarget({ url: 'https://example.com' });
+   ```
+
+4. **Processing not started**:
+   ```javascript
+   await spider.startProcessing(); // Don't forget this!
+   ```
+
+---
+
+**Q: Why is memory usage increasing?**
+
+A: Common causes:
+
+1. **Unclosed pages**:
+   ```javascript
+   // ✅ Always close pages
+   try {
+     const page = await puppeteer.open(task.url);
+     return await process(page);
+   } finally {
+     await page.close(); // Critical!
+   }
+   ```
+
+2. **Large data in memory**:
+   ```javascript
+   // Store in S3, not memory
+   const screenshot = await page.screenshot({ fullPage: true });
+
+   // ❌ Don't store in task result
+   return { screenshot }; // Can be huge!
+
+   // ✅ Upload to S3, return key only
+   const key = `screenshots/${taskId}.png`;
+   await uploadToS3(key, screenshot);
+   return { screenshotKey: key };
+   ```
+
+3. **Too many browsers**:
+   ```javascript
+   // Reduce pool size
+   puppeteer: {
+     pool: { size: 3 } // Instead of 10
+   }
+   ```
+
+---
+
+**Q: Tasks are timing out - what should I do?**
+
+A: Increase timeouts and optimize selectors:
+
+```javascript
+// 1. Increase page load timeout
+processor: async (task, ctx, { puppeteer }) => {
+  const page = await puppeteer.open(task.url, {
+    timeout: 60000 // 60 seconds
+  });
+}
+
+// 2. Use faster waitUntil
+const page = await puppeteer.open(task.url, {
+  waitUntil: 'domcontentloaded' // Instead of 'networkidle0'
+});
+
+// 3. Add timeout to specific operations
+await page.waitForSelector('.content', { timeout: 10000 });
+```
+
+---
+
+## Contributing
+
+Found a bug or have a feature request? Open an issue at:
+https://github.com/forattini-dev/s3db.js/issues
+
+---
+
+## License
+
+MIT - Same as s3db.js
+
+---
+
+**Made with ❤️ for the s3db.js community**
+
+🕷️ **Happy crawling!**

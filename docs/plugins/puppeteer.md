@@ -64,7 +64,8 @@ for (const url of urls) {
 
 1. [⚡ TLDR](#-tldr)
 2. [⚡ Quickstart](#-quickstart)
-3. [Usage Journey](#usage-journey)
+3. [📦 Dependencies](#-dependencies)
+4. [Usage Journey](#usage-journey)
    - [Level 1: Basic Page Visit](#level-1-basic-page-visit)
    - [Level 2: Enable Browser Pooling](#level-2-enable-browser-pooling)
    - [Level 3: Add Stealth Mode](#level-3-add-stealth-mode)
@@ -72,13 +73,13 @@ for (const url of urls) {
    - [Level 5: Cookie Farming](#level-5-cookie-farming)
    - [Level 6: Proxy Rotation](#level-6-proxy-rotation)
    - [Level 7: Production Setup](#level-7-production-setup)
-4. [📊 Configuration Reference](#-configuration-reference)
-5. [📚 Configuration Examples](#-configuration-examples)
-6. [🔧 API Reference](#-api-reference)
-7. [✅ Best Practices](#-best-practices)
-8. [🚨 Error Handling](#-error-handling)
-9. [🔗 See Also](#-see-also)
-10. [❓ FAQ](#-faq)
+5. [📊 Configuration Reference](#-configuration-reference)
+6. [📚 Configuration Examples](#-configuration-examples)
+7. [🔧 API Reference](#-api-reference)
+8. [✅ Best Practices](#-best-practices)
+9. [🚨 Error Handling](#-error-handling)
+10. [🔗 See Also](#-see-also)
+11. [❓ FAQ](#-faq)
 
 ---
 
@@ -121,6 +122,106 @@ try {
 }
 
 await db.disconnect();
+```
+
+---
+
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**Peer Dependencies (for PuppeteerPlugin):**
+
+This plugin requires the following peer dependencies to be installed separately:
+
+```bash
+pnpm install puppeteer puppeteer-extra puppeteer-extra-plugin-stealth ghost-cursor user-agents
+```
+
+**Individual packages:**
+- `puppeteer` - Headless Chrome/Chromium automation (^23.0.0)
+- `puppeteer-extra` - Plugin framework for Puppeteer (^3.0.0)
+- `puppeteer-extra-plugin-stealth` - Anti-bot detection evasion (^2.0.0)
+- `ghost-cursor` - Human-like mouse movements (^1.0.0)
+- `user-agents` - Realistic user agent rotation (^1.0.0)
+
+**Why peer dependencies?**
+
+PuppeteerPlugin dependencies are marked as peer dependencies (optional) to:
+- ✅ Keep core s3db.js lightweight (~500KB)
+- ✅ Allow version control (choose Puppeteer version that fits your needs)
+- ✅ Avoid dependency conflicts in your project
+- ✅ Enable lazy loading (dependencies loaded only when plugin is used)
+
+**Complete installation:**
+```bash
+# Install s3db.js and all PuppeteerPlugin dependencies
+pnpm install s3db.js puppeteer puppeteer-extra puppeteer-extra-plugin-stealth ghost-cursor user-agents
+```
+
+**Browser setup:**
+
+Puppeteer downloads Chromium automatically during installation. To use a different browser:
+
+```bash
+# Use system Chrome (skip Chromium download)
+PUPPETEER_SKIP_DOWNLOAD=1 pnpm install puppeteer
+
+# Or specify custom executable path in plugin config
+new PuppeteerPlugin({
+  puppeteerOptions: {
+    executablePath: '/path/to/chrome'  // Or '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' on macOS
+  }
+})
+```
+
+**Docker environments:**
+
+When using PuppeteerPlugin in Docker, install additional dependencies:
+
+```dockerfile
+# Install Chromium dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    lsb-release \
+    wget \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
 ```
 
 ---

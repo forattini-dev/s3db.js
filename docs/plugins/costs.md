@@ -6,6 +6,27 @@
 
 ---
 
+## 📦 Dependencies
+
+The Costs Plugin has **zero external dependencies** - it's a static plugin built into s3db.js core.
+
+**Peer Dependencies:** None required
+
+**What's Included:**
+- ✅ AWS S3 pricing tables (built-in)
+- ✅ Request tracking (automatic)
+- ✅ Storage calculation (automatic)
+- ✅ Data transfer tracking (automatic)
+- ✅ Tiered pricing logic (built-in)
+
+**Installation:**
+```javascript
+import { Database, CostsPlugin } from 's3db.js';
+plugins: [CostsPlugin]  // Static plugin - no instantiation needed
+```
+
+---
+
 ## ⚡ TLDR
 
 **Real-time** AWS S3 cost tracking with comprehensive request, storage, and data transfer monitoring.

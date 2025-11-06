@@ -1,12 +1,42 @@
-# Cloud Inventory Plugin
+# ☁️ Cloud Inventory Plugin
 
-> **Multi-cloud inventory, drift detection, and Terraform export for 200+ resource types.**
+> **Multi-cloud inventory, drift detection, and Terraform export for 200+ resource types across 11 providers.**
 >
-> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [Terraform Export →](#terraformopentofu-export) | [FAQ ↓](#-faq)
+> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [FAQ ↓](#-faq)
 
 ---
 
-The **Cloud Inventory Plugin**Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery and inventory system that ingests configuration metadata from **11 cloud providers** with support for **200+ resource types** across IaaS, PaaS, Serverless, Edge Computing, and Database-as-a-Service platforms.
+## ⚡ TLDR
+
+**Discover and track** infrastructure across **11 cloud providers** with automatic **drift detection**, **version history**, and **Terraform export**.
+
+**3 lines to get started:**
+```javascript
+import { CloudInventoryPlugin, AwsInventoryDriver } from 's3db.js/plugins';
+const plugin = new CloudInventoryPlugin({ clouds: [{ driver: AwsInventoryDriver, credentials: {...} }] });
+await plugin.discoverAll();  // Discovers all resources across all configured clouds
+```
+
+**Key features:**
+- ✅ **11 cloud providers**: AWS, GCP, Azure, Alibaba, Oracle, DigitalOcean, Linode, Hetzner, Vultr, Cloudflare, MongoDB Atlas
+- ✅ **200+ resource types**: EC2, S3, RDS, Lambda, Kubernetes, Databases, Serverless, Edge
+- ✅ **Automatic drift detection**: Track changes to resources over time
+- ✅ **Version history**: Immutable snapshots of every configuration change
+- ✅ **Terraform/OpenTofu export**: Convert discovered resources to IaC (brownfield → infrastructure as code)
+- ✅ **Distributed execution**: Rate limiting, concurrent discovery, multi-region support
+- ✅ **Scheduled discovery**: Cron-based automatic inventory updates
+
+**Use cases:**
+- 🔍 **Asset Management**: Track all cloud resources in one place
+- 📊 **Cost Optimization**: Identify unused resources across providers
+- 🔐 **Security Audits**: Compliance scanning and policy enforcement
+- 🚨 **Drift Detection**: Alert on unauthorized infrastructure changes
+- 📦 **Migration**: Inventory existing infrastructure before cloud migration
+- 🏗️ **IaC Adoption**: Export existing resources to Terraform/OpenTofu
+
+---
+
+The **Cloud Inventory Plugin** is a comprehensive multi-cloud resource discovery and inventory system that ingests configuration metadata from **11 cloud providers** with support for **200+ resource types** across IaaS, PaaS, Serverless, Edge Computing, and Database-as-a-Service platforms.
 
 ## 🚀 What's New
 
@@ -53,6 +83,136 @@ The **Cloud Inventory Plugin**Cloud Inventory Plugin** is a comprehensive multi-
 | **Vultr** | 12+ | 15+ | Instances, Kubernetes, Block Storage, Firewalls |
 | **Cloudflare** | 11+ | 15+ | Workers, R2, Pages, D1, WAF, Access |
 | **MongoDB Atlas** | 11+ | 15+ | Clusters, Serverless, Backups, Search Indexes |
+
+---
+
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**Peer Dependencies (Cloud Provider SDKs):**
+
+CloudInventoryPlugin uses **lazy loading** for cloud provider SDKs. Install only the SDKs you need:
+
+```bash
+# AWS (43+ services, 60+ resource types)
+pnpm install @aws-sdk/client-ec2 @aws-sdk/client-s3 @aws-sdk/client-rds @aws-sdk/client-lambda
+
+# GCP (20+ services, 25+ resource types)
+pnpm install @google-cloud/compute @google-cloud/storage @google-cloud/bigquery
+
+# Azure (10+ services, 25+ resource types)
+pnpm install @azure/identity @azure/arm-compute @azure/arm-storage @azure/arm-network
+
+# Alibaba Cloud (15+ services, 40+ resource types)
+pnpm install @alicloud/pop-core @alicloud/ecs20140526 @alicloud/oss-2019-05-17
+
+# Oracle Cloud (10+ services, 25+ resource types)
+pnpm install oci-common oci-core oci-identity oci-objectstorage
+
+# DigitalOcean (15+ services, 20+ resource types)
+pnpm install digitalocean-js
+
+# Linode (12+ services, 18+ resource types)
+pnpm install @linode/api-v4
+
+# Hetzner (12+ services, 15+ resource types)
+pnpm install hcloud-js
+
+# Vultr (12+ services, 15+ resource types)
+pnpm install @vultr/vultr-node
+
+# Cloudflare (11+ services, 15+ resource types)
+pnpm install cloudflare
+
+# MongoDB Atlas (11+ services, 15+ resource types)
+pnpm install mongodb-atlas-api-client
+```
+
+**Why Peer Dependencies?**
+
+- ✅ Keep core s3db.js lightweight (~500KB)
+- ✅ Install only what you use (no bloat)
+- ✅ Control SDK versions (avoid breaking changes)
+- ✅ Support multiple cloud providers simultaneously
+- ✅ Enable custom/internal cloud drivers
+
+**What's Included (Zero Dependencies):**
+
+CloudInventoryPlugin core functionality requires NO external dependencies:
+
+- **Driver Registry**: Register and manage cloud drivers
+- **Discovery Engine**: Parallel resource discovery with rate limiting
+- **Diff Engine**: Calculate deltas between resource versions
+- **Version Control**: Immutable snapshot + version + changelog storage
+- **Terraform Export**: Convert discovered resources to `.tfstate` format
+- **Scheduling**: Cron-based automated discovery
+- **Event System**: Progress tracking and monitoring hooks
+
+**Minimum Node.js Version:** 18.x (for async/await, fetch API, performance)
+
+**Platform Support:**
+- ✅ Node.js 18+ (server-side, recommended)
+- ✅ AWS Lambda (with layer for cloud SDKs)
+- ✅ Docker containers
+- ✅ Kubernetes (long-running discovery pods)
+- ❌ Browser (cloud SDKs require Node.js APIs)
+- ❌ Edge (Cloudflare Workers, Vercel Edge - no Node.js APIs)
+
+**Production Recommendations:**
+
+1. **Install only required providers** to minimize package size and attack surface
+2. **Use IAM roles** instead of hardcoded credentials (AWS, GCP, Azure)
+3. **Enable rate limiting** to avoid API throttling (`config.rateLimit` per driver)
+4. **Schedule discovery off-peak** to reduce cloud API costs
+5. **Monitor discovery duration** via events (`plg:cloud-inventory:discovery:complete`)
+
+```javascript
+// Production-ready configuration (AWS example)
+import { CloudInventoryPlugin } from 's3db.js/plugins';
+import { AwsInventoryDriver } from 's3db.js/plugins/cloud-inventory/drivers';
+
+const plugin = new CloudInventoryPlugin({
+  clouds: [
+    {
+      driver: AwsInventoryDriver,
+      credentials: {
+        // Use IAM role (recommended) or environment variables
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        sessionToken: process.env.AWS_SESSION_TOKEN  // For STS
+      },
+      config: {
+        accountId: '123456789012',
+        regions: ['us-east-1', 'us-west-2'],  // Multi-region
+        rateLimit: 10,  // 10 requests/second per service
+        timeout: 30000,  // 30s timeout per API call
+        retries: 3      // Retry failed API calls
+      },
+      tags: { environment: 'production', team: 'platform' },
+      scheduled: {
+        enabled: true,
+        cron: '0 */6 * * *',  // Every 6 hours
+        timezone: 'America/New_York'
+      }
+    }
+  ],
+  emitEvents: true,  // Enable monitoring
+  concurrency: 5     // Max 5 clouds discovered in parallel
+});
+
+await db.usePlugin(plugin);
+
+// Monitor discovery
+db.on('plg:cloud-inventory:discovery:complete', ({ cloud, duration, resources }) => {
+  console.log(`✅ ${cloud} discovery: ${resources} resources in ${duration}ms`);
+  metrics.histogram('discovery.duration', duration, { cloud });
+  metrics.gauge('discovery.resources', resources, { cloud });
+});
+```
 
 ---
 
@@ -1574,6 +1734,317 @@ Refer to `error.toJson()` for complete context (command input, bucket/key, retry
 - When `latestDigest` remains unchanged the plugin simply refreshes `lastSeenAt`.
 - All locking and checkpointing is handled automatically, but drivers should regularly emit checkpoints to guarantee at-least-once coverage without duplicates.
 - Cloud IDs default to `<driver>-<account>` (based on credentials/config hints) when omitted. Duplicate IDs are automatically deduplicated with numeric suffixes and logged.
+
+---
+
+## ❓ FAQ
+
+### General
+
+**Q: What clouds are supported?**
+
+**A:** 11 cloud providers with 200+ resource types:
+- **AWS** (43+ services): EC2, S3, RDS, Lambda, VPC, EKS, CloudFront, Route53
+- **GCP** (20+ services): Compute Engine, GKE, Cloud Storage, Cloud SQL, Pub/Sub
+- **Azure** (10+ services): Virtual Machines, AKS, Storage, Databases, Networking
+- **Alibaba Cloud** (15+ services): ECS, ACK, OSS, RDS, Auto Scaling, Security Groups
+- **Oracle Cloud** (10+ services): Compute, OKE, Block Storage, VCN, Databases
+- **DigitalOcean** (15+ services): Droplets, Kubernetes, Databases, Load Balancers
+- **Linode** (12+ services): Linodes, LKE, Managed Databases, NodeBalancers
+- **Hetzner** (12+ services): Servers, Volumes, Networks, Primary IPs
+- **Vultr** (12+ services): Instances, Kubernetes, Block Storage, Firewalls
+- **Cloudflare** (11+ services): Workers, R2, Pages, D1, WAF, Access
+- **MongoDB Atlas** (11+ services): Clusters, Serverless, Backups, Search Indexes
+
+**Q: Do I need to install SDKs for all 11 providers?**
+
+**A:** No! Only install SDKs for providers you use. The plugin uses lazy loading - peer dependencies are loaded on-demand.
+
+```bash
+# Example: Only AWS and GCP
+pnpm install @aws-sdk/client-ec2 @google-cloud/compute
+```
+
+**Q: How does drift detection work?**
+
+**A:** The plugin stores immutable snapshots of each resource's configuration. On every discovery, it:
+1. Fetches current state from cloud API
+2. Compares with latest snapshot
+3. Generates a diff (changelog) showing what changed
+4. Creates a new version entry if changes detected
+5. Emits events for monitoring/alerting
+
+**Q: Can I export to Terraform/OpenTofu?**
+
+**A:** Yes! Use the Terraform export feature:
+
+```javascript
+const tfState = await plugin.exportTerraform({
+  clouds: ['aws'],  // Filter by cloud
+  resources: ['ec2', 's3'],  // Filter by resource type
+  format: 'tfstate'  // or 'memory'
+});
+
+// Write to .tfstate file
+fs.writeFileSync('terraform.tfstate', JSON.stringify(tfState, null, 2));
+
+// Now use Terraform import:
+// terraform import aws_instance.example i-1234567890abcdef0
+```
+
+Supports 170+ resource type mappings across all 11 providers!
+
+**Q: How often should I run discovery?**
+
+**A:** Depends on your use case:
+- **Asset management**: Every 6-24 hours
+- **Drift detection**: Every 1-6 hours
+- **Security compliance**: Every 15-60 minutes
+- **Cost optimization**: Daily
+
+Configure with cron expressions:
+```javascript
+scheduled: { enabled: true, cron: '0 */6 * * *' }  // Every 6 hours
+```
+
+### Cloud-Specific
+
+**Q: How do I configure AWS multi-region discovery?**
+
+**A:**
+```javascript
+{
+  driver: AwsInventoryDriver,
+  credentials: { /* IAM credentials */ },
+  config: {
+    regions: ['us-east-1', 'us-west-2', 'eu-west-1'],  // List all regions
+    services: ['ec2', 's3', 'rds'],  // Or discover all: null
+    accountId: '123456789012'
+  }
+}
+```
+
+**Q: Does GCP discovery work with service accounts?**
+
+**A:** Yes! Use service account JSON:
+
+```javascript
+{
+  driver: GcpInventoryDriver,
+  credentials: {
+    client_email: 'inventory@project.iam.gserviceaccount.com',
+    private_key: process.env.GCP_PRIVATE_KEY,
+    project_id: 'my-project'
+  },
+  config: {
+    zones: ['us-central1-a', 'europe-west1-b']
+  }
+}
+```
+
+**Q: Can I discover multiple Azure subscriptions?**
+
+**A:** Yes! Create separate cloud configurations:
+
+```javascript
+clouds: [
+  { driver: AzureInventoryDriver, config: { subscriptionId: 'sub-1' } },
+  { driver: AzureInventoryDriver, config: { subscriptionId: 'sub-2' } }
+]
+```
+
+**Q: How does Cloudflare Workers discovery work?**
+
+**A:** Discovers Workers scripts, KV namespaces, R2 buckets, D1 databases, Pages deployments, and WAF rules:
+
+```javascript
+{
+  driver: CloudflareInventoryDriver,
+  credentials: {
+    apiToken: process.env.CLOUDFLARE_API_TOKEN,
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID
+  }
+}
+```
+
+### Performance & Scale
+
+**Q: How long does discovery take for large infrastructure?**
+
+**A:** Performance benchmarks (single region):
+
+| Resources | Provider | Duration | Notes |
+|-----------|----------|----------|-------|
+| 100 | AWS | ~5-10s | EC2 + S3 + RDS |
+| 1,000 | AWS | ~30-60s | Multi-service |
+| 10,000 | AWS | ~5-10min | Full account |
+| 100 | GCP | ~3-8s | Compute + Storage |
+| 1,000 | DigitalOcean | ~15-30s | All services |
+
+**Multi-region/multi-cloud runs in parallel!**
+
+**Q: Does it respect cloud provider rate limits?**
+
+**A:** Yes! Configure `rateLimit` per driver:
+
+```javascript
+config: {
+  rateLimit: 10,  // 10 API calls/second
+  timeout: 30000,  // 30s per call
+  retries: 3      // Retry failed calls
+}
+```
+
+**Q: Can I run discovery in parallel across multiple clouds?**
+
+**A:** Yes! Set `concurrency` at plugin level:
+
+```javascript
+new CloudInventoryPlugin({
+  clouds: [/* 11 clouds */],
+  concurrency: 5  // Discover 5 clouds simultaneously
+})
+```
+
+**Q: What's the memory footprint during discovery?**
+
+**A:** Discovery is streaming-based:
+- **Small (< 1K resources)**: ~50-100MB RAM
+- **Medium (1K-10K resources)**: ~100-300MB RAM
+- **Large (10K-100K resources)**: ~300-500MB RAM
+
+Resources are processed in batches and written to S3DB incrementally.
+
+### Security & Credentials
+
+**Q: How should I store cloud credentials securely?**
+
+**A:** Best practices:
+
+1. **Use environment variables** (never hardcode)
+2. **Use IAM roles** when running on cloud (AWS, GCP, Azure)
+3. **Use secret management** (AWS Secrets Manager, HashiCorp Vault)
+4. **Rotate credentials** regularly
+5. **Least privilege** - grant only ListResources permissions
+
+**Q: What IAM permissions are required for AWS?**
+
+**A:** Minimum read-only permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:Describe*",
+      "s3:ListAllMyBuckets",
+      "s3:GetBucketLocation",
+      "rds:Describe*",
+      "lambda:List*",
+      "lambda:Get*"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+**Q: Can I use SSO/SAML for authentication?**
+
+**A:** Yes! Use temporary credentials from STS:
+
+```javascript
+credentials: {
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN  // From STS assume-role
+}
+```
+
+### Terraform Export
+
+**Q: Can I import existing infrastructure into Terraform?**
+
+**A:** Yes! The Terraform export feature generates `.tfstate` files:
+
+1. Discover resources: `await plugin.discoverAll()`
+2. Export to tfstate: `await plugin.exportTerraform({ format: 'file', path: './terraform.tfstate' })`
+3. Import into Terraform: `terraform plan` (Terraform detects existing state)
+
+**Q: Which resource types support Terraform export?**
+
+**A:** 170+ resource types across 11 providers, including:
+- **AWS**: EC2, S3, RDS, Lambda, VPC, IAM, Route53
+- **GCP**: Compute, GKE, Cloud Storage, Cloud SQL
+- **Azure**: VMs, AKS, Storage, Databases
+- **DigitalOcean**: Droplets, Kubernetes, Volumes
+- **All others**: Core compute, storage, networking resources
+
+**Q: Can I export only specific resources?**
+
+**A:** Yes! Filter by cloud, resource type, or tags:
+
+```javascript
+await plugin.exportTerraform({
+  clouds: ['aws'],
+  resources: ['ec2', 's3'],
+  tags: { environment: 'production' },
+  format: 'file',
+  path: './prod-terraform.tfstate'
+});
+```
+
+### Troubleshooting
+
+**Q: Discovery is slow - how can I speed it up?**
+
+**A:** Optimization strategies:
+
+1. **Filter by services**: Only discover what you need
+   ```javascript
+   config: { services: ['ec2', 's3'] }  // Skip other services
+   ```
+
+2. **Increase concurrency**: Discover resources in parallel
+   ```javascript
+   config: { concurrency: 10 }  // 10 parallel API calls
+   ```
+
+3. **Reduce regions**: Focus on active regions
+   ```javascript
+   config: { regions: ['us-east-1'] }  // Skip unused regions
+   ```
+
+4. **Schedule off-peak**: Run during low-traffic hours
+
+**Q: Getting rate limit errors - what should I do?**
+
+**A:** Reduce `rateLimit` or enable backoff:
+
+```javascript
+config: {
+  rateLimit: 5,    // Lower from 10 to 5 calls/second
+  retries: 5,      // Increase retry attempts
+  retryDelay: 2000  // Wait 2s between retries
+}
+```
+
+**Q: How do I debug discovery issues?**
+
+**A:** Enable verbose logging and events:
+
+```javascript
+emitEvents: true,  // Enable event emission
+verboseEvents: true  // Detailed progress events
+
+db.on('plg:cloud-inventory:discovery:progress', ({ cloud, service, resource, current, total }) => {
+  console.log(`${cloud}/${service}/${resource}: ${current}/${total}`);
+});
+
+db.on('plg:cloud-inventory:error', ({ error, cloud, service }) => {
+  console.error(`Error in ${cloud}/${service}:`, error);
+});
+```
 
 ---
 

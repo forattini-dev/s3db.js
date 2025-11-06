@@ -70,7 +70,8 @@ const prodUSData = await plugin.getSnapshots({ clusterId: 'prod-us' });
 
 1. [⚡ TLDR](#-tldr)
 2. [⚡ Quickstart](#-quickstart)
-3. [Usage Journey](#usage-journey)
+3. [📦 Dependencies](#-dependencies)
+4. [Usage Journey](#usage-journey)
    - [Level 1: Basic Single Cluster](#level-1-basic-single-cluster)
    - [Level 2: Multi-Cluster Management](#level-2-multi-cluster-management)
    - [Level 3: Resource Filtering](#level-3-resource-filtering)
@@ -78,13 +79,13 @@ const prodUSData = await plugin.getSnapshots({ clusterId: 'prod-us' });
    - [Level 5: Custom Authentication](#level-5-custom-authentication)
    - [Level 6: Context Selection](#level-6-context-selection)
    - [Level 7: Production Setup](#level-7-production-setup)
-4. [📊 Configuration Reference](#-configuration-reference)
-5. [📚 Configuration Examples](#-configuration-examples)
-6. [🔧 API Reference](#-api-reference)
-7. [✅ Best Practices](#-best-practices)
-8. [🚨 Error Handling](#-error-handling)
-9. [🔗 See Also](#-see-also)
-10. [❓ FAQ](#-faq)
+5. [📊 Configuration Reference](#-configuration-reference)
+6. [📚 Configuration Examples](#-configuration-examples)
+7. [🔧 API Reference](#-api-reference)
+8. [✅ Best Practices](#-best-practices)
+9. [🚨 Error Handling](#-error-handling)
+10. [🔗 See Also](#-see-also)
+11. [❓ FAQ](#-faq)
 
 ---
 
@@ -139,6 +140,229 @@ if (pods.length > 0) {
 
 await db.disconnect();
 ```
+
+---
+
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**Peer Dependencies (for KubernetesInventoryPlugin):**
+
+This plugin requires the official Kubernetes JavaScript client:
+
+```bash
+pnpm install @kubernetes/client-node
+```
+
+**Individual package:**
+- `@kubernetes/client-node` - Official Kubernetes client for Node.js (^1.0.0)
+
+**Why peer dependency?**
+
+The Kubernetes client is marked as a peer dependency (optional) to:
+- ✅ Keep core s3db.js lightweight (~500KB)
+- ✅ Allow version control (choose client version that matches your cluster)
+- ✅ Avoid dependency conflicts in your project
+- ✅ Enable lazy loading (client loaded only when plugin is used)
+
+**Complete installation:**
+```bash
+# Install s3db.js and Kubernetes client
+pnpm install s3db.js @kubernetes/client-node
+```
+
+**Kubernetes Cluster Access:**
+
+The plugin requires access to a Kubernetes cluster. You have several options:
+
+**Option 1: Use existing kubeconfig (Recommended)**
+
+```bash
+# The plugin automatically uses ~/.kube/config by default
+# No configuration needed if kubectl already works
+
+# Test cluster access
+kubectl cluster-info
+```
+
+**Option 2: Provide custom kubeconfig path**
+
+```javascript
+new KubernetesInventoryPlugin({
+  clusters: [
+    {
+      id: 'prod',
+      name: 'Production Cluster',
+      kubeconfigPath: '/path/to/custom-kubeconfig.yaml'
+    }
+  ]
+})
+```
+
+**Option 3: In-cluster configuration (for Pods running inside Kubernetes)**
+
+```javascript
+new KubernetesInventoryPlugin({
+  clusters: [
+    {
+      id: 'local',
+      name: 'Current Cluster',
+      inCluster: true  // Uses service account credentials
+    }
+  ]
+})
+```
+
+**Option 4: Manual cluster configuration**
+
+```javascript
+new KubernetesInventoryPlugin({
+  clusters: [
+    {
+      id: 'manual',
+      name: 'Manual Config',
+      server: 'https://k8s.example.com:6443',
+      token: 'your-service-account-token',
+      // Optional: custom CA certificate
+      certificateAuthority: '/path/to/ca.crt'
+    }
+  ]
+})
+```
+
+**Cluster Permissions:**
+
+The plugin requires **read-only** access to cluster resources. Minimum RBAC permissions:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: s3db-inventory-reader
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+```
+
+Apply permissions:
+
+```bash
+# Create ClusterRole
+kubectl apply -f cluster-role.yaml
+
+# Create ServiceAccount
+kubectl create serviceaccount s3db-inventory
+
+# Bind role to service account
+kubectl create clusterrolebinding s3db-inventory-binding \
+  --clusterrole=s3db-inventory-reader \
+  --serviceaccount=default:s3db-inventory
+```
+
+**Docker Environments:**
+
+When using KubernetesInventoryPlugin in Docker:
+
+```dockerfile
+FROM node:20-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN npm install -g pnpm
+RUN pnpm install s3db.js @kubernetes/client-node
+
+# Copy kubeconfig (for external clusters)
+COPY kubeconfig.yaml /root/.kube/config
+
+# Or use in-cluster mode (when running as Kubernetes Pod)
+# No kubeconfig needed - uses mounted service account
+```
+
+**Kubernetes Pod Deployment:**
+
+When running inside Kubernetes, mount the service account:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3db-inventory
+spec:
+  serviceAccountName: s3db-inventory
+  containers:
+    - name: app
+      image: your-app:latest
+      env:
+        - name: KUBERNETES_IN_CLUSTER
+          value: "true"
+```
+
+**Multi-Cluster Setup:**
+
+Monitor multiple clusters simultaneously:
+
+```javascript
+new KubernetesInventoryPlugin({
+  clusters: [
+    {
+      id: 'prod-us',
+      name: 'Production US',
+      kubeconfigPath: '/configs/prod-us-kubeconfig.yaml'
+    },
+    {
+      id: 'prod-eu',
+      name: 'Production EU',
+      kubeconfigPath: '/configs/prod-eu-kubeconfig.yaml'
+    },
+    {
+      id: 'dev',
+      name: 'Development',
+      kubeconfigPath: '/configs/dev-kubeconfig.yaml'
+    }
+  ]
+})
+```
+
+**Troubleshooting Cluster Connection:**
+
+If the plugin cannot connect to your cluster:
+
+1. **Verify kubectl access:**
+   ```bash
+   kubectl cluster-info
+   kubectl get nodes
+   ```
+
+2. **Check kubeconfig:**
+   ```bash
+   echo $KUBECONFIG
+   cat ~/.kube/config
+   ```
+
+3. **Test client-node:**
+   ```javascript
+   const k8s = require('@kubernetes/client-node');
+   const kc = new k8s.KubeConfig();
+   kc.loadFromDefault();
+   console.log('Clusters:', kc.getClusters());
+   ```
+
+4. **Enable debug logging:**
+   ```javascript
+   new KubernetesInventoryPlugin({
+     debug: true,  // Logs connection attempts and errors
+     clusters: [...]
+   })
+   ```
 
 ---
 

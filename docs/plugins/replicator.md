@@ -347,8 +347,154 @@ console.log('All operations replicated in real-time! ✅');
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**NO Peer Dependencies!**
+
+ReplicatorPlugin works out-of-the-box with **zero external dependencies** for the core functionality. All database drivers are **optional peer dependencies** - install only what you need!
+
+**Why Zero Core Dependencies?**
+
+- ✅ Lightweight core (~500KB s3db.js)
+- ✅ Pay-per-use model (only install drivers you need)
+- ✅ No version conflicts
+- ✅ Tree-shaking friendly
+
+---
+
+### Driver-Specific Dependencies (Optional)
+
+Install only the drivers you need for your replication targets:
+
+#### SQL Databases
+
+**PostgreSQL:**
+```bash
+pnpm install pg
+```
+- `pg` - PostgreSQL client (~150KB)
+- Supports: PostgreSQL 9.6+, connection pooling, schema sync
+
+**MySQL / MariaDB / PlanetScale:**
+```bash
+pnpm install mysql2
+```
+- `mysql2` - MySQL client with prepared statements (~200KB)
+- Supports: MySQL 5.7+, MariaDB 10.2+, PlanetScale (serverless MySQL)
+
+**Turso (SQLite Edge):**
+```bash
+pnpm install @libsql/client
+```
+- `@libsql/client` - LibSQL/Turso client for edge databases
+- Supports: Turso serverless SQLite, local SQLite
+
+#### NoSQL Databases
+
+**DynamoDB:**
+```bash
+pnpm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
+```
+- `@aws-sdk/client-dynamodb` - AWS SDK v3 DynamoDB client
+- `@aws-sdk/lib-dynamodb` - Document client with simpler API
+- Supports: AWS DynamoDB, single-table design patterns
+
+**MongoDB:**
+```bash
+pnpm install mongodb
+```
+- `mongodb` - Official MongoDB Node.js driver (~1.5MB)
+- Supports: MongoDB 4.0+, MongoDB Atlas, self-hosted
+
+#### Cloud Services
+
+**Google BigQuery:**
+```bash
+pnpm install @google-cloud/bigquery
+```
+- `@google-cloud/bigquery` - Google Cloud BigQuery client
+- Supports: Standard SQL, partitioned tables, streaming inserts
+- Includes schema sync and mutability modes (append-only, mutable, immutable)
+
+**AWS SQS (Message Queue):**
+```bash
+pnpm install @aws-sdk/client-sqs
+```
+- `@aws-sdk/client-sqs` - AWS SDK v3 SQS client
+- Supports: Standard queues, FIFO queues, message batching
+
+#### HTTP / Webhooks
+
+**NO additional packages needed!**
+
+- Uses Node.js built-in `fetch` API (Node.js 18+)
+- Supports: Any HTTP/HTTPS endpoint, custom headers, retry logic
+
+#### S3DB Replication
+
+**NO additional packages needed!**
+
+- Uses same s3db.js instance
+- Supports: Cross-region replication, backup instances
+
+---
+
+### Installation Examples
+
+**Full-stack analytics pipeline:**
+```bash
+# Core
+pnpm install s3db.js
+
+# PostgreSQL for data warehouse
+pnpm install pg
+
+# BigQuery for analytics
+pnpm install @google-cloud/bigquery
+
+# SQS for event streaming
+pnpm install @aws-sdk/client-sqs
+```
+
+**MongoDB + DynamoDB multi-cloud:**
+```bash
+pnpm install s3db.js mongodb @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
+```
+
+**MySQL edge with Turso + PlanetScale:**
+```bash
+pnpm install s3db.js mysql2 @libsql/client
+```
+
+---
+
+### Driver Compatibility
+
+| Driver | Package | Min Version | Notes |
+|--------|---------|-------------|-------|
+| PostgreSQL | `pg` | 8.0.0+ | Supports connection pooling |
+| MySQL/MariaDB | `mysql2` | 3.0.0+ | Prepared statements recommended |
+| PlanetScale | `mysql2` | 3.0.0+ | Serverless MySQL (no schema migrations) |
+| Turso | `@libsql/client` | 0.3.0+ | Edge SQLite, WebSocket connections |
+| DynamoDB | `@aws-sdk/client-dynamodb` | 3.0.0+ | AWS SDK v3 modular |
+| MongoDB | `mongodb` | 5.0.0+ | Supports change streams |
+| BigQuery | `@google-cloud/bigquery` | 6.0.0+ | Streaming inserts + batch |
+| SQS | `@aws-sdk/client-sqs` | 3.0.0+ | Standard + FIFO queues |
+| Webhooks | Built-in | Node.js 18+ | Uses native fetch |
+| S3DB | Built-in | - | Same s3db.js instance |
+
+**Minimum Node.js Version:** 18.x (for native fetch, Web Streams)
+
+---
+
 ## 📋 Table of Contents
 
+- [Dependencies](#-dependencies)
 - [Overview](#overview)
 - [Usage Journey](#usage-journey) - **Start here for step-by-step learning**
 - [Installation & Setup](#installation--setup)

@@ -2,7 +2,7 @@
 
 > **Explore the full plugin ecosystem for s3db.js—performance, observability, automation, and more.**
 >
-> **Navigation:** [Quick Start ↓](#-quick-start) | [Architecture ↓](#️-plugin-architecture) | [Plugin List ↓](#-all-available-plugins)
+> **Navigation:** [Quick Start ↓](#-quick-start) | [Architecture ↓](#️-plugin-architecture) | [Plugin List ↓](#-all-available-plugins) | [Documentation Standard ↓](#-documentation-standard)
 
 ---
 
@@ -10,6 +10,27 @@
   <strong>Extend your database with powerful plugins</strong><br>
   <em>23 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
+
+---
+
+## 📖 Documentation Standard
+
+**All plugin documentation follows a standardized format for consistency and ease of use.**
+
+- **[📋 Documentation Standard](../plugin-docs-standard.md)** - Complete specification with 12 required sections
+- **[📝 Full Template](../templates/plugin-doc-template.md)** - Comprehensive template for complex plugins
+- **[📝 Minimal Template](../templates/plugin-doc-minimal.md)** - Streamlined template for simple plugins
+- **[🌟 Gold Standard](./puppeteer.md)** - Exemplar implementation (1,850+ lines)
+
+### Quality Badges
+
+Plugin documentation quality is indicated with badges:
+
+- 🟢 **Complete**: All requirements met, passes quality checklist (12 sections, 10+ FAQ, examples, cross-links)
+- 🟡 **Partial**: Most sections present (8-11), some content missing or minimal
+- 🔴 **Minimal**: Stub documentation, incomplete sections
+
+**Contributing:** When documenting plugins, use the templates above to achieve 🟢 Complete rating.
 
 ---
 
@@ -103,6 +124,20 @@ await users.insert({ email: 'user@example.com' });
 ---
 
 ## 🏗️ Plugin Architecture
+
+### Standard Plugin Options
+
+Every plugin constructor MUST accept the shared options contract handled by
+`normalizePluginOptions`:
+
+- `verbose` – defaults to `false` and gates any console/log output.
+- `resources`, `database`, `client` – references injected by the runtime; use
+  them via `this.resources`, `this.database`, `this.client` after calling
+  `super(options)`.
+
+In new plugins, call `super(options)` and rely on `this.options`/`this.verbose`
+instead of reading `options.verbose` directly. Existing plugins follow this
+pattern, so use them as reference implementations.
 
 ### Plugin Lifecycle
 

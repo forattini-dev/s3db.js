@@ -6,6 +6,31 @@
 
 ---
 
+## 📦 Dependencies
+
+The EventualConsistency Plugin has **zero external dependencies** - it's built into s3db.js core.
+
+**Peer Dependencies:** None required
+
+**What's Included:**
+- ✅ Transaction logging (built-in)
+- ✅ Consolidation engine (built-in)
+- ✅ Analytics aggregation (built-in)
+- ✅ Distributed locking (PluginStorage)
+- ✅ Cohort partitioning (built-in)
+- ✅ Garbage collection (built-in)
+
+**Installation:**
+```javascript
+import { Database, EventualConsistencyPlugin } from 's3db.js';
+
+await db.usePlugin(new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] }
+}));
+```
+
+---
+
 ## ⚡ TLDR
 
 Plugin for numeric fields with **auditable transactions** and **pre-calculated analytics** by hour/day/week/month.

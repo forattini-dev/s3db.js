@@ -6,6 +6,36 @@
 
 ---
 
+## 📦 Dependencies
+
+The Metrics Plugin has **zero external dependencies** - it's built into s3db.js core.
+
+**Peer Dependencies:** None required
+
+**What's Included:**
+- ✅ Performance tracking (built-in)
+- ✅ Error logging (built-in)
+- ✅ Usage analytics (built-in)
+- ✅ Prometheus exporter (built-in)
+- ✅ Real-time alerting (built-in)
+
+**Optional Integrations:**
+- **Prometheus**: Built-in Prometheus text format exporter (no dependencies)
+- **Grafana**: Works out of the box with Prometheus integration
+- **API Plugin**: Auto-integrates when available for `/metrics` endpoint
+
+**Installation:**
+```javascript
+import { Database, MetricsPlugin } from 's3db.js';
+
+await db.usePlugin(new MetricsPlugin({
+  enabled: true,
+  prometheus: { enabled: true }  // Optional: Prometheus exporter
+}));
+```
+
+---
+
 ## ⚡ TLDR
 
 **Complete** performance monitoring: timing, usage patterns, errors, and cache hit rates.
@@ -112,14 +142,21 @@ console.log('- Slowest operation:', userMetrics.performance.slowestOperation);
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Installation & Setup](#installation--setup)
-- [Configuration Options](#configuration-options)
-- [Usage Examples](#usage-examples)
-- [API Reference](#api-reference)
-- [Advanced Patterns](#advanced-patterns)
-- [Best Practices](#best-practices)
+1. [📦 Dependencies](#-dependencies)
+2. [⚡ TLDR](#-tldr)
+3. [⚡ Quick Start](#-quick-start)
+4. [Overview](#overview)
+5. [Key Features](#key-features)
+6. [Installation & Setup](#installation--setup)
+7. [Configuration Options](#configuration-options)
+8. [Usage Examples](#usage-examples)
+9. [API Reference](#api-reference)
+10. [Advanced Patterns](#advanced-patterns)
+11. [Best Practices](#best-practices)
+12. [Troubleshooting](#troubleshooting)
+13. [See Also](#see-also)
+14. [❓ FAQ](#-faq)
+15. [🔥 Prometheus Integration](#-prometheus-integration)
 
 ---
 
@@ -1010,7 +1047,7 @@ async function optimizeBasedOnMetrics() {
 
 ## ❓ FAQ
 
-### Basics
+### General
 
 **Q: What does the MetricsPlugin monitor?**
 A: Performance (duration), errors, and operation counters for all resources and operations (insert, update, delete, get, list, etc).
@@ -1020,6 +1057,24 @@ A: In three S3DB resources: `plg_metrics` (operations), `plg_error_logs` (errors
 
 **Q: What is the performance overhead?**
 A: Minimal (<1ms per operation). The plugin uses method wrapping and periodic flush to avoid blocking operations.
+
+**Q: Does MetricsPlugin work with MemoryClient?**
+A: Yes! All metric storage resources use MemoryClient when `useFakeS3: true`, making testing blazing fast.
+
+**Q: Can I run multiple MetricsPlugin instances?**
+A: Yes, use `namespace` parameter:
+```javascript
+await db.usePlugin(new MetricsPlugin({ enabled: true }), { namespace: 'monitoring' });
+// Creates resources: plg_monitoring_metrics, plg_monitoring_error_logs, etc.
+```
+
+**Q: Is MetricsPlugin compatible with other plugins?**
+A: Yes! It auto-detects API Plugin for `/metrics` endpoint integration and tracks all plugin operations.
+
+**Q: What metrics types does it support?**
+A: Three types: **Performance** (latency), **Usage** (operation counts), and **Errors** (failures/rates).
+
+---
 
 ### Configuration
 
@@ -1056,6 +1111,41 @@ new MetricsPlugin({
 })
 ```
 
+**Q: How to configure sampling rate?**
+A: Use `sampleRate` (0.0-1.0):
+```javascript
+new MetricsPlugin({
+  sampleRate: 0.1  // 10% sampling (high-volume scenarios)
+})
+```
+
+**Q: How to set slow query thresholds?**
+A: Configure `slowQueryThreshold`:
+```javascript
+new MetricsPlugin({
+  trackSlowQueries: true,
+  slowQueryThreshold: 500  // 500ms (default: 1000ms)
+})
+```
+
+**Q: Can I customize batch size for metric storage?**
+A: Yes, use `batchSize`:
+```javascript
+new MetricsPlugin({
+  batchSize: 50  // Store 50 metrics at once (default: 100)
+})
+```
+
+**Q: How to disable metrics in tests?**
+A: Metrics are disabled automatically when `NODE_ENV === 'test'`, or explicitly:
+```javascript
+new MetricsPlugin({
+  enabled: process.env.NODE_ENV !== 'test'
+})
+```
+
+---
+
 ### Operations
 
 **Q: How to get aggregated metrics?**
@@ -1086,6 +1176,222 @@ const errors = await metricsPlugin.getErrorLogs({
 });
 ```
 
+**Q: How to get resource-specific metrics?**
+A: Use `getResourceMetrics`:
+```javascript
+const userMetrics = await metricsPlugin.getResourceMetrics('users');
+console.log('Avg latency:', userMetrics.performance.averageResponseTime);
+```
+
+**Q: How to get operation-specific metrics?**
+A: Use `getOperationMetrics`:
+```javascript
+const insertMetrics = await metricsPlugin.getOperationMetrics('inserted');
+console.log('Total inserts:', insertMetrics.operations.total);
+```
+
+**Q: How to export metrics?**
+A: Use `exportMetrics`:
+```javascript
+const json = await metricsPlugin.exportMetrics('json');
+const csv = await metricsPlugin.exportMetrics('csv');
+const xml = await metricsPlugin.exportMetrics('xml');
+```
+
+**Q: Can I query metrics by date range?**
+A: Yes, pass `startDate` and `endDate`:
+```javascript
+const metrics = await metricsPlugin.getMetrics({
+  startDate: '2025-01-01',
+  endDate: '2025-01-31'
+});
+```
+
+---
+
+### Prometheus Integration
+
+**Q: What Prometheus modes are available?**
+A: Three modes:
+- **auto** (default): Auto-detects API Plugin, falls back to standalone
+- **integrated**: Requires API Plugin, same port
+- **standalone**: Separate server on port 9090
+
+**Q: How to enable Prometheus?**
+A: Set `prometheus.enabled: true`:
+```javascript
+new MetricsPlugin({
+  prometheus: { enabled: true }
+})
+```
+
+**Q: What metrics are exported to Prometheus?**
+A:
+- `s3db_operations_total` (counter)
+- `s3db_operation_duration_seconds` (gauge)
+- `s3db_operation_errors_total` (counter)
+- `s3db_uptime_seconds` (gauge)
+- `s3db_resources_total` (gauge)
+- `s3db_info` (gauge)
+
+**Q: How to customize Prometheus path?**
+A: Use `prometheus.path`:
+```javascript
+new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    path: '/custom-metrics'
+  }
+})
+```
+
+**Q: How to use standalone Prometheus server?**
+A: Set `mode: 'standalone'` and `port`:
+```javascript
+new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'standalone',
+    port: 9090
+  }
+})
+// Metrics at: GET http://localhost:9090/metrics
+```
+
+**Q: How to integrate with API Plugin?**
+A: Use `mode: 'integrated'`:
+```javascript
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'integrated'  // Uses port 3000
+  }
+}));
+// Metrics at: GET http://localhost:3000/metrics
+```
+
+**Q: How to configure Prometheus scrape in Kubernetes?**
+A: Use ServiceMonitor:
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s3db-metrics
+spec:
+  selector:
+    matchLabels:
+      app: s3db-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+```
+
+**Q: Can I test Prometheus locally?**
+A: Yes, use curl or promtool:
+```bash
+curl http://localhost:3000/metrics
+curl http://localhost:3000/metrics | promtool check metrics
+```
+
+---
+
+### Alerting & Thresholds
+
+**Q: How to set up custom alerts?**
+A: Use `alertThresholds` and callbacks:
+```javascript
+new MetricsPlugin({
+  alertThresholds: {
+    errorRate: 0.05,        // 5%
+    avgResponseTime: 1000   // 1 second
+  },
+  onHighErrorRate: (resource, errorRate) => {
+    console.error(`Alert: ${resource} has ${errorRate}% errors`);
+  }
+})
+```
+
+**Q: What alert callbacks are available?**
+A:
+- `onSlowQuery(operation, resource, duration)`
+- `onHighErrorRate(resource, errorRate)`
+- `onThresholdExceeded(metric, value, threshold)`
+
+**Q: How to detect slow queries?**
+A: Enable `trackSlowQueries`:
+```javascript
+new MetricsPlugin({
+  trackSlowQueries: true,
+  slowQueryThreshold: 500,  // 500ms
+  onSlowQuery: (op, resource, duration) => {
+    console.warn(`Slow ${op} on ${resource}: ${duration}ms`);
+  }
+})
+```
+
+**Q: Can I create custom alert conditions?**
+A: Yes, use `getMetrics()` with custom logic:
+```javascript
+setInterval(async () => {
+  const metrics = await metricsPlugin.getMetrics();
+  if (metrics.performance.averageResponseTime > 1000) {
+    sendAlert('High latency detected!');
+  }
+}, 60000);  // Check every minute
+```
+
+**Q: How to track error rates per resource?**
+A: Use `getResourceMetrics`:
+```javascript
+const resourceMetrics = await metricsPlugin.getResourceMetrics('users');
+if (resourceMetrics.errors.errorRate > 0.05) {
+  console.error(`Users resource has ${resourceMetrics.errors.errorRate}% errors`);
+}
+```
+
+---
+
+### Performance
+
+**Q: What's the overhead of metrics collection?**
+A: <1ms per operation. Metrics are buffered in-memory and flushed periodically.
+
+**Q: How to reduce memory usage?**
+A: Lower `retentionDays` and increase `flushInterval`:
+```javascript
+new MetricsPlugin({
+  retentionDays: 7,        // 7 days instead of 30
+  flushInterval: 300000    // 5 minutes instead of 1
+})
+```
+
+**Q: How to optimize for high-volume scenarios?**
+A: Use sampling and increase batch size:
+```javascript
+new MetricsPlugin({
+  sampleRate: 0.1,   // 10% sampling
+  batchSize: 500,    // Larger batches
+  flushInterval: 120000  // 2 minutes
+})
+```
+
+**Q: Does metrics collection block operations?**
+A: No. Metrics are collected asynchronously using method wrapping and periodic flush.
+
+**Q: How much S3 storage do metrics use?**
+A: ~1KB per metric record. With 1M operations/day and 30-day retention: ~30GB (with sampling: ~3GB at 10%).
+
+**Q: Can I disable metrics temporarily?**
+A: Yes, toggle `enabled`:
+```javascript
+metricsPlugin.enabled = false;  // Disable
+metricsPlugin.enabled = true;   // Re-enable
+```
+
+---
+
 ### Maintenance
 
 **Q: How to cleanup old data?**
@@ -1101,6 +1407,39 @@ A: Use `flushMetrics`:
 await metricsPlugin.flushMetrics();
 // Persists buffered metrics to database
 ```
+
+**Q: How to clear all metrics?**
+A: Use `clearMetrics`:
+```javascript
+await metricsPlugin.clearMetrics();
+// Deletes ALL metrics data (use with caution!)
+```
+
+**Q: How to backup metrics data?**
+A: Use `exportMetrics` with BackupPlugin:
+```javascript
+const metricsJson = await metricsPlugin.exportMetrics('json');
+await backupPlugin.backup('metrics-backup.json', metricsJson);
+```
+
+**Q: How often should I cleanup old data?**
+A: Automatic cleanup runs on plugin initialization and every 24 hours. Manual cleanup rarely needed.
+
+**Q: Can I archive metrics to external storage?**
+A: Yes, use ReplicatorPlugin:
+```javascript
+await db.usePlugin(new ReplicatorPlugin({
+  targets: {
+    s3: {
+      type: 's3',
+      bucket: 'metrics-archive',
+      resources: ['plg_metrics', 'plg_error_logs']
+    }
+  }
+}));
+```
+
+---
 
 ### Troubleshooting
 
@@ -1125,6 +1464,151 @@ new MetricsPlugin({
   collectPerformance: false
 })
 ```
+
+**Q: Metrics are showing zero/empty?**
+A:
+1. Ensure operations have been performed
+2. Check `flushInterval` hasn't reset counters
+3. Verify plugin was installed before operations
+4. Check `sampleRate` (1.0 = 100%)
+
+**Q: Prometheus endpoint returns 404?**
+A:
+1. Check `prometheus.enabled: true`
+2. If using `mode: 'integrated'`, ensure API Plugin is active
+3. Verify correct path (default: `/metrics`)
+
+**Q: Standalone Prometheus server won't start?**
+A:
+1. Check port 9090 is not in use: `lsof -i :9090`
+2. Verify `mode: 'standalone'` is set
+3. Check console for error messages
+
+**Q: High memory usage from metrics?**
+A: Reduce `retentionDays`, increase `flushInterval`, or lower `sampleRate`:
+```javascript
+new MetricsPlugin({
+  retentionDays: 7,
+  flushInterval: 300000,
+  sampleRate: 0.1
+})
+```
+
+**Q: Error logs are missing?**
+A: Ensure `collectErrors: true` and check error threshold:
+```javascript
+new MetricsPlugin({
+  collectErrors: true,
+  minErrorLevel: 'warn'  // Collect warnings and above
+})
+```
+
+---
+
+### Advanced
+
+**Q: Can I create custom metrics?**
+A: Yes, use `recordCustomMetric`:
+```javascript
+await metricsPlugin.recordCustomMetric({
+  name: 'custom_operation',
+  value: 123,
+  labels: { resource: 'users', type: 'custom' }
+});
+```
+
+**Q: How to integrate with external monitoring?**
+A: Export metrics and push to external systems:
+```javascript
+const metrics = await metricsPlugin.exportMetrics('json');
+await axios.post('https://monitoring-service.com/ingest', metrics);
+```
+
+**Q: Can I benchmark specific code blocks?**
+A: Yes, use `startTimer`/`endTimer`:
+```javascript
+const timer = metricsPlugin.startTimer('custom_operation');
+// ... your code ...
+metricsPlugin.endTimer(timer, { resource: 'users' });
+```
+
+**Q: How to track custom business metrics?**
+A: Use `recordMetric` with custom dimensions:
+```javascript
+await metricsPlugin.recordMetric({
+  operation: 'purchase',
+  resource: 'orders',
+  duration: 250,
+  metadata: { amount: 99.99, country: 'US' }
+});
+```
+
+**Q: Can I query metrics with complex filters?**
+A: Yes, metrics resources support standard query operations:
+```javascript
+const slowInserts = await db.getResource('plg_metrics').query({
+  operation: 'inserted',
+  duration: { $gt: 1000 }  // Slower than 1 second
+});
+```
+
+**Q: How to create health checks based on metrics?**
+A: Use `getResourceMetrics` with thresholds:
+```javascript
+async function healthCheck() {
+  const metrics = await metricsPlugin.getStats();
+  return {
+    healthy: metrics.errors.errorRate < 0.05 &&
+             metrics.performance.averageResponseTime < 1000,
+    metrics
+  };
+}
+```
+
+---
+
+### For AI Agents
+
+**Q: What's the metrics data model?**
+A: Three resources:
+- `plg_metrics`: { operation, resource, duration, timestamp, metadata }
+- `plg_error_logs`: { operation, resource, error, stack, timestamp }
+- `plg_performance_logs`: { operation, resource, duration, timestamp, details }
+
+**Q: How does method wrapping work?**
+A: Plugin wraps Resource methods (insert, update, get, etc.) with timing and error tracking logic.
+
+**Q: What operations are automatically tracked?**
+A: All Resource operations: insert, insertMany, update, patch, replace, remove, get, list, count, query.
+
+**Q: How is data retention implemented?**
+A: TTL-based cleanup runs on initialization and every 24 hours, removing records older than `retentionDays`.
+
+**Q: What's the difference between getMetrics() and getStats()?**
+A:
+- `getMetrics()`: Returns raw metric records (filterable)
+- `getStats()`: Returns aggregated statistics (totals, averages, rates)
+
+**Q: How are Prometheus metrics calculated?**
+A: Counter metrics accumulate, gauge metrics show current values. Updated on `/metrics` request.
+
+**Q: Can metrics collection cause race conditions?**
+A: No. Metrics are buffered in-memory and flushed to S3 asynchronously, separate from operation execution.
+
+**Q: What's the plugin initialization order?**
+A: MetricsPlugin should be one of the first plugins (after CachePlugin) to track all subsequent plugin operations.
+
+**Q: How to access raw metrics data programmatically?**
+A:
+```javascript
+const metricsResource = await db.getResource('plg_metrics');
+const allMetrics = await metricsResource.list({ limit: 1000 });
+```
+
+**Q: What's the performance impact of Prometheus export?**
+A: Minimal. Metrics are kept in-memory and serialized to Prometheus format on-demand (<10ms).
+
+---
 
 ---
 

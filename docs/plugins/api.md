@@ -93,10 +93,70 @@ GET     /metrics         # Prometheus metrics
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**Peer Dependencies (for ApiPlugin):**
+
+This plugin requires the Hono web framework and related packages:
+
+```bash
+pnpm install hono @hono/node-server @hono/swagger-ui jose
+```
+
+**Individual packages:**
+- `hono` - Fast, lightweight web framework (~50KB core, 3-12x faster than Express)
+- `@hono/node-server` - Node.js adapter for Hono
+- `@hono/swagger-ui` - Interactive API documentation at `/docs`
+- `jose` - JWT/OIDC token validation (JOSE standard implementation)
+
+**Optional Dependencies (By Feature):**
+
+**Authentication Drivers:**
+```bash
+# OAuth2/OIDC support (Azure AD, Keycloak, Google, etc.)
+pnpm install openid-client
+
+# Session tracking with encryption
+# (No additional packages needed - uses Node.js built-in crypto)
+```
+
+**Security Features:**
+```bash
+# GeoIP country blocking
+pnpm install @maxmind/geoip2-node
+
+# Download GeoLite2 database (free)
+wget https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb
+```
+
+**Static File Serving:**
+```bash
+# S3-based static assets (alternative to filesystem)
+# (Uses same AWS SDK as s3db.js core - already included)
+```
+
+**Why Peer Dependencies?**
+
+ApiPlugin uses peer dependencies to:
+- ✅ Keep core s3db.js lightweight (~500KB)
+- ✅ Allow version flexibility (you control Hono/jose versions)
+- ✅ Prevent dependency conflicts in monorepos
+- ✅ Enable tree-shaking (only bundle what you use)
+
+**Minimum Node.js Version:** 18.x (for native fetch, Web Streams)
+
+---
+
 ## 📑 Table of Contents
 
 - [TL;DR](#-tldr)
 - [Quick Start](#-quick-start)
+- [Dependencies](#-dependencies)
 - [Documentation Hub](#-documentation-hub)
 - [Context Access Patterns](#-context-access-patterns)
 - [Quick Wins](#-quick-wins)
