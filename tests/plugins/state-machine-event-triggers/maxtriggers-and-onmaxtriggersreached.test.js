@@ -36,6 +36,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
 
     const consoleLog = console.log;
     const logs = [];
+    console.log = (...args) => {
       logs.push(args.join(' '));
       consoleLog(...args);
     };
