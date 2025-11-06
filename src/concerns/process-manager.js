@@ -44,7 +44,7 @@ export class ProcessManager {
     this._setupSignalHandlers();
 
     if (this.options.verbose) {
-      console.log('[ProcessManager] Initialized with shutdown timeout:', this.options.shutdownTimeout, 'ms');
+      // console.log('[ProcessManager] Initialized with shutdown timeout:', this.options.shutdownTimeout, 'ms');
     }
   }
 
@@ -71,7 +71,7 @@ export class ProcessManager {
     this.intervals.set(name, { id, fn, interval });
 
     if (this.options.verbose) {
-      console.log(`[ProcessManager] Registered interval '${name}' (${interval}ms)`);
+      // console.log(`[ProcessManager] Registered interval '${name}' (${interval}ms)`);
     }
 
     return id;
@@ -88,7 +88,7 @@ export class ProcessManager {
       this.intervals.delete(name);
 
       if (this.options.verbose) {
-        console.log(`[ProcessManager] Cleared interval '${name}'`);
+        // console.log(`[ProcessManager] Cleared interval '${name}'`);
       }
     }
   }
@@ -120,7 +120,7 @@ export class ProcessManager {
     this.timeouts.set(name, { id, fn, delay });
 
     if (this.options.verbose) {
-      console.log(`[ProcessManager] Registered timeout '${name}' (${delay}ms)`);
+      // console.log(`[ProcessManager] Registered timeout '${name}' (${delay}ms)`);
     }
 
     return id;
@@ -137,7 +137,7 @@ export class ProcessManager {
       this.timeouts.delete(name);
 
       if (this.options.verbose) {
-        console.log(`[ProcessManager] Cleared timeout '${name}'`);
+        // console.log(`[ProcessManager] Cleared timeout '${name}'`);
       }
     }
   }
@@ -161,7 +161,7 @@ export class ProcessManager {
     this.cleanups.set(name, cleanupFn);
 
     if (this.options.verbose) {
-      console.log(`[ProcessManager] Registered cleanup '${name}'`);
+      // console.log(`[ProcessManager] Registered cleanup '${name}'`);
     }
   }
 
@@ -172,7 +172,7 @@ export class ProcessManager {
   unregisterCleanup(name) {
     if (this.cleanups.delete(name)) {
       if (this.options.verbose) {
-        console.log(`[ProcessManager] Unregistered cleanup '${name}'`);
+        // console.log(`[ProcessManager] Unregistered cleanup '${name}'`);
       }
     }
   }
@@ -199,7 +199,7 @@ export class ProcessManager {
     this._signalHandlersSetup = true;
 
     if (this.options.verbose) {
-      console.log('[ProcessManager] Signal handlers registered (SIGTERM, SIGINT, uncaughtException, unhandledRejection)');
+      // console.log('[ProcessManager] Signal handlers registered (SIGTERM, SIGINT, uncaughtException, unhandledRejection)');
     }
   }
 
@@ -210,12 +210,12 @@ export class ProcessManager {
   async _handleSignal(signal) {
     if (this.isShuttingDown) {
       if (this.options.verbose) {
-        console.log(`[ProcessManager] Shutdown already in progress, ignoring ${signal}`);
+        // console.log(`[ProcessManager] Shutdown already in progress, ignoring ${signal}`);
       }
       return;
     }
 
-    console.log(`[ProcessManager] Received ${signal}, initiating graceful shutdown...`);
+    // console.log(`[ProcessManager] Received ${signal}, initiating graceful shutdown...`);
 
     try {
       await this.shutdown();
@@ -241,7 +241,7 @@ export class ProcessManager {
     // Prevent multiple shutdown calls
     if (this.isShuttingDown) {
       if (this.options.verbose) {
-        console.log('[ProcessManager] Shutdown already in progress, waiting for completion...');
+        // console.log('[ProcessManager] Shutdown already in progress, waiting for completion...');
       }
       return this.shutdownPromise;
     }
@@ -260,15 +260,15 @@ export class ProcessManager {
   async _performShutdown(timeout) {
     const startTime = Date.now();
 
-    console.log('[ProcessManager] Starting shutdown sequence...');
+    // console.log('[ProcessManager] Starting shutdown sequence...');
 
     // 1. Clear all intervals
     if (this.intervals.size > 0) {
-      console.log(`[ProcessManager] Clearing ${this.intervals.size} intervals...`);
+      // console.log(`[ProcessManager] Clearing ${this.intervals.size} intervals...`);
       for (const [name, entry] of this.intervals.entries()) {
         clearInterval(entry.id);
         if (this.options.verbose) {
-          console.log(`[ProcessManager]   ✓ Cleared interval '${name}'`);
+          // console.log(`[ProcessManager]   ✓ Cleared interval '${name}'`);
         }
       }
       this.intervals.clear();
@@ -276,11 +276,11 @@ export class ProcessManager {
 
     // 2. Clear all timeouts
     if (this.timeouts.size > 0) {
-      console.log(`[ProcessManager] Clearing ${this.timeouts.size} timeouts...`);
+      // console.log(`[ProcessManager] Clearing ${this.timeouts.size} timeouts...`);
       for (const [name, entry] of this.timeouts.entries()) {
         clearTimeout(entry.id);
         if (this.options.verbose) {
-          console.log(`[ProcessManager]   ✓ Cleared timeout '${name}'`);
+          // console.log(`[ProcessManager]   ✓ Cleared timeout '${name}'`);
         }
       }
       this.timeouts.clear();
@@ -288,7 +288,7 @@ export class ProcessManager {
 
     // 3. Run cleanup functions with timeout
     if (this.cleanups.size > 0) {
-      console.log(`[ProcessManager] Running ${this.cleanups.size} cleanup functions...`);
+      // console.log(`[ProcessManager] Running ${this.cleanups.size} cleanup functions...`);
 
       const cleanupPromises = Array.from(this.cleanups.entries()).map(async ([name, cleanupFn]) => {
         try {
@@ -302,7 +302,7 @@ export class ProcessManager {
           ]);
 
           if (this.options.verbose) {
-            console.log(`[ProcessManager]   ✓ Cleanup '${name}' completed`);
+            // console.log(`[ProcessManager]   ✓ Cleanup '${name}' completed`);
           }
         } catch (err) {
           console.error(`[ProcessManager]   ✗ Cleanup '${name}' failed:`, err.message);
@@ -314,7 +314,7 @@ export class ProcessManager {
     }
 
     const elapsed = Date.now() - startTime;
-    console.log(`[ProcessManager] Shutdown complete in ${elapsed}ms`);
+    // console.log(`[ProcessManager] Shutdown complete in ${elapsed}ms`);
   }
 
   /**
@@ -344,7 +344,7 @@ export class ProcessManager {
     this._signalHandlersSetup = false;
 
     if (this.options.verbose) {
-      console.log('[ProcessManager] Signal handlers removed');
+      // console.log('[ProcessManager] Signal handlers removed');
     }
   }
 }

@@ -67,8 +67,33 @@ export class S3QueuePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    const resourceNamesOption = options.resourceNames || {};
-    if (!options.resource) {
+    const {
+      resource,
+      resourceNames = {},
+      visibilityTimeout = 30000,
+      pollInterval = 1000,
+      maxAttempts = 3,
+      concurrency = 1,
+      deadLetterResource = null,
+      autoStart = true,
+      onMessage,
+      onError,
+      onComplete,
+      pollBatchSize,
+      recoveryInterval = 5000,
+      recoveryBatchSize,
+      processedCacheTTL = 30000,
+      maxPollInterval,
+      queueResource,
+      orderingMode = 'fifo',
+      orderingGuarantee = true,
+      orderingLockTTL = 1500,
+      failureStrategy,
+      lockTTL = 5,
+      ...rest
+    } = this.options;
+
+    if (!resource) {
       throw new QueueError('S3QueuePlugin requires "resource" option', {
         pluginName: 'S3QueuePlugin',
         operation: 'constructor',
@@ -78,29 +103,43 @@ export class S3QueuePlugin extends Plugin {
       });
     }
 
+    const initialDeadLetter = deadLetterResource ?? failureStrategy?.deadLetterQueue ?? null;
+    const normalizedFailureStrategy = this._normalizeFailureStrategy({
+      failureStrategy,
+      deadLetterResource: initialDeadLetter,
+      maxAttempts
+    });
+    const normalizedOrderingMode = this._normalizeOrderingMode(orderingMode);
+
     this.config = {
-      ...options,
-      resource: options.resource,
-      visibilityTimeout: options.visibilityTimeout ?? 30000,     // 30 seconds
-      pollInterval: options.pollInterval ?? 1000,                 // 1 second
-      maxAttempts: options.maxAttempts ?? 3,
-      concurrency: options.concurrency ?? 1,
-      deadLetterResource: options.deadLetterResource ?? null,
-      autoStart: options.autoStart !== false,
-      onMessage: options.onMessage,
-      onError: options.onError,
-      onComplete: options.onComplete,
-      verbose: options.verbose ?? false
+      ...rest,
+      resource,
+      visibilityTimeout,
+      pollInterval,
+      maxAttempts,
+      concurrency,
+      deadLetterResource: normalizedFailureStrategy.deadLetterQueue || initialDeadLetter,
+      autoStart,
+      onMessage,
+      onError,
+      onComplete,
+      verbose: this.verbose,
+      orderingGuarantee: Boolean(orderingGuarantee),
+      orderingLockTTL: Math.max(250, orderingLockTTL),
+      orderingMode: normalizedOrderingMode,
+      failureStrategy: normalizedFailureStrategy,
+      lockTTL: Math.max(1, lockTTL)
     };
-    this.config.pollBatchSize = options.pollBatchSize ?? Math.max((this.config.concurrency || 1) * 4, 16);
-    this.config.recoveryInterval = options.recoveryInterval ?? 5000;
-    this.config.recoveryBatchSize = options.recoveryBatchSize ?? Math.max((this.config.concurrency || 1) * 2, 10);
-    this.config.processedCacheTTL = options.processedCacheTTL ?? 30000;
-    this.config.maxPollInterval = options.maxPollInterval ?? this.config.pollInterval;
+    this.config.maxAttempts = normalizedFailureStrategy.maxRetries ?? maxAttempts;
+    this.config.pollBatchSize = pollBatchSize ?? Math.max((this.config.concurrency || 1) * 4, 16);
+    this.config.recoveryInterval = recoveryInterval;
+    this.config.recoveryBatchSize = recoveryBatchSize ?? Math.max((this.config.concurrency || 1) * 2, 10);
+    this.config.processedCacheTTL = processedCacheTTL;
+    this.config.maxPollInterval = maxPollInterval ?? this.config.pollInterval;
 
     this._queueResourceDescriptor = {
       defaultName: `plg_s3queue_${this.config.resource}_queue`,
-      override: resourceNamesOption.queue || options.queueResource
+      override: resourceNames.queue || queueResource
     };
     this.queueResourceName = this._resolveQueueResourceName();
     this.config.queueResourceName = this.queueResourceName;
@@ -108,7 +147,7 @@ export class S3QueuePlugin extends Plugin {
     if (this.config.deadLetterResource) {
       this._deadLetterDescriptor = {
         defaultName: `plg_s3queue_${this.config.resource}_dead`,
-        override: resourceNamesOption.deadLetter || this.config.deadLetterResource
+        override: resourceNames.deadLetter || this.config.deadLetterResource
       };
     } else {
       this._deadLetterDescriptor = null;
@@ -116,9 +155,12 @@ export class S3QueuePlugin extends Plugin {
 
     this.deadLetterResourceName = this._resolveDeadLetterResourceName();
     this.config.deadLetterResource = this.deadLetterResourceName;
+    if (this.config.failureStrategy.deadLetterQueue) {
+      this.config.failureStrategy.deadLetterQueue = this.deadLetterResourceName;
+    }
 
-    this.queueResourceAlias = options.queueResource || `${this.config.resource}_queue`;
-    this.deadLetterResourceAlias = options.deadLetterResource || null;
+    this.queueResourceAlias = queueResource || `${this.config.resource}_queue`;
+    this.deadLetterResourceAlias = deadLetterResource || null;
 
     this.queueResource = null;       // Resource: <resource>_queue
     this.targetResource = null;      // Resource original do usuário
@@ -134,6 +176,7 @@ export class S3QueuePlugin extends Plugin {
     this.messageLocks = new Map();
     this._lastRecovery = 0;
     this._recoveryInFlight = false;
+    this._bestEffortNotified = false;
   }
 
   _resolveQueueResourceName() {
@@ -166,6 +209,9 @@ export class S3QueuePlugin extends Plugin {
     this.config.queueResourceName = this.queueResourceName;
     this.deadLetterResourceName = this._resolveDeadLetterResourceName();
     this.config.deadLetterResource = this.deadLetterResourceName;
+    if (this.config.failureStrategy.deadLetterQueue) {
+      this.config.failureStrategy.deadLetterQueue = this.deadLetterResourceName;
+    }
   }
 
   async onInstall() {
@@ -195,8 +241,10 @@ export class S3QueuePlugin extends Plugin {
           visibleAt: 'number|required',       // Timestamp de visibilidade
           claimedBy: 'string|optional',       // Worker que claimed
           claimedAt: 'number|optional',       // Timestamp do claim
+          lockToken: 'string|optional',       // Token exclusivo do lock
           attempts: 'number|default:0',
           maxAttempts: 'number|default:3',
+          queuedAt: 'number|required',        // Timestamp de enfileiramento
           error: 'string|optional',
           result: 'json|optional',
           createdAt: 'string|required',
@@ -280,15 +328,19 @@ export class S3QueuePlugin extends Plugin {
       // Insert original record first
       const record = await resource.insert(recordData);
 
+      const now = Date.now();
+      const maxAttemptsForMessage = options.maxAttempts ?? plugin._resolveMaxAttempts();
+
       // Create queue entry
       const queueEntry = {
         id: idGenerator(),
         originalId: record.id,
         status: 'pending',
-        visibleAt: Date.now(),
+        visibleAt: now,
         attempts: 0,
-        maxAttempts: options.maxAttempts || plugin.config.maxAttempts,
-        createdAt: new Date().toISOString().slice(0, 10)
+        maxAttempts: maxAttemptsForMessage,
+        queuedAt: now,
+        createdAt: new Date(now).toISOString()
       };
 
       await plugin.queueResource.insert(queueEntry);
@@ -322,8 +374,12 @@ export class S3QueuePlugin extends Plugin {
     /**
      * Extend visibility timeout for a specific queue entry
      */
-    resource.extendQueueVisibility = async function(queueId, extraMilliseconds) {
-      return await plugin.extendVisibility(queueId, extraMilliseconds);
+    resource.extendQueueVisibility = async function(queueId, extraMilliseconds, options = {}) {
+      return await plugin.extendVisibility(queueId, extraMilliseconds, options);
+    };
+
+    resource.renewQueueLock = async function(queueId, lockToken, extraMilliseconds) {
+      return await plugin.renewLock(queueId, lockToken, extraMilliseconds);
     };
 
     resource.clearQueueCache = async function() {
@@ -463,21 +519,124 @@ export class S3QueuePlugin extends Plugin {
       return null;
     }
 
-    // Filter messages that are visible now
-    const available = messages.filter(m => m.visibleAt <= now);
+    const available = this._prepareAvailableMessages(messages, now);
     if (available.length === 0) {
       return null;
     }
 
-    // Try to claim first available message using ETag
-    for (const msg of available) {
-      const claimed = await this.attemptClaim(msg);
-      if (claimed) {
-        return claimed;
-      }
+    if (!this.config.orderingGuarantee) {
+      this._notifyBestEffortOrdering();
+      return await this._attemptMessagesInOrder(available);
     }
 
+    const releaseOrderingLock = await this._acquireOrderingLock();
+    if (!releaseOrderingLock) {
+      return null;
+    }
+
+    try {
+      const next = available[0];
+      if (!next) return null;
+      return await this.attemptClaim(next, { enforceOrder: true });
+    } finally {
+      await releaseOrderingLock();
+    }
+  }
+
+  _prepareAvailableMessages(messages, now) {
+    const prepared = [];
+    for (const message of messages) {
+      if (!message || message.visibleAt > now) continue;
+      const queuedAt = this._ensureQueuedAt(message);
+      prepared.push({
+        ...message,
+        _queuedAt: queuedAt
+      });
+    }
+    return this._sortMessages(prepared);
+  }
+
+  _ensureQueuedAt(message) {
+    if (typeof message.queuedAt === 'number' && Number.isFinite(message.queuedAt)) {
+      return message.queuedAt;
+    }
+    if (message.createdAt) {
+      const parsed = Date.parse(message.createdAt);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+    if (typeof message.visibleAt === 'number') {
+      return message.visibleAt;
+    }
+    return Date.now();
+  }
+
+  _sortMessages(messages) {
+    const mode = this.config.orderingMode;
+    const sorted = [...messages];
+    const comparator = mode === 'lifo'
+      ? (a, b) => (b._queuedAt - a._queuedAt) || a.id.localeCompare(b.id)
+      : (a, b) => (a._queuedAt - b._queuedAt) || a.id.localeCompare(b.id);
+    sorted.sort(comparator);
+    return sorted;
+  }
+
+  async _attemptMessagesInOrder(messages) {
+    for (const msg of messages) {
+      const claimed = await this.attemptClaim(msg);
+      if (claimed) return claimed;
+    }
     return null;
+  }
+
+  _generateLockToken() {
+    return `lt-${idGenerator()}`;
+  }
+
+  _notifyBestEffortOrdering() {
+    if (this._bestEffortNotified) return;
+    this._bestEffortNotified = true;
+    this.emit('plg:s3-queue:ordering-best-effort', {
+      queue: this.queueResourceName,
+      orderingMode: this.config.orderingMode,
+      orderingGuarantee: this.config.orderingGuarantee
+    });
+  }
+
+  _orderingLockName() {
+    return `order-${this.queueResourceName}`;
+  }
+
+  async _acquireOrderingLock() {
+    const storage = this.getStorage();
+    try {
+      const ttlSeconds = Math.max(1, Math.ceil(this.config.orderingLockTTL / 1000));
+      const lock = await storage.acquireLock(this._orderingLockName(), {
+        ttl: ttlSeconds,
+        timeout: 0,
+        workerId: this.workerId
+      });
+
+      if (!lock) {
+        return null;
+      }
+
+      return async () => {
+        try {
+          await storage.releaseLock(lock);
+        } catch (releaseErr) {
+          if (this.config.verbose) {
+            console.warn('[S3QueuePlugin] Failed to release ordering lock:', releaseErr?.message || releaseErr);
+          }
+        }
+      };
+    } catch (error) {
+      if (this.config.verbose) {
+        console.warn('[S3QueuePlugin] Ordering lock acquisition failed:', error?.message || error);
+      }
+      return null;
+    }
   }
 
   /**
@@ -494,7 +653,7 @@ export class S3QueuePlugin extends Plugin {
 
     try {
       const lock = await storage.acquireLock(lockName, {
-        ttl: 5, // 5 seconds
+        ttl: this.config.lockTTL, // seconds
         timeout: 0, // Don't wait if locked
         workerId: this.workerId
       });
@@ -554,8 +713,9 @@ export class S3QueuePlugin extends Plugin {
     return;
   }
 
-  async attemptClaim(msg) {
+  async attemptClaim(msg, options = {}) {
     const now = Date.now();
+    const { enforceOrder = false } = options;
 
     // Try to acquire distributed lock for cache check
     // This prevents race condition where multiple workers check cache simultaneously
@@ -607,9 +767,20 @@ export class S3QueuePlugin extends Plugin {
       return null;
     }
 
+    msgWithETag.queuedAt = this._ensureQueuedAt(msgWithETag);
+
+    if (enforceOrder && msg._queuedAt !== undefined && msgWithETag.queuedAt !== msg._queuedAt) {
+      // Queue order changed while acquiring lock - release marker and let another pass retry
+      this.processedCache.delete(msg.id);
+      return null;
+    }
+
     if (this.config.verbose) {
       console.log(`[attemptClaim] Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`);
     }
+
+    const lockToken = this._generateLockToken();
+    const nextVisibleAt = now + this.config.visibilityTimeout;
 
     // Attempt atomic claim using ETag
     const [ok, err, result] = await tryFn(() =>
@@ -617,7 +788,8 @@ export class S3QueuePlugin extends Plugin {
         status: 'processing',
         claimedBy: this.workerId,
         claimedAt: now,
-        visibleAt: now + this.config.visibilityTimeout,
+        lockToken,
+        visibleAt: nextVisibleAt,
         attempts: msgWithETag.attempts + 1
       }, {
         ifMatch: msgWithETag._etag  // ← ATOMIC CLAIM using ETag!
@@ -646,69 +818,76 @@ export class S3QueuePlugin extends Plugin {
 
     if (!okRecord) {
       // Original record was deleted? Mark queue entry as failed
-      await this.failMessage(msgWithETag.id, 'Original record not found');
+      await this.failMessage({
+        queueId: msgWithETag.id,
+        lockToken,
+        attempts: msgWithETag.attempts + 1,
+        maxAttempts: msgWithETag.maxAttempts,
+        record: null,
+        originalId: msgWithETag.originalId
+      }, 'Original record not found');
       return null;
     }
+
+    const claimedData = result.data || msgWithETag;
 
     return {
       queueId: msgWithETag.id,
       record,
       attempts: msgWithETag.attempts + 1,
-      maxAttempts: msgWithETag.maxAttempts
+      maxAttempts: msgWithETag.maxAttempts,
+      originalId: record.id,
+      lockToken,
+      visibleUntil: nextVisibleAt,
+      etag: result.etag || claimedData._etag,
+      queuedAt: msgWithETag.queuedAt
     };
   }
 
   async processMessage(message, handler) {
     const startTime = Date.now();
 
+    const context = {
+      queueId: message.queueId,
+      attempts: message.attempts,
+      workerId: this.workerId,
+      lockToken: message.lockToken,
+      visibleUntil: message.visibleUntil,
+      renewLock: async (extraMilliseconds) => {
+        return await this.renewLock(message.queueId, message.lockToken, extraMilliseconds);
+      }
+    };
+
     try {
       // Execute user handler
-      const result = await handler(message.record, {
-        queueId: message.queueId,
-        attempts: message.attempts,
-        workerId: this.workerId
-      });
+      const result = await handler(message.record, context);
 
       // Mark as completed
-      await this.completeMessage(message.queueId, result);
+      await this.completeMessage(message, result);
 
       const duration = Date.now() - startTime;
 
-      this.emit('plg:s3-queue:message-completed', {
+      const eventPayload = {
         queueId: message.queueId,
         originalId: message.record.id,
         duration,
-        attempts: message.attempts
-      });
+        attempts: message.attempts,
+        finalStatus: 'processed'
+      };
+
+      this.emit('plg:s3-queue:message-completed', eventPayload);
+      this._emitOutcome('processed', message, { duration });
 
       if (this.config.onComplete) {
         await this.config.onComplete(message.record, result);
       }
 
     } catch (error) {
-      // Handle failure
-      const shouldRetry = message.attempts < message.maxAttempts;
+      const finalStatus = await this._handleProcessingFailure(message, error);
 
-      if (shouldRetry) {
-        // Retry with backoff
-        await this.retryMessage(message.queueId, message.attempts, error.message);
-
-        this.emit('plg:s3-queue:message-retry', {
-          queueId: message.queueId,
-          originalId: message.record.id,
-          attempts: message.attempts,
-          error: error.message
-        });
-      } else {
-        // Max attempts reached - move to dead letter queue
-        await this.moveToDeadLetter(message.queueId, message.record, error.message);
-
-        this.emit('plg:s3-queue:message-dead', {
-          queueId: message.queueId,
-          originalId: message.record.id,
-          error: error.message
-        });
-      }
+      this._emitOutcome(finalStatus, message, {
+        error: error?.message
+      });
 
       if (this.config.onError) {
         await this.config.onError(error, message.record);
@@ -716,62 +895,70 @@ export class S3QueuePlugin extends Plugin {
     }
   }
 
-  async completeMessage(queueId, result) {
-    await this.queueResource.update(queueId, {
+  async completeMessage(message, result) {
+    await this._updateQueueEntryWithLock(message, {
       status: 'completed',
       completedAt: Date.now(),
-      result
+      result,
+      claimedBy: this.workerId,
+      claimedAt: Date.now(),
+      lockToken: null,
+      error: null
     });
 
     // Note: message already in cache from attemptClaim()
   }
 
-  async failMessage(queueId, error) {
-    await this.queueResource.update(queueId, {
+  async failMessage(message, error) {
+    await this._updateQueueEntryWithLock(message, {
       status: 'failed',
-      error
-    });
-    await this._clearProcessedMarker(queueId);
+      error,
+      claimedBy: null,
+      claimedAt: Date.now(),
+      lockToken: null
+    }, { clearProcessedMarker: true });
   }
 
-  async retryMessage(queueId, attempts, error) {
+  async retryMessage(message, attempts, error) {
     // Exponential backoff: 2^attempts * 1000ms, max 30 seconds
     const backoff = Math.min(Math.pow(2, attempts) * 1000, 30000);
 
-    await this.queueResource.update(queueId, {
+    await this._updateQueueEntryWithLock(message, {
       status: 'pending',
       visibleAt: Date.now() + backoff,
+      claimedBy: null,
+      claimedAt: null,
+      lockToken: null,
       error
-    });
-
-    // Remove from cache so it can be retried
-    await this._clearProcessedMarker(queueId);
+    }, { clearProcessedMarker: true });
   }
 
-  async moveToDeadLetter(queueId, record, error) {
+  async moveToDeadLetter(message, error) {
     // Save to dead letter queue if configured
     if (this.config.deadLetterResource && this.deadLetterResourceObj) {
-      const msg = await this.queueResource.get(queueId);
+      const msg = await this.queueResource.get(message.queueId);
+
+      const dataPayload = message.record ?? { id: message.originalId, _missing: true };
 
       await this.deadLetterResourceObj.insert({
         id: idGenerator(),
-        originalId: record.id,
-        queueId: queueId,
-        data: record,
+        originalId: message.originalId ?? dataPayload.id,
+        queueId: message.queueId,
+        data: dataPayload,
         error,
-        attempts: msg.attempts,
+        attempts: msg?.attempts ?? message.attempts,
         createdAt: new Date().toISOString()
       });
     }
 
     // Mark as dead in queue
-    await this.queueResource.update(queueId, {
+    await this._updateQueueEntryWithLock(message, {
       status: 'dead',
-      error
-    });
-
-    // Note: message already in cache from attemptClaim()
-    await this._clearProcessedMarker(queueId);
+      error,
+      claimedBy: null,
+      claimedAt: Date.now(),
+      lockToken: null
+    }, { clearProcessedMarker: true });
   }
 
   async getStats() {
@@ -845,6 +1032,9 @@ export class S3QueuePlugin extends Plugin {
     }
 
     this.deadLetterResourceName = this.deadLetterResourceObj.name;
+    if (this.config.failureStrategy.deadLetterQueue) {
+      this.config.failureStrategy.deadLetterQueue = this.deadLetterResourceName;
+    }
 
     if (this.deadLetterResourceAlias) {
       const existing = this.database.resources[this.deadLetterResourceAlias];
@@ -858,8 +1048,15 @@ export class S3QueuePlugin extends Plugin {
     }
   }
 
-  async extendVisibility(queueId, extraMilliseconds) {
+  async extendVisibility(queueId, extraMilliseconds, { lockToken } = {}) {
     if (!queueId || !extraMilliseconds || extraMilliseconds <= 0) {
+      return false;
+    }
+
+    if (!lockToken) {
+      if (this.config.verbose) {
+        console.warn('[S3QueuePlugin] extendVisibility requires a lockToken to renew visibility');
+      }
       return false;
     }
 
@@ -867,6 +1064,13 @@ export class S3QueuePlugin extends Plugin {
     if (!okGet || !entry) {
       if (this.config.verbose) {
         console.warn('[S3QueuePlugin] extendVisibility failed to load entry:', errGet?.message);
+      }
+      return false;
+    }
+
+    if (entry.lockToken !== lockToken) {
+      if (this.config.verbose) {
+        console.warn('[S3QueuePlugin] extendVisibility lock token mismatch for queueId:', queueId);
       }
       return false;
     }
@@ -891,6 +1095,13 @@ export class S3QueuePlugin extends Plugin {
     }
 
     return true;
+  }
+
+  async renewLock(queueId, lockToken, extraMilliseconds) {
+    if (extraMilliseconds === undefined || extraMilliseconds === null) {
+      extraMilliseconds = this.config.visibilityTimeout;
+    }
+    return await this.extendVisibility(queueId, extraMilliseconds, { lockToken });
   }
 
   async recoverStalledMessages(now) {
@@ -955,12 +1166,37 @@ export class S3QueuePlugin extends Plugin {
         record = { id: queueEntry.originalId, _missing: true };
       }
 
-      await this.moveToDeadLetter(queueEntry.id, record, 'visibility-timeout exceeded max attempts');
-      this.emit('plg:s3-queue:message-dead', {
+      const recoveredMessage = {
         queueId: queueEntry.id,
         originalId: queueEntry.originalId,
-        error: 'visibility-timeout exceeded max attempts'
-      });
+        record,
+        attempts: queueEntry.attempts,
+        maxAttempts: queueEntry.maxAttempts,
+        lockToken: queueEntry.lockToken
+      };
+
+      const timeoutError = 'visibility-timeout exceeded max attempts';
+
+      if (this.config.failureStrategy.mode === 'dead-letter' || this.config.failureStrategy.mode === 'hybrid') {
+        await this.moveToDeadLetter(recoveredMessage, timeoutError);
+        this.emit('plg:s3-queue:message-dead', {
+          queueId: queueEntry.id,
+          originalId: queueEntry.originalId,
+          error: timeoutError,
+          finalStatus: 'dead-lettered'
+        });
+        this._emitOutcome('dead-lettered', recoveredMessage, { error: timeoutError });
+      } else {
+        await this.failMessage(recoveredMessage, timeoutError);
+        this.emit('plg:s3-queue:message-failed', {
+          queueId: queueEntry.id,
+          originalId: queueEntry.originalId,
+          attempts: queueEntry.attempts,
+          error: timeoutError,
+          finalStatus: 'failed'
+        });
+        this._emitOutcome('failed', recoveredMessage, { error: timeoutError });
+      }
       return;
     }
 
@@ -970,6 +1206,7 @@ export class S3QueuePlugin extends Plugin {
         visibleAt: now,
         claimedBy: null,
         claimedAt: null,
+        lockToken: null,
         error: 'Recovered after visibility timeout'
       }, {
         ifMatch: queueEntry._etag
@@ -988,6 +1225,221 @@ export class S3QueuePlugin extends Plugin {
       queueId: queueEntry.id,
       originalId: queueEntry.originalId
     });
+  }
+
+  _emitOutcome(finalStatus, message, extra = {}) {
+    this.emit('plg:s3-queue:message-outcome', {
+      queueId: message.queueId,
+      originalId: message.record?.id,
+      finalStatus,
+      attempts: message.attempts,
+      maxAttempts: message.maxAttempts,
+      orderingMode: this.config.orderingMode,
+      orderingGuarantee: this.config.orderingGuarantee,
+      ...extra
+    });
+  }
+
+  async _handleProcessingFailure(message, error) {
+    const strategy = this.config.failureStrategy;
+    const errorMessage = error?.message || 'Processing failed';
+    const attempts = message.attempts;
+    const maxAttempts = message.maxAttempts ?? strategy.maxRetries ?? 0;
+
+    if (strategy.mode === 'dead-letter') {
+      await this.moveToDeadLetter(message, errorMessage);
+      this.emit('plg:s3-queue:message-dead', {
+        queueId: message.queueId,
+        originalId: message.record?.id,
+        error: errorMessage,
+        finalStatus: 'dead-lettered'
+      });
+      return 'dead-lettered';
+    }
+
+    if (attempts < maxAttempts) {
+      await this.retryMessage(message, attempts, errorMessage);
+      this.emit('plg:s3-queue:message-retry', {
+        queueId: message.queueId,
+        originalId: message.record?.id,
+        attempts,
+        error: errorMessage,
+        finalStatus: 'retrying'
+      });
+      return 'retrying';
+    }
+
+    if (strategy.mode === 'hybrid' && strategy.deadLetterQueue) {
+      await this.moveToDeadLetter(message, errorMessage);
+      this.emit('plg:s3-queue:message-dead', {
+        queueId: message.queueId,
+        originalId: message.record?.id,
+        error: errorMessage,
+        finalStatus: 'dead-lettered'
+      });
+      return 'dead-lettered';
+    }
+
+    await this.failMessage(message, errorMessage);
+    this.emit('plg:s3-queue:message-failed', {
+      queueId: message.queueId,
+      originalId: message.record?.id,
+      attempts,
+      error: errorMessage,
+      finalStatus: 'failed'
+    });
+    return 'failed';
+  }
+
+  async _updateQueueEntryWithLock(message, attributes, { clearProcessedMarker = false, requireLock = true } = {}) {
+    const { queueId, lockToken } = message;
+
+    const [okGet, errGet, entry] = await tryFn(() => this.queueResource.get(queueId));
+    if (!okGet || !entry) {
+      throw new QueueError(`Queue entry '${queueId}' not found during lock-protected update`, {
+        pluginName: 'S3QueuePlugin',
+        operation: 'updateWithLock',
+        queueId,
+        statusCode: 404,
+        retriable: false,
+        original: errGet
+      });
+    }
+
+    if (requireLock && entry.lockToken !== lockToken) {
+      throw new QueueError('Lock token mismatch', {
+        pluginName: 'S3QueuePlugin',
+        operation: 'updateWithLock',
+        queueId,
+        statusCode: 409,
+        retriable: false,
+        suggestion: 'Ensure renewLock/finish is called with the token returned by attemptClaim().'
+      });
+    }
+
+    const mergedAttributes = {
+      ...attributes,
+      lockToken: attributes.lockToken ?? null
+    };
+
+    const [okUpdate, errUpdate, result] = await tryFn(() =>
+      this.queueResource.updateConditional(queueId, mergedAttributes, {
+        ifMatch: entry._etag
+      })
+    );
+
+    if (!okUpdate || !result?.success) {
+      throw new QueueError('Failed to update queue entry with lock', {
+        pluginName: 'S3QueuePlugin',
+        operation: 'updateWithLock',
+        queueId,
+        statusCode: 409,
+        retriable: true,
+        suggestion: 'Re-fetch the entry and retry. The message may have been recovered or reassigned.',
+        original: errUpdate || result?.error
+      });
+    }
+
+    if (clearProcessedMarker) {
+      await this._clearProcessedMarker(queueId);
+    }
+
+    return result;
+  }
+
+  _normalizeOrderingMode(orderingMode) {
+    const candidate = (orderingMode || 'fifo').toString().toLowerCase();
+    if (candidate !== 'fifo' && candidate !== 'lifo') {
+      throw new QueueError(`Invalid orderingMode '${orderingMode}'`, {
+        pluginName: 'S3QueuePlugin',
+        operation: 'normalizeOrderingMode',
+        statusCode: 400,
+        retriable: false,
+        suggestion: "Use 'fifo' (default) or 'lifo'."
+      });
+    }
+    return candidate;
+  }
+
+  _normalizeFailureStrategy({ failureStrategy, deadLetterResource, maxAttempts }) {
+    const defaultStrategy = {
+      mode: deadLetterResource ? 'hybrid' : 'retry',
+      maxRetries: Math.max(0, maxAttempts ?? 3),
+      deadLetterQueue: deadLetterResource || null
+    };
+
+    if (!failureStrategy) {
+      return defaultStrategy;
+    }
+
+    if (typeof failureStrategy === 'string') {
+      failureStrategy = { mode: failureStrategy };
+    }
+
+    const mode = (failureStrategy.mode || defaultStrategy.mode || 'retry').toLowerCase();
+    const maxRetries = failureStrategy.maxRetries ?? defaultStrategy.maxRetries;
+    const deadLetterQueue = failureStrategy.deadLetterQueue ?? deadLetterResource ?? defaultStrategy.deadLetterQueue;
+
+    if (mode === 'retry') {
+      return {
+        mode,
+        maxRetries: Math.max(0, maxRetries ?? 3),
+        deadLetterQueue: null
+      };
+    }
+
+    if (mode === 'dead-letter') {
+      if (!deadLetterQueue) {
+        throw new QueueError('dead-letter mode requires a deadLetterQueue/deadLetterResource', {
+          pluginName: 'S3QueuePlugin',
+          operation: 'normalizeFailureStrategy',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Provide deadLetterResource or failureStrategy.deadLetterQueue.'
+        });
+      }
+      return {
+        mode,
+        maxRetries: 0,
+        deadLetterQueue
+      };
+    }
+
+    if (mode === 'hybrid') {
+      if (!deadLetterQueue) {
+        throw new QueueError('hybrid failure strategy requires a dead-letter queue', {
+          pluginName: 'S3QueuePlugin',
+          operation: 'normalizeFailureStrategy',
+          statusCode: 400,
+          retriable: false,
+          suggestion: 'Set deadLetterResource or failureStrategy.deadLetterQueue.'
+        });
+      }
+      return {
+        mode,
+        maxRetries: Math.max(0, maxRetries ?? 3),
+        deadLetterQueue
+      };
+    }
+
+    throw new QueueError(`Unknown failure strategy mode '${mode}'`, {
+      pluginName: 'S3QueuePlugin',
+      operation: 'normalizeFailureStrategy',
+      statusCode: 400,
+      retriable: false,
+      suggestion: "Supported modes: 'retry', 'dead-letter', 'hybrid'."
+    });
+  }
+
+  _resolveMaxAttempts() {
+    const strategy = this.config?.failureStrategy;
+    if (!strategy) {
+      return this.config.maxAttempts ?? 3;
+    }
+    if (strategy.mode === 'dead-letter') {
+      return 0;
+    }
+    return strategy.maxRetries ?? this.config.maxAttempts ?? 3;
   }
 
   _computeIdleDelay(idleStreak) {

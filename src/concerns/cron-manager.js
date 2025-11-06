@@ -130,7 +130,7 @@ export class CronManager {
     this.disabled = this.options.disabled;
 
     if (this.options.verbose) {
-      console.log('[CronManager] Initialized');
+      // console.log('[CronManager] Initialized');
     }
 
     if (!this.disabled) {
@@ -157,7 +157,7 @@ export class CronManager {
     this._signalHandlersSetup = true;
 
     if (this.options.verbose) {
-      console.log('[CronManager] Signal handlers registered');
+      // console.log('[CronManager] Signal handlers registered');
     }
   }
 
@@ -176,7 +176,7 @@ export class CronManager {
     this._signalHandlersSetup = false;
 
     if (this.options.verbose) {
-      console.log('[CronManager] Signal handlers removed');
+      // console.log('[CronManager] Signal handlers removed');
     }
   }
 
@@ -187,7 +187,7 @@ export class CronManager {
     if (this._destroyed) return;
 
     if (this.options.verbose) {
-      console.log(`[CronManager] Received ${signal}, shutting down...`);
+      // console.log(`[CronManager] Received ${signal}, shutting down...`);
     }
 
     this.shutdown({ signal })
@@ -235,7 +235,7 @@ export class CronManager {
       this._cron = cronModule.default || cronModule;
 
       if (this.options.verbose) {
-        console.log('[CronManager] node-cron loaded');
+        // console.log('[CronManager] node-cron loaded');
       }
 
       return this._cron;
@@ -291,7 +291,7 @@ export class CronManager {
 
     if (this.disabled) {
       if (this.options.verbose) {
-        console.log(`[CronManager] Scheduling disabled - skipping job '${name}'`);
+        // console.log(`[CronManager] Scheduling disabled - skipping job '${name}'`);
       }
 
       return this._createStubTask(name, fn);
@@ -312,7 +312,7 @@ export class CronManager {
       }
 
       if (this.options.verbose) {
-        console.log(`[CronManager] Replaced existing job '${name}'`);
+        // console.log(`[CronManager] Replaced existing job '${name}'`);
       }
     }
 
@@ -342,7 +342,7 @@ export class CronManager {
     });
 
     if (this.options.verbose) {
-      console.log(`[CronManager] Scheduled job '${name}': ${expression}`);
+      // console.log(`[CronManager] Scheduled job '${name}': ${expression}`);
     }
 
     return task;
@@ -396,7 +396,7 @@ export class CronManager {
       this.jobs.delete(name);
 
       if (this.options.verbose) {
-        console.log(`[CronManager] Stopped job '${name}'`);
+        // console.log(`[CronManager] Stopped job '${name}'`);
       }
 
       return true;
@@ -448,7 +448,7 @@ export class CronManager {
   async shutdown(options = {}) {
     if (this._destroyed) {
       if (this.options.verbose) {
-        console.log('[CronManager] Already destroyed');
+        // console.log('[CronManager] Already destroyed');
       }
       return;
     }
@@ -456,7 +456,7 @@ export class CronManager {
     const timeout = options.timeout || this.options.shutdownTimeout;
 
     if (this.options.verbose) {
-      console.log(`[CronManager] Shutting down ${this.jobs.size} jobs...`);
+      // console.log(`[CronManager] Shutting down ${this.jobs.size} jobs...`);
     }
 
     if (this.disabled) {
@@ -499,7 +499,7 @@ export class CronManager {
     this._destroyed = true;
 
     if (this.options.verbose) {
-      console.log('[CronManager] Shutdown complete');
+      // console.log('[CronManager] Shutdown complete');
     }
   }
 

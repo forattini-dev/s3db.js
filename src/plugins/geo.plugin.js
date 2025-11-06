@@ -75,11 +75,11 @@ import { PluginError } from "../errors.js";
  * resource.getDistance(id1, id2)  // Returns distance in km
  */
 export class GeoPlugin extends Plugin {
-  constructor(config = {}) {
-    super(config);
+  constructor(options = {}) {
+    super(options);
 
-    this.resources = config.resources || {};
-    this.verbose = config.verbose !== undefined ? config.verbose : false;
+    const { resources = {} } = this.options;
+    this.resources = resources;
 
     // Geohash base32 alphabet
     this.base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
@@ -211,11 +211,11 @@ export class GeoPlugin extends Plugin {
     this._addHelperMethods(resource, config);
 
     if (this.verbose) {
-      console.log(
-        `[GeoPlugin] Setup resource "${resourceName}" with precision ${config.precision} ` +
-        `(~${this._getPrecisionDistance(config.precision)}km cells)` +
-        (config.usePartitions ? ' [Partitions enabled]' : '')
-      );
+      // console.log(
+      //   `[GeoPlugin] Setup resource "${resourceName}" with precision ${config.precision} ` +
+      //   `(~${this._getPrecisionDistance(config.precision)}km cells)` +
+      //   (config.usePartitions ? ' [Partitions enabled]' : '')
+      // );
     }
   }
 
@@ -245,10 +245,10 @@ export class GeoPlugin extends Plugin {
           partitionsCreated++;
 
           if (this.verbose) {
-            console.log(
-              `[GeoPlugin] Created ${partitionName} partition for "${resource.name}" ` +
-              `(precision ${zoom}, ~${this._getPrecisionDistance(zoom)}km cells)`
-            );
+            // console.log(
+            //   `[GeoPlugin] Created ${partitionName} partition for "${resource.name}" ` +
+            //   `(precision ${zoom}, ~${this._getPrecisionDistance(zoom)}km cells)`
+            // );
           }
         }
       }

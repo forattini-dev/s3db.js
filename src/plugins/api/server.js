@@ -224,10 +224,14 @@ export class ApiServer {
           },
           (info) => {
             this.isRunning = true;
-            console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+            if (this.options.verbose) {
+              console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+            }
 
             const shutdownHandler = async (signal) => {
-              console.log(`[API Server] Received ${signal}, initiating graceful shutdown...`);
+              if (this.options.verbose) {
+                console.log(`[API Server] Received ${signal}, initiating graceful shutdown...`);
+              }
               try {
                 await this.shutdown({ timeout: 30000 });
                 process.exit(0);
@@ -259,13 +263,17 @@ export class ApiServer {
       await new Promise((resolve) => {
         this.server.close(() => {
           this.isRunning = false;
-          console.log('[API Plugin] Server stopped');
+          if (this.options.verbose) {
+            console.log('[API Plugin] Server stopped');
+          }
           resolve();
         });
       });
     } else {
       this.isRunning = false;
-      console.log('[API Plugin] Server stopped');
+      if (this.options.verbose) {
+        console.log('[API Plugin] Server stopped');
+      }
     }
 
     if (this.metrics) {
@@ -334,7 +342,9 @@ export class ApiServer {
       return;
     }
 
-    console.log('[API Server] Initiating graceful shutdown...');
+    if (this.options.verbose) {
+      console.log('[API Server] Initiating graceful shutdown...');
+    }
     this.stopAcceptingRequests();
 
     const finished = await this.waitForRequestsToFinish({ timeout });
@@ -352,7 +362,9 @@ export class ApiServer {
     }
 
     this.isRunning = false;
-    console.log('[API Server] Shutdown complete');
+    if (this.options.verbose) {
+      console.log('[API Server] Shutdown complete');
+    }
   }
 
   _setupMetricsEventListeners() {
