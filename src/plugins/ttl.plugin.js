@@ -156,16 +156,24 @@ function getExpiredCohorts(granularity, count) {
 }
 
 export class TTLPlugin extends Plugin {
-  constructor(config = {}) {
-    super(config);
+  constructor(options = {}) {
+    super(options);
 
-    this.verbose = config.verbose !== undefined ? config.verbose : false;
-    this.resources = config.resources || {};
-    this.resourceFilter = this._buildResourceFilter(config);
-    this.batchSize = config.batchSize || 100;
+    const {
+      resources = {},
+      batchSize = 100,
+      schedules = {},
+      resourceFilter,
+      resourceAllowlist,
+      resourceBlocklist
+    } = this.options;
+
+    this.resources = resources;
+    this.resourceFilter = this._buildResourceFilter({ resourceFilter, resourceAllowlist, resourceBlocklist });
+    this.batchSize = batchSize;
 
     // Cleanup schedule configuration (cron expressions only)
-    this.schedules = config.schedules || {};   // { minute: '*/30 * * * * *', hour: '*/15 * * * *', ... }
+    this.schedules = schedules;   // { minute: '*/30 * * * * *', hour: '*/15 * * * *', ... }
 
     // Statistics
     this.stats = {
@@ -185,16 +193,16 @@ export class TTLPlugin extends Plugin {
     this.isRunning = false;
 
     // Expiration index (plugin storage)
-    const resourceNamesOption = config.resourceNames || {};
+    const resourceNamesOption = this.options.resourceNames || {};
     this.expirationIndex = null;
     this._indexResourceDescriptor = {
       defaultName: 'plg_ttl_expiration_index',
-      override: resourceNamesOption.index || config.indexResourceName
+      override: resourceNamesOption.index || this.options.indexResourceName
     };
     this.indexResourceName = this._resolveIndexResourceName();
   }
 
-  _buildResourceFilter(config) {
+  _buildResourceFilter(config = {}) {
     if (typeof config.resourceFilter === 'function') {
       return config.resourceFilter;
     }

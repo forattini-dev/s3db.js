@@ -28,6 +28,7 @@ export class PuppeteerPlugin extends Plugin {
 
     // Default configuration
     this.config = {
+      verbose: this.verbose,
       // Browser Pool
       pool: {
         enabled: true,
@@ -244,8 +245,11 @@ export class PuppeteerPlugin extends Plugin {
         console: false,
         network: false,
         ...options.debug
-      }
+      },
+      ...options
     };
+
+    this.config.verbose = this.verbose;
 
     const resourceNamesOption = options.resourceNames || {};
     this._resourceDescriptors = {
@@ -280,7 +284,23 @@ export class PuppeteerPlugin extends Plugin {
     };
     this.resourceNames = this._resolveResourceNames();
 
-    this.config.cookies.storage.resource = this.resourceNames.cookies;
+    // Ensure cookies.storage exists before setting resource name
+    // (user may have passed cookies: { enabled: false } without storage property)
+    if (this.config.cookies && !this.config.cookies.storage) {
+      this.config.cookies.storage = {
+        resource: this.resourceNames.cookies,
+        autoSave: true,
+        autoLoad: true,
+        encrypt: true
+      };
+    } else if (this.config.cookies && this.config.cookies.storage) {
+      this.config.cookies.storage.resource = this.resourceNames.cookies;
+    }
+
+    // Ensure proxy.selectionStrategy exists (user may have passed proxy: {} without selectionStrategy)
+    if (this.config.proxy && !this.config.proxy.selectionStrategy) {
+      this.config.proxy.selectionStrategy = 'round-robin';
+    }
 
     // Internal state
     this.browserPool = [];

@@ -491,16 +491,18 @@ export class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     this.indexResource = null;
-    const resourceNamesOption = options.resourceNames || {};
+    const opts = this.options;
+    const resourceNamesOption = opts.resourceNames || {};
     this._indexResourceDescriptor = {
       defaultName: 'plg_fulltext_indexes',
-      override: resourceNamesOption.index || options.indexResource
+      override: resourceNamesOption.index || opts.indexResource
     };
     this.indexResourceName = this._resolveIndexResourceName();
     this.config = {
-      minWordLength: options.minWordLength || 3,
-      maxResults: options.maxResults || 100,
-      ...options
+      minWordLength: opts.minWordLength || 3,
+      maxResults: opts.maxResults || 100,
+      verbose: this.verbose,
+      ...opts
     };
     this.indexes = new Map(); // In-memory index for simplicity
     this.dirtyIndexes = new Set(); // Track changed index keys for incremental saves

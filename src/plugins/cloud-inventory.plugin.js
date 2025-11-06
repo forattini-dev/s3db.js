@@ -68,11 +68,21 @@ export class CloudInventoryPlugin extends Plugin {
 
     const pendingLogs = [];
     const normalizedClouds = normalizeCloudDefinitions(
-      Array.isArray(options.clouds) ? options.clouds : [],
+      Array.isArray(this.options.clouds) ? this.options.clouds : [],
       (level, message, meta) => pendingLogs.push({ level, message, meta })
     );
 
-    this._internalResourceOverrides = options.resourceNames || {};
+    const {
+      resourceNames = {},
+      discovery = {},
+      logger,
+      scheduled,
+      lock = {},
+      terraform = {},
+      ...rest
+    } = this.options;
+
+    this._internalResourceOverrides = resourceNames || {};
     this._internalResourceDescriptors = {
       snapshots: {
         defaultName: 'plg_cloud_inventory_snapshots',
@@ -97,24 +107,25 @@ export class CloudInventoryPlugin extends Plugin {
       clouds: normalizedClouds,
       discovery: {
         ...DEFAULT_DISCOVERY,
-        ...(options.discovery || {})
+        ...(discovery || {})
       },
       resourceNames: this.internalResourceNames,
-      logger: typeof options.logger === 'function' ? options.logger : null,
-      verbose: options.verbose === true,
-      scheduled: normalizeSchedule(options.scheduled),
+      logger: typeof logger === 'function' ? logger : null,
+      verbose: this.verbose,
+      scheduled: normalizeSchedule(scheduled),
       lock: {
-        ttl: options.lock?.ttl ?? DEFAULT_LOCK.ttl,
-        timeout: options.lock?.timeout ?? DEFAULT_LOCK.timeout
+        ttl: lock?.ttl ?? DEFAULT_LOCK.ttl,
+        timeout: lock?.timeout ?? DEFAULT_LOCK.timeout
       },
       terraform: {
         ...DEFAULT_TERRAFORM,
-        ...(options.terraform || {}),
+        ...(terraform || {}),
         filters: {
           ...DEFAULT_TERRAFORM.filters,
-          ...(options.terraform?.filters || {})
+          ...(terraform?.filters || {})
         }
-      }
+      },
+      ...rest
     };
 
     this.cloudDrivers = new Map();
@@ -1162,7 +1173,7 @@ export class CloudInventoryPlugin extends Plugin {
       return;
     }
 
-    const shouldLog = this.config.verbose || level === 'error' || level === 'warn';
+    const shouldLog = this.verbose || level === 'error' || level === 'warn';
     if (shouldLog && typeof console[level] === 'function') {
       console[level](`[CloudInventoryPlugin] ${message}`, meta);
     }

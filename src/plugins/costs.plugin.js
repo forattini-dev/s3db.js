@@ -534,10 +534,17 @@ export class CostsPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
+    const {
+      considerFreeTier = false,
+      region = 'us-east-1',
+      ...rest
+    } = this.options;
+
     this.config = {
-      considerFreeTier: config.considerFreeTier !== undefined ? config.considerFreeTier : false,
-      region: config.region || 'us-east-1',
-      ...config
+      considerFreeTier,
+      region,
+      verbose: this.verbose,
+      ...rest
     };
 
     this.map = {

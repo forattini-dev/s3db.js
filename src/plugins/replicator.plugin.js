@@ -121,16 +121,31 @@ function normalizeResourceName(name) {
 export class ReplicatorPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    const {
+      replicators = [],
+      resourceNames = {},
+      replicatorConcurrency,
+      stopConcurrency,
+      logErrors = true,
+      persistReplicatorLog = false,
+      enabled = true,
+      batchSize = 100,
+      maxRetries = 3,
+      timeout = 30000,
+      replicatorLogResource
+    } = this.options;
+
     // Validation for config tests
-    if (!options.replicators || !Array.isArray(options.replicators)) {
+    if (!Array.isArray(replicators) || replicators.length === 0) {
       throw new ReplicationError('ReplicatorPlugin requires replicators array', {
         operation: 'constructor',
         pluginName: 'ReplicatorPlugin',
-        providedOptions: Object.keys(options),
+        providedOptions: Object.keys(this.options),
         suggestion: 'Provide replicators array: new ReplicatorPlugin({ replicators: [{ driver: "s3db", resources: [...] }] })'
       });
     }
-    for (const rep of options.replicators) {
+    for (const rep of replicators) {
       if (!rep.driver) {
         throw new ReplicationError('Each replicator must have a driver', {
           operation: 'constructor',
@@ -159,33 +174,32 @@ export class ReplicatorPlugin extends Plugin {
       }
     }
 
-    const resourceNamesOption = options.resourceNames || {};
-    const resolvedReplicatorConcurrency = Number.isFinite(options.replicatorConcurrency)
-      ? Math.max(1, Math.floor(options.replicatorConcurrency))
+    const resolvedReplicatorConcurrency = Number.isFinite(replicatorConcurrency)
+      ? Math.max(1, Math.floor(replicatorConcurrency))
       : 5;
-    const resolvedStopConcurrency = Number.isFinite(options.stopConcurrency)
-      ? Math.max(1, Math.floor(options.stopConcurrency))
+    const resolvedStopConcurrency = Number.isFinite(stopConcurrency)
+      ? Math.max(1, Math.floor(stopConcurrency))
       : resolvedReplicatorConcurrency;
     this.config = {
-      replicators: options.replicators || [],
-      logErrors: options.logErrors !== false,
-      persistReplicatorLog: options.persistReplicatorLog || false,
-      enabled: options.enabled !== false,
-      batchSize: options.batchSize || 100,
-      maxRetries: options.maxRetries || 3,
-      timeout: options.timeout || 30000,
-      verbose: options.verbose || false,
+      replicators,
+      logErrors,
+      persistReplicatorLog,
+      enabled,
+      batchSize,
+      maxRetries,
+      timeout,
+      verbose: this.verbose,
       replicatorConcurrency: resolvedReplicatorConcurrency,
       stopConcurrency: resolvedStopConcurrency
     };
     this._logResourceDescriptor = {
       defaultName: 'plg_replicator_logs',
-      override: resourceNamesOption.log || options.replicatorLogResource
+      override: resourceNames.log || replicatorLogResource
     };
     this.logResourceName = this._resolveLogResourceName();
     this.config.logResourceName = this.logResourceName;
 
-    this.resourceFilter = this._buildResourceFilter(options);
+    this.resourceFilter = this._buildResourceFilter(this.options);
 
     this.replicators = [];
     this.database = null;

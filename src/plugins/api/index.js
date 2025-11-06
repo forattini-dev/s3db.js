@@ -331,7 +331,8 @@ export class ApiPlugin extends Plugin {
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024
     };
 
-    this.config.resources = this._normalizeResourcesConfig(options.resources);
+    this.config.verbose = this.verbose;
+    this.config.resources = this._normalizeResourcesConfig(this.options.resources);
 
     this.server = null;
     this.usersResource = null;

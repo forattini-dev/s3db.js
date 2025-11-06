@@ -32,7 +32,6 @@ export async function cleanupStaleLocks(lockResource, config) {
   // If another container is already cleaning, skip
   if (!lockAcquired) {
     if (config.verbose) {
-      console.log(`[EventualConsistency] Lock cleanup already running in another container`);
     }
     return;
   }
@@ -51,7 +50,6 @@ export async function cleanupStaleLocks(lockResource, config) {
     if (staleLocks.length === 0) return;
 
     if (config.verbose) {
-      console.log(`[EventualConsistency] Cleaning up ${staleLocks.length} stale locks`);
     }
 
     // Delete stale locks using PromisePool
@@ -64,11 +62,9 @@ export async function cleanupStaleLocks(lockResource, config) {
       });
 
     if (errors && errors.length > 0 && config.verbose) {
-      console.warn(`[EventualConsistency] ${errors.length} stale locks failed to delete`);
     }
   } catch (error) {
     if (config.verbose) {
-      console.warn(`[EventualConsistency] Error cleaning up stale locks:`, error.message);
     }
   } finally {
     // Always release cleanup lock

@@ -1,5 +1,8 @@
 import { PluginError } from '../../errors.js';
 
+export { SqsConsumer } from './sqs-consumer.js';
+export { RabbitMqConsumer } from './rabbitmq-consumer.js';
+
 /**
  * Lazy-loaded consumer drivers to avoid loading peer dependencies at initialization.
  * Peer dependencies required:

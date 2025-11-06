@@ -159,20 +159,33 @@ import { SchedulerError } from "./scheduler.errors.js";
  */
 export class SchedulerPlugin extends Plugin {
   constructor(options = {}) {
-    super();
-    
+    super(options);
+
+    const {
+      timezone = 'UTC',
+      jobs = {},
+      defaultTimeout = 300000,
+      defaultRetries = 1,
+      jobHistoryResource = 'plg_job_executions',
+      persistJobs = true,
+      onJobStart = null,
+      onJobComplete = null,
+      onJobError = null,
+      ...rest
+    } = this.options;
+
     this.config = {
-      timezone: options.timezone || 'UTC',
-      jobs: options.jobs || {},
-      defaultTimeout: options.defaultTimeout || 300000, // 5 minutes
-      defaultRetries: options.defaultRetries || 1,
-      jobHistoryResource: options.jobHistoryResource || 'plg_job_executions',
-      persistJobs: options.persistJobs !== false,
-      verbose: options.verbose || false,
-      onJobStart: options.onJobStart || null,
-      onJobComplete: options.onJobComplete || null,
-      onJobError: options.onJobError || null,
-      ...options
+      timezone,
+      jobs,
+      defaultTimeout,
+      defaultRetries,
+      jobHistoryResource,
+      persistJobs,
+      verbose: this.verbose,
+      onJobStart,
+      onJobComplete,
+      onJobError,
+      ...rest
     };
     
     this.database = null;
@@ -335,7 +348,7 @@ export class SchedulerPlugin extends Plugin {
       
       this.timers.set(jobName, timer);
       
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[SchedulerPlugin] Scheduled job '${jobName}' for ${nextRun.toISOString()}`);
       }
     }
@@ -410,6 +423,38 @@ export class SchedulerPlugin extends Plugin {
     return next;
   }
 
+  _calculateNextRunFromConfig(config = {}) {
+    if (!config || config.enabled === false) {
+      return null;
+    }
+
+    const schedule = typeof config.schedule === 'string' ? config.schedule.trim() : '';
+    if (!schedule) {
+      return null;
+    }
+
+    const nextRun = this._calculateNextRun(schedule);
+
+    if (config.timezone) {
+      try {
+        const localized = nextRun.toLocaleString('en-US', { timeZone: config.timezone });
+        const tzDate = new Date(localized);
+        if (!Number.isNaN(tzDate.getTime())) {
+          return tzDate;
+        }
+      } catch (error) {
+        if (this.verbose) {
+          console.warn('[SchedulerPlugin] Failed to apply timezone adjustment', {
+            timezone: config.timezone,
+            error: error.message
+          });
+        }
+      }
+    }
+
+    return nextRun;
+  }
+
   async _executeJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
@@ -435,7 +480,7 @@ export class SchedulerPlugin extends Plugin {
 
     // If lock couldn't be acquired, another instance is executing this job
     if (!lock) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
       }
       // Remove from activeJobs since we didn't acquire the lock
@@ -515,7 +560,7 @@ export class SchedulerPlugin extends Plugin {
           attempt++;
 
           if (attempt <= job.retries) {
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.warn(`[SchedulerPlugin] Job '${jobName}' failed (attempt ${attempt + 1}):`, error.message);
             }
 
@@ -617,7 +662,7 @@ export class SchedulerPlugin extends Plugin {
       })
     );
     
-    if (!ok && this.config.verbose) {
+    if (!ok && this.verbose) {
       console.warn('[SchedulerPlugin] Failed to persist job execution:', err.message);
     }
   }
@@ -625,7 +670,7 @@ export class SchedulerPlugin extends Plugin {
   async _executeHook(hook, ...args) {
     if (typeof hook === 'function') {
       const [ok, err] = await tryFn(() => hook(...args));
-      if (!ok && this.config.verbose) {
+      if (!ok && this.verbose) {
         console.warn('[SchedulerPlugin] Hook execution failed:', err.message);
       }
     }
@@ -771,7 +816,7 @@ export class SchedulerPlugin extends Plugin {
     );
 
     if (!ok) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.warn(`[SchedulerPlugin] Failed to get job history:`, err.message);
       }
       return [];
@@ -905,7 +950,7 @@ export class SchedulerPlugin extends Plugin {
   }
 
   async start() {
-    if (this.config.verbose) {
+    if (this.verbose) {
       console.log(`[SchedulerPlugin] Started with ${this.jobs.size} jobs`);
     }
   }
@@ -919,7 +964,7 @@ export class SchedulerPlugin extends Plugin {
 
     // For tests, don't wait for active jobs - they may be mocked
     if (!this._isTestEnvironment() && this.activeJobs.size > 0) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[SchedulerPlugin] Waiting for ${this.activeJobs.size} active jobs to complete...`);
       }
       

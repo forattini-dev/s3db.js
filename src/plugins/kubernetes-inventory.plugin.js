@@ -98,13 +98,23 @@ export class KubernetesInventoryPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    const {
+      clusters,
+      resourceNames = {},
+      discovery = {},
+      logger,
+      scheduled,
+      lock = {},
+      ...rest
+    } = this.options;
+
     const pendingLogs = [];
     const normalizedClusters = normalizeClusterDefinitions(
-      Array.isArray(options.clusters) ? options.clusters : [],
+      Array.isArray(clusters) ? clusters : [],
       (level, message, meta) => pendingLogs.push({ level, message, meta })
     );
 
-    this._internalResourceOverrides = options.resourceNames || {};
+    this._internalResourceOverrides = resourceNames;
     this._internalResourceDescriptors = {
       snapshots: {
         defaultName: 'plg_k8s_inventory_snapshots',
@@ -129,16 +139,17 @@ export class KubernetesInventoryPlugin extends Plugin {
       clusters: normalizedClusters,
       discovery: {
         ...DEFAULT_DISCOVERY,
-        ...(options.discovery || {}),
+        ...(discovery || {}),
       },
       resourceNames: this.internalResourceNames,
-      logger: typeof options.logger === 'function' ? options.logger : null,
-      verbose: options.verbose === true,
-      scheduled: normalizeSchedule(options.scheduled),
+      logger: typeof logger === 'function' ? logger : null,
+      verbose: this.verbose,
+      scheduled: normalizeSchedule(scheduled),
       lock: {
-        ttl: options.lock?.ttl ?? DEFAULT_LOCK.ttl,
-        timeout: options.lock?.timeout ?? DEFAULT_LOCK.timeout,
+        ttl: lock?.ttl ?? DEFAULT_LOCK.ttl,
+        timeout: lock?.timeout ?? DEFAULT_LOCK.timeout,
       },
+      ...rest,
     };
 
     this.clusterDrivers = new Map();

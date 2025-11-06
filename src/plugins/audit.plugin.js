@@ -435,20 +435,29 @@ export class AuditPlugin extends Plugin {
     super(options);
 
     // Validate and set namespace (standardized)
-    this.namespace = getValidatedNamespace(options, '');
+    this.namespace = getValidatedNamespace(this.options, '');
 
-    const resourceNames = options.resourceNames || {};
+    const {
+      resourceNames = {},
+      resourceName,
+      includeData = true,
+      includePartitions = true,
+      maxDataSize = 10000,
+      ...rest
+    } = this.options;
+
     this.auditResource = null;
     this._auditResourceDescriptor = {
       defaultName: 'plg_audits',
-      override: resourceNames.audit || options.resourceName
+      override: resourceNames.audit || resourceName
     };
     this.auditResourceName = this._resolveAuditResourceName();
     this.config = {
-      includeData: options.includeData !== false,
-      includePartitions: options.includePartitions !== false,
-      maxDataSize: options.maxDataSize || 10000,
-      ...options
+      includeData,
+      includePartitions,
+      maxDataSize,
+      verbose: this.verbose,
+      ...rest
     };
   }
 

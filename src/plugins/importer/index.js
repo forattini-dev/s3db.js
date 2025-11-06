@@ -794,28 +794,30 @@ export class ImporterPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
-    this.resourceName = config.resource || config.resourceName;
-    this.format = config.format || 'json';
-    this.mapping = config.mapping || {};
-    this.transforms = config.transforms || {};
-    this.validate = config.validate || null;
-    this.deduplicateBy = config.deduplicateBy || null;
-    this.batchSize = config.batchSize || 1000;
-    this.parallelism = config.parallelism || 10;
-    this.continueOnError = config.continueOnError !== undefined ? config.continueOnError : true;
-    this.streaming = config.streaming !== undefined ? config.streaming : true;
+    const opts = this.options;
+
+    this.resourceName = opts.resource || opts.resourceName;
+    this.format = opts.format || 'json';
+    this.mapping = opts.mapping || {};
+    this.transforms = opts.transforms || {};
+    this.validate = opts.validate || null;
+    this.deduplicateBy = opts.deduplicateBy || null;
+    this.batchSize = opts.batchSize || 1000;
+    this.parallelism = opts.parallelism || 10;
+    this.continueOnError = opts.continueOnError !== undefined ? opts.continueOnError : true;
+    this.streaming = opts.streaming !== undefined ? opts.streaming : true;
 
     // Driver-specific config
-    this.driverConfig = config.driverConfig || {};
+    this.driverConfig = opts.driverConfig || {};
 
     // Excel-specific
-    this.sheet = config.sheet || 0;
-    this.headerRow = config.headerRow || 0;
-    this.startRow = config.startRow || 1;
+    this.sheet = opts.sheet || 0;
+    this.headerRow = opts.headerRow || 0;
+    this.startRow = opts.startRow || 1;
 
     // Binary-specific
-    this.binarySchema = config.binarySchema || null;
-    this.recordSize = config.recordSize || null;
+    this.binarySchema = opts.binarySchema || null;
+    this.recordSize = opts.recordSize || null;
 
     // Internal
     this.resource = null;

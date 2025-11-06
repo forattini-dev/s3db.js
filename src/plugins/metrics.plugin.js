@@ -581,9 +581,22 @@ import { getCronManager } from "../concerns/cron-manager.js";
 
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
-    super();
-    const resourceNamesOption = options.resourceNames || {};
-    const legacyResourceOption = options.resources || {};
+    super(options);
+
+    const {
+      resourceNames = {},
+      resources = {},
+      collectPerformance,
+      collectErrors,
+      collectUsage,
+      retentionDays,
+      flushInterval,
+      prometheus = {},
+      ...rest
+    } = this.options;
+
+    const resourceNamesOption = resourceNames || {};
+    const legacyResourceOption = resources || {};
     const resourceOverrides = {
       metrics: resourceNamesOption.metrics ?? legacyResourceOption.metrics,
       errors: resourceNamesOption.errors ?? legacyResourceOption.errors,
@@ -605,22 +618,23 @@ export class MetricsPlugin extends Plugin {
     };
     this.resourceNames = this._resolveResourceNames();
     this.config = {
-      collectPerformance: options.collectPerformance !== false,
-      collectErrors: options.collectErrors !== false,
-      collectUsage: options.collectUsage !== false,
-      retentionDays: options.retentionDays || 30,
-      flushInterval: options.flushInterval || 60000, // 1 minute
+      collectPerformance: collectPerformance !== false,
+      collectErrors: collectErrors !== false,
+      collectUsage: collectUsage !== false,
+      retentionDays: retentionDays || 30,
+      flushInterval: flushInterval || 60000, // 1 minute
 
       // Prometheus configuration
       prometheus: {
-        enabled: options.prometheus?.enabled !== false, // Enabled by default
-        mode: options.prometheus?.mode || 'auto',       // 'auto' | 'integrated' | 'standalone'
-        port: options.prometheus?.port || 9090,         // Standalone server port
-        path: options.prometheus?.path || '/metrics',   // Metrics endpoint path
-        includeResourceLabels: options.prometheus?.includeResourceLabels !== false
+        ...prometheus,
+        enabled: prometheus.enabled !== false,
+        mode: prometheus.mode || 'auto',
+        port: prometheus.port || 9090,
+        path: prometheus.path || '/metrics',
+        includeResourceLabels: prometheus.includeResourceLabels !== false
       },
-
-      ...options
+      verbose: this.verbose,
+      ...rest
     };
 
     this.metrics = {

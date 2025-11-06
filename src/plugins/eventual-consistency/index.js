@@ -24,23 +24,25 @@ export class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    this.resourceFilter = this._buildResourceFilter(options);
+    const opts = this.options;
+
+    this.resourceFilter = this._buildResourceFilter(opts);
 
     // Validate resources structure
-    validateResourcesConfig(options.resources);
+    validateResourcesConfig(opts.resources);
 
     // Auto-detect timezone
     const detectedTimezone = detectTimezone();
-    const timezoneAutoDetected = !options.cohort?.timezone;
+    const timezoneAutoDetected = !opts.cohort?.timezone;
 
     // Create shared configuration
-    this.config = createConfig(options, detectedTimezone);
+    this.config = createConfig({ ...opts, verbose: this.verbose }, detectedTimezone);
 
     // Create field handlers map
     this.fieldHandlers = new Map(); // Map<resourceName, Map<fieldName, handler>>
 
     // Parse resources configuration
-    for (const [resourceName, fields] of Object.entries(options.resources)) {
+    for (const [resourceName, fields] of Object.entries(opts.resources || {})) {
       if (!this.resourceFilter(resourceName)) {
         continue;
       }
@@ -57,7 +59,7 @@ export class EventualConsistencyPlugin extends Plugin {
     logInitialization(this.config, this.fieldHandlers, timezoneAutoDetected);
   }
 
-  _buildResourceFilter(options) {
+  _buildResourceFilter(options = {}) {
     if (typeof options.resourceFilter === 'function') {
       return options.resourceFilter;
     }

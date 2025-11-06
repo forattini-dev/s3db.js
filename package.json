@@ -87,7 +87,7 @@
     "test:core": "node --max-old-space-size=4096 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --testPathIgnorePatterns=tests/plugins/",
     "test:quick": "node --max-old-space-size=4096 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=2 --bail",
     "test:ts": "tsc --noEmit --project tests/typescript/tsconfig.json",
-    "test:coverage": "pnpm run test:js -- --coverage --runInBand && pnpm run test:ts",
+    "test:coverage": "node --max-old-space-size=8192 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand && pnpm run test:ts",
     "test:serial": "node --max-old-space-size=8192 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:plugins": "node --max-old-space-size=6144 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/plugins/ --testTimeout=60000",
     "test:low-memory": "node --max-old-space-size=4096 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=2 --workerIdleMemoryLimit=256MB",

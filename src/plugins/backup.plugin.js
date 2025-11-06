@@ -74,15 +74,37 @@ import { PluginError } from "../errors.js";
  */
 export class BackupPlugin extends Plugin {
   constructor(options = {}) {
-    super();
+    super(options);
+
+    const {
+      driver = 'filesystem',
+      config: driverConfig = {},
+      schedule = {},
+      retention = {},
+      compression = 'gzip',
+      encryption = null,
+      verification = true,
+      parallelism = 4,
+      include = null,
+      exclude = [],
+      backupMetadataResource = 'plg_backup_metadata',
+      tempDir = path.join(os.tmpdir(), 's3db', 'backups'),
+      onBackupStart = null,
+      onBackupComplete = null,
+      onBackupError = null,
+      onRestoreStart = null,
+      onRestoreComplete = null,
+      onRestoreError = null,
+      ...rest
+    } = this.options;
 
     this.config = {
       // Driver configuration
-      driver: options.driver || 'filesystem',
-      driverConfig: options.config || {},
+      driver,
+      driverConfig,
 
       // Scheduling configuration
-      schedule: options.schedule || {},
+      schedule,
 
       // Retention policy (Grandfather-Father-Son)
       retention: {
@@ -90,27 +112,28 @@ export class BackupPlugin extends Plugin {
         weekly: 4,
         monthly: 12,
         yearly: 3,
-        ...options.retention
+        ...retention
       },
 
       // Backup options
-      compression: options.compression || 'gzip',
-      encryption: options.encryption || null,
-      verification: options.verification !== false,
-      parallelism: options.parallelism || 4,
-      include: options.include || null,
-      exclude: options.exclude || [],
-      backupMetadataResource: options.backupMetadataResource || 'plg_backup_metadata',
-      tempDir: options.tempDir || path.join(os.tmpdir(), 's3db', 'backups'),
-      verbose: options.verbose || false,
+      compression,
+      encryption,
+      verification,
+      parallelism,
+      include,
+      exclude,
+      backupMetadataResource,
+      tempDir,
+      verbose: this.verbose,
 
       // Hooks
-      onBackupStart: options.onBackupStart || null,
-      onBackupComplete: options.onBackupComplete || null,
-      onBackupError: options.onBackupError || null,
-      onRestoreStart: options.onRestoreStart || null,
-      onRestoreComplete: options.onRestoreComplete || null,
-      onRestoreError: options.onRestoreError || null
+      onBackupStart,
+      onBackupComplete,
+      onBackupError,
+      onRestoreStart,
+      onRestoreComplete,
+      onRestoreError,
+      ...rest
     };
 
     this.driver = null;
@@ -174,7 +197,7 @@ export class BackupPlugin extends Plugin {
     // Create backup metadata resource
     await this._createBackupMetadataResource();
 
-    if (this.config.verbose) {
+    if (this.verbose) {
       const storageInfo = this.driver.getStorageInfo();
       console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
     }
@@ -207,7 +230,7 @@ export class BackupPlugin extends Plugin {
       timestamps: true
     }));
 
-    if (!ok && this.config.verbose) {
+    if (!ok && this.verbose) {
       console.log(`[BackupPlugin] Backup metadata resource '${this.config.backupMetadataResource}' already exists`);
     }
   }
@@ -424,7 +447,7 @@ export class BackupPlugin extends Plugin {
     // Create StreamingExporter
     const exporter = new StreamingExporter({
       compress: true, // Always use gzip for backups
-      onProgress: this.config.verbose ? (stats) => {
+      onProgress: this.verbose ? (stats) => {
         if (stats.recordCount % 10000 === 0) {
           console.log(`[BackupPlugin] Exported ${stats.recordCount} records from '${stats.resourceName}'`);
         }
@@ -452,7 +475,7 @@ export class BackupPlugin extends Plugin {
         sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000);
       }
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[BackupPlugin] Incremental backup since ${sinceTimestamp.toISOString()}`);
       }
     }
@@ -461,7 +484,7 @@ export class BackupPlugin extends Plugin {
     for (const resourceName of resourceNames) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
         }
         continue;
@@ -479,14 +502,14 @@ export class BackupPlugin extends Plugin {
           definition: resource.config
         });
 
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.log(
             `[BackupPlugin] Exported ${stats.recordCount} records from '${resourceName}' ` +
             `(${(stats.bytesWritten / 1024 / 1024).toFixed(2)} MB compressed)`
           );
         }
       } catch (error) {
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.error(`[BackupPlugin] Error exporting '${resourceName}': ${error.message}`);
         }
         throw error;
@@ -532,7 +555,7 @@ export class BackupPlugin extends Plugin {
     const metadataPath = path.join(tempDir, 's3db.json');
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
-    if (this.config.verbose) {
+    if (this.verbose) {
       console.log(`[BackupPlugin] Generated s3db.json metadata`);
     }
   }
@@ -552,7 +575,7 @@ export class BackupPlugin extends Plugin {
       const [readOk, readErr, content] = await tryFn(() => readFile(filePath, 'utf8'));
 
       if (!readOk) {
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
         }
         continue;
@@ -775,7 +798,7 @@ export class BackupPlugin extends Plugin {
         });
       }
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[BackupPlugin] Restoring ${archive.files.length} files from backup`);
       }
 
@@ -785,7 +808,7 @@ export class BackupPlugin extends Plugin {
           const resourceData = JSON.parse(file.content);
 
           if (!resourceData.resourceName || !resourceData.definition) {
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.warn(`[BackupPlugin] Skipping invalid file: ${file.name}`);
             }
             continue;
@@ -802,7 +825,7 @@ export class BackupPlugin extends Plugin {
           let resource = this.database.resources[resourceName];
 
           if (!resource) {
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.log(`[BackupPlugin] Creating resource '${resourceName}'`);
             }
 
@@ -811,7 +834,7 @@ export class BackupPlugin extends Plugin {
             );
 
             if (!createOk) {
-              if (this.config.verbose) {
+              if (this.verbose) {
                 console.warn(`[BackupPlugin] Failed to create resource '${resourceName}': ${createErr?.message}`);
               }
               continue;
@@ -858,13 +881,13 @@ export class BackupPlugin extends Plugin {
               totalRecords: resourceData.records.length
             });
 
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.log(`[BackupPlugin] Restored ${insertedCount}/${resourceData.records.length} records to '${resourceName}'`);
             }
           }
 
         } catch (fileError) {
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.warn(`[BackupPlugin] Error processing file ${file.name}: ${fileError.message}`);
           }
         }
@@ -873,7 +896,7 @@ export class BackupPlugin extends Plugin {
       return restoredResources;
 
     } catch (error) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.error(`[BackupPlugin] Error restoring backup: ${error.message}`);
       }
       throw this.createError(`Failed to restore backup: ${error.message}`, {
@@ -918,7 +941,7 @@ export class BackupPlugin extends Plugin {
       return combinedBackups;
       
     } catch (error) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[BackupPlugin] Error listing backups: ${error.message}`);
       }
       return [];
@@ -1023,7 +1046,7 @@ export class BackupPlugin extends Plugin {
         return;
       }
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[BackupPlugin] Cleaning up ${backupsToDelete.length} old backups (keeping ${toKeep.size})`);
       }
 
@@ -1036,18 +1059,18 @@ export class BackupPlugin extends Plugin {
           // Delete metadata
           await this.database.resources[this.config.backupMetadataResource].delete(backup.id);
 
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.log(`[BackupPlugin] Deleted old backup: ${backup.id}`);
           }
         } catch (deleteError) {
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.warn(`[BackupPlugin] Failed to delete backup ${backup.id}: ${deleteError.message}`);
           }
         }
       }
 
     } catch (error) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.warn(`[BackupPlugin] Error during cleanup: ${error.message}`);
       }
     }
@@ -1060,7 +1083,7 @@ export class BackupPlugin extends Plugin {
   }
 
   async start() {
-    if (this.config.verbose) {
+    if (this.verbose) {
       const storageInfo = this.driver.getStorageInfo();
       console.log(`[BackupPlugin] Started with driver: ${storageInfo.type}`);
     }
