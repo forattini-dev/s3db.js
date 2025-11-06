@@ -453,6 +453,18 @@ export class SchedulerPlugin extends Plugin {
       database: this.database
     };
 
+    const setTimer = (
+      globalThis?.originalSetTimeout ||
+      globalThis?.setTimeout ||
+      setTimeout
+    ).bind(globalThis);
+
+    const clearTimer = (
+      globalThis?.originalClearTimeout ||
+      globalThis?.clearTimeout ||
+      clearTimeout
+    ).bind(globalThis);
+
     // Update with actual executionId
     this.activeJobs.set(jobName, executionId);
 
@@ -479,7 +491,7 @@ export class SchedulerPlugin extends Plugin {
 
           let timeoutId;
           const timeoutPromise = new Promise((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error('Job execution timeout')), actualTimeout);
+            timeoutId = setTimer(() => reject(new Error('Job execution timeout')), actualTimeout);
           });
 
           // Execute job with timeout
@@ -488,10 +500,10 @@ export class SchedulerPlugin extends Plugin {
           try {
             result = await Promise.race([jobPromise, timeoutPromise]);
             // Clear timeout if job completes successfully
-            clearTimeout(timeoutId);
+            clearTimer(timeoutId);
           } catch (raceError) {
             // Ensure timeout is cleared even on error
-            clearTimeout(timeoutId);
+            clearTimer(timeoutId);
             throw raceError;
           }
 
@@ -510,7 +522,7 @@ export class SchedulerPlugin extends Plugin {
             // Wait before retry (exponential backoff with max delay, shorter in tests)
             const baseDelay = Math.min(Math.pow(2, attempt) * 1000, 5000); // Max 5 seconds
             const delay = isTestEnvironment ? 1 : baseDelay; // Just 1ms in tests
-            await new Promise(resolve => setTimeout(resolve, delay));
+            await new Promise(resolve => setTimer(resolve, delay));
           }
         }
       }
@@ -827,8 +839,8 @@ export class SchedulerPlugin extends Plugin {
     const job = {
       ...jobConfig,
       enabled: jobConfig.enabled !== false,
-      retries: jobConfig.retries || this.config.defaultRetries,
-      timeout: jobConfig.timeout || this.config.defaultTimeout,
+      retries: jobConfig.retries ?? this.config.defaultRetries,
+      timeout: jobConfig.timeout ?? this.config.defaultTimeout,
       lastRun: null,
       nextRun: null,
       runCount: 0,

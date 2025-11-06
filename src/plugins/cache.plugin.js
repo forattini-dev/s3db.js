@@ -191,6 +191,25 @@ export class CachePlugin extends Plugin {
       this.driver = await this._createSingleDriver(this.config.driver, this.config.config);
     }
 
+    if (this.driver && typeof this.driver.on === 'function') {
+      this.driver.on('memory:pressure', (payload) => {
+        this.emit('cache:memoryPressure', {
+          driver: 'memory',
+          ...payload
+        });
+        if (this.config.verbose) {
+          const reason = payload?.reason || 'unknown';
+          console.warn(`[CachePlugin] Memory pressure detected (reason: ${reason}) current=${Math.round((payload?.currentBytes || 0) / (1024 * 1024))}MB`);
+        }
+      });
+      this.driver.on('memory:evict', (payload) => {
+        this.emit('cache:memoryEvict', {
+          driver: 'memory',
+          ...payload
+        });
+      });
+    }
+
     // Use database hooks instead of method overwriting
     this.installDatabaseHooks();
 
@@ -431,10 +450,6 @@ export class CachePlugin extends Plugin {
 
   async onStart() {
     // Plugin is ready
-  }
-
-  async onStop() {
-    // Cleanup if needed
   }
 
   /**
@@ -1162,5 +1177,11 @@ export class CachePlugin extends Plugin {
     if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
 
     return parts.join(' ');
+  }
+
+  async onStop() {
+    if (this.driver && typeof this.driver.shutdown === 'function') {
+      await this.driver.shutdown();
+    }
   }
 }

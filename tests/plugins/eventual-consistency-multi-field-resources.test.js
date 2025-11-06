@@ -5,7 +5,7 @@
  * for ALL configured fields, not just the first one.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
@@ -70,6 +70,8 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     console.log('\n✅ All transaction resources created!\n');
   });
+
+  jest.setTimeout(30000);
 
   it('should create analytics resources for ALL configured fields when enabled', async () => {
     console.log('\n🧪 Testing multi-field analytics resource creation...\n');

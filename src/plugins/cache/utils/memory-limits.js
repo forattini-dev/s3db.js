@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import v8 from 'node:v8';
 
+const DEFAULT_TOTAL_PERCENT = 0.5;   // Use up to 50% of effective memory
+const DEFAULT_HEAP_PERCENT = 0.6;    // Cap at 60% of V8 heap limit
+
 /**
  * Read cgroup memory limit (v2 first, fallback to v1)
  */
@@ -53,7 +56,7 @@ export function getEffectiveTotalMemoryBytes() {
 export function resolveCacheMemoryLimit({
   maxMemoryBytes,
   maxMemoryPercent,
-  safetyPercent = 0.75,
+  safetyPercent,
 } = {}) {
   const heapStats = v8.getHeapStatistics();
   const heapLimit = heapStats?.heap_size_limit ?? 0;
@@ -70,24 +73,27 @@ export function resolveCacheMemoryLimit({
     derivedFromPercent = true;
   }
 
-  // Always cap by heap limit * safetyPercent if both are available
+  const safeTotalPercent = typeof safetyPercent === 'number' && safetyPercent > 0 && safetyPercent <= 1
+    ? safetyPercent
+    : DEFAULT_TOTAL_PERCENT;
+  const totalCap = Math.floor(effectiveTotal * safeTotalPercent);
+
+  if (resolvedBytes === 0 || totalCap < resolvedBytes) {
+    resolvedBytes = totalCap;
+    derivedFromPercent = derivedFromPercent || maxMemoryPercent > 0;
+  }
+
   if (heapLimit > 0) {
-    const heapCap = Math.floor(heapLimit * safetyPercent);
+    const heapCap = Math.floor(heapLimit * DEFAULT_HEAP_PERCENT);
     if (resolvedBytes === 0 || heapCap < resolvedBytes) {
       resolvedBytes = heapCap;
       derivedFromPercent = derivedFromPercent || maxMemoryPercent > 0;
     }
   }
 
-  // Final fallback: take safetyPercent of effective total memory
-  if (resolvedBytes === 0) {
-    resolvedBytes = Math.floor(effectiveTotal * safetyPercent);
-    derivedFromPercent = true;
-  }
-
   // Guard against zero/negative values
   if (!Number.isFinite(resolvedBytes) || resolvedBytes <= 0) {
-    resolvedBytes = Math.floor(effectiveTotal * 0.5);
+    resolvedBytes = Math.floor(effectiveTotal * DEFAULT_TOTAL_PERCENT);
     derivedFromPercent = true;
   }
 

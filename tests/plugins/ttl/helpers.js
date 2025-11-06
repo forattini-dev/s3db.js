@@ -1,4 +1,4 @@
-import { sleep } from '../config.js';
+import { sleep } from '../../config.js';
 
 /**
  * Polls the provided async function until it returns a truthy value or the timeout is reached.

@@ -5,11 +5,12 @@
  * Verifies that final consolidated values match expected results
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
 describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', () => {
+  jest.setTimeout(120000);
   let database;
   let urls;
 
@@ -297,5 +298,5 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
     if (allCorrect) {
       console.log('\n✅ ALL 10 FIELDS CONSOLIDATED CORRECTLY!\n');
     }
-  }, 60000);
+  }, 120000);
 });

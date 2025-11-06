@@ -2,6 +2,8 @@
  * Tests for ProcessManager - Centralized lifecycle management
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+
 import { ProcessManager, getProcessManager, resetProcessManager } from '../../src/concerns/process-manager.js';
 
 describe('ProcessManager', () => {
@@ -158,7 +160,7 @@ describe('ProcessManager', () => {
     });
 
     it('should handle async cleanup functions', async () => {
-      const cleanup = vi.fn(async () => {
+      const cleanup = jest.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 50));
       });
 
@@ -169,7 +171,7 @@ describe('ProcessManager', () => {
     });
 
     it('should timeout long-running cleanup functions', async () => {
-      const cleanup = vi.fn(async () => {
+      const cleanup = jest.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 200));
       });
 

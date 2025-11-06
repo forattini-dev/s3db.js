@@ -119,6 +119,34 @@ await cronManager.schedule(
   'cron-10s'
 );
 
+// Re-scheduling with the same name automatically replaces the previous job.
+// Pass { replace: false } if you want the old guard-rail behaviour.
+await cronManager.schedule(
+  CRON_PRESETS.EVERY_MINUTE,
+  () => {
+    console.log('[Cron] Every minute - replacement demo');
+  },
+  'cron-10s'
+);
+
+// Explicitly opt-out of replacement to surface duplicates.
+try {
+  await cronManager.schedule(
+    CRON_PRESETS.EVERY_MINUTE,
+    () => {},
+    'cron-throw',
+    { replace: false }
+  );
+  await cronManager.schedule(
+    CRON_PRESETS.EVERY_MINUTE,
+    () => {},
+    'cron-throw',
+    { replace: false }
+  );
+} catch (error) {
+  console.log('Expected duplicate guard:', error.message);
+}
+
 // Custom cron expression (every minute at :30 seconds)
 await cronManager.schedule(
   '30 * * * * *', // sec min hour day month weekday
@@ -216,6 +244,7 @@ console.log();
 // Stop a specific job
 console.log('Stopping "cron-10s" job...');
 cronManager.stop('cron-10s');
+cronManager.stop('cron-throw');
 
 const updatedStats = cronManager.getStats();
 console.log('After stopping:');

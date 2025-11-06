@@ -19,10 +19,14 @@ import { getCronManager } from "../../concerns/cron-manager.js";
  * @param {Map} fieldHandlers - Field handlers map
  * @param {Function} completeFieldSetupFn - Function to complete field setup for a field
  * @param {Function} watchForResourceFn - Function to watch for resource creation
+ * @param {Function} shouldManageResource - Predicate to determine if a resource should be managed
  */
-export async function onInstall(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn) {
+export async function onInstall(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn, shouldManageResource = () => true) {
   // Iterate over all resource/field combinations
   for (const [resourceName, resourceHandlers] of fieldHandlers) {
+    if (!shouldManageResource(resourceName)) {
+      continue;
+    }
     const targetResource = database.resources[resourceName];
 
     if (!targetResource) {
@@ -85,6 +89,10 @@ export async function completeFieldSetup(handler, database, config, plugin) {
 
   const resourceName = handler.resource;
   const fieldName = handler.field;
+
+  if (plugin && typeof plugin.resourceFilter === 'function' && !plugin.resourceFilter(resourceName)) {
+    return;
+  }
 
   // Create transaction resource with partitions (plg_ prefix for plugin resources)
   const transactionResourceName = `plg_${resourceName}_tx_${fieldName}`;

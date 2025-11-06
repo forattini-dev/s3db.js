@@ -161,6 +161,7 @@ export class TTLPlugin extends Plugin {
 
     this.verbose = config.verbose !== undefined ? config.verbose : false;
     this.resources = config.resources || {};
+    this.resourceFilter = this._buildResourceFilter(config);
     this.batchSize = config.batchSize || 100;
 
     // Cleanup schedule configuration (cron expressions only)
@@ -193,6 +194,29 @@ export class TTLPlugin extends Plugin {
     this.indexResourceName = this._resolveIndexResourceName();
   }
 
+  _buildResourceFilter(config) {
+    if (typeof config.resourceFilter === 'function') {
+      return config.resourceFilter;
+    }
+
+    const allow = Array.isArray(config.resourceAllowlist) ? new Set(config.resourceAllowlist) : null;
+    const block = Array.isArray(config.resourceBlocklist) ? new Set(config.resourceBlocklist) : null;
+
+    if (allow || block) {
+      return (resourceName) => {
+        if (allow && allow.size > 0 && !allow.has(resourceName)) {
+          return false;
+        }
+        if (block && block.has(resourceName)) {
+          return false;
+        }
+        return true;
+      };
+    }
+
+    return () => true;
+  }
+
   /**
    * Install the plugin
    */
@@ -200,28 +224,37 @@ export class TTLPlugin extends Plugin {
     await super.install(database);
 
     // Validate resource configurations
+    const managedResources = [];
+
     for (const [resourceName, config] of Object.entries(this.resources)) {
+      if (!this.resourceFilter(resourceName)) {
+        if (this.verbose) {
+          console.warn(`[TTLPlugin] Resource "${resourceName}" skipped by resource filter`);
+        }
+        continue;
+      }
       this._validateResourceConfig(resourceName, config);
+      managedResources.push(resourceName);
     }
 
     // Create expiration index (plugin storage)
     await this._createExpirationIndex();
 
     // Setup hooks for each configured resource (skip if resource doesn't exist)
-    for (const [resourceName, config] of Object.entries(this.resources)) {
-      this._setupResourceHooks(resourceName, config);
+    for (const resourceName of managedResources) {
+      this._setupResourceHooks(resourceName, this.resources[resourceName]);
     }
 
     // Start interval-based cleanup
     this._startIntervals();
 
     if (this.verbose) {
-      console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
+      console.log(`[TTLPlugin] Installed with ${managedResources.length} resources`);
     }
 
     this.emit('db:plugin:installed', {
       plugin: 'TTLPlugin',
-      resources: Object.keys(this.resources)
+      resources: managedResources
     });
   }
 
@@ -349,6 +382,13 @@ export class TTLPlugin extends Plugin {
     if (!this.database.resources[resourceName]) {
       if (this.verbose) {
         console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
+      }
+      return;
+    }
+
+    if (!this.resourceFilter(resourceName)) {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" skipped by resource filter`);
       }
       return;
     }
@@ -485,6 +525,9 @@ export class TTLPlugin extends Plugin {
     };
 
     for (const [name, config] of Object.entries(this.resources)) {
+      if (!this.resourceFilter(name)) {
+        continue;
+      }
       byGranularity[config.granularity].push({ name, config });
     }
 
@@ -552,6 +595,9 @@ export class TTLPlugin extends Plugin {
 
           for (const entry of batch) {
             const config = this.resources[entry.resourceName];
+            if (!config || !this.resourceFilter(entry.resourceName)) {
+              continue;
+            }
             await this._processExpiredEntry(entry, config);
           }
         }

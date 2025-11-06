@@ -206,9 +206,9 @@ export class MemoryCache extends Cache {
     this.enableCompression = config.enableCompression !== undefined ? config.enableCompression : false;
     this.compressionThreshold = config.compressionThreshold !== undefined ? config.compressionThreshold : 1024;
 
-    this.heapUsageThreshold = config.heapUsageThreshold ?? 0.75; // 75% of heap
+    this.heapUsageThreshold = config.heapUsageThreshold ?? 0.6; // 60% of heap by default
     if (!(this.heapUsageThreshold > 0 && this.heapUsageThreshold < 1)) {
-      this.heapUsageThreshold = 0.9;
+      this.heapUsageThreshold = 0.6;
     }
     this.monitorInterval = config.monitorInterval === undefined ? 15000 : config.monitorInterval;
 
@@ -223,6 +223,7 @@ export class MemoryCache extends Cache {
     // Memory tracking
     this.currentMemoryBytes = 0;
     this.evictedDueToMemory = 0;
+    this.memoryPressureEvents = 0;
     this._monitorHandle = null;
 
     // Monotonic counter for LRU ordering (prevents timestamp collisions)
@@ -316,11 +317,32 @@ export class MemoryCache extends Cache {
   }
 
   _memoryHealthCheck() {
+    let freedBytes = 0;
+
     if (this.maxMemoryBytes > 0 && this.currentMemoryBytes > this.maxMemoryBytes) {
       const before = this.currentMemoryBytes;
       this._enforceMemoryLimit(0);
-      if (this.config?.logEvictions && before !== this.currentMemoryBytes) {
-        console.warn(`[MemoryCache] Reduced cache size from ${this._formatBytes(before)} to ${this._formatBytes(this.currentMemoryBytes)} to respect maxMemoryBytes.`);
+      const diff = Math.max(0, before - this.currentMemoryBytes);
+      if (diff > 0) {
+        freedBytes += diff;
+        if (this.config?.logEvictions) {
+          console.warn(`[MemoryCache] Reduced cache size from ${this._formatBytes(before)} to ${this._formatBytes(this.currentMemoryBytes)} to respect maxMemoryBytes.`);
+        }
+        this.emit('memory:evict', {
+          reason: 'limit',
+          freedBytes: diff,
+          currentBytes: this.currentMemoryBytes,
+          maxMemoryBytes: this.maxMemoryBytes
+        });
+        this.emit('memory:pressure', {
+          reason: 'limit',
+          heapLimit: v8.getHeapStatistics()?.heap_size_limit ?? 0,
+          heapUsed: process.memoryUsage().heapUsed,
+          currentBytes: this.currentMemoryBytes,
+          maxMemoryBytes: this.maxMemoryBytes,
+          freedBytes: diff
+        });
+        this.memoryPressureEvents += 1;
       }
     }
 
@@ -335,11 +357,40 @@ export class MemoryCache extends Cache {
           ? Math.min(Math.floor(this.maxMemoryBytes * 0.5), this.currentMemoryBytes)
           : Math.floor(this.currentMemoryBytes * 0.5);
         this._reduceMemoryTo(target);
-        if (this.config?.logEvictions && before !== this.currentMemoryBytes) {
-          const diff = Math.max(0, before - this.currentMemoryBytes);
-          console.warn(`[MemoryCache] Heap usage ${(heapRatio * 100).toFixed(1)}% exceeded threshold ${(this.heapUsageThreshold * 100).toFixed(1)}%. Evicted ${this._formatBytes(diff)} (current: ${this._formatBytes(this.currentMemoryBytes)}).`);
+        const diff = Math.max(0, before - this.currentMemoryBytes);
+        if (diff > 0) {
+          freedBytes += diff;
+          if (this.config?.logEvictions) {
+            console.warn(`[MemoryCache] Heap usage ${(heapRatio * 100).toFixed(1)}% exceeded threshold ${(this.heapUsageThreshold * 100).toFixed(1)}%. Evicted ${this._formatBytes(diff)} (current: ${this._formatBytes(this.currentMemoryBytes)}).`);
+          }
+          this.emit('memory:evict', {
+            reason: 'heap',
+            freedBytes: diff,
+            currentBytes: this.currentMemoryBytes,
+            heapLimit,
+            heapUsed
+          });
         }
+        this.memoryPressureEvents += 1;
+        this.emit('memory:pressure', {
+          reason: 'heap',
+          heapLimit,
+          heapUsed,
+          heapRatio,
+          currentBytes: this.currentMemoryBytes,
+          maxMemoryBytes: this.maxMemoryBytes,
+          freedBytes: diff
+        });
       }
+    }
+
+    return freedBytes;
+  }
+
+  async shutdown() {
+    if (this._monitorHandle) {
+      clearInterval(this._monitorHandle);
+      this._monitorHandle = null;
     }
   }
 
@@ -648,6 +699,7 @@ export class MemoryCache extends Cache {
       totalItems,
       maxSize: this.maxSize,
       evictedDueToMemory: this.evictedDueToMemory,
+       memoryPressureEvents: this.memoryPressureEvents,
       averageItemSize: totalItems > 0 ? Math.round(this.currentMemoryBytes / totalItems) : 0,
       memoryUsage: {
         current: this._formatBytes(this.currentMemoryBytes),
