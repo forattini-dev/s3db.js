@@ -1,20 +1,42 @@
 /**
  * Plugin exports for s3db.js
  *
- * IMPORTANT: To avoid "module not found" errors for optional peer dependencies,
- * plugins with external dependencies use lazy loading.
+ * IMPORTANT: Plugins with peer dependencies (hono, puppeteer, etc.) are now
+ * exported directly from the main package, but require peer dependencies to be
+ * installed before importing.
  *
- * Core plugins (no external deps) are exported directly.
- * Plugins with peer dependencies should be imported individually:
+ * ## Three Ways to Import Plugins:
  *
+ * ### 1. Direct import (recommended if peer dependencies are installed)
  * @example
- * // ✅ Direct import (avoids loading all plugins)
+ * import { ApiPlugin, PuppeteerPlugin } from 's3db.js';
+ * const api = new ApiPlugin({ port: 3000 });
+ *
+ * ### 2. Lazy loading (recommended if peer dependencies might not be installed)
+ * @example
+ * import { lazyLoadPlugin } from 's3db.js';
+ * const ApiPlugin = await lazyLoadPlugin('ApiPlugin');
+ * const api = new ApiPlugin({ port: 3000 });
+ *
+ * ### 3. Direct file import (advanced use cases)
+ * @example
  * import { ApiPlugin } from 's3db.js/src/plugins/api/index.js';
  * import { PuppeteerPlugin } from 's3db.js/src/plugins/puppeteer.plugin.js';
  *
- * // ✅ Lazy load helper
- * import { lazyLoadPlugin } from 's3db.js/plugins';
- * const PuppeteerPlugin = await lazyLoadPlugin('PuppeteerPlugin');
+ * ## Core Plugins (no peer dependencies)
+ * These are always safe to import directly:
+ * - AuditPlugin, CachePlugin, CostsPlugin, FulltextPlugin
+ * - MetricsPlugin, RelationPlugin, S3QueuePlugin, SchedulerPlugin
+ * - StateMachinePlugin, TTLPlugin, VectorPlugin, MLPlugin
+ *
+ * ## Plugins with Peer Dependencies
+ * Install peer dependencies before importing:
+ * - ApiPlugin: hono, @hono/node-server, jose, bcrypt
+ * - IdentityPlugin: hono, jose, bcrypt, nodemailer
+ * - PuppeteerPlugin: puppeteer, puppeteer-extra, user-agents
+ * - ReplicatorPlugin: pg, @google-cloud/bigquery, @libsql/client, etc.
+ * - CloudInventoryPlugin: @aws-sdk/*, @google-cloud/*, @azure/*
+ * - QueueConsumerPlugin: amqplib, @aws-sdk/client-sqs
  */
 
 // Base plugin classes (always available, no peer dependencies)
@@ -118,6 +140,61 @@ export const loadReplicatorPlugin = () => lazyLoadPlugin('ReplicatorPlugin');
 export const loadReconPlugin = () => lazyLoadPlugin('ReconPlugin');
 export const loadKubernetesInventoryPlugin = () => lazyLoadPlugin('KubernetesInventoryPlugin');
 export const loadQueueConsumerPlugin = () => lazyLoadPlugin('QueueConsumerPlugin');
+
+/**
+ * Direct re-exports from plugin modules (lazy loaded)
+ *
+ * These allow importing plugins directly from the main package without needing
+ * to install peer dependencies until the plugin is actually used at runtime.
+ *
+ * @example Basic usage
+ * import { ApiPlugin } from 's3db.js';
+ * const plugin = new ApiPlugin({ port: 3000 });
+ *
+ * @example With utilities (ApiPlugin exports additional helpers)
+ * import {
+ *   ApiPlugin,
+ *   OIDCClient,           // from './api/index.js'
+ *   withContext,          // from './api/index.js'
+ *   OpenGraphHelper,      // from './api/index.js'
+ *   errorResponse,        // from './api/index.js'
+ *   successResponse       // from './api/index.js'
+ * } from 's3db.js';
+ *
+ * Note: Since these use static imports, peer dependencies (hono, jose, etc.)
+ * must be installed before importing. For fully lazy loading without dependencies,
+ * use the lazyLoadPlugin() helper instead.
+ */
+export { ApiPlugin } from './api/index.js';
+export { IdentityPlugin } from './identity/index.js';
+export { BackupPlugin } from './backup.plugin.js';
+export { CloudInventoryPlugin } from './cloud-inventory.plugin.js';
+export { KubernetesInventoryPlugin } from './kubernetes-inventory.plugin.js';
+export { PuppeteerPlugin } from './puppeteer.plugin.js';
+export { CookieFarmPlugin } from './cookie-farm.plugin.js';
+export { CookieFarmSuitePlugin } from './cookie-farm-suite.plugin.js';
+export { ReconPlugin } from './recon.plugin.js';
+export { GeoPlugin } from './geo.plugin.js';
+export { ReplicatorPlugin } from './replicator.plugin.js';
+export { QueueConsumerPlugin } from './queue-consumer.plugin.js';
+
+/**
+ * API Plugin utilities (re-exported from './api/index.js')
+ * These are also available when you import ApiPlugin.
+ */
+export {
+  OIDCClient,
+  setupTemplateEngine,
+  ejsEngine,
+  pugEngine,
+  jsxEngine,
+  OpenGraphHelper,
+  RouteContext,
+  withContext,
+  errorResponse,
+  successResponse,
+  createContextInjectionMiddleware
+} from './api/index.js';
 
 /**
  * Plugin drivers & utilities
