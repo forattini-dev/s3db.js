@@ -16,14 +16,12 @@ import { createDatabaseForTest } from '../config.js';
 let tfAvailable = false;
 
 if (process.env.NODE_ENV === 'test') {
-  console.warn('[MLPlugin Tests] Skipping - TensorFlow.js has compatibility issues with Jest ESM mode');
   tfAvailable = false;
 } else {
   try {
     await import('@tensorflow/tfjs-node');
     tfAvailable = true;
   } catch (e) {
-    console.warn('[MLPlugin Tests] TensorFlow not available, skipping ML plugin tests');
   }
 }
 

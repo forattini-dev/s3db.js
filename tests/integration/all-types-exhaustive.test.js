@@ -192,14 +192,9 @@ describe('ALL Optimized Types - Exhaustive Integration Tests', () => {
           const inserted = await resource.insert(data);
           insertedIds.push(inserted.id);
 
-          console.log(`[${label}] Inserted ID:`, inserted.id);
-          console.log(`[${label}] Expected IP:`, ip);
-          console.log(`[${label}] Inserted IP:`, inserted.ipv4Client);
 
           const retrieved = await resource.get(inserted.id);
 
-          console.log(`[${label}] Retrieved IP:`, retrieved.ipv4Client);
-          console.log(`[${label}] Match:`, retrieved.ipv4Client === ip);
 
           expect(retrieved.ipv4Client).toBe(ip);
         }

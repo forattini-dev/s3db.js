@@ -68,11 +68,10 @@ asyncCleanupSignals.forEach(signal => {
       // Ignore cleanup errors
     }
 
-    // For error signals, log and exit
+    // For error signals, exit silently (logging after tests causes Jest warnings)
     if (signal === 'uncaughtException' || signal === 'unhandledRejection') {
-      if (error) {
-        console.error(`[Test Cleanup] ${signal}:`, error);
-      }
+      // Don't log here - Jest already finished and logging causes "Cannot log after tests are done"
+      // The error was already caught by Jest's error handling
       process.exit(1);
     } else {
       // For termination signals, exit gracefully

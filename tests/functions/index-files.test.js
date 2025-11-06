@@ -120,10 +120,11 @@ describe('Index Files - Export Tests', () => {
     expect(typeof replicators.BaseReplicator).toBe('function');
     expect(typeof replicators.S3dbReplicator).toBe('function');
     expect(typeof replicators.SqsReplicator).toBe('function');
-    
-    // BigQuery and Postgres replicators are optional (require external dependencies)
-    expect(replicators.BigqueryReplicator).toBeDefined();
-    expect(replicators.PostgresReplicator).toBeDefined();
+
+    // BigQuery and Postgres replicators use lazy loading (external peer dependencies)
+    // They are loaded via createReplicator() async function
+    expect(replicators.createReplicator).toBeDefined();
+    expect(typeof replicators.createReplicator).toBe('function');
   });
 
   test('consumers index.js should export consumer classes', async () => {

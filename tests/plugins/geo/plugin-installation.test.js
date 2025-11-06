@@ -8,7 +8,7 @@ describe('Geo Plugin - Installation', () => {
 
   test('installs plugin successfully', async () => {
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -48,7 +48,7 @@ describe('Geo Plugin - Installation', () => {
 
   test('emits installed event', async () => {
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

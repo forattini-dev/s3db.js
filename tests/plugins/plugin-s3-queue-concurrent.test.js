@@ -332,7 +332,6 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
     // Get it with ETag
     const fetched = await testResource.get('test-1');
-    console.log('ETag present:', fetched._etag ? 'YES' : 'NO');
     expect(fetched._etag).toBeDefined();
 
     // Update with correct ETag (should succeed)
@@ -341,7 +340,6 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       value: 1
     }, { ifMatch: fetched._etag });
 
-    console.log('Update 1 (correct ETag):', result1.success);
     expect(result1.success).toBe(true);
 
     // Update with stale ETag (should fail)
@@ -350,7 +348,6 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       value: 2
     }, { ifMatch: fetched._etag });  // Stale!
 
-    console.log('Update 2 (stale ETag):', result2.success, result2.error);
     expect(result2.success).toBe(false);
 
     // Get fresh and update (should succeed)
@@ -360,7 +357,6 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       value: 3
     }, { ifMatch: fetched2._etag });
 
-    console.log('Update 3 (fresh ETag):', result3.success);
     expect(result3.success).toBe(true);
   });
 
@@ -425,7 +421,6 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const processLog = []; // Track each processing attempt with timestamp
 
     // Enqueue 100 messages in parallel batches
-    console.log('Enqueuing 100 messages...');
     const enqueueStart = Date.now();
 
     const enqueueBatches = [];
@@ -445,10 +440,8 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     await Promise.all(enqueueBatches);
 
     const enqueueTime = Date.now() - enqueueStart;
-    console.log(`Enqueued 100 messages in ${enqueueTime}ms`);
 
     // Start processing with 3 concurrent workers
-    console.log('Starting processing with 3 concurrent workers...');
     const processStart = Date.now();
 
     await resource.startProcessing(async (task, context) => {
@@ -474,20 +467,14 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     }, { concurrency: 3 });
 
     // Wait for all processing to complete (generous timeout for S3 latency)
-    console.log('Processing messages for 40 seconds...');
     await new Promise(resolve => setTimeout(resolve, 40000));
 
-    console.log('Stopping processing...');
     await resource.stopProcessing();
 
     const processTime = Date.now() - processStart;
-    console.log(`Processing completed in ${processTime}ms`);
 
     // Verify all messages were processed
     const totalProcessed = processed.length;
-    console.log(`Total processed: ${totalProcessed} / 100`);
-    console.log(`Worker distribution:`, workerDistribution);
-    console.log(`Errors: ${errors.length}`);
 
     // With S3 latency, expect at least 10% throughput (10 of 100 messages)
     // The key is demonstrating safe concurrency, not maximum throughput
@@ -497,21 +484,15 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const uniqueProcessed = [...new Set(processed)];
     const duplicateCount = totalProcessed - uniqueProcessed.length;
 
-    console.log(`Unique messages: ${uniqueProcessed.length}`);
-    console.log(`Duplicates: ${duplicateCount}`);
-    console.log(`Duplication rate: ${((duplicateCount / totalProcessed) * 100).toFixed(1)}%`);
 
     // Find which messages were duplicated
     if (duplicateCount > 0) {
       const duplicates = processed.filter((item, index) => processed.indexOf(item) !== index);
-      console.log(`Duplicated messages:`, duplicates);
 
       // Show processing log for duplicated messages
       for (const dup of [...new Set(duplicates)]) {
         const entries = processLog.filter(e => e.name === dup);
-        console.log(`  ${dup}: processed ${entries.length} times`);
         entries.forEach((e, i) => {
-          console.log(`    ${i + 1}. worker=${e.workerId}, time=${e.timestamp - processStart}ms`);
         });
       }
     }
@@ -535,7 +516,6 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
     // Check queue stats
     const stats = await resource.queueStats();
-    console.log('Queue stats:', stats);
 
     expect(stats.completed).toBeGreaterThanOrEqual(10);
     expect(stats.processing).toBe(0);

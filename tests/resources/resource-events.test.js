@@ -173,7 +173,6 @@ describe('Resource Events - Always Emit Complete Content', () => {
       // Debug: confirm object exists after insert
       const existsAfterInsert = await resource.exists('test-overflow-update');
       // eslint-disable-next-line no-console
-      console.log('[TEST][body-overflow update] exists after insert:', existsAfterInsert);
 
       // Wait for S3/MinIO consistency
       await new Promise(r => setTimeout(r, 100));
@@ -486,7 +485,6 @@ describe('Resource Events - Always Emit Complete Content', () => {
       await resource.insert(testData);
       const eventData = await eventPromise;
 
-      console.log({ eventData });
 
       // Should preserve arrays (numbers may be converted to strings)
       expect(eventData.tags).toEqual(['javascript', 'node.js', 'testing']);

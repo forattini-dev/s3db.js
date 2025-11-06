@@ -14,7 +14,7 @@ describe('Cloud Inventory driver registry', () => {
     expect(drivers).not.toContain('azure-mock');
   });
 
-  test('registerCloudDriver accepts custom drivers', () => {
+  test('registerCloudDriver accepts custom drivers', async () => {
     class FixtureDriver extends BaseCloudDriver {
       async listResources() {
         return [{ provider: 'fixture', resourceId: 'fixture-1' }];
@@ -27,7 +27,7 @@ describe('Cloud Inventory driver registry', () => {
     const drivers = listCloudDrivers();
     expect(drivers).toContain(driverName);
 
-    const driver = createCloudDriver(driverName, { config: { foo: 'bar' } });
+    const driver = await createCloudDriver(driverName, { config: { foo: 'bar' } });
     expect(driver).toBeInstanceOf(FixtureDriver);
   });
 });

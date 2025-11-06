@@ -14,7 +14,7 @@ describe('Cache Plugin - MemoryCache Driver - Driver Setup and Configuration', (
   });
 
   test('respects explicit ttl configuration during install', async () => {
-    const plugin = new CachePlugin({ driver: 'memory', ttl: 300000 });
+    const plugin = new CachePlugin({ verbose: false, driver: 'memory', ttl: 300000 });
     await plugin.install(ctx.db);
 
     expect(plugin.driver).toBeInstanceOf(MemoryCache);
@@ -22,7 +22,7 @@ describe('Cache Plugin - MemoryCache Driver - Driver Setup and Configuration', (
   });
 
   test('respects explicit maxSize configuration during install', async () => {
-    const plugin = new CachePlugin({ driver: 'memory', maxSize: 50 });
+    const plugin = new CachePlugin({ verbose: false, driver: 'memory', maxSize: 50 });
     await plugin.install(ctx.db);
 
     expect(plugin.driver.maxSize).toBe(50);

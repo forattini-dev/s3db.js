@@ -26,7 +26,6 @@ async function waitForServer(port, maxAttempts = 100) {
     } catch (err) {
       // swallow connection errors until server is ready
       if (attempt % 10 === 0) {
-        console.log(`[waitForServer] Attempt ${attempt}/${maxAttempts} for port ${port} - ${err.code || err.message}`);
       }
     }
     await new Promise(resolve => setTimeout(resolve, 100));

@@ -92,7 +92,6 @@ describe('Audit Plugin', () => {
         }
       } catch (error) {
         // Continue if cleanup fails
-        console.warn('Audit cleanup failed:', error.message);
       }
     }
   });

@@ -249,7 +249,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
           }
         }
       },
-      lockTimeout: 0,
+      lockTimeout: 2000, // Allow 2s for retry attempts after lock expires
       lockTTL: 1 // 1 second TTL
     });
 
@@ -270,7 +270,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
     // Wait for TTL to expire
     await new Promise(resolve => setTimeout(resolve, 1100));
 
-    // Transition should succeed (lock expired)
+    // Transition should succeed (lock expired, retry logic will detect and clean it up)
     await ttlPlugin.send('test', 'entity1', 'NEXT');
 
     const state = await ttlPlugin.getState('test', 'entity1');

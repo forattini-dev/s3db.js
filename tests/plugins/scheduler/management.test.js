@@ -205,7 +205,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
 
     it('should return empty array when persistence disabled', async () => {
       const noPersistPlugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           test: { schedule: '@daily', action: () => {} },
         },
         persistJobs: false,

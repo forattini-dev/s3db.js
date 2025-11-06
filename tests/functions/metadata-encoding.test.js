@@ -195,7 +195,6 @@ describe('Smart Encoding for S3 Metadata', () => {
         
         // Verify size efficiency
         const sizeInfo = calculateEncodedSize(text);
-        console.log(`"${text}": ${result.encoding} encoding, ratio: ${sizeInfo.ratio.toFixed(2)}x`);
       });
     });
   });

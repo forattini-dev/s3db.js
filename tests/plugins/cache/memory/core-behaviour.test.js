@@ -14,7 +14,7 @@ describe('MemoryCache driver basics', () => {
   });
 
   test('respects custom ttl and maxSize during install', async () => {
-    const plugin = new CachePlugin({ driver: 'memory', ttl: 300000, maxSize: 50 });
+    const plugin = new CachePlugin({ verbose: false, driver: 'memory', ttl: 300000, maxSize: 50 });
     await plugin.install(ctx.db);
 
     expect(plugin.driver.ttl).toBe(300000);
@@ -116,7 +116,7 @@ describe('Memory limits and statistics', () => {
   const LARGE_DATA = 'x'.repeat(2000);
 
   test('evicts entries when maxSize is reached', async () => {
-    const plugin = new CachePlugin({ driver: 'memory', maxSize: 2 });
+    const plugin = new CachePlugin({ verbose: false, driver: 'memory', maxSize: 2 });
     await plugin.install(ctx.db);
 
     const users = await ctx.db.createResource({
@@ -135,7 +135,7 @@ describe('Memory limits and statistics', () => {
 
   test('enforces maxMemoryBytes and reports memory stats', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryBytes: 5 * 1024 }
     });
     await plugin.install(ctx.db);

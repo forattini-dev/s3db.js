@@ -174,11 +174,8 @@ describe.skip('Resource Behaviors - Fast Integration Tests [SKIPPED - HANGS]', (
 
       let result;
       try {
-        console.log('About to insert data:', testData);
         result = await testResource.insert(testData);
-        console.log('Insert result:', result);
       } catch (error) {
-        console.error('Insert failed:', error);
         throw error;
       }
       
@@ -193,10 +190,8 @@ describe.skip('Resource Behaviors - Fast Integration Tests [SKIPPED - HANGS]', (
       
       // Check if the object exists
       const exists = await testResource.exists(result.id);
-      console.log('Object exists:', exists, 'for ID:', result.id);
       
       if (!exists) {
-        console.error('Object does not exist after insert!');
         throw new Error('Object does not exist after insert');
       }
       

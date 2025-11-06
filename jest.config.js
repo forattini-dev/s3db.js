@@ -1,10 +1,7 @@
 export default {
-  silent: true,
-  maxWorkers: 1, // Use 1 worker to prevent database connection leaks across parallel tests
+  maxWorkers: '50%', // Use 50% of CPU cores for parallel execution (was: 1 - too slow!)
   workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
-  verbose: false,
   testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
-  injectGlobals: true,
   testEnvironment: 'node',
 
   // Configurações para evitar travamentos
@@ -59,6 +56,12 @@ export default {
   ],
 
   coverageThreshold: {
+    global: {
+      statements: 90,
+      branches: 90,
+      functions: 90,
+      lines: 90,
+    },
     'src/plugins/': {
       statements: 90,
       branches: 90,
@@ -77,5 +80,10 @@ export default {
   // Allow TensorFlow.js to be transformed by Jest (fixes ESM import issues)
   transformIgnorePatterns: [
     'node_modules/(?!(@tensorflow)/)',
+  ],
+
+  reporters: [
+    'default',
+    '<rootDir>/tests/reporters/progress-reporter.cjs',
   ],
 };

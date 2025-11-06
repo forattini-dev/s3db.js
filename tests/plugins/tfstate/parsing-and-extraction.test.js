@@ -28,7 +28,7 @@ describe('TfStatePlugin - State Parsing & Resource Extraction', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ asyncPartitions: false });
+      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await plugin.install(database);
     });
 
@@ -159,7 +159,7 @@ describe('TfStatePlugin - State Parsing & Resource Extraction', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ asyncPartitions: false });
+      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await plugin.install(database);
     });
 
@@ -264,7 +264,7 @@ describe('TfStatePlugin - State Parsing & Resource Extraction', () => {
 
     beforeEach(async () => {
       plugin = new TfStatePlugin({
-        asyncPartitions: false,
+        verbose: false,asyncPartitions: false,
         filters: {
           types: ['aws_instance', 'aws_s3_bucket'],
           exclude: ['data.*', '.*_test'],
@@ -321,7 +321,7 @@ describe('TfStatePlugin - State Parsing & Resource Extraction', () => {
     });
 
     test('should allow all resources when no filters', async () => {
-      const noFilterPlugin = new TfStatePlugin({ asyncPartitions: false });
+      const noFilterPlugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await noFilterPlugin.install(database);
 
       const stateFile = createStateFile(tempDir, 1, [

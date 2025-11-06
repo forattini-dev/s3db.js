@@ -412,7 +412,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       // Insert multiple items
       const promises = Array.from({ length: 10 }, (_, i) => 
         resource.insert({ name: `User ${i}` }).catch(err => {
-          console.error(`Insert ${i} failed:`, err.message);
           return null;
         })
       );
@@ -420,7 +419,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       const allResults = await Promise.all(promises);
       const results = allResults.filter(r => r !== null);
       
-      console.log('Successful results:', results.length, 'IDs:', results.map(r => r.id));
       const endTime = Date.now();
 
       // Sort results by ID number since parallel operations can complete out of order
@@ -471,7 +469,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       results.forEach((result, index) => {
         expect(result.id.length).toBe(5);
         expect(result.id).toMatch(/^[a-zA-Z0-9_-]{5}$/);
-        console.log(`5-char ID ${index + 1}:`, result.id);
       });
 
       // Ensure they're all unique
@@ -494,7 +491,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         
         expect(result.id.length).toBe(size);
         expect(result.id).toMatch(new RegExp(`^[a-zA-Z0-9_-]{${size}}$`));
-        console.log(`Size ${size} ID:`, result.id);
       }
     }, 30000);
 
@@ -512,7 +508,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         
         expect(result.id.length).toBe(size);
         expect(result.id).toMatch(new RegExp(`^[a-zA-Z0-9_-]{${size}}$`));
-        console.log(`Generator size ${size} ID:`, result.id);
       }
     }, 20000);
   });
@@ -542,7 +537,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         expect(result.id).toMatch(/^CONV[A-Z0-9]{5}$/);
         expect(result.id.length).toBe(9); // CONV + 5 chars
         expect(result.id.startsWith('CONV')).toBe(true);
-        console.log(`Convite ${index + 1}:`, result.id);
       });
 
       // Ensure uniqueness
@@ -568,7 +562,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       results.forEach((result, index) => {
         expect(result.id.length).toBe(5);
         expect(result.id.length).not.toBe(22);
-        console.log(`Non-22-char ID ${index + 1}:`, result.id, `(${result.id.length} chars)`);
       });
     });
 
@@ -607,7 +600,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         if (gen.expectedLength) {
           expect(result.id.length).toBe(gen.expectedLength);
         }
-        console.log(`${gen.name} ID:`, result.id);
       }
     });
 
@@ -638,8 +630,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(customResult.id).toMatch(/^CUSTOM_[A-Z0-9]{2}$/);
       expect(customResult.id.length).toBe(9);
 
-      console.log('Persistent short ID:', shortResult.id);
-      console.log('Persistent custom ID:', customResult.id);
     });
   });
 
@@ -655,7 +645,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       
       expect(result.id.length).toBe(100);
       expect(result.id).toMatch(/^[a-zA-Z0-9_-]{100}$/);
-      console.log('Huge ID sample (first 20 chars):', result.id.substring(0, 20) + '...');
     });
 
     test('should handle generator functions that return empty strings', async () => {
@@ -672,7 +661,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       // Should still create an ID (possibly fallback to default)
       expect(result.id).toBeDefined();
       expect(typeof result.id).toBe('string');
-      console.log('Empty generator result ID:', result.id);
     });
 
     test('should handle generator functions that return non-string values', async () => {
@@ -688,7 +676,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       
       expect(result.id).toBe('12345');
       expect(typeof result.id).toBe('string');
-      console.log('Number generator result ID:', result.id);
     });
 
     test('should handle complex generator with special characters', async () => {
@@ -703,7 +690,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       const result = await resource.insert({ name: 'Test User' });
       
       expect(result.id).toMatch(/^ID-\d+-[a-z0-9]{6}_SPECIAL!@#\$%$/);
-      console.log('Complex generator ID:', result.id);
     });
   });
 
@@ -731,8 +717,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       const uniqueIds = new Set(ids);
       expect(uniqueIds.size).toBe(20);
 
-      console.log('First 5 consistent IDs:', ids.slice(0, 5));
-      console.log('Last 5 consistent IDs:', ids.slice(-5));
     });
 
     test('should handle rapid successive ID generation', async () => {
@@ -763,8 +747,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(ids[0]).toBe('SEQ_000001');
       expect(ids[19]).toBe('SEQ_000020');
 
-      console.log(`Rapid generation completed in ${endTime - startTime}ms`);
-      console.log('Sample rapid IDs:', ids.slice(0, 5));
     });
 
     test('should handle mixed ID generation strategies in same database', async () => {
@@ -806,18 +788,12 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(customResult.id).toMatch(/^MIX_[a-z0-9]{3}$/);
       expect(uuidResult.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 
-      console.log('Mixed strategies:');
-      console.log('  Default (22):', defaultResult.id);
-      console.log('  Short (6):', shortResult.id);
-      console.log('  Custom:', customResult.id);
-      console.log('  UUID:', uuidResult.id);
     });
   });
 
   describe('ID Configuration Persistence Across Reconnections', () => {
     test('should persist idSize configuration through database reconnections', async () => {
       // === FASE 1: Criar resource com idSize customizado ===
-      console.log('📝 FASE 1: Criando resource com idSize=6');
       
       const testResource = await database.createResource({
         name: 'test_idsize_persistence',
@@ -846,11 +822,8 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(item1.id).toMatch(/^[a-zA-Z0-9_-]{6}$/);
       expect(item2.id).toMatch(/^[a-zA-Z0-9_-]{6}$/);
 
-      console.log(`Item 1 ID: "${item1.id}" (${item1.id.length} chars)`);
-      console.log(`Item 2 ID: "${item2.id}" (${item2.id.length} chars)`);
 
       // === FASE 2: Simular reconexão carregando resource do metadata ===
-      console.log('📝 FASE 2: Simulando reconexão - carregando resource do metadata');
       
       // Pegar o metadata que seria salvo
       await database.uploadMetadataFile();
@@ -867,7 +840,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(versionData.idGenerator).toBe(6);
 
       // === FASE 3: Simular criação de resource a partir do metadata (como acontece no connect) ===
-      console.log('📝 FASE 3: Recriando resource a partir do metadata');
       
              // Restore ID generator configuration (como no database.class.js)
        let restoredIdGenerator, restoredIdSize;
@@ -910,7 +882,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(restoredResource.idGeneratorType).toBe(6);
 
       // === FASE 4: Testar geração de IDs com resource restaurado ===
-      console.log('📝 FASE 4: Testando geração de IDs com resource restaurado');
       
       const item3 = await restoredResource.insert({ 
         name: 'Item 3', 
@@ -926,11 +897,8 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(item3.id).toMatch(/^[a-zA-Z0-9_-]{6}$/);
       expect(item4.id).toMatch(/^[a-zA-Z0-9_-]{6}$/);
 
-      console.log(`Item 3 ID após restauração: "${item3.id}" (${item3.id.length} chars)`);
-      console.log(`Item 4 ID após restauração: "${item4.id}" (${item4.id.length} chars)`);
 
       // === FASE 5: Verificar se dados antigos são acessíveis ===
-      console.log('📝 FASE 5: Verificando acesso a dados antigos');
       
       const retrievedItem1 = await restoredResource.get(item1.id);
       const retrievedItem2 = await restoredResource.get(item2.id);
@@ -941,7 +909,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(retrievedItem2.description).toBe('Segunda inserção');
 
       // === FASE 6: Verificar consistência geral ===
-      console.log('📝 FASE 6: Verificação final de consistência');
       
       const allIds = [item1.id, item2.id, item3.id, item4.id];
       const allSizesCorrect = allIds.every(id => id.length === 6);
@@ -950,13 +917,9 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(allSizesCorrect).toBe(true);
       expect(uniqueIds.size).toBe(4);
 
-      console.log(`Todos IDs: ${allIds.join(', ')}`);
-      console.log(`Todos têm 6 chars: ${allSizesCorrect}`);
-      console.log(`Todos únicos: ${uniqueIds.size === allIds.length}`);
     });
 
     test('should persist idGenerator number configuration through metadata', async () => {
-      console.log('📝 Testando persistência de idGenerator como número');
       
       // Criar resource com idGenerator como número
       const resource = await database.createResource({
@@ -984,11 +947,9 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(versionData.idSize).toBe(8);
       expect(versionData.idGenerator).toBe(8);
 
-      console.log(`Metadata salvo - idSize: ${versionData.idSize}, idGenerator: ${versionData.idGenerator}`);
     });
 
     test('should handle custom function idGenerator persistence (fallback to default)', async () => {
-      console.log('📝 Testando persistência de idGenerator customizado');
       
       function customIdGenerator() {
         return 'CUSTOM' + Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -1021,12 +982,9 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(versionData.idSize).toBe(22);
       expect(versionData.idGenerator).toBe('custom_function');
 
-      console.log(`Metadata salvo - idSize: ${versionData.idSize}, idGenerator: ${versionData.idGenerator}`);
-      console.log('Nota: Função customizada não pode ser restaurada, mas metadata é preservado');
     });
 
     test('should maintain different ID configurations for multiple resources', async () => {
-      console.log('📝 Testando múltiplos resources com configurações diferentes');
       
       // Criar vários resources com configurações diferentes
       const shortResource = await database.createResource({
@@ -1069,10 +1027,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(mediumMeta.versions[mediumMeta.currentVersion].idSize).toBe(10);
       expect(defaultMeta.versions[defaultMeta.currentVersion].idSize).toBe(22);
 
-      console.log('Configurações salvas:');
-      console.log(`  Short: ${shortMeta.versions[shortMeta.currentVersion].idSize} chars`);
-      console.log(`  Medium: ${mediumMeta.versions[mediumMeta.currentVersion].idSize} chars`);
-      console.log(`  Default: ${defaultMeta.versions[defaultMeta.currentVersion].idSize} chars`);
     });
   });
 }); 

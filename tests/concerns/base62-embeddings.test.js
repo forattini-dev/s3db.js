@@ -24,7 +24,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
         { value: -1, label: 'max negative' }
       ];
 
-      console.log('\n=== Current Encoding Size Analysis ===');
       testCases.forEach(({ value, label }) => {
         const encoded = encodeDecimal(value);
         const decoded = decodeDecimal(encoded);
@@ -32,7 +31,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
         const encodedBytes = encoded.length;
         const compression = ((1 - encodedBytes / originalBytes) * 100).toFixed(1);
 
-        console.log(`${label.padEnd(25)} | ${value.toString().padEnd(12)} → "${encoded.padEnd(12)}" | ${originalBytes}→${encodedBytes} bytes (${compression}% compression)`);
 
         expect(decoded).toBeCloseTo(value, 10);
       });
@@ -48,10 +46,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
       const totalBytes = encoded.reduce((sum, s) => sum + s.length, 0);
       const avgBytesPerValue = totalBytes / 1536;
 
-      console.log(`\n=== 1536-dim Embedding Current Encoding ===`);
-      console.log(`Total bytes: ${totalBytes}`);
-      console.log(`Avg bytes per value: ${avgBytesPerValue.toFixed(2)}`);
-      console.log(`First 10 encoded: ${encoded.slice(0, 10).join(', ')}`);
 
       expect(totalBytes).toBeGreaterThan(0);
     });
@@ -127,7 +121,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
         0.123456
       ];
 
-      console.log('\n=== Fixed-Point Encoding Comparison ===');
       testCases.forEach(value => {
         const currentEncoded = encodeDecimal(value);
         const fixedPointEncoded = encodeFixedPoint(value);
@@ -138,7 +131,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
         const savings = currentBytes - fixedBytes;
         const savingsPercent = ((savings / currentBytes) * 100).toFixed(1);
 
-        console.log(`${value.toString().padEnd(12)} | Current: "${currentEncoded.padEnd(10)}" (${currentBytes}) | Fixed: "${fixedPointEncoded.padEnd(6)}" (${fixedBytes}) | Saves ${savings} bytes (${savingsPercent}%)`);
 
         expect(decoded).toBeCloseTo(value, 5); // 6 decimal precision
       });
@@ -158,11 +150,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
       const savings = currentBytes - fixedBytes;
       const savingsPercent = ((savings / currentBytes) * 100).toFixed(1);
 
-      console.log(`\n=== 1536-dim Embedding Fixed-Point Encoding ===`);
-      console.log(`Current encoding: ${currentBytes} bytes`);
-      console.log(`Fixed-point encoding: ${fixedBytes} bytes`);
-      console.log(`Savings: ${savings} bytes (${savingsPercent}%)`);
-      console.log(`Avg bytes per value: ${(fixedBytes / 1536).toFixed(2)}`);
 
       // Verify accuracy
       const decoded = fixedEncoded.map(s => decodeFixedPoint(s));
@@ -185,10 +172,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
       const value = 0.000123;
       const str = value.toExponential(); // "1.23e-4"
 
-      console.log(`\n=== Scientific Notation Exploration ===`);
-      console.log(`Value: ${value}`);
-      console.log(`Exponential: ${str}`);
-      console.log(`Could encode mantissa and exponent separately in base62`);
 
       // This is more complex and may not save as much for typical embeddings
       // which are usually in [-1, 1] range with similar magnitudes
@@ -199,9 +182,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
     test('should provide size analysis for different array sizes', () => {
       const sizes = [256, 512, 768, 1024, 1536, 2048, 3072];
 
-      console.log(`\n=== Embedding Size Analysis with Fixed-Point Encoding ===`);
-      console.log('Dimension | Current (bytes) | Fixed-Point (bytes) | Savings (bytes) | Savings (%)');
-      console.log('----------|-----------------|---------------------|-----------------|------------');
 
       sizes.forEach(dim => {
         const embedding = Array.from({ dim }, () => (Math.random() * 2 - 1) * 0.9);
@@ -227,7 +207,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
         const savings = currentBytes - fixedBytes;
         const savingsPercent = ((savings / currentBytes) * 100).toFixed(1);
 
-        console.log(`${dim.toString().padStart(9)} | ${currentBytes.toString().padStart(15)} | ${fixedBytes.toString().padStart(19)} | ${savings.toString().padStart(15)} | ${savingsPercent.padStart(10)}%`);
       });
     });
   });
@@ -238,10 +217,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
       const encoded = encodeFixedPointBatch(values, 6);
       const decoded = decodeFixedPointBatch(encoded, 6);
 
-      console.log(`\n=== Batch Encoding Test ===`);
-      console.log(`Original: [${values.join(', ')}]`);
-      console.log(`Encoded: ${encoded}`);
-      console.log(`Decoded: [${decoded.join(', ')}]`);
 
       expect(encoded).toMatch(/^\^\[.*\]$/); // Format: ^[...]
       expect(decoded.length).toBe(values.length);
@@ -275,10 +250,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
       const savings = individualSize - batchSize;
       const savingsPercent = ((savings / individualSize) * 100).toFixed(1);
 
-      console.log(`\n=== Batch vs Individual (1536-dim) ===`);
-      console.log(`Individual encoding: ${individualSize} bytes`);
-      console.log(`Batch encoding:      ${batchSize} bytes`);
-      console.log(`Savings:             ${savings} bytes (${savingsPercent}%)`);
 
       expect(batchSize).toBeLessThan(individualSize);
       expect(parseFloat(savingsPercent)).toBeGreaterThan(15); // At least 15% savings
@@ -302,9 +273,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
     test('should measure compression across different dimensions', () => {
       const dimensions = [256, 512, 768, 1024, 1536, 2048, 3072];
 
-      console.log(`\n=== Batch Encoding Savings by Dimension ===`);
-      console.log('Dimension | Individual (bytes) | Batch (bytes) | Savings (bytes) | Savings (%)');
-      console.log('----------|-------------------|---------------|-----------------|------------');
 
       dimensions.forEach(dim => {
         const embedding = Array.from({ length: dim }, () =>
@@ -316,7 +284,6 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
         const savings = individualSize - batchSize;
         const savingsPercent = ((savings / individualSize) * 100).toFixed(1);
 
-        console.log(`${dim.toString().padStart(9)} | ${individualSize.toString().padStart(17)} | ${batchSize.toString().padStart(13)} | ${savings.toString().padStart(15)} | ${savingsPercent.padStart(10)}%`);
 
         expect(batchSize).toBeLessThan(individualSize);
       });
