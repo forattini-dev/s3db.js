@@ -61,7 +61,6 @@ describe("Resource Hook Persistence - Limitations", () => {
       expect(result1.hasRetryLogic).toBe(true);
     } else {
       // If hooks aren't working, skip this validation
-      console.log('Hooks may not be executing, result1:', result1);
       expect(result1.name).toBe('Admin'); // At least basic data should be there
     }
 
@@ -276,7 +275,6 @@ describe("Resource Hook Persistence - Limitations", () => {
       expect(result.processed).toBeUndefined();
     } else {
       // If hooks don't execute after deserialization, result may not have these properties
-      console.log('Hook may not have executed after deserialization:', result);
     }
 
     await newDb.disconnect();

@@ -55,7 +55,6 @@ describe('Smart Encoding Efficiency Test', () => {
       }
     ];
 
-    console.log('\n=== Encoding Efficiency Comparison ===\n');
 
     let totalOriginalSize = 0;
     let totalSmartSize = 0;
@@ -76,11 +75,6 @@ describe('Smart Encoding Efficiency Test', () => {
       const smartOverhead = ((smartInfo.encoded / originalSize) - 1) * 100;
       const improvement = base64Overhead - smartOverhead;
 
-      console.log(`\n${name}:`);
-      console.log(`  Original: ${originalSize} bytes`);
-      console.log(`  Base64: ${base64Size} bytes (+${base64Overhead.toFixed(1)}%)`);
-      console.log(`  Smart (${smartInfo.encoding}): ${smartInfo.encoded} bytes (+${smartOverhead.toFixed(1)}%)`);
-      console.log(`  Savings: ${improvement.toFixed(1)}% ${improvement > 0 ? '✅' : '❌'}`);
 
       // Test actual storage and retrieval with unique counter-based ID
       await resource.insert({
@@ -96,11 +90,6 @@ describe('Smart Encoding Efficiency Test', () => {
     }
 
     // Overall statistics
-    console.log('\n=== Overall Statistics ===');
-    console.log(`Total original size: ${totalOriginalSize} bytes`);
-    console.log(`Total base64 size: ${totalBase64Size} bytes (+${((totalBase64Size/totalOriginalSize - 1) * 100).toFixed(1)}%)`);
-    console.log(`Total smart encoding size: ${totalSmartSize} bytes (+${((totalSmartSize/totalOriginalSize - 1) * 100).toFixed(1)}%)`);
-    console.log(`Overall improvement: ${((1 - totalSmartSize/totalBase64Size) * 100).toFixed(1)}% reduction`);
 
     // Smart encoding may not always be better than base64 for mixed content
     // Just verify it's not significantly worse
@@ -152,9 +141,6 @@ describe('Smart Encoding Efficiency Test', () => {
       'Mix: José 中 🚀'                      // Mixed content
     ];
 
-    console.log('\n=== Encoding Efficiency Table ===');
-    console.log('Text Sample            | Orig | B64  | Smart | Best Method');
-    console.log('----------------------|------|------|-------|------------');
 
     samples.forEach(text => {
       const orig = Buffer.byteLength(text, 'utf8');
@@ -162,7 +148,6 @@ describe('Smart Encoding Efficiency Test', () => {
       const smart = calculateEncodedSize(text);
       const padded = text.padEnd(20);
       
-      console.log(
         `${padded.substring(0, 20)} | ${String(orig).padStart(4)} | ${String(b64).padStart(4)} | ${String(smart.encoded).padStart(5)} | ${smart.encoding}`
       );
     });

@@ -52,22 +52,18 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Get current state
     const userBefore = await users.get(user.id);
-    console.log('User balance before recalculate:', userBefore.balance);
 
     // First recalculate
     await users.recalculate(user.id, 'balance');
     const userAfterFirst = await users.get(user.id);
-    console.log('User balance after 1st recalculate:', userAfterFirst.balance);
 
     // Second recalculate (should produce same result)
     await users.recalculate(user.id, 'balance');
     const userAfterSecond = await users.get(user.id);
-    console.log('User balance after 2nd recalculate:', userAfterSecond.balance);
 
     // Third recalculate (just to be sure)
     await users.recalculate(user.id, 'balance');
     const userAfterThird = await users.get(user.id);
-    console.log('User balance after 3rd recalculate:', userAfterThird.balance);
 
     // All recalculates should produce the same result
     expect(userAfterFirst.balance).toBe(userAfterSecond.balance);
@@ -90,22 +86,18 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Get current state
     const userBefore = await users.get(user.id);
-    console.log('User balance before consolidate:', userBefore.balance);
 
     // First consolidate
     await users.consolidate(user.id, 'balance');
     const userAfterFirst = await users.get(user.id);
-    console.log('User balance after 1st consolidate:', userAfterFirst.balance);
 
     // Second consolidate (should produce same result)
     await users.consolidate(user.id, 'balance');
     const userAfterSecond = await users.get(user.id);
-    console.log('User balance after 2nd consolidate:', userAfterSecond.balance);
 
     // Third consolidate (just to be sure)
     await users.consolidate(user.id, 'balance');
     const userAfterThird = await users.get(user.id);
-    console.log('User balance after 3rd consolidate:', userAfterThird.balance);
 
     // All consolidates should produce the same result
     expect(userAfterFirst.balance).toBe(userAfterSecond.balance);
@@ -128,12 +120,10 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Get current state
     const userBefore = await users.get(user.id);
-    console.log('User balance before recalculate:', userBefore.balance);
 
     // Recalculate
     await users.recalculate(user.id, 'balance');
     const userAfterRecalc = await users.get(user.id);
-    console.log('User balance after recalculate:', userAfterRecalc.balance);
 
     // Wait a bit to ensure lock is released
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -141,7 +131,6 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
     // Consolidate (should not change anything since recalculate already consolidated)
     await users.consolidate(user.id, 'balance');
     const userAfterConsolidate = await users.get(user.id);
-    console.log('User balance after consolidate:', userAfterConsolidate.balance);
 
     // Should be the same
     expect(userAfterRecalc.balance).toBe(userAfterConsolidate.balance);
@@ -163,12 +152,10 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Get current state
     const userBefore = await users.get(user.id);
-    console.log('User balance before consolidate:', userBefore.balance);
 
     // Consolidate first
     await users.consolidate(user.id, 'balance');
     const userAfterConsolidate = await users.get(user.id);
-    console.log('User balance after consolidate:', userAfterConsolidate.balance);
 
     // Wait a bit to ensure lock is released
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -176,7 +163,6 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
     // Then recalculate (should produce same result)
     await users.recalculate(user.id, 'balance');
     const userAfterRecalc = await users.get(user.id);
-    console.log('User balance after recalculate:', userAfterRecalc.balance);
 
     // Should be the same
     expect(userAfterConsolidate.balance).toBe(userAfterRecalc.balance);
@@ -199,13 +185,11 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
     await users.update(user.id, { balance: 9999 });
 
     const corruptedUser = await users.get(user.id);
-    console.log('Corrupted balance:', corruptedUser.balance);
     expect(corruptedUser.balance).toBe(9999);
 
     // Recalculate should fix it
     await users.recalculate(user.id, 'balance');
     const fixedUser = await users.get(user.id);
-    console.log('Fixed balance after recalculate:', fixedUser.balance);
 
     // Should be: 0 (initial from eventualConsistency config) + 200 - 50 = 150
     // NOT 1000 + 200 - 50 = 1150 (would use insert balance as initial)
@@ -214,7 +198,6 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
     // Second recalculate should produce same result
     await users.recalculate(user.id, 'balance');
     const fixedUserSecond = await users.get(user.id);
-    console.log('Balance after 2nd recalculate:', fixedUserSecond.balance);
     expect(fixedUserSecond.balance).toBe(150);
   });
 
@@ -257,19 +240,16 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
       await accounts.recalculate(account.id, 'credits');
       await accounts.recalculate(account.id, 'debits');
       const first = await accounts.get(account.id);
-      console.log('After 1st recalculate - credits:', first.credits, 'debits:', first.debits);
 
       // Second recalculate for both fields
       await accounts.recalculate(account.id, 'credits');
       await accounts.recalculate(account.id, 'debits');
       const second = await accounts.get(account.id);
-      console.log('After 2nd recalculate - credits:', second.credits, 'debits:', second.debits);
 
       // Third recalculate for both fields
       await accounts.recalculate(account.id, 'credits');
       await accounts.recalculate(account.id, 'debits');
       const third = await accounts.get(account.id);
-      console.log('After 3rd recalculate - credits:', third.credits, 'debits:', third.debits);
 
       // Should all be the same
       expect(first.credits).toBe(second.credits);

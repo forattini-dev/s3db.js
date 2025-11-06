@@ -40,11 +40,16 @@ describe('S3QueuePlugin - Edge Cases', () => {
       // Capture console.log
       const originalLog = console.log;
       const logs = [];
-      console.log = (...args) => logs.push(args.join(' '));
 
-      await plugin.install(database);
-
-      console.log = originalLog;
+      console.log = (...args) => {
+        logs.push(args.join(' '));
+        return originalLog(...args);
+      };
+      try {
+        await plugin.install(database);
+      } finally {
+        console.log = originalLog;
+      }
 
       // Verify verbose log was called
       expect(logs.some(log => log.includes('Setup completed'))).toBe(true);
@@ -68,16 +73,19 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       await plugin.install(database);
 
-      // Capture console.log
       const originalLog = console.log;
       const logs = [];
-      console.log = (...args) => logs.push(args.join(' '));
-
-      await plugin.startProcessing();
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await plugin.stopProcessing();
-
-      console.log = originalLog;
+      console.log = (...args) => {
+        logs.push(args.join(' '));
+        return originalLog(...args);
+      };
+      try {
+        await plugin.startProcessing();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        await plugin.stopProcessing();
+      } finally {
+        console.log = originalLog;
+      }
 
       // Verify verbose logs
       expect(logs.some(log => log.includes('Started'))).toBe(true);
@@ -102,19 +110,22 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       await plugin.install(database);
 
-      // Capture console.log
       const originalLog = console.log;
       const logs = [];
-      console.log = (...args) => logs.push(args.join(' '));
+      console.log = (...args) => {
+        logs.push(args.join(' '));
+        return originalLog(...args);
+      };
+      try {
+        await plugin.startProcessing();
 
-      await plugin.startProcessing();
+        // Try to start again (should log "already running")
+        await plugin.startProcessing();
 
-      // Try to start again (should log "already running")
-      await plugin.startProcessing();
-
-      await plugin.stopProcessing();
-
-      console.log = originalLog;
+        await plugin.stopProcessing();
+      } finally {
+        console.log = originalLog;
+      }
 
       // Verify "already running" log
       expect(logs.some(log => log.includes('Already running'))).toBe(true);
@@ -142,8 +153,6 @@ describe('S3QueuePlugin - Edge Cases', () => {
   });
 
   describe('Dead Letter Queue Edge Cases', () => {
-    });
-
     test('should handle moveToDeadLetter with verbose logging', async () => {
       const resource = await database.createResource({
         name: 'tasks',
@@ -165,25 +174,32 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       await plugin.install(database);
 
-      // Capture console.log
       const originalLog = console.log;
       const originalWarn = console.warn;
       const logs = [];
-      console.log = (...args) => logs.push(args.join(' '));
-      console.warn = (...args) => logs.push(args.join(' '));
+      console.log = (...args) => {
+        logs.push(args.join(' '));
+        return originalLog(...args);
+      };
+      console.warn = (...args) => {
+        return originalWarn(...args);
+      };
 
       await resource.enqueue({ name: 'Task 1' });
 
-      await resource.startProcessing(async (task) => {
-        throw new Error('Test error');
-      }, { concurrency: 1 });
+      try {
+        await resource.startProcessing(async (task) => {
+          throw new Error('Test error');
+        }, { concurrency: 1 });
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
-      await resource.stopProcessing();
+        await resource.stopProcessing();
+      } finally {
+        console.log = originalLog;
+        console.warn = originalWarn;
+      }
 
-      console.log = originalLog;
-      console.warn = originalWarn;
     });
   });
 
@@ -216,28 +232,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
   describe('Claim Edge Cases', () => {
     // Skip: Async queue processing timing issues with MemoryClient
-      });
-
-      const plugin = new S3QueuePlugin({
-        resource: 'tasks',
-        autoStart: false,
-        onMessage: async (task) => ({ done: true })
-      });
-
-      await plugin.install(database);
-
-      const eventPromise = new Promise((resolve) => {
-        plugin.once('plg:s3-queue:workers-started', resolve);
-      });
-
-      await plugin.startProcessing();
-
-      const event = await eventPromise;
-      expect(event.concurrency).toBeDefined();
-      expect(event.workerId).toBeDefined();
-
-      await plugin.stopProcessing();
-    });
+    // (orphaned code removed - was causing syntax error)
 
     test('should emit workers.stopped event', async () => {
       const resource = await database.createResource({

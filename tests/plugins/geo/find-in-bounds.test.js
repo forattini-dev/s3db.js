@@ -17,7 +17,7 @@ describe('Geo Plugin - findInBounds()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -78,7 +78,7 @@ describe('Geo Plugin - findInBounds()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -106,7 +106,7 @@ describe('Geo Plugin - findInBounds()', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -133,7 +133,7 @@ describe('Geo Plugin - findInBounds()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

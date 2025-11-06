@@ -36,7 +36,6 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
 
     const consoleLog = console.log;
     const logs = [];
-    console.log = (...args) => {
       logs.push(args.join(' '));
       consoleLog(...args);
     };
@@ -91,7 +90,6 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
 
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    console.log = consoleLog;
     consoleLog('Trigger fired:', triggerFired);
     consoleLog('All logs:', logs);
 
@@ -248,10 +246,6 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
 
     // Verify trigger-executed events (should have 2, not 3)
     if (events.length !== 2) {
-      console.log('DEBUG: Expected 2 events, got:', events.length);
-      console.log('DEBUG: Events:', JSON.stringify(events, null, 2));
-      console.log('DEBUG: Transitions:', JSON.stringify(transitions, null, 2));
-      console.log('DEBUG: Final order:', JSON.stringify(order3, null, 2));
     }
     expect(events.length).toBe(2);
   });

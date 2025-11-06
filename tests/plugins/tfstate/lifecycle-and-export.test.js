@@ -20,13 +20,13 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
 
   describe('Plugin Lifecycle', () => {
     test('should handle plugin start', async () => {
-      const plugin = new TfStatePlugin({ asyncPartitions: false });
+      const plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await plugin.install(database);
       await expect(plugin.onStart()).resolves.not.toThrow();
     });
 
     test('should handle plugin stop', async () => {
-      const plugin = new TfStatePlugin({ asyncPartitions: false });
+      const plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await plugin.install(database);
       await plugin.onStart();
       await expect(plugin.onStop()).resolves.not.toThrow();
@@ -36,7 +36,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
       'should cleanup watchers on stop',
       async () => {
         const plugin = new TfStatePlugin({
-          asyncPartitions: false,
+          verbose: false,asyncPartitions: false,
           autoSync: true,
           watchPaths: [tempDir],
         });
@@ -56,7 +56,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ asyncPartitions: false });
+      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await plugin.install(database);
     });
 
@@ -132,7 +132,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
   describe('Integration Tests', () => {
     test('should handle complete workflow', async () => {
       const plugin = new TfStatePlugin({
-        asyncPartitions: false,
+        verbose: false,asyncPartitions: false,
         trackDiffs: true,
         filters: {
           types: ['aws_instance', 'aws_s3_bucket'],
@@ -173,7 +173,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ asyncPartitions: false });
+      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
       await plugin.install(database);
     });
 
@@ -445,7 +445,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
 
     beforeEach(
       async () => {
-        plugin = new TfStatePlugin({ asyncPartitions: false, trackDiffs: true });
+        plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false, trackDiffs: true });
         await plugin.install(database);
 
         const stateFile = createStateFile(tempDir, 1, [
@@ -590,7 +590,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
 
     test('should handle export with no resources', async () => {
       const emptyPlugin = new TfStatePlugin({
-        asyncPartitions: false,
+        verbose: false,asyncPartitions: false,
         resourceName: 'empty_resources',
       });
       await emptyPlugin.install(database);

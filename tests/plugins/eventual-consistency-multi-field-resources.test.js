@@ -24,7 +24,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
   });
 
   it('should create transaction resources for ALL configured fields', async () => {
-    console.log('\n🧪 Testing multi-field resource creation...\n');
 
     // Create URLs resource
     urls = await database.createResource({
@@ -39,7 +38,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
       }
     });
 
-    console.log('1️⃣  Creating plugin with 4 fields: clicks, views, shares, scans...\n');
 
     // Setup EventualConsistency for all counters
     const plugin = new EventualConsistencyPlugin({
@@ -51,7 +49,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     });
     await database.usePlugin(plugin);
 
-    console.log('2️⃣  Checking if transaction resources were created...\n');
 
     // Check if ALL transaction resources exist
     const expectedTransactionResources = [
@@ -63,18 +60,15 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     for (const resourceName of expectedTransactionResources) {
       const exists = database.resources[resourceName];
-      console.log(`   ${exists ? '✅' : '❌'} ${resourceName}: ${exists ? 'EXISTS' : 'MISSING'}`);
       expect(exists).toBeDefined();
       expect(exists).not.toBeNull();
     }
 
-    console.log('\n✅ All transaction resources created!\n');
   });
 
   jest.setTimeout(30000);
 
   it('should create analytics resources for ALL configured fields when enabled', async () => {
-    console.log('\n🧪 Testing multi-field analytics resource creation...\n');
 
     // Create URLs resource
     urls = await database.createResource({
@@ -89,7 +83,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
       }
     });
 
-    console.log('1️⃣  Creating plugin with 4 fields AND analytics enabled...\n');
 
     // Setup EventualConsistency with analytics
     const plugin = new EventualConsistencyPlugin({
@@ -102,7 +95,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     });
     await database.usePlugin(plugin);
 
-    console.log('2️⃣  Checking if analytics resources were created...\n');
 
     // Check if ALL analytics resources exist
     const expectedAnalyticsResources = [
@@ -114,16 +106,13 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     for (const resourceName of expectedAnalyticsResources) {
       const exists = database.resources[resourceName];
-      console.log(`   ${exists ? '✅' : '❌'} ${resourceName}: ${exists ? 'EXISTS' : 'MISSING'}`);
       expect(exists).toBeDefined();
       expect(exists).not.toBeNull();
     }
 
-    console.log('\n✅ All analytics resources created!\n');
   });
 
   it('should use PluginStorage for locks instead of creating lock resources', async () => {
-    console.log('\n🧪 Testing that NO lock resources are created (using PluginStorage now)...\n');
 
     // Create URLs resource
     urls = await database.createResource({
@@ -138,7 +127,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
       }
     });
 
-    console.log('1️⃣  Creating plugin with 4 fields...\n');
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
@@ -150,7 +138,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     });
     await database.usePlugin(plugin);
 
-    console.log('2️⃣  Verifying NO lock resources were created (migrated to PluginStorage)...\n');
 
     // Check that lock resources do NOT exist (migrated to PluginStorage)
     const oldLockResources = [
@@ -162,15 +149,12 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     for (const resourceName of oldLockResources) {
       const exists = database.resources[resourceName];
-      console.log(`   ${!exists ? '✅' : '❌'} ${resourceName}: ${!exists ? 'NOT CREATED (using PluginStorage)' : 'UNEXPECTED'}`);
       expect(exists).toBeUndefined();
     }
 
-    console.log('\n✅ Confirmed: Using PluginStorage for locks (no lock resources)!\n');
   });
 
   it('should be able to use ALL configured fields independently', async () => {
-    console.log('\n🧪 Testing multi-field operations...\n');
 
     // Create URLs resource
     urls = await database.createResource({
@@ -195,7 +179,6 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     });
     await database.usePlugin(plugin);
 
-    console.log('1️⃣  Creating URL...\n');
     await urls.insert({
       id: 'multi-field-test',
       link: 'https://example.com',
@@ -205,47 +188,32 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
       scans: 0
     });
 
-    console.log('2️⃣  Testing each field independently...\n');
 
     // Test clicks
-    console.log('   Testing clicks field...');
     await urls.add('multi-field-test', 'clicks', 10);
     let url = await urls.get('multi-field-test');
     expect(url.clicks).toBe(10);
-    console.log('   ✅ Clicks: 10');
 
     // Test views
-    console.log('   Testing views field...');
     await urls.add('multi-field-test', 'views', 20);
     url = await urls.get('multi-field-test');
     expect(url.views).toBe(20);
-    console.log('   ✅ Views: 20');
 
     // Test shares
-    console.log('   Testing shares field...');
     await urls.add('multi-field-test', 'shares', 5);
     url = await urls.get('multi-field-test');
     expect(url.shares).toBe(5);
-    console.log('   ✅ Shares: 5');
 
     // Test scans
-    console.log('   Testing scans field...');
     await urls.add('multi-field-test', 'scans', 3);
     url = await urls.get('multi-field-test');
     expect(url.scans).toBe(3);
-    console.log('   ✅ Scans: 3');
 
-    console.log('\n3️⃣  Final state:\n');
-    console.log(`   Clicks: ${url.clicks} (expected: 10)`);
-    console.log(`   Views: ${url.views} (expected: 20)`);
-    console.log(`   Shares: ${url.shares} (expected: 5)`);
-    console.log(`   Scans: ${url.scans} (expected: 3)`);
 
     expect(url.clicks).toBe(10);
     expect(url.views).toBe(20);
     expect(url.shares).toBe(5);
     expect(url.scans).toBe(3);
 
-    console.log('\n✅ All fields working correctly!\n');
   });
 });

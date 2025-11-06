@@ -22,7 +22,7 @@ describe("SchedulerPlugin", () => {
       let executionCount = 0;
 
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           test_job: {
             schedule: '@hourly',
             action: async () => {
@@ -46,7 +46,7 @@ describe("SchedulerPlugin", () => {
 
     it("should create job history resource when persistJobs is true", async () => {
       const plugin = new SchedulerPlugin({
-        persistJobs: true,
+        verbose: false,persistJobs: true,
         jobs: {
           test_job: {
             schedule: '@hourly',
@@ -66,7 +66,7 @@ describe("SchedulerPlugin", () => {
     it("should throw error when no jobs are defined", async () => {
       expect(() => {
         new SchedulerPlugin({
-          jobs: {}
+          verbose: false,jobs: {}
         });
       }).toThrow('At least one job must be defined');
     });
@@ -74,7 +74,7 @@ describe("SchedulerPlugin", () => {
     it("should validate job configuration", async () => {
       expect(() => {
         new SchedulerPlugin({
-          jobs: {
+          verbose: false,jobs: {
             invalid_job: {
               // Missing schedule and action
               description: 'Invalid job'
@@ -91,7 +91,7 @@ describe("SchedulerPlugin", () => {
       let lastContext = null;
 
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           manual_job: {
             schedule: '@hourly',
             action: async (database, context) => {
@@ -121,7 +121,7 @@ describe("SchedulerPlugin", () => {
       let executionCount = 0;
 
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           slow_job: {
             schedule: '@hourly',
             action: async () => {
@@ -155,7 +155,7 @@ describe("SchedulerPlugin", () => {
       let attemptCount = 0;
 
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           failing_job: {
             schedule: '@hourly',
             retries: 2, // Will attempt 3 times total (1 initial + 2 retries)
@@ -190,7 +190,7 @@ describe("SchedulerPlugin", () => {
       let attemptCount = 0;
 
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           always_failing_job: {
             schedule: '@hourly',
             retries: 2,
@@ -223,7 +223,7 @@ describe("SchedulerPlugin", () => {
       let executionCount = 0;
 
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           toggleable_job: {
             schedule: '@hourly',
             enabled: true,
@@ -255,7 +255,7 @@ describe("SchedulerPlugin", () => {
 
     it("should get job status", async () => {
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           status_job: {
             schedule: '@hourly',
             description: 'Test job for status',
@@ -282,7 +282,7 @@ describe("SchedulerPlugin", () => {
 
     it("should get all jobs status", async () => {
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           job1: {
             schedule: '@hourly',
             action: async () => ({ success: true })
@@ -308,7 +308,7 @@ describe("SchedulerPlugin", () => {
 
     it("should add job at runtime", async () => {
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           initial_job: {
             schedule: '@hourly',
             action: async () => ({ success: true })
@@ -341,7 +341,7 @@ describe("SchedulerPlugin", () => {
 
     it("should remove job", async () => {
       const plugin = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           removable_job: {
             schedule: '@hourly',
             action: async () => ({ success: true })
@@ -367,7 +367,7 @@ describe("SchedulerPlugin", () => {
   describe("Job History", () => {
     it("should persist job execution history", async () => {
       const plugin = new SchedulerPlugin({
-        persistJobs: true,
+        verbose: false,persistJobs: true,
         jobs: {
           history_job: {
             schedule: '@hourly',
@@ -395,7 +395,7 @@ describe("SchedulerPlugin", () => {
 
     it("should filter history by status", async () => {
       const plugin = new SchedulerPlugin({
-        persistJobs: true,
+        verbose: false,persistJobs: true,
         jobs: {
           multi_exec_job: {
             schedule: '@hourly',
@@ -445,7 +445,7 @@ describe("SchedulerPlugin", () => {
 
       // Simulate two instances with the same database
       const plugin1 = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           distributed_job: {
             schedule: '@hourly',
             action: async () => {
@@ -458,7 +458,7 @@ describe("SchedulerPlugin", () => {
       });
 
       const plugin2 = new SchedulerPlugin({
-        jobs: {
+        verbose: false,jobs: {
           distributed_job: {
             schedule: '@hourly',
             action: async () => {
@@ -500,7 +500,7 @@ describe("SchedulerPlugin", () => {
       };
 
       const plugin = new SchedulerPlugin({
-        onJobStart: (jobName, context) => {
+        verbose: false,onJobStart: (jobName, context) => {
           hooks.starts.push({ jobName, executionId: context.executionId });
         },
         onJobComplete: (jobName, result, duration) => {

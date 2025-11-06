@@ -35,7 +35,7 @@ describe('CookieFarmSuitePlugin', () => {
     await db.connect();
 
     suite = new CookieFarmSuitePlugin({
-      namespace: 'persona',
+      verbose: false,namespace: 'persona',
       queue: { autoStart: false },
       cookieFarm: {
         generation: { count: 0 },
@@ -85,7 +85,7 @@ describe('CookieFarmSuitePlugin', () => {
     await ttlDb.connect();
 
     const ttlSuite = new CookieFarmSuitePlugin({
-      namespace: 'persona-ttl',
+      verbose: false,namespace: 'persona-ttl',
       queue: { autoStart: false },
       ttl: { queue: { ttl: 900 } },
       cookieFarm: {

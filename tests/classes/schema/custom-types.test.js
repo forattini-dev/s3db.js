@@ -9,7 +9,7 @@ describe('Schema custom type: secret', () => {
     passphrase: 'test-secret'
   });
 
-  const mapAndUnmap = value => schema.unmapper(schema.mapper({ secret: value }));
+  const mapAndUnmap = async value => schema.unmapper(await schema.mapper({ secret: value }));
 
   test('round-trips primitive values', async () => {
     await expect(mapAndUnmap('mySecret')).resolves.toMatchObject({ secret: 'mySecret' });
@@ -30,7 +30,7 @@ describe('Schema custom type: json', () => {
     attributes: { data: 'json' }
   });
 
-  const mapAndUnmap = value => schema.unmapper(schema.mapper({ data: value }));
+  const mapAndUnmap = async value => schema.unmapper(await schema.mapper({ data: value }));
 
   test('round-trips structured data', async () => {
     await expect(mapAndUnmap({ foo: 'bar', n: 1 })).resolves.toMatchObject({

@@ -18,7 +18,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Passive Mode', () => {
     test('applies passive preset with correct features', () => {
       const plugin = new ReconPlugin({
-        behavior: 'passive',
+        verbose: false,behavior: 'passive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -43,7 +43,7 @@ describe('ReconPlugin - Behavior Modes', () => {
       emitSpy = jest.spyOn(ReconPlugin.prototype, 'emit');
 
       new ReconPlugin({
-        behavior: 'passive',
+        verbose: false,behavior: 'passive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -61,7 +61,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('allows behaviorOverrides to enable specific features', () => {
       const plugin = new ReconPlugin({
-        behavior: 'passive',
+        verbose: false,behavior: 'passive',
         behaviorOverrides: {
           features: {
             certificate: true // override passive default
@@ -79,7 +79,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Stealth Mode', () => {
     test('applies stealth preset with rate limiting', () => {
       const plugin = new ReconPlugin({
-        behavior: 'stealth',
+        verbose: false,behavior: 'stealth',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -107,7 +107,7 @@ describe('ReconPlugin - Behavior Modes', () => {
       jest.useFakeTimers();
 
       const plugin = new ReconPlugin({
-        behavior: 'stealth',
+        verbose: false,behavior: 'stealth',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -131,7 +131,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Aggressive Mode', () => {
     test('applies aggressive preset with all tools enabled', () => {
       const plugin = new ReconPlugin({
-        behavior: 'aggressive',
+        verbose: false,behavior: 'aggressive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -167,7 +167,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('does not apply rate limiting', async () => {
       const plugin = new ReconPlugin({
-        behavior: 'aggressive',
+        verbose: false,behavior: 'aggressive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -183,7 +183,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Default Mode (no behavior)', () => {
     test('uses default features when no behavior is set', () => {
       const plugin = new ReconPlugin({
-        storage: { persist: false },
+        verbose: false,storage: { persist: false },
         resources: { persist: false }
       });
 
@@ -198,7 +198,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Manual Overrides', () => {
     test('manual config overrides behavior preset', () => {
       const plugin = new ReconPlugin({
-        behavior: 'passive',
+        verbose: false,behavior: 'passive',
         concurrency: 10, // override passive default (2)
         ping: { count: 10, timeout: 20000 },
         storage: { persist: false },
@@ -212,7 +212,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('features param overrides behavior features', () => {
       const plugin = new ReconPlugin({
-        behavior: 'stealth',
+        verbose: false,behavior: 'stealth',
         features: {
           latency: { traceroute: true } // enable traceroute in stealth mode
         },
@@ -228,7 +228,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Invalid Behavior', () => {
     test('ignores invalid behavior mode', () => {
       const plugin = new ReconPlugin({
-        behavior: 'invalid-mode',
+        verbose: false,behavior: 'invalid-mode',
         storage: { persist: false },
         resources: { persist: false }
       });

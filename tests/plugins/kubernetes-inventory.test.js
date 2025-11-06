@@ -2,7 +2,7 @@
  * Tests for KubernetesInventoryPlugin
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { KubernetesInventoryPlugin } from '../../src/plugins/kubernetes-inventory.plugin.js';
 import { KubernetesDriver } from '../../src/plugins/kubernetes-inventory/k8s-driver.js';
@@ -96,8 +96,8 @@ describe('KubernetesInventoryPlugin', () => {
   describe('Internal Resources', () => {
     beforeEach(async () => {
       // Mock the driver initialization to avoid needing real K8s
-      vi.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
-      vi.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
+      jest.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
+      jest.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
         yield* [];
       });
 
@@ -393,8 +393,8 @@ describe('KubernetesInventoryPlugin', () => {
 
   describe('Resource Names & Namespacing', () => {
     it('should use custom resource names', async () => {
-      vi.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
-      vi.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
+      jest.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
+      jest.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
         yield* [];
       });
 
@@ -419,8 +419,8 @@ describe('KubernetesInventoryPlugin', () => {
     });
 
     it('should support multiple plugin instances with different names', async () => {
-      vi.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
-      vi.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
+      jest.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
+      jest.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
         yield* [];
       });
 
@@ -465,8 +465,8 @@ describe('KubernetesInventoryPlugin', () => {
 
   describe('Multi-Cluster Data Isolation', () => {
     beforeEach(async () => {
-      vi.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
-      vi.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
+      jest.spyOn(KubernetesDriver.prototype, 'initialize').mockResolvedValue();
+      jest.spyOn(KubernetesDriver.prototype, 'listResources').mockImplementation(async function* () {
         yield* [];
       });
 

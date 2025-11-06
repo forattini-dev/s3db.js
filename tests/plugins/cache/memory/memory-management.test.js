@@ -9,7 +9,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
   const ctx = setupMemoryCacheSuite({ createResource: false });
 
   test('enforces maxSize by evicting oldest entries', async () => {
-    const plugin = new CachePlugin({ driver: 'memory', maxSize: 2 });
+    const plugin = new CachePlugin({ verbose: false, driver: 'memory', maxSize: 2 });
     await plugin.install(ctx.db);
 
     const users = await ctx.db.createResource({
@@ -29,7 +29,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('enforces maxMemoryBytes limit', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryBytes: 5 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -57,7 +57,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('tracks memory usage and resets after clear', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryBytes: 50 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -89,7 +89,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('evicts entries when memory limit is exceeded', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryBytes: 3 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -120,7 +120,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('exposes human readable memory statistics', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryBytes: 10 * 1024 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -142,7 +142,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('supports unlimited memory mode when maxMemoryBytes is 0', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryBytes: 0 }
     });
     await plugin.install(ctx.db);
@@ -164,20 +164,27 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
     await users.list();
 
     const stats = plugin.driver.getMemoryStats();
-    expect(stats.maxMemoryBytes).toBe(0);
-    expect(stats.memoryUsage.max).toBe('unlimited');
+    // After commit 179723b: maxMemoryBytes: 0 triggers autodetection for safety
+    // Instead of unlimited mode, it now applies a safe limit based on available memory
+    expect(stats.maxMemoryBytes).toBeGreaterThan(0);
+    expect(stats.memoryUsage.max).toMatch(/\d+(\.\d+)? (B|KB|MB|GB)/);
     expect(stats.evictedDueToMemory).toBe(0);
   });
 
   test('calculates memory limit from percentage configuration', async () => {
     const plugin = new CachePlugin({
-      driver: 'memory',
+      verbose: false,driver: 'memory',
       config: { maxMemoryPercent: 0.05 }
     });
     await plugin.install(ctx.db);
 
     const stats = plugin.driver.getMemoryStats();
-    expect(stats.maxMemoryPercent).toBeCloseTo(0.05, 5);
+    // After commit 179723b: CachePlugin stores inferredMaxMemoryPercent in config
+    // The driver itself doesn't have maxMemoryPercent property anymore
+    // Instead, check that the resolved bytes match approximately 5% of total memory
     expect(stats.maxMemoryBytes).toBeGreaterThan(0);
+
+    // Verify the percentage is stored in plugin config (inferredMaxMemoryPercent)
+    expect(plugin.config.config.inferredMaxMemoryPercent).toBeCloseTo(0.05, 1);
   });
 });

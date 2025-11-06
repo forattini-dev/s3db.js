@@ -36,7 +36,7 @@ describe('GeoPlugin - Configuration and Validation Tests', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           lonField: 'longitude',
           precision: 5
@@ -65,7 +65,7 @@ describe('GeoPlugin - Configuration and Validation Tests', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           precision: 5
@@ -94,7 +94,7 @@ describe('GeoPlugin - Configuration and Validation Tests', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude'
@@ -145,7 +145,7 @@ describe('GeoPlugin - Geohash Encoding/Decoding', () => {
   let plugin;
 
   beforeAll(() => {
-    plugin = new GeoPlugin({});
+    plugin = new GeoPlugin({ verbose: false,});
   });
 
   test('should encode coordinates to geohash', () => {
@@ -211,7 +211,7 @@ describe('GeoPlugin - Distance Calculations', () => {
   let plugin;
 
   beforeAll(() => {
-    plugin = new GeoPlugin({});
+    plugin = new GeoPlugin({ verbose: false,});
   });
 
   test('should calculate distance using Haversine formula', () => {
@@ -260,7 +260,7 @@ describe('GeoPlugin - Neighbor Calculation', () => {
   let plugin;
 
   beforeAll(() => {
-    plugin = new GeoPlugin({});
+    plugin = new GeoPlugin({ verbose: false,});
   });
 
   test('should get 8 neighboring geohashes', () => {
@@ -387,7 +387,7 @@ describe('GeoPlugin - findNearby Method', () => {
     });
 
     plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         restaurants: {
           latField: 'lat',
           lonField: 'lon',
@@ -497,7 +497,7 @@ describe('GeoPlugin - findInBounds Method', () => {
     });
 
     plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         locations: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -601,7 +601,7 @@ describe('GeoPlugin - getDistance Method', () => {
     });
 
     plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         cities: {
           latField: 'lat',
           lonField: 'lon',
@@ -669,7 +669,7 @@ describe('GeoPlugin - Statistics and Monitoring', () => {
 
   test('should return plugin statistics', () => {
     plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -695,7 +695,7 @@ describe('GeoPlugin - Statistics and Monitoring', () => {
   });
 
   test('should return cell sizes for different precisions', () => {
-    plugin = new GeoPlugin({});
+    plugin = new GeoPlugin({ verbose: false,});
 
     expect(plugin._getPrecisionDistance(1)).toBe(5000);
     expect(plugin._getPrecisionDistance(4)).toBe(39);

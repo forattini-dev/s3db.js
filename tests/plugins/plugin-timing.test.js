@@ -158,7 +158,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add cache plugin before any resources
       const cachePlugin = new CachePlugin({
-        driver: 'memory',
+        verbose: false,driver: 'memory',
         config: { maxSize: 100 }
       });
       
@@ -218,7 +218,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add cache plugin after resource exists
       const cachePlugin = new CachePlugin({
-        driver: 'memory',
+        verbose: false,driver: 'memory',
         config: { maxSize: 100 }
       });
       
@@ -241,7 +241,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add some plugins before resource creation
       const cachePlugin = new CachePlugin({
-        driver: 'memory',
+        verbose: false,driver: 'memory',
         config: { maxSize: 100 }
       });
       
@@ -300,7 +300,7 @@ describe('Plugin Timing Tests', () => {
     it('should handle plugins in constructor config', async () => {
       // Create plugins
       const cachePlugin = new CachePlugin({
-        driver: 'memory',
+        verbose: false,driver: 'memory',
         config: { maxSize: 100 }
       });
       

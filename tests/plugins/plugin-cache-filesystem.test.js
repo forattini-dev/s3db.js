@@ -281,8 +281,6 @@ describe('FilesystemCache - Permission Tests', () => {
       // For testing purposes, we demonstrate the issue exists but note that
       // in a real scenario, this would need to be fixed in the FilesystemCache implementation
       
-      console.log('Note: FilesystemCache has a known issue where constructor calls async _init() without await');
-      console.log('This can cause uncaught promise rejections when directory permissions are insufficient');
       
       // Test that normal operation works fine
       const tempDir = await createTemporaryPathForTest('normal-operation');
@@ -337,7 +335,6 @@ describe('FilesystemCache - Permission Tests', () => {
       } catch (permissionError) {
         // If we can't change permissions (common in some environments),
         // just log and skip this part of the test
-        console.warn('Warning: Cannot test file permission changes in this environment');
       }
     });
   });

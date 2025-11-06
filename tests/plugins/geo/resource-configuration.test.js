@@ -15,7 +15,7 @@ describe('Geo Plugin - Resource configuration', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           lonField: 'longitude',
           precision: 5
@@ -35,7 +35,7 @@ describe('Geo Plugin - Resource configuration', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           precision: 5
@@ -97,7 +97,7 @@ describe('Geo Plugin - Resource configuration', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -118,7 +118,7 @@ describe('Geo Plugin - Resource configuration', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

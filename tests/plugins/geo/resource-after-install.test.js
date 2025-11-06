@@ -8,7 +8,7 @@ describe('Geo Plugin - Resource created after install', () => {
 
   test('registers geo capabilities on resources created post-install', async () => {
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

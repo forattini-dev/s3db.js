@@ -8,7 +8,7 @@ describe('Geo Plugin - Stats and uninstall', () => {
 
   test('reports plugin configuration stats', () => {
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -41,7 +41,7 @@ describe('Geo Plugin - Stats and uninstall', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -58,7 +58,7 @@ describe('Geo Plugin - Stats and uninstall', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

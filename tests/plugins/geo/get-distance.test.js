@@ -10,7 +10,7 @@ describe('Geo Plugin - getDistance()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -48,7 +48,7 @@ describe('Geo Plugin - getDistance()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -77,7 +77,7 @@ describe('Geo Plugin - getDistance()', () => {
     });
 
     const plugin = new GeoPlugin({
-      resources: {
+      verbose: false,resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

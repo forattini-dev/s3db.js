@@ -4,7 +4,7 @@ import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 
 describe('Geo Plugin - Geohash utilities', () => {
   test('encodes coordinates to geohash', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
     const geohash = plugin.encodeGeohash(-23.5505, -46.6333, 5);
 
     expect(geohash).toBe('6gyf4');
@@ -12,7 +12,7 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('supports multiple precision levels', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
 
     const hash4 = plugin.encodeGeohash(-23.5505, -46.6333, 4);
     const hash6 = plugin.encodeGeohash(-23.5505, -46.6333, 6);
@@ -23,7 +23,7 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('decodes geohash to coordinates', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
     const decoded = plugin.decodeGeohash('6gyf4');
 
     expect(decoded.latitude).toBeCloseTo(-23.5505, 1);
@@ -33,13 +33,13 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('rejects invalid geohash characters', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
 
     expect(() => plugin.decodeGeohash('abc')).toThrow('Invalid geohash character: a');
   });
 
   test('round-trips encode/decode', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
     const lat = -23.5505;
     const lon = -46.6333;
 
@@ -51,7 +51,7 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('returns distance between two points', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
     const distance = plugin.calculateDistance(-23.5505, -46.6333, -22.9068, -43.1729);
 
     expect(distance).toBeGreaterThan(350);
@@ -59,14 +59,14 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('handles zero distance and equator crossing', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
 
     expect(plugin.calculateDistance(-23.5505, -46.6333, -23.5505, -46.6333)).toBeLessThan(0.001);
     expect(plugin.calculateDistance(5, 0, -5, 0)).toBeGreaterThan(1100);
   });
 
   test('returns neighboring geohashes', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
     const neighbors = plugin.getNeighbors('6gyf4');
 
     expect(neighbors).toHaveLength(8);
@@ -75,7 +75,7 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('lists geohashes covering a bounding box', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
     const geohashes = plugin._getGeohashesInBounds({
       north: -23.5,
       south: -23.6,
@@ -98,7 +98,7 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('maps precision levels to cell sizes', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
 
     expect(plugin._getPrecisionDistance(1)).toBe(5000);
     expect(plugin._getPrecisionDistance(5)).toBe(4.9);
@@ -107,7 +107,7 @@ describe('Geo Plugin - Geohash utilities', () => {
   });
 
   test('selects optimal zoom based on radius', () => {
-    const plugin = new GeoPlugin({});
+    const plugin = new GeoPlugin({ verbose: false,});
 
     expect(plugin._selectOptimalZoom([4, 5, 6, 7], 20)).toBe(5);
     expect(plugin._selectOptimalZoom([4, 5, 6, 7], 5)).toBe(6);

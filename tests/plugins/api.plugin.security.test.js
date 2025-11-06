@@ -127,7 +127,6 @@ describe.skip('API Plugin - Security Tests', () => {
 
       if (!registerResponse.ok) {
         const registerData = await registerResponse.json();
-        console.warn(`Registration warning: ${JSON.stringify(registerData)}`);
       }
 
       const loginResponse = await fetch(`http://localhost:${port}/auth/login`, {
