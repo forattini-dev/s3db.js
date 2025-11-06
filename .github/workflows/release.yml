@@ -10,6 +10,12 @@ on:
         description: 'Version (e.g., v11.4.0)'
         required: true
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
+        type: string
 
 jobs:
   build-binaries:
