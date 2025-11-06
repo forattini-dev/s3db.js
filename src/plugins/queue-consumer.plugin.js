@@ -614,12 +614,13 @@ import { QueueError } from "./queue.errors.js";
 export class QueueConsumerPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    this.options = options;
+    const opts = this.options;
+
     // New pattern: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
-    this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
+    this.driversConfig = Array.isArray(opts.consumers) ? opts.consumers : [];
     this.consumers = [];
-    this.startConcurrency = Math.max(1, options.startConcurrency ?? 5);
-    this.stopConcurrency = Math.max(1, options.stopConcurrency ?? this.startConcurrency);
+    this.startConcurrency = Math.max(1, opts.startConcurrency ?? 5);
+    this.stopConcurrency = Math.max(1, opts.stopConcurrency ?? this.startConcurrency);
   }
 
   async onInstall() {
@@ -698,7 +699,7 @@ export class QueueConsumerPlugin extends Plugin {
         return task.consumer;
       });
 
-    if (errors.length > 0 && this.options.verbose) {
+    if (errors.length > 0 && this.verbose) {
       errors.forEach(({ reason }) => {
         console.warn(`[QueueConsumerPlugin] Failed to stop consumer: ${reason?.message || reason}`);
       });

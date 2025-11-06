@@ -21,16 +21,29 @@ export class VectorPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    const {
+      dimensions = 1536,
+      distanceMetric = 'cosine',
+      storageThreshold = 1500,
+      autoFixBehavior = false,
+      autoDetectVectorField = true,
+      emitEvents = true,
+      verboseEvents = false,
+      eventThrottle = 100,
+      ...rest
+    } = this.options;
+
     this.config = {
-      dimensions: 1536, // Default to OpenAI text-embedding-3-small/3-large
-      distanceMetric: 'cosine', // Default metric
-      storageThreshold: 1500, // Bytes - warn if vectors exceed this
-      autoFixBehavior: false, // Automatically set body-overflow
-      autoDetectVectorField: true, // Auto-detect embedding:XXX fields
-      emitEvents: true, // Emit events for monitoring
-      verboseEvents: false, // Emit detailed progress events
-      eventThrottle: 100, // Throttle progress events (ms)
-      ...options
+      dimensions,
+      distanceMetric,
+      storageThreshold,
+      autoFixBehavior,
+      autoDetectVectorField,
+      emitEvents,
+      verboseEvents,
+      eventThrottle,
+      verbose: this.verbose,
+      ...rest
     };
 
     this.distanceFunctions = {

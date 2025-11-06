@@ -3,12 +3,13 @@ import { PluginStorage } from "../concerns/plugin-storage.js";
 import { FilesystemStorageDriver } from "../concerns/storage-drivers/filesystem-driver.js";
 import { PluginError } from "../errors.js";
 import { listPluginNamespaces } from "./namespace.js";
+import normalizePluginOptions from './concerns/plugin-options.js';
 
 export class Plugin extends EventEmitter {
   constructor(options = {}) {
     super();
     this.name = this.constructor.name;
-    this.options = options;
+    this.options = normalizePluginOptions(this, options);
     this.hooks = new Map();
 
     // Auto-generate slug from class name (CamelCase -> kebab-case)
@@ -139,7 +140,7 @@ export class Plugin extends EventEmitter {
    */
   async scheduleCron(expression, fn, suffix = 'job', options = {}) {
     if (!this.cronManager) {
-      console.warn(`[${this.name}] CronManager not available, cannot schedule job '${suffix}'`);
+      // console.warn(`[${this.name}] CronManager not available, cannot schedule job '${suffix}'`);
       return null;
     }
 
@@ -169,7 +170,7 @@ export class Plugin extends EventEmitter {
    */
   async scheduleInterval(ms, fn, suffix = 'interval', options = {}) {
     if (!this.cronManager) {
-      console.warn(`[${this.name}] CronManager not available, cannot schedule interval '${suffix}'`);
+      // console.warn(`[${this.name}] CronManager not available, cannot schedule interval '${suffix}'`);
       return null;
     }
 
@@ -274,13 +275,13 @@ export class Plugin extends EventEmitter {
 
       // Emit console warnings (standardized format)
       if (existingNamespaces.length > 0) {
-        console.warn(
-          `[${this.name}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
-        );
+        // console.warn(
+        //   `[${this.name}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
+        // );
       }
 
       const namespaceDisplay = currentNamespace === '' ? '(none)' : `"${currentNamespace}"`;
-      console.warn(`[${this.name}] Using namespace: ${namespaceDisplay}`);
+      // console.warn(`[${this.name}] Using namespace: ${namespaceDisplay}`);
 
       return existingNamespaces;
     } catch (error) {

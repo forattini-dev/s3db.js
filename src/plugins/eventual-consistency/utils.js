@@ -56,10 +56,9 @@ export function getTimezoneOffset(timezone, verbose = false) {
     };
 
     if (verbose && !offsets[timezone]) {
-      console.warn(
-        `[EventualConsistency] Unknown timezone '${timezone}', using UTC. ` +
-        `Consider using a valid IANA timezone (e.g., 'America/New_York')`
-      );
+        // `[EventualConsistency] Unknown timezone '${timezone}', using UTC. ` +
+        // `Consider using a valid IANA timezone (e.g., 'America/New_York')`
+      // );
     }
 
     return offsets[timezone] || 0;
@@ -399,10 +398,9 @@ export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false)
     const cohortInfo = getCohortInfo(date, timezone, verbose);
 
     if (verbose) {
-      console.log(
-        `[EventualConsistency] Transaction ${transaction.id} missing cohortHour, ` +
-        `calculated from timestamp: ${cohortInfo.hour}`
-      );
+        // `[EventualConsistency] Transaction ${transaction.id} missing cohortHour, ` +
+        // `calculated from timestamp: ${cohortInfo.hour}`
+      // );
     }
 
     // Add cohortHour (and other cohort fields if missing)
@@ -416,10 +414,9 @@ export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false)
       transaction.cohortMonth = cohortInfo.month;
     }
   } else if (verbose) {
-    console.warn(
-      `[EventualConsistency] Transaction ${transaction.id} missing both cohortHour and timestamp, ` +
-      `cannot calculate cohort`
-    );
+      // `[EventualConsistency] Transaction ${transaction.id} missing both cohortHour and timestamp, ` +
+      // `cannot calculate cohort`
+    // );
   }
 
   return transaction;

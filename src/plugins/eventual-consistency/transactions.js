@@ -29,18 +29,16 @@ export async function createTransaction(handler, data, config) {
 
     if (config.lateArrivalStrategy === 'ignore') {
       if (config.verbose) {
-        console.warn(
-          `[EventualConsistency] Late arrival ignored: transaction for ${cohortInfo.hour} ` +
-          `is ${hoursLate}h late (watermark: ${config.consolidationWindow}h)`
-        );
+          // `[EventualConsistency] Late arrival ignored: transaction for ${cohortInfo.hour} ` +
+          // `is ${hoursLate}h late (watermark: ${config.consolidationWindow}h)`
+        // );
       }
       return null;
     } else if (config.lateArrivalStrategy === 'warn') {
-      console.warn(
-        `[EventualConsistency] Late arrival detected: transaction for ${cohortInfo.hour} ` +
-        `is ${hoursLate}h late (watermark: ${config.consolidationWindow}h). ` +
-        `Processing anyway, but consolidation may not pick it up.`
-      );
+        // `[EventualConsistency] Late arrival detected: transaction for ${cohortInfo.hour} ` +
+        // `is ${hoursLate}h late (watermark: ${config.consolidationWindow}h). ` +
+        // `Processing anyway, but consolidation may not pick it up.`
+      // );
     }
     // 'process' strategy: continue normally
   }
@@ -65,11 +63,10 @@ export async function createTransaction(handler, data, config) {
     handler.pendingTransactions.set(transaction.id, transaction);
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
-        `Transaction batched: ${data.operation} ${data.value} for ${data.originalId} ` +
-        `(batch: ${handler.pendingTransactions.size}/${config.batchSize})`
-      );
+        // `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
+        // `Transaction batched: ${data.operation} ${data.value} for ${data.originalId} ` +
+        // `(batch: ${handler.pendingTransactions.size}/${config.batchSize})`
+      // );
     }
 
     // Flush if batch size reached
@@ -80,11 +77,10 @@ export async function createTransaction(handler, data, config) {
     await handler.transactionResource.insert(transaction);
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
-        `Transaction created: ${data.operation} ${data.value} for ${data.originalId} ` +
-        `(cohort: ${cohortInfo.hour}, applied: false)`
-      );
+        // `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
+        // `Transaction created: ${data.operation} ${data.value} for ${data.originalId} ` +
+        // `(cohort: ${cohortInfo.hour}, applied: false)`
+      // );
     }
   }
 
@@ -114,7 +110,6 @@ export async function flushPendingTransactions(handler) {
     handler.pendingTransactions.clear();
   } catch (error) {
     // Keep pending transactions for retry on next flush
-    console.error('Failed to flush pending transactions:', error);
     throw error;
   }
 }

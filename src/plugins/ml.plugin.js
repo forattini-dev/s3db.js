@@ -64,13 +64,23 @@ export class MLPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    const {
+      models = {},
+      minTrainingSamples = 10,
+      saveModel = true,
+      saveTrainingData = false,
+      enableVersioning = true,
+      ...rest
+    } = this.options;
+
     this.config = {
-      models: options.models || {},
-      verbose: options.verbose || false,
-      minTrainingSamples: options.minTrainingSamples || 10,
-      saveModel: options.saveModel !== false, // Default true
-      saveTrainingData: options.saveTrainingData || false,
-      enableVersioning: options.enableVersioning !== false // Default true
+      models,
+      verbose: this.verbose,
+      minTrainingSamples,
+      saveModel,
+      saveTrainingData,
+      enableVersioning,
+      ...rest
     };
 
     // Model instances

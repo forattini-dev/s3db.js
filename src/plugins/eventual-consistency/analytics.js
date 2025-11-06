@@ -37,10 +37,9 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
   }
 
   if (config.verbose) {
-    console.log(
-      `[EventualConsistency] ${config.resource}.${config.field} - ` +
-      `Updating analytics for ${transactions.length} transactions...`
-    );
+      // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+      // `Updating analytics for ${transactions.length} transactions...`
+    // );
   }
 
   try {
@@ -49,10 +48,9 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     const cohortCount = Object.keys(byHour).length;
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Updating ${cohortCount} hourly analytics cohorts IN PARALLEL...`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Updating ${cohortCount} hourly analytics cohorts IN PARALLEL...`
+      // );
     }
 
     // ✅ OTIMIZAÇÃO: Update hourly analytics EM PARALELO
@@ -67,10 +65,9 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
       const uniqueHours = Object.keys(byHour);
 
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `Rolling up ${uniqueHours.length} hours to daily/weekly/monthly analytics IN PARALLEL...`
-        );
+          // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          // `Rolling up ${uniqueHours.length} hours to daily/weekly/monthly analytics IN PARALLEL...`
+        // );
       }
 
       // ✅ OTIMIZAÇÃO: Rollup analytics EM PARALELO
@@ -82,23 +79,21 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     }
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Analytics update complete for ${cohortCount} cohorts`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Analytics update complete for ${cohortCount} cohorts`
+      // );
     }
   } catch (error) {
-    console.error(
-      `[EventualConsistency] CRITICAL: ${config.resource}.${config.field} - ` +
-      `Analytics update failed:`,
-      {
-        error: error.message,
-        stack: error.stack,
-        field: config.field,
-        resource: config.resource,
-        transactionCount: transactions.length
-      }
-    );
+      // `[EventualConsistency] CRITICAL: ${config.resource}.${config.field} - ` +
+      // `Analytics update failed:`,
+      // {
+        // error: error.message,
+        // stack: error.stack,
+        // field: config.field,
+        // resource: config.resource,
+        // transactionCount: transactions.length
+      // }
+    // );
     // Re-throw to prevent silent failures
     throw new PluginError(`Analytics update failed for ${config.resource}.${config.field}: ${error.message}`, {
       pluginName: 'EventualConsistencyPlugin',

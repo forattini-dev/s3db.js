@@ -99,46 +99,67 @@ export class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    // Detect multi-tier mode (drivers array)
-    const isMultiTier = Array.isArray(options.drivers) && options.drivers.length > 0;
+    const {
+      driver = 's3',
+      drivers,
+      promoteOnHit = true,
+      strategy = 'write-through',
+      fallbackOnError = true,
+      ttl,
+      maxSize,
+      maxMemoryBytes,
+      maxMemoryPercent,
+      config = {},
+      include = null,
+      exclude = [],
+      includePartitions = true,
+      partitionStrategy = 'hierarchical',
+      partitionAware = true,
+      trackUsage = true,
+      preloadRelated = true,
+      retryAttempts = 3,
+      retryDelay = 100
+    } = this.options;
+
+    const isMultiTier = Array.isArray(drivers) && drivers.length > 0;
 
     // Clean, consolidated configuration
     this.config = {
       // Driver configuration (single-tier or multi-tier)
-      driver: options.driver || 's3',
-      drivers: options.drivers, // Array of driver configs for multi-tier
+      driver,
+      drivers,
       isMultiTier,
 
       // Multi-tier specific options
-      promoteOnHit: options.promoteOnHit !== false,
-      strategy: options.strategy || 'write-through', // 'write-through' | 'lazy-promotion'
-      fallbackOnError: options.fallbackOnError !== false,
+      promoteOnHit,
+      strategy,
+      fallbackOnError,
 
       config: {
-        ttl: options.ttl,
-        maxSize: options.maxSize,
-        maxMemoryBytes: options.maxMemoryBytes,
-        maxMemoryPercent: options.maxMemoryPercent,
-        ...options.config // Driver-specific config (can override ttl/maxSize/maxMemoryBytes/maxMemoryPercent)
+        ttl,
+        maxSize,
+        maxMemoryBytes,
+        maxMemoryPercent,
+        ...config
       },
 
       // Resource filtering
-      include: options.include || null, // Array of resource names to cache (null = all)
-      exclude: options.exclude || [], // Array of resource names to exclude
+      include,
+      exclude,
 
       // Partition settings
-      includePartitions: options.includePartitions !== false,
-      partitionStrategy: options.partitionStrategy || 'hierarchical',
-      partitionAware: options.partitionAware !== false,
-      trackUsage: options.trackUsage !== false,
-      preloadRelated: options.preloadRelated !== false,
+      includePartitions,
+      partitionStrategy,
+      partitionAware,
+      trackUsage,
+      preloadRelated,
 
       // Retry configuration
-      retryAttempts: options.retryAttempts || 3,
-      retryDelay: options.retryDelay || 100, // ms
+      retryAttempts,
+      retryDelay,
 
       // Logging
-      verbose: options.verbose || false
+      verbose: this.verbose
     };
 
     // Initialize stats tracking
@@ -182,7 +203,7 @@ export class CachePlugin extends Plugin {
 
         this.config.config.inferredMaxMemoryPercent = resolvedLimit.inferredPercent;
 
-        if (this.config.verbose) {
+        if (this.verbose) {
           const source = resolvedLimit.derivedFromPercent ? 'percent/cgroup' : 'explicit';
           console.warn(`[CachePlugin] Memory driver capped at ${Math.round(resolvedLimit.maxMemoryBytes / (1024 * 1024))} MB (source: ${source}, heapLimit=${Math.round(resolvedLimit.heapLimit / (1024 * 1024))} MB)`);
         }
@@ -197,7 +218,7 @@ export class CachePlugin extends Plugin {
           driver: 'memory',
           ...payload
         });
-        if (this.config.verbose) {
+        if (this.verbose) {
           const reason = payload?.reason || 'unknown';
           console.warn(`[CachePlugin] Memory pressure detected (reason: ${reason}) current=${Math.round((payload?.currentBytes || 0) / (1024 * 1024))}MB`);
         }
@@ -508,7 +529,7 @@ export class CachePlugin extends Plugin {
       promoteOnHit: this.config.promoteOnHit,
       strategy: this.config.strategy,
       fallbackOnError: this.config.fallbackOnError,
-      verbose: this.config.verbose
+      verbose: this.verbose
     });
   }
 
@@ -825,7 +846,7 @@ export class CachePlugin extends Plugin {
             error: err.message
           });
 
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:${data.id}:`, err.message);
           }
         }
@@ -846,7 +867,7 @@ export class CachePlugin extends Plugin {
                 error: err.message
               });
 
-              if (this.config.verbose) {
+              if (this.verbose) {
                 console.warn(`[CachePlugin] Failed to clear partition cache for ${resource.name}/${partitionName}:`, err.message);
               }
             }
@@ -865,7 +886,7 @@ export class CachePlugin extends Plugin {
         error: err.message
       });
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.warn(`[CachePlugin] Failed to clear broad cache for ${resource.name}, trying specific methods:`, err.message);
       }
 

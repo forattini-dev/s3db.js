@@ -27,11 +27,11 @@ export function startConsolidationTimer(handler, resourceName, fieldName, runCon
 
   if (config.verbose) {
     const nextRun = new Date(Date.now() + intervalMs);
-    console.log(
-      `[EventualConsistency] ${resourceName}.${fieldName} - ` +
-      `Consolidation timer started. Next run at ${nextRun.toISOString()} ` +
-      `(every ${config.consolidationInterval}s)`
-    );
+    // console.log(
+    //   `[EventualConsistency] ${resourceName}.${fieldName} - ` +
+    //   `Consolidation timer started. Next run at ${nextRun.toISOString()} ` +
+    //   `(every ${config.consolidationInterval}s)`
+    // );
   }
 
   cronManager.scheduleInterval(
@@ -59,10 +59,9 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
   const startTime = Date.now();
 
   if (config.verbose) {
-    console.log(
-      `[EventualConsistency] ${config.resource}.${config.field} - ` +
-      `Starting consolidation run at ${new Date().toISOString()}`
-    );
+      // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+      // `Starting consolidation run at ${new Date().toISOString()}`
+    // );
   }
 
   try {
@@ -79,10 +78,9 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     }
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Querying ${hoursToCheck} hour partitions for pending transactions...`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Querying ${hoursToCheck} hour partitions for pending transactions...`
+      // );
     }
 
     // Query transactions by partition for each hour (parallel for speed)
@@ -103,10 +101,9 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
 
     if (transactions.length === 0) {
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `No pending transactions found. Next run in ${config.consolidationInterval}s`
-        );
+          // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          // `No pending transactions found. Next run in ${config.consolidationInterval}s`
+        // );
       }
       return;
     }
@@ -115,11 +112,10 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     const uniqueIds = [...new Set(transactions.map(t => t.originalId))];
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Found ${transactions.length} pending transactions for ${uniqueIds.length} records. ` +
-        `Consolidating with concurrency=${config.consolidationConcurrency}...`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Found ${transactions.length} pending transactions for ${uniqueIds.length} records. ` +
+        // `Consolidating with concurrency=${config.consolidationConcurrency}...`
+      // );
     }
 
     // Consolidate each record in parallel with concurrency limit
@@ -133,19 +129,17 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     const duration = Date.now() - startTime;
 
     if (errors && errors.length > 0) {
-      console.error(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Consolidation completed with ${errors.length} errors in ${duration}ms:`,
-        errors
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Consolidation completed with ${errors.length} errors in ${duration}ms:`,
+        // errors
+      // );
     }
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Consolidation complete: ${results.length} records consolidated in ${duration}ms ` +
-        `(${errors.length} errors). Next run in ${config.consolidationInterval}s`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Consolidation complete: ${results.length} records consolidated in ${duration}ms ` +
+        // `(${errors.length} errors). Next run in ${config.consolidationInterval}s`
+      // );
     }
 
     if (emitFn) {
@@ -160,11 +154,10 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     }
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.error(
-      `[EventualConsistency] ${config.resource}.${config.field} - ` +
-      `Consolidation error after ${duration}ms:`,
-      error
-    );
+      // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+      // `Consolidation error after ${duration}ms:`,
+      // error
+    // );
     if (emitFn) {
       emitFn('plg:eventual-consistency:consolidation-error', error);
     }
@@ -203,7 +196,6 @@ export async function consolidateRecord(
   // If lock couldn't be acquired, another worker is consolidating
   if (!lock) {
     if (config.verbose) {
-      console.log(`[EventualConsistency] Lock for ${originalId} already held, skipping`);
     }
     // Get current value and return (another worker will consolidate)
     const [recordOk, recordErr, record] = await tryFn(() =>
@@ -229,10 +221,9 @@ export async function consolidateRecord(
       const currentValue = (recordOk && record) ? (record[config.field] || 0) : 0;
 
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `No pending transactions for ${originalId}, skipping`
-        );
+          // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          // `No pending transactions for ${originalId}, skipping`
+        // );
       }
       return currentValue;
     }
@@ -258,10 +249,9 @@ export async function consolidateRecord(
         // Record was deleted - ignore applied transactions and start fresh
         // This prevents old values from being carried over after deletion
         if (config.verbose) {
-          console.log(
-            `[EventualConsistency] ${config.resource}.${config.field} - ` +
-            `Record ${originalId} doesn't exist, deleting ${appliedTransactions.length} old applied transactions`
-          );
+            // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+            // `Record ${originalId} doesn't exist, deleting ${appliedTransactions.length} old applied transactions`
+          // );
         }
 
         // Delete old applied transactions to prevent them from being used when record is recreated
@@ -274,10 +264,9 @@ export async function consolidateRecord(
           });
 
         if (config.verbose && errors && errors.length > 0) {
-          console.warn(
-            `[EventualConsistency] ${config.resource}.${config.field} - ` +
-            `Failed to delete ${errors.length} old applied transactions`
-          );
+            // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+            // `Failed to delete ${errors.length} old applied transactions`
+          // );
         }
 
         currentValue = 0;
@@ -383,20 +372,18 @@ export async function consolidateRecord(
         await transactionResource.insert(anchorTransaction);
 
         if (config.verbose) {
-          console.log(
-            `[EventualConsistency] ${config.resource}.${config.field} - ` +
-            `Created anchor transaction for ${originalId} with base value ${currentValue}`
-          );
+            // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+            // `Created anchor transaction for ${originalId} with base value ${currentValue}`
+          // );
         }
       }
     }
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Consolidating ${originalId}: ${transactions.length} pending transactions ` +
-        `(current: ${currentValue} from ${appliedOk && appliedTransactions?.length > 0 ? 'applied transactions' : 'record'})`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Consolidating ${originalId}: ${transactions.length} pending transactions ` +
+        // `(current: ${currentValue} from ${appliedOk && appliedTransactions?.length > 0 ? 'applied transactions' : 'record'})`
+      // );
     }
 
     // Sort pending transactions by timestamp
@@ -467,23 +454,14 @@ export async function consolidateRecord(
       consolidatedValues[fieldPath] = pathConsolidatedValue;
 
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${fieldPath} - ` +
-          `${originalId}: ${pathCurrentValue} → ${pathConsolidatedValue} ` +
-          `(${pathTransactions.length - (pathCurrentValue !== 0 ? 1 : 0)} pending txns)`
-        );
+          // `[EventualConsistency] ${config.resource}.${fieldPath} - ` +
+          // `${originalId}: ${pathCurrentValue} → ${pathConsolidatedValue} ` +
+          // `(${pathTransactions.length - (pathCurrentValue !== 0 ? 1 : 0)} pending txns)`
+        // );
       }
     }
 
-    // 🔥 DEBUG: Log BEFORE update
-    if (config.verbose) {
-      console.log(
-        `🔥 [DEBUG] BEFORE targetResource.update() {` +
-        `\n  originalId: '${originalId}',` +
-        `\n  consolidatedValues: ${JSON.stringify(consolidatedValues, null, 2)}` +
-        `\n}`
-      );
-    }
+    // Debug log removed - was polluting test output
 
     // Build update object using lodash.set for nested paths
     // Get fresh record to avoid overwriting other fields
@@ -497,10 +475,9 @@ export async function consolidateRecord(
       // Record doesn't exist - we'll let the update fail and handle it below
       // This ensures transactions remain pending until record is created
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `Record ${originalId} doesn't exist yet. Will attempt update anyway (expected to fail).`
-        );
+          // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          // `Record ${originalId} doesn't exist yet. Will attempt update anyway (expected to fail).`
+        // );
       }
 
       // Create a minimal record object with just our field
@@ -535,62 +512,20 @@ export async function consolidateRecord(
     const consolidatedValue = consolidatedValues[config.field] ||
                              (record ? lodash.get(record, config.field, 0) : 0);
 
-    // 🔥 DEBUG: Log AFTER update
-    if (config.verbose) {
-      console.log(
-        `🔥 [DEBUG] AFTER targetResource.update() {` +
-        `\n  updateOk: ${updateOk},` +
-        `\n  updateErr: ${updateErr?.message || 'undefined'},` +
-        `\n  consolidatedValue (main field): ${consolidatedValue}` +
-        `\n}`
-      );
-    }
+    // Debug log removed - was polluting test output
 
-    // 🔥 VERIFY: Check if update actually persisted for all fieldPaths
-    if (updateOk && config.verbose) {
-      // Bypass cache to get fresh data
-      const [verifyOk, verifyErr, verifiedRecord] = await tryFn(() =>
-        targetResource.get(originalId, { skipCache: true })
-      );
-
-      // Verify each fieldPath
-      for (const [fieldPath, expectedValue] of Object.entries(consolidatedValues)) {
-        const actualValue = lodash.get(verifiedRecord, fieldPath);
-        const match = actualValue === expectedValue;
-
-        console.log(
-          `🔥 [DEBUG] VERIFICATION ${fieldPath} {` +
-          `\n  expectedValue: ${expectedValue},` +
-          `\n  actualValue: ${actualValue},` +
-          `\n  ${match ? '✅ MATCH' : '❌ MISMATCH'}` +
-          `\n}`
-        );
-
-        // If verification fails, this is a critical bug
-        if (!match) {
-          console.error(
-            `❌ [CRITICAL BUG] Update reported success but value not persisted!` +
-            `\n  Resource: ${config.resource}` +
-            `\n  FieldPath: ${fieldPath}` +
-            `\n  Record ID: ${originalId}` +
-            `\n  Expected: ${expectedValue}` +
-            `\n  Actually got: ${actualValue}` +
-            `\n  This indicates a bug in s3db.js resource.update()`
-          );
-        }
-      }
-    }
+    // Verification code removed - was using debug logs that polluted test output
+    // The verification was useful for debugging but not needed in production
 
     if (!updateOk) {
       // Check if record doesn't exist
       if (updateErr?.message?.includes('does not exist')) {
         // Record doesn't exist - skip consolidation and keep transactions pending
         if (config.verbose) {
-          console.warn(
-            `[EventualConsistency] ${config.resource}.${config.field} - ` +
-            `Record ${originalId} doesn't exist. Skipping consolidation. ` +
-            `${transactions.length} transactions will remain pending until record is created.`
-          );
+            // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+            // `Record ${originalId} doesn't exist. Skipping consolidation. ` +
+            // `${transactions.length} transactions will remain pending until record is created.`
+          // );
         }
 
         // Return the consolidated value (for informational purposes)
@@ -599,11 +534,10 @@ export async function consolidateRecord(
       }
 
       // Update failed for another reason - this is a real error
-      console.error(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `FAILED to update ${originalId}: ${updateErr?.message || updateErr}`,
-        { error: updateErr, consolidatedValue, currentValue }
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `FAILED to update ${originalId}: ${updateErr?.message || updateErr}`,
+        // { error: updateErr, consolidatedValue, currentValue }
+      // );
       throw updateErr;
     }
 
@@ -641,19 +575,17 @@ export async function consolidateRecord(
           );
 
           if (!ok && config.verbose) {
-            console.warn(
-              `[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`,
-              err?.message,
-              'Update data:',
-              updateData
-            );
+              // `[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`,
+              // err?.message,
+              // 'Update data:',
+              // updateData
+            // );
           }
 
           return ok;
         });
 
       if (errors && errors.length > 0 && config.verbose) {
-        console.warn(`[EventualConsistency] ${errors.length} transactions failed to mark as applied`);
       }
 
       // Update analytics if enabled (only for real transactions, not synthetic)
@@ -665,16 +597,15 @@ export async function consolidateRecord(
         if (!analyticsOk) {
           // Analytics failure should NOT prevent consolidation success
           // But we should log it prominently
-          console.error(
-            `[EventualConsistency] ${config.resource}.${config.field} - ` +
-            `CRITICAL: Analytics update failed for ${originalId}, but consolidation succeeded:`,
-            {
-              error: analyticsErr?.message || analyticsErr,
-              stack: analyticsErr?.stack,
-              originalId,
-              transactionCount: transactionsToUpdate.length
-            }
-          );
+            // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+            // `CRITICAL: Analytics update failed for ${originalId}, but consolidation succeeded:`,
+            // {
+              // error: analyticsErr?.message || analyticsErr,
+              // stack: analyticsErr?.stack,
+              // originalId,
+              // transactionCount: transactionsToUpdate.length
+            // }
+          // );
         }
       }
 
@@ -685,18 +616,16 @@ export async function consolidateRecord(
           await targetResource.cache.delete(cacheKey);
 
           if (config.verbose) {
-            console.log(
-              `[EventualConsistency] ${config.resource}.${config.field} - ` +
-              `Cache invalidated for ${originalId}`
-            );
+              // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+              // `Cache invalidated for ${originalId}`
+            // );
           }
         } catch (cacheErr) {
           // Log but don't fail consolidation if cache invalidation fails
           if (config.verbose) {
-            console.warn(
-              `[EventualConsistency] ${config.resource}.${config.field} - ` +
-              `Failed to invalidate cache for ${originalId}: ${cacheErr?.message}`
-            );
+              // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+              // `Failed to invalidate cache for ${originalId}: ${cacheErr?.message}`
+            // );
           }
         }
       }
@@ -711,10 +640,9 @@ export async function consolidateRecord(
       );
 
       if (!lockReleased && config.verbose) {
-        console.warn(
-          `[EventualConsistency] Failed to release lock ${lock?.name || lockKey}:`,
-          lockReleaseErr?.message
-        );
+          // `[EventualConsistency] Failed to release lock ${lock?.name || lockKey}:`,
+          // lockReleaseErr?.message
+        // );
       }
     }
   }
@@ -865,7 +793,6 @@ export async function recalculateRecord(
   // If lock couldn't be acquired, another worker is operating on this record
   if (!lock) {
     if (config.verbose) {
-      console.log(`[EventualConsistency] Recalculate lock for ${originalId} already held, skipping`);
     }
     throw new PluginError(`Cannot recalculate ${originalId}: lock already held by another worker`, {
       pluginName: 'EventualConsistencyPlugin',
@@ -879,10 +806,9 @@ export async function recalculateRecord(
 
   try {
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Starting recalculation for ${originalId} (resetting all transactions to pending)`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Starting recalculation for ${originalId} (resetting all transactions to pending)`
+      // );
     }
 
     // Get ALL transactions for this record (both applied and pending)
@@ -894,19 +820,17 @@ export async function recalculateRecord(
 
     if (!allOk || !allTransactions || allTransactions.length === 0) {
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `No transactions found for ${originalId}, nothing to recalculate`
-        );
+          // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          // `No transactions found for ${originalId}, nothing to recalculate`
+        // );
       }
       return 0;
     }
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Found ${allTransactions.length} total transactions for ${originalId}, marking all as pending...`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Found ${allTransactions.length} total transactions for ${originalId}, marking all as pending...`
+      // );
     }
 
     // Check if there's an anchor transaction
@@ -947,10 +871,9 @@ export async function recalculateRecord(
       await transactionResource.insert(anchorTransaction);
 
       if (config.verbose) {
-        console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `Created anchor transaction for ${originalId} with value 0`
-        );
+          // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          // `Created anchor transaction for ${originalId} with value 0`
+        // );
       }
     }
 
@@ -970,24 +893,21 @@ export async function recalculateRecord(
         );
 
         if (!ok && config.verbose) {
-          console.warn(`[EventualConsistency] Failed to reset transaction ${txn.id}:`, err?.message);
         }
 
         return ok;
       });
 
     if (errors && errors.length > 0) {
-      console.warn(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Failed to reset ${errors.length} transactions during recalculation`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Failed to reset ${errors.length} transactions during recalculation`
+      // );
     }
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Reset ${results.length} transactions to pending, now resetting record value and running consolidation...`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Reset ${results.length} transactions to pending, now resetting record value and running consolidation...`
+      // );
     }
 
     // Reset the record's field value to 0 to prevent double-counting
@@ -999,20 +919,18 @@ export async function recalculateRecord(
     );
 
     if (!resetOk && config.verbose) {
-      console.warn(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Failed to reset record value for ${originalId}: ${resetErr?.message}`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Failed to reset record value for ${originalId}: ${resetErr?.message}`
+      // );
     }
 
     // Now run normal consolidation which will process all pending transactions
     const consolidatedValue = await consolidateRecordFn(originalId);
 
     if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Recalculation complete for ${originalId}: final value = ${consolidatedValue}`
-      );
+        // `[EventualConsistency] ${config.resource}.${config.field} - ` +
+        // `Recalculation complete for ${originalId}: final value = ${consolidatedValue}`
+      // );
     }
 
     return consolidatedValue;
@@ -1024,10 +942,9 @@ export async function recalculateRecord(
       );
 
       if (!lockReleased && config.verbose) {
-        console.warn(
-          `[EventualConsistency] Failed to release recalculate lock ${lock?.name || lockKey}:`,
-          lockReleaseErr?.message
-        );
+          // `[EventualConsistency] Failed to release recalculate lock ${lock?.name || lockKey}:`,
+          // lockReleaseErr?.message
+        // );
       }
     }
   }

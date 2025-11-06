@@ -29,17 +29,20 @@ export class CookieFarmPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
-    const resourceNamesOption = options.resourceNames || {};
+    const opts = this.options;
+
+    const resourceNamesOption = opts.resourceNames || {};
 
     // Default configuration
     this.config = {
+      verbose: this.verbose,
       // Persona generation
       generation: {
         count: 10, // Initial personas to generate
         proxies: [], // List of proxies to use
         userAgentStrategy: 'random', // 'random' | 'desktop-only' | 'mobile-only'
         viewportStrategy: 'varied', // 'varied' | 'fixed' | 'desktop-only'
-        ...options.generation
+        ...opts.generation
       },
 
       // Warmup process
@@ -60,7 +63,7 @@ export class CookieFarmPlugin extends Plugin {
           hover: true,
           click: false // Safer - avoid accidental navigation
         },
-        ...options.warmup
+        ...opts.warmup
       },
 
       // Quality scoring
@@ -77,7 +80,7 @@ export class CookieFarmPlugin extends Plugin {
           medium: 0.5, // >= 50% = medium quality
           low: 0 // < 50% = low quality
         },
-        ...options.quality
+        ...opts.quality
       },
 
       // Rotation strategy
@@ -87,21 +90,21 @@ export class CookieFarmPlugin extends Plugin {
         maxRequests: 200,
         minQualityScore: 0.3,
         retireOnFailureRate: 0.3, // Retire if success rate < 30%
-        ...options.rotation
+        ...opts.rotation
       },
 
       // Storage
       storage: {
         resource: 'cookie_farm_personas',
         encrypt: true,
-        ...options.storage
+        ...opts.storage
       },
 
       // Export/Import
       export: {
         format: 'json', // 'json' | 'csv'
         includeCredentials: false, // Mask proxy credentials
-        ...options.export
+        ...opts.export
       },
 
       // Stealth mode (anti-detection)
@@ -113,13 +116,16 @@ export class CookieFarmPlugin extends Plugin {
         humanBehavior: true, // Simulate mouse/scroll/typing
         requestPacing: true, // Throttle requests to avoid rate limits
         geoConsistency: true, // Match timezone/language to proxy geo
-        ...options.stealth
-      }
+        ...opts.stealth
+      },
+      ...opts
     };
+
+    this.config.verbose = this.verbose;
 
     this._storageResourceDescriptor = {
       defaultName: 'plg_cookie_farm_personas',
-      override: resourceNamesOption.personas || options.storage?.resource
+      override: resourceNamesOption.personas || opts.storage?.resource
     };
     this.config.storage.resource = this._resolveStorageResourceName();
 

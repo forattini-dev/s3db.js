@@ -56,7 +56,6 @@ export async function runGarbageCollection(transactionResource, storage, config,
   // If another container is already running GC, skip
   if (!lock) {
     if (config.verbose) {
-      console.log(`[EventualConsistency] GC already running in another container`);
     }
     return;
   }
@@ -68,7 +67,6 @@ export async function runGarbageCollection(transactionResource, storage, config,
     const cutoffIso = cutoffDate.toISOString();
 
     if (config.verbose) {
-      console.log(`[EventualConsistency] Running GC for transactions older than ${cutoffIso} (${config.transactionRetention} days)`);
     }
 
     // Query old applied transactions
@@ -81,20 +79,17 @@ export async function runGarbageCollection(transactionResource, storage, config,
 
     if (!ok) {
       if (config.verbose) {
-        console.warn(`[EventualConsistency] GC failed to query transactions:`, err?.message);
       }
       return;
     }
 
     if (!oldTransactions || oldTransactions.length === 0) {
       if (config.verbose) {
-        console.log(`[EventualConsistency] No old transactions to clean up`);
       }
       return;
     }
 
     if (config.verbose) {
-      console.log(`[EventualConsistency] Deleting ${oldTransactions.length} old transactions`);
     }
 
     // Delete old transactions using PromisePool
@@ -107,7 +102,6 @@ export async function runGarbageCollection(transactionResource, storage, config,
       });
 
     if (config.verbose) {
-      console.log(`[EventualConsistency] GC completed: ${results.length} deleted, ${errors.length} errors`);
     }
 
     if (emitFn) {
@@ -120,7 +114,6 @@ export async function runGarbageCollection(transactionResource, storage, config,
     }
   } catch (error) {
     if (config.verbose) {
-      console.warn(`[EventualConsistency] GC error:`, error.message);
     }
     if (emitFn) {
       emitFn('plg:eventual-consistency:gc-error', error);

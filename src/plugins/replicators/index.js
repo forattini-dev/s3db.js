@@ -30,6 +30,7 @@ export { ReplicationError };
 // Replicators with no or minimal peer dependencies (can be exported directly)
 export { default as S3dbReplicator } from './s3db-replicator.class.js';
 export { default as WebhookReplicator } from './webhook-replicator.class.js';
+export { default as SqsReplicator } from './sqs-replicator.class.js';
 
 /**
  * Lazy loader map for replicators with peer dependencies

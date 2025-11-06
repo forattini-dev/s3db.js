@@ -151,12 +151,12 @@ export async function completeFieldSetup(handler, database, config, plugin) {
   addHelperMethodsForHandler(handler, plugin, config);
 
   if (config.verbose) {
-    console.log(
-      `[EventualConsistency] ${resourceName}.${fieldName} - ` +
-      `Setup complete. Resources: ${transactionResourceName}` +
-      `${config.enableAnalytics ? `, plg_${resourceName}_an_${fieldName}` : ''}` +
-      ` (locks via PluginStorage TTL)`
-    );
+    // console.log(
+    //   `[EventualConsistency] ${resourceName}.${fieldName} - ` +
+    //   `Setup complete. Resources: ${transactionResourceName}` +
+    //   `${config.enableAnalytics ? `, plg_${resourceName}_an_${fieldName}` : ''}` +
+    //   ` (locks via PluginStorage TTL)`
+    // );
   }
 }
 

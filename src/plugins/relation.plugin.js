@@ -277,30 +277,42 @@ import {
  * ```
  */
 export class RelationPlugin extends Plugin {
-  constructor(config = {}) {
-    super(config);
+  constructor(options = {}) {
+    super(options);
 
-    this.relations = config.relations || {};
-    this.cache = config.cache !== undefined ? config.cache : true;
-    this.batchSize = config.batchSize || 100;
-    this.preventN1 = config.preventN1 !== undefined ? config.preventN1 : true;
-    this.verbose = config.verbose || false;
-    this.resourceFilter = this._buildResourceFilter(config);
+    const {
+      relations = {},
+      cache = true,
+      batchSize = 100,
+      preventN1 = true,
+      resourceFilter,
+      resourceAllowlist,
+      resourceBlocklist,
+      fallbackLimit = null,
+      cascadeBatchSize = 10,
+      cascadeTransactions = false
+    } = this.options;
+
+    this.relations = relations;
+    this.cache = cache;
+    this.batchSize = batchSize;
+    this.preventN1 = preventN1;
+    this.resourceFilter = this._buildResourceFilter({ resourceFilter, resourceAllowlist, resourceBlocklist });
 
     // Fallback limit for non-partitioned queries
     // null = no limit (load all records, slower but correct)
     // number = max records to load (faster but may truncate)
     // WARNING: Setting a limit may cause silent data loss if you have more related records!
-    this.fallbackLimit = config.fallbackLimit !== undefined ? config.fallbackLimit : null;
+    this.fallbackLimit = fallbackLimit;
 
     // Cascade batch size for parallel delete/update operations
     // Higher = faster but more memory/connections (default: 10)
-    this.cascadeBatchSize = config.cascadeBatchSize || 10;
+    this.cascadeBatchSize = cascadeBatchSize;
 
     // Enable transaction/rollback support for cascade operations (default: false)
     // When enabled, tracks all cascade operations and rolls back on failure
     // Note: Best-effort rollback (S3 doesn't support true transactions)
-    this.cascadeTransactions = config.cascadeTransactions !== undefined ? config.cascadeTransactions : false;
+    this.cascadeTransactions = cascadeTransactions;
 
     // Track loaded relations per request to prevent N+1
     this._loaderCache = new Map();
@@ -320,13 +332,13 @@ export class RelationPlugin extends Plugin {
     };
   }
 
-  _buildResourceFilter(config) {
-    if (typeof config.resourceFilter === 'function') {
-      return config.resourceFilter;
+  _buildResourceFilter(options = {}) {
+    if (typeof options.resourceFilter === 'function') {
+      return options.resourceFilter;
     }
 
-    const allow = Array.isArray(config.resourceAllowlist) ? new Set(config.resourceAllowlist) : null;
-    const block = Array.isArray(config.resourceBlocklist) ? new Set(config.resourceBlocklist) : null;
+    const allow = Array.isArray(options.resourceAllowlist) ? new Set(options.resourceAllowlist) : null;
+    const block = Array.isArray(options.resourceBlocklist) ? new Set(options.resourceBlocklist) : null;
 
     if (allow || block) {
       return (resourceName) => {
@@ -348,9 +360,11 @@ export class RelationPlugin extends Plugin {
    * @override
    */
   async onInstall() {
-    console.log('[RelationPlugin] onInstall() called');
-    console.log('[RelationPlugin] Database connected:', !!this.database);
-    console.log('[RelationPlugin] Relations:', Object.keys(this.relations));
+    if (this.verbose) {
+      console.log('[RelationPlugin] onInstall() called');
+      console.log('[RelationPlugin] Database connected:', !!this.database);
+      console.log('[RelationPlugin] Relations:', Object.keys(this.relations));
+    }
 
     // Validate all relations upfront
     this._validateRelationsConfig();

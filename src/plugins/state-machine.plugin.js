@@ -102,47 +102,71 @@ import { getCronManager } from "../concerns/cron-manager.js";
  */
 export class StateMachinePlugin extends Plugin {
   constructor(options = {}) {
-    super();
+    super(options);
 
-    const resourceNamesOption = options.resourceNames || {};
+    const {
+      resourceNames = {},
+      stateMachines = {},
+      actions = {},
+      guards = {},
+      persistTransitions = true,
+      transitionLogResource,
+      stateResource,
+      retryAttempts = 3,
+      retryDelay = 100,
+      workerId = 'default',
+      lockTimeout = 1000,
+      lockTTL = 5,
+      retryConfig = null,
+      enableScheduler = false,
+      schedulerConfig = {},
+      enableDateTriggers = true,
+      enableFunctionTriggers = true,
+      enableEventTriggers = true,
+      triggerCheckInterval = 60000,
+      ...rest
+    } = this.options;
+
+    const resourceNamesOption = resourceNames || {};
 
     this._resourceDescriptors = {
       transitionLog: {
         defaultName: 'plg_state_transitions',
-        override: resourceNamesOption.transitionLog || options.transitionLogResource
+        override: resourceNamesOption.transitionLog || transitionLogResource
       },
       states: {
         defaultName: 'plg_entity_states',
-        override: resourceNamesOption.states || options.stateResource
+        override: resourceNamesOption.states || stateResource
       }
     };
     this.resourceNames = this._resolveResourceNames();
 
     this.config = {
-      stateMachines: options.stateMachines || {},
-      actions: options.actions || {},
-      guards: options.guards || {},
-      persistTransitions: options.persistTransitions !== false,
+      stateMachines,
+      actions,
+      guards,
+      persistTransitions,
       transitionLogResource: this.resourceNames.transitionLog,
       stateResource: this.resourceNames.states,
-      retryAttempts: options.retryAttempts || 3,
-      retryDelay: options.retryDelay || 100,
-      verbose: options.verbose || false,
+      retryAttempts,
+      retryDelay,
+      verbose: this.verbose,
       // Distributed lock configuration (prevents concurrent transitions)
-      workerId: options.workerId || 'default',
-      lockTimeout: options.lockTimeout || 1000, // Wait up to 1s for lock
-      lockTTL: options.lockTTL || 5, // Lock expires after 5s (prevent deadlock)
+      workerId,
+      lockTimeout,
+      lockTTL,
 
       // Global retry configuration for action execution
-      retryConfig: options.retryConfig || null,
+      retryConfig,
 
       // Trigger system configuration
-      enableScheduler: options.enableScheduler || false,
-      schedulerConfig: options.schedulerConfig || {},
-      enableDateTriggers: options.enableDateTriggers !== false,
-      enableFunctionTriggers: options.enableFunctionTriggers !== false,
-      enableEventTriggers: options.enableEventTriggers !== false,
-      triggerCheckInterval: options.triggerCheckInterval || 60000 // Check triggers every 60s by default
+      enableScheduler,
+      schedulerConfig,
+      enableDateTriggers,
+      enableFunctionTriggers,
+      enableEventTriggers,
+      triggerCheckInterval,
+      ...rest
     };
 
     this.database = null;
@@ -403,7 +427,7 @@ export class StateMachinePlugin extends Plugin {
   async _executeAction(actionName, context, event, machineId, entityId) {
     const action = this.config.actions[actionName];
     if (!action) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.warn(`[StateMachinePlugin] Action '${actionName}' not found`);
       }
       return;
@@ -440,7 +464,7 @@ export class StateMachinePlugin extends Plugin {
             state: currentState
           });
 
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.log(`[StateMachinePlugin] Action '${actionName}' succeeded after ${attempt + 1} attempts`);
           }
         }
@@ -452,7 +476,7 @@ export class StateMachinePlugin extends Plugin {
 
         // If retries are disabled, use old behavior (emit error but don't throw)
         if (!retryEnabled) {
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.error(`[StateMachinePlugin] Action '${actionName}' failed:`, error.message);
           }
           this.emit('plg:state-machine:action-error', { actionName, error: error.message, machineId, entityId });
@@ -475,7 +499,7 @@ export class StateMachinePlugin extends Plugin {
             state: currentState
           });
 
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.error(`[StateMachinePlugin] Action '${actionName}' failed with non-retriable error:`, error.message);
           }
 
@@ -493,7 +517,7 @@ export class StateMachinePlugin extends Plugin {
             state: currentState
           });
 
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.error(`[StateMachinePlugin] Action '${actionName}' failed after ${attempt + 1} attempts:`, error.message);
           }
 
@@ -511,7 +535,7 @@ export class StateMachinePlugin extends Plugin {
           try {
             await retryConfig.onRetry(attempt, error, context);
           } catch (hookError) {
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.warn(`[StateMachinePlugin] onRetry hook failed:`, hookError.message);
             }
           }
@@ -527,7 +551,7 @@ export class StateMachinePlugin extends Plugin {
           state: currentState
         });
 
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.warn(`[StateMachinePlugin] Action '${actionName}' failed (attempt ${attempt + 1}/${maxAttempts + 1}), retrying in ${delay}ms:`, error.message);
         }
 
@@ -581,7 +605,7 @@ export class StateMachinePlugin extends Plugin {
         }
       }
 
-      if (!logOk && this.config.verbose) {
+      if (!logOk && this.verbose) {
         console.warn(`[StateMachinePlugin] Failed to log transition after ${this.config.retryAttempts} attempts:`, lastLogErr.message);
       }
 
@@ -607,7 +631,7 @@ export class StateMachinePlugin extends Plugin {
           this.database.resources[this.config.stateResource].insert({ id: stateId, ...stateData })
         );
 
-        if (!insertOk && this.config.verbose) {
+        if (!insertOk && this.verbose) {
           console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
         }
       }
@@ -653,7 +677,7 @@ export class StateMachinePlugin extends Plugin {
     const storage = this.getStorage();
     const [ok, err] = await tryFn(() => storage.releaseLock(lock));
 
-    if (!ok && this.config.verbose) {
+    if (!ok && this.verbose) {
       console.warn(`[StateMachinePlugin] Failed to release lock '${lock?.name}':`, err.message);
     }
   }
@@ -774,7 +798,7 @@ export class StateMachinePlugin extends Plugin {
     );
 
     if (!ok) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.warn(`[StateMachinePlugin] Failed to get transition history:`, err.message);
       }
       return [];
@@ -936,7 +960,7 @@ export class StateMachinePlugin extends Plugin {
     );
 
     if (!ok) {
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.warn(`[StateMachinePlugin] Failed to query entities in state '${stateName}':`, err.message);
       }
       return [];
@@ -1017,13 +1041,13 @@ export class StateMachinePlugin extends Plugin {
       this.schedulerPlugin = new SchedulerPlugin({
         jobs: cronJobs,
         persistJobs: false, // Don't persist trigger jobs
-        verbose: this.config.verbose,
+        verbose: this.verbose,
         ...this.config.schedulerConfig
       });
 
       await this.database.usePlugin(this.schedulerPlugin);
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[StateMachinePlugin] Installed SchedulerPlugin with ${Object.keys(cronJobs).length} cron triggers`);
       }
     }
@@ -1106,7 +1130,7 @@ export class StateMachinePlugin extends Plugin {
               }));
             }
 
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.error(`[StateMachinePlugin] Trigger '${triggerName}' failed for entity ${entity.entityId}:`, error.message);
             }
           }
@@ -1172,7 +1196,7 @@ export class StateMachinePlugin extends Plugin {
             });
           }
         } catch (error) {
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.error(`[StateMachinePlugin] Date trigger '${triggerName}' failed:`, error.message);
             }
           }
@@ -1234,7 +1258,7 @@ export class StateMachinePlugin extends Plugin {
             });
           }
         } catch (error) {
-            if (this.config.verbose) {
+            if (this.verbose) {
               console.error(`[StateMachinePlugin] Function trigger '${triggerName}' failed:`, error.message);
             }
           }
@@ -1337,7 +1361,7 @@ export class StateMachinePlugin extends Plugin {
                 const [ok] = await tryFn(() =>
                   resource.patch(entity.entityId, { [resourceConfig.stateField]: trigger.targetState })
                 );
-                if (!ok && this.config.verbose) {
+                if (!ok && this.verbose) {
                   console.warn(`[StateMachinePlugin] Failed to update resource stateField for entity ${entity.entityId}`);
                 }
               }
@@ -1396,7 +1420,7 @@ export class StateMachinePlugin extends Plugin {
             targetState: trigger.targetState
           });
         } catch (error) {
-          if (this.config.verbose) {
+          if (this.verbose) {
             console.error(`[StateMachinePlugin] Event trigger '${triggerName}' failed:`, error.message);
           }
         }
@@ -1430,7 +1454,7 @@ export class StateMachinePlugin extends Plugin {
 
       eventSource.on(baseEvent, wrappedHandler);
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[StateMachinePlugin] Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}' (async-safe)`);
       }
     } else {
@@ -1441,14 +1465,14 @@ export class StateMachinePlugin extends Plugin {
         const dbEventName = staticEventName.substring(3); // Remove 'db:' prefix
         this.database.on(dbEventName, eventHandler);
 
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
         }
       } else {
         // Listen to plugin events
         this.on(staticEventName, eventHandler);
 
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.log(`[StateMachinePlugin] Listening to plugin event '${staticEventName}' for trigger '${triggerName}'`);
         }
       }
@@ -1466,7 +1490,7 @@ export class StateMachinePlugin extends Plugin {
 
       // Skip if no resource is specified
       if (!resourceConfig.resource) {
-        if (this.config.verbose) {
+        if (this.verbose) {
           console.log(`[StateMachinePlugin] Machine '${machineName}' has no resource configured, skipping attachment`);
         }
         continue;
@@ -1514,14 +1538,14 @@ export class StateMachinePlugin extends Plugin {
       // Attach the proxy to the resource
       resource._attachStateMachine(machineProxy);
 
-      if (this.config.verbose) {
+      if (this.verbose) {
         console.log(`[StateMachinePlugin] Attached machine '${machineName}' to resource '${resource.name}'`);
       }
     }
   }
 
   async start() {
-    if (this.config.verbose) {
+    if (this.verbose) {
       console.log(`[StateMachinePlugin] Started with ${this.machines.size} state machines`);
     }
   }
