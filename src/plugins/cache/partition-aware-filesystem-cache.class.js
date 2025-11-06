@@ -394,7 +394,7 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
 
       if (usage && usage.count >= this.preloadThreshold) {
         // This would integrate with the actual resource to preload data
-        console.log(`🔥 Warming cache for ${resource}/${partition} (${usage.count} accesses)`);
+        // console.log(`🔥 Warming cache for ${resource}/${partition} (${usage.count} accesses)`);
         warmedCount++;
       }
 
@@ -441,7 +441,7 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
     // - Geographic patterns (load adjacent regions)
     // - Categorical patterns (load related categories)
     
-    console.log(`🎯 Preloading related partitions for ${resource}/${partition}`);
+    // console.log(`🎯 Preloading related partitions for ${resource}/${partition}`);
     
     // Example: for date partitions, preload next day
     if (partitionValues.timestamp || partitionValues.date) {

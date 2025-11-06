@@ -45,7 +45,7 @@ export class SafeEventEmitter extends EventEmitter {
     }
 
     if (this.options.verbose) {
-      console.log(`[SafeEventEmitter] Initialized with auto-cleanup: ${this.options.autoCleanup}`);
+      // console.log(`[SafeEventEmitter] Initialized with auto-cleanup: ${this.options.autoCleanup}`);
     }
   }
 
@@ -67,7 +67,7 @@ export class SafeEventEmitter extends EventEmitter {
     this._signalHandlersSetup = true;
 
     if (this.options.verbose) {
-      console.log('[SafeEventEmitter] Signal handlers registered (SIGTERM, SIGINT, beforeExit)');
+      // console.log('[SafeEventEmitter] Signal handlers registered (SIGTERM, SIGINT, beforeExit)');
     }
   }
 
@@ -79,7 +79,7 @@ export class SafeEventEmitter extends EventEmitter {
     if (this._isDestroyed) return;
 
     if (this.options.verbose) {
-      console.log(`[SafeEventEmitter] Received ${signal}, cleaning up listeners...`);
+      // console.log(`[SafeEventEmitter] Received ${signal}, cleaning up listeners...`);
     }
 
     this.destroy();
@@ -161,7 +161,7 @@ export class SafeEventEmitter extends EventEmitter {
     const totalListeners = this.getTotalListenerCount();
 
     if (this.options.verbose) {
-      console.log(`[SafeEventEmitter] Destroying emitter (${totalListeners} listeners)...`);
+      // console.log(`[SafeEventEmitter] Destroying emitter (${totalListeners} listeners)...`);
     }
 
     // Remove all listeners
@@ -178,7 +178,7 @@ export class SafeEventEmitter extends EventEmitter {
     this._isDestroyed = true;
 
     if (this.options.verbose) {
-      console.log('[SafeEventEmitter] Destroyed');
+      // console.log('[SafeEventEmitter] Destroyed');
     }
   }
 
@@ -201,7 +201,7 @@ export class SafeEventEmitter extends EventEmitter {
       this._signalHandlersSetup = false;
 
       if (this.options.verbose) {
-        console.log('[SafeEventEmitter] Signal handlers removed');
+        // console.log('[SafeEventEmitter] Signal handlers removed');
       }
     }
   }
