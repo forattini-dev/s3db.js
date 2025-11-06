@@ -59,6 +59,65 @@ await db.stateMachine('order').send('order-123', 'PAY');
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**NO Peer Dependencies!**
+
+StateMachinePlugin is **built into s3db.js core** with zero external dependencies!
+
+**Why Zero Dependencies?**
+
+- ✅ Pure JavaScript implementation (no external libraries)
+- ✅ Uses only Node.js built-ins and s3db.js core features
+- ✅ Lightweight and fast (~10KB plugin code)
+- ✅ Works instantly after installing s3db.js
+- ✅ No version conflicts or compatibility issues
+
+**What's Included:**
+
+- **State Machine Logic**: Transition validation, guards, actions
+- **Event System**: Leverages s3db.js resource events
+- **Persistence**: Uses s3db.js resources for state storage
+- **Audit Trail**: Automatic transition logging to s3db.js
+- **Distributed Locks**: Uses PluginStorage for concurrency control
+- **Visualization**: GraphViz DOT format export (requires `graphviz` CLI tool for rendering)
+
+**Optional External Tools:**
+
+If you want to render state machine diagrams visually:
+
+```bash
+# For diagram visualization (optional)
+# Ubuntu/Debian
+sudo apt install graphviz
+
+# macOS
+brew install graphviz
+
+# Windows
+choco install graphviz
+```
+
+Then generate diagrams:
+
+```javascript
+const machine = db.stateMachine('order');
+console.log(machine.visualize()); // Outputs GraphViz DOT format
+
+// Save to file and render
+// $ node script.js > state-machine.dot
+// $ dot -Tpng state-machine.dot > state-machine.png
+```
+
+**Minimum Node.js Version:** 18.x (for async/await, native Map/Set performance)
+
+---
+
 ## ⚡ Quick Start
 
 Build a simple order workflow in under 2 minutes:
@@ -173,6 +232,7 @@ try {
 
 ## 📋 Table of Contents
 
+- [Dependencies](#-dependencies)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Installation & Setup](#installation--setup)
@@ -182,6 +242,10 @@ try {
 - [API Reference](#api-reference)
 - [Advanced Patterns](#advanced-patterns)
 - [Best Practices](#best-practices)
+- [Error Handling](#-error-handling)
+- [Troubleshooting](#troubleshooting)
+- [See Also](#see-also)
+- [FAQ](#-faq)
 
 ---
 

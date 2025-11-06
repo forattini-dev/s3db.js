@@ -6,6 +6,42 @@
 
 ---
 
+## 📦 Dependencies
+
+The Relation Plugin has **zero external dependencies** - it's built directly into s3db.js core.
+
+**Peer Dependencies:** None required
+
+**What's Included:**
+- ✅ Relation engine (built-in)
+- ✅ Partition auto-detection (built-in)
+- ✅ N+1 prevention (built-in)
+- ✅ Query batching (built-in)
+- ✅ Cascade operations (built-in)
+- ✅ Cache integration (built-in)
+
+**Installation:**
+```javascript
+import { Database, RelationPlugin } from 's3db.js';
+
+await db.usePlugin(new RelationPlugin({
+  relations: {
+    users: {
+      posts: {
+        type: 'hasMany',
+        resource: 'posts',
+        foreignKey: 'userId'
+      }
+    }
+  }
+}));
+```
+
+**No Additional Packages Needed:**
+All relation functionality is built into the core package. Just configure your relations and start querying!
+
+---
+
 ## ⚡ TLDR
 
 **ORM-like relationships for S3DB** with automatic partition optimization for 10-100x faster queries.
@@ -182,22 +218,25 @@ console.log('- Batch loads:', stats.batchLoads);
 
 ## 📋 Table of Contents
 
-- [🚀 Quick Start](#-quick-start)
-- [📖 Overview](#-overview)
-- [✨ Key Features](#-key-features)
-- [📊 Performance](#-performance)
-- [⚙️ Configuration](#️-configuration)
-- [🔗 Relation Types](#-relation-types)
-  - [hasOne (1:1)](#1-hasone-11)
-  - [hasMany (1:n)](#2-hasmany-1n)
-  - [belongsTo (n:1)](#3-belongsto-n1)
-  - [belongsToMany (m:n)](#4-belongstomany-mn)
-- [💡 Usage Examples](#-usage-examples)
-- [⚡ Performance Optimization](#-performance-optimization)
-- [📚 API Reference](#-api-reference)
-- [✅ Best Practices](#-best-practices)
-- [🔧 Troubleshooting](#-troubleshooting)
-- [🌍 Real-World Examples](#-real-world-examples)
+1. [📦 Dependencies](#-dependencies)
+2. [⚡ TLDR](#-tldr)
+3. [🚀 Quick Start](#-quick-start)
+4. [📖 Overview](#-overview)
+5. [✨ Key Features](#-key-features)
+6. [📊 Performance](#-performance)
+7. [⚙️ Configuration](#️-configuration)
+8. [🔗 Relation Types](#-relation-types)
+   - [hasOne (1:1)](#1-hasone-11)
+   - [hasMany (1:n)](#2-hasmany-1n)
+   - [belongsTo (n:1)](#3-belongsto-n1)
+   - [belongsToMany (m:n)](#4-belongstomany-mn)
+9. [💡 Usage Examples](#-usage-examples)
+10. [⚡ Performance Optimization](#-performance-optimization)
+11. [📚 API Reference](#-api-reference)
+12. [✅ Best Practices](#-best-practices)
+13. [🔧 Troubleshooting](#-troubleshooting)
+14. [🌍 Real-World Examples](#-real-world-examples)
+15. [❓ FAQ](#-faq)
 
 ---
 
@@ -987,14 +1026,478 @@ const order = await orders.get('order-456', {
 
 ## ❓ FAQ
 
-### Do I need to recreate resources to use relations?
-No. Define relations against your existing resources. Adding partitions matching foreign keys dramatically improves performance but is optional.
+### General
 
-### Can relations coexist with custom business logic?
-Yes. Relations simply add helpers and hooks; your existing resource methods continue working. You can mix manual queries with relation-powered helpers.
+**Q: What does the RelationPlugin do?**
+A: Provides ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) with automatic partition optimization, N+1 prevention, and cascade operations.
 
-### How do I prevent cascades from removing data?
-Leave `cascade` unset (default) or specify only the operations you need (e.g., `cascade: ['deleted']`). Nothing cascades unless explicitly configured.
+**Q: Do I need to recreate resources to use relations?**
+A: No. Define relations against existing resources. Adding partitions on foreign keys dramatically improves performance but is optional.
+
+**Q: What relation types are supported?**
+A: Four types:
+- `hasOne` (1:1) - User → Profile
+- `hasMany` (1:n) - User → Posts
+- `belongsTo` (n:1) - Post → User
+- `belongsToMany` (m:n) - Post ↔ Tags
+
+**Q: Can relations coexist with custom business logic?**
+A: Yes. Relations add helpers and hooks; existing resource methods continue working. Mix manual queries with relation-powered helpers.
+
+**Q: Does RelationPlugin work with MemoryClient?**
+A: Yes! All relation operations work with MemoryClient when `useFakeS3: true`, making testing blazing fast.
+
+**Q: Can I run multiple RelationPlugin instances?**
+A: Technically yes with namespacing, but typically unnecessary - one plugin instance manages all relations across resources.
+
+**Q: Is RelationPlugin compatible with other plugins?**
+A: Yes! Works seamlessly with CachePlugin (faster loads), AuditPlugin (change tracking), MetricsPlugin (performance monitoring).
+
+---
+
+### Configuration
+
+**Q: How to define a hasOne relation?**
+A: Use `type: 'hasOne'`:
+```javascript
+relations: {
+  users: {
+    profile: {
+      type: 'hasOne',
+      resource: 'profiles',
+      foreignKey: 'userId',
+      cascade: ['deleted']
+    }
+  }
+}
+```
+
+**Q: How to define a hasMany relation?**
+A: Use `type: 'hasMany'`:
+```javascript
+relations: {
+  users: {
+    posts: {
+      type: 'hasMany',
+      resource: 'posts',
+      foreignKey: 'userId',
+      partitionHint: 'byAuthor'
+    }
+  }
+}
+```
+
+**Q: How to define a belongsTo relation?**
+A: Use `type: 'belongsTo'`:
+```javascript
+relations: {
+  posts: {
+    author: {
+      type: 'belongsTo',
+      resource: 'users',
+      foreignKey: 'userId'
+    }
+  }
+}
+```
+
+**Q: How to define a belongsToMany relation?**
+A: Use `type: 'belongsToMany'` with junction table:
+```javascript
+relations: {
+  posts: {
+    tags: {
+      type: 'belongsToMany',
+      resource: 'tags',
+      through: 'post_tags',
+      foreignKey: 'postId',
+      otherKey: 'tagId'
+    }
+  }
+}
+```
+
+**Q: How to configure cascade operations?**
+A: Use `cascade` array:
+```javascript
+{
+  type: 'hasMany',
+  resource: 'posts',
+  foreignKey: 'userId',
+  cascade: ['deleted', 'updated']  // Delete/update child records
+}
+```
+
+**Q: How to disable N+1 prevention?**
+A: Set `preventN1: false`:
+```javascript
+new RelationPlugin({
+  relations: {...},
+  preventN1: false
+})
+```
+
+**Q: How to configure batch size?**
+A: Use `batchSize`:
+```javascript
+new RelationPlugin({
+  relations: {...},
+  batchSize: 200  // Default: 100
+})
+```
+
+**Q: How to configure parallelism?**
+A: Use `parallelism`:
+```javascript
+new RelationPlugin({
+  relations: {...},
+  parallelism: 20  // Max concurrent queries (default: 10)
+})
+```
+
+---
+
+### Performance & Partitions
+
+**Q: Why are partitions important for relations?**
+A: Without partitions, finding related records requires full scans (O(n)). With partitions on foreign keys, lookups are O(1) - **100x faster**.
+
+**Q: How to create partitions for relations?**
+A: Create single-field partitions on foreign keys:
+```javascript
+await db.createResource({
+  name: 'posts',
+  attributes: {
+    userId: 'string|required'  // Foreign key
+  },
+  partitions: {
+    byAuthor: { fields: { userId: 'string' } }  // ← Critical!
+  }
+})
+```
+
+**Q: How does the plugin detect partitions?**
+A: Automatically! Scans resource metadata for partitions matching the foreign key. Use `partitionHint` to force a specific partition.
+
+**Q: What if I don't create partitions?**
+A: Relations still work but use full scans (slower). Plugin warns: "No partition found, falling back to full scan."
+
+**Q: Can I use multi-field partitions?**
+A: Yes, but single-field partitions on foreign keys are faster for simple lookups. Multi-field partitions useful for range queries.
+
+**Q: How to check partition usage?**
+A: Enable verbose mode:
+```javascript
+new RelationPlugin({ verbose: true })
+// Logs: "[RelationPlugin] ✅ Using partition 'byAuthor' (O(1))"
+```
+
+**Q: What is partition caching?**
+A: Plugin caches partition lookups to avoid repeated metadata scans. Enabled by default with `cache: true`.
+
+**Q: How to clear partition cache?**
+A: Use `clearPartitionCache()`:
+```javascript
+relationPlugin.clearPartitionCache();
+```
+
+---
+
+### Loading Strategies
+
+**Q: What's the difference between eager and lazy loading?**
+A:
+- **Eager**: Load relations upfront with `include` (fewer queries, better for bulk)
+- **Lazy**: Load on-demand with dynamic methods (better for selective access)
+
+**Q: How to use eager loading?**
+A: Use `include` option:
+```javascript
+const user = await users.get('u1', { include: ['posts', 'profile'] });
+console.log(user.posts.length);
+```
+
+**Q: How to use lazy loading?**
+A: Call dynamic relation methods:
+```javascript
+const user = await users.get('u1');
+const posts = await user.posts();      // Load on demand
+const profile = await user.profile();
+```
+
+**Q: How to load nested relations?**
+A: Use nested `include`:
+```javascript
+const user = await users.get('u1', {
+  include: {
+    posts: {
+      include: ['comments', 'tags']
+    }
+  }
+});
+```
+
+**Q: How to limit related records?**
+A: Pass `limit` in nested include:
+```javascript
+{
+  include: {
+    posts: {
+      limit: 10,
+      include: ['comments']
+    }
+  }
+}
+```
+
+**Q: Can I filter related records?**
+A: Not directly in `include`. Load all relations, then filter in application code, or use manual queries.
+
+**Q: Are lazy-loaded relations cached?**
+A: Yes! Second call to `user.posts()` returns cached results without S3 query.
+
+---
+
+### N+1 Problem
+
+**Q: What is the N+1 problem?**
+A: Loading 100 users, then loading posts for each in a loop = 101 queries (1 + 100). Relation Plugin batches this into 2 queries.
+
+**Q: How does the plugin prevent N+1?**
+A: Automatically batches relation loads when loading multiple parent records with `include`.
+
+**Q: Example of N+1 prevention?**
+A:
+```javascript
+// Without plugin: 101 queries
+const users = await users.list({ limit: 100 });
+for (const user of users) {
+  await posts.query({ userId: user.id });  // 100 queries!
+}
+
+// With plugin: 2 queries (batched)
+const users = await users.list({ limit: 100, include: ['posts'] });
+```
+
+**Q: Does N+1 prevention work with lazy loading?**
+A: No. N+1 prevention only works with eager loading (`include`). Don't call lazy methods in loops!
+
+**Q: How to check if N+1 prevention is working?**
+A: Check stats:
+```javascript
+const stats = plugin.getStats();
+console.log('Batch loads:', stats.batchLoads);
+console.log('Deduped queries:', stats.deduplicatedQueries);
+```
+
+---
+
+### Cascade Operations
+
+**Q: What are cascade operations?**
+A: Automatically delete/update related records when parent is deleted/updated.
+
+**Q: How to enable cascade delete?**
+A: Use `cascade: ['deleted']`:
+```javascript
+relations: {
+  users: {
+    posts: {
+      type: 'hasMany',
+      resource: 'posts',
+      foreignKey: 'userId',
+      cascade: ['deleted']  // Delete posts when user deleted
+    }
+  }
+}
+```
+
+**Q: How to prevent cascades from removing data?**
+A: Leave `cascade` unset (default) or specify only needed operations. Nothing cascades unless explicitly configured.
+
+**Q: Can I cascade updates?**
+A: Yes, use `cascade: ['updated']`, but behavior depends on what you update. Typically used for foreign key changes.
+
+**Q: Do cascade operations use partitions?**
+A: Yes! Cascade operations automatically use partitions for 100x faster deletion.
+
+**Q: How to check cascade stats?**
+A: Use `getStats()`:
+```javascript
+const stats = plugin.getStats();
+console.log('Cascade deletes:', stats.cascadeDeletes);
+console.log('Cascade updates:', stats.cascadeUpdates);
+```
+
+---
+
+### API Integration
+
+**Q: How does RelationPlugin integrate with API Plugin?**
+A: Adds `?populate=` query parameter to all REST endpoints:
+```http
+GET /orders?populate=customer,items.product
+```
+
+**Q: Can I populate nested relations via API?**
+A: Yes! Use dot notation:
+```http
+GET /posts?populate=author.profile,comments.author
+```
+
+**Q: What happens if I populate an invalid relation?**
+A: Returns `400 INVALID_POPULATE` error with list of valid relations.
+
+**Q: Does populate work with list endpoints?**
+A: Yes! Works with GET /resource, GET /resource/:id, and query endpoints.
+
+---
+
+### Troubleshooting
+
+**Q: "No partition found" warnings?**
+A: Create partition on foreign key:
+```javascript
+partitions: {
+  byUserId: { fields: { userId: 'string' } }
+}
+```
+
+**Q: Relations loading slowly?**
+A:
+1. Enable verbose: `new RelationPlugin({ verbose: true })`
+2. Check `getStats()` for cache hits
+3. Verify partitions exist
+4. Use eager loading instead of lazy in loops
+
+**Q: High query counts?**
+A:
+1. Use eager loading with `include`
+2. Enable N+1 prevention: `preventN1: true` (default)
+3. Check stats: `deduplicatedQueries` and `batchLoads`
+
+**Q: Cascade not working?**
+A: Ensure `cascade: ['deleted']` is configured in relation definition.
+
+**Q: Dynamic relation methods not available?**
+A: Ensure plugin is installed before fetching records:
+```javascript
+await db.usePlugin(relationPlugin);  // Before get/list
+const user = await users.get('u1');
+await user.posts();  // Now available
+```
+
+**Q: Relations returning null/undefined?**
+A: Check:
+1. Foreign key values match
+2. Related records exist
+3. Resource names spelled correctly
+4. Relations defined in correct direction
+
+---
+
+### Advanced
+
+**Q: Can I have bidirectional relations?**
+A: Yes! Define both directions:
+```javascript
+relations: {
+  users: {
+    posts: { type: 'hasMany', resource: 'posts', foreignKey: 'userId' }
+  },
+  posts: {
+    author: { type: 'belongsTo', resource: 'users', foreignKey: 'userId' }
+  }
+}
+```
+
+**Q: How to implement self-referential relations?**
+A: Use same resource as target:
+```javascript
+relations: {
+  users: {
+    manager: {
+      type: 'belongsTo',
+      resource: 'users',
+      foreignKey: 'managerId'
+    },
+    subordinates: {
+      type: 'hasMany',
+      resource: 'users',
+      foreignKey: 'managerId'
+    }
+  }
+}
+```
+
+**Q: Can I have multiple relations to the same resource?**
+A: Yes! Use different foreign keys:
+```javascript
+relations: {
+  posts: {
+    author: { type: 'belongsTo', resource: 'users', foreignKey: 'authorId' },
+    editor: { type: 'belongsTo', resource: 'users', foreignKey: 'editorId' }
+  }
+}
+```
+
+**Q: How to implement polymorphic relations?**
+A: Not directly supported. Use multiple relations or manual queries with type discrimination.
+
+**Q: Can I customize relation queries?**
+A: Not directly in relation config. Load relations, then filter/sort in application code.
+
+**Q: How to implement soft deletes with relations?**
+A: Combine with custom logic:
+```javascript
+// Mark deleted instead of removing
+await users.update('u1', { deletedAt: Date.now() });
+// Manual cascade or use hooks
+```
+
+---
+
+### For AI Agents
+
+**Q: What's the relation loading algorithm?**
+A:
+1. Check if partition exists for foreign key
+2. If yes: use partition query (O(1))
+3. If no: fall back to full scan with filter
+4. Batch multiple parent records to prevent N+1
+5. Cache partition lookups for repeated loads
+
+**Q: How does partition auto-detection work?**
+A: Scans resource metadata for partitions where one field matches `foreignKey`. Prefers single-field partitions.
+
+**Q: What's stored in partition cache?**
+A: Map of `resourceName:foreignKey → partitionName`. Avoids repeated metadata scans.
+
+**Q: How does N+1 prevention work internally?**
+A: Collects foreign key values from all parent records, executes single batched query, distributes results back to parents.
+
+**Q: What's the difference between foreignKey and localKey?**
+A:
+- `foreignKey`: Field in child resource (where foreign key is stored)
+- `localKey`: Field in parent resource (typically 'id')
+
+**Q: How are belongsToMany queries optimized?**
+A: Uses two queries: (1) junction table with partition, (2) batch load target records by IDs.
+
+**Q: What's the memory footprint per relation?**
+A: ~1-5KB per loaded relation (cached objects + metadata).
+
+**Q: Can relations cause race conditions?**
+A: No. Relation loads are independent reads. Writes use proper resource locking.
+
+**Q: How to access relation configuration programmatically?**
+A: Access via `plugin.relations`:
+```javascript
+const userRelations = relationPlugin.relations.users;
+```
+
+**Q: What happens when parent record is updated?**
+A: Relations are NOT automatically reloaded. Fetch fresh or use `clearPartitionCache()` if schema changes.
 
 ---
 

@@ -99,6 +99,123 @@ await plugin.restore(backups[0].id); // Restored in minutes
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**NO Peer Dependencies!**
+
+BackupPlugin is **built into s3db.js core** with zero external dependencies!
+
+**Why Zero Dependencies?**
+
+- ✅ Pure JavaScript implementation (no external libraries)
+- ✅ Works instantly after installing s3db.js
+- ✅ No version conflicts or compatibility issues
+- ✅ Lightweight and fast (~25KB plugin code)
+- ✅ Perfect for any environment (Node.js, serverless, edge)
+
+**What's Included:**
+
+- **Streaming Architecture**: Constant ~10KB memory using Node.js streams
+- **Compression**: Built-in gzip compression (70-90% space savings)
+- **JSONL Format**: Line-delimited JSON for BigQuery/Athena compatibility
+- **Metadata Export**: Full schemas exported to `s3db.json` for restore
+- **Multiple Drivers**: Filesystem, S3, and multi-destination support
+- **GFS Retention**: Grandfather-Father-Son rotation (daily/weekly/monthly/yearly)
+- **Path Templates**: Dynamic paths with `{date}`, `{time}`, `{year}`, `{month}`, `{day}`
+- **Incremental Backups**: Track changes since last backup with timestamps
+- **Selective Backups**: Filter by resources, partitions, or custom queries
+
+**Architecture:**
+
+BackupPlugin uses s3db.js core primitives:
+- **Streaming API**: `ResourceReader` for constant memory usage
+- **Metadata**: Schema export via `Database.exportMetadata()`
+- **Partitions**: Partition-aware backups for filtered exports
+- **Compression**: Native Node.js `zlib` for gzip encoding
+- **File System**: `fs` module for local backups
+- **S3 Client**: Uses database's S3 client for cloud backups
+
+**Minimum Node.js Version:** 18.x (for async/await, streams, fs/promises)
+
+**Platform Support:**
+- ✅ Node.js 18+ (server-side, recommended)
+- ✅ AWS Lambda (serverless functions with `/tmp` or S3 driver)
+- ✅ Docker containers (persistent volumes or S3 driver)
+- ✅ Kubernetes (persistent volumes or S3 driver)
+- ❌ Browser (no filesystem or streams API)
+- ❌ Edge (Cloudflare Workers, Vercel Edge - no fs access)
+
+**Storage Requirements:**
+
+Backup sizes (compressed with gzip):
+
+| Records | Avg Size | Backup Size | Storage |
+|---------|----------|-------------|---------|
+| 1K | 500 bytes | ~150KB | Filesystem OK |
+| 10K | 500 bytes | ~1.5MB | Filesystem OK |
+| 100K | 500 bytes | ~15MB | Filesystem OK |
+| 1M | 500 bytes | ~150MB | Filesystem/S3 recommended |
+| 10M | 500 bytes | ~1.5GB | S3 required |
+
+**Production Recommendations:**
+
+1. **Use S3 driver** for production (durability, multi-region, unlimited storage)
+2. **Enable GFS retention** to balance storage costs and recovery points
+3. **Schedule backups** during low-traffic periods (e.g., 2am daily)
+4. **Monitor backup events** for failures and storage growth
+5. **Test restores regularly** (monthly dry-run recommended)
+
+```javascript
+// Production-ready configuration
+import { Database, BackupPlugin } from 's3db.js';
+
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+
+const backup = new BackupPlugin({
+  driver: 's3',
+  config: {
+    bucket: 'prod-backups',
+    region: 'us-east-1',
+    prefix: 'databases/{year}/{month}/'
+  },
+  schedule: {
+    daily: '0 2 * * *',      // 2am every day
+    weekly: '0 3 * * 0',     // 3am every Sunday
+    monthly: '0 4 1 * *'     // 4am first of month
+  },
+  retention: {
+    daily: 7,       // Keep 7 daily backups
+    weekly: 4,      // Keep 4 weekly backups
+    monthly: 12,    // Keep 12 monthly backups
+    yearly: 5       // Keep 5 yearly backups
+  },
+  compression: true,  // Enabled by default
+  emitEvents: true    // Enable monitoring
+});
+
+await db.usePlugin(backup);
+await db.connect();
+
+// Monitor backup health
+db.on('plg:backup:complete', ({ type, size, duration, path }) => {
+  console.log(`✅ ${type} backup complete: ${size} bytes in ${duration}ms`);
+  metrics.gauge('backup.size', size);
+  metrics.histogram('backup.duration', duration);
+});
+
+db.on('plg:backup:error', ({ error, type }) => {
+  console.error(`❌ ${type} backup failed:`, error);
+  alerts.notify(`Backup failed: ${error.message}`);
+});
+```
+
+---
+
 ## ⚡ Quick Start
 
 Get started with backups in under 2 minutes:
@@ -173,6 +290,7 @@ console.log('Available backups:', backups.length);
 
 ## 📋 Table of Contents
 
+- [Dependencies](#-dependencies)
 - [Overview](#overview)
 - [Usage Journey](#usage-journey) - **Start here to learn step-by-step**
 - [Installation & Setup](#installation--setup)
@@ -1685,6 +1803,81 @@ new BackupPlugin({
 
 **Q: How to verify integrity?**
 A: Checksum verification is automatic if `verification: true` (default).
+
+### Advanced Use Cases
+
+**Q: Can I run backups in parallel for faster completion?**
+
+**A:** Yes! Use the `multi` driver with separate resources or partitions:
+
+```javascript
+const backup = new BackupPlugin({
+  driver: 'multi',
+  config: {
+    strategy: 'all',
+    drivers: [
+      { driver: 's3', config: { bucket: 'backup-users', prefix: 'users/' } },
+      { driver: 's3', config: { bucket: 'backup-events', prefix: 'events/' } }
+    ]
+  }
+});
+
+// Backup multiple resources in parallel
+await Promise.all([
+  backup.backup('full', { resources: ['users'] }),
+  backup.backup('full', { resources: ['events'] })
+]);
+```
+
+This can reduce backup time by 50-70% for large datasets.
+
+**Q: How do I backup only specific partitions?**
+
+**A:** Use partition filters in the backup configuration:
+
+```javascript
+// Backup only US region data
+await backup.backup('full', {
+  resources: ['orders'],
+  partitions: {
+    byRegion: ['US']  // Only backup US partition
+  }
+});
+
+// Backup multiple partitions
+await backup.backup('full', {
+  resources: ['orders'],
+  partitions: {
+    byRegion: ['US', 'EU'],  // US and EU partitions
+    byStatus: ['active']     // Only active orders
+  }
+});
+```
+
+This is useful for:
+- Compliance (GDPR: backup only EU data)
+- Testing (backup only test data partition)
+- Performance (backup only active/hot data)
+
+**Q: Can I test backups without actually writing files?**
+
+**A:** Yes! Use `dryRun` mode:
+
+```javascript
+const result = await backup.backup('full', {
+  dryRun: true  // Don't write files, only calculate size/metadata
+});
+
+console.log(`Backup would be ${result.size} bytes`);
+console.log(`Would backup ${result.recordCount} records`);
+console.log(`Estimated duration: ${result.estimatedDuration}ms`);
+```
+
+Perfect for:
+- Estimating backup size before running
+- Testing backup configuration
+- Monitoring backup growth over time
+- CI/CD pipeline validation
 
 ### Troubleshooting
 

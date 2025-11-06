@@ -57,7 +57,8 @@ console.log(s3db.client.costs.requests.get); // 1 (vs 1000 without cache)
 
 1. [⚡ TLDR](#-tldr)
 2. [⚡ Quickstart](#-quickstart)
-3. [Usage Journey](#usage-journey)
+3. [📦 Dependencies](#-dependencies)
+4. [Usage Journey](#usage-journey)
    - [Level 1: Basic Memory Caching](#level-1-basic-memory-caching)
    - [Level 2: Add Memory Limits](#level-2-add-memory-limits)
    - [Level 3: Enable Compression](#level-3-enable-compression)
@@ -65,13 +66,13 @@ console.log(s3db.client.costs.requests.get); // 1 (vs 1000 without cache)
    - [Level 5: Production - Persistent Cache](#level-5-production---persistent-cache)
    - [Level 6: Multi-Server - Shared S3 Cache](#level-6-multi-server---shared-s3-cache)
    - [Level 7: Production Optimization](#level-7-production-optimization)
-4. [📊 Configuration Reference](#-configuration-reference)
-5. [📚 Configuration Examples](#-configuration-examples)
-6. [🔧 API Reference](#-api-reference)
-7. [✅ Best Practices](#-best-practices)
-8. [💰 Measuring Real Cost Savings with Costs Plugin](#-measuring-real-cost-savings-with-costs-plugin)
-9. [🔗 See Also](#-see-also)
-10. [🚨 Error Handling](#-error-handling)
+5. [📊 Configuration Reference](#-configuration-reference)
+6. [📚 Configuration Examples](#-configuration-examples)
+7. [🔧 API Reference](#-api-reference)
+8. [✅ Best Practices](#-best-practices)
+9. [💰 Measuring Real Cost Savings with Costs Plugin](#-measuring-real-cost-savings-with-costs-plugin)
+10. [🔗 See Also](#-see-also)
+11. [🚨 Error Handling](#-error-handling)
 
 ---
 
@@ -103,6 +104,176 @@ console.timeEnd('Cached call');
 
 console.log(`Count: ${count2}, Speed improvement: ${(180/2).toFixed(0)}x faster`);
 // Output: Count: 150, Speed improvement: 90x faster
+```
+
+---
+
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**NO Peer Dependencies!**
+
+CachePlugin works out-of-the-box with **zero external dependencies**. All caching capabilities use:
+- ✅ Node.js built-in modules (`fs`, `path`, `crypto`, `os`)
+- ✅ Core s3db.js functionality
+- ✅ No NPM packages required
+
+**Cache Drivers:**
+
+All cache drivers are built-in and require no additional installation:
+
+1. **Memory Driver** (default)
+   - Pure in-memory caching using JavaScript Map
+   - Automatic memory management with configurable limits
+   - No dependencies, no configuration needed
+   - Best for: Development, single-process apps, fast prototyping
+
+2. **Filesystem Driver**
+   - Uses Node.js `fs` module for persistent caching
+   - Automatic compression with `zlib` (built-in)
+   - No dependencies, works on all platforms
+   - Best for: Local caching, serverless functions, single-server deployments
+
+3. **S3 Driver**
+   - Uses same S3 client as core s3db.js (already included)
+   - No additional dependencies
+   - Leverages S3 metadata for O(1) cache lookups
+   - Best for: Multi-server deployments, AWS Lambda, distributed systems
+
+**Complete installation (all features included):**
+```bash
+# Install s3db.js - that's it!
+pnpm install s3db.js
+
+# All cache drivers are already included
+# No additional packages needed
+```
+
+**Zero-Configuration Setup:**
+
+CachePlugin works immediately without any setup:
+
+```javascript
+// Minimal setup - uses memory driver by default
+import { Database } from 's3db.js';
+import { CachePlugin } from 's3db.js/plugins';
+
+const db = new Database({ connectionString: 's3://...' });
+await db.usePlugin(new CachePlugin());  // That's it!
+await db.connect();
+
+// Caching is now active, no dependencies installed
+```
+
+**Driver Selection:**
+
+Choose your cache driver based on your deployment:
+
+```javascript
+// Memory (default) - zero config
+new CachePlugin({ driver: 'memory' })
+
+// Filesystem - specify cache directory
+new CachePlugin({
+  driver: 'filesystem',
+  config: { cacheDir: './cache' }  // Optional, defaults to .s3db-cache
+})
+
+// S3 - uses your existing S3 bucket
+new CachePlugin({
+  driver: 's3',
+  config: {
+    bucket: 'my-cache-bucket',  // Optional, uses same bucket as database
+    prefix: 'cache/'            // Optional, defaults to 'cache/'
+  }
+})
+```
+
+**Why No Dependencies?**
+
+CachePlugin avoids external NPM packages to:
+- ✅ Reduce installation time (no extra downloads)
+- ✅ Eliminate version conflicts (pure Node.js APIs)
+- ✅ Ensure maximum compatibility (works on all Node.js versions 18+)
+- ✅ Enable immediate use (no setup, no configuration)
+- ✅ Keep core s3db.js lightweight
+
+**Advanced: Memory Management**
+
+Memory driver automatically monitors and manages memory usage:
+
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryPercent: 0.1,  // Use max 10% of system memory (automatic)
+    enableCompression: true, // Compress large values (built-in zlib)
+    autoEviction: true       // Auto-remove least-used items when memory limit reached
+  }
+})
+```
+
+Built-in memory monitoring:
+- Automatic heap size detection
+- LRU (Least Recently Used) eviction
+- Compression for large values (>1KB)
+- Real-time memory usage tracking
+
+**Docker Environments:**
+
+CachePlugin works perfectly in Docker with zero additional setup:
+
+```dockerfile
+FROM node:20-slim
+
+WORKDIR /app
+
+# Only need s3db.js - no cache dependencies
+RUN npm install -g pnpm
+RUN pnpm install s3db.js
+
+# Optional: Create cache directory for filesystem driver
+RUN mkdir -p /app/cache
+
+# That's it - all cache drivers work
+```
+
+**Kubernetes/Multi-Instance Deployments:**
+
+For distributed caching across multiple pods/instances, use S3 driver:
+
+```javascript
+// S3 driver shares cache across all instances automatically
+new CachePlugin({
+  driver: 's3',  // Shared cache across all pods
+  ttl: 1800000,  // 30 minutes
+  config: {
+    bucket: process.env.CACHE_BUCKET || 'shared-cache',
+    prefix: `cache/${process.env.POD_NAME || 'default'}/`
+  }
+})
+```
+
+**Serverless (AWS Lambda, Cloudflare Workers):**
+
+CachePlugin is optimized for serverless:
+
+```javascript
+// Lambda: Use /tmp for filesystem cache (500MB available)
+new CachePlugin({
+  driver: 'filesystem',
+  config: { cacheDir: '/tmp/cache' }
+})
+
+// Or use S3 for persistent cross-invocation caching
+new CachePlugin({
+  driver: 's3',
+  ttl: 3600000  // 1 hour, survives Lambda cold starts
+})
 ```
 
 ---

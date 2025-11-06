@@ -6,6 +6,51 @@
 
 ---
 
+## 📦 Dependencies
+
+The Importer Plugin has **minimal core dependencies** with optional format-specific packages.
+
+**Core Dependencies:** (included in s3db.js)
+- ✅ CSV parser (built-in)
+- ✅ JSON parser (built-in)
+- ✅ JSONL/NDJSON parser (built-in)
+- ✅ Streaming engine (built-in)
+- ✅ Batch processor (built-in)
+
+**Optional Peer Dependencies:** (install only if needed)
+
+```bash
+# Excel support (.xlsx, .xls)
+npm install exceljs
+
+# Parquet support (.parquet)
+npm install parquetjs
+```
+
+**Installation:**
+```javascript
+import { Database, ImporterPlugin } from 's3db.js';
+
+// Core formats (CSV, JSON, JSONL) work out of the box
+const importer = new ImporterPlugin({
+  resource: 'users',
+  format: 'csv'  // No extra dependencies needed!
+});
+```
+
+**Format Support Matrix:**
+
+| Format | Dependency | Auto-installed? |
+|--------|-----------|-----------------|
+| CSV | Built-in | ✅ Yes |
+| TSV | Built-in | ✅ Yes |
+| JSON | Built-in | ✅ Yes |
+| JSONL/NDJSON | Built-in | ✅ Yes |
+| Excel (.xlsx) | `exceljs` | ❌ Optional |
+| Parquet | `parquetjs` | ❌ Optional |
+
+---
+
 ## ⚡ TLDR
 
 High-performance data import from **multiple file formats** with **streaming processing**, **automatic schema mapping**, and **batch parallelism**.
@@ -65,21 +110,26 @@ await importer.import();  // 1M records = 12 seconds, 200MB RAM
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Supported Formats](#supported-formats)
-- [Configuration](#configuration)
-- [Field Mapping](#field-mapping)
-- [Data Transformations](#data-transformations)
-- [Validation](#validation)
-- [Deduplication](#deduplication)
-- [Progress Tracking](#progress-tracking)
-- [Performance Optimization](#performance-optimization)
-- [Error Handling](#error-handling)
-- [Real-World Examples](#real-world-examples)
-- [API Reference](#api-reference)
-- [Troubleshooting](#troubleshooting)
+1. [📦 Dependencies](#-dependencies)
+2. [⚡ TLDR](#-tldr)
+3. [Overview](#overview)
+4. [Installation](#installation)
+5. [Quick Start](#quick-start)
+6. [Supported Formats](#supported-formats)
+7. [Configuration](#configuration)
+8. [Field Mapping](#field-mapping)
+9. [Data Transformations](#data-transformations)
+10. [Validation](#validation)
+11. [Deduplication](#deduplication)
+12. [Progress Tracking](#progress-tracking)
+13. [Performance Optimization](#performance-optimization)
+14. [Error Handling](#error-handling)
+15. [Real-World Examples](#real-world-examples)
+16. [API Reference](#api-reference)
+17. [Troubleshooting](#troubleshooting)
+18. [Performance Tips](#performance-tips)
+19. [❓ FAQ](#-faq)
+20. [Related Documentation](#related-documentation)
 
 ---
 
@@ -953,7 +1003,101 @@ importer.on('complete', (result) => {
 
 ## ❓ FAQ
 
-### For Developers
+### General
+
+**Q: What does the ImporterPlugin do?**
+A: Enables high-performance bulk data import from multiple file formats (CSV, JSON, JSONL, Excel, Parquet) with streaming processing, field mapping, transformations, validation, and deduplication.
+
+**Q: Why use ImporterPlugin instead of manual inserts?**
+A: ImporterPlugin is 5-9x faster with 40x less memory usage through streaming and parallel batch processing. Manual inserts process one record at a time, while ImporterPlugin processes thousands in parallel batches.
+
+**Q: What file formats are supported?**
+A:
+- **CSV** (`.csv`) - Comma-separated values (built-in)
+- **TSV** (`.tsv`) - Tab-separated values (built-in)
+- **JSON** (`.json`) - JSON array (built-in)
+- **JSONL/NDJSON** (`.jsonl`, `.ndjson`) - JSON Lines (built-in)
+- **Excel** (`.xlsx`, `.xls`) - Requires `exceljs` package
+- **Parquet** (`.parquet`) - Requires `parquetjs` package
+
+All formats support gzip compression (`.gz` extension).
+
+**Q: Do I need to install additional packages?**
+A: Only for Excel and Parquet:
+```bash
+npm install exceljs      # For Excel (.xlsx)
+npm install parquetjs    # For Parquet
+```
+
+CSV, JSON, and JSONL work out of the box.
+
+### Configuration
+
+**Q: What are the minimum required parameters?**
+A: Only three:
+```javascript
+new ImporterPlugin({
+  resource: 'users',       // Required: target resource name
+  format: 'csv',          // Required: file format
+  filePath: './data.csv'  // Required: path to file
+})
+```
+
+**Q: How do I map source fields to target fields?**
+A: Use the `mapping` option:
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  mapping: {
+    'user_id': 'id',           // Source → Target
+    'user_name': 'name',
+    'email_address': 'email'
+  }
+})
+```
+
+**Q: Can I transform data during import?**
+A: Yes! Use the `transforms` option:
+```javascript
+transforms: {
+  email: (value) => value.toLowerCase(),
+  createdAt: (value) => new Date(value).getTime(),
+  age: (value) => parseInt(value, 10),
+  tags: (value) => value.split(',')
+}
+```
+
+**Q: How do I configure batch size and parallelism?**
+A: Use `batchSize` and `parallelism`:
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  batchSize: 1000,    // Records per batch (default: 1000)
+  parallelism: 10     // Concurrent batches (default: 10)
+})
+```
+
+**Tuning guide:**
+- Small files (<10K): `batchSize: 500, parallelism: 5`
+- Medium files (10K-1M): `batchSize: 1000, parallelism: 10` (default)
+- Large files (>1M): `batchSize: 5000, parallelism: 20`
+
+**Q: How do I skip duplicate records?**
+A: Use `deduplicateBy`:
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  deduplicateBy: 'email'  // Skip records with duplicate emails
+})
+
+// Or multiple fields
+deduplicateBy: ['userId', 'timestamp']
+```
+
+### Operations
 
 **Q: Can ImporterPlugin restore BackupPlugin exports?**
 **A:** Yes! BackupPlugin exports to JSONL.gz format, which ImporterPlugin can import directly:
@@ -1043,6 +1187,278 @@ const importer = new ImporterPlugin({
   filePath: '/tmp/users.csv'
 });
 await importer.import();
+```
+
+### Performance
+
+**Q: How fast is ImporterPlugin?**
+A: Performance benchmarks (1M records):
+- CSV: ~12 seconds (~83K records/sec)
+- JSONL: ~10 seconds (~100K records/sec)
+- JSON: ~15 seconds (~66K records/sec)
+- Excel: ~25 seconds (~40K records/sec)
+
+Compared to manual inserts: 5-9x faster with 40x less memory.
+
+**Q: What's the fastest file format?**
+A: JSONL (JSON Lines) is fastest because:
+- Streaming-friendly (one record per line)
+- No array parsing overhead
+- Gzip compression supported
+- Minimal parsing required
+
+**Q: How do I optimize import performance?**
+A:
+1. **Use JSONL format** for maximum speed
+2. **Increase batchSize** for larger records: `batchSize: 5000`
+3. **Increase parallelism** on powerful machines: `parallelism: 20`
+4. **Disable validation** if data is pre-validated: `validate: null`
+5. **Remove unnecessary transforms** - only transform what's needed
+6. **Use gzip compression** for network transfers
+
+**Q: Why is my import slow?**
+A: Common causes:
+1. **Small batch size** - Increase to 1000-5000
+2. **Low parallelism** - Increase to 10-20
+3. **Complex transforms** - Simplify or pre-process data
+4. **Expensive validation** - Remove or optimize validation logic
+5. **Network latency** - Import from local files when possible
+
+**Q: How do I handle very large files (>10GB)?**
+A:
+1. **Split file** into smaller chunks:
+   ```bash
+   split -l 1000000 data.csv chunk_
+   ```
+2. **Import chunks sequentially**:
+   ```javascript
+   const files = ['chunk_aa', 'chunk_ab', 'chunk_ac'];
+   for (const file of files) {
+     await importer.import(file);
+   }
+   ```
+3. **Increase batch size**: `batchSize: 10000`
+4. **Monitor memory**: Keep below 80% system memory
+
+### Validation & Errors
+
+**Q: How do I validate records before import?**
+A: Use the `validate` function:
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  validate: (record) => {
+    if (!record.id || !record.email) return false;
+    if (record.age < 0 || record.age > 120) return false;
+    if (!record.email.includes('@')) return false;
+    return true;
+  },
+  continueOnError: true  // Skip invalid records
+})
+```
+
+**Q: Should I stop or continue on validation errors?**
+A: Depends on your use case:
+- **Stop on error** (`continueOnError: false`): For critical data where any error is unacceptable
+- **Continue on error** (`continueOnError: true`): For bulk imports where some errors are acceptable
+
+**Q: How do I track validation errors?**
+A: Listen to the `error` event:
+```javascript
+importer.on('error', (error) => {
+  console.error(`Row ${error.row}: ${error.message}`);
+  console.error('Record:', error.record);
+});
+
+const result = await importer.import('./data.csv');
+console.log(`Skipped ${result.skipped} invalid records`);
+```
+
+**Q: Can I save rejected records to a file?**
+A: Yes:
+```javascript
+const rejectedRecords = [];
+
+importer.on('error', (error) => {
+  rejectedRecords.push({
+    row: error.row,
+    record: error.record,
+    reason: error.message
+  });
+});
+
+await importer.import('./data.csv');
+
+// Save rejected records
+fs.writeFileSync(
+  './rejected.json',
+  JSON.stringify(rejectedRecords, null, 2)
+);
+```
+
+### Progress Tracking
+
+**Q: How do I monitor import progress?**
+A: Use the `progress` event:
+```javascript
+importer.on('progress', (progress) => {
+  console.log(`${progress.percent}% complete`);
+  console.log(`Processed: ${progress.processed}`);
+  console.log(`Inserted: ${progress.inserted}`);
+  console.log(`Skipped: ${progress.skipped}`);
+});
+```
+
+**Q: Can I show a progress bar?**
+A: Yes, with a progress library:
+```javascript
+import cliProgress from 'cli-progress';
+
+const bar = new cliProgress.SingleBar({});
+let total = 0;
+
+importer.on('start', (stats) => {
+  total = stats.total;
+  bar.start(total, 0);
+});
+
+importer.on('progress', (progress) => {
+  bar.update(progress.processed);
+});
+
+importer.on('complete', () => {
+  bar.stop();
+});
+
+await importer.import('./data.csv');
+```
+
+**Q: How often are progress events emitted?**
+A: After each batch completes. With `batchSize: 1000`, you'll get a progress event every 1000 records.
+
+### Troubleshooting
+
+**Q: Import is failing with "Out of memory" error?**
+A: Reduce batch size:
+```javascript
+batchSize: 500,      // Reduce from 1000
+parallelism: 5       // Reduce from 10
+```
+
+**Q: Getting "File not found" error?**
+A: Use absolute paths:
+```javascript
+import path from 'path';
+
+const filePath = path.resolve('./data.csv');
+const importer = new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  filePath
+});
+```
+
+**Q: CSV parsing errors with special characters?**
+A: Specify encoding:
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  driverConfig: {
+    encoding: 'utf8'  // or 'latin1', 'utf16le'
+  }
+});
+```
+
+**Q: Excel import shows empty cells as undefined?**
+A: Filter or transform undefined values:
+```javascript
+transforms: {
+  age: (value) => value ?? 0,  // Default to 0
+  name: (value) => value ?? ''  // Default to empty string
+}
+```
+
+**Q: How do I handle CSV files without headers?**
+A: Specify field mapping by index:
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  driverConfig: {
+    hasHeader: false
+  },
+  mapping: {
+    '0': 'id',      // First column → id
+    '1': 'name',    // Second column → name
+    '2': 'email'    // Third column → email
+  }
+});
+```
+
+### Advanced
+
+**Q: Can I import from URLs?**
+A: Yes, download first with fetch:
+```javascript
+const response = await fetch('https://example.com/data.csv');
+const buffer = await response.arrayBuffer();
+fs.writeFileSync('/tmp/data.csv', Buffer.from(buffer));
+
+await importer.import('/tmp/data.csv');
+```
+
+**Q: Can I transform nested objects?**
+A: Yes, transformations work on nested fields:
+```javascript
+transforms: {
+  'address.city': (value) => value.toUpperCase(),
+  'profile.age': (value) => parseInt(value, 10)
+}
+```
+
+**Q: How do I import only specific rows?**
+A: Use validation to filter:
+```javascript
+validate: (record, index) => {
+  // Import only rows 100-200
+  return index >= 100 && index < 200;
+}
+```
+
+**Q: Can I import multiple files in parallel?**
+A: Yes, but carefully manage memory:
+```javascript
+const files = ['file1.csv', 'file2.csv', 'file3.csv'];
+
+// Parallel import (use with caution)
+await Promise.all(files.map(file =>
+  new ImporterPlugin({
+    resource: 'users',
+    format: 'csv',
+    batchSize: 500  // Reduce batch size for parallel
+  }).import(file)
+));
+```
+
+**Q: How do I handle date formats from different locales?**
+A: Use a date parsing library:
+```javascript
+import { parse } from 'date-fns';
+
+transforms: {
+  createdAt: (value) => {
+    // Handle multiple formats
+    const formats = ['yyyy-MM-dd', 'dd/MM/yyyy', 'MM-dd-yyyy'];
+    for (const format of formats) {
+      try {
+        return parse(value, format, new Date()).getTime();
+      } catch {}
+    }
+    return null;
+  }
+}
 ```
 
 ### For AI Agents

@@ -6,6 +6,27 @@
 
 ---
 
+## 📦 Dependencies
+
+The FullText Plugin has **zero external dependencies** - it's built directly into s3db.js core.
+
+**Peer Dependencies:** None required
+
+**What's Included:**
+- ✅ Tokenization engine (built-in)
+- ✅ Inverted index storage (uses s3db resources)
+- ✅ Relevance scoring (TF-IDF based)
+- ✅ Highlighting engine (pure JavaScript)
+- ✅ Fuzzy matching (Levenshtein distance)
+
+**No Installation Needed:**
+```javascript
+import { Database, FullTextPlugin } from 's3db.js';
+// Ready to use!
+```
+
+---
+
 ## ⚡ TLDR
 
 **Full-text** search engine with automatic indexing, relevance scoring, and highlighting.
@@ -153,14 +174,20 @@ console.log(`\nFuzzy search found ${fuzzyResults.length} results`);
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Installation & Setup](#installation--setup)
-- [Configuration Options](#configuration-options)
-- [Usage Examples](#usage-examples)
-- [API Reference](#api-reference)
-- [Advanced Patterns](#advanced-patterns)
-- [Best Practices](#best-practices)
+1. [📦 Dependencies](#-dependencies)
+2. [⚡ TLDR](#-tldr)
+3. [⚡ Quick Start](#-quick-start)
+4. [Overview](#overview)
+5. [Key Features](#key-features)
+6. [Installation & Setup](#installation--setup)
+7. [Configuration Options](#configuration-options)
+8. [Usage Examples](#usage-examples)
+9. [API Reference](#api-reference)
+10. [Advanced Patterns](#advanced-patterns)
+11. [Best Practices](#best-practices)
+12. [Troubleshooting](#troubleshooting)
+13. [See Also](#see-also)
+14. [❓ FAQ](#-faq)
 
 ---
 
@@ -1042,7 +1069,7 @@ setInterval(maintainIndexes, 7 * 24 * 60 * 60 * 1000);
 
 ## ❓ FAQ
 
-### Basics
+### General
 
 **Q: What does the FullTextPlugin do?**
 A: Adds full-text search on text fields using inverted indexes stored in S3, similar to Elasticsearch but using S3DB.
@@ -1053,13 +1080,31 @@ A: Tokenizes text, creates inverted indexes (word → record IDs) and stores the
 **Q: Does it support accents and special characters?**
 A: Yes, preserves accented characters (full UTF-8) and automatically normalizes during tokenization.
 
+**Q: Do I need to install any external dependencies?**
+A: No! FullTextPlugin is built into s3db.js core with zero external dependencies.
+
+**Q: What languages are supported?**
+A: Currently optimized for English (en-US), but works with any UTF-8 text. Language-specific stemming requires configuration.
+
+**Q: Is it suitable for production use?**
+A: Yes for small-medium datasets (<1M records). For larger volumes (millions of records), consider dedicated solutions like Elasticsearch or Typesense.
+
 ### Configuration
 
 **Q: How to configure which fields to index?**
-A: Use the `fields` option:
+A: Use the `resources` option:
 ```javascript
 new FullTextPlugin({
-  fields: ['title', 'description', 'tags']
+  resources: {
+    articles: {
+      fields: ['title', 'description', 'content'],
+      weights: {
+        title: 3,       // Title matches 3x more important
+        description: 2,
+        content: 1
+      }
+    }
+  }
 })
 ```
 
@@ -1079,87 +1124,347 @@ new FullTextPlugin({
 })
 ```
 
+**Q: Can I index multiple resources?**
+A: Yes! Configure each resource separately:
+```javascript
+new FullTextPlugin({
+  resources: {
+    articles: { fields: ['title', 'content'] },
+    products: { fields: ['name', 'description', 'tags'] },
+    users: { fields: ['name', 'bio'] }
+  }
+})
+```
+
+**Q: How do I configure field weights?**
+A: Use the `weights` option per resource:
+```javascript
+{
+  resources: {
+    articles: {
+      fields: ['title', 'description', 'content'],
+      weights: {
+        title: 3.0,       // Highest priority
+        description: 2.0,
+        content: 1.0      // Base weight
+      }
+    }
+  }
+}
+```
+
+**Q: Can I customize stop words?**
+A: Yes, provide your own list:
+```javascript
+new FullTextPlugin({
+  stopWords: ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at']
+})
+```
+
+**Q: How to enable fuzzy search?**
+A: Set `fuzzySearch: true`:
+```javascript
+new FullTextPlugin({
+  fuzzySearch: true,
+  maxDistance: 2  // Allow 2 character differences
+})
+```
+
 ### Operations
 
 **Q: How to perform a search?**
-A: Use the search methods:
+A: Use the `search()` method:
 ```javascript
-// Search and return only IDs with score
-const results = await fulltextPlugin.search('articles', 'javascript async', {
-  limit: 20,
-  exactMatch: false
-});
+// Basic search
+const results = await plugin.search('articles', 'javascript async');
 
-// Search and return full records with _searchScore
-const articles = await fulltextPlugin.searchRecords('articles', 'javascript async', {
+// With options
+const results = await plugin.search('articles', 'javascript', {
   limit: 20,
-  fields: ['title', 'content']  // Search only these fields
+  highlight: true,
+  fuzzy: true
 });
+```
+
+**Q: What's returned from a search?**
+A: Array of records with metadata:
+```javascript
+[
+  {
+    id: 'article-123',
+    title: 'Introduction to JavaScript',
+    score: 0.85,              // Relevance score (0-1)
+    matchedFields: ['title', 'content'],
+    matchedWords: ['javascript'],
+    highlighted: {            // If highlight: true
+      title: 'Introduction to <mark>JavaScript</mark>'
+    }
+  }
+]
 ```
 
 **Q: What's the difference between exact match and partial match?**
 A:
-- `exactMatch: true` searches for exact words
-- `exactMatch: false` (default) searches for words that start with the term (e.g., "java" finds "javascript")
+- `exactMatch: true` - Only matches complete words ("java" doesn't match "javascript")
+- `exactMatch: false` (default) - Matches word prefixes ("java" matches "javascript")
 
 **Q: How to rebuild indexes?**
-A: Use `rebuildIndex`:
+A: Use `rebuildIndex()`:
 ```javascript
 // Rebuild a single resource
-await fulltextPlugin.rebuildIndex('articles');
+await plugin.rebuildIndex('articles');
 
 // Rebuild all resources
-await fulltextPlugin.rebuildAllIndexes();
+await plugin.rebuildAllIndexes();
+```
+
+**Q: How to remove a record from the index?**
+A: It happens automatically on delete, or manually:
+```javascript
+await plugin.removeFromIndex('articles', 'article-123');
+```
+
+**Q: Can I search across multiple resources?**
+A: Yes, but you need to query each separately:
+```javascript
+const articleResults = await plugin.search('articles', query);
+const productResults = await plugin.search('products', query);
+const allResults = [...articleResults, ...productResults]
+  .sort((a, b) => b.score - a.score);
 ```
 
 ### Maintenance
 
 **Q: How to get index statistics?**
-A: Use `getIndexStats`:
+A: Use `getIndexStats()`:
 ```javascript
-const stats = await fulltextPlugin.getIndexStats();
-// Returns: totalIndexes, resources, totalWords, avgWordsPerResource, etc.
+const stats = await plugin.getIndexStats('articles');
+console.log(stats);
+// {
+//   totalWords: 15234,
+//   totalRecords: 450,
+//   avgWordsPerRecord: 33.85,
+//   indexSize: '2.3MB'
+// }
 ```
 
 **Q: How to clear indexes?**
-A: Use `clearIndex` or `clearAllIndexes`:
+A: Use `clearIndex()`:
 ```javascript
-await fulltextPlugin.clearIndex('articles');
-await fulltextPlugin.clearAllIndexes();
+// Clear specific resource
+await plugin.clearIndex('articles');
+
+// Clear all indexes
+await plugin.clearAllIndexes();
 ```
 
 **Q: Are indexes updated automatically?**
-A: Yes, the plugin monitors insert/update/delete and automatically updates indexes in real-time.
+A: Yes! The plugin automatically hooks into insert/update/delete operations and updates indexes in real-time.
+
+**Q: How often should I rebuild indexes?**
+A: Rarely needed since indexes update automatically. Rebuild if:
+- You changed field configuration
+- You suspect index corruption
+- After bulk data migration
+
+**Q: How much storage do indexes use?**
+A: Approximately 10-30% of your original text data size. Use `getIndexStats()` to see actual size.
+
+**Q: Can I disable auto-indexing temporarily?**
+A: Yes, remove the plugin temporarily:
+```javascript
+// Disable
+await db.removePlugin('fulltext');
+
+// Re-enable
+await db.usePlugin(new FullTextPlugin({ /* config */ }));
+await plugin.rebuildAllIndexes();
+```
 
 ### Performance
 
 **Q: What is the performance impact of indexing?**
 A: Minimal on read operations. Inserts/updates are ~10-30% slower due to tokenization and index updates.
 
-**Q: How to optimize search?**
+**Q: How fast are searches?**
+A: Typical search times:
+- <1000 records: 10-50ms
+- 1000-10000 records: 50-200ms
+- 10000-100000 records: 200-1000ms
+- >100000 records: Consider dedicated search engine
+
+**Q: How to optimize search performance?**
 A:
 1. Use specific `fields` instead of searching all fields
 2. Use low `limit` to return only relevant results
 3. Use `exactMatch: true` when possible
 4. Consider pagination with `offset`
+5. Cache frequent search results
+6. Use higher `minWordLength` to reduce index size
 
-**Q: Can I use it in production?**
-A: Yes, but for very large volumes (millions of records), consider a dedicated solution like Elasticsearch or Typesense.
+**Q: Does search performance degrade with more records?**
+A: Yes, linearly. Each search scans the index. For large datasets (>100k records), consider:
+- Using partitions to segment indexes
+- Caching search results
+- Upgrading to Elasticsearch/Typesense
+
+**Q: How to handle large text fields (>10KB)?**
+A: The plugin indexes all text, but you can:
+- Increase `minWordLength` to reduce index size
+- Use more stop words to filter common terms
+- Index only important sections (summary, title)
+
+### Advanced
+
+**Q: Can I use custom tokenizers?**
+A: Not directly, but you can pre-process text before indexing:
+```javascript
+articles.addHook('beforeInsert', (data) => {
+  data.searchableContent = customTokenize(data.content);
+  return data;
+});
+```
+
+**Q: How to implement autocomplete?**
+A: Query the index resource for word suggestions:
+```javascript
+const indexes = await db.resources.plg_fulltext_indexes.list();
+const suggestions = indexes
+  .filter(idx => idx.word.startsWith(partial))
+  .sort((a, b) => b.frequency - a.frequency)
+  .slice(0, 10)
+  .map(idx => idx.word);
+```
+
+**Q: Can I combine with other plugins?**
+A: Yes! Works well with:
+- **CachePlugin**: Cache search results
+- **MetricsPlugin**: Track search performance
+- **AuditPlugin**: Log search queries
+
+**Q: How to search with AND/OR logic?**
+A: The plugin uses OR logic by default (matches any word). For AND logic:
+```javascript
+const results = await plugin.search('articles', 'javascript async');
+const andResults = results.filter(r =>
+  r.matchedWords.includes('javascript') &&
+  r.matchedWords.includes('async')
+);
+```
+
+**Q: Can I boost certain records?**
+A: Not directly, but you can adjust scores post-search:
+```javascript
+const results = await plugin.search('articles', query);
+const boosted = results.map(r => ({
+  ...r,
+  score: r.featured ? r.score * 1.5 : r.score
+})).sort((a, b) => b.score - a.score);
+```
+
+**Q: How to implement phrase search?**
+A: The plugin searches for individual words. For phrase matching:
+```javascript
+const results = await plugin.search('articles', 'machine learning');
+const phraseResults = results.filter(r =>
+  r.content.includes('machine learning')
+);
+```
+
+**Q: Can I use regular expressions?**
+A: Not in the plugin itself, but you can filter results:
+```javascript
+const results = await plugin.search('articles', 'regex');
+const regexResults = results.filter(r =>
+  /regex/i.test(r.content)
+);
+```
 
 ### Troubleshooting
 
 **Q: Search is not returning expected results?**
 A: Check:
 1. Words have length >= `minWordLength`
-2. Fields are included in `fields`
-3. Indexes were created (use `getIndexStats`)
+2. Fields are included in resource `fields` configuration
+3. Indexes were created (use `getIndexStats()`)
 4. Use `exactMatch: false` for partial search
+5. Check if words are in `stopWords` list
+
+**Q: Why are common words not indexed?**
+A: They're probably in the stop words list. Check:
+```javascript
+console.log(plugin.config.stopWords);
+```
+
+**Q: Index is not updating after record changes?**
+A: Verify plugin is installed correctly:
+```javascript
+console.log(db.plugins); // Should include FullTextPlugin
+```
 
 **Q: How to debug indexes?**
 A: Query the index resource directly:
 ```javascript
-const indexes = await database.resources.plg_fulltext_indexes.list();
+const indexes = await db.resources.plg_fulltext_indexes.list();
 console.log(indexes);
+// Shows all indexed words, frequencies, and record IDs
+```
+
+**Q: Search results have low scores?**
+A: Scores are relative. Low scores might still be relevant. To improve:
+1. Adjust field weights (boost important fields)
+2. Remove more stop words
+3. Use exact match for precision
+4. Filter by minimum score threshold
+
+**Q: Getting "too many results" warnings?**
+A: Increase `maxResults`:
+```javascript
+new FullTextPlugin({
+  maxResults: 500  // Increase from default 100
+})
+```
+
+**Q: Indexes taking too much space?**
+A: Reduce index size:
+1. Increase `minWordLength` (skip short words)
+2. Add more `stopWords` (skip common words)
+3. Index fewer `fields`
+4. Clear old/unused indexes
+
+**Q: Can't find recently inserted records?**
+A: Indexes might be rebuilding. Wait a moment or check:
+```javascript
+const stats = await plugin.getIndexStats();
+console.log('Last indexed:', stats.lastIndexed);
+```
+
+**Q: Searches are slow?**
+A: Optimize:
+1. Reduce `maxResults`
+2. Use more specific queries
+3. Cache frequent searches
+4. Consider pagination
+5. For >100k records, use Elasticsearch
+
+**Q: How to test search functionality?**
+A: Create a test suite:
+```javascript
+import { Database, FullTextPlugin, MemoryClient } from 's3db.js';
+
+const db = new Database({ client: new MemoryClient() });
+await db.usePlugin(new FullTextPlugin({
+  resources: { test: { fields: ['title'] } }
+}));
+
+const test = await db.createResource({
+  name: 'test',
+  attributes: { title: 'string' }
+});
+
+await test.insert({ title: 'Hello World' });
+const results = await plugin.search('test', 'hello');
+console.assert(results.length === 1);
 ```
 
 ---

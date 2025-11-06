@@ -81,6 +81,81 @@ const { prediction } = await mlPlugin.predict('pricePredictor', { cost: 150, dem
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**Peer Dependencies (Required for MLPlugin):**
+
+This plugin requires TensorFlow.js for machine learning capabilities:
+
+```bash
+pnpm install @tensorflow/tfjs-node
+```
+
+**Individual packages:**
+- `@tensorflow/tfjs-node` - TensorFlow.js for Node.js with native CPU/GPU bindings (~200MB)
+
+**Alternative TensorFlow.js packages (choose ONE):**
+
+```bash
+# For Node.js with GPU acceleration (CUDA required)
+pnpm install @tensorflow/tfjs-node-gpu
+
+# For browser/pure JavaScript (slower, no native bindings)
+pnpm install @tensorflow/tfjs
+
+# For React Native
+pnpm install @tensorflow/tfjs-react-native
+```
+
+**Why Peer Dependencies?**
+
+MLPlugin uses peer dependencies to:
+- ✅ Keep core s3db.js lightweight (~500KB without ML)
+- ✅ Allow version flexibility (you control TensorFlow.js version)
+- ✅ Support different TensorFlow.js backends (CPU, GPU, browser)
+- ✅ Avoid bundling heavy ML libraries (~200MB) for users who don't need them
+- ✅ Enable tree-shaking (only bundle what you use)
+
+**Installation Notes:**
+
+⚠️ **First install may take 3-5 minutes** - TensorFlow.js includes native bindings and downloads platform-specific libraries.
+
+⚠️ **Disk space**: ~200MB for `@tensorflow/tfjs-node` (includes libtensorflow binaries)
+
+⚠️ **GPU support**: `@tensorflow/tfjs-node-gpu` requires CUDA 11.2+ and cuDNN 8.1+
+
+**Minimum Node.js Version:** 18.x (for native fetch, async/await, ES modules)
+
+**Platform Support:**
+- ✅ Linux (x64, arm64)
+- ✅ macOS (x64, Apple Silicon M1/M2)
+- ✅ Windows (x64)
+
+**Production Recommendations:**
+
+For production deployments:
+1. Use `@tensorflow/tfjs-node` for CPU inference (fastest startup, no GPU driver issues)
+2. Use `@tensorflow/tfjs-node-gpu` only if you have dedicated GPU instances with CUDA
+3. Pin TensorFlow.js version in `package.json` to avoid breaking changes
+4. Pre-warm models on server startup to avoid cold-start latency
+
+```javascript
+// package.json
+{
+  "dependencies": {
+    "s3db.js": "^14.0.0",
+    "@tensorflow/tfjs-node": "4.10.0"  // Pin exact version
+  }
+}
+```
+
+---
+
 ## 🚀 Quick Start
 
 ### ✨ New API (Recommended - Zero Config!)
@@ -269,6 +344,7 @@ await mlPlugin.train('pricePredictor');
 
 ## 📋 Table of Contents
 
+- [Dependencies](#-dependencies)
 - [🚀 Quick Start](#-quick-start)
 - [🆚 MLPlugin vs Traditional ML Workflows](#-mlplugin-vs-traditional-ml-workflows)
 - [Overview](#overview)
@@ -293,8 +369,10 @@ await mlPlugin.train('pricePredictor');
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Performance](#performance)
+- [Best Practices](#-best-practices)
 - [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
+- [Error Handling](#-error-handling)
+- [FAQ](#-faq)
 
 ---
 
@@ -2547,6 +2625,334 @@ console.log('Backend:', tf.getBackend());
 
 ---
 
+## ✅ Best Practices
+
+### Model Design
+
+**1. Feature Selection ✅**
+
+Choose features that actually influence the target:
+
+```javascript
+// ✅ Good - relevant features
+{
+  features: ['age', 'income', 'credit_score'],
+  target: 'loan_approved'
+}
+
+// ❌ Bad - irrelevant features
+{
+  features: ['id', 'created_at', 'random_value'],  // No correlation!
+  target: 'loan_approved'
+}
+```
+
+**2. Data Transformations ✅**
+
+Clean your data before training:
+
+```javascript
+// ✅ Good - remove outliers and normalize
+{
+  filter: (sample) => {
+    return sample.age > 18 && sample.age < 100 &&
+           sample.income > 0 && sample.income < 1000000;
+  },
+  map: (sample) => ({
+    ...sample,
+    income: sample.income / 100000,  // Normalize
+    age: (sample.age - 18) / 82      // Scale to 0-1
+  })
+}
+
+// ❌ Bad - no data cleaning
+{
+  // Raw data with outliers (age=999, income=-1000)
+}
+```
+
+**3. Model Type Selection ✅**
+
+Choose the right model for your problem:
+
+```javascript
+// ✅ Regression for continuous values
+{ type: 'regression', target: 'price' }        // Predict: 19.99, 42.50
+
+// ✅ Classification for categories
+{ type: 'classification', target: 'approved' } // Predict: true, false
+
+// ✅ LSTM for time series
+{ type: 'lstm', target: 'revenue' }            // Predict next value
+
+// ❌ Wrong type
+{ type: 'classification', target: 'price' }    // Should be regression!
+```
+
+---
+
+### Training Strategy
+
+**1. Train/Test Split ✅**
+
+Always validate on unseen data:
+
+```javascript
+// ✅ Good - use partition filtering for train/test split
+const trainData = products.query({ created_at: { $lt: '2024-01-01' } });
+const testData = products.query({ created_at: { $gte: '2024-01-01' } });
+
+// Train on historical data
+await mlPlugin.train('model', { data: trainData });
+
+// Validate on recent data
+const { accuracy } = await mlPlugin.evaluate('model', testData);
+```
+
+**2. Incremental Training ✅**
+
+Use version management for continuous improvement:
+
+```javascript
+// ✅ Good - save versions for rollback
+await mlPlugin.train('model');  // version 1
+// ... collect more data ...
+await mlPlugin.train('model');  // version 2
+
+// Compare performance
+const v1 = await mlPlugin.getModelVersion('model', 1);
+const v2 = await mlPlugin.getModelVersion('model', 2);
+
+if (v2.metrics.accuracy < v1.metrics.accuracy) {
+  await mlPlugin.rollbackModel('model', 1);  // Rollback!
+}
+```
+
+**3. Auto-Training ✅**
+
+Schedule automatic retraining:
+
+```javascript
+// ✅ Good - auto-retrain every 1000 inserts
+{
+  autoTrain: {
+    enabled: true,
+    triggerOnInsert: 1000,
+    minSamples: 100
+  }
+}
+
+// ❌ Bad - manual training only (models get stale)
+{
+  autoTrain: { enabled: false }
+}
+```
+
+---
+
+### Production Deployment
+
+**1. Model Pre-warming ✅**
+
+Load models on startup to avoid cold-start latency:
+
+```javascript
+// ✅ Good - pre-warm models
+async function startServer() {
+  await db.connect();
+
+  // Load all models into memory
+  await mlPlugin.loadModel('pricePredictor');
+  await mlPlugin.loadModel('demandForecaster');
+  await mlPlugin.loadModel('churnPredictor');
+
+  server.listen(3000);
+}
+```
+
+**2. Error Handling ✅**
+
+Always handle training/prediction errors gracefully:
+
+```javascript
+// ✅ Good - handle errors
+try {
+  const { prediction } = await mlPlugin.predict('model', input);
+  return { price: prediction };
+} catch (error) {
+  if (error.code === 'MODEL_NOT_TRAINED') {
+    // Fallback to rule-based logic
+    return { price: calculateFallbackPrice(input) };
+  }
+  throw error;
+}
+
+// ❌ Bad - no error handling
+const { prediction } = await mlPlugin.predict('model', input);  // Crashes if model not trained!
+```
+
+**3. Monitoring ✅**
+
+Track model performance in production:
+
+```javascript
+// ✅ Good - log metrics
+const { prediction, confidence } = await mlPlugin.predict('model', input);
+
+logger.info('Prediction', {
+  model: 'pricePredictor',
+  input,
+  prediction,
+  confidence,
+  timestamp: Date.now()
+});
+
+// Monitor confidence degradation
+if (confidence < 0.7) {
+  logger.warn('Low confidence prediction', { prediction, confidence });
+  // Consider retraining
+}
+```
+
+---
+
+### Performance Optimization
+
+**1. Batch Predictions ✅**
+
+Use batch API for multiple predictions:
+
+```javascript
+// ✅ Good - batch prediction (10x faster)
+const inputs = [
+  { cost: 100, demand: 200 },
+  { cost: 150, demand: 300 },
+  { cost: 200, demand: 400 }
+];
+
+const results = await mlPlugin.predictBatch('model', inputs);
+// ~50-200ms for 100 predictions
+
+// ❌ Bad - sequential predictions
+for (const input of inputs) {
+  await mlPlugin.predict('model', input);  // ~1-10ms each = 10x slower
+}
+```
+
+**2. Model Caching ✅**
+
+Models are cached in memory automatically, but dispose when done:
+
+```javascript
+// ✅ Good - dispose models to free memory
+await mlPlugin.loadModel('tempModel');
+await mlPlugin.predict('tempModel', input);
+await mlPlugin.disposeModel('tempModel');  // Free ~10-50MB RAM
+
+// Note: Production models stay loaded automatically
+```
+
+**3. Partition-Based Training ✅**
+
+Train specialized models on data subsets:
+
+```javascript
+// ✅ Good - specialized models per region
+{
+  models: {
+    priceUS: {
+      resource: 'products',
+      partition: 'byRegion',
+      partitionValue: { region: 'US' }  // O(1) filtering
+    },
+    priceEU: {
+      resource: 'products',
+      partition: 'byRegion',
+      partitionValue: { region: 'EU' }
+    }
+  }
+}
+```
+
+---
+
+### Security & Privacy
+
+**1. Data Sanitization ✅**
+
+Never train on PII (Personally Identifiable Information):
+
+```javascript
+// ✅ Good - exclude PII from features
+{
+  features: ['age', 'income', 'credit_score'],  // Anonymized
+  target: 'loan_approved'
+}
+
+// ❌ Bad - training on PII
+{
+  features: ['email', 'ssn', 'full_name'],  // Privacy violation!
+  target: 'loan_approved'
+}
+```
+
+**2. Model Access Control ✅**
+
+Restrict model access in production:
+
+```javascript
+// ✅ Good - validate input before prediction
+async function predictPrice(userId, input) {
+  if (!isAuthorized(userId)) {
+    throw new UnauthorizedError('Access denied');
+  }
+
+  // Sanitize input
+  const sanitized = sanitizeInput(input);
+
+  return await mlPlugin.predict('priceModel', sanitized);
+}
+```
+
+---
+
+### Testing
+
+**1. Unit Testing ✅**
+
+Test models with known inputs:
+
+```javascript
+// ✅ Good - test model predictions
+describe('Price Predictor', () => {
+  it('predicts price within range', async () => {
+    const input = { cost: 100, demand: 200 };
+    const { prediction } = await mlPlugin.predict('price', input);
+
+    expect(prediction).toBeGreaterThan(0);
+    expect(prediction).toBeLessThan(1000);
+  });
+});
+```
+
+**2. Regression Testing ✅**
+
+Ensure model performance doesn't degrade:
+
+```javascript
+// ✅ Good - track model accuracy over time
+const testSet = await loadTestDataset();
+
+const v1Accuracy = await mlPlugin.evaluate('model', testSet, { version: 1 });
+const v2Accuracy = await mlPlugin.evaluate('model', testSet, { version: 2 });
+
+expect(v2Accuracy.accuracy).toBeGreaterThanOrEqual(
+  v1Accuracy.accuracy * 0.95  // Allow 5% degradation max
+);
+```
+
+---
+
 ## Troubleshooting
 
 ### TensorFlow.js Not Installed
@@ -2737,6 +3143,430 @@ modelConfig: {
 ```javascript
 // Need at least lookback + 1 samples
 // For lookback=7, need minimum 8 samples
+```
+
+---
+
+## 🚨 Error Handling
+
+MLPlugin provides structured error handling with specific error codes and actionable messages.
+
+### Error Types
+
+#### `TensorFlowDependencyError`
+
+**Cause**: TensorFlow.js not installed
+
+**Error Code**: `TENSORFLOW_NOT_INSTALLED`
+
+**Solution**:
+```bash
+pnpm install @tensorflow/tfjs-node
+```
+
+**Example**:
+```javascript
+try {
+  await mlPlugin.train('model');
+} catch (error) {
+  if (error.code === 'TENSORFLOW_NOT_INSTALLED') {
+    console.error('Install TensorFlow.js: pnpm add @tensorflow/tfjs-node');
+    // Fallback to rule-based logic
+  }
+}
+```
+
+---
+
+#### `ModelNotTrainedError`
+
+**Cause**: Attempting to predict with untrained model
+
+**Error Code**: `MODEL_NOT_TRAINED`
+
+**Solution**:
+```javascript
+try {
+  const { prediction } = await mlPlugin.predict('model', input);
+} catch (error) {
+  if (error.code === 'MODEL_NOT_TRAINED') {
+    // Train the model first
+    await mlPlugin.train('model');
+    const { prediction } = await mlPlugin.predict('model', input);
+  }
+}
+```
+
+**Best Practice**: Always check if model is trained before prediction:
+```javascript
+const status = await mlPlugin.getModelStatus('model');
+if (!status.trained) {
+  await mlPlugin.train('model');
+}
+```
+
+---
+
+#### `InsufficientDataError`
+
+**Cause**: Not enough training samples
+
+**Error Code**: `INSUFFICIENT_DATA`
+
+**Details**:
+- `required`: Minimum samples needed
+- `actual`: Current sample count
+- `resource`: Resource name
+
+**Solution**:
+```javascript
+try {
+  await mlPlugin.train('model');
+} catch (error) {
+  if (error.code === 'INSUFFICIENT_DATA') {
+    console.error(`Need ${error.required} samples, have ${error.actual}`);
+
+    // Option 1: Collect more data
+    // Option 2: Lower minTrainingSamples
+    const config = {
+      models: {
+        myModel: {
+          minTrainingSamples: error.actual  // Use current data
+        }
+      }
+    };
+  }
+}
+```
+
+---
+
+#### `InvalidFeatureError`
+
+**Cause**: Feature missing from resource schema
+
+**Error Code**: `INVALID_FEATURE`
+
+**Details**:
+- `feature`: Name of missing feature
+- `resource`: Resource name
+- `availableFields`: Valid field names
+
+**Solution**:
+```javascript
+try {
+  await mlPlugin.train('model');
+} catch (error) {
+  if (error.code === 'INVALID_FEATURE') {
+    console.error(`Feature "${error.feature}" not found`);
+    console.log('Available fields:', error.availableFields);
+
+    // Fix model configuration
+    const config = {
+      models: {
+        myModel: {
+          features: error.availableFields.slice(0, 3)  // Use valid fields
+        }
+      }
+    };
+  }
+}
+```
+
+---
+
+#### `ModelVersionNotFoundError`
+
+**Cause**: Requested model version doesn't exist
+
+**Error Code**: `MODEL_VERSION_NOT_FOUND`
+
+**Details**:
+- `modelName`: Model name
+- `version`: Requested version
+- `availableVersions`: List of valid versions
+
+**Solution**:
+```javascript
+try {
+  await mlPlugin.rollbackModel('model', 999);
+} catch (error) {
+  if (error.code === 'MODEL_VERSION_NOT_FOUND') {
+    console.error(`Version ${error.version} not found`);
+    console.log('Available versions:', error.availableVersions);
+
+    // Use latest version
+    const latest = Math.max(...error.availableVersions);
+    await mlPlugin.rollbackModel('model', latest);
+  }
+}
+```
+
+---
+
+#### `PredictionError`
+
+**Cause**: Error during model prediction (invalid input, NaN values, etc.)
+
+**Error Code**: `PREDICTION_ERROR`
+
+**Details**:
+- `modelName`: Model name
+- `input`: Invalid input data
+- `originalError`: TensorFlow.js error
+
+**Solution**:
+```javascript
+try {
+  const { prediction } = await mlPlugin.predict('model', input);
+} catch (error) {
+  if (error.code === 'PREDICTION_ERROR') {
+    console.error('Prediction failed:', error.originalError.message);
+
+    // Validate input
+    const validatedInput = validateAndCleanInput(input);
+    const { prediction } = await mlPlugin.predict('model', validatedInput);
+  }
+}
+```
+
+---
+
+#### `TrainingError`
+
+**Cause**: Error during model training (convergence failure, NaN loss, etc.)
+
+**Error Code**: `TRAINING_ERROR`
+
+**Details**:
+- `modelName`: Model name
+- `epoch`: Epoch where training failed
+- `originalError`: TensorFlow.js error
+
+**Solution**:
+```javascript
+try {
+  await mlPlugin.train('model');
+} catch (error) {
+  if (error.code === 'TRAINING_ERROR') {
+    console.error(`Training failed at epoch ${error.epoch}`);
+
+    // Adjust hyperparameters
+    const config = {
+      models: {
+        myModel: {
+          modelConfig: {
+            learningRate: 0.001,  // Reduce learning rate
+            epochs: 30            // Reduce epochs
+          }
+        }
+      }
+    };
+
+    await mlPlugin.reconfigure(config);
+    await mlPlugin.train('model');
+  }
+}
+```
+
+---
+
+### Error Handling Patterns
+
+#### 1. Graceful Degradation ✅
+
+Fallback to rule-based logic when ML fails:
+
+```javascript
+async function predictPrice(input) {
+  try {
+    const { prediction } = await mlPlugin.predict('priceModel', input);
+    return { price: prediction, method: 'ml' };
+  } catch (error) {
+    if (error.code === 'MODEL_NOT_TRAINED') {
+      // Fallback: rule-based pricing
+      const price = input.cost * 1.5 + input.demand * 0.1;
+      return { price, method: 'rule-based' };
+    }
+    throw error;  // Re-throw unexpected errors
+  }
+}
+```
+
+---
+
+#### 2. Retry with Exponential Backoff ✅
+
+For transient errors (S3 issues, memory pressure):
+
+```javascript
+async function trainWithRetry(modelName, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await mlPlugin.train(modelName);
+      return;  // Success
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;  // Last retry failed
+
+      const delay = Math.pow(2, i) * 1000;  // 1s, 2s, 4s
+      console.log(`Training failed (${error.code}), retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+```
+
+---
+
+#### 3. Circuit Breaker Pattern ✅
+
+Prevent cascading failures:
+
+```javascript
+class MLCircuitBreaker {
+  constructor(threshold = 5, timeout = 60000) {
+    this.failures = 0;
+    this.threshold = threshold;
+    this.timeout = timeout;
+    this.lastFailureTime = 0;
+    this.state = 'CLOSED';  // CLOSED, OPEN, HALF_OPEN
+  }
+
+  async predict(modelName, input) {
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.lastFailureTime > this.timeout) {
+        this.state = 'HALF_OPEN';
+      } else {
+        // Circuit open, use fallback
+        return { price: calculateFallback(input), method: 'circuit-open' };
+      }
+    }
+
+    try {
+      const result = await mlPlugin.predict(modelName, input);
+      this.failures = 0;
+      this.state = 'CLOSED';
+      return result;
+    } catch (error) {
+      this.failures++;
+      this.lastFailureTime = Date.now();
+
+      if (this.failures >= this.threshold) {
+        this.state = 'OPEN';
+      }
+
+      throw error;
+    }
+  }
+}
+```
+
+---
+
+#### 4. Structured Error Logging ✅
+
+Log errors with context for debugging:
+
+```javascript
+try {
+  await mlPlugin.train('model');
+} catch (error) {
+  logger.error('ML Training Failed', {
+    code: error.code,
+    message: error.message,
+    modelName: error.modelName,
+    timestamp: Date.now(),
+    stack: error.stack,
+    metadata: {
+      resource: error.resource,
+      samples: error.actual,
+      required: error.required
+    }
+  });
+
+  // Send to monitoring service
+  monitoringService.recordError('ml_training_failed', {
+    code: error.code,
+    model: error.modelName
+  });
+}
+```
+
+---
+
+#### 5. User-Friendly Error Messages ✅
+
+Translate technical errors for end users:
+
+```javascript
+function getUserFriendlyMessage(error) {
+  const messages = {
+    'MODEL_NOT_TRAINED': 'The AI model is still learning. Please try again in a few minutes.',
+    'INSUFFICIENT_DATA': 'We need more data to make accurate predictions. Current accuracy may be lower.',
+    'PREDICTION_ERROR': 'Unable to process your request. Please check your input values.',
+    'TENSORFLOW_NOT_INSTALLED': 'System maintenance required. Please contact support.',
+    'TRAINING_ERROR': 'Model training failed. Our team has been notified.'
+  };
+
+  return messages[error.code] || 'An unexpected error occurred. Please try again.';
+}
+
+// Usage
+try {
+  const { prediction } = await mlPlugin.predict('model', input);
+} catch (error) {
+  return {
+    success: false,
+    message: getUserFriendlyMessage(error),
+    error: process.env.NODE_ENV === 'development' ? error.message : undefined
+  };
+}
+```
+
+---
+
+### Common Error Combinations
+
+#### Training fails → Retry → Still fails → Fallback
+
+```javascript
+async function robustTrain(modelName) {
+  try {
+    // Try training
+    await mlPlugin.train(modelName);
+  } catch (error) {
+    if (error.code === 'INSUFFICIENT_DATA') {
+      // Wait for more data
+      console.log('Waiting for more training data...');
+      return { trained: false, reason: 'insufficient-data' };
+    }
+
+    if (error.code === 'TRAINING_ERROR') {
+      // Retry with adjusted config
+      await mlPlugin.reconfigure({
+        models: {
+          [modelName]: {
+            modelConfig: { learningRate: 0.001, epochs: 20 }
+          }
+        }
+      });
+
+      try {
+        await mlPlugin.train(modelName);
+      } catch (retryError) {
+        // Final fallback: use previous version
+        const versions = await mlPlugin.getModelVersions(modelName);
+        if (versions.length > 0) {
+          await mlPlugin.rollbackModel(modelName, versions[versions.length - 1].version);
+          return { trained: false, reason: 'training-failed-using-previous-version' };
+        }
+        throw retryError;
+      }
+    }
+  }
+
+  return { trained: true };
+}
 ```
 
 ---

@@ -6,6 +6,32 @@
 
 ---
 
+## 📦 Dependencies
+
+The Geo Plugin has **zero external dependencies** - it's built into s3db.js core.
+
+**Peer Dependencies:** None required
+
+**What's Included:**
+- ✅ Geohash encoding/decoding (built-in)
+- ✅ Haversine distance formula (built-in)
+- ✅ Neighbor calculation (built-in)
+- ✅ Bounding box queries (built-in)
+- ✅ Proximity search (built-in)
+
+**Installation:**
+```javascript
+import { Database, GeoPlugin } from 's3db.js';
+
+await db.usePlugin(new GeoPlugin({
+  resources: {
+    stores: { latField: 'lat', lonField: 'lon', precision: 6 }
+  }
+}));
+```
+
+---
+
 ## ⚡ TLDR
 
 **Location-based queries** with automatic geohash indexing, proximity search, and distance calculations.

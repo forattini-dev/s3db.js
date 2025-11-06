@@ -110,10 +110,65 @@ POST http://localhost:4000/oauth/register                    # Dynamic client re
 
 ---
 
+## 📦 Dependencies
+
+**Required:**
+```bash
+pnpm install s3db.js
+```
+
+**Peer Dependencies (for IdentityPlugin):**
+
+This plugin requires the Hono web framework:
+
+```bash
+pnpm install hono @hono/node-server
+```
+
+**Individual packages:**
+- `hono` - Fast, lightweight web framework (~50KB core)
+- `@hono/node-server` - Node.js adapter for Hono
+
+**Optional Dependencies (By Feature):**
+
+**JWT/Cryptography (Built-in):**
+```bash
+# NO additional packages needed!
+# IdentityPlugin uses Node.js built-in crypto module for:
+# - RSA key pair generation (purpose-scoped signing and challenge keys)
+# - JWT signing and verification (RS256 algorithm)
+# - Token encryption and hashing
+# - PKCE code challenge/verifier validation
+```
+
+**Why Peer Dependencies?**
+
+IdentityPlugin uses peer dependencies to:
+- ✅ Keep core s3db.js lightweight (~500KB)
+- ✅ Allow version flexibility (you control Hono versions)
+- ✅ Prevent dependency conflicts in monorepos
+- ✅ Share Hono instance with ApiPlugin (if using both)
+
+**Minimum Node.js Version:** 18.x (for native crypto, Web Streams)
+
+**Security Notice:**
+
+IdentityPlugin automatically generates RSA key pairs on first initialization if none exist:
+- **Signing keys** (`plg_identity_signing_keys`) - Used for JWT signature (RS256)
+- **Challenge keys** (`plg_identity_challenge_keys`) - Used for PKCE code_challenge validation
+
+These keys are stored in s3db.js resources and persisted to S3. In production:
+- ✅ Use encryption (`encryptionKey` in Database config) to protect private keys at rest
+- ✅ Rotate keys periodically (create new, deprecate old)
+- ✅ Back up keys securely (losing private keys = all issued JWTs become invalid)
+
+---
+
 ## 📑 Table of Contents
 
 - [TL;DR](#-tldr)
 - [Quick Start](#-quick-start)
+- [Dependencies](#-dependencies)
 - [Documentation Hub](#-documentation-hub)
 - [Usage Journey](#-usage-journey)
 - [Resource Customization](#-resource-customization)
