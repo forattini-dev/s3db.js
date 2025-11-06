@@ -6,6 +6,9 @@ config({
 });
 
 process.env.NODE_ENV = 'test';
+if (process.env.S3DB_DISABLE_CRON === undefined) {
+  process.env.S3DB_DISABLE_CRON = 'true';
+}
 
 // Global configurations to prevent deadlocks
 global.originalSetTimeout = global.setTimeout;

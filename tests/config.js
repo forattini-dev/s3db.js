@@ -11,6 +11,7 @@ import {
 
 import Database from '#src/database.class.js';
 import { idGenerator } from '#src/concerns/id.js';
+import { CronManager } from '#src/concerns/cron-manager.js';
 import { S3Client } from '#src/clients/s3-client.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
 
@@ -55,6 +56,10 @@ export function createDatabaseForTest(testName, options = {}) {
   const params = {
     connectionString: baseConnection + `/${s3Prefix(testName)}`,
     ...options,
+  }
+
+  if (!params.cronManager) {
+    params.cronManager = new CronManager({ disabled: true, verbose: false });
   }
 
   const database = new Database(params);

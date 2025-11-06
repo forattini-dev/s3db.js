@@ -265,8 +265,9 @@ export class Resource extends AsyncEventEmitter {
       for (const [event, hooksArr] of Object.entries(hooks)) {
         if (Array.isArray(hooksArr) && this.hooks[event]) {
           for (const fn of hooksArr) {
-            if (typeof fn === 'function') {
-              this.hooks[event].push(fn.bind(this));
+            const bound = this._bindHook(fn);
+            if (bound) {
+              this.hooks[event].push(bound);
             }
             // If not a function, ignore silently
           }
@@ -274,24 +275,9 @@ export class Resource extends AsyncEventEmitter {
       }
     }
 
-    // Setup event listeners
-    if (events && Object.keys(events).length > 0) {
-      for (const [eventName, listeners] of Object.entries(events)) {
-        if (Array.isArray(listeners)) {
-          // Multiple listeners for this event
-          for (const listener of listeners) {
-            if (typeof listener === 'function') {
-              // Bind listener to resource context so it has access to this.database
-              this.on(eventName, listener.bind(this));
-            }
-          }
-        } else if (typeof listeners === 'function') {
-          // Single listener for this event
-          // Bind listener to resource context so it has access to this.database
-          this.on(eventName, listeners.bind(this));
-        }
-      }
-    }
+    this.eventsDisabled = config.disableEvents === true || config.disableResourceEvents === true;
+    this._pendingEventListeners = (!this.eventsDisabled && events && Object.keys(events).length > 0) ? events : null;
+    this._eventsWired = this.eventsDisabled || !this._pendingEventListeners;
 
     // --- GUARDS SYSTEM ---
     // Normalize and store guards (framework-agnostic authorization)
@@ -610,7 +596,10 @@ export class Resource extends AsyncEventEmitter {
    */
   addHook(event, fn) {
     if (this.hooks[event]) {
-      this.hooks[event].push(fn.bind(this));
+      const bound = this._bindHook(fn);
+      if (bound) {
+        this.hooks[event].push(bound);
+      }
     }
   }
 
@@ -629,6 +618,27 @@ export class Resource extends AsyncEventEmitter {
     }
 
     return result;
+  }
+
+  _bindHook(fn) {
+    if (typeof fn !== 'function') {
+      return null;
+    }
+
+    const original = fn.__s3db_original || fn;
+    const bound = original.bind(this);
+
+    try {
+      Object.defineProperty(bound, '__s3db_original', {
+        value: original,
+        enumerable: false,
+        configurable: true,
+      });
+    } catch (_) {
+      bound.__s3db_original = original;
+    }
+
+    return bound;
   }
 
   /**
@@ -1047,13 +1057,73 @@ export class Resource extends AsyncEventEmitter {
    * @param {string} [id] - Optional ID for ID-specific events
    */
   _emitStandardized(event, payload, id = null) {
+    if (this.eventsDisabled) {
+      return;
+    }
+
+    this._ensureEventsWired();
+
     // Emit standardized event
-    this.emit(event, payload);
+    super.emit(event, payload);
 
     // Emit ID-specific event if ID provided
     if (id) {
-      this.emit(`${event}:${id}`, payload);
+      super.emit(`${event}:${id}`, payload);
     }
+  }
+
+  _ensureEventsWired() {
+    if (this.eventsDisabled || this._eventsWired) {
+      return;
+    }
+
+    if (!this._pendingEventListeners) {
+      this._eventsWired = true;
+      return;
+    }
+
+    for (const [eventName, listeners] of Object.entries(this._pendingEventListeners)) {
+      if (Array.isArray(listeners)) {
+        for (const listener of listeners) {
+          if (typeof listener === 'function') {
+            super.on(eventName, listener.bind(this));
+          }
+        }
+      } else if (typeof listeners === 'function') {
+        super.on(eventName, listeners.bind(this));
+      }
+    }
+
+    this._pendingEventListeners = null;
+    this._eventsWired = true;
+  }
+
+  on(eventName, listener) {
+    if (this.eventsDisabled) {
+      return this;
+    }
+    this._ensureEventsWired();
+    return super.on(eventName, listener);
+  }
+
+  addListener(eventName, listener) {
+    return this.on(eventName, listener);
+  }
+
+  once(eventName, listener) {
+    if (this.eventsDisabled) {
+      return this;
+    }
+    this._ensureEventsWired();
+    return super.once(eventName, listener);
+  }
+
+  emit(eventName, ...args) {
+    if (this.eventsDisabled) {
+      return false;
+    }
+    this._ensureEventsWired();
+    return super.emit(eventName, ...args);
   }
 
   /**

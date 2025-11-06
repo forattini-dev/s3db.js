@@ -57,13 +57,15 @@ describe('BigQuery Replicator Tests', () => {
         table: 'users_table',
         actions: ['insert'],
         transform: null,
-        mutability: 'append-only'
+        mutability: 'append-only',
+        tableOptions: null
       }]);
       expect(replicator.resources.orders).toEqual([{
         table: 'orders_table',
         actions: ['insert'],
         transform: null,
-        mutability: 'append-only'
+        mutability: 'append-only',
+        tableOptions: null
       }]);
     });
 
@@ -82,7 +84,8 @@ describe('BigQuery Replicator Tests', () => {
         table: 'users_table',
         actions: ['insert', 'update', 'delete'],
         transform: null,
-        mutability: 'append-only'
+        mutability: 'append-only',
+        tableOptions: null
       }]);
     });
   });
@@ -153,7 +156,8 @@ describe('BigQuery Replicator Tests', () => {
         table: 'users_table',
         actions: ['insert', 'update'],
         transform: transformFn,
-        mutability: 'append-only'
+        mutability: 'append-only',
+        tableOptions: null
       }]);
     });
 
@@ -305,7 +309,8 @@ describe('BigQuery Replicator Tests', () => {
       expect(tables).toEqual([{
         table: 'users_table',
         transform: null,
-        mutability: 'immutable'
+        mutability: 'immutable',
+        tableOptions: null
       }]);
     });
 

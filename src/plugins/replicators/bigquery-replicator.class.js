@@ -106,13 +106,14 @@ class BigqueryReplicator extends BaseReplicator {
           table: config,
           actions: ['insert'],
           transform: null,
-          mutability: this.mutability
+          mutability: this.mutability,
+          tableOptions: null
         }];
       } else if (Array.isArray(config)) {
         // Array form: multiple table mappings
         parsed[resourceName] = config.map(item => {
           if (typeof item === 'string') {
-            return { table: item, actions: ['insert'], transform: null, mutability: this.mutability };
+            return { table: item, actions: ['insert'], transform: null, mutability: this.mutability, tableOptions: null };
           }
           const itemMutability = item.mutability || this.mutability;
           this._validateMutability(itemMutability);
@@ -120,7 +121,8 @@ class BigqueryReplicator extends BaseReplicator {
             table: item.table,
             actions: item.actions || ['insert'],
             transform: item.transform || null,
-            mutability: itemMutability
+            mutability: itemMutability,
+            tableOptions: item.tableOptions || null
           };
         });
       } else if (typeof config === 'object') {
@@ -131,7 +133,8 @@ class BigqueryReplicator extends BaseReplicator {
           table: config.table,
           actions: config.actions || ['insert'],
           transform: config.transform || null,
-          mutability: configMutability
+          mutability: configMutability,
+          tableOptions: config.tableOptions || null
         }];
       }
     }
@@ -232,9 +235,10 @@ class BigqueryReplicator extends BaseReplicator {
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
         const mutability = tableConfig.mutability;
+        const tableOptions = tableConfig.tableOptions;
 
         const [okSync, errSync] = await tryFn(async () => {
-          await this.syncTableSchema(tableName, attributes, mutability);
+          await this.syncTableSchema(tableName, attributes, mutability, tableOptions);
         });
 
         if (!okSync) {
@@ -266,9 +270,13 @@ class BigqueryReplicator extends BaseReplicator {
   /**
    * Sync a single table schema in BigQuery
    */
-  async syncTableSchema(tableName, attributes, mutability = 'append-only') {
+  async syncTableSchema(tableName, attributes, mutability = 'append-only', tableOptions = null) {
     const dataset = this.bigqueryClient.dataset(this.datasetId);
     const table = dataset.table(tableName);
+
+    const normalizedTableOptions = tableOptions
+      ? JSON.parse(JSON.stringify(tableOptions))
+      : null;
 
     // Check if table exists
     const [exists] = await table.exists();
@@ -301,7 +309,15 @@ class BigqueryReplicator extends BaseReplicator {
         console.log(`[BigQueryReplicator] Creating table ${tableName} with schema (mutability: ${mutability}):`, schema);
       }
 
-      await dataset.createTable(tableName, { schema });
+      const createOptions = { schema };
+      if (normalizedTableOptions?.timePartitioning) {
+        createOptions.timePartitioning = normalizedTableOptions.timePartitioning;
+      }
+      if (normalizedTableOptions?.clustering) {
+        createOptions.clustering = normalizedTableOptions.clustering;
+      }
+
+      await dataset.createTable(tableName, createOptions);
 
       this.emit('table_created', {
         replicator: this.name,
@@ -321,7 +337,14 @@ class BigqueryReplicator extends BaseReplicator {
 
       await table.delete();
       const schema = generateBigQuerySchema(attributes, mutability);
-      await dataset.createTable(tableName, { schema });
+      const createOptions = { schema };
+      if (normalizedTableOptions?.timePartitioning) {
+        createOptions.timePartitioning = normalizedTableOptions.timePartitioning;
+      }
+      if (normalizedTableOptions?.clustering) {
+        createOptions.clustering = normalizedTableOptions.clustering;
+      }
+      await dataset.createTable(tableName, createOptions);
 
       this.emit('table_recreated', {
         replicator: this.name,
@@ -396,7 +419,8 @@ class BigqueryReplicator extends BaseReplicator {
       .map(tableConfig => ({
         table: tableConfig.table,
         transform: tableConfig.transform,
-        mutability: tableConfig.mutability
+        mutability: tableConfig.mutability,
+        tableOptions: tableConfig.tableOptions || null
       }));
   }
 

@@ -285,6 +285,7 @@ export class RelationPlugin extends Plugin {
     this.batchSize = config.batchSize || 100;
     this.preventN1 = config.preventN1 !== undefined ? config.preventN1 : true;
     this.verbose = config.verbose || false;
+    this.resourceFilter = this._buildResourceFilter(config);
 
     // Fallback limit for non-partitioned queries
     // null = no limit (load all records, slower but correct)
@@ -317,6 +318,29 @@ export class RelationPlugin extends Plugin {
       deduplicatedQueries: 0,
       fallbackLimitWarnings: 0
     };
+  }
+
+  _buildResourceFilter(config) {
+    if (typeof config.resourceFilter === 'function') {
+      return config.resourceFilter;
+    }
+
+    const allow = Array.isArray(config.resourceAllowlist) ? new Set(config.resourceAllowlist) : null;
+    const block = Array.isArray(config.resourceBlocklist) ? new Set(config.resourceBlocklist) : null;
+
+    if (allow || block) {
+      return (resourceName) => {
+        if (allow && allow.size > 0 && !allow.has(resourceName)) {
+          return false;
+        }
+        if (block && block.has(resourceName)) {
+          return false;
+        }
+        return true;
+      };
+    }
+
+    return () => true;
   }
 
   /**
@@ -420,6 +444,13 @@ export class RelationPlugin extends Plugin {
     if (!resource) {
       if (this.verbose) {
         console.warn(`[RelationPlugin] Resource "${resourceName}" not found, will setup when created`);
+      }
+      return;
+    }
+
+    if (!this.resourceFilter(resourceName)) {
+      if (this.verbose) {
+        console.warn(`[RelationPlugin] Resource "${resourceName}" skipped by resource filter`);
       }
       return;
     }

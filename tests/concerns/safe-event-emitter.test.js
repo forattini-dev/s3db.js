@@ -2,6 +2,8 @@
  * Tests for SafeEventEmitter - Auto-cleanup EventEmitter
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+
 import { SafeEventEmitter, createSafeEventEmitter } from '../../src/concerns/safe-event-emitter.js';
 
 describe('SafeEventEmitter', () => {

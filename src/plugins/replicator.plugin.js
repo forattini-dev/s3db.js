@@ -185,6 +185,8 @@ export class ReplicatorPlugin extends Plugin {
     this.logResourceName = this._resolveLogResourceName();
     this.config.logResourceName = this.logResourceName;
 
+    this.resourceFilter = this._buildResourceFilter(options);
+
     this.replicators = [];
     this.database = null;
     this.eventListenersInstalled = new Set();
@@ -250,7 +252,7 @@ export class ReplicatorPlugin extends Plugin {
 
   installEventListeners(resource, database, plugin) {
     if (!resource || this.eventListenersInstalled.has(resource.name) ||
-        resource.name === this.logResourceName) {
+        resource.name === this.logResourceName || !this._shouldManageResource(resource.name)) {
       return;
     }
 
@@ -362,7 +364,7 @@ export class ReplicatorPlugin extends Plugin {
 
     // Install event listeners for existing resources
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== this.logResourceName) {
+      if (resource.name !== this.logResourceName && this._shouldManageResource(resource.name)) {
         this.installEventListeners(resource, this.database, this);
       }
     }
@@ -375,7 +377,7 @@ export class ReplicatorPlugin extends Plugin {
   installDatabaseHooks() {
     // Store hook reference for later removal
     this._afterCreateResourceHook = (resource) => {
-      if (resource.name !== this.logResourceName) {
+      if (resource.name !== this.logResourceName && this._shouldManageResource(resource.name)) {
         this.installEventListeners(resource, this.database, this);
       }
     };
@@ -445,7 +447,15 @@ export class ReplicatorPlugin extends Plugin {
       const { driver, config = {}, resources, client, ...otherConfig } = replicatorConfig;
 
       // Extract resources from replicatorConfig or config
-      const replicatorResources = resources || config.resources || {};
+      const rawResources = resources || config.resources || {};
+      const replicatorResources = this._filterResourcesDefinition(rawResources);
+
+      if (this._resourcesDefinitionIsEmpty(replicatorResources)) {
+        if (this.config.verbose) {
+          console.warn(`[ReplicatorPlugin] Skipping replicator for driver ${driver} due to resource filter`);
+        }
+        continue;
+      }
 
       // Merge config with other top-level config options (like queueUrlDefault)
       const mergedConfig = { ...config, ...otherConfig };
@@ -1154,4 +1164,67 @@ export class ReplicatorPlugin extends Plugin {
       });
     }
   }
-} 
+
+  _buildResourceFilter(options) {
+    if (typeof options.resourceFilter === 'function') {
+      return options.resourceFilter;
+    }
+
+    const allow = Array.isArray(options.resourceAllowlist) ? new Set(options.resourceAllowlist.map(normalizeResourceName)) : null;
+    const block = Array.isArray(options.resourceBlocklist) ? new Set(options.resourceBlocklist.map(normalizeResourceName)) : null;
+
+    if (allow || block) {
+      return (resourceName) => {
+        const normalized = normalizeResourceName(resourceName);
+        if (allow && allow.size > 0 && !allow.has(normalized)) {
+          return false;
+        }
+        if (block && block.has(normalized)) {
+          return false;
+        }
+        return true;
+      };
+    }
+
+    return () => true;
+  }
+
+  _shouldManageResource(resourceName) {
+    try {
+      return this.resourceFilter(normalizeResourceName(resourceName));
+    } catch {
+      return true;
+    }
+  }
+
+  _filterResourcesDefinition(definition) {
+    if (!definition) return definition;
+
+    if (Array.isArray(definition)) {
+      return definition.filter((name) => this._shouldManageResource(name));
+    }
+
+    if (typeof definition === 'object') {
+      const filtered = {};
+      for (const [name, target] of Object.entries(definition)) {
+        if (this._shouldManageResource(name)) {
+          filtered[name] = target;
+        }
+      }
+      return filtered;
+    }
+
+    return definition;
+  }
+
+  _resourcesDefinitionIsEmpty(definition) {
+    if (!definition) return true;
+    if (Array.isArray(definition)) {
+      return definition.length === 0;
+    }
+    if (typeof definition === 'object') {
+      return Object.keys(definition).length === 0;
+    }
+    return false;
+  }
+}

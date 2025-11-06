@@ -511,7 +511,7 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
       attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     // Replicator envia para fila SQS
-    replicator = createReplicator('sqs', {
+    replicator = await createReplicator('sqs', {
       queueUrl,
       region: 'us-east-1',
       credentials: { accessKeyId: 'test', secretAccessKey: 'test' },

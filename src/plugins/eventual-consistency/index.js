@@ -24,6 +24,8 @@ export class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    this.resourceFilter = this._buildResourceFilter(options);
+
     // Validate resources structure
     validateResourcesConfig(options.resources);
 
@@ -39,6 +41,9 @@ export class EventualConsistencyPlugin extends Plugin {
 
     // Parse resources configuration
     for (const [resourceName, fields] of Object.entries(options.resources)) {
+      if (!this.resourceFilter(resourceName)) {
+        continue;
+      }
       const resourceHandlers = new Map();
       for (const fieldName of fields) {
         // Create a field handler for each resource/field combination
@@ -52,6 +57,29 @@ export class EventualConsistencyPlugin extends Plugin {
     logInitialization(this.config, this.fieldHandlers, timezoneAutoDetected);
   }
 
+  _buildResourceFilter(options) {
+    if (typeof options.resourceFilter === 'function') {
+      return options.resourceFilter;
+    }
+
+    const allow = Array.isArray(options.resourceAllowlist) ? new Set(options.resourceAllowlist) : null;
+    const block = Array.isArray(options.resourceBlocklist) ? new Set(options.resourceBlocklist) : null;
+
+    if (allow || block) {
+      return (resourceName) => {
+        if (allow && allow.size > 0 && !allow.has(resourceName)) {
+          return false;
+        }
+        if (block && block.has(resourceName)) {
+          return false;
+        }
+        return true;
+      };
+    }
+
+    return () => true;
+  }
+
   /**
    * Install hook - create resources and register helpers
    */
@@ -61,7 +89,8 @@ export class EventualConsistencyPlugin extends Plugin {
       this.fieldHandlers,
       (handler) => completeFieldSetup(handler, this.database, this.config, this),
       (resourceName) => watchForResource(resourceName, this.database, this.fieldHandlers,
-        (handler) => completeFieldSetup(handler, this.database, this.config, this))
+        (handler) => completeFieldSetup(handler, this.database, this.config, this)),
+      (resourceName) => this.resourceFilter(resourceName)
     );
   }
 

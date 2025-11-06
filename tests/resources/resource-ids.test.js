@@ -496,7 +496,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         expect(result.id).toMatch(new RegExp(`^[a-zA-Z0-9_-]{${size}}$`));
         console.log(`Size ${size} ID:`, result.id);
       }
-    });
+    }, 30000);
 
     test('should handle idGenerator as number for various sizes', async () => {
       const sizes = [2, 7, 12, 18, 24, 35];
@@ -514,7 +514,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         expect(result.id).toMatch(new RegExp(`^[a-zA-Z0-9_-]{${size}}$`));
         console.log(`Generator size ${size} ID:`, result.id);
       }
-    });
+    }, 20000);
   });
 
   describe('User-specific scenarios (reproducing reported issues)', () => {

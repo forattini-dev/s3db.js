@@ -639,6 +639,7 @@ export class MetricsPlugin extends Plugin {
     };
 
     this.flushJobName = null;
+    this.flushTimer = null;
     this.metricsServer = null; // Standalone HTTP server (if needed)
   }
 
@@ -750,6 +751,45 @@ export class MetricsPlugin extends Plugin {
       const cronManager = getCronManager();
       cronManager.stop(this.flushJobName);
       this.flushJobName = null;
+    }
+
+    // Clear any legacy timer references
+    if (this.flushTimer) {
+      const clearFn = (
+        globalThis?.originalClearInterval ||
+        globalThis?.clearInterval ||
+        clearInterval
+      ).bind(globalThis);
+
+      if (typeof this.flushTimer?.stop === 'function') {
+        try {
+          this.flushTimer.stop();
+        } catch (err) {
+          if (this.config.verbose) {
+            console.warn('[MetricsPlugin] Error stopping flush timer:', err?.message || err);
+          }
+        }
+      }
+
+      if (typeof this.flushTimer?.destroy === 'function') {
+        try {
+          this.flushTimer.destroy();
+        } catch (err) {
+          if (this.config.verbose) {
+            console.warn('[MetricsPlugin] Error destroying flush timer:', err?.message || err);
+          }
+        }
+      }
+
+      if (typeof this.flushTimer === 'object' && !this.flushTimer?.stop && !this.flushTimer?.destroy) {
+        try {
+          clearFn(this.flushTimer);
+        } catch (_) {
+          // Ignore legacy timers that can't be cleared
+        }
+      }
+
+      this.flushTimer = null;
     }
 
     // Stop standalone metrics server if running
@@ -990,15 +1030,35 @@ export class MetricsPlugin extends Plugin {
       cronManager.stop(this.flushJobName);
       this.flushJobName = null;
     }
+    this.flushTimer = null;
 
     // Only start timer if flushInterval is greater than 0
     if (this.config.flushInterval > 0) {
       const cronManager = getCronManager();
-      this.flushJobName = cronManager.scheduleInterval(
+      const jobName = `metrics-flush-${Date.now()}`;
+      this.flushJobName = jobName;
+
+      // Placeholder to keep compatibility with legacy code/tests
+      this.flushTimer = {
+        stop: () => cronManager.stop(jobName),
+        destroy: () => cronManager.stop(jobName),
+      };
+
+      cronManager.scheduleInterval(
         this.config.flushInterval,
         () => this.flushMetrics().catch(() => {}),
-        `metrics-flush-${Date.now()}`
-      );
+        jobName
+      ).then(task => {
+        if (task && typeof task === 'object') {
+          this.flushTimer = task;
+        }
+      }).catch(error => {
+        if (this.config.verbose) {
+          console.warn('[MetricsPlugin] Failed to schedule flush timer:', error?.message || error);
+        }
+        this.flushJobName = null;
+        this.flushTimer = null;
+      });
     }
   }
 

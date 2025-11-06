@@ -316,7 +316,7 @@ describe('KubernetesInventoryPlugin', () => {
         apiVersion: 'apps/v1',
         labels: { app: 'web' },
         annotations: { note: 'test' },
-        configuration: { spec: { ... } }
+        configuration: { spec: { replicas: 2 } }
       };
 
       const summary = plugin._extractSummary(resource);

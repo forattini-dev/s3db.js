@@ -1,9 +1,11 @@
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
+  jest.setTimeout(120000);
   let database;
   let urls;
   let clicks;

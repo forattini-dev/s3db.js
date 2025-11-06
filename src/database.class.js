@@ -78,6 +78,7 @@ export class Database extends SafeEventEmitter {
     this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
     this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
     this.strictHooks = options.strictHooks || false; // Throw on first hook error instead of continuing
+    this.disableResourceEvents = options.disableResourceEvents === true;
 
     // Initialize ProcessManager for lifecycle management (prevents memory leaks)
     this.processManager = options.processManager || new ProcessManager({
@@ -440,10 +441,11 @@ export class Database extends SafeEventEmitter {
       if (Array.isArray(hookArray)) {
         serialized[event] = hookArray.map(hook => {
           if (typeof hook === 'function') {
+            const originalHook = hook.__s3db_original || hook;
             const [ok, err, data] = tryFn(() => ({
               __s3db_serialized_function: true,
-              code: hook.toString(),
-              name: hook.name || 'anonymous'
+              code: originalHook.toString(),
+              name: originalHook.name || hook.name || 'anonymous'
             }));
 
             if (!ok) {
@@ -536,6 +538,12 @@ export class Database extends SafeEventEmitter {
 
           await plugin.install(db);
 
+          this.emit('db:plugin:metrics', {
+            stage: 'install',
+            plugin: pluginName,
+            ...this._collectMemorySnapshot()
+          });
+
           // Register the plugin
           this.pluginRegistry[pluginName] = plugin;
           return pluginName;
@@ -557,7 +565,13 @@ export class Database extends SafeEventEmitter {
         .withConcurrency(concurrency)
         .for(plugins)
         .process(async (plugin) => {
+          const pluginName = this._getPluginName(plugin);
           await plugin.start();
+          this.emit('db:plugin:metrics', {
+            stage: 'start',
+            plugin: pluginName,
+            ...this._collectMemorySnapshot()
+          });
           return plugin;
         });
 
@@ -586,6 +600,25 @@ export class Database extends SafeEventEmitter {
    */
   _getPluginName(plugin, customName = null) {
     return customName || plugin.constructor.name.replace('Plugin', '').toLowerCase();
+  }
+
+  _collectMemorySnapshot() {
+    const usage = process.memoryUsage();
+    const toMB = (bytes) => Math.round((bytes || 0) / (1024 * 1024));
+
+    const snapshot = {
+      timestamp: new Date().toISOString(),
+      rssMB: toMB(usage.rss),
+      heapUsedMB: toMB(usage.heapUsed),
+      heapTotalMB: toMB(usage.heapTotal),
+      externalMB: toMB(usage.external)
+    };
+
+    if (usage.arrayBuffers !== undefined) {
+      snapshot.arrayBuffersMB = toMB(usage.arrayBuffers);
+    }
+
+    return snapshot;
   }
 
   async usePlugin(plugin, name = null) {
@@ -1297,6 +1330,9 @@ export class Database extends SafeEventEmitter {
         this._applyMiddlewares(existingResource, middlewares);
       }
 
+      const disableEventsFlag = config.disableEvents !== undefined ? config.disableEvents : this.disableResourceEvents;
+      existingResource.eventsDisabled = disableEventsFlag;
+
       // Only upload metadata if hash actually changed
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -1335,6 +1371,7 @@ export class Database extends SafeEventEmitter {
       asyncEvents: config.asyncEvents,
       asyncPartitions: config.asyncPartitions !== undefined ? config.asyncPartitions : true,
       events: config.events || {},
+      disableEvents: config.disableEvents !== undefined ? config.disableEvents : this.disableResourceEvents,
       createdBy: config.createdBy || 'user'
     });
     resource.database = this;
@@ -1347,6 +1384,10 @@ export class Database extends SafeEventEmitter {
 
     await this.uploadMetadataFile();
     this.emit("db:resource-created", name);
+    this.emit('db:resource:metrics', {
+      resource: name,
+      ...this._collectMemorySnapshot()
+    });
     return resource;
   }
 
