@@ -36,6 +36,9 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       await database.disconnect();
     }
     MemoryClient.clearAllStorage();
+
+    // Small delay to ensure timers are fully cancelled
+    await new Promise(resolve => setTimeout(resolve, 100));
   });
 
   describe("Configuration", () => {
