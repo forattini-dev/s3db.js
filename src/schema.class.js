@@ -21,6 +21,15 @@ import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal,
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
 import { encodeMoney, decodeMoney, getCurrencyDecimals } from "./concerns/money.js";
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon, encodeGeoPoint, decodeGeoPoint } from "./concerns/geo-encoding.js";
+import {
+  generateSchemaFingerprint,
+  getCachedValidator,
+  cacheValidator,
+  releaseValidator,
+  getCacheStats,
+  getCacheMemoryUsage,
+  evictUnusedValidators
+} from "./concerns/validator-cache.js";
 
 /**
  * Generate base62 mapping for attributes
@@ -568,14 +577,31 @@ export class Schema {
     // Preprocess attributes to handle nested objects for validator compilation
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
 
-    this.validator = new ValidatorManager({
-      autoEncrypt: false,
+    // PERFORMANCE: Generate schema fingerprint for validator caching
+    this._schemaFingerprint = generateSchemaFingerprint(processedAttributes, {
       passphrase: this.passphrase,
-      bcryptRounds: this.bcryptRounds
-    }).compile(merge(
-      { $$async: true, $$strict: false },
-      processedAttributes,
-    ))
+      bcryptRounds: this.bcryptRounds,
+      allNestedObjectsOptional: this.allNestedObjectsOptional
+    });
+
+    // PERFORMANCE: Try to get cached validator, otherwise compile and cache
+    const cachedValidator = getCachedValidator(this._schemaFingerprint);
+
+    if (cachedValidator) {
+      this.validator = cachedValidator;
+    } else {
+      this.validator = new ValidatorManager({
+        autoEncrypt: false,
+        passphrase: this.passphrase,
+        bcryptRounds: this.bcryptRounds
+      }).compile(merge(
+        { $$async: true, $$strict: false },
+        processedAttributes,
+      ));
+
+      // Cache the compiled validator for reuse
+      cacheValidator(this._schemaFingerprint, this.validator);
+    }
 
     if (this.options.generateAutoHooks) this.generateAutoHooks();
 
@@ -1442,6 +1468,46 @@ export class Schema {
     }
 
     return processed;
+  }
+
+  /**
+   * Dispose of the schema and release cached validator
+   * Call this when a resource is being destroyed to allow validator cache eviction
+   */
+  dispose() {
+    if (this._schemaFingerprint) {
+      releaseValidator(this._schemaFingerprint);
+    }
+  }
+
+  /**
+   * Get validator cache statistics
+   * Useful for debugging and monitoring validator reuse
+   *
+   * @returns {Object} Cache statistics
+   */
+  static getValidatorCacheStats() {
+    return getCacheStats();
+  }
+
+  /**
+   * Get validator cache memory usage
+   *
+   * @returns {Object} Memory usage stats
+   */
+  static getValidatorCacheMemoryUsage() {
+    return getCacheMemoryUsage();
+  }
+
+  /**
+   * Manually evict unused validators from cache
+   * Called automatically during garbage collection, but can be called manually
+   *
+   * @param {number} maxAgeMs - Max age for zero-ref validators (default: 5 minutes)
+   * @returns {number} Number of validators evicted
+   */
+  static evictUnusedValidators(maxAgeMs) {
+    return evictUnusedValidators(maxAgeMs);
   }
 }
 
