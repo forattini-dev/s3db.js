@@ -103,8 +103,8 @@ function generateResourceSchema(resource) {
 
   // Filter out plugin attributes - they are internal implementation details
   // and should not be exposed in public API documentation
-  const pluginAttrNames = resource.$schema._pluginAttributes
-    ? Object.values(resource.$schema._pluginAttributes).flat()
+  const pluginAttrNames = resource.schema?._pluginAttributes
+    ? Object.values(resource.schema._pluginAttributes).flat()
     : [];
 
   const attributes = Object.fromEntries(

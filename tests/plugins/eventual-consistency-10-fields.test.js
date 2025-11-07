@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
-describe.skip('EventualConsistencyPlugin - 10 Fields Scale Test [SKIPPED - HANGS]', () => {
+describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
   let database;
   let metrics;
 
@@ -172,7 +172,7 @@ describe.skip('EventualConsistencyPlugin - 10 Fields Scale Test [SKIPPED - HANGS
     }
   }, 30000);
 
-  it.skip('should create analytics for all 10 fields and query them independently', async () => {
+  it('should create analytics for all 10 fields and query them independently', async () => {
 
     // Create metrics resource with 10 fields
     metrics = await database.createResource({
@@ -203,7 +203,8 @@ describe.skip('EventualConsistencyPlugin - 10 Fields Scale Test [SKIPPED - HANGS
         metrics: fieldNames
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      verbose: false,
+      analytics: { enabled: true }
     });
     await database.usePlugin(plugin);
 

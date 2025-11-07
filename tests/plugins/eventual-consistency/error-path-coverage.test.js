@@ -71,45 +71,6 @@ describe('EventualConsistencyPlugin - Error Path Coverage', () => {
     handler.transactionResource.insert = originalInsert;
   });
 
-  it.skip('should handle lock release errors gracefully (SKIP: locks use PluginStorage now)', async () => {
-    urls = await database.createResource({
-      name: 'urls',
-      attributes: {
-        id: 'string|optional',
-        clicks: 'number|default:0'
-      }
-    });
-
-    plugin = new EventualConsistencyPlugin({
-      resources: { urls: ['clicks'] },
-      consolidation: { mode: 'sync', auto: false },
-      verbose: true
-    });
-
-    await database.usePlugin(plugin);
-
-    // Insert and add clicks
-    await urls.insert({ id: 'url1', clicks: 0 });
-    await urls.add('url1', 'clicks', 5);
-
-    // Mock lock resource delete to fail
-    const lockResource = database.resources.urls_consolidation_locks_clicks;
-    const originalDelete = lockResource.delete.bind(lockResource);
-    lockResource.delete = async (id) => {
-      if (id.startsWith('lock-url1')) {
-        throw new Error('Simulated lock release error');
-      }
-      return await originalDelete(id);
-    };
-
-    // Consolidate - should handle lock release error gracefully
-    const result = await urls.consolidate('url1', 'clicks');
-    expect(result).toBe(5);
-
-    // Restore original delete
-    lockResource.delete = originalDelete;
-  });
-
   it('should handle getConsolidatedValue with date filters', async () => {
     urls = await database.createResource({
       name: 'urls',

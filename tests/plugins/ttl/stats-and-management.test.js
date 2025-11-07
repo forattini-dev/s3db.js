@@ -71,6 +71,8 @@ describe('TTLPlugin v2 - Stats and Monitoring', () => {
     plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
     await plugin.start();
+    // Manually trigger coordinator promotion to start intervals
+    await plugin.onBecomeCoordinator();
   });
 
   afterAll(async () => {
@@ -138,6 +140,8 @@ describe('TTLPlugin v2 - Manual Cleanup', () => {
     plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
     await plugin.start();
+    // Manually trigger coordinator promotion to start intervals
+    await plugin.onBecomeCoordinator();
   });
 
   afterAll(async () => {
@@ -201,6 +205,8 @@ describe('TTLPlugin v2 - Multiple Granularities', () => {
     plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
     await plugin.start();
+    // Manually trigger coordinator promotion to start intervals
+    await plugin.onBecomeCoordinator();
   });
 
   afterAll(async () => {
@@ -257,6 +263,8 @@ describe('TTLPlugin v2 - Interval Management', () => {
     plugin.cronManager = new FakeCronManager();
     await plugin.install(db);
     await plugin.start();
+    // Manually trigger coordinator promotion to start intervals
+    await plugin.onBecomeCoordinator();
   });
 
   afterAll(async () => {

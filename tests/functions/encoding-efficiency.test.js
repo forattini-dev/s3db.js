@@ -147,7 +147,8 @@ describe('Smart Encoding Efficiency Test', () => {
       const b64 = Buffer.from(text).toString('base64').length;
       const smart = calculateEncodedSize(text);
       const padded = text.padEnd(20);
-      
+
+      console.log(
         `${padded.substring(0, 20)} | ${String(orig).padStart(4)} | ${String(b64).padStart(4)} | ${String(smart.encoded).padStart(5)} | ${smart.encoding}`
       );
     });
