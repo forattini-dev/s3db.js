@@ -94,7 +94,7 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
     expect(plugin.config.cohort.timezone).toBe('America/Sao_Paulo');
     expect(plugin.config.verbose).toBe(false);
 
-    // Criar resource
+    // Create resource
     urls = await database.createResource({
       name: 'urls',
       attributes: {
@@ -104,7 +104,7 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
       }
     });
 
-    // Testar funcionalidade básica
+    // Test basic functionality
     await urls.insert({ id: 'url-1', link: 'https://google.com', clicks: 0 });
     await urls.add('url-1', 'clicks', 5);
 
@@ -113,14 +113,14 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
   });
 
   it('should use defaults when sections are omitted', async () => {
-    // Configuração mínima
+    // Minimal configuration
     const plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] }
     });
 
     await database.usePlugin(plugin);
 
-    // Verificar defaults
+    // Verify defaults
     expect(plugin.config.mode).toBe('async'); // default
     expect(plugin.config.autoConsolidate).toBe(true); // default
     expect(plugin.config.consolidationInterval).toBe(300); // default
@@ -131,25 +131,25 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
   });
 
   it('should allow partial nested config', async () => {
-    // Apenas algumas seções
+    // Only a few sections
     const plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
 
       consolidation: {
         mode: 'sync',
         auto: false
-        // interval, window, concurrency usam defaults
+        // interval, window, concurrency rely on defaults
       },
 
       analytics: {
         enabled: true
-        // periods, metrics, retention usam defaults
+        // periods, metrics, retention rely on defaults
       }
     });
 
     await database.usePlugin(plugin);
 
-    // Verificar mix de configurados e defaults
+    // Validate the mix of custom values and defaults
     expect(plugin.config.mode).toBe('sync');
     expect(plugin.config.autoConsolidate).toBe(false);
     expect(plugin.config.consolidationInterval).toBe(300); // default

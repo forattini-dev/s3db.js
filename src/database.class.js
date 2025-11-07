@@ -18,20 +18,23 @@ import { CronManager } from "./concerns/cron-manager.js";
 
 export class Database extends SafeEventEmitter {
   constructor(options) {
-    // ✨ VERTICALIZADO CONFIG: Separate databaseOptions from clientOptions
-    // Supports both new structure and backward compatibility with flat config
+    // ✨ VERTICALIZADO CONFIG (v16+)
+    // Database config at root level, client config in clientOptions wrapper
     //
-    // NEW (recommended):
-    //   new S3db({ connectionString, databaseOptions: {...}, clientOptions: {...} })
-    //
-    // OLD (backward compatible):
-    //   new S3db({ connectionString, verbose, compression: {...}, ... })
-
-    const dbOpts = options.databaseOptions || {};
+    // Structure:
+    //   new S3db({
+    //     connectionString: 'file:///path?compression.enabled=true',
+    //     verbose: false,              // Database option (root)
+    //     parallelism: 10,             // Database option (root)
+    //     clientOptions: {             // Client options (wrapper)
+    //       compression: { enabled: true },
+    //       ttl: { enabled: true }
+    //     }
+    //   })
 
     super({
-      verbose: dbOpts.verbose || options.verbose || false,
-      autoCleanup: (dbOpts.autoCleanup !== undefined ? dbOpts.autoCleanup : options.autoCleanup) !== false
+      verbose: options.verbose || false,
+      autoCleanup: options.autoCleanup !== false
     });
 
     // Generate database ID with fallback for reliability
@@ -80,36 +83,36 @@ export class Database extends SafeEventEmitter {
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;
 
-    // ✨ VERTICALIZADO: Database-level options (prefer databaseOptions, fallback to flat)
-    this.verbose = dbOpts.verbose ?? options.verbose ?? false;
-    this.parallelism = parseInt((dbOpts.parallelism ?? options.parallelism ?? 10) + "");
-    this.pluginList = dbOpts.plugins ?? options.plugins ?? [];
+    // ✨ Database-level options (root level)
+    this.verbose = options.verbose ?? false;
+    this.parallelism = parseInt((options.parallelism ?? 10) + "");
+    this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry
-    this.cache = dbOpts.cache ?? options.cache;
-    this.passphrase = dbOpts.passphrase ?? options.passphrase ?? "secret";
-    this.bcryptRounds = dbOpts.bcryptRounds ?? options.bcryptRounds ?? 10;
-    this.versioningEnabled = dbOpts.versioningEnabled ?? options.versioningEnabled ?? false;
-    this.persistHooks = dbOpts.persistHooks ?? options.persistHooks ?? false;
-    this.strictValidation = (dbOpts.strictValidation ?? options.strictValidation) !== false;
-    this.strictHooks = dbOpts.strictHooks ?? options.strictHooks ?? false;
-    this.disableResourceEvents = (dbOpts.disableResourceEvents ?? options.disableResourceEvents) === true;
+    this.cache = options.cache;
+    this.passphrase = options.passphrase ?? "secret";
+    this.bcryptRounds = options.bcryptRounds ?? 10;
+    this.versioningEnabled = options.versioningEnabled ?? false;
+    this.persistHooks = options.persistHooks ?? false;
+    this.strictValidation = (options.strictValidation ?? true) !== false;
+    this.strictHooks = options.strictHooks ?? false;
+    this.disableResourceEvents = options.disableResourceEvents === true;
 
     // Performance: Debounced metadata uploads (opt-in to prevent O(n²) complexity)
-    this.deferMetadataWrites = dbOpts.deferMetadataWrites ?? options.deferMetadataWrites ?? false;
-    this.metadataWriteDelay = dbOpts.metadataWriteDelay ?? options.metadataWriteDelay ?? 100;
+    this.deferMetadataWrites = options.deferMetadataWrites ?? false;
+    this.metadataWriteDelay = options.metadataWriteDelay ?? 100;
     this._metadataUploadPending = false;
     this._metadataUploadDebounce = null;
 
     // Initialize ProcessManager for lifecycle management (prevents memory leaks)
-    const exitOnSignal = (dbOpts.exitOnSignal ?? options.exitOnSignal) !== false;
-    this.processManager = dbOpts.processManager ?? options.processManager ?? new ProcessManager({
+    const exitOnSignal = (options.exitOnSignal ?? true) !== false;
+    this.processManager = options.processManager ?? new ProcessManager({
       verbose: this.verbose,
       exitOnSignal
     });
 
     // Initialize CronManager for cron job management (prevents memory leaks)
-    this.cronManager = dbOpts.cronManager ?? options.cronManager ?? new CronManager({
+    this.cronManager = options.cronManager ?? new CronManager({
       verbose: this.verbose,
       exitOnSignal
     });
@@ -152,25 +155,31 @@ export class Database extends SafeEventEmitter {
       }
     }
 
-    // ✨ VERTICALIZADO: Merge clientOptions from multiple sources
-    // Priority (highest to lowest):
-    //   1. Querystring params (compression.enabled=true)
-    //   2. options.clientOptions (explicit object)
-    //   3. Flat options (options.compression, backward compat)
+    // ✨ VERTICALIZADO: Merge clientOptions from 2 sources only
+    // Priority: querystring params > options.clientOptions
+    // (No backward compatibility with flat config)
 
     let mergedClientOptions = {};
     let connStr = null;
 
-    // Start with lowest priority: flat options (backward compatibility)
-    const flatClientOptions = this._extractClientOptionsFromFlat(options);
-    mergedClientOptions = { ...flatClientOptions };
-
-    // Merge with medium priority: explicit options.clientOptions
+    // Base: explicit options.clientOptions (if provided)
     if (options.clientOptions) {
-      mergedClientOptions = this._deepMerge(mergedClientOptions, options.clientOptions);
+      mergedClientOptions = { ...options.clientOptions };
     }
 
-    // Merge with highest priority: querystring params
+    // Allow common client-only options at the top level for convenience (v16 verticalizado)
+    const passthroughKeys = ['compression', 'ttl', 'locking', 'backup', 'journal', 'stats'];
+    const topLevelClientOptions = {};
+    for (const key of passthroughKeys) {
+      if (options[key] !== undefined) {
+        topLevelClientOptions[key] = options[key];
+      }
+    }
+    if (Object.keys(topLevelClientOptions).length > 0) {
+      mergedClientOptions = this._deepMerge(mergedClientOptions, topLevelClientOptions);
+    }
+
+    // Override with querystring params (highest priority)
     if (connectionString) {
       try {
         connStr = new ConnectionString(connectionString);
@@ -192,47 +201,41 @@ export class Database extends SafeEventEmitter {
           const bucket = url.hostname || 'test-bucket';
           const keyPrefix = url.pathname ? url.pathname.substring(1) : ''; // Remove leading slash
 
-          this.client = new MemoryClient({
+          this.client = new MemoryClient(this._deepMerge({
             bucket,
             keyPrefix,
             verbose: this.verbose,
-            ...mergedClientOptions, // ✨ Apply merged client options
-          });
+          }, mergedClientOptions)); // ✨ Deep merge client options
         } else if (url.protocol === 'file:') {
           // Use FileSystemClient for file:// protocol
-          this.client = new FileSystemClient({
+          this.client = new FileSystemClient(this._deepMerge({
             basePath: connStr.basePath,
             bucket: connStr.bucket,
             keyPrefix: connStr.keyPrefix,
             verbose: this.verbose,
-            ...mergedClientOptions, // ✨ Apply merged client options
-          });
+          }, mergedClientOptions)); // ✨ Deep merge client options
         } else {
           // Use S3Client for s3://, http://, https:// protocols
-          this.client = new S3Client({
+          this.client = new S3Client(this._deepMerge({
             verbose: this.verbose,
             parallelism: this.parallelism,
             connectionString: connectionString,
-            ...mergedClientOptions, // ✨ Apply merged client options
-          });
+          }, mergedClientOptions)); // ✨ Deep merge client options
         }
       } catch (err) {
         // If URL parsing fails, fall back to S3Client
-        this.client = new S3Client({
+        this.client = new S3Client(this._deepMerge({
           verbose: this.verbose,
           parallelism: this.parallelism,
           connectionString: connectionString,
-          ...mergedClientOptions, // ✨ Apply merged client options
-        });
+        }, mergedClientOptions)); // ✨ Deep merge client options
       }
     } else if (!options.client) {
       // No connection string provided, use S3Client with defaults
-      this.client = new S3Client({
+      this.client = new S3Client(this._deepMerge({
         verbose: this.verbose,
         parallelism: this.parallelism,
-        connectionString: connectionString,
-        ...mergedClientOptions, // ✨ Apply merged client options
-      });
+      }, mergedClientOptions)); // ✨ Deep merge client options
     } else {
       // Use provided client
       this.client = options.client;
@@ -267,38 +270,8 @@ export class Database extends SafeEventEmitter {
   }
 
   /**
-   * Extract client-specific options from flat config structure
-   * Used for backward compatibility with pre-verticalizado config
-   *
-   * @param {Object} options - Flat options object
-   * @returns {Object} Client options extracted from flat structure
-   * @private
-   */
-  _extractClientOptionsFromFlat(options) {
-    const clientKeys = [
-      'compression', 'ttl', 'locking', 'backup', 'journal', 'stats',
-      'enableCompression', 'compressionThreshold', 'compressionLevel',
-      'enableTTL', 'defaultTTL', 'cleanupInterval',
-      'enableLocking', 'lockTimeout',
-      'enableBackup', 'backupSuffix',
-      'enableJournal', 'journalFile',
-      'enableStats',
-      'enforceLimits', 'persistPath', 'forcePathStyle'
-    ];
-
-    const clientOptions = {};
-    for (const key of clientKeys) {
-      if (options[key] !== undefined) {
-        clientOptions[key] = options[key];
-      }
-    }
-
-    return clientOptions;
-  }
-
-  /**
    * Deep merge two objects (target gets overwritten by source)
-   * Used to merge clientOptions from multiple sources with correct priority
+   * Used to merge clientOptions: querystring params override explicit options
    *
    * @param {Object} target - Base object
    * @param {Object} source - Object to merge (higher priority)
@@ -1704,14 +1677,16 @@ export class Database extends SafeEventEmitter {
           });
       }
 
-      // 2. Remove all listeners from all resources
+      // 2. Dispose all resources (cleanup validators, listeners, plugin references)
       if (this.resources && Object.keys(this.resources).length > 0) {
         for (const [name, resource] of Object.entries(this.resources)) {
           // Silently ignore errors on exit
           await tryFn(() => {
-            if (resource && typeof resource.removeAllListeners === 'function') {
-              resource.removeAllListeners();
+            // PERFORMANCE: Use dispose() to release validator cache references and cleanup listeners
+            if (resource && typeof resource.dispose === 'function') {
+              resource.dispose();
             }
+            // Cleanup plugin wrappers and middlewares
             if (resource._pluginWrappers) {
               resource._pluginWrappers.clear();
             }

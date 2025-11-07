@@ -102,7 +102,7 @@ describe('Smart Encoding for S3 Metadata', () => {
 
     // v13: Legacy base64 without prefix no longer supported
     // test('should handle legacy base64 without prefix', () => {
-    //   const original = 'José María';
+    //   const original = 'Jose Maria';
     //   const legacyEncoded = Buffer.from(original, 'utf8').toString('base64');
     //   const decoded = metadataDecode(legacyEncoded);
     //   expect(decoded).toBe(original);

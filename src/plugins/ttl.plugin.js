@@ -160,6 +160,12 @@ export class TTLPlugin extends CoordinatorPlugin {
     // Pass coordinator options to super (TTL doesn't need coordinator work interval since it uses cron)
     super(options);
 
+    // CoordinatorPlugin expects this.config for logging toggles
+    this.config = {
+      verbose: Boolean(this.options.verbose),
+      ...this.options
+    };
+
     const {
       resources = {},
       batchSize = 100,
@@ -571,7 +577,9 @@ export class TTLPlugin extends CoordinatorPlugin {
    */
   async _startIntervals() {
     if (!this.cronManager) {
-      console.warn('[TTLPlugin] CronManager not available, cleanup intervals will not run');
+      if (this.verbose) {
+        console.warn('[TTLPlugin] CronManager not available, cleanup intervals will not run');
+      }
       return;
     }
 

@@ -2,6 +2,8 @@
 
 > **How to use the plugin documentation templates to create high-quality documentation.**
 >
+> **Language reminder:** all documentation and examples must be written in English.
+>
 > **Navigation:** [← Templates Index](./) | [Standard ↑](../plugin-docs-standard.md) | [Full Template ↓](./plugin-doc-template.md) | [Minimal Template ↓](./plugin-doc-minimal.md)
 
 ---

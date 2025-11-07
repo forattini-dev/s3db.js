@@ -149,7 +149,7 @@ describe('GeoPlugin - Geohash Encoding/Decoding', () => {
   });
 
   test('should encode coordinates to geohash', () => {
-    const geohash = plugin.encodeGeohash(-23.5505, -46.6333, 5); // São Paulo
+    const geohash = plugin.encodeGeohash(-23.5505, -46.6333, 5); // Sao Paulo
     expect(geohash).toBe('6gyf4');
     expect(geohash.length).toBe(5);
   });
@@ -215,9 +215,9 @@ describe('GeoPlugin - Distance Calculations', () => {
   });
 
   test('should calculate distance using Haversine formula', () => {
-    // Distance between São Paulo and Rio de Janeiro
+    // Distance between Sao Paulo and Rio de Janeiro
     const distance = plugin.calculateDistance(
-      -23.5505, -46.6333, // São Paulo
+      -23.5505, -46.6333, // Sao Paulo
       -22.9068, -43.1729  // Rio de Janeiro
     );
 
@@ -398,7 +398,7 @@ describe('GeoPlugin - findNearby Method', () => {
 
     await plugin.install(database);
 
-    // Insert test data around São Paulo
+    // Insert test data around Sao Paulo
     await restaurants.insert({ id: 'r1', name: 'Restaurant 1', lat: -23.5505, lon: -46.6333 }); // Center
     await restaurants.insert({ id: 'r2', name: 'Restaurant 2', lat: -23.5605, lon: -46.6433 }); // ~2km away
     await restaurants.insert({ id: 'r3', name: 'Restaurant 3', lat: -23.5705, lon: -46.6533 }); // ~4km away
@@ -612,7 +612,7 @@ describe('GeoPlugin - getDistance Method', () => {
 
     await plugin.install(database);
 
-    await cities.insert({ id: 'sp', name: 'São Paulo', lat: -23.5505, lon: -46.6333 });
+    await cities.insert({ id: 'sp', name: 'Sao Paulo', lat: -23.5505, lon: -46.6333 });
     await cities.insert({ id: 'rj', name: 'Rio de Janeiro', lat: -22.9068, lon: -43.1729 });
     await cities.insert({ id: 'ny', name: 'New York', lat: 40.7128, lon: -74.0060 });
   });
@@ -641,7 +641,7 @@ describe('GeoPlugin - getDistance Method', () => {
   test('should calculate long distances', async () => {
     const result = await cities.getDistance('sp', 'ny');
 
-    // São Paulo to New York is approximately 7700 km
+    // Sao Paulo to New York is approximately 7700 km
     expect(result.distance).toBeGreaterThan(7500);
     expect(result.distance).toBeLessThan(8000);
   });

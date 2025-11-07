@@ -772,7 +772,7 @@ describe('ALL Optimized Types - Exhaustive Integration Tests', () => {
         nycRecords.push(inserted.id);
       }
 
-      // São Paulo records
+      // Sao Paulo records
       for (let i = 0; i < 2; i++) {
         const data = {
           userName: `geo_sp_${i}`,

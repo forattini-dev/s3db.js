@@ -375,8 +375,8 @@ describe('Smart Encoding - Exhaustive Tests', () => {
   //   test('should decode legacy base64 without prefix', () => {
   //     // These are base64 encoded strings without our prefix
   //     const legacyEncoded = [
-  //       { encoded: 'Sm9zw6k=', decoded: 'José' },
-  //       { encoded: 'YcOnw6Nv', decoded: 'ação' },  // Corrected base64
+  //       { encoded: 'Sm9zw6k=', decoded: 'Jose' },
+  //       { encoded: 'YcOnw6Nv', decoded: 'acao' },  // Corrected base64
   //       { encoded: '8J+agA==', decoded: '🚀' },
   //       { encoded: '5Lit5paH', decoded: '中文' },
   //     ];

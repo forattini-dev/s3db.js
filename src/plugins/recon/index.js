@@ -45,7 +45,7 @@ import { FingerprintBuilder } from './concerns/fingerprint-builder.js';
 import { ReportGenerator } from './concerns/report-generator.js';
 import { DiffDetector } from './concerns/diff-detector.js';
 import { SecurityAnalyzer } from './concerns/security-analyzer.js';
-import { processManager } from './concerns/process-manager.js';
+import { ProcessManager } from './concerns/process-manager.js';
 
 // Behaviors
 import { UptimeBehavior } from './behaviors/uptime-behavior.js';
@@ -138,7 +138,9 @@ export class ReconPlugin extends Plugin {
     this.commandRunner = new CommandRunner();
 
     // Initialize process manager (for automatic cleanup)
-    this.processManager = processManager;
+    // Lazy-initialized here instead of singleton export to prevent global
+    // signal handlers from being registered when s3db.js is imported
+    this.processManager = new ProcessManager();
 
     // Initialize managers
     this.storageManager = null; // Initialized in initialize()

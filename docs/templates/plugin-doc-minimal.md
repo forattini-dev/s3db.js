@@ -24,6 +24,8 @@ Delete this comment before publishing!
 
 # {PLUGIN_EMOJI} {PLUGIN_NAME}
 
+> **Language note**: All published documentation must be in English.
+
 > **{ONE_LINE_DESCRIPTION}**
 >
 > **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)

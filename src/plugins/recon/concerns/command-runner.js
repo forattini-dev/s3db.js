@@ -10,11 +10,11 @@
  */
 
 import { spawn } from 'child_process';
-import { processManager } from './process-manager.js';
 
 export class CommandRunner {
-  constructor() {
+  constructor(processManager = null) {
     this.availabilityCache = new Map();
+    this.processManager = processManager;
   }
 
   /**
@@ -51,9 +51,9 @@ export class CommandRunner {
       });
 
       // Track process for automatic cleanup (unless disabled for 'which' checks)
-      if (trackProcess && proc.pid) {
+      if (trackProcess && proc.pid && this.processManager) {
         const commandName = `${command} ${args.slice(0, 2).join(' ')}`.substring(0, 50);
-        processManager.track(proc, { name: commandName });
+        this.processManager.track(proc, { name: commandName });
       }
 
       let stdout = '';
