@@ -34,8 +34,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
       verbose: true,  // Test expects verbose logging output
         resource: 'tasks',
-        autoStart: false,
-        verbose: false  // Enable verbose logging
+        autoStart: false
       });
 
       // Capture console.log
@@ -69,7 +68,6 @@ describe('S3QueuePlugin - Edge Cases', () => {
       verbose: true,  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
-        verbose: true,  // Test expects verbose logging output
         onMessage: async (task) => ({ done: true })
       });
 
@@ -107,7 +105,6 @@ describe('S3QueuePlugin - Edge Cases', () => {
       verbose: true,  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
-        verbose: true,  // Test expects verbose logging output
         onMessage: async (task) => ({ done: true })
       });
 
