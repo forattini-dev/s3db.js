@@ -65,10 +65,10 @@ describe('CRUD Performance Benchmarks', () => {
       const duration = Date.now() - start;
       const avgTime = duration / iterations;
 
-      console.log(`\n📊 Resource Creation Performance:`);
-      console.log(`   Total: ${duration}ms for ${iterations} resources`);
-      console.log(`   Average: ${avgTime.toFixed(2)}ms per resource`);
-      console.log(`   Expected: <10ms per resource (10x faster than cloneDeep)`);
+      // console.log(`\n📊 Resource Creation Performance:`);
+      // console.log(`   Total: ${duration}ms for ${iterations} resources`);
+      // console.log(`   Average: ${avgTime.toFixed(2)}ms per resource`);
+      // console.log(`   Expected: <10ms per resource (10x faster than cloneDeep)`);
 
       // With shallow clone optimization, should be < 10ms per resource
       expect(avgTime).toBeLessThan(10);
@@ -122,10 +122,10 @@ describe('CRUD Performance Benchmarks', () => {
       const duration = Date.now() - start;
       const avgTime = duration / count;
 
-      console.log(`\n📊 Bulk Insert Performance:`);
-      console.log(`   Total: ${duration}ms for ${count} records`);
-      console.log(`   Average: ${avgTime.toFixed(2)}ms per insert`);
-      console.log(`   Throughput: ${(count / duration * 1000).toFixed(0)} inserts/sec`);
+      // console.log(`\n📊 Bulk Insert Performance:`);
+      // console.log(`   Total: ${duration}ms for ${count} records`);
+      // console.log(`   Average: ${avgTime.toFixed(2)}ms per insert`);
+      // console.log(`   Throughput: ${(count / duration * 1000).toFixed(0)} inserts/sec`);
 
       // Should handle 1000 inserts in reasonable time
       expect(duration).toBeLessThan(5000); // 5ms per insert average
@@ -149,10 +149,10 @@ describe('CRUD Performance Benchmarks', () => {
       const duration = Date.now() - start;
       const avgTime = duration / iterations;
 
-      console.log(`\n📊 update() Performance:`);
-      console.log(`   Total: ${duration}ms for ${iterations} updates`);
-      console.log(`   Average: ${avgTime.toFixed(2)}ms per update`);
-      console.log(`   Expected: 10-50x faster than cloneDeep (< 5ms)`);
+      // console.log(`\n📊 update() Performance:`);
+      // console.log(`   Total: ${duration}ms for ${iterations} updates`);
+      // console.log(`   Average: ${avgTime.toFixed(2)}ms per update`);
+      // console.log(`   Expected: 10-50x faster than cloneDeep (< 5ms)`);
 
       // With structural sharing, should be < 6ms per update (MemoryClient overhead)
       expect(avgTime).toBeLessThan(6);
@@ -176,10 +176,10 @@ describe('CRUD Performance Benchmarks', () => {
       const duration = Date.now() - start;
       const avgTime = duration / iterations;
 
-      console.log(`\n📊 patch() Performance:`);
-      console.log(`   Total: ${duration}ms for ${iterations} patches`);
-      console.log(`   Average: ${avgTime.toFixed(2)}ms per patch`);
-      console.log(`   Expected: 40-60% faster than update() for metadata-only`);
+      // console.log(`\n📊 patch() Performance:`);
+      // console.log(`   Total: ${duration}ms for ${iterations} patches`);
+      // console.log(`   Average: ${avgTime.toFixed(2)}ms per patch`);
+      // console.log(`   Expected: 40-60% faster than update() for metadata-only`);
 
       // patch() with HEAD+COPY should be faster
       expect(avgTime).toBeLessThan(5);
@@ -203,10 +203,10 @@ describe('CRUD Performance Benchmarks', () => {
       const duration = Date.now() - start;
       const avgTime = duration / iterations;
 
-      console.log(`\n📊 replace() Performance:`);
-      console.log(`   Total: ${duration}ms for ${iterations} replaces`);
-      console.log(`   Average: ${avgTime.toFixed(2)}ms per replace`);
-      console.log(`   Expected: 30-40% faster than update() (no GET)`);
+      // console.log(`\n📊 replace() Performance:`);
+      // console.log(`   Total: ${duration}ms for ${iterations} replaces`);
+      // console.log(`   Average: ${avgTime.toFixed(2)}ms per replace`);
+      // console.log(`   Expected: 30-40% faster than update() (no GET)`);
 
       // replace() skips GET, should be fastest
       expect(avgTime).toBeLessThan(4);
@@ -260,14 +260,14 @@ describe('CRUD Performance Benchmarks', () => {
       const patchAvg = patchDuration / iterations;
       const replaceAvg = replaceDuration / iterations;
 
-      console.log(`\n📊 Method Comparison (${iterations} operations each):`);
-      console.log(`   update():  ${updateAvg.toFixed(2)}ms avg (baseline)`);
-      console.log(`   patch():   ${patchAvg.toFixed(2)}ms avg (${((1 - patchAvg/updateAvg) * 100).toFixed(0)}% faster)`);
-      console.log(`   replace(): ${replaceAvg.toFixed(2)}ms avg (${((1 - replaceAvg/updateAvg) * 100).toFixed(0)}% faster)`);
+      // console.log(`\n📊 Method Comparison (${iterations} operations each):`);
+      // console.log(`   update():  ${updateAvg.toFixed(2)}ms avg (baseline)`);
+      // console.log(`   patch():   ${patchAvg.toFixed(2)}ms avg (${((1 - patchAvg/updateAvg) * 100).toFixed(0)}% faster)`);
+      // console.log(`   replace(): ${replaceAvg.toFixed(2)}ms avg (${((1 - replaceAvg/updateAvg) * 100).toFixed(0)}% faster)`);
 
-      console.log(`\n   💡 All methods benefit from structural sharing optimization`);
-      console.log(`   💡 patch() uses HEAD+COPY when possible (40-60% faster)`);
-      console.log(`   💡 replace() skips GET operation (30-40% faster)`);
+      // console.log(`\n   💡 All methods benefit from structural sharing optimization`);
+      // console.log(`   💡 patch() uses HEAD+COPY when possible (40-60% faster)`);
+      // console.log(`   💡 replace() skips GET operation (30-40% faster)`);
 
       // All methods should be reasonably fast
       expect(updateAvg).toBeLessThan(10);
@@ -308,9 +308,9 @@ describe('CRUD Performance Benchmarks', () => {
         results.push({ size, avgTime });
       }
 
-      console.log(`\n📊 Scalability Test (cloneDeep optimization):`);
+      // console.log(`\n📊 Scalability Test (cloneDeep optimization):`);
       results.forEach(r => {
-        console.log(`   ${r.size} items: ${r.avgTime.toFixed(2)}ms avg`);
+        // console.log(`   ${r.size} items: ${r.avgTime.toFixed(2)}ms avg`);
       });
 
       // With structural sharing, growth should be near-linear
@@ -318,10 +318,10 @@ describe('CRUD Performance Benchmarks', () => {
       const growthFactor = results[results.length - 1].avgTime / results[0].avgTime;
       const dataSizeFactor = sizes[sizes.length - 1] / sizes[0]; // 200/10 = 20x
 
-      console.log(`\n   Data size grew ${dataSizeFactor}x`);
-      console.log(`   Time grew ${growthFactor.toFixed(2)}x`);
-      console.log(`   Expected: Near-linear growth (< ${dataSizeFactor * 1.5}x)`);
-      console.log(`   ❌ Without optimization: Would be O(n²) growth (~${dataSizeFactor * dataSizeFactor}x)`);
+      // console.log(`\n   Data size grew ${dataSizeFactor}x`);
+      // console.log(`   Time grew ${growthFactor.toFixed(2)}x`);
+      // console.log(`   Expected: Near-linear growth (< ${dataSizeFactor * 1.5}x)`);
+      // console.log(`   ❌ Without optimization: Would be O(n²) growth (~${dataSizeFactor * dataSizeFactor}x)`);
 
       // Growth should be sub-quadratic (ideally linear)
       expect(growthFactor).toBeLessThan(dataSizeFactor * 1.5);
