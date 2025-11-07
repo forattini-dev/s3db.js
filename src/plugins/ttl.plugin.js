@@ -351,7 +351,7 @@ export class TTLPlugin extends CoordinatorPlugin {
     }
 
     // Validate timestamp field availability
-    if (config.field === '_createdAt' && this.database) {
+    if (config.field === '_createdAt' && this.database && this.verbose) {
       const resource = this.database.resources[resourceName];
       if (resource && resource.$schema.timestamps === false) {
         console.warn(
@@ -748,7 +748,9 @@ export class TTLPlugin extends CoordinatorPlugin {
       this.stats.totalExpired++;
       this.emit('plg:ttl:record-expired', { resource: entry.resourceName, record });
     } catch (error) {
-      console.error(`[TTLPlugin] Error processing expired entry:`, error);
+      if (this.verbose) {
+        console.error(`[TTLPlugin] Error processing expired entry:`, error);
+      }
       this.stats.totalErrors++;
     }
   }

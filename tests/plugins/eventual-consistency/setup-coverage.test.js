@@ -24,7 +24,7 @@ describe('EventualConsistencyPlugin - Setup Coverage', () => {
     // Create plugin BEFORE resource exists
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

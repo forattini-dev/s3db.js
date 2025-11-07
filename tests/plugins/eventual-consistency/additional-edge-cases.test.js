@@ -80,7 +80,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

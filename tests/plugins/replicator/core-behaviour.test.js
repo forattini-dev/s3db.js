@@ -11,7 +11,7 @@ const minimalReplicator = {
 describe('ReplicatorPlugin configuration', () => {
   test('accepts minimal configuration and optional flags', () => {
     const plugin = new ReplicatorPlugin({
-      verbose: true,
+      verbose: false,
       persistReplicatorLog: true,
       replicatorLogResource: 'custom_logs',
       replicatorConcurrency: 12.7,
@@ -133,7 +133,7 @@ describe('Event listeners', () => {
   };
 
   test('listener errors emit plg:replicator:error events', async () => {
-    const plugin = new ReplicatorPlugin({ verbose: true, replicators: [minimalReplicator] });
+    const plugin = new ReplicatorPlugin({ verbose: false, replicators: [minimalReplicator] });
     const resource = createResourceForListeners();
     plugin.database = resource.database;
     plugin.processReplicatorEvent = jest.fn().mockRejectedValue(new Error('Replication failed'));

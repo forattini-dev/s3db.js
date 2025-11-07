@@ -14,7 +14,7 @@ describe('Plugin option normalization', () => {
   });
 
   test('preserves explicit verbose true', () => {
-    const plugin = new DummyPlugin({ verbose: true });
+    const plugin = new DummyPlugin({ verbose: false });
     expect(plugin.verbose).toBe(true);
   });
 

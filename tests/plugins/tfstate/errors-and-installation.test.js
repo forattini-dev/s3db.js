@@ -105,7 +105,7 @@ describe('TfStatePlugin - Installation', () => {
         enabled: false,
       },
       autoSync: true,
-      verbose: true,
+      verbose: false,
       filters: {
         types: ['aws_instance'],
         exclude: ['data.*'],

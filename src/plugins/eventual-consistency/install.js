@@ -11,6 +11,7 @@ import { startConsolidationTimer } from "./consolidation.js";
 import { startGarbageCollectionTimer } from "./garbage-collection.js";
 import { PluginError } from '../../errors.js';
 import { getCronManager } from "../../concerns/cron-manager.js";
+import { createTicketResourceSchema } from "./tickets.js";
 
 /**
  * Install plugin for all configured resources
@@ -139,6 +140,11 @@ export async function completeFieldSetup(handler, database, config, plugin) {
 
   handler.transactionResource = ok ? transactionResource : database.resources[transactionResourceName];
 
+  // Create ticket resource for coordinator mode workload distribution
+  if (config.enableCoordinator) {
+    await createTicketResource(handler, database, resourceName, fieldName);
+  }
+
   // Locks are now managed by PluginStorage with TTL - no Resource needed
   // Lock acquisition is handled via storage.acquireLock() with automatic expiration
 
@@ -232,6 +238,47 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
   }
 
   handler.analyticsResource = ok ? analyticsResource : database.resources[analyticsResourceName];
+}
+
+/**
+ * Create ticket resource for a field handler (coordinator mode)
+ *
+ * Tickets are used to distribute consolidation workload across multiple workers.
+ * The coordinator creates tickets by querying pending transactions, and workers
+ * claim tickets atomically to process batches of records.
+ *
+ * @param {Object} handler - Field handler
+ * @param {Object} database - Database instance
+ * @param {string} resourceName - Resource name
+ * @param {string} fieldName - Field name
+ * @returns {Promise<void>}
+ */
+async function createTicketResource(handler, database, resourceName, fieldName) {
+  const ticketResourceName = `plg_${resourceName}_${fieldName}_tickets`;
+  const ticketSchema = createTicketResourceSchema();
+
+  const [ok, err, ticketResource] = await tryFn(() =>
+    database.createResource({
+      name: ticketResourceName,
+      ...ticketSchema,
+      createdBy: 'EventualConsistencyPlugin'
+    })
+  );
+
+  if (!ok && !database.resources[ticketResourceName]) {
+    throw new PluginError(`Failed to create ticket resource for ${resourceName}.${fieldName}`, {
+      pluginName: 'EventualConsistencyPlugin',
+      operation: 'createTicketResource',
+      statusCode: 500,
+      retriable: false,
+      suggestion: 'Verify database permissions and configuration for creating ticket resources.',
+      resourceName,
+      fieldName,
+      original: err
+    });
+  }
+
+  handler.ticketResource = ok ? ticketResource : database.resources[ticketResourceName];
 }
 
 /**

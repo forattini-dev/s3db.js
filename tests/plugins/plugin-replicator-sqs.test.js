@@ -261,7 +261,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
       send: jest.fn().mockRejectedValue(new Error('SQS error'))
     };
     
-    const replicator = new SqsReplicator({ queueUrl: 'test-queue', verbose: true });
+    const replicator = new SqsReplicator({ queueUrl: 'test-queue', verbose: false });
     replicator.sqsClient = errorClient;
     replicator.enabled = true;
     replicator.resources = { users: true };

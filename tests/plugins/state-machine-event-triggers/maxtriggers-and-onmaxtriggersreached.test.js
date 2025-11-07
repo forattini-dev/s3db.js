@@ -44,7 +44,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
     stateMachinePlugin = new StateMachinePlugin({
       enableEventTriggers: true,
       persistTransitions: true,
-      verbose: true,
+      verbose: false,
       actions: {
         testAction: async () => {
           triggerFired = true;

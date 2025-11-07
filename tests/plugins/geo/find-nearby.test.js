@@ -47,7 +47,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',
@@ -184,7 +184,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',
@@ -221,7 +221,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',

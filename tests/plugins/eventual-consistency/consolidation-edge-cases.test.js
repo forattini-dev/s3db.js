@@ -32,7 +32,7 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);
@@ -67,7 +67,7 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);
@@ -106,7 +106,7 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

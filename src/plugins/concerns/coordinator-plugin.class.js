@@ -35,12 +35,15 @@ import { Plugin } from '../plugin.class.js';
 import { tryFn } from '../../concerns/try-fn.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 
+// Monotonic counter to ensure unique worker IDs even in same millisecond
+let workerCounter = 0;
+
 export class CoordinatorPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
-    // Worker identity
-    this.workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    // Worker identity with monotonic counter for uniqueness
+    this.workerId = `worker-${Date.now()}-${++workerCounter}-${Math.random().toString(36).slice(2, 9)}`;
     this.workerStartTime = Date.now();
 
     // Coordinator state
@@ -539,6 +542,14 @@ export class CoordinatorPlugin extends Plugin {
     if (!this.coordinatorConfig.enableCoordinator) {
       if (this.config.verbose) {
         console.log(`[${this.constructor.name}] Coordinator mode disabled`);
+      }
+      return;
+    }
+
+    // Prevent double initialization
+    if (this.heartbeatHandle) {
+      if (this.config.verbose) {
+        console.log(`[${this.constructor.name}] Coordination already started`);
       }
       return;
     }

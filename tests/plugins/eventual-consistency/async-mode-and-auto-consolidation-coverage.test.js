@@ -32,7 +32,7 @@ describe('EventualConsistencyPlugin - Async Mode and Auto-Consolidation Coverage
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', auto: true },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);
@@ -65,7 +65,7 @@ describe('EventualConsistencyPlugin - Async Mode and Auto-Consolidation Coverage
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

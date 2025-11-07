@@ -33,7 +33,7 @@ describe('EventualConsistencyPlugin - Transaction Coverage', () => {
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', window: 0 }, // 0 hours = all transactions are "late"
       lateArrivals: { strategy: 'ignore' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);
@@ -67,7 +67,7 @@ describe('EventualConsistencyPlugin - Transaction Coverage', () => {
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', window: 0 }, // 0 hours = all transactions are "late"
       lateArrivals: { strategy: 'warn' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

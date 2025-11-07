@@ -40,7 +40,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       plugin = new EventualConsistencyPlugin({
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
-        verbose: true
+        verbose: false
       });
 
       await database.usePlugin(plugin);
@@ -86,7 +86,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       plugin = new EventualConsistencyPlugin({
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
-        verbose: true
+        verbose: false
       });
 
       await database.usePlugin(plugin);
@@ -337,7 +337,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         transactionRetention: 0, // Delete immediately
-        verbose: true
+        verbose: false
       });
 
       await database.usePlugin(plugin);

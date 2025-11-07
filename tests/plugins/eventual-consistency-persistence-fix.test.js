@@ -40,7 +40,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(clicksPlugin);
@@ -190,7 +190,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: true },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

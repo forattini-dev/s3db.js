@@ -60,7 +60,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       enableCoordinator: true,
       heartbeatInterval: 1000,
       heartbeatTTL: 5,
-      verbose: true
+      verbose: false
     });
 
     await plugin.install(database);
@@ -146,7 +146,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       heartbeatInterval: 500,
       dispatchInterval: 200,
       ticketBatchSize: 3,
-      verbose: true
+      verbose: false
     });
 
     await plugin.install(database);
@@ -216,7 +216,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 10000,
-      verbose: true
+      verbose: false
     });
 
     await plugin.install(database);
@@ -254,7 +254,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 10000,
-      verbose: true
+      verbose: false
     });
 
     await plugin.install(database);
@@ -399,7 +399,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       enableCoordinator: true,
       heartbeatInterval: 500,
       epochDuration: 2000, // Short epoch for testing
-      verbose: true
+      verbose: false
     });
 
     await plugin.install(database);

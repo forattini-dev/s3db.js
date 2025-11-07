@@ -305,7 +305,9 @@ export class ProcessManager {
             // console.log(`[ProcessManager]   ✓ Cleanup '${name}' completed`);
           }
         } catch (err) {
-          console.error(`[ProcessManager]   ✗ Cleanup '${name}' failed:`, err.message);
+          if (this.options.verbose) {
+            console.error(`[ProcessManager]   ✗ Cleanup '${name}' failed:`, err.message);
+          }
         }
       });
 

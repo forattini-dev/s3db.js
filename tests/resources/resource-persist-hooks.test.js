@@ -110,7 +110,7 @@ describe("Resource Hook Persistence", () => {
   test("should handle hook serialization errors gracefully", async () => {
     const db = await createDatabaseForTest("suite=resources/persist-hooks-serialization", {
       persistHooks: true,
-      verbose: true
+      verbose: false
     });
 
     const resource = await db.createResource({

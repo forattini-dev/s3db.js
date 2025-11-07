@@ -4,7 +4,7 @@
  * @module eventual-consistency
  */
 
-import { Plugin } from "../plugin.class.js";
+import { CoordinatorPlugin } from "../concerns/coordinator-plugin.class.js";
 import { createConfig, validateResourcesConfig, logConfigWarnings, logInitialization } from "./config.js";
 import { detectTimezone, getCohortInfo, createFieldHandler } from "./utils.js";
 import { createPartitionConfig } from "./partitions.js";
@@ -17,10 +17,11 @@ import {
   runConsolidation
 } from "./consolidation.js";
 import { runGarbageCollection } from "./garbage-collection.js";
+import { createTicketsForHandler, claimTickets, processTicket } from "./tickets.js";
 import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getYearByWeek, getMonthByWeek, getMonthByHour, getTopRecords, getYearByDay, getWeekByDay, getWeekByHour, getLastNHours, getLastNWeeks, getLastNMonths, getRawEvents } from "./analytics.js";
 import { onInstall, onStart, onStop, watchForResource, completeFieldSetup } from "./install.js";
 
-export class EventualConsistencyPlugin extends Plugin {
+export class EventualConsistencyPlugin extends CoordinatorPlugin {
   constructor(options = {}) {
     super(options);
 
@@ -107,6 +108,18 @@ export class EventualConsistencyPlugin extends Plugin {
       (handler, resourceName, fieldName) => this._runGarbageCollectionForHandler(handler, resourceName, fieldName),
       (event, data) => this.emit(event, data)
     );
+
+    // Start coordinator mode if enabled
+    if (this.config.enableCoordinator) {
+      await this.startCoordination(
+        () => this.coordinatorWork(),
+        () => this.workerLoop()
+      );
+
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Coordinator mode started (workerId: ${this.workerId})`);
+      }
+    }
   }
 
   /**
@@ -762,5 +775,221 @@ export class EventualConsistencyPlugin extends Plugin {
     };
 
     return diagnostics;
+  }
+
+  // ==================== COORDINATOR HOOKS ====================
+  // These methods are called by CoordinatorPlugin
+
+  /**
+   * Called when this worker becomes the coordinator
+   * @override
+   */
+  async onBecomeCoordinator() {
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] 🎖️  Became coordinator (workerId: ${this.workerId})`);
+    }
+
+    // Emit event for monitoring
+    this.database.emit('plg:eventual-consistency:coordinator-promoted', {
+      pluginName: this.name,
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Called when this worker stops being the coordinator
+   * @override
+   */
+  async onStopBeingCoordinator() {
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] No longer coordinator (workerId: ${this.workerId})`);
+    }
+
+    // Emit event for monitoring
+    this.database.emit('plg:eventual-consistency:coordinator-demoted', {
+      pluginName: this.name,
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Get cohort hours for the consolidation window
+   * @private
+   */
+  _getCohortHours(windowHours) {
+    const cohortHours = [];
+    const now = new Date();
+
+    for (let i = 0; i < windowHours; i++) {
+      const hourDate = new Date(now.getTime() - (i * 60 * 60 * 1000));
+      const cohortHour = hourDate.toISOString().slice(0, 13) + ':00:00Z';
+      cohortHours.push(cohortHour);
+    }
+
+    return cohortHours;
+  }
+
+  /**
+   * Periodic work that only the coordinator should do
+   * Creates tickets from pending transactions for all field handlers
+   * @override
+   */
+  async coordinatorWork() {
+    if (!this.config.enableCoordinator) {
+      return; // Coordinator mode disabled
+    }
+
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] Coordinator work executing (workerId: ${this.workerId})`);
+    }
+
+    // Iterate over all field handlers and create tickets
+    let totalTickets = 0;
+    const results = [];
+
+    for (const [resourceName, fieldHandlers] of this.fieldHandlers.entries()) {
+      for (const [fieldName, handler] of fieldHandlers.entries()) {
+        try {
+          // Create tickets for this handler
+          const tickets = await createTicketsForHandler(
+            handler,
+            this.config,
+            (windowHours) => this._getCohortHours(windowHours)
+          );
+
+          totalTickets += tickets.length;
+          results.push({
+            resource: resourceName,
+            field: fieldName,
+            tickets: tickets.length
+          });
+
+          if (this.config.verbose && tickets.length > 0) {
+            console.log(`[EventualConsistency] Created ${tickets.length} tickets for ${resourceName}.${fieldName}`);
+          }
+        } catch (err) {
+          if (this.config.verbose) {
+            console.error(`[EventualConsistency] Error creating tickets for ${resourceName}.${fieldName}:`, err);
+          }
+        }
+      }
+    }
+
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] Coordinator work complete: ${totalTickets} total tickets created`);
+    }
+
+    // Emit event for monitoring
+    this.database.emit('plg:eventual-consistency:tickets-created', {
+      pluginName: this.name,
+      workerId: this.workerId,
+      totalTickets,
+      results,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Worker loop - runs on all workers (including coordinator)
+   * Claims and processes available tickets
+   */
+  async workerLoop() {
+    if (!this.config.enableCoordinator) {
+      return; // Coordinator mode disabled
+    }
+
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] Worker loop executing (workerId: ${this.workerId})`);
+    }
+
+    // Iterate over all field handlers and process tickets
+    let totalClaimed = 0;
+    let totalProcessed = 0;
+    let totalErrors = 0;
+    const results = [];
+
+    for (const [resourceName, fieldHandlers] of this.fieldHandlers.entries()) {
+      for (const [fieldName, handler] of fieldHandlers.entries()) {
+        try {
+          // Attempt to claim tickets
+          const claimed = await claimTickets(
+            handler.ticketResource,
+            this.workerId,
+            this.config
+          );
+
+          if (claimed.length === 0) {
+            continue; // No tickets available for this handler
+          }
+
+          totalClaimed += claimed.length;
+
+          if (this.config.verbose) {
+            console.log(`[EventualConsistency] Claimed ${claimed.length} tickets for ${resourceName}.${fieldName}`);
+          }
+
+          // Process each claimed ticket
+          for (const ticket of claimed) {
+            try {
+              const result = await processTicket(ticket, handler, this.database);
+
+              totalProcessed += result.recordsProcessed;
+              totalErrors += result.errors.length;
+
+              results.push({
+                resource: resourceName,
+                field: fieldName,
+                ticketId: ticket.id,
+                recordsProcessed: result.recordsProcessed,
+                transactionsApplied: result.transactionsApplied,
+                errors: result.errors
+              });
+
+              if (this.config.verbose && result.recordsProcessed > 0) {
+                console.log(`[EventualConsistency] Processed ticket ${ticket.id}: ${result.recordsProcessed} records, ${result.transactionsApplied} transactions`);
+              }
+
+              if (this.config.verbose && result.errors.length > 0) {
+                console.error(`[EventualConsistency] Errors processing ticket ${ticket.id}:`, result.errors);
+              }
+            } catch (err) {
+              totalErrors++;
+              if (this.config.verbose) {
+                console.error(`[EventualConsistency] Failed to process ticket ${ticket.id}:`, err);
+              }
+              results.push({
+                resource: resourceName,
+                field: fieldName,
+                ticketId: ticket.id,
+                recordsProcessed: 0,
+                transactionsApplied: 0,
+                errors: [{ error: err.message }]
+              });
+            }
+          }
+        } catch (err) {
+          if (this.config.verbose) {
+            console.error(`[EventualConsistency] Error in worker loop for ${resourceName}.${fieldName}:`, err);
+          }
+        }
+      }
+    }
+
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] Worker loop complete: claimed ${totalClaimed} tickets, processed ${totalProcessed} records, ${totalErrors} errors`);
+    }
+
+    // Emit event for monitoring
+    this.database.emit('plg:eventual-consistency:tickets-processed', {
+      pluginName: this.name,
+      workerId: this.workerId,
+      ticketsClaimed: totalClaimed,
+      recordsProcessed: totalProcessed,
+      errors: totalErrors,
+      results,
+      timestamp: Date.now()
+    });
   }
 }
