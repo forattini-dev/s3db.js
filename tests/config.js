@@ -55,6 +55,7 @@ export function createDatabaseForTest(testName, options = {}) {
   const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
   const params = {
     connectionString: baseConnection + `/${s3Prefix(testName)}`,
+    verbose: false,  // Ensure no initialization logs in tests
     ...options,
   }
 
@@ -193,6 +194,7 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
 
   const database = new Database({
     client: memoryClient,
+    verbose: false,  // Ensure no initialization logs in tests
     ...options
   });
 
