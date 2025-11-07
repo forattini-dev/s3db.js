@@ -17,7 +17,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
 
     // Create data
     const client = new MemoryClient({ bucket: 'test' });
-    const db = new Database({ client });
+    const db = new Database({ verbose: false, client });
     await db.connect();
 
     const users = await db.createResource({
@@ -80,7 +80,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
 
     // Create data
     const client = new MemoryClient({ bucket: 'test' });
-    const db = new Database({ client });
+    const db = new Database({ verbose: false, client });
     await db.connect();
 
     const products = await db.createResource({
@@ -166,7 +166,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
 
     // Import
     const client = new MemoryClient({ bucket: 'import-test' });
-    const db = new Database({ client });
+    const db = new Database({ verbose: false, client });
     await db.connect();
 
     const stats = await client.importBackup(tmpDir, { database: db });
@@ -202,7 +202,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
 
     // Step 1: Create original data
     const originalClient = new MemoryClient({ bucket: 'original' });
-    const originalDb = new Database({ client: originalClient });
+    const originalDb = new Database({ verbose: false, client: originalClient });
     await originalDb.connect();
 
     const orders = await originalDb.createResource({
@@ -229,7 +229,7 @@ describe('MemoryClient BackupPlugin-Compatible Format', () => {
 
     // Step 3: Import to new client
     const newClient = new MemoryClient({ bucket: 'new' });
-    const newDb = new Database({ client: newClient });
+    const newDb = new Database({ verbose: false, client: newClient });
     await newDb.connect();
 
     await newClient.importBackup(tmpDir, { database: newDb });

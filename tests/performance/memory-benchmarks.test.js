@@ -31,7 +31,7 @@ describe('Memory Benchmarks', () => {
   beforeAll(async () => {
     // Warm up - create and destroy a database
     const warmupDb = new Database({
-      client: new MemoryClient({ bucket: 'warmup', keyPrefix: 'warmup/' }),
+      verbose: false, client: new MemoryClient({ bucket: 'warmup', keyPrefix: 'warmup/' }),
       deferMetadataWrites: true  // Enable debounced metadata uploads for performance
     });
     await warmupDb.connect();
@@ -54,7 +54,7 @@ describe('Memory Benchmarks', () => {
 
     const measurement = await measureMemory(async () => {
       const testDb = new Database({
-        client: new MemoryClient({ bucket: 'test', keyPrefix: 'test/' }),
+        verbose: false, client: new MemoryClient({ bucket: 'test', keyPrefix: 'test/' }),
         deferMetadataWrites: true  // Enable debounced metadata uploads for performance
       });
       await testDb.connect();

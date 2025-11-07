@@ -155,7 +155,7 @@ describe.skip('API Plugin - Path-based Auth Integration', () => {
   beforeAll(async () => {
     // Create database with MemoryClient (no MinIO needed)
     db = new Database({
-      client: 'memory'
+      verbose: false, client: 'memory'
     });
 
     await db.connect();

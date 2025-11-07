@@ -28,7 +28,7 @@ describe('Event Listener Cleanup', () => {
     clearValidatorCache();
 
     db = new Database({
-      client: new MemoryClient({ bucket: 'test-listener-cleanup', keyPrefix: 'test/' }),
+      verbose: false, client: new MemoryClient({ bucket: 'test-listener-cleanup', keyPrefix: 'test/' }),
       deferMetadataWrites: true
     });
     await db.connect();

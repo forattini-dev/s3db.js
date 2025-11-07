@@ -130,7 +130,7 @@ describe('Audit Plugin', () => {
       // Create isolated database instance for this test
       const isolatedClient = createClientForTest(`plugin-audit-disabled`);
 
-      const isolatedDatabase = new Database({ client: isolatedClient });
+      const isolatedDatabase = new Database({ verbose: false, client: isolatedClient });
 
 
     });
@@ -139,7 +139,7 @@ describe('Audit Plugin', () => {
       // Create isolated database instance for this test
       const isolatedClient = createClientForTest(`suite=plugins/audit-existing`);
 
-      const isolatedDatabase = new Database({ client: isolatedClient });
+      const isolatedDatabase = new Database({ verbose: false, client: isolatedClient });
 
       // First setup
       const firstPlugin = new AuditPlugin();
@@ -154,7 +154,7 @@ describe('Audit Plugin', () => {
       // Create a fresh database without audit plugin
       const freshClient = createClientForTest(`suite=plugins/audit-no-audit`);
 
-      const freshDatabase = new Database({ client: freshClient });
+      const freshDatabase = new Database({ verbose: false, client: freshClient });
 
       const freshUsers = await freshDatabase.createResource({
         name: 'users',

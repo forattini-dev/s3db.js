@@ -13,7 +13,7 @@ describe('KubernetesInventoryPlugin', () => {
 
   beforeEach(async () => {
     db = new Database({
-      connectionString: 'memory://k8s-inventory-test/databases/test'
+      verbose: false, connectionString: 'memory://k8s-inventory-test/databases/test'
     });
   });
 

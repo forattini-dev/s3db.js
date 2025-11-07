@@ -82,7 +82,7 @@ describe('Geo Plugin - Stats and uninstall', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,
+      verbose: true,  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',

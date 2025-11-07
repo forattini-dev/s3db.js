@@ -16,7 +16,7 @@ describe('Database Critical Fixes', () => {
 
   beforeEach(async () => {
     const client = new MemoryClient({ bucket: 'test' });
-    db = new Database({ client });
+    db = new Database({ verbose: false, client });
     await db.connect();
   });
 
@@ -29,7 +29,7 @@ describe('Database Critical Fixes', () => {
   describe('Fix 1: Memory Leak - Process Exit Listener Cleanup', () => {
     it('should register exit listener in constructor', async () => {
       const client = new MemoryClient({ bucket: 'test-exit' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
 
       // Listener should be registered immediately after construction
       expect(database._exitListenerRegistered).toBe(true);
@@ -42,7 +42,7 @@ describe('Database Critical Fixes', () => {
 
     it('should cleanup exit listener on disconnect', async () => {
       const client = new MemoryClient({ bucket: 'test-cleanup' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
 
       await database.connect();
 
@@ -58,7 +58,7 @@ describe('Database Critical Fixes', () => {
 
     it('should properly handle reconnection with new listener', async () => {
       const client = new MemoryClient({ bucket: 'test-multi' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
 
       await database.connect();
       const firstListener = database._exitListener;
@@ -85,7 +85,7 @@ describe('Database Critical Fixes', () => {
   describe('Fix 2: Race Condition - Emit Before RemoveAllListeners', () => {
     it('should receive disconnected event before listeners are removed', async () => {
       const client = new MemoryClient({ bucket: 'test-race' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
       await database.connect();
 
       let eventReceived = false;
@@ -105,7 +105,7 @@ describe('Database Critical Fixes', () => {
 
     it('should emit disconnected event to multiple listeners', async () => {
       const client = new MemoryClient({ bucket: 'test-multi-listeners' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
       await database.connect();
 
       const receivedEvents = [];
@@ -126,7 +126,7 @@ describe('Database Critical Fixes', () => {
 
     it('should await disconnected event emission call', async () => {
       const client = new MemoryClient({ bucket: 'test-await' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
       await database.connect();
 
       let eventEmitted = false;
@@ -147,7 +147,7 @@ describe('Database Critical Fixes', () => {
   describe('Fix 3: Hook Error Handling - Strict Mode', () => {
     it('should continue execution on hook errors in non-strict mode (default)', async () => {
       const client = new MemoryClient({ bucket: 'test-hooks-lenient' });
-      const database = new Database({ client, strictHooks: false });
+      const database = new Database({ verbose: false, client, strictHooks: false });
       await database.connect();
 
       const executionOrder = [];
@@ -182,7 +182,7 @@ describe('Database Critical Fixes', () => {
 
     it('should throw on first hook error in strict mode', async () => {
       const client = new MemoryClient({ bucket: 'test-hooks-strict' });
-      const database = new Database({ client, strictHooks: true });
+      const database = new Database({ verbose: false, client, strictHooks: true });
       await database.connect();
 
       const executionOrder = [];
@@ -219,7 +219,7 @@ describe('Database Critical Fixes', () => {
 
     it('should include error context in strict mode exception', async () => {
       const client = new MemoryClient({ bucket: 'test-hooks-context' });
-      const database = new Database({ client, strictHooks: true });
+      const database = new Database({ verbose: false, client, strictHooks: true });
       await database.connect();
 
       database.addHook('beforeCreateResource', () => {
@@ -244,7 +244,7 @@ describe('Database Critical Fixes', () => {
 
     it('should execute all hooks successfully in strict mode when no errors', async () => {
       const client = new MemoryClient({ bucket: 'test-hooks-success' });
-      const database = new Database({ client, strictHooks: true });
+      const database = new Database({ verbose: false, client, strictHooks: true });
       await database.connect();
 
       const executionOrder = [];
@@ -273,7 +273,7 @@ describe('Database Critical Fixes', () => {
   describe('Fix 4: Missing Await in Disconnect', () => {
     it('should properly await emit during disconnect', async () => {
       const client = new MemoryClient({ bucket: 'test-await-emit' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
       await database.connect();
 
       let emitCompleted = false;
@@ -291,7 +291,7 @@ describe('Database Critical Fixes', () => {
 
     it('should ensure proper cleanup order with await', async () => {
       const client = new MemoryClient({ bucket: 'test-cleanup-order' });
-      const database = new Database({ client });
+      const database = new Database({ verbose: false, client });
       await database.connect();
 
       await database.createResource({
@@ -325,7 +325,7 @@ describe('Database Critical Fixes', () => {
   describe('Integration: All Fixes Together', () => {
     it('should handle complete lifecycle with all fixes', async () => {
       const client = new MemoryClient({ bucket: 'test-integration' });
-      const database = new Database({ client, strictHooks: false });
+      const database = new Database({ verbose: false, client, strictHooks: false });
 
       // Track lifecycle events
       const lifecycle = [];
@@ -354,7 +354,7 @@ describe('Database Critical Fixes', () => {
 
     it('should handle reconnection with all fixes', async () => {
       const client = new MemoryClient({ bucket: 'test-reconnect' });
-      const database = new Database({ client, strictHooks: true });
+      const database = new Database({ verbose: false, client, strictHooks: true });
 
       // First connection
       await database.connect();
