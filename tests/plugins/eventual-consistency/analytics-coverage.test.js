@@ -30,6 +30,7 @@ describe('EventualConsistencyPlugin - Analytics Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' }
     });
@@ -55,6 +56,7 @@ describe('EventualConsistencyPlugin - Analytics Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] }
     });
 
@@ -76,6 +78,7 @@ describe('EventualConsistencyPlugin - Analytics Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] }
     });
 
@@ -97,6 +100,7 @@ describe('EventualConsistencyPlugin - Analytics Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] }
     });
 

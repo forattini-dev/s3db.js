@@ -52,7 +52,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
 
     test('should handle custom configuration', async () => {
       const customCachePlugin = new CachePlugin({
-        verbose: false,driver: 's3',
+      verbose: false,driver: 's3',
         client: db.client,
         config: {
           bucket: 'custom-cache-bucket',
@@ -67,7 +67,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
 
     test('should use database client by default', async () => {
       const defaultCachePlugin = new CachePlugin({
-        verbose: false,driver: 's3'
+      verbose: false,driver: 's3'
         // No explicit client - should use database.client
       });
       await defaultCachePlugin.install(db);

@@ -44,6 +44,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
   describe("Configuration", () => {
     it("should enable coordinator mode by default", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         verbose: false
       });
@@ -56,6 +57,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should disable coordinator mode when explicitly set", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         enableCoordinator: false,
         verbose: false
@@ -69,6 +71,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should use default coordinator configuration", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         verbose: false
       });
@@ -86,6 +89,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should override coordinator configuration", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         coordinator: {
           heartbeatInterval: 3000,
@@ -110,6 +114,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
   describe("Ticket Resource Creation", () => {
     it("should create ticket resources during installation", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         verbose: false
       });
@@ -124,6 +129,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should configure ticket resource correctly", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         verbose: false
       });
@@ -149,6 +155,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should have required ticket fields", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         verbose: false
       });
@@ -173,6 +180,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should reference ticket resource in handler", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         verbose: false
       });
@@ -187,6 +195,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should not create ticket resources when coordinator disabled", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         enableCoordinator: false,
         verbose: false
@@ -203,6 +212,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
   describe("Ticket Creation", () => {
     beforeEach(async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         coordinator: { ticketBatchSize: 100 },
         verbose: false
@@ -273,6 +283,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         coordinator: { ticketBatchSize: 50 },
         verbose: false
@@ -324,6 +335,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
   describe("Ticket Claiming", () => {
     beforeEach(async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         coordinator: { ticketBatchSize: 100, workerClaimLimit: 2 },
         verbose: false
@@ -450,6 +462,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
   describe("Ticket Processing", () => {
     beforeEach(async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         coordinator: { ticketBatchSize: 100 },
         verbose: false
@@ -653,6 +666,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
   describe("End-to-End Flow", () => {
     it("should consolidate transactions via coordinator pattern", async () => {
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { users: ['balance'] },
         coordinator: {
           ticketBatchSize: 50,

@@ -30,6 +30,7 @@ describe('EventualConsistencyPlugin - Garbage Collection Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', auto: false },
       verbose: false

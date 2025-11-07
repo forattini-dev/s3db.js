@@ -83,6 +83,7 @@ describe('API Plugin populate parameter', () => {
     });
 
     const relationPlugin = new RelationPlugin({
+      verbose: false,
       relations: {
         orders: {
           customer: {
@@ -109,6 +110,7 @@ describe('API Plugin populate parameter', () => {
     await db.usePlugin(relationPlugin);
 
     apiPlugin = new ApiPlugin({
+      verbose: false,
       port,
       host: '127.0.0.1',
       verbose: false,

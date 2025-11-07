@@ -7,6 +7,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
       const plugin = new VectorPlugin({
+      verbose: false,
         storageThreshold: 100,
         autoFixBehavior: false
       });
@@ -44,6 +45,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
     test('should auto-fix when enabled', () => {
       const plugin = new VectorPlugin({
+      verbose: false,
         storageThreshold: 100,
         autoFixBehavior: true
       });
@@ -81,6 +83,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
     test('should not warn for body-overflow behavior', () => {
       const plugin = new VectorPlugin({
+      verbose: false,
         storageThreshold: 100
       });
 
@@ -112,6 +115,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
     test('should not warn for body-only behavior', () => {
       const plugin = new VectorPlugin({
+      verbose: false,
         storageThreshold: 100
       });
 
@@ -143,6 +147,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
     test('should not warn for small vectors', () => {
       const plugin = new VectorPlugin({
+      verbose: false,
         storageThreshold: 1000
       });
 
@@ -599,6 +604,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
     test('should use default metric from config', () => {
       const plugin = new VectorPlugin({
+      verbose: false,
         distanceMetric: 'euclidean'
       });
 
@@ -610,6 +616,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
     test('should override default metric', () => {
       const plugin = new VectorPlugin({
+      verbose: false,
         distanceMetric: 'cosine'
       });
 

@@ -24,6 +24,7 @@ describe('StateMachinePlugin - Machine Definition', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
+      verbose: false,
       stateMachines: {
         order_processing: {
           initialState: 'pending',

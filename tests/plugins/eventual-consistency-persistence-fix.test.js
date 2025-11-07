@@ -36,6 +36,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
 
     // Add EventualConsistency plugin for clicks field
     const clicksPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -186,6 +187,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     });
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },

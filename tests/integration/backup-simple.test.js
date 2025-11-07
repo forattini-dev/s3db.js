@@ -14,6 +14,7 @@ describe('Backup Integration (Simple)', () => {
     tempBackupDir = await createTemporaryPathForTest('backup-simple-test');
 
     backupPlugin = new BackupPlugin({
+      verbose: false,
       driver: 'filesystem',
       config: {
         path: tempBackupDir + '/{date}/'

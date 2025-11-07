@@ -35,6 +35,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - sendEvent with ac
     const transitions = [];
 
     stateMachinePlugin = new StateMachinePlugin({
+      verbose: false,
       enableEventTriggers: true,
       persistTransitions: true,  // Need to persist context
       actions: {

@@ -55,6 +55,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('single worker becomes coordinator immediately', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -84,6 +85,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('deterministic coordinator election with multiple workers', async () => {
     const pluginA = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -94,6 +96,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     });
 
     const pluginB = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -104,6 +107,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     });
 
     const pluginC = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -140,6 +144,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('coordinator publishes dispatch tickets', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -180,6 +185,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('workers claim messages via dispatch tickets', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -213,6 +219,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('lock renewal rejected after message completion', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 10000,
@@ -251,6 +258,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('lock renewal rejected for wrong token', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 10000,
@@ -290,6 +298,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('coordinator recovers stalled tickets from dead worker', async () => {
     const pluginA = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -337,6 +346,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   // The epochDuration minimum prevents testing this behavior in reasonable time.
   test.skip('coordinator transitions when worker joins/leaves', async () => {
     const pluginA = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -362,6 +372,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
     // Add a second worker with lexicographically earlier ID
     const pluginB = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -394,6 +405,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   // TODO: Add a test mode flag that allows shorter epochs for testing.
   test.skip('epoch renewal extends coordinator leadership', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -424,6 +436,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   test('cold start observes environment before processing', async () => {
     // First worker starts
     const pluginA = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -461,6 +474,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('cold start can be skipped for testing', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -484,6 +498,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   test('multiple workers discover each other during cold start', async () => {
     // Start first worker
     const pluginA = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -512,6 +527,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     await sleep(300);
 
     const pluginB = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,

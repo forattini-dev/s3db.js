@@ -36,6 +36,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
       attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     plugin = new QueueConsumerPlugin({
+      verbose: false,
       enabled: true,
       consumers: [
         {
@@ -204,6 +205,7 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
       attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     plugin = new QueueConsumerPlugin({
+      verbose: false,
       enabled: true,
       consumers: [
         {
@@ -268,6 +270,7 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
       attributes: { id: 'string|optional', userId: 'string|required', amount: 'number|required|convert:true' }
     });
     plugin = new QueueConsumerPlugin({
+      verbose: false,
       enabled: true,
       consumers: [
         {
@@ -345,6 +348,7 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
       attributes: { id: 'string|optional', name: 'string|required', email: 'string|required' }
     });
     plugin = new QueueConsumerPlugin({
+      verbose: false,
       enabled: true,
       consumers: [
         {
@@ -416,6 +420,7 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
       attributes: { id: 'string|optional', userId: 'string|required', amount: 'number|required' }
     });
     plugin = new QueueConsumerPlugin({
+      verbose: false,
       enabled: true,
       consumers: [
         {
@@ -521,6 +526,7 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
     await replicator.initialize(dbSource);
     // Consumer consome da mesma fila e popula resource destino
     consumer = new QueueConsumerPlugin({
+      verbose: false,
       enabled: true,
       consumers: [
         {

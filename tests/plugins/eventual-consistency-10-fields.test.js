@@ -52,6 +52,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     ];
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         metrics: fieldNames
       },
@@ -112,6 +113,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     ];
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         metrics: fieldNames
       },
@@ -199,6 +201,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     ];
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         metrics: fieldNames
       },

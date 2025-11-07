@@ -37,6 +37,7 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       verbose: false
     });
@@ -58,6 +59,7 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       cohort: { timezone: 'Invalid/Timezone' },
       consolidation: { mode: 'sync', auto: false },
@@ -82,6 +84,7 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
 
     expect(() => {
       new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: 'invalid' } // Should be array
       });
     }).toThrow('must be an array');

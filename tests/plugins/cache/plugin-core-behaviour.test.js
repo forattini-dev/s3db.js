@@ -41,7 +41,7 @@ describe('CachePlugin core behaviour', () => {
       {
         name: 'partition-aware',
         setup: () => new CachePlugin({
-          verbose: false,driver: 'filesystem',
+      verbose: false,driver: 'filesystem',
           partitionAware: true,
           trackUsage: true,
           config: { directory: tempDir }

@@ -30,6 +30,7 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
       verbose: false
@@ -65,6 +66,7 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
       verbose: false
@@ -104,6 +106,7 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
       verbose: false

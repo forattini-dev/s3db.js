@@ -50,7 +50,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
     test('should initialize with custom configuration', () => {
       const plugin = new MetricsPlugin({
-        verbose: false,enabled: false,
+      verbose: false,enabled: false,
         collectPerformance: false,
         retentionDays: 60,
         flushInterval: 120000

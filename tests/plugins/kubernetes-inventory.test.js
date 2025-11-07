@@ -27,6 +27,7 @@ describe('KubernetesInventoryPlugin', () => {
     it('should require at least one cluster', () => {
       expect(() => {
         new KubernetesInventoryPlugin({
+      verbose: false,
           clusters: []
         });
       }).not.toThrow();
@@ -36,6 +37,7 @@ describe('KubernetesInventoryPlugin', () => {
 
     it('should auto-generate cluster IDs', () => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [
           { name: 'Cluster 1' },
           { name: 'Cluster 2' }
@@ -48,6 +50,7 @@ describe('KubernetesInventoryPlugin', () => {
 
     it('should normalize cluster definitions', () => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [
           {
             id: 'test',
@@ -66,6 +69,7 @@ describe('KubernetesInventoryPlugin', () => {
 
     it('should detect duplicate cluster IDs', async () => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [
           { id: 'test', name: 'Test 1' },
           { id: 'test', name: 'Test 2' } // Duplicate!
@@ -78,6 +82,7 @@ describe('KubernetesInventoryPlugin', () => {
 
     it('should normalize discovery options', () => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         discovery: {
           select: ['core.*'],
@@ -102,6 +107,7 @@ describe('KubernetesInventoryPlugin', () => {
       });
 
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test', name: 'Test' }],
         discovery: { runOnInstall: false } // Don't auto-discover
       });
@@ -121,6 +127,7 @@ describe('KubernetesInventoryPlugin', () => {
       await db.disconnect();
 
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         resourceNames: {
           snapshots: 'my_snapshots',
@@ -144,6 +151,7 @@ describe('KubernetesInventoryPlugin', () => {
   describe('Filtering', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -219,6 +227,7 @@ describe('KubernetesInventoryPlugin', () => {
   describe('Resource Key Generation', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -263,6 +272,7 @@ describe('KubernetesInventoryPlugin', () => {
   describe('Digest Computation', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -303,6 +313,7 @@ describe('KubernetesInventoryPlugin', () => {
   describe('Summary Extraction', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -335,6 +346,7 @@ describe('KubernetesInventoryPlugin', () => {
   describe('Diff Computation', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -399,6 +411,7 @@ describe('KubernetesInventoryPlugin', () => {
       });
 
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test' }],
         resourceNames: {
           snapshots: 'custom_snapshots',
@@ -425,6 +438,7 @@ describe('KubernetesInventoryPlugin', () => {
       });
 
       const plugin1 = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test1' }],
         resourceNames: {
           snapshots: 'prod_snapshots',
@@ -436,6 +450,7 @@ describe('KubernetesInventoryPlugin', () => {
       });
 
       const plugin2 = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [{ id: 'test2' }],
         resourceNames: {
           snapshots: 'staging_snapshots',
@@ -471,6 +486,7 @@ describe('KubernetesInventoryPlugin', () => {
       });
 
       plugin = new KubernetesInventoryPlugin({
+      verbose: false,
         clusters: [
           { id: 'cluster-a', name: 'Cluster A' },
           { id: 'cluster-b', name: 'Cluster B' }

@@ -15,6 +15,7 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
 
     // Plugin configuration for wallets
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         wallets: ['balance']
       },

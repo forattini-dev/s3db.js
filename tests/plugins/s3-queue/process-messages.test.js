@@ -33,6 +33,7 @@ describe('S3QueuePlugin - Process Messages', () => {
 
   beforeEach(async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'emails',
       autoStart: false,
       pollInterval: 100,  // Fast polling for tests

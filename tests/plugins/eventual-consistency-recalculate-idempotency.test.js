@@ -19,6 +19,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Install eventual consistency plugin
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         users_recalc_idempotent: ['balance']
       },
@@ -214,6 +215,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Setup plugin for this resource
     const accountsPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         accounts_recalc_multi: ['credits', 'debits']
       },

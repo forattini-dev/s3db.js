@@ -36,6 +36,7 @@ describe('Audit Plugin', () => {
     client = database.client;
 
     auditPlugin = new AuditPlugin({
+      verbose: false,
       enabled: true,
       includeData: true,
       includePartitions: true,
@@ -246,6 +247,7 @@ describe('Audit Plugin', () => {
       await isolatedDatabase.connect();
 
       const pluginWithoutPartitions = new AuditPlugin({
+      verbose: false,
         enabled: true,
         includeData: true,
         includePartitions: false
@@ -303,6 +305,7 @@ describe('Audit Plugin', () => {
       await isolatedDatabase.connect();
 
       const pluginWithoutData = new AuditPlugin({
+      verbose: false,
         enabled: true,
         includeData: false
       });
@@ -1080,6 +1083,7 @@ describe('Audit Plugin', () => {
       const isolatedDatabase = new Database({ client: isolatedClient });
 
       const pluginWithoutData = new AuditPlugin({
+      verbose: false,
         enabled: true,
         includeData: false
       });
@@ -1123,6 +1127,7 @@ describe('Audit Plugin', () => {
       const isolatedDatabase = new Database({ client: isolatedClient });
 
       const pluginWithoutPartitions = new AuditPlugin({
+      verbose: false,
         enabled: true,
         includeData: true,
         includePartitions: false

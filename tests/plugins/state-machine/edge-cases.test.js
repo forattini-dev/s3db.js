@@ -24,6 +24,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
+      verbose: false,
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -72,6 +73,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
 
   it('should handle missing action gracefully', async () => {
     const missingActionPlugin = new StateMachinePlugin({
+      verbose: false,
       stateMachines: {
         test: {
           initialState: 'start',
@@ -101,6 +103,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
 
   it('should handle missing guard gracefully', async () => {
     const missingGuardPlugin = new StateMachinePlugin({
+      verbose: false,
       stateMachines: {
         test: {
           initialState: 'start',

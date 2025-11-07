@@ -30,6 +30,7 @@ describe('EventualConsistencyPlugin - Verbose Logging Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
       verbose: false // Enable verbose for logging coverage
@@ -60,6 +61,7 @@ describe('EventualConsistencyPlugin - Verbose Logging Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
       verbose: false

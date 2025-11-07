@@ -204,6 +204,7 @@ describe.skip('API Plugin - Path-based Auth Integration', () => {
 
     // Create API Plugin with path-based auth
     apiPlugin = new ApiPlugin({
+      verbose: false,
       port: 0, // Random port
       verbose: false,
       auth: {

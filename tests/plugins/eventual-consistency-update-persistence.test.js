@@ -36,6 +36,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -98,6 +99,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -145,6 +147,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -207,6 +210,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
