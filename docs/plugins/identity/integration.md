@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [Resource Server](#resource-server-integration) | [Client Integration](#client-integration-examples) | [Azure AD](#azure-ad-integration) | [Keycloak](#keycloak-integration) | [Multi-Audience](#multi-audience-tokens)
 
-> **Navigation:** [← Back to Identity Plugin](../identity.md) | [← API Reference](./api-reference.md) | [Troubleshooting →](./troubleshooting.md)
+> **Navigation:** [← Back to Identity Plugin](./README.md) | [← API Reference](./api-reference.md) | [Troubleshooting →](./troubleshooting.md)
 
 ---
 
@@ -339,7 +339,7 @@ const productsOIDC = new OIDCClient({
 - [Architecture & Token Flow](./architecture.md) - System design and flows
 - [API Reference](./api-reference.md) - All endpoints
 - [Troubleshooting](./troubleshooting.md) - Common errors and solutions
-- [Identity Plugin Main](../identity.md) - Overview and quickstart
+- [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
 - [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource Server
@@ -349,4 +349,4 @@ const productsOIDC = new OIDCClient({
 
 ---
 
-> **Navigation:** [↑ Top](#) | [← API Reference](./api-reference.md) | [Troubleshooting →](./troubleshooting.md) | [← Back to Identity Plugin](../identity.md)
+> **Navigation:** [↑ Top](#) | [← API Reference](./api-reference.md) | [Troubleshooting →](./troubleshooting.md) | [← Back to Identity Plugin](./README.md)

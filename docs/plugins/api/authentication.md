@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [🔑 JWT](#jwt-authentication) | [🔒 Basic Auth](#basic-authentication) | [🌐 OIDC/OAuth2](#oauth2--openid-connect-sso-authorization-server) | [🎣 User Hooks](#oidc-authentication-with-user-hooks) | [🛡️ Security](#️-security--validation) | [🛤️ Path Auth](#️-path-based-authentication)
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Guards →](./guards.md) | [Static Files →](./static-files.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Guards →](./guards.md) | [Static Files →](./static-files.md)
 
 ---
 
@@ -837,7 +837,7 @@ You learned:
 ## 🔗 See Also
 
 **Related Documentation:**
-- [API Plugin](../api.md) - Main API Plugin documentation
+- [API Plugin](./README.md) - Main API Plugin documentation
 - [Guards](./guards.md) - Row-level security and authorization
 - [Static Files](./static-files.md) - Serve React/Vue/Angular apps with auth
 - [Identity Plugin](../identity.md) - OAuth2/OIDC Authorization Server (SSO)
@@ -853,4 +853,4 @@ You learned:
 
 ---
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Guards →](./guards.md) | [Static Files →](./static-files.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Guards →](./guards.md) | [Static Files →](./static-files.md)

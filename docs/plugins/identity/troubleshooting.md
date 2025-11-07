@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [Error Handling](#error-handling) | [Common Errors](#common-errors) | [Recovery Patterns](#error-recovery-patterns) | [Performance](#performance-optimization) | [Issues](#common-issues)
 
-> **Navigation:** [← Back to Identity Plugin](../identity.md) | [← Integration](./integration.md)
+> **Navigation:** [← Back to Identity Plugin](./README.md) | [← Integration](./integration.md)
 
 ---
 
@@ -426,7 +426,7 @@ const identityPlugin = new IdentityPlugin({
 - [Architecture & Token Flow](./architecture.md) - System design and flows
 - [API Reference](./api-reference.md) - All endpoints
 - [Integration Guide](./integration.md) - Resource Server and client integration
-- [Identity Plugin Main](../identity.md) - Overview and quickstart
+- [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
 - [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
@@ -435,4 +435,4 @@ const identityPlugin = new IdentityPlugin({
 
 ---
 
-> **Navigation:** [↑ Top](#) | [← Integration](./integration.md) | [← Back to Identity Plugin](../identity.md)
+> **Navigation:** [↑ Top](#) | [← Integration](./integration.md) | [← Back to Identity Plugin](./README.md)

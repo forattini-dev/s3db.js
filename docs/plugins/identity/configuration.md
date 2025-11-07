@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [Core Options](#core-options) | [OAuth2/OIDC](#oauth2oidc-options) | [Security](#security-options) | [Features](#features-options) | [Examples](#-configuration-examples)
 
-> **Navigation:** [← Back to Identity Plugin](../identity.md) | [Architecture →](./architecture.md) | [API Reference →](./api-reference.md)
+> **Navigation:** [← Back to Identity Plugin](./README.md) | [Architecture →](./architecture.md) | [API Reference →](./api-reference.md)
 
 ---
 
@@ -396,7 +396,7 @@ const identityPlugin = new IdentityPlugin({
 - [API Reference](./api-reference.md) - All 9 OAuth2/OIDC endpoints
 - [Integration Guide](./integration.md) - Connect Resource Servers and clients
 - [Troubleshooting](./troubleshooting.md) - Common errors and solutions
-- [Identity Plugin Main](../identity.md) - Overview and quickstart
+- [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
 - [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
@@ -405,4 +405,4 @@ const identityPlugin = new IdentityPlugin({
 
 ---
 
-> **Navigation:** [↑ Top](#) | [← Identity Plugin](../identity.md) | [Architecture →](./architecture.md) | [API Reference →](./api-reference.md)
+> **Navigation:** [↑ Top](#) | [← Identity Plugin](./README.md) | [Architecture →](./architecture.md) | [API Reference →](./api-reference.md)
