@@ -38,6 +38,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
 
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         accounts: ['balance', 'transactions']
       },
@@ -166,6 +167,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         counters: ['value']
       },
@@ -204,6 +206,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         votes: ['upvotes', 'downvotes']
       },
@@ -253,6 +256,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         wallets: ['balance']
       },

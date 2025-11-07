@@ -79,6 +79,7 @@ describe.skip('API Plugin - Security Tests', () => {
       });
 
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         auth: {
@@ -416,6 +417,7 @@ describe.skip('API Plugin - Security Tests', () => {
       });
 
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         auth: {

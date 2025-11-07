@@ -35,6 +35,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - trigger-executed 
     const executedEvents = [];
 
     stateMachinePlugin = new StateMachinePlugin({
+      verbose: false,
       enableEventTriggers: true,
       persistTransitions: true,  // Need to persist context
       stateMachines: {

@@ -41,6 +41,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     // Setup EventualConsistency for all counters
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
@@ -86,6 +87,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     // Setup EventualConsistency with analytics
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
@@ -130,6 +132,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
@@ -171,6 +174,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },

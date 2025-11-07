@@ -19,6 +19,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
     // Create plugin with test configuration (new driver-based API)
     plugin = new BackupPlugin({
+      verbose: false,
       driver: 'filesystem',
       config: {
         path: path.join(tempDir, 'backups', '{date}')
@@ -97,7 +98,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
     it('should initialize with S3 driver', async () => {
       const s3Plugin = new BackupPlugin({
-        verbose: false,driver: 's3',
+      verbose: false,driver: 's3',
         config: {
           bucket: 'test-bucket',
           path: 'backups/{date}/'
@@ -109,7 +110,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
     it('should initialize with multi driver', async () => {
       const multiPlugin = new BackupPlugin({
-        verbose: false,driver: 'multi',
+      verbose: false,driver: 'multi',
         config: {
           strategy: 'all',
           destinations: [
@@ -125,7 +126,7 @@ describe('BackupPlugin (New Driver API)', () => {
     it('should validate driver configuration', () => {
       expect(() => {
         new BackupPlugin({
-          verbose: false,driver: 'invalid-driver'
+      verbose: false,driver: 'invalid-driver'
         });
       }).toThrow('Unknown backup driver: invalid-driver');
     });
@@ -133,7 +134,7 @@ describe('BackupPlugin (New Driver API)', () => {
     it('should validate filesystem driver config', () => {
       expect(() => {
         new BackupPlugin({
-          verbose: false,driver: 'filesystem',
+      verbose: false,driver: 'filesystem',
           config: {} // Missing path
         });
       }).toThrow('FilesystemBackupDriver requires "path" configuration');
@@ -355,7 +356,7 @@ describe('BackupPlugin (New Driver API)', () => {
       await emptyDb.connect();
       
       const emptyPlugin = new BackupPlugin({
-        verbose: false,driver: 'filesystem',
+      verbose: false,driver: 'filesystem',
         config: { path: path.join(tempDir, 'empty-backup') },
         compression: 'none',
         verification: false
@@ -418,7 +419,7 @@ describe('BackupPlugin (New Driver API)', () => {
     it('should validate compression settings', () => {
       expect(() => {
         new BackupPlugin({
-          verbose: false,driver: 'filesystem',
+      verbose: false,driver: 'filesystem',
           config: { path: '/tmp' },
           compression: 'invalid-compression'
         });
@@ -428,7 +429,7 @@ describe('BackupPlugin (New Driver API)', () => {
     it('should validate encryption settings', () => {
       expect(() => {
         new BackupPlugin({
-          verbose: false,driver: 'filesystem',
+      verbose: false,driver: 'filesystem',
           config: { path: '/tmp' },
           encryption: { algorithm: 'AES-256' } // Missing key
         });
@@ -439,7 +440,7 @@ describe('BackupPlugin (New Driver API)', () => {
   describe('Multi-Driver Support', () => {
     it('should work with multi driver strategy "all"', async () => {
       const multiPlugin = new BackupPlugin({
-        verbose: false,driver: 'multi',
+      verbose: false,driver: 'multi',
         config: {
           strategy: 'all',
           destinations: [
@@ -472,7 +473,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
     it('should work with multi driver strategy "any"', async () => {
       const multiPlugin = new BackupPlugin({
-        verbose: false,driver: 'multi',
+      verbose: false,driver: 'multi',
         config: {
           strategy: 'any',
           destinations: [

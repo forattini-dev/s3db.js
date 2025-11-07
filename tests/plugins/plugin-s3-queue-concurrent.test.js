@@ -35,6 +35,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
   test.skip('should process messages with multiple concurrent workers', async () => {
     // Create plugin with 3 concurrent workers
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,  // Fast polling
@@ -90,6 +91,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
   test.skip('should prevent race conditions with ETag locking', async () => {
     // Create multiple plugin instances (simulating different containers)
     const plugin1 = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,  // Very fast polling to increase race probability
@@ -97,6 +99,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     });
 
     const plugin2 = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,
@@ -162,6 +165,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
   test.skip('should handle visibility timeout correctly', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 50,
@@ -207,6 +211,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
   test.skip('should distribute work across workers efficiently', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,
@@ -271,6 +276,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
   test.skip('should handle mixed success and failure in concurrent processing', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 50,
@@ -362,6 +368,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
   test.skip('should maintain message order within same visibility window', async () => {
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 50,
@@ -405,6 +412,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
   test.skip('should process 100+ messages with 3 concurrent workers with minimal duplicates', async () => {
     // Use single plugin with 3 workers for simplicity
     const plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,  // Fast polling

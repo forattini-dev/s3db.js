@@ -18,6 +18,7 @@ describe('CLI Backup & Restore API Tests', () => {
     
     // Setup backup plugin with new driver API
     backupPlugin = new BackupPlugin({
+      verbose: false,
       driver: 'filesystem',
       config: {
         path: tempDir + '/{date}/'

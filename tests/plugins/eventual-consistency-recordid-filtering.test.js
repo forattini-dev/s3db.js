@@ -29,6 +29,7 @@ describe('EventualConsistency Analytics - RecordId Filtering', () => {
 
     // Install EventualConsistency plugin with analytics enabled
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },

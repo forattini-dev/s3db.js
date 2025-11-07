@@ -31,6 +31,7 @@ describe('EventualConsistencyPlugin - Utils Coverage', () => {
 
     // Test with various timezones
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       cohort: { timezone: 'America/Sao_Paulo' }
     });

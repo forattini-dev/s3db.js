@@ -36,6 +36,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -121,6 +122,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -196,6 +198,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },

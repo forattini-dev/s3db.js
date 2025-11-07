@@ -50,6 +50,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('enforces FIFO ordering when orderingGuarantee is true', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -82,6 +83,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('supports LIFO ordering when configured', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -117,6 +119,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('emits best-effort ordering event when guarantee disabled', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -151,6 +154,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('prevents duplicate processing with high concurrency', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -187,6 +191,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('allows workers to renew message locks', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 200,

@@ -45,6 +45,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
 
     // Create IdentityPlugin
     identityPlugin = new IdentityPlugin({
+      verbose: false,
       port: IDENTITY_PORT,
       issuer: IDENTITY_URL,
       supportedScopes: ['openid', 'profile', 'email', 'orders:read', 'orders:write', 'products:read', 'products:write'],
@@ -107,6 +108,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
 
     // Create ApiPlugin with OIDC driver pointing to Identity Provider
     ordersPlugin = new ApiPlugin({
+      verbose: false,
       port: ORDERS_PORT,
       verbose: false,
       auth: {
@@ -155,6 +157,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
 
     // Create ApiPlugin with OIDC driver (public GET, protected POST)
     productsPlugin = new ApiPlugin({
+      verbose: false,
       port: PRODUCTS_PORT,
       verbose: false,
       auth: {

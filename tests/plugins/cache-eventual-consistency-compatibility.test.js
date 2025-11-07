@@ -56,6 +56,7 @@ async function withScenario(name, { cacheOptions = {} } = {}, run) {
     await database.usePlugin(eventualPlugin);
 
     const cachePlugin = new CachePlugin({
+      verbose: false,
       driver: 'memory',
       verbose: false,
       ...cacheOptions
@@ -126,6 +127,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
       });
 
       const accountsPlugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: {
           accounts: ['balance']
         },

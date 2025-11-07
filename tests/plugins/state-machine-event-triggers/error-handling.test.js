@@ -34,6 +34,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - Error handling', 
   it('should throw error if neither event nor eventName is provided', async () => {
     expect(() => {
       new StateMachinePlugin({
+      verbose: false,
         enableEventTriggers: true,
         stateMachines: {
           order: {

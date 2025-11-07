@@ -36,7 +36,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
       'should cleanup watchers on stop',
       async () => {
         const plugin = new TfStatePlugin({
-          verbose: false,asyncPartitions: false,
+      verbose: false,asyncPartitions: false,
           autoSync: true,
           watchPaths: [tempDir],
         });
@@ -132,7 +132,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
   describe('Integration Tests', () => {
     test('should handle complete workflow', async () => {
       const plugin = new TfStatePlugin({
-        verbose: false,asyncPartitions: false,
+      verbose: false,asyncPartitions: false,
         trackDiffs: true,
         filters: {
           types: ['aws_instance', 'aws_s3_bucket'],
@@ -590,7 +590,7 @@ describe('TfStatePlugin - Lifecycle, Integration & Export', () => {
 
     test('should handle export with no resources', async () => {
       const emptyPlugin = new TfStatePlugin({
-        verbose: false,asyncPartitions: false,
+      verbose: false,asyncPartitions: false,
         resourceName: 'empty_resources',
       });
       await emptyPlugin.install(database);

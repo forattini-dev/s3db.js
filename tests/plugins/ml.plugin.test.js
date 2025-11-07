@@ -42,6 +42,7 @@ describeIfTf('MLPlugin', () => {
 
     // Install ML Plugin
     mlPlugin = new MLPlugin({
+      verbose: false,
       models: {
         testRegression: {
           type: 'regression',
@@ -112,6 +113,7 @@ describeIfTf('MLPlugin', () => {
     it('should throw error for invalid model type', async () => {
       await expect(async () => {
         const badPlugin = new MLPlugin({
+      verbose: false,
           models: {
             invalid: {
               type: 'invalid_type',
@@ -401,6 +403,7 @@ describeIfTf('MLPlugin', () => {
       await minResource.insert({ x: 1, y: 2 });
 
       const minPlugin = new MLPlugin({
+      verbose: false,
         models: {
           minimal: {
             type: 'regression',
@@ -474,6 +477,7 @@ describeIfTf('MLPlugin', () => {
 
       // Create plugin with saveModel enabled
       persistPlugin = new MLPlugin({
+      verbose: false,
         models: {
           persistModel: {
             type: 'regression',
@@ -527,6 +531,7 @@ describeIfTf('MLPlugin', () => {
     it('should load model from S3 on start', async () => {
       // Create new plugin instance (simulating restart)
       const newPlugin = new MLPlugin({
+      verbose: false,
         models: {
           persistModel: {
             type: 'regression',
@@ -561,6 +566,7 @@ describeIfTf('MLPlugin', () => {
     it('should respect per-model saveModel override', async () => {
       // Create plugin with global saveModel=false but model-level override
       const overridePlugin = new MLPlugin({
+      verbose: false,
         models: {
           overrideModel: {
             type: 'regression',
@@ -636,6 +642,7 @@ describeIfTf('MLPlugin', () => {
 
       // Create plugin with partition-specific models
       partitionPlugin = new MLPlugin({
+      verbose: false,
         models: {
           modelA: {
             type: 'regression',
@@ -767,6 +774,7 @@ describeIfTf('MLPlugin', () => {
 
       // Create plugin with filter and map
       transformPlugin = new MLPlugin({
+      verbose: false,
         models: {
           // Model without transformations
           noTransform: {
@@ -916,7 +924,7 @@ describeIfTf('MLPlugin', () => {
 
       // Empty MLPlugin - models will be created dynamically
       mlPlugin2 = new MLPlugin({
-        verbose: false,
+      verbose: false,
         minTrainingSamples: 5
       });
 

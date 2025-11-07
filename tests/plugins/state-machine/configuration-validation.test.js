@@ -24,6 +24,7 @@ describe('StateMachinePlugin - Configuration Validation', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
+      verbose: false,
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -79,6 +80,7 @@ describe('StateMachinePlugin - Configuration Validation', () => {
   it('should throw error when machine has no states', () => {
     expect(() => {
       new StateMachinePlugin({
+      verbose: false,
         stateMachines: {
           invalid: {}
         }
@@ -89,6 +91,7 @@ describe('StateMachinePlugin - Configuration Validation', () => {
   it('should throw error when machine has no initial state', () => {
     expect(() => {
       new StateMachinePlugin({
+      verbose: false,
         stateMachines: {
           invalid: {
             states: { start: {} }
@@ -101,6 +104,7 @@ describe('StateMachinePlugin - Configuration Validation', () => {
   it('should throw error when initial state not found in states', () => {
     expect(() => {
       new StateMachinePlugin({
+      verbose: false,
         stateMachines: {
           invalid: {
             initialState: 'missing',

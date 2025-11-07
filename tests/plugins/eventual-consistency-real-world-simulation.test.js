@@ -42,6 +42,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency for all counters (like mrt-shortner)
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
@@ -106,6 +107,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -159,6 +161,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resource: 'urls',
       field: 'clicks',
       consolidation: { mode: 'sync', auto: false },
@@ -208,6 +211,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency in ASYNC mode with short interval
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -272,6 +276,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },

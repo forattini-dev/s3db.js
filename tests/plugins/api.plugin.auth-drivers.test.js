@@ -76,6 +76,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
 
       // Configure API with JWT driver
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         auth: {
@@ -282,6 +283,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
 
       // Configure API with Basic Auth driver
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         auth: {
@@ -455,6 +457,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
 
       // Configure API with custom fields
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         auth: {
@@ -555,6 +558,7 @@ describe.skip('API Plugin - Custom Routes', () => {
 
       // Configure API with plugin-level custom routes
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         routes: {
@@ -673,6 +677,7 @@ describe.skip('API Plugin - Custom Routes', () => {
 
       // Configure API with resource-level custom routes
       apiPlugin = new ApiPlugin({
+      verbose: false,
         port,
         verbose: false,
         resources: {

@@ -5,6 +5,7 @@ import { GeoPlugin } from '../../src/plugins/geo.plugin.js';
 describe('GeoPlugin - Configuration and Validation Tests', () => {
   test('should create GeoPlugin with valid config', () => {
     const plugin = new GeoPlugin({
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',
@@ -114,6 +115,7 @@ describe('GeoPlugin - Configuration and Validation Tests', () => {
     await database.connect();
 
     const plugin = new GeoPlugin({
+      verbose: false,
       resources: {
         nonExistent: {
           latField: 'lat',
@@ -301,6 +303,7 @@ describe('GeoPlugin - Resource Integration', () => {
     });
 
     plugin = new GeoPlugin({
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',

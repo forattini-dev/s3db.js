@@ -347,7 +347,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
 
     test('should track filtered resources separately', async () => {
       const filterPlugin = new TfStatePlugin({
-        verbose: false,asyncPartitions: false,
+      verbose: false,asyncPartitions: false,
         filters: { types: ['aws_instance'] },
       });
       await filterPlugin.install(database);

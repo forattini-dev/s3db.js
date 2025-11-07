@@ -38,6 +38,7 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views']
       },
@@ -109,6 +110,7 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -168,6 +170,7 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     // Setup plugin
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },

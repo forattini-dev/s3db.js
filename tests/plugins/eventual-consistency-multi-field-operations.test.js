@@ -41,6 +41,7 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
 
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
@@ -168,6 +169,7 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
 
 
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         metrics: fieldNames
       },

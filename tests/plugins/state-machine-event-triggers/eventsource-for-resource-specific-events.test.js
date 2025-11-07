@@ -35,6 +35,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - eventSource for r
     const triggerExecutions = [];
 
     stateMachinePlugin = new StateMachinePlugin({
+      verbose: false,
       enableEventTriggers: true,
       persistTransitions: false,
       stateMachines: {

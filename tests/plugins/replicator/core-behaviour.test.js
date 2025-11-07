@@ -30,6 +30,7 @@ describe('ReplicatorPlugin configuration', () => {
     const transform = data => ({ ...data, transformed: true });
 
     const plugin = new ReplicatorPlugin({
+      verbose: false,
       replicators: [
         { driver: 's3db', client: {}, resources: ['users', 'orders'] },
         {
@@ -63,6 +64,7 @@ describe('ReplicatorPlugin configuration', () => {
     expect(
       () =>
         new ReplicatorPlugin({
+      verbose: false,
           replicators: [
             minimalReplicator,
             { driver: 'sqs', defaultQueue: 'q', resources: { orders: 'orders' } }
@@ -111,6 +113,7 @@ describe('Event listeners', () => {
   test('skips listener installation for replicator log resource', () => {
     const resource = { name: 'plg_replicator_logs', on: jest.fn(), database: {} };
     const plugin = new ReplicatorPlugin({
+      verbose: false,
       replicatorLogResource: 'replicator_logs',
       replicators: [minimalReplicator]
     });

@@ -23,6 +23,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks']
       },
@@ -439,6 +440,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       });
 
       const statsPlugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: {
           stats: ['views', 'likes']
         },

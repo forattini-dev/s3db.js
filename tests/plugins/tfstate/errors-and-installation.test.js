@@ -95,6 +95,7 @@ describe('TfStatePlugin - Installation', () => {
 
   test('should create plugin with custom configuration', () => {
     const plugin = createPlugin({
+      verbose: false,
       driver: 's3',
       resources: {
         resources: 'custom_resources',

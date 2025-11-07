@@ -38,6 +38,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         verbose: false
@@ -84,6 +85,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         verbose: false
@@ -133,6 +135,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -170,6 +173,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -223,6 +227,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -282,6 +287,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -334,6 +340,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         transactionRetention: 0, // Delete immediately
@@ -386,6 +393,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -442,6 +450,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         lockTimeout: 30 // 30 seconds
@@ -483,6 +492,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
+      verbose: false,
         resources: { urls: ['clicks', 'views'] },
         consolidation: { mode: 'sync' }
       });

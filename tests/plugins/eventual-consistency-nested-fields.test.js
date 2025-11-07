@@ -25,6 +25,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
 
   it('should support nested fields with json type (1 level after json)', async () => {
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['utmResults'] },
       consolidation: { mode: 'sync', auto: false }
     });
@@ -55,6 +56,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
 
   it('should support nested fields with explicit object type', async () => {
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['utmResults'] },
       consolidation: { mode: 'sync', auto: false }
     });
@@ -93,6 +95,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
 
   it('should reject nested paths exceeding 1 level after json', async () => {
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['utmResults'] },
       consolidation: { mode: 'sync', auto: false }
     });
@@ -119,6 +122,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
 
   it('should support nested json within object', async () => {
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['utmResults'] },
       consolidation: { mode: 'sync', auto: false }
     });
@@ -155,6 +159,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
 
   it('should consolidate multiple nested paths independently', async () => {
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['utmResults'] },
       consolidation: { mode: 'sync', auto: false }
     });
@@ -196,6 +201,7 @@ describe('EventualConsistencyPlugin - Nested Fields', () => {
 
   it('should support set/add/sub operations on nested fields', async () => {
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['utmResults'] },
       consolidation: { mode: 'sync', auto: false }
     });

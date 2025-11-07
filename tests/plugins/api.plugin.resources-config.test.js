@@ -75,6 +75,7 @@ describe('API Plugin - resource configuration', () => {
 
   it('exposes plugin resources when configured via array syntax', async () => {
     apiPlugin = new ApiPlugin({
+      verbose: false,
       port,
       host: '127.0.0.1',
       verbose: false,
@@ -97,6 +98,7 @@ describe('API Plugin - resource configuration', () => {
 
   it('skips plugin resources when explicitly disabled in config', async () => {
     apiPlugin = new ApiPlugin({
+      verbose: false,
       port,
       host: '127.0.0.1',
       verbose: false,
@@ -130,6 +132,7 @@ describe('API Plugin - resource configuration', () => {
     });
 
     apiPlugin = new ApiPlugin({
+      verbose: false,
       port,
       host: '127.0.0.1',
       verbose: false,

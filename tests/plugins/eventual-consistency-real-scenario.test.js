@@ -15,6 +15,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
 
     // Plugin with multi-resource API
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },

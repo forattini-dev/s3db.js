@@ -33,6 +33,7 @@ describe('S3QueuePlugin - Enqueue Messages', () => {
 
   beforeEach(async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'emails',
       autoStart: false
     });

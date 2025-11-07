@@ -35,6 +35,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - targetState for a
     const transitions = [];
 
     stateMachinePlugin = new StateMachinePlugin({
+      verbose: false,
       enableEventTriggers: true,
       persistTransitions: false,
       stateMachines: {
@@ -104,6 +105,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - targetState for a
     let actionExecuted = false;
 
     stateMachinePlugin = new StateMachinePlugin({
+      verbose: false,
       enableEventTriggers: true,
       persistTransitions: false,
       actions: {

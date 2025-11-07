@@ -20,6 +20,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
 
     // Plugin with multi-resource API - EXACTLY like production
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },

@@ -30,6 +30,7 @@ describe('EventualConsistencyPlugin - Recalculate Functionality Coverage', () =>
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
       verbose: false
@@ -70,6 +71,7 @@ describe('EventualConsistencyPlugin - Recalculate Functionality Coverage', () =>
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' },
       verbose: false

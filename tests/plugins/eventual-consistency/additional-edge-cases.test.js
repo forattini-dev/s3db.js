@@ -30,6 +30,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' }
     });
@@ -54,6 +55,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' }
     });
@@ -78,6 +80,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
       verbose: false
@@ -105,6 +108,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] }
     });
 
@@ -125,6 +129,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] }
     });
 

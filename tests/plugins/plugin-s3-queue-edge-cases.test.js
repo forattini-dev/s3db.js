@@ -32,6 +32,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         verbose: false  // Enable verbose logging
@@ -65,6 +66,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         verbose: false,
@@ -102,6 +104,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         verbose: false,
@@ -141,6 +144,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false
       });
@@ -163,6 +167,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         pollInterval: 50,
@@ -214,6 +219,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         verbose: false
@@ -244,6 +250,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })
@@ -275,6 +282,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
+      verbose: false,
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })

@@ -26,6 +26,7 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
   it('should work with new nested config format', async () => {
     // Nova estrutura aninhada
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
 
       consolidation: {
@@ -115,6 +116,7 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
   it('should use defaults when sections are omitted', async () => {
     // Minimal configuration
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] }
     });
 
@@ -133,6 +135,7 @@ describe('EventualConsistencyPlugin - Nested Config', () => {
   it('should allow partial nested config', async () => {
     // Only a few sections
     const plugin = new EventualConsistencyPlugin({
+      verbose: false,
       resources: { urls: ['clicks'] },
 
       consolidation: {

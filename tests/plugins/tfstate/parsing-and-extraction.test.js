@@ -264,7 +264,7 @@ describe('TfStatePlugin - State Parsing & Resource Extraction', () => {
 
     beforeEach(async () => {
       plugin = new TfStatePlugin({
-        verbose: false,asyncPartitions: false,
+      verbose: false,asyncPartitions: false,
         filters: {
           types: ['aws_instance', 'aws_s3_bucket'],
           exclude: ['data.*', '.*_test'],

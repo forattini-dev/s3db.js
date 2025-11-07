@@ -39,6 +39,7 @@ describe('S3QueuePlugin - Setup and Configuration', () => {
 
   test('should setup queue resource', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'emails',
       autoStart: false
     });
@@ -53,6 +54,7 @@ describe('S3QueuePlugin - Setup and Configuration', () => {
 
   test('should add helper methods to target resource', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'emails',
       autoStart: false
     });
@@ -67,6 +69,7 @@ describe('S3QueuePlugin - Setup and Configuration', () => {
 
   test('should throw error if target resource not found', async () => {
     plugin = new S3QueuePlugin({
+      verbose: false,
       resource: 'nonexistent',
       autoStart: false
     });

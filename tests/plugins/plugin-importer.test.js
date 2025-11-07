@@ -68,6 +68,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData, null, 2));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json'
       });
@@ -94,6 +95,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, testData.map(d => JSON.stringify(d)).join('\n'));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'jsonl'
       });
@@ -118,6 +120,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, lines.join('\n'));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'jsonl',
         continueOnError: true
@@ -144,6 +147,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, csvContent);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv'
       });
@@ -177,6 +181,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, csvContent);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv'
       });
@@ -199,6 +204,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, csvContent);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv'
       });
@@ -224,6 +230,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, csvContent);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv'
       });
@@ -252,6 +259,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, csvContent);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv',
         mapping: {
@@ -286,6 +294,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, csvContent);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv',
         transforms: {
@@ -316,6 +325,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json',
         transforms: {
@@ -348,6 +358,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json',
         deduplicateBy: 'id'
@@ -374,6 +385,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json',
         validate: (record) => {
@@ -403,6 +415,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json',
         batchSize: 10,
@@ -431,6 +444,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json',
         batchSize: 10
@@ -458,6 +472,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json'
       });
@@ -488,6 +503,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, JSON.stringify(testData));
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json',
         batchSize: 20,
@@ -512,6 +528,7 @@ describe('ImporterPlugin', () => {
       await testDb.connect();
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'non_existent_resource',
         format: 'json'
       });
@@ -523,6 +540,7 @@ describe('ImporterPlugin', () => {
 
     it('should throw error for unsupported format', async () => {
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'unsupported'
       });
@@ -532,6 +550,7 @@ describe('ImporterPlugin', () => {
 
     it('should throw error if file not found', async () => {
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'json'
       });
@@ -556,6 +575,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, compressed);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'jsonl'
       });
@@ -583,6 +603,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, compressed);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'csv'
       });
@@ -609,6 +630,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, compressed);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'jsonl'
       });
@@ -633,6 +655,7 @@ describe('ImporterPlugin', () => {
       fs.writeFileSync(testFile, compressed);
 
       const plugin = new ImporterPlugin({
+      verbose: false,
         resource: 'test_users',
         format: 'jsonl',
         batchSize: 50,
