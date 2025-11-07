@@ -48,22 +48,22 @@ Plugin documentation quality is indicated with badges:
 | **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
 | **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
 | **[🔐 Identity](./identity.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](./identity.md) |
-| **[☸️ Kubernetes Inventory](./kubernetes-inventory.md)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](./kubernetes-inventory.md) |
+| **[☸️ Kubernetes Inventory](./kubernetes-inventory/)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](./kubernetes-inventory/) |
 | **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
 | **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
-| **[🤖 ML](./ml-plugin.md)** | Machine learning model management | Model inference, predictions | [→](./ml-plugin.md) |
-| **[🛰️ Recon](./recon.md)** | Full-stack recon (DNS, ports, TLS, subdomains) with scheduled sweeps | Incident response, asset discovery, continuous monitoring | [→](./recon.md) |
+| **[🤖 ML](./ml-plugin/)** | Machine learning model management | Model inference, predictions | [→](./ml-plugin/) |
+| **[🛰️ Recon](./recon/)** | Full-stack recon (DNS, ports, TLS, subdomains) with scheduled sweeps | Incident response, asset discovery, continuous monitoring | [→](./recon/) |
 | **[📬 Queue Consumer](./queue-consumer.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](./queue-consumer.md) |
 | **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
-| **[🔄 Replicator](./replicator.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator.md) |
-| **[🔒 S3Queue](./s3-queue.md)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue.md) |
+| **[🔄 Replicator](./replicator/)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator/) |
+| **[🔒 S3Queue](./s3-queue/)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue/) |
 | **[🕷️ Spider Suite](./spider-suite.md)** | Crawling bundle (Puppeteer + S3 queue + TTL) | Web scraping pipelines, sitemap refresh, link audits | [→](./spider-suite.md) |
 | **[🍪 Cookie Farm Suite](./cookie-farm-suite.md)** | Persona farming bundle (Cookie Farm + Puppeteer + Queue) | Anti-bot personas, warmup workflows, session rotation | [→](./cookie-farm-suite.md) |
-| **[⏰ Scheduler](./scheduler.md)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler.md) |
-| **[🤖 State Machine](./state-machine.md)** | Finite state machine workflows | Business processes, automation | [→](./state-machine.md) |
+| **[⏰ Scheduler](./scheduler/)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler/) |
+| **[🤖 State Machine](./state-machine/)** | Finite state machine workflows | Business processes, automation | [→](./state-machine/) |
 | **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
-| **[⏳ TTL](./ttl.md)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl.md) |
-| **[🎯 Vector](./vector.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector.md) |
+| **[⏳ TTL](./ttl/)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl/) |
+| **[🎯 Vector](./vector/)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector/) |
 
 **💡 Can't find what you need?** [Build your own plugin](#-plugin-development) in ~50 lines of code!
 
@@ -3207,13 +3207,13 @@ Each plugin has comprehensive documentation:
 - [Audit Plugin](./audit.md) - Comprehensive audit logging
 - [Metrics Plugin](./metrics.md) - Performance monitoring
 - [Backup Plugin](./backup.md) - Data backup and recovery
-- [Replicator Plugin](./replicator.md) - Data replication
+- [Replicator Plugin](./replicator/) - Data replication
 - [FullText Plugin](./fulltext.md) - Full-text search
 - [Eventual Consistency Plugin](./eventual-consistency.md) - Event sourcing for numeric fields
-- [State Machine Plugin](./state-machine.md) - Workflow management
-- [Scheduler Plugin](./scheduler.md) - Job scheduling
+- [State Machine Plugin](./state-machine/) - Workflow management
+- [Scheduler Plugin](./scheduler/) - Job scheduling
 - [Queue Consumer Plugin](./queue-consumer.md) - Message processing
-- [S3Queue Plugin](./s3-queue.md) - Distributed queue processing
+- [S3Queue Plugin](./s3-queue/) - Distributed queue processing
 
 ### Testing Plugins
 
@@ -3276,12 +3276,28 @@ docs/plugins/
 ├── audit.md              # Audit Plugin documentation
 ├── metrics.md            # Metrics Plugin documentation
 ├── backup.md             # Backup Plugin documentation
-├── replicator.md         # Replicator Plugin documentation
+├── replicator/           # Replicator Plugin documentation
+│   └── README.md
 ├── fulltext.md           # FullText Plugin documentation
 ├── queue-consumer.md     # Queue Consumer Plugin documentation
-├── s3-queue.md           # S3Queue Plugin documentation
-├── state-machine.md      # State Machine Plugin documentation
-├── scheduler.md          # Scheduler Plugin documentation
+├── s3-queue/             # S3Queue Plugin documentation
+│   └── README.md
+├── state-machine/        # State Machine Plugin documentation
+│   └── README.md
+├── scheduler/            # Scheduler Plugin documentation
+│   └── README.md
+├── ttl/                  # TTL Plugin documentation
+│   └── README.md
+├── vector/               # Vector Plugin documentation
+│   └── README.md
+├── kubernetes-inventory/ # Kubernetes Inventory Plugin documentation
+│   └── README.md
+├── recon/                # Recon Plugin documentation
+│   └── README.md
+├── ml-plugin/            # ML Plugin documentation
+│   └── README.md
+├── cookie-farm/          # Cookie Farm Plugin documentation
+│   └── README.md
 └── eventual-consistency.md # Eventual Consistency Plugin documentation
 ```
 

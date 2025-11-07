@@ -6,10 +6,10 @@
 
 ---
 
-## ⚡ IMPORTANT FIX (v13.4.0)
+## ⚡ IMPORTANT: Event Handling
 
-**Fixed race condition with resource events:**
-The plugin now tracks pending event handlers and provides `waitForPendingEvents()` method to ensure all state transitions complete before continuing.
+**Race condition prevention:**
+The plugin tracks pending event handlers and provides `waitForPendingEvents()` method to ensure all state transitions complete before continuing.
 
 **Works with BOTH async and sync events:**
 

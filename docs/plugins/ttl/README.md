@@ -101,6 +101,86 @@ console.log('Last scan:', stats.lastScanAt);
 
 ---
 
+## 🔀 Coordinator Mode
+
+### Why Coordinator Mode?
+
+In multi-pod/multi-instance deployments, we need **exactly one instance** to run cleanup intervals to avoid:
+- ❌ Duplicate cleanup operations
+- ❌ Race conditions when scanning expiration index
+- ❌ Wasted resources from redundant cleanup work
+
+**Coordinator Mode solves this** by automatically electing one instance as the "coordinator" responsible for running cleanup intervals. All other instances remain idle for TTL operations.
+
+### Key Benefits
+
+- ✅ **Automatic Election**: No manual configuration, works out-of-the-box
+- ✅ **Fault Tolerance**: If coordinator dies, new one is elected automatically
+- ✅ **Zero Duplication**: Only coordinator runs cleanup intervals
+- ✅ **Scalable**: Add/remove instances without breaking cleanup
+- ✅ **Resource Efficient**: No wasted cleanup work across instances
+
+### Quick Example
+
+```javascript
+// Multi-instance deployment - NO changes needed!
+// Instance 1
+const ttlA = new TTLPlugin({
+  resources: {
+    sessions: { ttl: 86400, onExpire: 'soft-delete' }
+  },
+  enableCoordinator: true  // Enabled by default
+});
+
+// Instance 2 (same config)
+const ttlB = new TTLPlugin({
+  resources: {
+    sessions: { ttl: 86400, onExpire: 'soft-delete' }
+  },
+  enableCoordinator: true
+});
+
+// Result: Only ONE instance runs cleanup intervals
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enableCoordinator` | boolean | `true` | Enable coordinator mode |
+| `heartbeatInterval` | number | `30000` | Heartbeat frequency (ms) |
+| `coldStartObservationWindow` | number | `15000` | Observation phase duration (ms) |
+| `skipColdStart` | boolean | `false` | Skip cold start (testing only!) |
+
+### Coordinator Events
+
+```javascript
+ttl.on('plg:ttl:coordinator-elected', ({ workerId, epoch }) => {
+  console.log(`New coordinator: ${workerId}`);
+});
+
+ttl.on('plg:ttl:coordinator-promoted', ({ workerId }) => {
+  console.log(`This worker is now coordinator`);
+});
+
+ttl.on('plg:ttl:cleanup-started', ({ coordinatorId }) => {
+  console.log(`Coordinator started cleanup intervals`);
+});
+```
+
+### Learn More
+
+📚 **[Full Coordinator Documentation →](./coordinator.md)**
+
+Comprehensive guide covering:
+- Election algorithm (lexicographic ordering)
+- Epoch system (guaranteed leadership terms)
+- Cold start phases (prevents race conditions)
+- Troubleshooting multi-instance issues
+- Implementation details for plugin developers
+
+---
+
 ## 📋 Table of Contents
 
 1. [📦 Dependencies](#-dependencies)
