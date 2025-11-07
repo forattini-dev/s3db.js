@@ -214,10 +214,11 @@ describe('Validator Cache', () => {
       // With caching: 1 * 50KB = 50KB
       // Savings: 99% memory reduction!
 
-      console.log(`\n💾 Memory Savings:`);
-      console.log(`   Without cache: ${100 * 50}KB (5MB)`);
-      console.log(`   With cache: ${memUsage.estimatedKB}KB`);
-      console.log(`   Savings: ${((1 - memUsage.estimatedKB / (100 * 50)) * 100).toFixed(1)}%`);
+      // Memory savings statistics (commented out to prevent console spam in tests)
+      // console.log(`\n💾 Memory Savings:`);
+      // console.log(`   Without cache: ${100 * 50}KB (5MB)`);
+      // console.log(`   With cache: ${memUsage.estimatedKB}KB`);
+      // console.log(`   Savings: ${((1 - memUsage.estimatedKB / (100 * 50)) * 100).toFixed(1)}%`);
     });
   });
 
