@@ -261,7 +261,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
       send: jest.fn().mockRejectedValue(new Error('SQS error'))
     };
     
-    const replicator = new SqsReplicator({ queueUrl: 'test-queue', verbose: false });
+    const replicator = new SqsReplicator({ queueUrl: 'test-queue', verbose: true });
     replicator.sqsClient = errorClient;
     replicator.enabled = true;
     replicator.resources = { users: true };
@@ -270,7 +270,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
     const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
 
     const result = await replicator.replicate('users', 'insert', { id: '1' }, '1');
-    
+
     expect(result.success).toBe(false);
     expect(result.error).toBe('SQS error');
     expect(consoleSpy).toHaveBeenCalled();
