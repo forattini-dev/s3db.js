@@ -3857,7 +3857,7 @@ export class Resource extends AsyncEventEmitter {
   _normalizeGuard(guard) {
     if (!guard) return null;
 
-    // String array simples → aplica para todas as operações
+    // Simple string array → applies to every operation
     if (Array.isArray(guard)) {
       return { '*': guard };
     }
@@ -4313,5 +4313,33 @@ function validateResourceConfig(config) {
     errors
   };
 }
+
+/**
+ * Dispose of the resource and clean up all references
+ *
+ * Call this when a resource is being destroyed to prevent memory leaks.
+ * This method:
+ * - Releases validator cache reference (allows cache eviction)
+ * - Removes all event listeners (prevents listener leaks)
+ * - Emits disposal event for plugins to clean up
+ *
+ * @example
+ * const resource = await db.getResource('users');
+ * // ... use resource ...
+ * resource.dispose(); // Clean up when done
+ */
+Resource.prototype.dispose = function() {
+  // Release validator reference for cache eviction
+  if (this.schema) {
+    this.schema.dispose();
+  }
+
+  // Emit disposal event for plugins to clean up
+  // Do this BEFORE removing listeners so plugins can handle the event
+  this.emit('resource:disposed', { resourceName: this.name });
+
+  // Remove all event listeners (inherited from AsyncEventEmitter)
+  this.removeAllListeners();
+};
 
 export default Resource;

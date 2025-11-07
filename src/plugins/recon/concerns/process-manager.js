@@ -334,5 +334,6 @@ export class ProcessManager {
   }
 }
 
-// Export singleton instance
-export const processManager = new ProcessManager();
+// NOTE: Singleton export removed to prevent auto-initialization on import.
+// ProcessManager is now lazy-initialized inside ReconPlugin constructor.
+// This prevents global signal handlers from being registered when s3db.js is imported.

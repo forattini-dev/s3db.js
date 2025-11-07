@@ -797,7 +797,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       
       const testResource = await database.createResource({
         name: 'test_idsize_persistence',
-        idSize: 6, // IDs de 6 caracteres
+        idSize: 6, // 6-character IDs
         attributes: {
           name: 'string|required',
           description: 'string|optional'
@@ -807,14 +807,14 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(testResource.idSize).toBe(6);
       expect(testResource.idGeneratorType).toBe(6);
 
-      // Inserir alguns itens na primeira conexão
+      // Insert a few items in the first connection
       const item1 = await testResource.insert({ 
         name: 'Item 1', 
-        description: 'Primeira inserção' 
+        description: 'First insert' 
       });
       const item2 = await testResource.insert({ 
         name: 'Item 2', 
-        description: 'Segunda inserção' 
+        description: 'Second insert' 
       });
 
       expect(item1.id.length).toBe(6);
@@ -823,7 +823,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(item2.id).toMatch(/^[a-zA-Z0-9_-]{6}$/);
 
 
-      // === FASE 2: Simular reconexão carregando resource do metadata ===
+      // === PHASE 2: Simulate reconnection by loading the resource from metadata ===
       
       // Pegar o metadata que seria salvo
       await database.uploadMetadataFile();
@@ -839,7 +839,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(versionData.idSize).toBe(6);
       expect(versionData.idGenerator).toBe(6);
 
-      // === FASE 3: Simular criação de resource a partir do metadata (como acontece no connect) ===
+      // === PHASE 3: Simulate creating the resource from metadata (same as connect) ===
       
              // Restore ID generator configuration (como no database.class.js)
        let restoredIdGenerator, restoredIdSize;
@@ -855,7 +855,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
          restoredIdSize = versionData.idSize || 22;
        }
 
-      // Criar nova resource simulando o que acontece no connect
+      // Create a new resource to mirror what happens during connect
       const restoredResource = new Resource({
         name: 'test_idsize_persistence',
         client: database.client,
@@ -881,15 +881,15 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(restoredResource.idSize).toBe(6);
       expect(restoredResource.idGeneratorType).toBe(6);
 
-      // === FASE 4: Testar geração de IDs com resource restaurado ===
+      // === PHASE 4: Test ID generation with the restored resource ===
       
       const item3 = await restoredResource.insert({ 
         name: 'Item 3', 
-        description: 'Após restauração' 
+        description: 'After restore' 
       });
       const item4 = await restoredResource.insert({ 
         name: 'Item 4', 
-        description: 'Confirmação' 
+        description: 'Confirmation' 
       });
 
       expect(item3.id.length).toBe(6);
@@ -898,17 +898,17 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(item4.id).toMatch(/^[a-zA-Z0-9_-]{6}$/);
 
 
-      // === FASE 5: Verificar se dados antigos são acessíveis ===
+      // === PHASE 5: Ensure old data remains accessible ===
       
       const retrievedItem1 = await restoredResource.get(item1.id);
       const retrievedItem2 = await restoredResource.get(item2.id);
       
       expect(retrievedItem1.name).toBe('Item 1');
       expect(retrievedItem2.name).toBe('Item 2');
-      expect(retrievedItem1.description).toBe('Primeira inserção');
-      expect(retrievedItem2.description).toBe('Segunda inserção');
+      expect(retrievedItem1.description).toBe('First insert');
+      expect(retrievedItem2.description).toBe('Second insert');
 
-      // === FASE 6: Verificar consistência geral ===
+      // === PHASE 6: Validate overall consistency ===
       
       const allIds = [item1.id, item2.id, item3.id, item4.id];
       const allSizesCorrect = allIds.every(id => id.length === 6);
@@ -921,10 +921,10 @@ describe('Custom ID Generators - Real Integration Tests', () => {
 
     test('should persist idGenerator number configuration through metadata', async () => {
       
-      // Criar resource com idGenerator como número
+      // Create a resource with a numeric idGenerator
       const resource = await database.createResource({
         name: 'test_idgenerator_number_persistence',
-        idGenerator: 8, // Número que vira tamanho
+        idGenerator: 8, // Number interpreted as ID size
         attributes: {
           name: 'string|required'
         }
@@ -933,11 +933,11 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(resource.idSize).toBe(8);
       expect(resource.idGeneratorType).toBe(8);
 
-      // Inserir item
+      // Insert an item
       const item1 = await resource.insert({ name: 'Test Item' });
       expect(item1.id.length).toBe(8);
 
-      // Forçar upload do metadata
+      // Force a metadata upload
       await database.uploadMetadataFile();
       const metadata = database.savedMetadata;
       
@@ -955,7 +955,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         return 'CUSTOM' + Math.random().toString(36).substring(2, 6).toUpperCase();
       }
 
-      // Criar resource com função customizada
+      // Create a resource with a custom function
       const resource = await database.createResource({
         name: 'test_custom_function_persistence',
         idGenerator: customIdGenerator,
@@ -967,12 +967,12 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(resource.idGeneratorType).toBe('custom_function');
       expect(resource.idSize).toBe(22); // Default size stored
 
-      // Inserir item
+      // Insert an item
       const item1 = await resource.insert({ name: 'Test Item' });
       expect(item1.id).toMatch(/^CUSTOM[A-Z0-9]{4}$/);
       expect(item1.id.length).toBe(10);
 
-      // Forçar upload do metadata
+      // Force a metadata upload
       await database.uploadMetadataFile();
       const metadata = database.savedMetadata;
       
@@ -986,7 +986,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
 
     test('should maintain different ID configurations for multiple resources', async () => {
       
-      // Criar vários resources com configurações diferentes
+      // Create multiple resources with different configurations
       const shortResource = await database.createResource({
         name: 'multi_test_short',
         idSize: 4,
@@ -1004,21 +1004,21 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         attributes: { name: 'string|required' }
       });
 
-      // Inserir itens
+      // Insert entries
       const shortItem = await shortResource.insert({ name: 'Short' });
       const mediumItem = await mediumResource.insert({ name: 'Medium' });
       const defaultItem = await defaultResource.insert({ name: 'Default' });
 
-      // Verificar tamanhos
+      // Verify lengths
       expect(shortItem.id.length).toBe(4);
       expect(mediumItem.id.length).toBe(10);
       expect(defaultItem.id.length).toBe(22);
 
-      // Forçar upload do metadata
+      // Force a metadata upload
       await database.uploadMetadataFile();
       const metadata = database.savedMetadata;
 
-      // Verificar metadata salvo
+      // Inspect the saved metadata
       const shortMeta = metadata.resources['multi_test_short'];
       const mediumMeta = metadata.resources['multi_test_medium'];
       const defaultMeta = metadata.resources['multi_test_default'];

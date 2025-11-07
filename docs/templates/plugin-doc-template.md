@@ -32,6 +32,8 @@ Delete this entire comment block before publishing!
 
 # {PLUGIN_EMOJI} {PLUGIN_NAME}
 
+> **Documentation Language Requirement**: Publish every public-facing doc in **English only** so other teams and external partners can consume it without translation.
+
 > **{DESCRIPTION}**
 >
 > **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)

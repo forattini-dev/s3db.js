@@ -1,15 +1,15 @@
 /**
  * Example 82: OIDC Web Application (Authorization Code Flow)
  *
- * Como criar uma aplicação web que usa "Login com SSO" via OIDC.
- * O usuário clica em "Login", é redirecionado para o SSO Server,
- * faz login lá, e volta autenticado para esta aplicação.
+ * How to build a web application that uses "Login with SSO" via OIDC.
+ * The user clicks "Login", is redirected to the SSO server,
+ * signs in there, and returns authenticated to this application.
  *
- * Arquitetura:
- * - Authorization Server (e80 - IdentityPlugin) - SSO Server que emite tokens (porta 4000)
- * - Web Application (esta app) - Aplicação que usa OIDC para login (porta 3000)
+ * Architecture:
+ * - Authorization Server (e80 - IdentityPlugin) - SSO server that issues tokens (port 4000)
+ * - Web Application (this app) - Application that uses OIDC for login (port 3000)
  *
- * Run (após iniciar o e80-sso-oauth2-server.js):
+ * Run (after starting e80-sso-oauth2-server.js):
  *   node docs/examples/e82-oidc-web-app.js
  */
 
@@ -29,7 +29,7 @@ async function setupWebApp() {
 
   await db.connect();
 
-  // 2. Criar resource de exemplo (páginas protegidas)
+  // 2. Create an example resource (protected pages)
   const postsResource = await db.createResource({
     name: 'posts',
     attributes: {
@@ -47,7 +47,7 @@ async function setupWebApp() {
     port: APP_PORT,
     verbose: true,
 
-    // Autenticação OIDC - "Login com SSO"
+    // OIDC authentication - "Login with SSO"
     auth: {
       drivers: [
         {
@@ -61,12 +61,12 @@ async function setupWebApp() {
             cookieSecret: 'my-super-secret-cookie-key-32chars!',  // 32+ chars
             cookieName: 'session',
             cookieMaxAge: 86400000,  // 24 horas
-            postLoginRedirect: '/dashboard',  // Redirecionar após login
-            postLogoutRedirect: '/'  // Redirecionar após logout
+            postLoginRedirect: '/dashboard',  // Redirect after login
+            postLogoutRedirect: '/'  // Redirect after logout
           }
         }
       ],
-      resource: 'users'  // Não usado (OIDC usa dados do token)
+      resource: 'users'  // Not used (OIDC pulls data from the token)
     },
 
     // CORS
@@ -78,7 +78,7 @@ async function setupWebApp() {
 
     // Rotas personalizadas
     routes: {
-      // Página inicial (pública)
+      // Home page (public)
       'GET /': {
         handler: async (c) => {
           return c.html(`
@@ -94,26 +94,26 @@ async function setupWebApp() {
             </head>
             <body>
               <h1>🔐 My Web App</h1>
-              <p>Esta é uma aplicação que usa OIDC para autenticação via SSO Server.</p>
+              <p>This application uses OIDC to authenticate through the SSO server.</p>
               <p><a href="/auth/login" class="btn">Login com SSO</a></p>
               <hr>
               <h2>Como funciona:</h2>
               <ol>
                 <li>Clique em "Login com SSO"</li>
-                <li>Você será redirecionado para http://localhost:4000 (SSO Server)</li>
+                <li>You will be redirected to http://localhost:4000 (SSO Server)</li>
                 <li>Faça login com:
                   <ul>
                     <li>Email: admin@sso.local</li>
                     <li>Password: Admin123!</li>
                   </ul>
                 </li>
-                <li>Você será redirecionado de volta para /dashboard autenticado</li>
+                <li>You will be redirected back to /dashboard already authenticated</li>
               </ol>
             </body>
             </html>
           `);
         },
-        auth: false  // Página pública
+        auth: false  // Public page
       },
 
       // Dashboard (protegido)
@@ -141,22 +141,22 @@ async function setupWebApp() {
             <body>
               <h1>📊 Dashboard</h1>
               <div class="user-info">
-                <h2>Bem-vindo, ${user.name || user.username}!</h2>
+                <h2>Welcome, ${user.name || user.username}!</h2>
                 <p><strong>Email:</strong> ${user.email}</p>
                 <p><strong>Role:</strong> ${user.role}</p>
                 <p><strong>Scopes:</strong> ${user.scopes?.join(', ') || 'N/A'}</p>
               </div>
 
-              <h3>📄 Dados completos do usuário:</h3>
+              <h3>📄 Complete user payload:</h3>
               <pre>${JSON.stringify(user, null, 2)}</pre>
 
-              <p><a href="/posts" class="btn" style="background:#28a745">Ver Posts</a></p>
+              <p><a href="/posts" class="btn" style="background:#28a745">View Posts</a></p>
               <p><a href="/auth/logout" class="btn">Logout</a></p>
             </body>
             </html>
           `);
         },
-        auth: false  // Validação manual dentro do handler
+        auth: false  // Manual validation inside the handler
       },
 
       // Lista de posts (protegida por guard)
@@ -179,24 +179,24 @@ async function setupWebApp() {
             </head>
             <body>
               <h1>📝 Posts</h1>
-              <p>Usuário logado: ${user.name} (${user.email})</p>
+              <p>Signed-in user: ${user.name} (${user.email})</p>
 
-              ${posts.length === 0 ? '<p>Nenhum post ainda.</p>' : ''}
+              ${posts.length === 0 ? '<p>No posts yet.</p>' : ''}
               ${posts.map(post => `
                 <div class="post">
                   <h3>${post.title}</h3>
                   <p>${post.content}</p>
-                  <small>Por: ${post.authorId} | ${post.createdAt}</small>
+                  <small>By: ${post.authorId} | ${post.createdAt}</small>
                 </div>
               `).join('')}
 
-              <p><a href="/dashboard" class="btn">Voltar ao Dashboard</a></p>
+              <p><a href="/dashboard" class="btn">Back to Dashboard</a></p>
               <p><a href="/auth/logout" class="btn" style="background:#dc3545">Logout</a></p>
             </body>
             </html>
           `);
         },
-        auth: true  // Requer autenticação
+        auth: true  // Requires authentication
       }
     }
   });
@@ -207,7 +207,7 @@ async function setupWebApp() {
   postsResource.config = {
     ...postsResource.config,
     guards: {
-      list: 'openid',  // Requer scope 'openid' (todos autenticados têm)
+      list: 'openid',  // Requires the 'openid' scope (all authenticated users have it)
       get: 'openid',
       create: 'profile',  // Requer scope 'profile'
       update: 'profile',
@@ -223,53 +223,53 @@ async function seedData(postsResource) {
 
   const post1 = await postsResource.insert({
     title: 'Primeiro Post',
-    content: 'Este é o primeiro post da nossa aplicação!',
+    content: 'This is the first post in our application!',
     authorId: 'admin@sso.local'
   });
 
   const post2 = await postsResource.insert({
-    title: 'OIDC é incrível',
-    content: 'Com OIDC, podemos ter Single Sign-On de forma simples e segura.',
+    title: 'OIDC is awesome',
+    content: 'With OIDC we can offer Single Sign-On in a simple, secure way.',
     authorId: 'admin@sso.local'
   });
 
-  console.log('✅ Posts criados:', [post1, post2].map(p => p.title).join(', '));
+  console.log('✅ Posts created:', [post1, post2].map(p => p.title).join(', '));
 }
 
 async function printUsage() {
-  console.log(`\n🚀 Web App rodando em: ${APP_URL}`);
-  console.log('\n📋 Rotas disponíveis:\n');
-  console.log('  Páginas:');
-  console.log(`    GET  ${APP_URL}/                    - Página inicial`);
-  console.log(`    GET  ${APP_URL}/dashboard            - Dashboard (requer login)`);
-  console.log(`    GET  ${APP_URL}/posts-html           - Lista de posts (requer login)`);
+  console.log(`\n🚀 Web app running at: ${APP_URL}`);
+  console.log('\n📋 Available routes:\n');
+  console.log('  Pages:');
+  console.log(`    GET  ${APP_URL}/                    - Home page`);
+  console.log(`    GET  ${APP_URL}/dashboard            - Dashboard (requires login)`);
+  console.log(`    GET  ${APP_URL}/posts-html           - Post list (requires login)`);
   console.log('');
-  console.log('  OIDC (auto-criadas pelo driver):');
-  console.log(`    GET  ${APP_URL}/auth/login           - Login com SSO`);
-  console.log(`    GET  ${APP_URL}/auth/callback        - Callback OAuth2`);
+  console.log('  OIDC (auto-generated by the driver):');
+  console.log(`    GET  ${APP_URL}/auth/login           - Login with SSO`);
+  console.log(`    GET  ${APP_URL}/auth/callback        - OAuth2 callback`);
   console.log(`    GET  ${APP_URL}/auth/logout          - Logout`);
   console.log('');
-  console.log('  API REST:');
-  console.log(`    GET    ${APP_URL}/posts              - Lista posts (JSON)`);
-  console.log(`    POST   ${APP_URL}/posts              - Criar post (JSON)`);
+  console.log('  REST API:');
+  console.log(`    GET    ${APP_URL}/posts              - List posts (JSON)`);
+  console.log(`    POST   ${APP_URL}/posts              - Create post (JSON)`);
   console.log('');
 }
 
 async function testConnection() {
-  console.log('🧪 Testando conexão com SSO Server...\n');
+  console.log('🧪 Testing the connection with the SSO server...\n');
 
   try {
     const response = await fetch(`${SSO_URL}/.well-known/openid-configuration`);
 
     if (!response.ok) {
-      throw new Error(`SSO Server não está rodando (${response.status})`);
+      throw new Error(`SSO server is not running (${response.status})`);
     }
 
     const discovery = await response.json();
     console.log('✅ SSO Server detectado:', discovery.issuer);
   } catch (err) {
-    console.error('❌ Erro ao conectar com SSO Server:', err.message);
-    console.error('   Certifique-se de que o e80-sso-oauth2-server.js está rodando na porta 4000!');
+    console.error('❌ Failed to reach the SSO server:', err.message);
+    console.error('   Make sure e80-sso-oauth2-server.js is running on port 4000!');
     process.exit(1);
   }
 }
@@ -277,7 +277,7 @@ async function testConnection() {
 async function main() {
   console.log('🌐 Configurando Web Application (OIDC Client)...\n');
 
-  // Verificar se SSO Server está rodando
+  // Check if the SSO server is alive
   await testConnection();
 
   const { db, postsResource } = await setupWebApp();
@@ -285,17 +285,17 @@ async function main() {
   await seedData(postsResource);
   await printUsage();
 
-  console.log('💡 Como testar:');
-  console.log(`   1. Abra o navegador em: ${APP_URL}`);
-  console.log('   2. Clique em "Login com SSO"');
-  console.log('   3. Faça login no SSO Server (porta 4000)');
-  console.log('   4. Você será redirecionado de volta autenticado!\n');
+  console.log('💡 How to test:');
+  console.log(`   1. Open the browser at: ${APP_URL}`);
+  console.log('   2. Click "Login with SSO"');
+  console.log('   3. Sign in on the SSO server (port 4000)');
+  console.log('   4. You will be redirected back already authenticated!\n');
 
-  console.log('✅ Web App pronto para receber requisições!\n');
+  console.log('✅ Web app ready to receive requests!\n');
 
-  // Manter servidor rodando
+  // Keep the server running
   process.on('SIGINT', async () => {
-    console.log('\n\n🛑 Parando Web App...');
+    console.log('\n\n🛑 Stopping the web app...');
     await db.disconnect();
     process.exit(0);
   });

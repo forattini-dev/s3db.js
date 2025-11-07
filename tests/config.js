@@ -162,7 +162,7 @@ export async function createTemporaryPathForTest (prefix = 's3db-test') {
   const uniqueId = `${timestamp}-${random}`;
   const tempPath = path.join('/tmp', `${prefix}-${uniqueId}`);
 
-  // Criar o diretório se não existir
+  // Create the directory if it does not exist yet
   await fs.mkdir(tempPath, { recursive: true });
 
   return tempPath;

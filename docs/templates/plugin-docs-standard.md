@@ -10,6 +10,8 @@
 
 This document defines the standardized format for all s3db.js plugin documentation. Following this standard ensures consistency, discoverability, and excellent user experience across the entire plugin ecosystem.
 
+> **Language requirement:** publish every plugin doc in English only. English content keeps cross-team collaboration and external support simple.
+
 **Quick Links:**
 - [Templates](./templates/) - Ready-to-use documentation templates
 - [Plugin Index](./plugins/README.md) - All plugin documentation

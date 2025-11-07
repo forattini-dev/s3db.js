@@ -1,14 +1,14 @@
 /**
  * Example 81: OAuth2/OIDC Resource Server (Client Application)
  *
- * Como configurar uma aplicação que CONSOME tokens de um servidor OAuth2/OIDC.
- * Esta aplicação valida tokens emitidos pelo Identity Provider (e80).
+ * How to configure an application that CONSUMES tokens from an OAuth2/OIDC server.
+ * This application validates tokens issued by the Identity Provider (e80).
  *
- * Arquitetura:
- * - Authorization Server (e80 - IdentityPlugin) - Emite tokens JWT (porta 4000)
- * - Resource Server (esta app - ApiPlugin) - Valida tokens (porta 3000)
+ * Architecture:
+ * - Authorization Server (e80 - IdentityPlugin) - Issues JWT tokens (port 4000)
+ * - Resource Server (this app - ApiPlugin) - Validates tokens (port 3000)
  *
- * Run (após iniciar o e80-sso-oauth2-server.js):
+ * Run (after starting e80-sso-oauth2-server.js):
  *   node docs/examples/e81-oauth2-resource-server.js
  */
 
@@ -16,10 +16,10 @@ import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 
 const APP_PORT = 3000;
-const SSO_URL = 'http://localhost:4000'; // URL do Identity Provider (e80 - IdentityPlugin)
+const SSO_URL = 'http://localhost:4000'; // Identity Provider URL (e80 - IdentityPlugin)
 
 async function setupResourceServer() {
-  // 1. Criar database
+  // 1. Create the database
   const db = new Database({
     connectionString: 'http://minioadmin:minioadmin@localhost:9000/my-app',
     encryptionKey: 'my-app-encryption-key-32-chars'
@@ -27,7 +27,7 @@ async function setupResourceServer() {
 
   await db.connect();
 
-  // 2. Criar resource de exemplo (protegido por OAuth2)
+  // 2. Create an example resource (protected by OAuth2)
   const carsResource = await db.createResource({
     name: 'cars',
     attributes: {
@@ -41,29 +41,29 @@ async function setupResourceServer() {
     timestamps: true
   });
 
-  // 3. Configurar API Plugin com OAuth2 Client
+  // 3. Configure the API Plugin with an OAuth2 client
   const apiPlugin = new ApiPlugin({
     port: APP_PORT,
     verbose: true,
 
-    // Autenticação OIDC - Valida tokens do Identity Provider
+    // OIDC authentication - validates tokens from the Identity Provider
     auth: {
       drivers: [
         {
-          driver: 'oidc',  // ← Resource Server (valida tokens JWT do IdentityPlugin)
+          driver: 'oidc',  // ← Resource server mode (validates JWT tokens from IdentityPlugin)
           config: {
-            issuer: SSO_URL,  // URL do Identity Provider (IdentityPlugin)
-            // jwksUri é descoberto automaticamente via /.well-known/openid-configuration
-            audience: 'my-api',  // Opcional: valida audiência do token
-            requiredScopes: ['read:api', 'write:api'],  // Scopes necessários
-            clockTolerance: 60  // Tolerância de 60s para exp/nbf
+            issuer: SSO_URL,  // Identity Provider URL (IdentityPlugin)
+            // jwksUri is discovered automatically via /.well-known/openid-configuration
+            audience: 'my-api',  // Optional: enforce token audience
+            requiredScopes: ['read:api', 'write:api'],  // Required scopes
+            clockTolerance: 60  // 60-second tolerance for exp/nbf
           }
         }
       ],
-      resource: 'users'  // Não usado quando não há user lookup local
+      resource: 'users'  // Not used when there is no local user lookup
     },
 
-    // CORS para permitir requisições do frontend
+    // CORS so the frontend can call the API
     cors: {
       enabled: true,
       origin: '*',
@@ -73,15 +73,15 @@ async function setupResourceServer() {
 
   await db.usePlugin(apiPlugin);
 
-  // 4. Configurar guards no resource (autorização por scopes)
+  // 4. Configure guards on the resource (authorization by scope)
   carsResource.config = {
     ...carsResource.config,
     guards: {
-      list: 'read:api',      // Requer scope 'read:api' para listar
-      get: 'read:api',       // Requer scope 'read:api' para ler
-      create: 'write:api',   // Requer scope 'write:api' para criar
-      update: 'write:api',   // Requer scope 'write:api' para atualizar
-      delete: 'write:api'    // Requer scope 'write:api' para deletar
+      list: 'read:api',      // Require read:api scope to list
+      get: 'read:api',       // Require read:api scope to fetch
+      create: 'write:api',   // Require write:api scope to create
+      update: 'write:api',   // Require write:api scope to update
+      delete: 'write:api'    // Require write:api scope to delete
     }
   };
 
@@ -89,7 +89,7 @@ async function setupResourceServer() {
 }
 
 async function seedData(carsResource) {
-  console.log('\n📝 Criando dados de exemplo...\n');
+  console.log('\n📝 Creating sample data...\n');
 
   const car1 = await carsResource.insert({
     brand: 'Tesla',
@@ -105,18 +105,18 @@ async function seedData(carsResource) {
     price: 25000
   });
 
-  console.log('✅ Carros criados:', [car1, car2].map(c => `${c.brand} ${c.model}`).join(', '));
+  console.log('✅ Cars created:', [car1, car2].map(c => `${c.brand} ${c.model}`).join(', '));
 }
 
 async function printUsage() {
-  console.log('\n🚀 Resource Server rodando em: http://localhost:3000');
-  console.log('\n📋 Endpoints disponíveis:\n');
+  console.log('\n🚀 Resource server running at: http://localhost:3000');
+  console.log('\n📋 Available endpoints:\n');
   console.log('  Cars API:');
-  console.log('    GET    http://localhost:3000/cars       (requer scope: read:api)');
-  console.log('    GET    http://localhost:3000/cars/:id   (requer scope: read:api)');
-  console.log('    POST   http://localhost:3000/cars       (requer scope: write:api)');
-  console.log('    PUT    http://localhost:3000/cars/:id   (requer scope: write:api)');
-  console.log('    DELETE http://localhost:3000/cars/:id   (requer scope: write:api)');
+  console.log('    GET    http://localhost:3000/cars       (requires scope: read:api)');
+  console.log('    GET    http://localhost:3000/cars/:id   (requires scope: read:api)');
+  console.log('    POST   http://localhost:3000/cars       (requires scope: write:api)');
+  console.log('    PUT    http://localhost:3000/cars/:id   (requires scope: write:api)');
+  console.log('    DELETE http://localhost:3000/cars/:id   (requires scope: write:api)');
   console.log('');
 }
 
