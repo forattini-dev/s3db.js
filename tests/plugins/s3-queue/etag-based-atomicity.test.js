@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globa
 import { S3QueuePlugin } from '../../../src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '../../config.js';
 
-describe.skip('S3QueuePlugin - ETag-based Atomicity', () => {
+describe('S3QueuePlugin - ETag-based Atomicity', () => {
   let database;
   let resource;
   let plugin;

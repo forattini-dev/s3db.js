@@ -122,3 +122,54 @@ The plugin MUST allow workers to renew a lock before the visibility timeout expi
 - **Given** a worker releases a lock after acknowledging success
 - **When** it attempts to call `renewLock` again
 - **Then** the plugin MUST reject the renewal because the lock no longer exists
+
+### Requirement: Deterministic Coordinator Election
+The plugin MUST elect a single coordinator among active workers using a deterministic rule based on registered client identifiers.
+
+#### Scenario: Single worker becomes coordinator
+- **Given** only one worker registers with the queue
+- **When** workers execute the election rule
+- **Then** the single worker MUST assume leadership immediately for the current epoch
+
+#### Scenario: Multiple workers elect leader by ordering
+- **Given** three workers register with distinct identifiers
+- **When** they sort the active identifiers lexicographically
+- **Then** the worker with the alphabetically first identifier MUST assume leadership for the epoch
+
+#### Scenario: Coordinator epoch renewal
+- **Given** a coordinator holds leadership with a five-minute epoch duration
+- **When** the epoch is about to expire and the coordinator remains healthy
+- **Then** it MUST renew the leadership record before expiration or allow the next eligible worker to assume leadership
+
+### Requirement: Worker Heartbeats and Self-Healing
+Workers MUST publish periodic heartbeats and be removed automatically when they become unhealthy so that leadership and dispatch recover without manual intervention.
+
+#### Scenario: Worker heartbeat refresh
+- **Given** a worker is actively processing messages
+- **When** it publishes a heartbeat before the heartbeat TTL expires
+- **Then** the worker MUST remain in the active registry
+
+#### Scenario: Remove stale worker
+- **Given** a worker stops renewing its heartbeat
+- **When** the registry cleanup runs after the heartbeat TTL
+- **Then** the stale worker MUST be removed from the registry
+- **And** future elections MUST ignore that worker
+
+### Requirement: Coordinated Dispatch Loop
+The elected coordinator MUST order messages and expose dispatch tickets to other workers without causing deadlocks.
+
+#### Scenario: Coordinator publishes dispatch tickets
+- **Given** a coordinator holds leadership
+- **When** it orders pending messages
+- **Then** it MUST publish a batch of dispatch tickets for other workers and release the ordering lock promptly
+
+#### Scenario: Worker consumes ticket without duplication
+- **Given** a worker retrieves a dispatch ticket
+- **When** it claims the underlying message
+- **Then** the message MUST enter processing exactly once
+- **And** other workers observing the same ticket MUST skip it
+
+#### Scenario: Recover tickets from missing worker
+- **Given** a worker holding dispatch tickets fails to send heartbeats
+- **When** the coordinator detects the worker is stale
+- **Then** it MUST requeue the worker's outstanding tickets for other workers to process

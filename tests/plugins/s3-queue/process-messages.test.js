@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globa
 import { S3QueuePlugin } from '../../../src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '../../config.js';
 
-describe.skip('S3QueuePlugin - Process Messages', () => {
+describe('S3QueuePlugin - Process Messages', () => {
   let database;
   let resource;
   let plugin;

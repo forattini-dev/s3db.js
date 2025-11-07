@@ -1,4 +1,4 @@
-import { Plugin } from "./plugin.class.js";
+import { CoordinatorPlugin } from "./concerns/coordinator-plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
@@ -15,6 +15,8 @@ import { getCronManager } from "../concerns/cron-manager.js";
  * - Dead letter queue support
  * - Concurrent workers with configurable concurrency
  * - At-least-once delivery guarantee
+ * - FIFO/LIFO ordering with strict or best-effort guarantees
+ * - Coordinator mode with worker registry, heartbeats, and leader election (opt-in)
  *
  * === Configuration Example ===
  *
@@ -26,6 +28,19 @@ import { getCronManager } from "../concerns/cron-manager.js";
  *   concurrency: 5,                        // Number of concurrent workers
  *   deadLetterResource: 'failed_emails',   // Dead letter queue (optional)
  *   autoStart: true,                       // Auto-start workers
+ *   orderingMode: 'fifo',                  // 'fifo' or 'lifo' (default: 'fifo')
+ *   orderingGuarantee: true,               // Strict ordering (default: true)
+ *   failureStrategy: 'hybrid',             // 'retry', 'dead-letter', or 'hybrid'
+ *
+ *   // Coordinator mode (enabled by default for optimal performance)
+ *   enableCoordinator: true,               // Enable coordinator mode (default: true)
+ *   heartbeatInterval: 10000,              // Heartbeat interval in ms (default: 10000)
+ *   heartbeatTTL: 30,                      // Heartbeat TTL in seconds (default: 30)
+ *   epochDuration: 300000,                 // Coordinator epoch duration in ms (default: 300000)
+ *   ticketBatchSize: 10,                   // Number of tickets to publish per dispatch (default: 10)
+ *   dispatchInterval: 100,                 // Dispatch loop interval in ms (default: 100)
+ *   coldStartDuration: 0,                  // Cold start observation period in ms (default: 0, disabled)
+ *   skipColdStart: false,                  // Skip cold start period (for testing, default: false)
  *
  *   onMessage: async (record, context) => {
  *     // Process message
@@ -63,9 +78,13 @@ import { getCronManager } from "../concerns/cron-manager.js";
  * const stats = await db.resources.emails.queueStats();
  * // { total: 100, pending: 50, processing: 20, completed: 25, failed: 5, dead: 0 }
  */
-export class S3QueuePlugin extends Plugin {
+export class S3QueuePlugin extends CoordinatorPlugin {
   constructor(options = {}) {
-    super(options);
+    // Pass coordinator options to super()
+    super({
+      ...options,
+      coordinatorWorkInterval: options.dispatchInterval || 100
+    });
 
     const {
       resource,
@@ -90,6 +109,15 @@ export class S3QueuePlugin extends Plugin {
       orderingLockTTL = 1500,
       failureStrategy,
       lockTTL = 5,
+      // Coordinator mode options (enabled by default for best performance)
+      enableCoordinator = true,
+      heartbeatInterval = 10000,      // 10 seconds
+      heartbeatTTL = 30,              // 30 seconds
+      epochDuration = 300000,         // 5 minutes
+      ticketBatchSize = 10,
+      dispatchInterval = 100,
+      coldStartDuration = 0,          // 0 = disabled by default
+      skipColdStart = false,
       ...rest
     } = this.options;
 
@@ -128,7 +156,10 @@ export class S3QueuePlugin extends Plugin {
       orderingLockTTL: Math.max(250, orderingLockTTL),
       orderingMode: normalizedOrderingMode,
       failureStrategy: normalizedFailureStrategy,
-      lockTTL: Math.max(1, lockTTL)
+      lockTTL: Math.max(1, lockTTL),
+      // Queue-specific coordinator configuration
+      ticketBatchSize: Math.max(1, ticketBatchSize),
+      dispatchInterval: Math.max(50, dispatchInterval)           // Min 50ms
     };
     this.config.maxAttempts = normalizedFailureStrategy.maxRetries ?? maxAttempts;
     this.config.pollBatchSize = pollBatchSize ?? Math.max((this.config.concurrency || 1) * 4, 16);
@@ -162,12 +193,12 @@ export class S3QueuePlugin extends Plugin {
     this.queueResourceAlias = queueResource || `${this.config.resource}_queue`;
     this.deadLetterResourceAlias = deadLetterResource || null;
 
+    // Queue-specific resources
     this.queueResource = null;       // Resource: <resource>_queue
     this.targetResource = null;      // Resource original do usuário
     this.deadLetterResourceObj = null;
     this.workers = [];
     this.isRunning = false;
-    this.workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
     // Deduplication cache to prevent S3 eventual consistency issues
     // Tracks recently processed messages to avoid reprocessing
@@ -177,6 +208,31 @@ export class S3QueuePlugin extends Plugin {
     this._lastRecovery = 0;
     this._recoveryInFlight = false;
     this._bestEffortNotified = false;
+
+    // Queue-specific coordinator properties
+    this.dispatchHandle = null;
+
+    // Re-emit coordinator events with s3-queue prefix for backward compatibility
+    this.on('plg:coordinator:elected', (event) => {
+      this.emit('plg:s3-queue:coordinator-elected', event);
+    });
+    this.on('plg:coordinator:promoted', (event) => {
+      // Don't re-emit promoted - we emit it manually in onBecomeCoordinator
+    });
+    this.on('plg:coordinator:demoted', (event) => {
+      // Don't re-emit demoted - we emit it manually in onStopBeingCoordinator
+    });
+    this.on('plg:coordinator:epoch-renewed', (event) => {
+      this.emit('plg:s3-queue:coordinator-epoch-renewed', event);
+    });
+    this.on('plg:coordinator:cold-start-phase', (event) => {
+      // Map 'preparation' phase to 'tickets' for S3Queue backward compatibility
+      const phase = event.phase === 'preparation' ? 'tickets' : event.phase;
+      this.emit('plg:s3-queue:cold-start-phase', { ...event, phase });
+    });
+    this.on('plg:coordinator:cold-start-complete', (event) => {
+      this.emit('plg:s3-queue:cold-start-complete', event);
+    });
   }
 
   _resolveQueueResourceName() {
@@ -387,6 +443,141 @@ export class S3QueuePlugin extends Plugin {
     };
   }
 
+  /**
+   * Schedule interval that works both with CronManager and manual timers
+   * Fallback to setInterval when CronManager is disabled (tests)
+   *
+   * @private
+   */
+
+  /**
+   * Clear interval handle (cron or manual)
+   * @private
+   */
+
+  /**
+   * Execute cold start observation period
+   *
+   * Phases:
+   * 1. Observing - Publish heartbeat and discover active workers
+   * 2. Election - Participate in coordinator election
+   * 3. Tickets - Wait for coordinator to publish initial tickets
+   * 4. Ready - Cold start complete, ready to process
+   *
+   * @private
+   */
+
+  /**
+   * Publish a batch of tickets (coordinator only)
+   * @private
+   */
+  async _publishTickets() {
+    if (!this.isCoordinator) return 0;
+
+    const storage = this.getStorage();
+
+    // Get pending messages using partition for O(1) query
+    // Uses byStatus partition instead of scanning all messages
+    const [okQuery, errQuery, pendingMessages] = await tryFn(async () => {
+      return await this.queueResource.query({
+        status: 'pending'
+      }, {
+        limit: this.config.ticketBatchSize
+      });
+    });
+
+    if (!okQuery || !pendingMessages || pendingMessages.length === 0) {
+      return 0;
+    }
+
+    let ticketsPublished = 0;
+
+    for (const msg of pendingMessages) {
+      const ticketId = `ticket/${msg.id}`;
+      const ticketData = {
+        messageId: msg.id,
+        publishedAt: Date.now(),
+        publishedBy: this.workerId,
+        ttl: this.config.visibilityTimeout
+      };
+
+      const [okPut] = await tryFn(async () => {
+        return await storage.set(
+          ticketId,
+          ticketData,
+          {
+            ttl: Math.ceil(this.config.visibilityTimeout / 1000),
+            behavior: 'body-overflow'
+          }
+        );
+      });
+
+      if (okPut) {
+        ticketsPublished++;
+      }
+    }
+
+    return ticketsPublished;
+  }
+
+  // ==================== COORDINATOR HOOKS ====================
+
+  /**
+   * Called when this worker becomes coordinator
+   * Starts ticket publishing
+   */
+  async onBecomeCoordinator() {
+    if (this.config.verbose) {
+      console.log('[S3QueuePlugin] Became coordinator - publishing initial tickets');
+    }
+
+    // Publish initial batch of tickets
+    const count = await this._publishTickets();
+
+    if (this.config.verbose && count > 0) {
+      console.log(`[S3QueuePlugin] Published ${count} initial ticket(s)`);
+    }
+
+    // Emit tickets-published event (for backward compatibility with tests)
+    if (count > 0) {
+      this.emit('plg:s3-queue:tickets-published', {
+        coordinatorId: this.workerId,
+        count,
+        timestamp: Date.now()
+      });
+    }
+
+    this.emit('plg:s3-queue:coordinator-promoted', {
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Called when this worker stops being coordinator
+   * Cleans up coordinator-only resources
+   */
+  async onStopBeingCoordinator() {
+    if (this.config.verbose) {
+      console.log('[S3QueuePlugin] No longer coordinator');
+    }
+
+    this.emit('plg:s3-queue:coordinator-demoted', {
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Periodic work that only coordinator does
+   * Publishes dispatch tickets for workers to claim
+   */
+  async coordinatorWork() {
+    await this.coordinatorDispatchLoop();
+  }
+
+  // ==================== LIFECYCLE ====================
+
   async startProcessing(handler = null, options = {}) {
     if (this.isRunning) {
       if (this.config.verbose) {
@@ -430,6 +621,9 @@ export class S3QueuePlugin extends Plugin {
     // Lock cleanup no longer needed - TTL handles expiration automatically
     this._lastRecovery = 0;
 
+    // Start coordinator system (handles cold start, heartbeat, election, etc.)
+    await this.startCoordination();
+
     // Start N workers
     for (let i = 0; i < concurrency; i++) {
       const worker = this.createWorker(messageHandler, i);
@@ -454,6 +648,19 @@ export class S3QueuePlugin extends Plugin {
       cronManager.stop(this.cacheCleanupJobName);
       this.cacheCleanupJobName = null;
     }
+
+    // Stop dispatch loop (queue-specific)
+    if (this.dispatchHandle) {
+      this._clearIntervalHandle(this.dispatchHandle);
+      this.dispatchHandle = null;
+
+      if (this.config.verbose) {
+        console.log('[S3QueuePlugin] Stopped coordinator dispatch loop');
+      }
+    }
+
+    // Stop coordinator system (heartbeat, epoch management, etc.)
+    await this.stopCoordination();
 
     // Lock cleanup no longer needed (TTL handles it)
 
@@ -503,19 +710,62 @@ export class S3QueuePlugin extends Plugin {
   async claimMessage() {
     const now = Date.now();
 
+    // In coordinator mode, try to claim from dispatch tickets first
+    if (this.config.enableCoordinator) {
+      const tickets = await this.getAvailableTickets();
+      if (tickets && tickets.length > 0) {
+        // Try to claim from first available ticket (already ordered)
+        for (const ticket of tickets) {
+          const message = await this.claimFromTicket(ticket);
+          if (message) {
+            return message;
+          }
+        }
+        // All tickets failed, fall through to further logic
+      }
+
+      let activeCoordinatorId = this.currentCoordinatorId;
+      if (!activeCoordinatorId) {
+        activeCoordinatorId = await this.getCoordinator();
+      }
+      if (activeCoordinatorId && this.config.orderingGuarantee) {
+        // Give coordinator a moment to publish more tickets
+        await this._sleep(Math.min(this.config.dispatchInterval, 200));
+
+        const retryTickets = await this.getAvailableTickets();
+        for (const ticket of retryTickets) {
+          const message = await this.claimFromTicket(ticket);
+          if (message) {
+            return message;
+          }
+        }
+
+        // Coordinator exists but no tickets yet; yield control
+        return null;
+      }
+    }
+
     await this.recoverStalledMessages(now);
 
-    // Query for available messages
-    const [ok, err, messages] = await tryFn(() =>
+    // Query for available messages using partition query
+    // Note: query() doesn't support comparison operators, so we query by status partition
+    // and filter by visibleAt manually
+    const [ok, err, allMessages] = await tryFn(() =>
       this.queueResource.query({
-        status: 'pending',
-        visibleAt: { '<=': now }
+        status: 'pending'
       }, {
-        limit: this.config.pollBatchSize
+        limit: this.config.pollBatchSize * 2 // Fetch extra to account for filtering
       })
     );
 
-    if (!ok || !messages || messages.length === 0) {
+    if (!ok || !allMessages || allMessages.length === 0) {
+      return null;
+    }
+
+    // Filter by visibleAt manually and limit to pollBatchSize
+    const messages = allMessages.filter(msg => msg.visibleAt <= now).slice(0, this.config.pollBatchSize);
+
+    if (messages.length === 0) {
       return null;
     }
 
@@ -524,7 +774,7 @@ export class S3QueuePlugin extends Plugin {
       return null;
     }
 
-    if (!this.config.orderingGuarantee) {
+    if (!this.config.orderingGuarantee || !this.config.enableCoordinator) {
       this._notifyBestEffortOrdering();
       return await this._attemptMessagesInOrder(available);
     }
@@ -1068,10 +1318,59 @@ export class S3QueuePlugin extends Plugin {
       return false;
     }
 
+    // OpenSpec Requirement 7: Prevent renewal after release
+    // Check if lock has been released (terminal states or null lockToken)
+    const terminalStates = ['completed', 'failed', 'dead'];
+    if (terminalStates.includes(entry.status)) {
+      if (this.config.verbose) {
+        console.warn(`[S3QueuePlugin] Cannot renew lock: message ${queueId} is in terminal state '${entry.status}'`);
+      }
+      this.emit('plg:s3-queue:lock-renewal-rejected', {
+        queueId,
+        reason: 'terminal_state',
+        status: entry.status,
+        lockToken
+      });
+      return false;
+    }
+
+    if (!entry.lockToken) {
+      if (this.config.verbose) {
+        console.warn(`[S3QueuePlugin] Cannot renew lock: message ${queueId} has no active lock (lockToken is null)`);
+      }
+      this.emit('plg:s3-queue:lock-renewal-rejected', {
+        queueId,
+        reason: 'lock_released',
+        status: entry.status,
+        lockToken
+      });
+      return false;
+    }
+
     if (entry.lockToken !== lockToken) {
       if (this.config.verbose) {
         console.warn('[S3QueuePlugin] extendVisibility lock token mismatch for queueId:', queueId);
       }
+      this.emit('plg:s3-queue:lock-renewal-rejected', {
+        queueId,
+        reason: 'token_mismatch',
+        providedToken: lockToken,
+        currentToken: entry.lockToken
+      });
+      return false;
+    }
+
+    // Additional check: if status is not 'processing', cannot renew
+    if (entry.status !== 'processing') {
+      if (this.config.verbose) {
+        console.warn(`[S3QueuePlugin] Cannot renew lock: message ${queueId} is not in 'processing' state (current: ${entry.status})`);
+      }
+      this.emit('plg:s3-queue:lock-renewal-rejected', {
+        queueId,
+        reason: 'invalid_state',
+        status: entry.status,
+        lockToken
+      });
       return false;
     }
 
@@ -1094,6 +1393,17 @@ export class S3QueuePlugin extends Plugin {
       return false;
     }
 
+    if (this.config.verbose) {
+      console.log(`[S3QueuePlugin] Lock renewed for message ${queueId}: new visibleAt=${newVisibleAt}`);
+    }
+
+    this.emit('plg:s3-queue:lock-renewed', {
+      queueId,
+      lockToken,
+      newVisibleAt,
+      extraMilliseconds
+    });
+
     return true;
   }
 
@@ -1115,12 +1425,14 @@ export class S3QueuePlugin extends Plugin {
     this._lastRecovery = now;
 
     try {
-      const [ok, err, candidates] = await tryFn(() =>
+      // Query processing messages using partition query
+      // Note: query() doesn't support comparison operators, so we query by status partition
+      // and filter by visibleAt manually
+      const [ok, err, allCandidates] = await tryFn(() =>
         this.queueResource.query({
-          status: 'processing',
-          visibleAt: { '<=': now }
+          status: 'processing'
         }, {
-          limit: this.config.recoveryBatchSize
+          limit: this.config.recoveryBatchSize * 2 // Fetch extra to account for filtering
         })
       );
 
@@ -1131,7 +1443,14 @@ export class S3QueuePlugin extends Plugin {
         return;
       }
 
-      if (!candidates || candidates.length === 0) {
+      if (!allCandidates || allCandidates.length === 0) {
+        return;
+      }
+
+      // Filter by visibleAt manually and limit to recoveryBatchSize
+      const candidates = allCandidates.filter(msg => msg.visibleAt <= now).slice(0, this.config.recoveryBatchSize);
+
+      if (candidates.length === 0) {
         return;
       }
 
@@ -1527,6 +1846,399 @@ export class S3QueuePlugin extends Plugin {
     const [ok, err] = await tryFn(() => storage.delete(key));
     if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
       console.warn('[S3QueuePlugin] Failed to delete processed marker:', err.message || err);
+    }
+  }
+
+  // ============================================
+  // COORDINATOR MODE: WORKER REGISTRY & HEARTBEATS
+  // ============================================
+
+  /**
+   * Publish heartbeat to indicate this worker is active
+   * Uses PluginStorage with TTL for automatic cleanup of stale workers
+   */
+
+  /**
+   * Get all active workers from the registry
+   * Workers are automatically filtered by TTL (stale workers removed by PluginStorage)
+   */
+
+  /**
+   * Elect coordinator using deterministic rule: lexicographically first worker ID
+   *
+   * OpenSpec Requirement 9: Deterministic Coordinator Election
+   * - Single worker elected among active workers
+   * - Lexicographic ordering of worker IDs
+   * - Epoch-based leadership with configurable duration
+   */
+
+  /**
+   * Check if this worker is the current coordinator
+   */
+
+  /**
+   * Get current coordinator from epoch storage
+   * If epoch expired, trigger re-election
+   */
+
+  /**
+   * Ensure a coordinator is elected and epoch is valid
+   * Uses distributed lock to prevent race conditions during election
+   *
+   * Respects existing coordinator's epoch - will not force re-election
+   * during valid epoch period unless coordinator disappears.
+   */
+
+  /**
+   * Renew coordinator epoch if this worker is coordinator and epoch is about to expire
+   */
+
+  // ============================================
+  // COORDINATOR MODE: DISPATCH LOOP & TICKETS
+  // ============================================
+
+  /**
+   * Start coordinator dispatch loop
+   * This method runs only on the coordinator worker and:
+   * 1. Acquires ordering lock
+   * 2. Fetches and orders pending messages
+   * 3. Publishes dispatch tickets
+   * 4. Releases lock promptly to avoid deadlocks
+   *
+   * OpenSpec Requirement 11: Coordinated Dispatch Loop
+   */
+  async coordinatorDispatchLoop() {
+    if (!this.config.enableCoordinator) return;
+    if (!this.isCoordinator) return;
+
+    // Recover stalled tickets from dead workers
+    await this.recoverStalledTickets();
+
+    const now = Date.now();
+
+    // Acquire ordering lock (short TTL to prevent deadlocks)
+    const releaseOrderingLock = await this._acquireOrderingLock();
+    if (!releaseOrderingLock) {
+      // Another operation holds the lock, skip this cycle
+      return;
+    }
+
+    try {
+      // Avoid flooding ticket queue: only fetch additional messages if capacity available
+      const existingTickets = await this.getAvailableTickets();
+      const availableCapacity = Math.max(this.config.ticketBatchSize - existingTickets.length, 0);
+
+      if (availableCapacity === 0) {
+        return;
+      }
+
+      // Fetch pending messages
+      // NOTE: s3db.js query() doesn't support comparison operators, so we list and filter manually
+      const [ok, err, allMessages] = await tryFn(() =>
+        this.queueResource.query({ status: 'pending' }, { limit: availableCapacity * 2 })
+      );
+
+      if (!ok || !allMessages) {
+        return;
+      }
+
+      // Filter by visibleAt manually
+      const messages = allMessages.filter(msg => msg.visibleAt <= now).slice(0, availableCapacity);
+
+      if (messages.length === 0) {
+        return;
+      }
+
+      // Order messages according to configuration
+      const orderedMessages = this._prepareAvailableMessages(messages, now);
+
+      if (orderedMessages.length === 0) {
+        return;
+      }
+
+      // Publish dispatch tickets (batch limited by ticketBatchSize)
+      const ticketCount = await this.publishDispatchTickets(orderedMessages);
+
+      if (ticketCount > 0) {
+        if (this.config.verbose) {
+          console.log(`[S3QueuePlugin] Coordinator published ${ticketCount} dispatch tickets`);
+        }
+
+        this.emit('plg:s3-queue:tickets-published', {
+          coordinatorId: this.workerId,
+          count: ticketCount,
+          timestamp: now
+        });
+      }
+
+    } finally {
+      // Release ordering lock promptly to prevent deadlocks
+      await releaseOrderingLock();
+    }
+  }
+
+  /**
+   * Publish dispatch tickets for ordered messages
+   * Each ticket contains message metadata and ordering information
+   *
+   * @param {Array} orderedMessages - Ordered messages to create tickets for
+   * @returns {Promise<number>} - Number of tickets published
+   */
+  async publishDispatchTickets(orderedMessages) {
+    if (!orderedMessages || orderedMessages.length === 0) return 0;
+
+    const storage = this.getStorage();
+    const now = Date.now();
+    const ticketTTL = Math.max(30, Math.ceil(this.config.visibilityTimeout / 1000) * 2); // 2x visibility timeout
+    let published = 0;
+
+    for (let i = 0; i < orderedMessages.length; i++) {
+      const msg = orderedMessages[i];
+      const ticketId = `ticket-${msg.id}-${now}-${i}`;
+      const key = storage.getPluginKey(null, 'tickets', ticketId);
+
+      const ticketData = {
+        ticketId,
+        messageId: msg.id,
+        originalId: msg.originalId,
+        queuedAt: msg._queuedAt || msg.queuedAt,
+        orderIndex: i,
+        publishedAt: now,
+        publishedBy: this.workerId,
+        status: 'available', // available, claimed, processed
+        claimedBy: null,
+        claimedAt: null,
+        ticketTTL  // Preserve TTL for releaseTicket()
+      };
+
+      const [ok, err] = await tryFn(() =>
+        storage.set(key, ticketData, {
+          ttl: ticketTTL,
+          behavior: 'body-only'
+        })
+      );
+
+      if (ok) {
+        published++;
+      } else if (this.config.verbose) {
+        console.warn(`[S3QueuePlugin] Failed to publish ticket ${ticketId}:`, err?.message);
+      }
+    }
+
+    return published;
+  }
+
+  /**
+   * Get available dispatch tickets for this worker to claim
+   * Returns tickets in order (by orderIndex)
+   *
+   * @returns {Promise<Array>} - Available tickets
+   */
+  async getAvailableTickets() {
+    if (!this.config.enableCoordinator) return [];
+
+    const storage = this.getStorage();
+    // Use relative prefix (without plugin slug, listWithPrefix adds it)
+    const prefix = 'tickets/';
+
+    const [ok, err, tickets] = await tryFn(() => storage.listWithPrefix(prefix));
+
+    if (!ok) {
+      if (this.config.verbose) {
+        console.warn('[S3QueuePlugin] Failed to list tickets:', err?.message);
+      }
+      return [];
+    }
+
+    if (!tickets || tickets.length === 0) {
+      return [];
+    }
+
+    // Filter available tickets and sort by order index
+    const available = tickets
+      .filter(t => t && t.status === 'available' && !t.claimedBy)
+      .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+    return available;
+  }
+
+  /**
+   * Claim a message via dispatch ticket
+   * This ensures ordered processing when coordinator mode is enabled
+   *
+   * @param {Object} ticket - Dispatch ticket
+   * @returns {Promise<Object|null>} - Claimed message or null
+   */
+  async claimFromTicket(ticket) {
+    if (!ticket || !ticket.messageId) return null;
+
+    const storage = this.getStorage();
+    const now = Date.now();
+
+    // Try to claim the ticket atomically
+    const ticketKey = storage.getPluginKey(null, 'tickets', ticket.ticketId);
+
+    // Fetch ticket with current state
+    const [okGet, errGet, currentTicket] = await tryFn(() => storage.get(ticketKey));
+
+    if (!okGet || !currentTicket) {
+      // Ticket expired or deleted
+      return null;
+    }
+
+    if (currentTicket.status !== 'available' || currentTicket.claimedBy) {
+      // Already claimed by another worker
+      return null;
+    }
+
+    // Attempt to claim ticket
+    const [okClaim, errClaim] = await tryFn(() =>
+      storage.set(ticketKey, {
+        ...currentTicket,
+        status: 'claimed',
+        claimedBy: this.workerId,
+        claimedAt: now
+      }, {
+        ttl: currentTicket.ticketTTL || currentTicket._ttl || 60,
+        behavior: 'body-only'
+      })
+    );
+
+    if (!okClaim) {
+      // Failed to claim (race condition)
+      if (this.config.verbose) {
+        console.log(`[S3QueuePlugin] Failed to claim ticket ${ticket.ticketId}: ${errClaim?.message}`);
+      }
+      return null;
+    }
+
+    // Now claim the actual message using standard claim logic
+    const [okMsg, errMsg, msg] = await tryFn(() =>
+      this.queueResource.get(ticket.messageId)
+    );
+
+    if (!okMsg || !msg) {
+      // Message not found, mark ticket as processed
+      await this.markTicketProcessed(ticket.ticketId);
+      return null;
+    }
+
+    // Use existing claim logic (with ETag atomicity)
+    const claimedMessage = await this.attemptClaim(msg, { enforceOrder: true });
+
+    if (claimedMessage) {
+      // Successfully claimed, mark ticket as processed
+      await this.markTicketProcessed(ticket.ticketId);
+      return claimedMessage;
+    } else {
+      // Failed to claim message, release ticket
+      await this.releaseTicket(ticket.ticketId);
+      return null;
+    }
+  }
+
+  /**
+   * Mark a dispatch ticket as processed
+   */
+  async markTicketProcessed(ticketId) {
+    const storage = this.getStorage();
+    const key = storage.getPluginKey(null, 'tickets', ticketId);
+
+    const [ok, err] = await tryFn(() =>
+      storage.delete(key)
+    );
+
+    if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
+      console.warn('[S3QueuePlugin] Failed to delete ticket:', err?.message);
+    }
+  }
+
+  /**
+   * Release a dispatch ticket back to available state
+   */
+  async releaseTicket(ticketId) {
+    const storage = this.getStorage();
+    const key = storage.getPluginKey(null, 'tickets', ticketId);
+
+    const [okGet, , ticket] = await tryFn(() => storage.get(key));
+
+    if (!okGet || !ticket) {
+      return;
+    }
+
+    const [okRelease, errRelease] = await tryFn(() =>
+      storage.set(key, {
+        ...ticket,
+        status: 'available',
+        claimedBy: null,
+        claimedAt: null
+      }, {
+        ttl: ticket.ticketTTL || 60, // Use persisted TTL from publishDispatchTickets()
+        behavior: 'body-only'
+      })
+    );
+
+    if (!okRelease && this.config.verbose) {
+      console.warn('[S3QueuePlugin] Failed to release ticket:', errRelease?.message);
+    }
+  }
+
+  /**
+   * Recover stalled tickets from dead workers
+   * OpenSpec Requirement 11: Ticket Recovery
+   */
+  async recoverStalledTickets() {
+    if (!this.config.enableCoordinator) return;
+    if (!this.isCoordinator) return;
+
+    const storage = this.getStorage();
+    // Use relative prefix (without plugin slug, listWithPrefix adds it)
+    const prefix = 'tickets/';
+
+    const [okTickets, , tickets] = await tryFn(() => storage.listWithPrefix(prefix));
+
+    if (!okTickets || !tickets || tickets.length === 0) {
+      return;
+    }
+
+    // Get active workers
+    const activeWorkers = await this.getActiveWorkers();
+    const activeWorkerIds = new Set(activeWorkers.map(w => w.workerId));
+
+    const now = Date.now();
+    const stalledTimeout = this.config.heartbeatTTL * 1000; // Same as heartbeat TTL
+    let recovered = 0;
+
+    for (const ticket of tickets) {
+      // Validate ticket has required fields (listWithPrefix returns data objects now)
+      if (!ticket || !ticket.ticketId || ticket.status !== 'claimed' || !ticket.claimedBy) {
+        continue;
+      }
+
+      // Check if worker is still active
+      if (activeWorkerIds.has(ticket.claimedBy)) {
+        // Worker is active, check if ticket is stalled (claimed too long ago)
+        const claimAge = now - (ticket.claimedAt || 0);
+        if (claimAge < stalledTimeout) {
+          continue; // Still valid
+        }
+      }
+
+      // Worker is dead or ticket is stalled, release it
+      await this.releaseTicket(ticket.ticketId);
+      recovered++;
+
+      if (this.config.verbose) {
+        console.log(`[S3QueuePlugin] Recovered stalled ticket ${ticket.ticketId} from worker ${ticket.claimedBy}`);
+      }
+    }
+
+    if (recovered > 0) {
+      this.emit('plg:s3-queue:tickets-recovered', {
+        coordinatorId: this.workerId,
+        count: recovered,
+        timestamp: now
+      });
     }
   }
 }
