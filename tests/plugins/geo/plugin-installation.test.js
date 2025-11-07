@@ -27,7 +27,7 @@ describe('Geo Plugin - Installation', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation();
 
     const plugin = new GeoPlugin({
-      verbose: false,
+      verbose: true,  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',

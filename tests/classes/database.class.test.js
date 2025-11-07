@@ -285,7 +285,7 @@ describe('Database Plugin Lifecycle', () => {
 describe('Database Constructor and Edge Cases', () => {
   test('should handle constructor with minimal options', () => {
     const db = new Database({
-      client: { bucket: 'test', keyPrefix: 'test/' }
+      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.version).toBe('1');
     expect(db.s3dbVersion).toBeDefined();
@@ -301,7 +301,7 @@ describe('Database Constructor and Edge Cases', () => {
     const mockPlugin = { install: jest.fn(), start: jest.fn() };
     
     const db = new Database({
-      verbose: false,
+      verbose: true,  // Test expects verbose to be true
       parallelism: 5,
       plugins: [mockPlugin],
       cache: { type: 'memory' },
@@ -321,7 +321,7 @@ describe('Database Constructor and Edge Cases', () => {
 
   test('should handle constructor with string parallelism', () => {
     const db = new Database({ 
-      parallelism: '15',
+      verbose: false, parallelism: '15',
       client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.parallelism).toBe(15);
@@ -329,7 +329,7 @@ describe('Database Constructor and Edge Cases', () => {
 
   test('should handle constructor with invalid parallelism', () => {
     const db = new Database({ 
-      parallelism: 'invalid',
+      verbose: false, parallelism: 'invalid',
       client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.parallelism).toBe(10); // Default value
@@ -341,7 +341,7 @@ describe('Database Constructor and Edge Cases', () => {
     delete global.__PACKAGE_VERSION__;
     
     const db = new Database({
-      client: { bucket: 'test', keyPrefix: 'test/' }
+      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.s3dbVersion).toBe('latest');
     
@@ -357,7 +357,7 @@ describe('Database Constructor and Edge Cases', () => {
     global.__PACKAGE_VERSION__ = '1.2.3';
     
     const db = new Database({
-      client: { bucket: 'test', keyPrefix: 'test/' }
+      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.s3dbVersion).toBe('1.2.3');
     
@@ -802,7 +802,7 @@ describe('Database Configuration and Status', () => {
 
   test('should return connection status', () => {
     const db = new Database({
-      client: { bucket: 'test', keyPrefix: 'test/' }
+      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
     });
     
     expect(db.isConnected()).toBe(false); // Not connected yet
@@ -813,7 +813,7 @@ describe('Database Configuration and Status', () => {
 });
 
 describe('Database.generateDefinitionHash is stable and deterministic', () => {
-  const db = new Database({ client: { bucket: 'test', keyPrefix: 'test/' } });
+  const db = new Database({ verbose: false, client: { bucket: 'test', keyPrefix: 'test/' } });
   const def1 = {
     attributes: { name: 'string|required', email: 'email|required' },
     options: { timestamps: true }

@@ -810,7 +810,9 @@ export class MetricsPlugin extends Plugin {
     if (this.metricsServer) {
       await new Promise((resolve) => {
         this.metricsServer.close(() => {
-          console.log('[Metrics Plugin] Standalone metrics server stopped');
+          if (this.config.verbose) {
+            console.log('[Metrics Plugin] Standalone metrics server stopped');
+          }
           this.metricsServer = null;
           resolve();
         });
@@ -1475,15 +1477,19 @@ export class MetricsPlugin extends Plugin {
           'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'
         });
       } catch (err) {
-        console.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
+        if (this.config.verbose) {
+          console.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
+        }
         return c.text('Internal Server Error', 500);
       }
     });
 
     const port = apiPlugin.config?.port || 3000;
-    console.log(
-      `[Metrics Plugin] Prometheus metrics available at http://localhost:${port}${path} (integrated mode)`
-    );
+    if (this.config.verbose) {
+      console.log(
+        `[Metrics Plugin] Prometheus metrics available at http://localhost:${port}${path} (integrated mode)`
+      );
+    }
   }
 
   /**
@@ -1525,14 +1531,18 @@ export class MetricsPlugin extends Plugin {
     });
 
     this.metricsServer.listen(port, '0.0.0.0', () => {
-      console.log(
-        `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)`
-      );
+      if (this.config.verbose) {
+        console.log(
+          `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)`
+        );
+      }
     });
 
     // Handle server errors
     this.metricsServer.on('error', (err) => {
-      console.error('[Metrics Plugin] Standalone metrics server error:', err);
+      if (this.config.verbose) {
+        console.error('[Metrics Plugin] Standalone metrics server error:', err);
+      }
     });
   }
 } 

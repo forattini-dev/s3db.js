@@ -321,7 +321,7 @@ describe('Costs Plugin', () => {
     test('should handle cost tracking with multiple clients', async () => {
       const client2 = createClientForTest(`suite=plugins/costs-client2`);
 
-      const database2 = new Database({ client: client2 });
+      const database2 = new Database({ verbose: false, client: client2 });
       await database2.connect();
 
       const costsPlugin2 = new CostsPlugin();

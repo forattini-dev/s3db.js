@@ -27,7 +27,7 @@ describe('Validator Cache', () => {
     clearValidatorCache();
 
     db = new Database({
-      client: new MemoryClient({ bucket: 'test-validator-cache', keyPrefix: 'test/' }),
+      verbose: false, client: new MemoryClient({ bucket: 'test-validator-cache', keyPrefix: 'test/' }),
       deferMetadataWrites: true
     });
     await db.connect();

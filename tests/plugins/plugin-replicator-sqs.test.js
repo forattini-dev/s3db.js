@@ -17,7 +17,7 @@ describe('SqsReplicator - Comprehensive Integration Tests', () => {
     queueUrl = await createSqsQueueForTest('rep-sqs-optimized-queue');
     sqsClient = createSqsClientForTest();
     plugin = new ReplicatorPlugin({
-      verbose: false, // Reduced from true for faster execution
+      verbose: true,  // Test expects verbose logging output
       replicators: [
         {
           driver: 'sqs',

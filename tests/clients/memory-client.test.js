@@ -126,7 +126,7 @@ describe('MemoryClient - Snapshot/Restore', () => {
 
   beforeEach(async () => {
     memoryClient = new MemoryClient({ bucket: 'test-snapshot' });
-    database = new Database({ client: memoryClient });
+    database = new Database({ verbose: false, client: memoryClient });
     await database.connect();
   });
 
@@ -190,7 +190,7 @@ describe('MemoryClient - Persistence', () => {
       bucket: 'test-persist',
       persistPath: `${tempPath}/snapshot.json`
     });
-    database = new Database({ client: memoryClient });
+    database = new Database({ verbose: false, client: memoryClient });
     await database.connect();
   });
 

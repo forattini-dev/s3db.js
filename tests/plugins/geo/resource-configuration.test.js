@@ -52,7 +52,7 @@ describe('Geo Plugin - Resource configuration', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,
+      verbose: true,  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',
@@ -74,7 +74,7 @@ describe('Geo Plugin - Resource configuration', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
     const plugin = new GeoPlugin({
-      verbose: false,
+      verbose: true,  // Test expects verbose logging output
       resources: {
         nonexistent: {
           latField: 'latitude',

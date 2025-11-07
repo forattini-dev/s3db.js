@@ -36,7 +36,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
     // 1. Setup Identity Provider (Authorization Server)
     // ========================================
     identityDb = new Database({
-      client: new MemoryClient(),
+      verbose: false, client: new MemoryClient(),
       bucketName: 'identity-test',
       encryptionKey: 'test-identity-key'
     });
@@ -88,6 +88,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
     // 2. Setup Orders Resource Server
     // ========================================
     ordersDb = new Database({
+      verbose: false,
       client: new MemoryClient(),
       bucketName: 'orders-test',
       encryptionKey: 'test-orders-key'
@@ -137,6 +138,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
     // 3. Setup Products Resource Server
     // ========================================
     productsDb = new Database({
+      verbose: false,
       client: new MemoryClient(),
       bucketName: 'products-test',
       encryptionKey: 'test-products-key'

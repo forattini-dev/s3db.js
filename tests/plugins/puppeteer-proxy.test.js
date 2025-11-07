@@ -16,7 +16,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   beforeAll(async () => {
     // Use real Database with MemoryClient - obliterating MockDatabase!
     db = new Database({
-      client: new MemoryClient()
+      verbose: false, client: new MemoryClient()
     });
     await db.connect();
   });
