@@ -102,6 +102,9 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       await resource.enqueue({ id: `job-${i}`, payload: `payload-${i}` });
     }
 
+    // Wait for all messages to be enqueued and coordinator to publish tickets
+    await sleep(500);
+
     await plugin.startProcessing(async (job) => {
       processed.push(job.id);
     }, { concurrency: 1 });
