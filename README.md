@@ -110,7 +110,7 @@
 
 > **Core Concepts:** [Schema Validation](./docs/schema.md) • [Client API](./docs/client.md) • [Fastest Validator](./docs/fastest-validator.md)
 
-> **Plugins:** [API Plugin](./docs/plugins/api.md) • [Identity Plugin](./docs/plugins/identity.md) • [All Plugins](#-plugins)
+> **Plugins:** [API Plugin](./docs/plugins/api/README.md) • [Identity Plugin](./docs/plugins/identity/README.md) • [All Plugins](#-plugins)
 
 > **Integrations:** [MCP Server](./docs/mcp.md) • [Model Context Protocol](./docs/mcp.md)
 
@@ -1350,13 +1350,13 @@ orders.useMiddleware('updated', async (ctx, next) => {
 
 ## 🔌 Plugins
 
-> **Quick Jump:** [🌐 API](#-api) | [🔐 Identity](#-identity) | [⚡ Performance](#-performance) | [📊 Data](#-data) | [🔧 DevOps](#-devops) | [🤖 ML/AI](#-mlai)
+> **Quick Jump:** [🌐 API](#-api) | [🔐 Identity](#-identity) | [⚡ Performance](#-performance) | [📊 Data](#-data) | [🔧 DevOps](#-devops) | [🤖 ML/AI](#-mlai) | [🕷️ Web Scraping](#️-web-scraping--automation)
 
 Extend s3db.js with powerful plugins. All plugins are optional and can be installed independently.
 
 ### 🌐 API & Auth
 
-[**APIPlugin**](./docs/plugins/api.md) • [**IdentityPlugin**](./docs/plugins/identity.md)
+[**APIPlugin**](./docs/plugins/api/README.md) • [**IdentityPlugin**](./docs/plugins/identity/README.md)
 
 **APIPlugin** - Transform s3db.js into production-ready REST API with OpenAPI, multi-auth (JWT/OIDC/Basic/API Key), rate limiting, and template engines.
 
@@ -1411,6 +1411,12 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 **FullTextPlugin** - Full-text search with tokenization and indexing.
 
 **GeoPlugin** - Geospatial queries and distance calculations.
+
+### 🕷️ Web Scraping & Automation
+
+[**PuppeteerPlugin**](./docs/plugins/puppeteer/README.md)
+
+**PuppeteerPlugin** - Enterprise-grade browser automation with anti-bot detection, cookie farming, proxy rotation, and intelligent pooling for web scraping at scale.
 
 ### 🔗 Other Plugins
 
