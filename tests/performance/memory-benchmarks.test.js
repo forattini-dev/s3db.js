@@ -21,7 +21,7 @@ const VERBOSE = process.env.MEMORY_BENCHMARK_VERBOSE === 'true';
 
 function log(...args) {
   if (VERBOSE) {
-    console.log('[MEMORY]', ...args);
+    // console.log('[MEMORY]', ...args);
   }
 }
 
@@ -261,17 +261,17 @@ describe('Memory Benchmarks', () => {
   it('Summary Report', () => {
     const usage = getMemoryUsage();
 
-    console.log('\n' + '='.repeat(60));
-    console.log('MEMORY BENCHMARK SUMMARY');
-    console.log('='.repeat(60));
-    console.log('Current Memory Usage:');
-    console.log(`  RSS:          ${usage.rssMB} MB`);
-    console.log(`  Heap Used:    ${usage.heapUsedMB} MB`);
-    console.log(`  Heap Total:   ${usage.heapTotalMB} MB`);
-    console.log(`  External:     ${usage.externalMB} MB`);
-    console.log(`  Heap Limit:   ${usage.heapSizeLimitMB} MB`);
-    console.log('='.repeat(60));
-    console.log('Run with MEMORY_BENCHMARK_VERBOSE=true for detailed logs');
-    console.log('='.repeat(60) + '\n');
+    // console.log('\n' + '='.repeat(60));
+    // console.log('MEMORY BENCHMARK SUMMARY');
+    // console.log('='.repeat(60));
+    // console.log('Current Memory Usage:');
+    // console.log(`  RSS:          ${usage.rssMB} MB`);
+    // console.log(`  Heap Used:    ${usage.heapUsedMB} MB`);
+    // console.log(`  Heap Total:   ${usage.heapTotalMB} MB`);
+    // console.log(`  External:     ${usage.externalMB} MB`);
+    // console.log(`  Heap Limit:   ${usage.heapSizeLimitMB} MB`);
+    // console.log('='.repeat(60));
+    // console.log('Run with MEMORY_BENCHMARK_VERBOSE=true for detailed logs');
+    // console.log('='.repeat(60) + '\n');
   });
 });
