@@ -45,7 +45,7 @@ describe('Geo Plugin - Zoom levels', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',

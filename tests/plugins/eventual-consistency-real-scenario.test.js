@@ -19,7 +19,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

@@ -34,7 +34,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: true  // Enable verbose logging
+        verbose: false  // Enable verbose logging
       });
 
       // Capture console.log
@@ -67,7 +67,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: true,
+        verbose: false,
         onMessage: async (task) => ({ done: true })
       });
 
@@ -104,7 +104,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: true,
+        verbose: false,
         onMessage: async (task) => ({ done: true })
       });
 
@@ -169,7 +169,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         maxAttempts: 1,
         visibilityTimeout: 500,
         deadLetterResource: 'dead_tasks',
-        verbose: true
+        verbose: false
       });
 
       await plugin.install(database);
@@ -216,7 +216,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: true
+        verbose: false
       });
 
       await plugin.install(database);

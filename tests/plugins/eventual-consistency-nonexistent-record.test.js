@@ -40,7 +40,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(ecPlugin);
 
@@ -125,7 +125,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(ecPlugin);
 
@@ -200,7 +200,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(ecPlugin);
 

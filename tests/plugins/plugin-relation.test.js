@@ -125,7 +125,7 @@ describe('RelationPlugin - hasOne Relations', () => {
 
     // Add RelationPlugin
     plugin = new RelationPlugin({
-      verbose: true,  // Enable debug logging
+      verbose: false,  // Enable debug logging
       relations: {
         users: {
           profile: {

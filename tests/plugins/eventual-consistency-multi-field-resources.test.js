@@ -45,7 +45,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
 
@@ -90,7 +90,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true,
+      verbose: false,
       analytics: { enabled: true }
     });
     await database.usePlugin(plugin);
@@ -134,7 +134,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
 
@@ -175,7 +175,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
 

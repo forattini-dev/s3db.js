@@ -38,7 +38,7 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
 
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);
@@ -61,7 +61,7 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
       resources: { urls: ['clicks'] },
       cohort: { timezone: 'Invalid/Timezone' },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

@@ -19,8 +19,28 @@ export function createConfig(options, detectedTimezone) {
   const batch = options.batch || {};
   const lateArrivals = options.lateArrivals || {};
   const checkpoints = options.checkpoints || {};
+  const coordinator = options.coordinator || {};
 
   return {
+    // ========== Coordinator mode settings ==========
+    enableCoordinator: options.enableCoordinator !== false, // Default true
+
+    // Coordinator election settings (passed to CoordinatorPlugin)
+    heartbeatInterval: coordinator.heartbeatInterval ?? 5000, // 5s
+    heartbeatTTL: coordinator.heartbeatTTL ?? 3, // 15s timeout (3 × 5s)
+    epochDuration: coordinator.epochDuration ?? 300000, // 5min
+    coldStartDuration: coordinator.coldStartDuration ?? 15000, // 15s
+    skipColdStart: coordinator.skipColdStart || false,
+
+    // Coordinator work settings
+    coordinatorWorkInterval: coordinator.workInterval ?? 60000, // 60s query interval
+    consolidationWindow: consolidation.window ?? 24, // hours to query
+    ticketBatchSize: coordinator.ticketBatchSize ?? 100, // records per ticket
+    ticketTTL: coordinator.ticketTTL ?? 300000, // 5min ticket expiration
+
+    // Worker settings
+    workerInterval: coordinator.workerInterval ?? 10000, // 10s ticket claim interval
+    workerClaimLimit: coordinator.workerClaimLimit ?? 1, // tickets to claim per iteration
     // Cohort (timezone)
     cohort: {
       timezone: options.cohort?.timezone || detectedTimezone

@@ -46,7 +46,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
 
@@ -110,7 +110,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
 
@@ -212,7 +212,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: true, interval: 1 }, // 1 second interval for fast testing
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
     await plugin.start();
@@ -276,7 +276,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
     await database.usePlugin(plugin);
 

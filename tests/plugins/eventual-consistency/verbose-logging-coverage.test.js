@@ -32,7 +32,7 @@ describe('EventualConsistencyPlugin - Verbose Logging Coverage', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
-      verbose: true // Enable verbose for logging coverage
+      verbose: false // Enable verbose for logging coverage
     });
 
     await database.usePlugin(plugin);
@@ -62,7 +62,7 @@ describe('EventualConsistencyPlugin - Verbose Logging Coverage', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

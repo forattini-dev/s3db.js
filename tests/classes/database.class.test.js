@@ -301,7 +301,7 @@ describe('Database Constructor and Edge Cases', () => {
     const mockPlugin = { install: jest.fn(), start: jest.fn() };
     
     const db = new Database({
-      verbose: true,
+      verbose: false,
       parallelism: 5,
       plugins: [mockPlugin],
       cache: { type: 'memory' },
@@ -783,7 +783,7 @@ describe('Database Configuration and Status', () => {
   test('should return correct configuration', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
     const db = new Database({
-      verbose: true,
+      verbose: false,
       parallelism: 5,
       client: mockClient
     });
@@ -796,7 +796,7 @@ describe('Database Configuration and Status', () => {
       bucket: 'test-bucket',
       keyPrefix: 'test/',
       parallelism: 5,
-      verbose: true
+      verbose: false
     });
   });
 

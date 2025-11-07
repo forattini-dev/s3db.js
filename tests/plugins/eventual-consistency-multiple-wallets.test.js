@@ -19,7 +19,7 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
         wallets: ['balance']
       },
       consolidation: { mode: 'sync' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

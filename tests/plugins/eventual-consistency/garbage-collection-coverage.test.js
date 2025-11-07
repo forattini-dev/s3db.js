@@ -32,7 +32,7 @@ describe('EventualConsistencyPlugin - Garbage Collection Coverage', () => {
     plugin = new EventualConsistencyPlugin({
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', auto: false },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

@@ -22,13 +22,12 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       }
     });
 
-    // Add plugin with verbose mode for better debugging
     plugin = new EventualConsistencyPlugin({
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async' },
-      verbose: true
+      verbose: false
     });
 
     await database.usePlugin(plugin);

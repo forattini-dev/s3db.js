@@ -46,7 +46,7 @@ describe('Geo Plugin - findInBounds()', () => {
     await ctx.createStoresResource({ asyncPartitions: false });
 
     const plugin = new GeoPlugin({
-      verbose: true,
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',
@@ -161,7 +161,7 @@ describe('Geo Plugin - findInBounds()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,
+      verbose: false,
       resources: {
         stores: {
           latField: 'latitude',
