@@ -1,4 +1,4 @@
-import { Plugin } from "./plugin.class.js";
+import { CoordinatorPlugin } from "./concerns/coordinator-plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { SchedulerError } from "./scheduler.errors.js";
@@ -157,8 +157,9 @@ import { SchedulerError } from "./scheduler.errors.js";
  *   onJobError: (jobName, error) => console.error(`Job ${jobName} failed:`, error.message)
  * });
  */
-export class SchedulerPlugin extends Plugin {
+export class SchedulerPlugin extends CoordinatorPlugin {
   constructor(options = {}) {
+    // Pass coordinator options to super (Scheduler doesn't need coordinator work interval since it uses timers)
     super(options);
 
     const {
@@ -293,11 +294,15 @@ export class SchedulerPlugin extends Plugin {
         lastError: null
       });
     }
-    
-    // Start scheduling
-    await this._startScheduling();
-    
+
+    // NOTE: Job scheduling is started in onBecomeCoordinator() to ensure
+    // only the coordinator schedules and executes jobs (reduces overhead and lock contention)
+
     this.emit('db:plugin:initialized', { jobs: this.jobs.size });
+
+    // Start coordinator system (handles cold start, heartbeat, election, etc.)
+    // When this worker becomes coordinator, onBecomeCoordinator() will start job scheduling
+    await this.startCoordination();
   }
 
 
@@ -323,6 +328,51 @@ export class SchedulerPlugin extends Plugin {
       }
     }));
   }
+
+  // ==================== COORDINATOR HOOKS ====================
+
+  /**
+   * Called when this worker becomes the coordinator
+   * Only the coordinator should schedule and execute jobs
+   */
+  async onBecomeCoordinator() {
+    if (this.verbose) {
+      console.log('[SchedulerPlugin] Became coordinator - starting job scheduling');
+    }
+
+    // Start job scheduling (only coordinator schedules jobs)
+    await this._startScheduling();
+
+    this.emit('plg:scheduler:coordinator-promoted', {
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Called when this worker stops being the coordinator
+   * Job timers are cleared automatically in stop() method
+   */
+  async onStopBeingCoordinator() {
+    if (this.verbose) {
+      console.log('[SchedulerPlugin] No longer coordinator - job timers will be stopped automatically');
+    }
+
+    this.emit('plg:scheduler:coordinator-demoted', {
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Coordinator work loop (not used - Scheduler uses setTimeout-based job scheduling instead)
+   */
+  async coordinatorWork() {
+    // Scheduler uses setTimeout-based job scheduling rather than a work loop
+    // This method is required by CoordinatorPlugin but not used
+  }
+
+  // ==================== JOB SCHEDULING ====================
 
   async _startScheduling() {
     for (const [jobName, job] of this.jobs) {
@@ -967,15 +1017,15 @@ export class SchedulerPlugin extends Plugin {
       if (this.verbose) {
         console.log(`[SchedulerPlugin] Waiting for ${this.activeJobs.size} active jobs to complete...`);
       }
-      
+
       // Wait up to 5 seconds for jobs to complete in production
       const timeout = 5000;
       const start = Date.now();
-      
+
       while (this.activeJobs.size > 0 && (Date.now() - start) < timeout) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
+
       if (this.activeJobs.size > 0) {
         console.warn(`[SchedulerPlugin] ${this.activeJobs.size} jobs still running after timeout`);
       }
@@ -991,5 +1041,8 @@ export class SchedulerPlugin extends Plugin {
     this.statistics.clear();
     this.activeJobs.clear();
     this.removeAllListeners();
+
+    // Stop coordinator system (heartbeat, epoch management, etc.)
+    await this.stopCoordination();
   }
 }

@@ -1,4 +1,4 @@
-import { Plugin } from "./plugin.class.js";
+import { CoordinatorPlugin } from "./concerns/coordinator-plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
@@ -155,8 +155,9 @@ function getExpiredCohorts(granularity, count) {
   return cohorts;
 }
 
-export class TTLPlugin extends Plugin {
+export class TTLPlugin extends CoordinatorPlugin {
   constructor(options = {}) {
+    // Pass coordinator options to super (TTL doesn't need coordinator work interval since it uses cron)
     super(options);
 
     const {
@@ -253,8 +254,8 @@ export class TTLPlugin extends Plugin {
       this._setupResourceHooks(resourceName, this.resources[resourceName]);
     }
 
-    // Start interval-based cleanup
-    this._startIntervals();
+    // NOTE: Cleanup intervals are started in onBecomeCoordinator() to ensure
+    // only the coordinator performs cleanup work (avoids duplicate scans)
 
     if (this.verbose) {
       console.log(`[TTLPlugin] Installed with ${managedResources.length} resources`);
@@ -264,6 +265,10 @@ export class TTLPlugin extends Plugin {
       plugin: 'TTLPlugin',
       resources: managedResources
     });
+
+    // Start coordinator system (handles cold start, heartbeat, election, etc.)
+    // When this worker becomes coordinator, onBecomeCoordinator() will start cleanup intervals
+    await this.startCoordination();
   }
 
   _resolveIndexResourceName() {
@@ -514,9 +519,55 @@ export class TTLPlugin extends Plugin {
     }
   }
 
+  // ==================== COORDINATOR HOOKS ====================
+
+  /**
+   * Called when this worker becomes the coordinator
+   * Only the coordinator should run cleanup intervals
+   */
+  async onBecomeCoordinator() {
+    if (this.verbose) {
+      console.log('[TTLPlugin] Became coordinator - starting cleanup intervals');
+    }
+
+    // Start cleanup intervals (only coordinator does cleanup)
+    await this._startIntervals();
+
+    this.emit('plg:ttl:coordinator-promoted', {
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Called when this worker stops being the coordinator
+   * Cleanup intervals are auto-stopped by Plugin.stop()
+   */
+  async onStopBeingCoordinator() {
+    if (this.verbose) {
+      console.log('[TTLPlugin] No longer coordinator - cleanup intervals will be stopped automatically');
+    }
+
+    this.emit('plg:ttl:coordinator-demoted', {
+      workerId: this.workerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Coordinator work loop (not used - TTL uses cron-based intervals instead)
+   */
+  async coordinatorWork() {
+    // TTL uses cron-based cleanup intervals (scheduleCron) rather than a work loop
+    // This method is required by CoordinatorPlugin but not used
+  }
+
+  // ==================== CLEANUP INTERVALS ====================
+
   /**
    * Start cron-based cleanup for each granularity
    * Uses Plugin.scheduleInterval() for auto-tracking and cleanup
+   * ONLY called by coordinator (via onBecomeCoordinator)
    */
   async _startIntervals() {
     if (!this.cronManager) {
@@ -830,6 +881,9 @@ export class TTLPlugin extends Plugin {
 
   async onStop() {
     this.isRunning = false;
+
+    // Stop coordinator system (heartbeat, epoch management, etc.)
+    await this.stopCoordination();
   }
 
   /**

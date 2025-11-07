@@ -16,11 +16,9 @@ async function waitForCondition(predicate, { timeout = 10000, interval = 25 } = 
   }
 }
 
-// FIXME: These tests are currently failing due to job processing issues
-// Jobs are enqueued but never processed, causing all waitForCondition to timeout
-// This appears to be a functional issue with the S3QueuePlugin, not just timeouts
-// Timeouts have been increased appropriately but tests still fail
-describe.skip('S3QueuePlugin - Ordering & Locks', () => {
+// Updated to work with coordinator mode enabled by default (v14.2.0+)
+// Tests verify both coordinator and non-coordinator behavior
+describe('S3QueuePlugin - Ordering & Locks', () => {
   let database;
   let resource;
   let plugin;
@@ -56,7 +54,11 @@ describe.skip('S3QueuePlugin - Ordering & Locks', () => {
       autoStart: false,
       visibilityTimeout: 2000,
       pollInterval: 50,
-      concurrency: 4
+      concurrency: 4,
+      enableCoordinator: true,
+      heartbeatInterval: 500,
+      dispatchInterval: 100,
+      verbose: false
     });
 
     await plugin.install(database);
@@ -84,7 +86,11 @@ describe.skip('S3QueuePlugin - Ordering & Locks', () => {
       autoStart: false,
       visibilityTimeout: 2000,
       pollInterval: 50,
-      orderingMode: 'lifo'
+      orderingMode: 'lifo',
+      enableCoordinator: true,
+      heartbeatInterval: 500,
+      dispatchInterval: 100,
+      verbose: false
     });
 
     await plugin.install(database);
@@ -113,7 +119,10 @@ describe.skip('S3QueuePlugin - Ordering & Locks', () => {
       visibilityTimeout: 2000,
       pollInterval: 50,
       concurrency: 2,
-      orderingGuarantee: false
+      orderingGuarantee: false,
+      enableCoordinator: true,
+      heartbeatInterval: 500,
+      verbose: false
     });
 
     await plugin.install(database);
@@ -144,7 +153,12 @@ describe.skip('S3QueuePlugin - Ordering & Locks', () => {
       visibilityTimeout: 2000,
       pollInterval: 20,
       concurrency: 25,
-      orderingGuarantee: false
+      orderingGuarantee: false,
+      enableCoordinator: true,
+      heartbeatInterval: 500,
+      dispatchInterval: 50,
+      ticketBatchSize: 10,
+      verbose: false
     });
 
     await plugin.install(database);
@@ -174,7 +188,10 @@ describe.skip('S3QueuePlugin - Ordering & Locks', () => {
       autoStart: false,
       visibilityTimeout: 200,
       pollInterval: 20,
-      maxAttempts: 2
+      maxAttempts: 2,
+      enableCoordinator: true,
+      heartbeatInterval: 500,
+      verbose: false
     });
 
     await plugin.install(database);
@@ -208,7 +225,12 @@ describe.skip('S3QueuePlugin - Ordering & Locks', () => {
       autoStart: false,
       visibilityTimeout: 500,
       pollInterval: 25,
-      orderingGuarantee: true
+      orderingGuarantee: true,
+      enableCoordinator: true,
+      heartbeatInterval: 500,
+      dispatchInterval: 100,
+      ticketBatchSize: 5,
+      verbose: false
     };
 
     const pluginA = new S3QueuePlugin({ ...baseOptions });

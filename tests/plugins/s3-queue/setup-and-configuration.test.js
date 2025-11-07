@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globa
 import { S3QueuePlugin } from '../../../src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '../../config.js';
 
-describe.skip('S3QueuePlugin - Setup and Configuration', () => {
+describe('S3QueuePlugin - Setup and Configuration', () => {
   let database;
   let resource;
   let plugin;
@@ -45,10 +45,10 @@ describe.skip('S3QueuePlugin - Setup and Configuration', () => {
 
     await plugin.install(database);
 
-    // Check that queue resource was created
-    const queueResource = database.resources['emails_queue'];
+    // Check that queue resource was created (now has plugin prefix)
+    const queueResource = database.resources['plg_s3queue_emails_queue'];
     expect(queueResource).toBeDefined();
-    expect(queueResource.name).toBe('emails_queue');
+    expect(queueResource.name).toBe('plg_s3queue_emails_queue');
   });
 
   test('should add helper methods to target resource', async () => {
@@ -72,7 +72,7 @@ describe.skip('S3QueuePlugin - Setup and Configuration', () => {
     });
 
     await expect(plugin.install(database)).rejects.toThrow(
-      "S3QueuePlugin: resource 'nonexistent' not found"
+      "Resource 'nonexistent' not found"
     );
   });
 });

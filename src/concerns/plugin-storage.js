@@ -375,6 +375,33 @@ export class PluginStorage {
   }
 
   /**
+   * List objects (with data) matching a prefix
+   * Convenience method that combines list() + batchGet()
+   *
+   * @param {string} prefix - Prefix to match
+   * @param {Object} options - List options
+   * @returns {Promise<Array<Object>>} List of objects with data (not wrappers)
+   */
+  async listWithPrefix(prefix = '', options = {}) {
+    // Get keys matching prefix
+    const keys = await this.list(prefix, options);
+
+    if (!keys || keys.length === 0) {
+      return [];
+    }
+
+    // Fetch all objects
+    const results = await this.batchGet(keys);
+
+    // Extract data from wrappers and filter out nulls/errors/expired
+    // batchGet returns { ok, data, error } - we only want successful, non-null data
+    // Use != null (not !==) to filter both null and undefined
+    return results
+      .filter(item => item.ok && item.data != null)
+      .map(item => item.data);
+  }
+
+  /**
    * Remove client keyPrefix from keys
    * @private
    */

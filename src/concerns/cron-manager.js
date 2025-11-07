@@ -46,7 +46,7 @@ function createDailyStepExpression(value) {
 }
 
 export function intervalToCron(ms) {
-  const seconds = Math.floor(ms / 1000);
+  const seconds = Math.max(1, Math.floor(ms / 1000)); // Minimum 1 second
 
   // Every N seconds (max 59)
   if (seconds < 60) {
