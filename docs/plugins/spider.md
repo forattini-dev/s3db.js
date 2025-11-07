@@ -1246,9 +1246,15 @@ processor: async (task, ctx, helpers) => {
 
 ## 🔗 See Also
 
-- [PuppeteerPlugin](./puppeteer.md) - Browser automation details
-- [S3QueuePlugin](./s3-queue.md) - Distributed queue implementation
-- [TTLPlugin](./ttl.md) - TTL management
+### Related Plugins
+- **[Puppeteer Plugin](./puppeteer/README.md)** - Browser automation, pooling, proxy configuration, anti-bot detection
+- **[Cookie Farm Plugin](./cookie-farm/README.md)** - Automated cookie farming and persona management for anti-bot evasion
+
+### Supporting Plugins
+- [S3 Queue Plugin](./s3-queue/) - Distributed queue implementation
+- [TTL Plugin](./ttl/) - TTL management and automatic cleanup
+
+### Examples
 - [Example: e30-spider-basic.js](../examples/e30-spider-basic.js) - Basic spider example
 - [Example: e31-spider-distributed.js](../examples/e31-spider-distributed.js) - Multi-worker setup
 
