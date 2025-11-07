@@ -318,6 +318,11 @@ export class Plugin extends EventEmitter {
     // Auto-cleanup all cron jobs
     this.stopAllCronJobs();
 
+    // MEMORY: Remove all event listeners registered by this plugin
+    // This is a defensive cleanup - plugins SHOULD remove their own listeners
+    // in onStop(), but this acts as a safety net for poorly-written plugins
+    this.removeAllListeners();
+
     this.afterStop();
   }
 
