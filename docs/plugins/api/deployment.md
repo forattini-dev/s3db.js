@@ -1,6 +1,6 @@
 # 🐳 Production Deployment
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Configuration →](./configuration.md) | [Guards →](./guards.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Configuration →](./configuration.md) | [Guards →](./guards.md)
 
 ---
 
@@ -913,4 +913,4 @@ For detailed MetricsPlugin configuration and features, see [MetricsPlugin docume
 
 ---
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Configuration →](./configuration.md) | [Guards →](./guards.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Configuration →](./configuration.md) | [Guards →](./guards.md)

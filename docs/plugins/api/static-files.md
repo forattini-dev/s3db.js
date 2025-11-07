@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [💾 Filesystem](#filesystem-driver) | [☁️ S3 Driver](#s3-driver) | [⚛️ SPA Support](#spa-single-page-application-support) | [🔐 With Auth](#combining-with-authentication) | [⚙️ Config](#configuration-options)
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Authentication →](./authentication.md) | [Configuration →](./configuration.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Configuration →](./configuration.md)
 
 ---
 
@@ -422,7 +422,7 @@ You learned:
 
 **Next Steps:**
 1. Protect your SPA: [Authentication →](./authentication.md)
-2. Add API endpoints: [API Plugin →](../api.md)
+2. Add API endpoints: [API Plugin →](./README.md)
 3. Try basic example: [Example 84](../../examples/e84-static-files.js)
 4. Try protected SPA: [Example 85](../../examples/e85-protected-spa.js)
 5. Deploy to production: [Deployment →](./deployment.md)
@@ -432,7 +432,7 @@ You learned:
 ## 🔗 See Also
 
 **Related Documentation:**
-- [API Plugin](../api.md) - Main API Plugin documentation
+- [API Plugin](./README.md) - Main API Plugin documentation
 - [Authentication](./authentication.md) - Protect static files with auth
 - [Guards](./guards.md) - Authorization for API endpoints
 - [Configuration](./configuration.md) - Complete configuration reference
@@ -446,4 +446,4 @@ You learned:
 
 ---
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Authentication →](./authentication.md) | [Configuration →](./configuration.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Configuration →](./configuration.md)

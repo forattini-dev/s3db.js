@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [Discovery](#1-discovery-endpoint) | [JWKS](#2-jwks-endpoint) | [Token](#3-token-endpoint) | [Authorize](#4-authorization-endpoint-get) | [UserInfo](#6-userinfo-endpoint) | [Introspect](#7-token-introspection) | [Revoke](#8-token-revocation) | [Register](#9-dynamic-client-registration)
 
-> **Navigation:** [← Back to Identity Plugin](../identity.md) | [← Architecture](./architecture.md) | [Integration →](./integration.md)
+> **Navigation:** [← Back to Identity Plugin](./README.md) | [← Architecture](./architecture.md) | [Integration →](./integration.md)
 
 ---
 
@@ -332,7 +332,7 @@ await clientsResource.delete(clientId);
 - [Architecture & Token Flow](./architecture.md) - Understand how tokens flow
 - [Integration Guide](./integration.md) - Connect your apps
 - [Troubleshooting](./troubleshooting.md) - Common errors and solutions
-- [Identity Plugin Main](../identity.md) - Overview and quickstart
+- [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
 - [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
@@ -341,4 +341,4 @@ await clientsResource.delete(clientId);
 
 ---
 
-> **Navigation:** [↑ Top](#) | [← Architecture](./architecture.md) | [Integration →](./integration.md) | [← Back to Identity Plugin](../identity.md)
+> **Navigation:** [↑ Top](#) | [← Architecture](./architecture.md) | [Integration →](./integration.md) | [← Back to Identity Plugin](./README.md)

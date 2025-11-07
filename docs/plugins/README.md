@@ -20,7 +20,7 @@
 - **[📋 Documentation Standard](../plugin-docs-standard.md)** - Complete specification with 12 required sections
 - **[📝 Full Template](../templates/plugin-doc-template.md)** - Comprehensive template for complex plugins
 - **[📝 Minimal Template](../templates/plugin-doc-minimal.md)** - Streamlined template for simple plugins
-- **[🌟 Gold Standard](./puppeteer.md)** - Exemplar implementation (1,850+ lines)
+- **[🌟 Gold Standard](./puppeteer/README.md)** - Exemplar implementation (1,850+ lines)
 
 ### Quality Badges
 
@@ -38,7 +38,7 @@ Plugin documentation quality is indicated with badges:
 
 | Plugin | Purpose | Use Cases | Docs |
 |--------|---------|-----------|------|
-| **[🌐 API](./api.md)** | Auto-generated REST API with OpenAPI, path-based auth, template engine | RESTful endpoints, Swagger UI, multi-auth, SSR | [→](./api.md) |
+| **[🌐 API](./api/README.md)** | Auto-generated REST API with OpenAPI, path-based auth, template engine | RESTful endpoints, Swagger UI, multi-auth, SSR | [→](./api/README.md) |
 | **[📝 Audit](./audit.md)** | Comprehensive operation logging | Compliance, security | [→](./audit.md) |
 | **[💾 Backup](./backup.md)** | Multi-destination backup system | Data protection, disaster recovery | [→](./backup.md) |
 | **[💾 Cache](./cache.md)** | Multi-driver caching (memory/S3/filesystem) | Performance, cost reduction | [→](./cache.md) |
@@ -47,7 +47,7 @@ Plugin documentation quality is indicated with badges:
 | **[⚡ Eventual Consistency](./eventual-consistency.md)** | Transaction-based counters | Balances, analytics, aggregations | [→](./eventual-consistency.md) |
 | **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
 | **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
-| **[🔐 Identity](./identity.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](./identity.md) |
+| **[🔐 Identity](./identity/README.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](./identity/README.md) |
 | **[☸️ Kubernetes Inventory](./kubernetes-inventory/)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](./kubernetes-inventory/) |
 | **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
 | **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
@@ -1084,6 +1084,109 @@ class IndexingPlugin extends Plugin {
   }
 }
 ```
+
+#### Automatic Filtering from Documentation
+
+**Plugin attributes are automatically hidden** from user-facing documentation and type definitions to keep your API clean and focused on user-defined fields.
+
+**🔧 Filtered From:**
+
+| Tool | What Gets Filtered | Why |
+|------|-------------------|-----|
+| **OpenAPI Generator** | All plugin attributes (`_hasEmbedding`, `_ttl_expiresAt`, etc.) | API docs show only user fields |
+| **TypeScript Generator** | All plugin attributes | Type definitions match API contracts |
+| **API Plugin (Swagger UI)** | All plugin attributes | Clean, predictable REST API |
+
+**How It Works:**
+
+```javascript
+// User creates resource
+const users = await db.createResource({
+  name: 'users',
+  description: {
+    resource: 'User management',
+    attributes: {
+      email: 'User email address',
+      name: 'Full name'
+    }
+  },
+  attributes: {
+    email: 'string|required|email',
+    name: 'string|required'
+  }
+});
+
+// VectorPlugin adds internal tracking
+users.addPluginAttribute('_hasEmbedding', 'boolean|optional', 'VectorPlugin');
+users.addPluginAttribute('_vector_version', 'number|optional', 'VectorPlugin');
+
+// 📄 Generated OpenAPI shows ONLY user fields:
+// {
+//   "properties": {
+//     "email": { "type": "string", "format": "email" },
+//     "name": { "type": "string" }
+//   }
+// }
+// ✅ _hasEmbedding and _vector_version are automatically hidden
+
+// 📝 Generated TypeScript shows ONLY user fields:
+// interface Users {
+//   email: string;
+//   name: string;
+// }
+// ✅ Plugin attributes not exposed to developers
+```
+
+**Implementation Details:**
+
+The filtering uses two mechanisms to track plugin attributes:
+
+```javascript
+// 1. Reverse mapping (_pluginAttributes)
+resource.schema._pluginAttributes = {
+  'VectorPlugin': ['_hasEmbedding', '_vector_version'],
+  'TTLPlugin': ['_ttl_expiresAt', '_ttl_cohort']
+}
+
+// 2. Metadata for string-based definitions (_pluginAttributeMetadata)
+resource.schema._pluginAttributeMetadata = {
+  '_hasEmbedding': { __plugin__: 'VectorPlugin', __pluginCreated__: 1234567890 }
+}
+```
+
+**⚠️ Important: `$schema` vs `schema`**
+
+When generating documentation, always use `resource.schema` (live object) for attributes:
+
+```javascript
+// ✅ CORRECT: Use schema for attributes (includes runtime changes)
+const attributes = resource.schema.attributes;
+const pluginAttrs = resource.schema._pluginAttributes;
+const metadata = resource.schema._pluginAttributeMetadata;
+
+// ✅ CORRECT: Use $schema for static config (set at creation)
+const description = resource.$schema.description;
+const partitions = resource.$schema.partitions;
+const timestamps = resource.$schema.timestamps;
+```
+
+**Why the difference?**
+
+- `$schema` - Frozen snapshot at resource creation (doesn't include plugin attributes added later)
+- `schema` - Live object that reflects runtime changes (includes plugin attributes)
+
+This ensures OpenAPI/TypeScript generators can access and filter plugin attributes correctly.
+
+---
+
+**Why This Matters:**
+
+- ✅ **Clean API Docs**: Users see only their fields, not internal plugin state
+- ✅ **Type Safety**: TypeScript types match actual API responses
+- ✅ **Backwards Compatible**: Plugin attributes work in records but don't pollute docs
+- ✅ **Zero Config**: Automatic - just use `addPluginAttribute()` correctly
+
+**Note**: Plugin attributes are still **accessible in code** and **stored in records**—they're only hidden from **generated documentation**.
 
 ---
 

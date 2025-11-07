@@ -1,6 +1,6 @@
 # 🔌 Plugin Integrations
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Configuration →](./configuration.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Configuration →](./configuration.md)
 
 The API Plugin plays nicely with other first-party plugins. This guide shows how to expose their data through REST endpoints with zero ceremony.
 

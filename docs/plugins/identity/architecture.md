@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [System Arch](#system-architecture) | [SSO Flow](#complete-sso-flow) | [Grant Types](#grant-types-explained) | [Token Structure](#token-structure) | [RS256 vs HS256](#rs256-vs-hs256-security-model)
 
-> **Navigation:** [← Back to Identity Plugin](../identity.md) | [← Configuration](./configuration.md) | [API Reference →](./api-reference.md)
+> **Navigation:** [← Back to Identity Plugin](./README.md) | [← Configuration](./configuration.md) | [API Reference →](./api-reference.md)
 
 ---
 
@@ -287,7 +287,7 @@ graph LR
 - [API Reference](./api-reference.md) - All 9 endpoints documented
 - [Integration Guide](./integration.md) - Resource Server and client integration
 - [Troubleshooting](./troubleshooting.md) - Common errors and solutions
-- [Identity Plugin Main](../identity.md) - Overview and quickstart
+- [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
 - [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
@@ -296,4 +296,4 @@ graph LR
 
 ---
 
-> **Navigation:** [↑ Top](#) | [← Configuration](./configuration.md) | [API Reference →](./api-reference.md) | [← Back to Identity Plugin](../identity.md)
+> **Navigation:** [↑ Top](#) | [← Configuration](./configuration.md) | [API Reference →](./api-reference.md) | [← Back to Identity Plugin](./README.md)

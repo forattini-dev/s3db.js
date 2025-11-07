@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [🎯 Why Guards?](#-why-guards) | [📖 Syntax](#-guard-syntax) | [🔌 Integration](#-framework-integration) | [🎯 Patterns](#-common-patterns) | [📚 Helpers](#-helper-functions)
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
 
 ---
 
@@ -545,7 +545,7 @@ You learned:
 ## 🔗 See Also
 
 **Related Documentation:**
-- [API Plugin](../api.md) - Main API Plugin documentation
+- [API Plugin](./README.md) - Main API Plugin documentation
 - [Authentication](./authentication.md) - Set up JWT/OIDC authentication
 - [Resource Documentation](../../resource.md) - Partitions and resource config
 - [Guards Design](../../guards-design.md) - Detailed design document
@@ -557,4 +557,4 @@ You learned:
 
 ---
 
-> **Navigation:** [← Back to API Plugin](../api.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
