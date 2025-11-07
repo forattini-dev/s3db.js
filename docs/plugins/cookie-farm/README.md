@@ -2230,13 +2230,16 @@ suite.setProcessor(async (job, context, { cookieFarm }) => {
 
 ## 🔗 See Also
 
-- [Cookie Farm Plugin](./cookie-farm.plugin.md) – Persona generation internals, strategies, lifecycle management
-- [Puppeteer Plugin](./puppeteer/README.md) – Browser automation, pooling, proxy configuration, CAPTCHA solving
-- [S3 Queue Plugin](./s3-queue.md) – Queue infrastructure, worker pool, retry logic, DLQ handling
-- [TTL Plugin](./ttl.md) – Automatic cleanup, expiration strategies, partition-based pruning
-- [Cache Plugin](./cache.md) – Persona lookup caching, memory management
-- [Audit Plugin](./audit.md) – Compliance tracking, change logging
-- [Metrics Plugin](./metrics.md) – Performance monitoring, custom metrics
+### Related Plugins
+- **[Puppeteer Plugin](../puppeteer/README.md)** – Browser automation, pooling, proxy configuration, anti-bot detection
+- **[Spider Plugin](../spider.md)** – Web crawling suite combining Puppeteer with S3 queue and TTL for production scraping
+
+### Supporting Plugins
+- [S3 Queue Plugin](../s3-queue/) – Queue infrastructure, worker pool, retry logic, DLQ handling
+- [TTL Plugin](../ttl/) – Automatic cleanup, expiration strategies, partition-based pruning
+- [Cache Plugin](../cache.md) – Persona lookup caching, memory management
+- [Audit Plugin](../audit.md) – Compliance tracking, change logging
+- [Metrics Plugin](../metrics.md) – Performance monitoring, custom metrics
 
 ---
 

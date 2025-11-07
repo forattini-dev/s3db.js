@@ -190,7 +190,6 @@ ApiPlugin uses peer dependencies to:
 | Topic | What You'll Learn |
 |-------|-------------------|
 | **[Authorization Patterns](./api/authorization-patterns.md)** | Granular scopes, ABAC, hierarchical permissions |
-| **[Guard Design](./api/guards-design.md)** | Framework-agnostic declarative authorization |
 | **[Configuration Deep Dive](./api/configuration.md)** | All configuration options explained |
 
 ---

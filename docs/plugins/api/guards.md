@@ -505,22 +505,155 @@ applyGuardsToDelete(resource, context, record)   // Throws if denied
 
 ---
 
+## 🔧 Implementation Details
+
+### Guard Execution in Resource Methods
+
+Guards are executed at different points depending on the operation:
+
+**BEFORE fetching data:**
+- `list` - Guard runs first, can set partition, then query executes
+- `insert` - Guard runs before insert, can modify `ctx.body`
+
+**AFTER fetching data:**
+- `get` - Fetches record first, then guard checks ownership (has access to resource)
+- `update` - Fetches record first, then guard validates (has access to resource)
+- `delete` - Fetches record first, then guard validates (has access to resource)
+
+**Why this matters:**
+- List operations benefit from partition isolation (O(1) performance)
+- Get/update/delete can check resource attributes (e.g., `resource.userId === ctx.user.sub`)
+- Failed guards for get operations should return `null` (404) instead of throwing (403)
+
+### Guard Normalization
+
+```javascript
+// Simple string array → wildcard guard
+guard: ['admin']
+// Becomes: { '*': ['admin'] }
+
+// Per-operation guards
+guard: {
+  list: (ctx) => { ... },
+  get: (ctx, resource) => { ... }
+}
+// Used as-is
+
+// Wildcard + specific override
+guard: {
+  '*': (ctx) => { ... },    // Applies to all
+  delete: ['admin']          // Override for delete only
+}
+```
+
+### Role/Scope Detection
+
+Guards automatically check multiple token formats:
+
+```javascript
+// Keycloak client roles
+const clientId = user.azp || process.env.CLIENT_ID;
+const clientRoles = user.resource_access?.[clientId]?.roles || [];
+
+// Keycloak realm roles
+const realmRoles = user.realm_access?.roles || [];
+
+// Azure AD roles
+const azureRoles = user.roles || [];
+
+// OAuth2 scopes (space-separated string)
+const userScopes = user.scope?.split(' ') || [];
+
+// Combined check
+const hasPermission = requiredRolesScopes.some(required =>
+  userScopes.includes(required) ||
+  clientRoles.includes(required) ||
+  realmRoles.includes(required) ||
+  azureRoles.includes(required)
+);
+```
+
+### Error Handling Strategy
+
+**404 vs 403 for Ownership Failures:**
+
+```javascript
+// ✅ GOOD - Use 404 for ownership failures
+get: async (ctx, resource) => {
+  const allowed = resource.userId === ctx.user.sub;
+  if (!allowed) return null;  // Returns 404, doesn't leak existence
+  return resource;
+}
+
+// ❌ BAD - Don't throw 403 for ownership
+get: async (ctx, resource) => {
+  if (resource.userId !== ctx.user.sub) {
+    throw new Error('Forbidden');  // Leaks that resource exists!
+  }
+  return resource;
+}
+```
+
+**When to use each:**
+- **404 (Not Found)**: Ownership failures, resource doesn't belong to user
+- **403 (Forbidden)**: Permission failures, user lacks required role/scope
+- **401 (Unauthorized)**: Authentication failures, no token or invalid token
+
+### Performance Considerations
+
+**Partition-based RLS is O(1):**
+
+```javascript
+// ❌ SLOW - O(n) full table scan
+list: async (ctx) => {
+  const allRecords = await resource.list();
+  return allRecords.filter(r => r.userId === ctx.user.sub);  // Filter in memory
+}
+
+// ✅ FAST - O(1) partition lookup
+list: (ctx) => {
+  ctx.setPartition('byUser', { userId: ctx.user.sub });  // Direct S3 prefix
+  return true;
+}
+```
+
+**Async vs Sync Guards:**
+
+Guards can be async (return `Promise<boolean>`) for:
+- Fetching additional user data
+- Checking external services
+- Complex business logic requiring I/O
+
+```javascript
+guard: {
+  update: async (ctx, resource) => {
+    // Async: fetch user's current approval limit
+    const userProfile = await profileResource.get(ctx.user.sub);
+    const limit = userProfile.approvalLimit || 0;
+    return resource.total <= limit;
+  }
+}
+```
+
+---
+
 ## 🔗 Examples & Documentation
 
 - **Complete Example**: [docs/examples/e66-guards-live.js](../../examples/e66-guards-live.js)
 - **Before/After Comparison**: [docs/examples/e65-guards-comparison.js](../../examples/e65-guards-comparison.js)
-- **Design Document**: [docs/guards-design.md](../../guards-design.md)
+- **Authorization Patterns**: [authorization-patterns.md](./authorization-patterns.md) - Middleware examples for scopes, roles, ABAC
 
 ---
 
 ## ⚠️ Important Notes
 
-1. **Guards are NOT automatic with API Plugin** - You must manually apply guards in custom routes
+1. **Guards are NOT automatic with API Plugin** - You must manually apply guards in custom routes (or use global guards at plugin level)
 2. **Future feature**: `addResource()` method will auto-apply guards to generated routes
 3. **Never trust request body** - Always force `tenantId`/`userId` from token in guards
 4. **Use 404 instead of 403** - Prevents information leakage (don't reveal resource exists)
-5. **Guards run BEFORE database operations** - Failed guards never hit the database
+5. **Guards run BEFORE or AFTER database operations** - List/insert run before, get/update/delete run after (to access resource)
 6. **Partitions = O(1) RLS** - Use `ctx.setPartition()` for optimal performance
+7. **Guards can be async** - Use `async` for I/O operations (fetching user data, external checks)
 
 ---
 
