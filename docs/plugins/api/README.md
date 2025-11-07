@@ -180,6 +180,7 @@ ApiPlugin uses peer dependencies to:
 | **[🛡️ Guards & Authorization](./api/guards.md)** | Row-level security, multi-tenancy, RBAC | Controlling access to data |
 | **[🔒 Security](./api/security.md)** | Failban, rate limiting, GeoIP blocking, CSP headers | Protecting your API |
 | **[🔌 Integrations](./api/integrations.md)** | RelationPlugin populate, Cloud/Kubernetes inventory exposure | Serving data from other plugins |
+| **[📝 OpenAPI & Swagger UI](./api/openapi-customization.md)** | Add descriptions, customize docs, best practices | Creating beautiful API documentation |
 | **[📊 Observability](./api/observability.md)** | Metrics, events, tracing, health checks | Monitoring production APIs |
 | **[📦 Static Files](./api/static-files.md)** | Serve SPAs (React/Vue/Angular) and assets | Building full-stack apps |
 | **[🚀 Deployment](./api/deployment.md)** | Docker, Kubernetes, zero-downtime deploys | Going to production |
