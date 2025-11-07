@@ -170,9 +170,95 @@ console.log('Manual job execution completed');
 4. ✅ Job history tracked in database
 
 **Next steps:**
-- Add distributed locking for multi-instance deployments (see [Configuration Options](#configuration-options))
 - Configure timezone-aware schedules (see [Usage Examples](#usage-examples))
 - View job history and monitoring (see [API Reference](#api-reference))
+- Learn about coordinator mode for multi-instance deployments (see below)
+
+---
+
+## 🔀 Coordinator Mode
+
+### Why Coordinator Mode?
+
+In multi-pod/multi-instance deployments, we need **exactly one instance** to run scheduled jobs to avoid:
+- ❌ Duplicate job execution
+- ❌ Race conditions when checking job schedules
+- ❌ Wasted resources from redundant cron evaluations
+
+**Coordinator Mode solves this** by automatically electing one instance as the "coordinator" responsible for running all scheduled jobs. All other instances remain idle for scheduling (but can be used for other work).
+
+### Key Benefits
+
+- ✅ **Automatic Election**: No manual configuration, works out-of-the-box
+- ✅ **Fault Tolerance**: If coordinator dies, new one is elected automatically
+- ✅ **Zero Duplication**: Only coordinator runs scheduled jobs
+- ✅ **Scalable**: Add/remove instances without breaking job scheduling
+- ✅ **Resource Efficient**: No wasted cron evaluation across instances
+
+### Quick Example
+
+```javascript
+// Multi-instance deployment - NO changes needed!
+// Instance 1
+const schedulerA = new SchedulerPlugin({
+  jobs: {
+    daily_cleanup: {
+      schedule: '0 3 * * *',
+      action: async (db) => { /* cleanup */ }
+    }
+  },
+  enableCoordinator: true  // Enabled by default
+});
+
+// Instance 2 (same config)
+const schedulerB = new SchedulerPlugin({
+  jobs: {
+    daily_cleanup: {
+      schedule: '0 3 * * *',
+      action: async (db) => { /* cleanup */ }
+    }
+  },
+  enableCoordinator: true
+});
+
+// Result: Only ONE instance runs the jobs
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enableCoordinator` | boolean | `true` | Enable coordinator mode |
+| `heartbeatInterval` | number | `30000` | Heartbeat frequency (ms) |
+| `coldStartObservationWindow` | number | `15000` | Observation phase duration (ms) |
+| `skipColdStart` | boolean | `false` | Skip cold start (testing only!) |
+
+### Coordinator Events
+
+```javascript
+scheduler.on('plg:scheduler:coordinator-elected', ({ workerId, epoch }) => {
+  console.log(`New coordinator: ${workerId}`);
+});
+
+scheduler.on('plg:scheduler:coordinator-promoted', ({ workerId }) => {
+  console.log(`This worker is now coordinator`);
+});
+
+scheduler.on('plg:scheduler:job-started', ({ jobName }) => {
+  console.log(`Coordinator started job: ${jobName}`);
+});
+```
+
+### Learn More
+
+📚 **[Full Coordinator Documentation →](./coordinator.md)**
+
+Comprehensive guide covering:
+- Election algorithm (lexicographic ordering)
+- Epoch system (guaranteed leadership terms)
+- Cold start phases (prevents race conditions)
+- Troubleshooting multi-instance issues
+- Implementation details for plugin developers
 
 ---
 

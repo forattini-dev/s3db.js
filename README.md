@@ -1364,7 +1364,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### ⚡ Performance
 
-[**CachePlugin**](./docs/plugins/cache.md) • [**TTLPlugin**](./docs/plugins/ttl.md) • [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) • [**MetricsPlugin**](./docs/plugins/metrics.md)
+[**CachePlugin**](./docs/plugins/cache.md) • [**TTLPlugin**](./docs/plugins/ttl/) • [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) • [**MetricsPlugin**](./docs/plugins/metrics.md)
 
 **CachePlugin** - Memory/S3/filesystem caching with compression and automatic invalidation.
 
@@ -1376,7 +1376,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 📊 Data & Replication
 
-[**ReplicatorPlugin**](./docs/plugins/replicator.md) • [**ImporterPlugin**](./docs/plugins/importer.md) • [**BackupPlugin**](./docs/plugins/backup.md) • [**AuditPlugin**](./docs/plugins/audit.md)
+[**ReplicatorPlugin**](./docs/plugins/replicator/) • [**ImporterPlugin**](./docs/plugins/importer.md) • [**BackupPlugin**](./docs/plugins/backup.md) • [**AuditPlugin**](./docs/plugins/audit.md)
 
 **ReplicatorPlugin** - Real-time replication to BigQuery, PostgreSQL, MySQL, Turso, PlanetScale, and SQS.
 
@@ -1388,7 +1388,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 🔧 DevOps & Automation
 
-[**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) • [**SchedulerPlugin**](./docs/plugins/scheduler.md) • [**TfstatePlugin**](./docs/plugins/tfstate.md) • [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) • [**CostsPlugin**](./docs/plugins/costs.md)
+[**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) • [**SchedulerPlugin**](./docs/plugins/scheduler/) • [**TfstatePlugin**](./docs/plugins/tfstate.md) • [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) • [**CostsPlugin**](./docs/plugins/costs.md)
 
 **QueueConsumerPlugin** - Process RabbitMQ/SQS messages for event-driven architectures.
 
@@ -1402,7 +1402,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 🤖 ML/AI & Advanced Features
 
-[**MLPlugin**](./docs/plugins/ml-plugin.md) • [**VectorPlugin**](./docs/plugins/vector.md) • [**FullTextPlugin**](./docs/plugins/fulltext.md) • [**GeoPlugin**](./docs/plugins/geo.md)
+[**MLPlugin**](./docs/plugins/ml-plugin/) • [**VectorPlugin**](./docs/plugins/vector/) • [**FullTextPlugin**](./docs/plugins/fulltext.md) • [**GeoPlugin**](./docs/plugins/geo.md)
 
 **MLPlugin** - Machine learning model management and inference pipelines.
 
@@ -1414,7 +1414,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 🔗 Other Plugins
 
-[**RelationPlugin**](./docs/plugins/relation.md) • [**StateMachinePlugin**](./docs/plugins/state-machine.md) • [**S3QueuePlugin**](./docs/plugins/s3-queue.md)
+[**RelationPlugin**](./docs/plugins/relation.md) • [**StateMachinePlugin**](./docs/plugins/state-machine/) • [**S3QueuePlugin**](./docs/plugins/s3-queue/)
 
 **RelationPlugin** - ORM-like relationships with join optimization (10-100x faster queries).
 
@@ -1627,9 +1627,9 @@ S3DB_VERBOSE=false
 - [Costs Plugin](./docs/plugins/costs.md)
 - [Metrics Plugin](./docs/plugins/metrics.md)
 - [Audit Plugin](./docs/plugins/audit.md)
-- [TTL Plugin](./docs/plugins/ttl.md)
+- [TTL Plugin](./docs/plugins/ttl/)
 - [Relation Plugin](./docs/plugins/relation.md)
-- [Replicator Plugin](./docs/plugins/replicator.md)
+- [Replicator Plugin](./docs/plugins/replicator/)
 
 ### MCP & Integrations
 

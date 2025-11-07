@@ -371,4 +371,4 @@ plugin.on('plg:ml:prediction', ({ modelName, prediction }) => {
 
 - [Plugin Development Guide](./plugins/README.md)
 - [EventualConsistencyPlugin](./plugins/eventual-consistency.md)
-- [MLPlugin](./plugins/ml-plugin.md)
+- [MLPlugin](./plugins/ml-plugin/)

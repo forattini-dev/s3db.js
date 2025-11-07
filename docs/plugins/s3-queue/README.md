@@ -120,9 +120,90 @@ await db.connect();
 
 ---
 
+## 🔀 Coordinator Mode
+
+### Why Coordinator Mode?
+
+In multi-pod/multi-instance deployments, we need **exactly one instance** to publish dispatch tickets to avoid:
+- ❌ Duplicate ticket publishing
+- ❌ Race conditions in FIFO/LIFO ordering
+- ❌ Wasted resources from redundant coordination work
+
+**Coordinator Mode solves this** by automatically electing one instance as the "coordinator" responsible for publishing tickets. All other instances remain workers that process messages.
+
+### Key Benefits
+
+- ✅ **Automatic Election**: No manual configuration, works out-of-the-box
+- ✅ **Fault Tolerance**: If coordinator dies, new one is elected automatically
+- ✅ **Zero Duplication**: Only coordinator publishes tickets
+- ✅ **Scalable**: Add/remove instances without breaking coordination
+- ✅ **Battle-Tested**: Uses epoch-based leadership with cold start protection
+
+### Quick Example
+
+```javascript
+// Multi-instance deployment - NO changes needed!
+// Instance 1
+const queueA = new S3QueuePlugin({
+  resource: 'tasks',
+  enableCoordinator: true,  // Enabled by default
+  onMessage: async (task) => { /* process */ }
+});
+
+// Instance 2 (same config)
+const queueB = new S3QueuePlugin({
+  resource: 'tasks',
+  enableCoordinator: true,
+  onMessage: async (task) => { /* process */ }
+});
+
+// Result: Only ONE instance publishes tickets, both process messages
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enableCoordinator` | boolean | `true` | Enable coordinator mode |
+| `heartbeatInterval` | number | `30000` | Heartbeat frequency (ms) |
+| `dispatchInterval` | number | `5000` | How often coordinator publishes tickets (ms) |
+| `ticketBatchSize` | number | `10` | Messages per ticket batch |
+| `coldStartObservationWindow` | number | `15000` | Observation phase duration (ms) |
+| `skipColdStart` | boolean | `false` | Skip cold start (testing only!) |
+
+### Coordinator Events
+
+```javascript
+queue.on('plg:s3-queue:coordinator-elected', ({ workerId, epoch }) => {
+  console.log(`New coordinator: ${workerId}`);
+});
+
+queue.on('plg:s3-queue:coordinator-promoted', ({ workerId }) => {
+  console.log(`This worker is now coordinator`);
+});
+
+queue.on('plg:s3-queue:tickets-published', ({ count, coordinatorId }) => {
+  console.log(`Coordinator published ${count} tickets`);
+});
+```
+
+### Learn More
+
+📚 **[Full Coordinator Documentation →](./coordinator.md)**
+
+Comprehensive guide covering:
+- Election algorithm (lexicographic ordering)
+- Epoch system (guaranteed leadership terms)
+- Cold start phases (prevents race conditions)
+- Troubleshooting multi-instance issues
+- Implementation details for plugin developers
+
+---
+
 ## 📖 Table of Contents
 
 - [📦 Dependencies](#-dependencies)
+- [🔀 Coordinator Mode](#-coordinator-mode)
 - [🎯 What is S3Queue?](#-what-is-s3queue)
 - [✨ Key Features](#-key-features)
 - [🚀 Quick Start](#-quick-start)
@@ -2140,7 +2221,7 @@ onMessage: async (image) => {
 
 ### How It Works at Scale
 
-With coordinator mode enabled (v14.2.0+), S3Queue uses a **single-leader topology**:
+With coordinator mode enabled, S3Queue uses a **single-leader topology**:
 
 ```
 ┌────────────────────────────────────────────────────────┐

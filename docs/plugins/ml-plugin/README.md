@@ -67,18 +67,6 @@ const { prediction } = await mlPlugin.predict('pricePredictor', { cost: 150, dem
 - 🔍 **Partition Filtering**: Train specialized models on data subsets (O(1) lookups)
 - ⚡ **Performance**: 1-10ms predictions, batch support, GPU acceleration
 
-**What's New in v13.4.0:**
-- ✨ **NEW: `resource.ml.*` namespace API** - Zero-config ML with auto-detection
-- ✨ **Auto-detect type** (regression/classification) based on target attribute
-- ✨ **Auto-select features** from resource schema
-- ✨ Backward compatible - old API still works!
-
-**What's New in v13.0.0:**
-- ✨ True incremental storage (only saves NEW training samples per version)
-- ✨ Data transformations with `filter()` and `map()` functions
-- ✨ Complete version management API (list, compare, rollback)
-- ✨ Training history with sample-level tracking
-
 ---
 
 ## 📦 Dependencies
@@ -397,9 +385,9 @@ The **MLPlugin** transforms s3db.js into a complete machine learning platform, a
 | **4 Model Types** | Regression, Classification, Time Series (LSTM), Custom Neural Networks |
 | **Auto-Training** | Train on interval or after N inserts |
 | **Persistence** | Models saved to S3 automatically |
-| **Partition Filtering** | **NEW v13.0.0:** Train models on specific data subsets |
-| **Training Data Storage** | **NEW v13.0.0:** Save intermediate training data to S3 |
-| **Data Transformations** | **NEW v13.0.0:** Custom `filter()` and `map()` functions for preprocessing |
+| **Partition Filtering** | Train models on specific data subsets |
+| **Training Data Storage** | Save intermediate training data to S3 |
+| **Data Transformations** | Custom `filter()` and `map()` functions for preprocessing |
 | **Evaluation** | R², Confusion Matrix, MAPE, and more |
 | **TensorFlow.js** | Production-ready ML powered by Google |
 | **Zero Config** | Works out of the box with sensible defaults |
@@ -1087,7 +1075,7 @@ new MLPlugin({
   verbose: false,              // Enable logging
   minTrainingSamples: 10,      // Minimum samples required
 
-  // Persistence settings (NEW in v13.0.0)
+  // Persistence settings
   saveModel: true,             // Save trained models to S3 (default: true)
   saveTrainingData: false      // Save intermediate training data to S3 (default: false)
 })
@@ -1106,13 +1094,13 @@ All models share these common options:
     features: ['x', 'y'],       // Input features
     target: 'z',                // Output target
 
-    // Partition filtering (NEW in v13.0.0)
+    // Partition filtering
     partition: {
       name: 'byCategory',       // Partition name
       values: { category: 'A' } // Partition values to filter
     },
 
-    // Data transformations (NEW in v13.0.0)
+    // Data transformations
     filter: (record) => {       // Filter function to remove invalid/outlier records
       return record.value > 0 && record.value < 1000;
     },
@@ -1129,7 +1117,7 @@ All models share these common options:
     trainInterval: 3600000,     // Train every hour (ms)
     trainAfterInserts: 100,     // Train after N inserts
 
-    // Persistence (NEW in v13.0.0)
+    // Persistence
     saveModel: true,            // Override global saveModel setting
     saveTrainingData: true,     // Override global saveTrainingData setting
 
@@ -1426,7 +1414,7 @@ console.log(`MAPE = ${mape.toFixed(2)}%`);
 
 ## Persistence
 
-### Automatic Model Persistence (NEW in v13.0.0)
+### Automatic Model Persistence
 
 Models are **automatically saved** to S3 after training when `saveModel: true`:
 
@@ -1465,7 +1453,7 @@ new MLPlugin({ saveModel: false })
 }
 ```
 
-### Training Data Persistence (NEW in v13.0.0)
+### Training Data Persistence
 
 Save intermediate training data (prepared dataset) to S3 for debugging/auditing:
 
@@ -1572,7 +1560,7 @@ Models can be:
 - ✅ Version controlled
 - ✅ Shared between environments
 
-### Partition Filtering (NEW in v13.0.0)
+### Partition Filtering
 
 Train models on specific subsets of your data using partitions:
 
@@ -2157,8 +2145,8 @@ new MLPlugin(options)
   },
   verbose: false,
   minTrainingSamples: 10,
-  saveModel: true,           // NEW in v13.0.0: Save trained models to S3
-  saveTrainingData: false    // NEW in v13.0.0: Save training data to S3
+  saveModel: true,           // Save trained models to S3
+  saveTrainingData: false    // Save training data to S3
 }
 ```
 
@@ -2249,7 +2237,7 @@ Import model from JSON.
 await mlPlugin.importModel('modelName', data);
 ```
 
-##### `getTrainingData(modelName)` (NEW in v13.0.0)
+##### `getTrainingData(modelName)`
 
 Load saved training data from S3.
 
@@ -2405,7 +2393,7 @@ MAPE: 8.34%
 Interpretation: Excellent forecast accuracy
 ```
 
-### Example 4: Partition Filtering & Model Persistence (NEW in v13.0.0)
+### Example 4: Partition Filtering & Model Persistence
 
 **File:** [docs/examples/e71-ml-plugin-partitions.js](../examples/e71-ml-plugin-partitions.js)
 
@@ -2448,7 +2436,7 @@ node docs/examples/e71-ml-plugin-partitions.js
    5. Use getTrainingData() to load previously saved training datasets
 ```
 
-### Example 5: Data Transformations with filter() and map() (NEW in v13.0.0)
+### Example 5: Data Transformations with filter() and map()
 
 **File:** [docs/examples/e74-ml-plugin-data-transforms.js](../examples/e74-ml-plugin-data-transforms.js)
 
