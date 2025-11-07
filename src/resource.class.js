@@ -194,7 +194,9 @@ export class Resource extends AsyncEventEmitter {
     // Store raw schema definition (accessible as resource.$schema)
     // This is the LITERAL object passed to createResource()
     // Useful for plugins, documentation, and introspection
-    this.$schema = cloneDeep(config);
+    // PERFORMANCE: Exclude circular references (database, observers, client) to prevent O(n²) cloning
+    const { database: _db, observers: _obs, client: _cli, ...cloneableConfig } = config;
+    this.$schema = cloneDeep(cloneableConfig);
 
     // Add metadata timestamps
     this.$schema._createdAt = Date.now();
@@ -715,8 +717,8 @@ export class Resource extends AsyncEventEmitter {
       delete dataToValidate.id;
     }
 
+    // PERFORMANCE: Removed unnecessary 'original' clone - callers already have the original data
     const result = {
-      original: cloneDeep(data),
       isValid: false,
       errors: [],
       data: dataToValidate
@@ -1573,9 +1575,9 @@ export class Resource extends AsyncEventEmitter {
       });
     }
     const originalData = await this.get(id);
-    const attributesClone = cloneDeep(attributes);
+    // PERFORMANCE: No need to clone attributes (read-only), only clone originalData for mutation
     let mergedData = cloneDeep(originalData);
-    for (const [key, value] of Object.entries(attributesClone)) {
+    for (const [key, value] of Object.entries(attributes)) {
       if (key.includes('.')) {
         let ref = mergedData;
         const parts = key.split('.');
@@ -1585,11 +1587,13 @@ export class Resource extends AsyncEventEmitter {
           }
           ref = ref[parts[i]];
         }
-        ref[parts[parts.length - 1]] = cloneDeep(value);
+        // PERFORMANCE: Only clone objects/arrays, primitives can be assigned directly
+        ref[parts[parts.length - 1]] = (typeof value === 'object' && value !== null) ? cloneDeep(value) : value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         mergedData[key] = merge({}, mergedData[key], value);
       } else {
-        mergedData[key] = cloneDeep(value);
+        // PERFORMANCE: Primitives and arrays don't need cloneDeep
+        mergedData[key] = (typeof value === 'object' && value !== null) ? cloneDeep(value) : value;
       }
     }
     // Debug: print mergedData and attributes
@@ -1601,7 +1605,8 @@ export class Resource extends AsyncEventEmitter {
     }
     const preProcessedData = await this.executeHooks('beforeUpdate', cloneDeep(mergedData));
     const completeData = { ...originalData, ...preProcessedData, id };
-    const { isValid, errors, data } = await this.validate(cloneDeep(completeData), { includeId: true });
+    // PERFORMANCE: Let validate() handle cloning internally (removed duplicate cloneDeep)
+    const { isValid, errors, data } = await this.validate(completeData, { includeId: true });
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
@@ -1620,7 +1625,7 @@ export class Resource extends AsyncEventEmitter {
       id,
       data: { ...originalData, ...preProcessedData },
       mappedData: tempMappedData,
-      originalData: { ...attributesClone, id }
+      originalData: { ...attributes, id }
     });
     const { id: validatedId, ...validatedAttributes } = data;
     const oldData = { ...originalData, id };
@@ -1634,7 +1639,7 @@ export class Resource extends AsyncEventEmitter {
       id,
       data: validatedAttributes,
       mappedData,
-      originalData: { ...attributesClone, id }
+      originalData: { ...attributes, id }
     });
     const finalMetadata = processedMetadata;
     const key = this.getResourceKey(id);
@@ -2167,11 +2172,11 @@ export class Resource extends AsyncEventEmitter {
 
     // Get original data
     const originalData = await this.get(id);
-    const attributesClone = cloneDeep(attributes);
+    // PERFORMANCE: No need to clone attributes (read-only), only clone originalData for mutation
     let mergedData = cloneDeep(originalData);
 
     // Merge attributes (same logic as update)
-    for (const [key, value] of Object.entries(attributesClone)) {
+    for (const [key, value] of Object.entries(attributes)) {
       if (key.includes('.')) {
         let ref = mergedData;
         const parts = key.split('.');
@@ -2181,11 +2186,13 @@ export class Resource extends AsyncEventEmitter {
           }
           ref = ref[parts[i]];
         }
-        ref[parts[parts.length - 1]] = cloneDeep(value);
+        // PERFORMANCE: Only clone objects/arrays, primitives can be assigned directly
+        ref[parts[parts.length - 1]] = (typeof value === 'object' && value !== null) ? cloneDeep(value) : value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         mergedData[key] = merge({}, mergedData[key], value);
       } else {
-        mergedData[key] = cloneDeep(value);
+        // PERFORMANCE: Primitives and arrays don't need cloneDeep
+        mergedData[key] = (typeof value === 'object' && value !== null) ? cloneDeep(value) : value;
       }
     }
 
@@ -2202,7 +2209,8 @@ export class Resource extends AsyncEventEmitter {
     const completeData = { ...originalData, ...preProcessedData, id };
 
     // Validate
-    const { isValid, errors, data } = await this.validate(cloneDeep(completeData), { includeId: true });
+    // PERFORMANCE: Let validate() handle cloning internally (removed duplicate cloneDeep)
+    const { isValid, errors, data } = await this.validate(completeData, { includeId: true });
     if (!isValid) {
       return {
         success: false,
@@ -2222,7 +2230,7 @@ export class Resource extends AsyncEventEmitter {
       id,
       data: validatedAttributes,
       mappedData,
-      originalData: { ...attributesClone, id }
+      originalData: { ...attributes, id }
     });
 
     const key = this.getResourceKey(id);
