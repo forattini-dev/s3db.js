@@ -20,42 +20,6 @@ describe('EventualConsistencyPlugin - Consolidation Edge Cases', () => {
     }
   });
 
-  it.skip('should handle consolidation when lock is already held (SKIP: locks use PluginStorage now)', async () => {
-    urls = await database.createResource({
-      name: 'urls',
-      attributes: {
-        id: 'string|optional',
-        clicks: 'number|default:0'
-      }
-    });
-
-    plugin = new EventualConsistencyPlugin({
-      resources: { urls: ['clicks'] },
-      verbose: true
-    });
-
-    await database.usePlugin(plugin);
-
-    await urls.insert({ id: 'url1', clicks: 100 });
-
-    // Manually create a lock for this record
-    const lockResource = database.resources.urls_consolidation_locks_clicks;
-    await lockResource.insert({
-      id: 'lock-url1',
-      lockedAt: Date.now(),
-      workerId: 'other-worker'
-    });
-
-    // Try to consolidate - should skip and return current value
-    const result = await urls.consolidate('url1', 'clicks');
-
-    // Should return existing value
-    expect(result).toBe(100);
-
-    // Clean up
-    await lockResource.delete('lock-url1');
-  });
-
   it('should handle record deletion during consolidation', async () => {
     urls = await database.createResource({
       name: 'urls',

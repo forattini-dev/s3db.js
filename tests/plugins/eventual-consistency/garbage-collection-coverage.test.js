@@ -74,36 +74,4 @@ describe('EventualConsistencyPlugin - Garbage Collection Coverage', () => {
     expect(transactions.length).toBeLessThanOrEqual(1);
   }, 15000);
 
-  it.skip('should handle GC lock contention (SKIP: locks use PluginStorage now)', async () => {
-    urls = await database.createResource({
-      name: 'urls',
-      attributes: {
-        id: 'string|optional',
-        clicks: 'number|default:0'
-      }
-    });
-
-    plugin = new EventualConsistencyPlugin({
-      resources: { urls: ['clicks'] },
-      verbose: true
-    });
-
-    await database.usePlugin(plugin);
-
-    // Manually create a GC lock
-    const lockResource = database.resources.urls_consolidation_locks_clicks;
-    await lockResource.insert({
-      id: 'lock-gc-urls-clicks',
-      lockedAt: Date.now(),
-      workerId: 'test-worker'
-    });
-
-    // Try to run GC - should skip because lock is held
-    const handler = plugin.fieldHandlers.get('urls').get('clicks');
-    await plugin._runGarbageCollectionForHandler(handler, 'urls', 'clicks');
-
-    // Clean up
-    await lockResource.delete('lock-gc-urls-clicks');
-  });
-
 });

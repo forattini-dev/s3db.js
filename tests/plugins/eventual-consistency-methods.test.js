@@ -369,11 +369,6 @@ describe("EventualConsistencyPlugin Methods", () => {
       const transactionResourceName = 'plg_wallets_tx_balance';
       expect(database.resources[transactionResourceName]).toBeDefined();
     });
-
-    it.skip("should create lock resource for distributed locking (SKIP: locks use PluginStorage now)", async () => {
-      const lockResourceName = 'wallets_consolidation_locks_balance';
-      expect(database.resources[lockResourceName]).toBeDefined();
-    });
   });
 
   describe("Plugin Configuration", () => {
