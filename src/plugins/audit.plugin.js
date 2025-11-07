@@ -655,7 +655,9 @@ export class AuditPlugin extends Plugin {
       await this.auditResource.insert(auditRecord);
     } catch (error) {
       // Silently fail to avoid breaking operations
-      console.warn('Audit logging failed:', error.message);
+      if (this.verbose) {
+        console.warn('Audit logging failed:', error.message);
+      }
     }
   }
 
