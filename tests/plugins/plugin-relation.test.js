@@ -11,6 +11,7 @@ import {
 describe('RelationPlugin - Basic Configuration', () => {
   test('should create RelationPlugin with valid config', () => {
     const plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           profile: {
@@ -28,6 +29,7 @@ describe('RelationPlugin - Basic Configuration', () => {
 
   test('should throw error for unsupported relation type', () => {
     const plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           invalid: {
@@ -44,6 +46,7 @@ describe('RelationPlugin - Basic Configuration', () => {
 
   test('should throw error when resource field is missing', () => {
     const plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           profile: {
@@ -60,6 +63,7 @@ describe('RelationPlugin - Basic Configuration', () => {
 
   test('should throw error when foreignKey is missing', () => {
     const plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           profile: {
@@ -76,6 +80,7 @@ describe('RelationPlugin - Basic Configuration', () => {
 
   test('should throw error for belongsToMany without through', () => {
     const plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         posts: {
           tags: {
@@ -125,6 +130,7 @@ describe('RelationPlugin - hasOne Relations', () => {
 
     // Add RelationPlugin
     plugin = new RelationPlugin({
+      verbose: false,
       verbose: false,  // Enable debug logging
       relations: {
         users: {
@@ -212,6 +218,7 @@ describe('RelationPlugin - hasMany Relations', () => {
     });
 
     plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           posts: {
@@ -316,6 +323,7 @@ describe('RelationPlugin - belongsTo Relations', () => {
     });
 
     plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         posts: {
           author: {
@@ -417,6 +425,7 @@ describe('RelationPlugin - belongsToMany Relations', () => {
     });
 
     plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         posts: {
           tags: {
@@ -533,6 +542,7 @@ describe('RelationPlugin - Nested Includes', () => {
     });
 
     plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           posts: {
@@ -643,6 +653,7 @@ describe('RelationPlugin - Cascade Delete', () => {
     });
 
     plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           posts: {
@@ -694,6 +705,7 @@ describe('RelationPlugin - Cascade Delete', () => {
 describe('RelationPlugin - Statistics', () => {
   test('should return plugin statistics', () => {
     const plugin = new RelationPlugin({
+      verbose: false,
       relations: {
         users: {
           posts: {
