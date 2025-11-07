@@ -5,6 +5,8 @@ import { PromisePool } from "@supercharge/promise-pool";
 
 import { S3Client } from "./clients/s3-client.class.js";
 import { MemoryClient } from "./clients/memory-client.class.js";
+import { FileSystemClient } from "./clients/filesystem-client.class.js";
+import { ConnectionString } from "./connection-string.class.js";
 import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
 import { ResourceNotFound, DatabaseError, SchemaError } from "./errors.js";
@@ -16,9 +18,20 @@ import { CronManager } from "./concerns/cron-manager.js";
 
 export class Database extends SafeEventEmitter {
   constructor(options) {
+    // ✨ VERTICALIZADO CONFIG: Separate databaseOptions from clientOptions
+    // Supports both new structure and backward compatibility with flat config
+    //
+    // NEW (recommended):
+    //   new S3db({ connectionString, databaseOptions: {...}, clientOptions: {...} })
+    //
+    // OLD (backward compatible):
+    //   new S3db({ connectionString, verbose, compression: {...}, ... })
+
+    const dbOpts = options.databaseOptions || {};
+
     super({
-      verbose: options.verbose || false,
-      autoCleanup: options.autoCleanup !== false
+      verbose: dbOpts.verbose || options.verbose || false,
+      autoCleanup: (dbOpts.autoCleanup !== undefined ? dbOpts.autoCleanup : options.autoCleanup) !== false
     });
 
     // Generate database ID with fallback for reliability
@@ -66,30 +79,39 @@ export class Database extends SafeEventEmitter {
 
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;
-    this.verbose = options.verbose || false;
-    this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.pluginList = options.plugins || [];
+
+    // ✨ VERTICALIZADO: Database-level options (prefer databaseOptions, fallback to flat)
+    this.verbose = dbOpts.verbose ?? options.verbose ?? false;
+    this.parallelism = parseInt((dbOpts.parallelism ?? options.parallelism ?? 10) + "");
+    this.pluginList = dbOpts.plugins ?? options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry
-    this.cache = options.cache;
-    this.passphrase = options.passphrase || "secret";
-    this.bcryptRounds = options.bcryptRounds || 10;
-    this.versioningEnabled = options.versioningEnabled || false;
-    this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
-    this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
-    this.strictHooks = options.strictHooks || false; // Throw on first hook error instead of continuing
-    this.disableResourceEvents = options.disableResourceEvents === true;
+    this.cache = dbOpts.cache ?? options.cache;
+    this.passphrase = dbOpts.passphrase ?? options.passphrase ?? "secret";
+    this.bcryptRounds = dbOpts.bcryptRounds ?? options.bcryptRounds ?? 10;
+    this.versioningEnabled = dbOpts.versioningEnabled ?? options.versioningEnabled ?? false;
+    this.persistHooks = dbOpts.persistHooks ?? options.persistHooks ?? false;
+    this.strictValidation = (dbOpts.strictValidation ?? options.strictValidation) !== false;
+    this.strictHooks = dbOpts.strictHooks ?? options.strictHooks ?? false;
+    this.disableResourceEvents = (dbOpts.disableResourceEvents ?? options.disableResourceEvents) === true;
+
+    // Performance: Debounced metadata uploads (opt-in to prevent O(n²) complexity)
+    this.deferMetadataWrites = dbOpts.deferMetadataWrites ?? options.deferMetadataWrites ?? false;
+    this.metadataWriteDelay = dbOpts.metadataWriteDelay ?? options.metadataWriteDelay ?? 100;
+    this._metadataUploadPending = false;
+    this._metadataUploadDebounce = null;
 
     // Initialize ProcessManager for lifecycle management (prevents memory leaks)
-    this.processManager = options.processManager || new ProcessManager({
+    const exitOnSignal = (dbOpts.exitOnSignal ?? options.exitOnSignal) !== false;
+    this.processManager = dbOpts.processManager ?? options.processManager ?? new ProcessManager({
       verbose: this.verbose,
-      exitOnSignal: options.exitOnSignal !== false // Default: true (auto-exit on SIGTERM/SIGINT)
+      exitOnSignal
     });
 
     // Initialize CronManager for cron job management (prevents memory leaks)
-    this.cronManager = options.cronManager || new CronManager({
+    this.cronManager = dbOpts.cronManager ?? options.cronManager ?? new CronManager({
       verbose: this.verbose,
-      exitOnSignal: options.exitOnSignal !== false // Default: true (auto-exit on SIGTERM/SIGINT)
+      exitOnSignal
     });
 
     if (this.verbose) {
@@ -130,6 +152,37 @@ export class Database extends SafeEventEmitter {
       }
     }
 
+    // ✨ VERTICALIZADO: Merge clientOptions from multiple sources
+    // Priority (highest to lowest):
+    //   1. Querystring params (compression.enabled=true)
+    //   2. options.clientOptions (explicit object)
+    //   3. Flat options (options.compression, backward compat)
+
+    let mergedClientOptions = {};
+    let connStr = null;
+
+    // Start with lowest priority: flat options (backward compatibility)
+    const flatClientOptions = this._extractClientOptionsFromFlat(options);
+    mergedClientOptions = { ...flatClientOptions };
+
+    // Merge with medium priority: explicit options.clientOptions
+    if (options.clientOptions) {
+      mergedClientOptions = this._deepMerge(mergedClientOptions, options.clientOptions);
+    }
+
+    // Merge with highest priority: querystring params
+    if (connectionString) {
+      try {
+        connStr = new ConnectionString(connectionString);
+        // ConnectionString._parseQueryParams() already populated connStr.clientOptions
+        if (connStr.clientOptions && Object.keys(connStr.clientOptions).length > 0) {
+          mergedClientOptions = this._deepMerge(mergedClientOptions, connStr.clientOptions);
+        }
+      } catch (err) {
+        // If parsing fails, continue without querystring params
+      }
+    }
+
     // Auto-detect client type based on connection string protocol
     if (!options.client && connectionString) {
       try {
@@ -143,8 +196,16 @@ export class Database extends SafeEventEmitter {
             bucket,
             keyPrefix,
             verbose: this.verbose,
-            enforceLimits: url.searchParams.get('enforceLimits') === 'true',
-            persistPath: url.searchParams.get('persistPath') || undefined,
+            ...mergedClientOptions, // ✨ Apply merged client options
+          });
+        } else if (url.protocol === 'file:') {
+          // Use FileSystemClient for file:// protocol
+          this.client = new FileSystemClient({
+            basePath: connStr.basePath,
+            bucket: connStr.bucket,
+            keyPrefix: connStr.keyPrefix,
+            verbose: this.verbose,
+            ...mergedClientOptions, // ✨ Apply merged client options
           });
         } else {
           // Use S3Client for s3://, http://, https:// protocols
@@ -152,6 +213,7 @@ export class Database extends SafeEventEmitter {
             verbose: this.verbose,
             parallelism: this.parallelism,
             connectionString: connectionString,
+            ...mergedClientOptions, // ✨ Apply merged client options
           });
         }
       } catch (err) {
@@ -160,6 +222,7 @@ export class Database extends SafeEventEmitter {
           verbose: this.verbose,
           parallelism: this.parallelism,
           connectionString: connectionString,
+          ...mergedClientOptions, // ✨ Apply merged client options
         });
       }
     } else if (!options.client) {
@@ -168,6 +231,7 @@ export class Database extends SafeEventEmitter {
         verbose: this.verbose,
         parallelism: this.parallelism,
         connectionString: connectionString,
+        ...mergedClientOptions, // ✨ Apply merged client options
       });
     } else {
       // Use provided client
@@ -200,6 +264,63 @@ export class Database extends SafeEventEmitter {
       };
       process.on('exit', this._exitListener);
     }
+  }
+
+  /**
+   * Extract client-specific options from flat config structure
+   * Used for backward compatibility with pre-verticalizado config
+   *
+   * @param {Object} options - Flat options object
+   * @returns {Object} Client options extracted from flat structure
+   * @private
+   */
+  _extractClientOptionsFromFlat(options) {
+    const clientKeys = [
+      'compression', 'ttl', 'locking', 'backup', 'journal', 'stats',
+      'enableCompression', 'compressionThreshold', 'compressionLevel',
+      'enableTTL', 'defaultTTL', 'cleanupInterval',
+      'enableLocking', 'lockTimeout',
+      'enableBackup', 'backupSuffix',
+      'enableJournal', 'journalFile',
+      'enableStats',
+      'enforceLimits', 'persistPath', 'forcePathStyle'
+    ];
+
+    const clientOptions = {};
+    for (const key of clientKeys) {
+      if (options[key] !== undefined) {
+        clientOptions[key] = options[key];
+      }
+    }
+
+    return clientOptions;
+  }
+
+  /**
+   * Deep merge two objects (target gets overwritten by source)
+   * Used to merge clientOptions from multiple sources with correct priority
+   *
+   * @param {Object} target - Base object
+   * @param {Object} source - Object to merge (higher priority)
+   * @returns {Object} Merged object
+   * @private
+   */
+  _deepMerge(target, source) {
+    const result = { ...target };
+
+    for (const key in source) {
+      if (source[key] !== undefined) {
+        if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
+          // Recursively merge nested objects
+          result[key] = this._deepMerge(result[key] || {}, source[key]);
+        } else {
+          // Overwrite primitive values and arrays
+          result[key] = source[key];
+        }
+      }
+    }
+
+    return result;
   }
 
   async connect() {
@@ -700,6 +821,64 @@ export class Database extends SafeEventEmitter {
     }
 
     this.emit('db:plugin:uninstalled', { name: pluginName, plugin });
+  }
+
+  /**
+   * Schedule a deferred metadata upload (debounced to prevent O(n²) complexity)
+   * @private
+   */
+  _scheduleMetadataUpload() {
+    if (!this.deferMetadataWrites) {
+      // If deferred writes are disabled, upload immediately
+      return this.uploadMetadataFile();
+    }
+
+    // Clear existing debounce timer
+    if (this._metadataUploadDebounce) {
+      clearTimeout(this._metadataUploadDebounce);
+    }
+
+    this._metadataUploadPending = true;
+
+    // Schedule the upload (async, non-blocking)
+    this._metadataUploadDebounce = setTimeout(() => {
+      if (this._metadataUploadPending) {
+        // Fire and forget - don't await here
+        this.uploadMetadataFile()
+          .then(() => {
+            this._metadataUploadPending = false;
+          })
+          .catch(err => {
+            // Log error but don't throw (avoid unhandled rejection)
+            if (this.verbose) {
+              console.error('[Database] Metadata upload failed:', err.message);
+            }
+            this._metadataUploadPending = false;
+          });
+      }
+    }, this.metadataWriteDelay);
+
+    // Return immediately (non-blocking)
+    return Promise.resolve();
+  }
+
+  /**
+   * Immediately flush any pending metadata uploads
+   * @returns {Promise<void>}
+   * @public
+   */
+  async flushMetadata() {
+    // Clear debounce timer
+    if (this._metadataUploadDebounce) {
+      clearTimeout(this._metadataUploadDebounce);
+      this._metadataUploadDebounce = null;
+    }
+
+    // Upload if pending
+    if (this._metadataUploadPending) {
+      await this.uploadMetadataFile();
+      this._metadataUploadPending = false;
+    }
   }
 
   async uploadMetadataFile() {
@@ -1339,7 +1518,7 @@ export class Database extends SafeEventEmitter {
       const currentVersion = existingMetadata?.currentVersion || 'v1';
       const existingVersionData = existingMetadata?.versions?.[currentVersion];
       if (!existingVersionData || existingVersionData.hash !== newHash) {
-        await this.uploadMetadataFile();
+        await this._scheduleMetadataUpload();
       }
       this.emit("db:resource-updated", name);
       return existingResource;
@@ -1382,7 +1561,7 @@ export class Database extends SafeEventEmitter {
       this._applyMiddlewares(resource, middlewares);
     }
 
-    await this.uploadMetadataFile();
+    await this._scheduleMetadataUpload();
     this.emit("db:resource-created", name);
     this.emit('db:resource:metrics', {
       resource: name,
@@ -1495,6 +1674,9 @@ export class Database extends SafeEventEmitter {
   }
 
   async disconnect() {
+    // Flush any pending metadata uploads before disconnect
+    await this.flushMetadata();
+
     // Emit disconnected event BEFORE removing listeners (Fix #2)
     await this.emit('disconnected', new Date());
 
