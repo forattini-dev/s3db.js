@@ -167,18 +167,6 @@ export class Database extends SafeEventEmitter {
       mergedClientOptions = { ...options.clientOptions };
     }
 
-    // Allow common client-only options at the top level for convenience (v16 verticalizado)
-    const passthroughKeys = ['compression', 'ttl', 'locking', 'backup', 'journal', 'stats'];
-    const topLevelClientOptions = {};
-    for (const key of passthroughKeys) {
-      if (options[key] !== undefined) {
-        topLevelClientOptions[key] = options[key];
-      }
-    }
-    if (Object.keys(topLevelClientOptions).length > 0) {
-      mergedClientOptions = this._deepMerge(mergedClientOptions, topLevelClientOptions);
-    }
-
     // Override with querystring params (highest priority)
     if (connectionString) {
       try {
@@ -1655,14 +1643,16 @@ export class Database extends SafeEventEmitter {
 
     // Silently ignore all errors during disconnect
     await tryFn(async () => {
-      // 1. Remove all listeners from all plugins
+      // 1. Defense in depth: Clean up plugins (Layer 1 - immediate cleanup)
       if (this.pluginList && this.pluginList.length > 0) {
+        // MEMORY: First pass - immediate listener cleanup for failsafe
+        // This is redundant with Plugin.stop() but guarantees cleanup even if stop() fails
         for (const plugin of this.pluginList) {
           if (plugin && typeof plugin.removeAllListeners === 'function') {
             plugin.removeAllListeners();
           }
         }
-        // Also stop plugins if they have a stop method
+        // Also stop plugins if they have a stop method (includes second removeAllListeners() call)
         const stopConcurrency = Math.max(1, Number.isFinite(this.parallelism) ? this.parallelism : 5);
         await PromisePool
           .withConcurrency(stopConcurrency)
@@ -1677,12 +1667,13 @@ export class Database extends SafeEventEmitter {
           });
       }
 
-      // 2. Dispose all resources (cleanup validators, listeners, plugin references)
+      // 2. Defense in depth: Clean up resources (Layer 2 - resource lifecycle)
       if (this.resources && Object.keys(this.resources).length > 0) {
         for (const [name, resource] of Object.entries(this.resources)) {
           // Silently ignore errors on exit
           await tryFn(() => {
-            // PERFORMANCE: Use dispose() to release validator cache references and cleanup listeners
+            // MEMORY: Resource disposal emits 'resource:disposed' event then removes all listeners
+            // This gives plugins one final chance to clean up resource-specific state
             if (resource && typeof resource.dispose === 'function') {
               resource.dispose();
             }
