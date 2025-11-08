@@ -148,9 +148,9 @@ describe('Smart Encoding Efficiency Test', () => {
       const smart = calculateEncodedSize(text);
       const padded = text.padEnd(20);
 
-      console.log(
-        `${padded.substring(0, 20)} | ${String(orig).padStart(4)} | ${String(b64).padStart(4)} | ${String(smart.encoded).padStart(5)} | ${smart.encoding}`
-      );
+      // console.log(
+      //   `${padded.substring(0, 20)} | ${String(orig).padStart(4)} | ${String(b64).padStart(4)} | ${String(smart.encoded).padStart(5)} | ${smart.encoding}`
+      // );
     });
   });
 });
