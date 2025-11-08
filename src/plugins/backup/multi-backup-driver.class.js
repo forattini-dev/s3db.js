@@ -1,5 +1,5 @@
 import BaseBackupDriver from './base-backup-driver.class.js';
-import { createBackupDriver } from './index.js';
+import { createBackupDriver } from './factory.js';
 import tryFn from '../../concerns/try-fn.js';
 import { BackupError } from '../backup.errors.js';
 

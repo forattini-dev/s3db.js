@@ -64,7 +64,6 @@ export function createConfig(options, detectedTimezone) {
     // Consolidation settings
     consolidationInterval: consolidation.interval ?? 300,
     consolidationConcurrency: consolidation.concurrency ?? 5,
-    consolidationWindow: consolidation.window ?? 24,
     autoConsolidate: consolidation.auto !== false,
     mode: consolidation.mode || 'async',
 
