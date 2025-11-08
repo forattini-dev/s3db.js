@@ -43,7 +43,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       console.log = (...args) => {
         logs.push(args.join(' '));
-        return originalLog(...args);
+        // Don't print during tests - just capture
       };
       try {
         await plugin.install(database);
@@ -77,7 +77,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const logs = [];
       console.log = (...args) => {
         logs.push(args.join(' '));
-        return originalLog(...args);
+        // Don't print during tests - just capture
       };
       try {
         await plugin.startProcessing();
@@ -114,7 +114,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const logs = [];
       console.log = (...args) => {
         logs.push(args.join(' '));
-        return originalLog(...args);
+        // Don't print during tests - just capture
       };
       try {
         await plugin.startProcessing();
@@ -181,7 +181,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const logs = [];
       console.log = (...args) => {
         logs.push(args.join(' '));
-        return originalLog(...args);
+        // Don't print during tests - just capture
       };
       console.warn = (...args) => {
         return originalWarn(...args);
@@ -216,7 +216,6 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
         verbose: false
@@ -247,9 +246,9 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
+        verbose: false,
         onMessage: async (task) => ({ done: true })
       });
 
@@ -279,9 +278,9 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
+        verbose: false,
         onMessage: async (task) => ({ done: true })
       });
 
