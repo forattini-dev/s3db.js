@@ -17,6 +17,7 @@ import { Router } from './server/router.class.js';
 import { HealthManager } from './server/health-manager.class.js';
 import { OpenAPIGeneratorCached } from './utils/openapi-generator-cached.class.js';
 import { AuthStrategyFactory } from './auth/strategies/factory.class.js';
+import { applyBasePath } from './utils/base-path.js';
 import { networkInterfaces } from 'node:os';
 
 export class ApiServer {
@@ -439,16 +440,21 @@ export class ApiServer {
   }
 
   _setupDocumentationRoutes() {
+    const basePath = this.options.basePath || '';
+    const openApiPath = applyBasePath(basePath, '/openapi.json');
+    const docsPath = applyBasePath(basePath, '/docs');
+    const rootPath = applyBasePath(basePath, '/');
+
     if (this.options.docsEnabled) {
-      this.app.get('/openapi.json', (c) => {
+      this.app.get(openApiPath, (c) => {
         const spec = this.openApiGenerator.generate();
         return c.json(spec);
       });
 
       if (this.options.docsUI === 'swagger') {
-        this.app.get('/docs', this.swaggerUI({ url: '/openapi.json' }));
+        this.app.get(docsPath, this.swaggerUI({ url: openApiPath }));
       } else {
-        this.app.get('/docs', (c) => c.html(`<!DOCTYPE html>
+        this.app.get(docsPath, (c) => c.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -459,20 +465,20 @@ export class ApiServer {
   </style>
 </head>
 <body>
-  <redoc spec-url="/openapi.json"></redoc>
+  <redoc spec-url="${openApiPath}"></redoc>
   <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"></script>
 </body>
 </html>`));
       }
     }
 
-    this.app.get('/', (c) => {
+    this.app.get(rootPath, (c) => {
       if (this.options.rootHandler) {
         return this.options.rootHandler(c);
       }
 
       if (this.options.docsEnabled) {
-        return c.redirect('/docs', 302);
+        return c.redirect(docsPath, 302);
       }
 
       return c.json(formatter.success({
