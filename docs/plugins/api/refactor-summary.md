@@ -144,7 +144,7 @@ Components are composed together in the main `ApiServer` class rather than using
 
 ```javascript
 // This still works exactly as before
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   auth: {
     resource: 'users',
@@ -340,7 +340,7 @@ _createAuthMiddleware() {
 
 ### Health Checks
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   // ... other config
   health: {
     readiness: {
@@ -373,7 +373,7 @@ await db.use(new ApiPlugin({
 
 ### Modern Path Rules (PathRulesStrategy)
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   auth: {
     resource: 'users',
     drivers: [

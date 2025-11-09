@@ -110,8 +110,8 @@ new ApiPlugin({
 - Unknown relation paths return `400 INVALID_POPULATE` so consumers get immediate feedback.
 
 ```javascript
-await db.use(new RelationPlugin({ relations: {/* ... */} }));
-await db.use(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new RelationPlugin({ relations: {/* ... */} }));
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // GET /orders?populate=customer,items.product
 ```
 

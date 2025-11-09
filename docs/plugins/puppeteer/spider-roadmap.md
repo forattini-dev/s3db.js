@@ -116,7 +116,7 @@ const puppeteer = new PuppeteerPlugin({
   }
 });
 
-await db.use(puppeteer);
+await db.usePlugin(puppeteer);
 
 // Usage 1: Get a page (tab recycling)
 const page = await puppeteer.getPage({
@@ -370,7 +370,7 @@ const spider = new SpiderPlugin({
   }
 });
 
-await db.use(spider);
+await db.usePlugin(spider);
 
 // Usage 1: Crawl a website
 const crawl = await spider.crawl({

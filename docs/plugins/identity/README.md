@@ -14,7 +14,7 @@ import { Database, IdentityPlugin } from 's3db.js';
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
 
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
   supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api']
@@ -56,7 +56,7 @@ const db = new Database({
 
 await db.connect();
 
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
   supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
@@ -201,7 +201,7 @@ These keys are stored in s3db.js resources and persisted to S3. In production:
 Get a working OAuth2/OIDC server instantly:
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
   supportedScopes: ['openid', 'profile', 'email']
@@ -326,7 +326,7 @@ The plugin creates three resources: **users**, **tenants**, **clients**. You can
 ### Extend with Custom Fields
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
 
@@ -372,7 +372,7 @@ await db.use(new IdentityPlugin({
 Every IdentityPlugin instance also creates a handful of internal resources for OAuth2 state (`oauth_keys`, `auth_codes`, `sessions`, `password_reset_tokens`, `mfa_devices`). They default to namespaced identifiers such as `plg_identity_oauth_keys`, but you can override them to match your naming conventions or to avoid cross-plugin collisions:
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   issuer: 'https://sso.example.com',
   resourceNames: {
     oauthKeys: 'plg_identity_oauth_keys_us_west_2',
@@ -396,7 +396,7 @@ Guidelines:
 ### 1. Development SSO Server
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
   supportedScopes: ['openid', 'profile', 'email'],
@@ -409,7 +409,7 @@ await db.use(new IdentityPlugin({
 ### 2. Production SSO with All Features
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 443,
   issuer: 'https://sso.example.com',
 
@@ -463,7 +463,7 @@ await db.use(new IdentityPlugin({
 ### 3. Mobile Apps (PKCE Required)
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'https://api.example.com',
 
@@ -487,7 +487,7 @@ await db.use(new IdentityPlugin({
 ### 4. Service-to-Service (Client Credentials Only)
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
 
@@ -516,7 +516,7 @@ const response = await fetch('http://localhost:4000/oauth/token', {
 ### 5. Multi-Tenant SaaS
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
 
@@ -931,17 +931,17 @@ const response = await fetch('http://localhost:4000/oauth/token', {
 
 ```javascript
 // Only authorization_code (no client_credentials, no refresh_token)
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   supportedGrantTypes: ['authorization_code']
 }));
 
 // Only service-to-service (no user login)
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   supportedGrantTypes: ['client_credentials']
 }));
 
 // Full suite
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   supportedGrantTypes: [
     'authorization_code',
     'client_credentials',
@@ -1019,7 +1019,7 @@ api.setAuthRules([
 
 **1. HTTPS Required:**
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 443,
   issuer: 'https://sso.example.com',  // Must be HTTPS!
 
@@ -1080,7 +1080,7 @@ identityPlugin.on('auth:failed', (event) => {
 **Full whitelabel customization:**
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
 
@@ -1151,7 +1151,7 @@ console.log('Available keys:', jwks.keys.length);
 **Add your Resource Server origins:**
 
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   cors: {
     enabled: true,
     origin: [
@@ -1212,7 +1212,7 @@ console.log('Redirect URI allowed:', allowed);
 
 **5. Enable verbose logging:**
 ```javascript
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   verbose: true  // Detailed logs
 }));
 ```

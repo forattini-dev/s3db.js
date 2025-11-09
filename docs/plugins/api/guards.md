@@ -235,7 +235,7 @@ await db.createResource({
 **NEW** - Apply to ALL resources for specific HTTP verbs:
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   guards: {  // ✅ Global guards (NEW!)
     // Require authentication for ALL list operations across ALL resources
@@ -257,7 +257,7 @@ await db.use(new ApiPlugin({
 
 ```javascript
 // Example: Global guards as baseline + resource-specific overrides
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   guards: {
     // Global: Require auth for all list operations
@@ -304,7 +304,7 @@ await db.createResource({
 
 ```javascript
 // Global baseline: Everything requires auth + tenant isolation
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   guards: {
     '*': (ctx) => {

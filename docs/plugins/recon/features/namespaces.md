@@ -71,7 +71,7 @@ const plugin = new ReconPlugin({
   }
 });
 
-await db.use(plugin);
+await db.usePlugin(plugin);
 ```
 
 ### Multiple Instances
@@ -97,15 +97,15 @@ const aggressivePlugin = new ReconPlugin({
 });
 
 // Register all instances
-await db.use(uptimePlugin);
+await db.usePlugin(uptimePlugin);
 // Console output: [ReconPlugin] Using namespace: "uptime"
 
-await db.use(stealthPlugin);
+await db.usePlugin(stealthPlugin);
 // Console output:
 // [ReconPlugin] Detected 1 existing namespace(s): uptime
 // [ReconPlugin] Using namespace: "stealth"
 
-await db.use(aggressivePlugin);
+await db.usePlugin(aggressivePlugin);
 // Console output:
 // [ReconPlugin] Detected 2 existing namespace(s): stealth, uptime
 // [ReconPlugin] Using namespace: "aggressive"
@@ -197,7 +197,7 @@ This helps prevent accidental data conflicts and provides visibility into active
 
 ```javascript
 const plugin = new ReconPlugin({ namespace: 'uptime' });
-await db.use(plugin);
+await db.usePlugin(plugin);
 
 // List all namespaces in storage
 const namespaces = await plugin._storageManager.listNamespaces();
@@ -344,7 +344,7 @@ const uptimePlugin = new ReconPlugin({
   resources: { persist: true }
 });
 
-await db.use(uptimePlugin);
+await db.usePlugin(uptimePlugin);
 
 // Add production services
 await uptimePlugin.addTarget('api.example.com', {
@@ -379,7 +379,7 @@ const auditPlugin = new ReconPlugin({
   resources: { persist: true }
 });
 
-await db.use(auditPlugin);
+await db.usePlugin(auditPlugin);
 
 // Add audit targets
 await auditPlugin.addTarget('api.example.com', {
@@ -543,8 +543,8 @@ const auditPlugin = new ReconPlugin({
 const defaultPlugin = new ReconPlugin({ namespace: 'default' });
 const uptimePlugin = new ReconPlugin({ namespace: 'uptime' });
 
-await db.use(defaultPlugin);
-await db.use(uptimePlugin);
+await db.usePlugin(defaultPlugin);
+await db.usePlugin(uptimePlugin);
 
 // Copy targets
 const targets = await defaultPlugin.listTargets();
@@ -573,7 +573,7 @@ console.log('✅ Migration complete');
 // WARNING: Deletes all data in namespace!
 
 const plugin = new ReconPlugin({ namespace: 'old-namespace' });
-await db.use(plugin);
+await db.usePlugin(plugin);
 
 // Delete all resources
 const resourceConfigs = getAllResourceConfigs();
