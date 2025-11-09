@@ -849,13 +849,7 @@ export class ApiPlugin extends Plugin {
    * @private
    */
   async _createCompressionMiddleware() {
-    const { gzip, brotliCompress } = await import('zlib');
-    const { promisify } = await import('util');
-
-    const gzipAsync = promisify(gzip);
-    const brotliAsync = promisify(brotliCompress);
-
-    const { threshold, level } = this.config.compression;
+    const { threshold } = this.config.compression;
 
     // Content types that should NOT be compressed (already compressed)
     const skipContentTypes = [
@@ -864,7 +858,14 @@ export class ApiPlugin extends Plugin {
       'application/x-gzip', 'application/x-bzip2'
     ];
 
+    // Cache-Control: no-transform regex (from Hono)
+    const cacheControlNoTransformRegExp = /(?:^|,)\s*?no-transform\s*?(?:,|$)/i;
+
     return async (c, next) => {
+      // IMPORTANT: Set Vary header BEFORE processing request
+      // This ensures proxies/caches know the response varies by Accept-Encoding
+      c.header('Vary', 'Accept-Encoding');
+
       await next();
 
       // Skip if response has no body
@@ -872,8 +873,10 @@ export class ApiPlugin extends Plugin {
         return;
       }
 
-      // Skip if already compressed or body consumed
-      if (c.res.headers.has('content-encoding') || c.res.bodyUsed) {
+      // Skip if already compressed, Transfer-Encoding set, or HEAD request
+      if (c.res.headers.has('content-encoding') ||
+          c.res.headers.has('transfer-encoding') ||
+          c.req.method === 'HEAD') {
         return;
       }
 
@@ -884,61 +887,56 @@ export class ApiPlugin extends Plugin {
         return;
       }
 
+      // Respect Cache-Control: no-transform directive
+      const cacheControl = c.res.headers.get('cache-control') || '';
+      if (cacheControlNoTransformRegExp.test(cacheControl)) {
+        return;
+      }
+
+      // Check Content-Length threshold
+      const contentLength = c.res.headers.get('content-length');
+      if (contentLength && Number(contentLength) < threshold) {
+        return;
+      }
+
       // Check Accept-Encoding header
       const acceptEncoding = c.req.header('accept-encoding') || '';
-      const supportsBrotli = acceptEncoding.includes('br');
-      const supportsGzip = acceptEncoding.includes('gzip');
 
-      if (!supportsBrotli && !supportsGzip) {
-        return; // Client doesn't support compression
+      // Determine encoding (prioritize brotli > gzip > deflate)
+      let encoding = null;
+      if (acceptEncoding.includes('br')) {
+        encoding = 'br';
+      } else if (acceptEncoding.includes('gzip')) {
+        encoding = 'gzip';
+      } else if (acceptEncoding.includes('deflate')) {
+        encoding = 'deflate';
       }
 
-      // Get response body as buffer
-      let body;
-      try {
-        const text = await c.res.text();
-        body = Buffer.from(text, 'utf-8');
-      } catch (err) {
-        // If body is already consumed or not text, skip compression
+      // If client doesn't support compression, skip
+      if (!encoding) {
         return;
       }
 
-      // Skip if body is too small
-      if (body.length < threshold) {
-        return;
-      }
-
-      // Compress with brotli (better) or gzip (fallback)
-      let compressed;
-      let encoding;
-
       try {
-        if (supportsBrotli) {
-          compressed = await brotliAsync(body);
-          encoding = 'br';
-        } else {
-          compressed = await gzipAsync(body, { level });
-          encoding = 'gzip';
+        // Use CompressionStream for gzip/deflate (stream-based, avoids ReadableStream lock)
+        // Brotli ('br') requires different approach as CompressionStream doesn't support it yet
+        if (encoding === 'gzip' || encoding === 'deflate') {
+          const stream = new CompressionStream(encoding);
+          c.res = new Response(c.res.body.pipeThrough(stream), c.res);
+          c.res.headers.delete('Content-Length');
+          c.res.headers.set('Content-Encoding', encoding);
+        } else if (encoding === 'br') {
+          // For brotli, we need to use zlib.brotliCompress (not stream-based)
+          // This requires consuming the body, which can cause issues
+          // For now, fallback to gzip if available, otherwise skip
+          if (acceptEncoding.includes('gzip')) {
+            const stream = new CompressionStream('gzip');
+            c.res = new Response(c.res.body.pipeThrough(stream), c.res);
+            c.res.headers.delete('Content-Length');
+            c.res.headers.set('Content-Encoding', 'gzip');
+          }
+          // Otherwise skip - no brotli support yet without consuming stream
         }
-
-        // Only use compressed if it's actually smaller
-        if (compressed.length >= body.length) {
-          return; // Compression didn't help, use original
-        }
-
-        // Create new response with compressed body
-        const headers = new Headers(c.res.headers);
-        headers.set('Content-Encoding', encoding);
-        headers.set('Content-Length', compressed.length.toString());
-        headers.set('Vary', 'Accept-Encoding');
-
-        // Replace response
-        c.res = new Response(compressed, {
-          status: c.res.status,
-          statusText: c.res.statusText,
-          headers
-        });
-
       } catch (err) {
         // Compression failed, log and continue with uncompressed response
         if (this.config.verbose) {

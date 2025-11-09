@@ -21,7 +21,6 @@ import { createSessionTrackingMiddleware } from '../middlewares/session-tracking
 import { createFailbanMiddleware, setupFailbanViolationListener } from '../middlewares/failban.js';
 import { setupTemplateEngine } from '../utils/template-engine.js';
 import * as formatter from '../../shared/response-formatter.js';
-import { compress } from 'hono/compress';
 
 export class MiddlewareChain {
   constructor({
@@ -61,51 +60,32 @@ export class MiddlewareChain {
    * @param {Hono} app - Hono application instance
    */
   apply(app) {
-    // 1. Compression (early for maximum benefit - 70-85% bandwidth reduction)
-    this.applyCompression(app);
-
-    // 2. Request tracking (must be first after compression!)
+    // 1. Request tracking (must be first!)
     this.applyRequestTracking(app);
 
-    // 3. Failban (check banned IPs early)
+    // 2. Failban (check banned IPs early)
     this.applyFailban(app);
 
-    // 4. Request ID
+    // 3. Request ID
     this.applyRequestId(app);
 
-    // 5. CORS
+    // 4. CORS
     this.applyCors(app);
 
-    // 6. Security headers
+    // 5. Security headers
     this.applySecurity(app);
 
-    // 7. Session tracking
+    // 6. Session tracking
     this.applySessionTracking(app);
 
-    // 8. Custom middlewares
+    // 7. Custom middlewares (compression will be applied here via ApiPlugin)
     this.applyCustomMiddlewares(app);
 
-    // 9. Template engine
+    // 8. Template engine
     this.applyTemplates(app);
 
-    // 10. Body size limits
+    // 9. Body size limits
     this.applyBodySizeLimits(app);
-  }
-
-  /**
-   * Apply compression middleware (gzip)
-   * @private
-   */
-  applyCompression(app) {
-    // ⚡ OPTIMIZATION: Compress responses > 1KB (70-85% bandwidth reduction)
-    app.use('*', compress({
-      threshold: 1024,  // Only compress responses larger than 1KB
-      encoding: 'gzip'  // Use gzip encoding
-    }));
-
-    if (this.verbose) {
-      console.log('[MiddlewareChain] Compression enabled (gzip, threshold: 1KB)');
-    }
   }
 
   /**
