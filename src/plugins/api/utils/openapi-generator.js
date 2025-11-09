@@ -6,6 +6,199 @@
  */
 
 import { applyBasePath, normalizeBasePath } from './base-path.js';
+import startCase from 'lodash-es/startCase.js';
+
+const CUSTOM_ROUTES_TAG = 'Custom Routes';
+const CUSTOM_ROUTE_METHOD_REGEX = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i;
+
+function parseCustomRouteDefinition(definition) {
+  if (typeof definition !== 'string') {
+    return null;
+  }
+
+  let def = definition.trim();
+  if (!def) {
+    return null;
+  }
+
+  if (/^async\s+/i.test(def)) {
+    def = def.replace(/^async\s+/i, '').trim();
+  }
+
+  const match = def.match(CUSTOM_ROUTE_METHOD_REGEX);
+  if (!match) {
+    return null;
+  }
+
+  let path = match[2].trim();
+  if (!path) {
+    return null;
+  }
+
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
+  }
+
+  return {
+    method: match[1].toUpperCase(),
+    path,
+    originalKey: definition
+  };
+}
+
+function convertPathToOpenAPI(path) {
+  return path
+    .replace(/:([A-Za-z0-9_]+)/g, '{$1}')
+    .replace(/\*/g, '{wildcard}');
+}
+
+function methodSupportsRequestBody(method) {
+  return ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase());
+}
+
+function buildCustomRouteOperationId(scope, method, path) {
+  const sanitizedPath = path
+    .replace(/[{}\/:\-\s]+/g, '_')
+    .replace(/_{2,}/g, '_')
+    .replace(/^_|_$/g, '') || 'root';
+  return `${scope}_${method.toLowerCase()}_${sanitizedPath}`;
+}
+
+function createCustomRouteOperation({ method, path, originalKey, scope, tags }) {
+  const summary = `Custom ${method} ${path}`;
+  const descriptionLines = [
+    `Custom route defined ${scope}.`,
+    `Original definition: \`${originalKey}\`.`,
+    'Request and response payloads depend on the handler implementation.'
+  ];
+
+  const responses = {
+    200: {
+      description: 'Successful response',
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', example: true },
+              data: {
+                description: 'Handler-defined response payload',
+                nullable: true,
+                oneOf: [
+                  { type: 'object', additionalProperties: true },
+                  { type: 'array', items: {} },
+                  { type: 'string' },
+                  { type: 'number' },
+                  { type: 'boolean' },
+                  { type: 'null' }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    400: {
+      description: 'Bad request',
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/Error' }
+        }
+      }
+    },
+    500: {
+      description: 'Server error',
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/Error' }
+        }
+      }
+    }
+  };
+
+  const requestBody = methodSupportsRequestBody(method)
+    ? {
+        required: false,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              additionalProperties: true,
+              description: 'Arbitrary JSON payload accepted by the custom handler'
+            }
+          }
+        }
+      }
+    : undefined;
+
+  return {
+    tags: Array.from(new Set(tags)),
+    summary,
+    description: descriptionLines.join('\n\n'),
+    operationId: buildCustomRouteOperationId(scope, method, path),
+    requestBody,
+    responses
+  };
+}
+
+function addCustomRouteOperation(spec, path, method, details) {
+  const normalizedPath = convertPathToOpenAPI(path);
+  const methodKey = method.toLowerCase();
+
+  if (!spec.paths[normalizedPath]) {
+    spec.paths[normalizedPath] = {};
+  }
+
+  if (spec.paths[normalizedPath][methodKey]) {
+    return false;
+  }
+
+  spec.paths[normalizedPath][methodKey] = createCustomRouteOperation({
+    method,
+    path: normalizedPath,
+    originalKey: details.originalKey,
+    scope: details.scope,
+    tags: details.tags
+  });
+
+  return true;
+}
+
+function gatherCustomRouteDefinitions(routeMaps = []) {
+  const collected = [];
+  const seen = new Set();
+
+  for (const routes of routeMaps) {
+    if (!routes || typeof routes !== 'object') {
+      continue;
+    }
+
+    for (const [key, handler] of Object.entries(routes)) {
+      if (typeof handler !== 'function') {
+        continue;
+      }
+
+      const parsed = parseCustomRouteDefinition(key);
+      if (!parsed) {
+        continue;
+      }
+
+      const dedupeKey = `${parsed.method} ${parsed.path}`;
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+      collected.push(parsed);
+    }
+  }
+
+  return collected;
+}
+
+function formatResourceLabel(resourceName = '') {
+  const label = startCase(String(resourceName || '').replace(/[/_-]+/g, ' ')).trim();
+  return label || resourceName || '';
+}
 
 /**
  * Map s3db.js field types to OpenAPI types
@@ -188,6 +381,7 @@ function generateResourceSchema(resource) {
  */
 function generateResourcePaths(resource, version, config = {}) {
   const resourceName = resource.name;
+  const resourceLabel = formatResourceLabel(resourceName);
   const basePathPrefix = config.basePath || '';
 
   // Determine version prefix (same logic as server.js)
@@ -204,7 +398,7 @@ function generateResourcePaths(resource, version, config = {}) {
 
   const basePath = applyBasePath(basePathPrefix, prefix ? `/${prefix}/${resourceName}` : `/${resourceName}`);
   const schema = generateResourceSchema(resource);
-  const methods = config.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+  const methods = config.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
   const authMethods = config.auth || [];
   const requiresAuth = authMethods && authMethods.length > 0;
   const hasRelations = resource._relations && Object.keys(resource._relations).length > 0;
@@ -326,8 +520,8 @@ function generateResourcePaths(resource, version, config = {}) {
     paths[basePath] = {
       get: {
         tags: [resourceName],
-        summary: `List ${resourceName}`,
-        description: `Retrieve a paginated list of ${resourceName}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.
+        summary: `List ${resourceLabel}`,
+        description: `Retrieve a paginated list of ${resourceLabel}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.
 
 **Pagination**: Use \`limit\` and \`offset\` to paginate results. For example:
 - First page (10 items): \`?limit=10&offset=0\`
@@ -445,8 +639,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     paths[`${basePath}/{id}`] = {
       get: {
         tags: [resourceName],
-        summary: `Get ${resourceName} by ID`,
-        description: `Retrieve a single ${resourceName} by its ID${hasPartitions ? '. Optionally specify a partition for more efficient retrieval.' : ''}`,
+        summary: `Get ${resourceLabel} by ID`,
+        description: `Retrieve a single ${resourceLabel} by its ID${hasPartitions ? '. Optionally specify a partition for more efficient retrieval.' : ''}`,
         parameters: [
           {
             name: 'id',
@@ -518,8 +712,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[basePath]) paths[basePath] = {};
     paths[basePath].post = {
       tags: [resourceName],
-      summary: `Create ${resourceName}`,
-      description: `Create a new ${resourceName}`,
+      summary: `Create ${resourceLabel}`,
+      description: `Create a new ${resourceLabel}`,
       requestBody: {
         required: true,
         content: {
@@ -567,8 +761,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
     paths[`${basePath}/{id}`].put = {
       tags: [resourceName],
-      summary: `Update ${resourceName} (full)`,
-      description: `Fully update a ${resourceName}`,
+      summary: `Replace ${resourceLabel}`,
+      description: `Replace a ${resourceLabel} with a full payload`,
       parameters: [
         {
           name: 'id',
@@ -618,8 +812,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
     paths[`${basePath}/{id}`].patch = {
       tags: [resourceName],
-      summary: `Update ${resourceName} (partial)`,
-      description: `Partially update a ${resourceName}`,
+      summary: `Update ${resourceLabel}`,
+      description: `Partially update a ${resourceLabel}`,
       parameters: [
         {
           name: 'id',
@@ -672,8 +866,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
     paths[`${basePath}/{id}`].delete = {
       tags: [resourceName],
-      summary: `Delete ${resourceName}`,
-      description: `Delete a ${resourceName} by ID`,
+      summary: `Delete ${resourceLabel}`,
+      description: `Delete a ${resourceLabel} by ID`,
       parameters: [
         {
           name: 'id',
@@ -704,8 +898,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[basePath]) paths[basePath] = {};
     paths[basePath].head = {
       tags: [resourceName],
-      summary: `Get ${resourceName} statistics`,
-      description: `Get statistics about ${resourceName} collection without retrieving data. Returns statistics in response headers.`,
+      summary: `Get ${resourceLabel} statistics`,
+      description: `Get statistics about ${resourceLabel} collection without retrieving data. Returns statistics in response headers.`,
       responses: {
         200: {
           description: 'Statistics retrieved successfully',
@@ -732,8 +926,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
     paths[`${basePath}/{id}`].head = {
       tags: [resourceName],
-      summary: `Check if ${resourceName} exists`,
-      description: `Check if a ${resourceName} exists without retrieving its data`,
+      summary: `Check if ${resourceLabel} exists`,
+      description: `Check if a ${resourceLabel} exists without retrieving its data`,
       parameters: [
         {
           name: 'id',
@@ -765,8 +959,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[basePath]) paths[basePath] = {};
     paths[basePath].options = {
       tags: [resourceName],
-      summary: `Get ${resourceName} metadata`,
-      description: `Get complete metadata about ${resourceName} resource including schema, allowed methods, endpoints, and query parameters`,
+      summary: `Get ${resourceLabel} metadata`,
+      description: `Get complete metadata about ${resourceLabel} resource including schema, allowed methods, endpoints, and query parameters`,
       responses: {
         200: {
           description: 'Metadata retrieved successfully',
@@ -822,8 +1016,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
     if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
     paths[`${basePath}/{id}`].options = {
       tags: [resourceName],
-      summary: `Get allowed methods for ${resourceName} item`,
-      description: `Get allowed HTTP methods for individual ${resourceName} operations`,
+      summary: `Get allowed methods for ${resourceLabel} item`,
+      description: `Get allowed HTTP methods for individual ${resourceLabel} operations`,
       parameters: [
         {
           name: 'id',
@@ -862,6 +1056,8 @@ The response includes pagination metadata in the \`pagination\` object with tota
  */
 function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema, versionPrefix = '', basePathPrefix = '') {
   const resourceName = resource.name;
+  const resourceLabel = formatResourceLabel(resourceName);
+  const relationLabel = formatResourceLabel(relationName);
   const basePath = applyBasePath(
     basePathPrefix,
     versionPrefix
@@ -876,8 +1072,8 @@ function generateRelationalPaths(resource, relationName, relationConfig, version
   paths[basePath] = {
     get: {
       tags: [resourceName],
-      summary: `Get ${relationName} of ${resourceName}`,
-      description: `Retrieve ${relationName} (${relationConfig.type}) associated with this ${resourceName}. ` +
+      summary: `Get ${relationLabel} of ${resourceLabel}`,
+      description: `Retrieve ${relationLabel} (${relationConfig.type}) associated with this ${resourceLabel}. ` +
                    `This endpoint uses the RelationPlugin to efficiently load related data` +
                    (relationConfig.partitionHint ? ` via the '${relationConfig.partitionHint}' partition.` : '.'),
       parameters: [
@@ -885,7 +1081,7 @@ function generateRelationalPaths(resource, relationName, relationConfig, version
           name: 'id',
           in: 'path',
           required: true,
-          description: `${resourceName} ID`,
+          description: `${resourceLabel} ID`,
           schema: { type: 'string' }
         },
         ...(isToMany ? [
@@ -978,7 +1174,8 @@ export function generateOpenAPISpec(database, config = {}) {
     auth = {},
     resources: resourceConfigs = {},
     versionPrefix: globalVersionPrefix,
-    basePath = ''
+    basePath = '',
+    routes: pluginRoutes = {}
   } = config;
   const normalizedBasePath = normalizeBasePath(basePath);
 
@@ -1113,6 +1310,27 @@ For detailed information about each endpoint, see the sections below.`;
     tags: []
   };
 
+  const documentedCustomRouteOperations = new Set();
+  let customRoutesUsed = false;
+
+  const registerCustomRouteOperation = ({ fullPath, method, originalKey, scope, tags }) => {
+    const opKey = `${method.toUpperCase()} ${convertPathToOpenAPI(fullPath)}`;
+    if (documentedCustomRouteOperations.has(opKey)) {
+      return;
+    }
+
+    const added = addCustomRouteOperation(spec, fullPath, method, {
+      originalKey,
+      scope,
+      tags
+    });
+
+    if (added) {
+      documentedCustomRouteOperations.add(opKey);
+      customRoutesUsed = true;
+    }
+  };
+
   // Add security schemes
   if (auth.jwt?.enabled) {
     spec.components.securitySchemes.bearerAuth = {
@@ -1148,6 +1366,7 @@ For detailed information about each endpoint, see the sections below.`;
 
   for (const [name, resource] of Object.entries(resources)) {
     const rawConfig = resourceConfigs[name];
+    const resourceLabel = formatResourceLabel(name);
 
     if (rawConfig?.enabled === false) {
       continue;
@@ -1187,6 +1406,11 @@ For detailed information about each endpoint, see the sections below.`;
     } else if (typeof versionPrefixConfig === 'string') {
       prefix = versionPrefixConfig;
     }
+
+    const resourceBaseMountPath = applyBasePath(
+      normalizedBasePath,
+      prefix ? `/${prefix}/${name}` : `/${name}`
+    );
 
     // Generate paths
     const paths = generateResourcePaths(resource, version, {
@@ -1251,6 +1475,39 @@ For detailed information about each endpoint, see the sections below.`;
         Object.assign(spec.paths, relationalPaths);
       }
     }
+
+    const resourceCustomRoutes = gatherCustomRouteDefinitions([
+      resource.config?.routes,
+      resource.config?.api,
+      resourceConfig?.routes
+    ]);
+
+    for (const routeDef of resourceCustomRoutes) {
+      const relativePath = routeDef.path === '/' ? '' : routeDef.path;
+      const fullPath = relativePath
+        ? `${resourceBaseMountPath}${relativePath}`
+        : resourceBaseMountPath;
+
+      registerCustomRouteOperation({
+        fullPath,
+        method: routeDef.method,
+        originalKey: routeDef.originalKey,
+        scope: `for resource "${resourceLabel}"`,
+        tags: [name, CUSTOM_ROUTES_TAG]
+      });
+    }
+  }
+
+  const pluginCustomRoutesDefined = gatherCustomRouteDefinitions([pluginRoutes]);
+  for (const routeDef of pluginCustomRoutesDefined) {
+    const fullPath = applyBasePath(normalizedBasePath, routeDef.path);
+    registerCustomRouteOperation({
+      fullPath,
+      method: routeDef.method,
+      originalKey: routeDef.originalKey,
+      scope: 'at plugin level',
+      tags: [CUSTOM_ROUTES_TAG]
+    });
   }
 
   // Add authentication endpoints if enabled
@@ -1549,6 +1806,13 @@ For detailed information about each endpoint, see the sections below.`;
         description: 'Monitoring and observability endpoints (Prometheus)'
       });
     }
+  }
+
+  if (customRoutesUsed && !spec.tags.some(tag => tag.name === CUSTOM_ROUTES_TAG)) {
+    spec.tags.push({
+      name: CUSTOM_ROUTES_TAG,
+      description: 'User-defined routes configured in ApiPlugin options or resource configurations.'
+    });
   }
 
   return spec;
