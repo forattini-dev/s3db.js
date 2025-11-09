@@ -105,7 +105,7 @@ new ApiPlugin({
 })
 ```
 
-> **Tip:** The default format follows the same spirit as Morgan’s `dev` preset—method, URL, colored status, timing, payload size—but with our own `:verb`/`:ruta`/`:elapsed` tokens and the pastel `⇒` arrow line. Set `colorize: false` for plain text logs.
+> **Tip:** By default we print a pastel line with method, URL, colored status, timing, and payload size using the custom `:verb`/`:ruta`/`:elapsed` tokens plus the `⇒` arrow. Set `colorize: false` for plain text logs.
 
 ### RelationPlugin Integration
 
