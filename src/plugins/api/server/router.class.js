@@ -36,6 +36,7 @@ export class Router {
     this.authMiddleware = authMiddleware;
     this.verbose = verbose;
     this.Hono = Hono;
+    this.routeSummaries = [];
   }
 
   /**
@@ -77,6 +78,7 @@ export class Router {
    */
   mountResourceRoutes(app, events) {
     const databaseResources = this.database.resources;
+    this.routeSummaries = [];
 
     for (const [name, resource] of Object.entries(databaseResources)) {
       const resourceConfig = this.resources[name];
@@ -180,6 +182,13 @@ export class Router {
       if (this.verbose) {
         console.log(`[API Router] Mounted routes for resource '${name}' at ${fullMountPath}`);
       }
+
+      this.routeSummaries.push({
+        resource: name,
+        path: fullMountPath,
+        methods,
+        authEnabled: !!this.authMiddleware && !authDisabled
+      });
 
       // Mount custom routes for this resource
       if (resource.config?.routes) {
@@ -495,5 +504,13 @@ export class Router {
    */
   _withBasePath(path) {
     return applyBasePath(this.basePath, path);
+  }
+
+  /**
+   * Get summaries of mounted routes
+   * @returns {Array<{resource: string, path: string, methods: string[], authEnabled: boolean}>}
+   */
+  getRouteSummaries() {
+    return this.routeSummaries.slice();
   }
 }

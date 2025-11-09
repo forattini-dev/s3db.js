@@ -163,6 +163,7 @@ export class ApiPlugin extends Plugin {
       host: options.host || '0.0.0.0',
       verbose: options.verbose || false,
       basePath: normalizeBasePath(options.basePath),
+      startupBanner: options.startupBanner !== false,
 
       // Version prefix configuration (global default)
       // Can be: true (use resource version), false (no prefix - DEFAULT), or string (custom prefix like 'api/v1')
@@ -215,8 +216,9 @@ export class ApiPlugin extends Plugin {
       // Logging configuration
       logging: {
         enabled: options.logging?.enabled || false,
-        format: options.logging?.format || ':method :path :status :response-time ms',
-        verbose: options.logging?.verbose || false
+        format: options.logging?.format || ':method :url => :status (:response-time ms, :res[content-length])',
+        verbose: options.logging?.verbose || false,
+        colorize: options.logging?.colorize !== false
       },
 
       // Compression configuration
@@ -742,41 +744,68 @@ export class ApiPlugin extends Plugin {
   /**
    * Create logging middleware with customizable format
    * @private
-   *
-   * Supported tokens:
-   * - :method - HTTP method (GET, POST, etc)
-   * - :path - Request path
-   * - :status - HTTP status code
-   * - :response-time - Response time in milliseconds
-   * - :user - Username or 'anonymous'
-   * - :requestId - Request ID (UUID)
-   *
-   * Example format: ':method :path :status :response-time ms - :user'
-   * Output: 'GET /api/v1/cars 200 45ms - john'
    */
   async _createLoggingMiddleware() {
-    const { format } = this.config.logging;
+    const { format, colorize } = this.config.logging;
+
+    const colorStatus = (status, value) => {
+      if (!colorize) return value;
+      let colorCode = '';
+      if (status >= 500) colorCode = '\x1b[31m'; // red
+      else if (status >= 400) colorCode = '\x1b[33m'; // yellow
+      else if (status >= 300) colorCode = '\x1b[36m'; // cyan
+      else if (status >= 200) colorCode = '\x1b[32m'; // green
+
+      return colorCode ? `${colorCode}${value}\x1b[0m` : value;
+    };
+
+    const formatHeaderTokens = (message, headers) => {
+      return message.replace(/:res\[([^\]]+)\]/gi, (_, headerName) => {
+        const value = headers?.get(headerName) ?? headers?.get(headerName.toLowerCase());
+        return value ?? '-';
+      });
+    };
 
     return async (c, next) => {
-      const start = Date.now();
+      const start = process.hrtime.bigint();
       const method = c.req.method;
       const path = c.req.path;
       const requestId = c.get('requestId');
 
       await next();
 
-      const duration = Date.now() - start;
-      const status = c.res.status;
+      const elapsedNs = process.hrtime.bigint() - start;
+      const duration = Number(elapsedNs) / 1_000_000;
+      const durationFormatted = duration.toFixed(3);
+      const status = c.res?.status ?? 0;
       const user = c.get('user')?.username || c.get('user')?.email || 'anonymous';
 
-      // Parse format string with token replacement
-      let logMessage = format
-        .replace(':method', method)
-        .replace(':path', path)
-        .replace(':status', status)
-        .replace(':response-time', duration)
-        .replace(':user', user)
-        .replace(':requestId', requestId);
+      let urlPath = path;
+      try {
+        const parsed = new URL(c.req.url);
+        urlPath = parsed.pathname + parsed.search;
+      } catch {
+        urlPath = path;
+      }
+
+      const baseReplacements = [
+        { token: ':verb', value: method },
+        { token: ':ruta', value: path },
+        { token: ':url', value: urlPath },
+        { token: ':status', value: colorStatus(status, String(status)) },
+        { token: ':elapsed', value: durationFormatted },
+        { token: ':who', value: user },
+        { token: ':reqId', value: requestId }
+      ];
+
+      let logMessage = format;
+      for (const { token, value } of baseReplacements) {
+        if (logMessage.includes(token)) {
+          logMessage = logMessage.split(token).join(String(value));
+        }
+      }
+
+      logMessage = formatHeaderTokens(logMessage, c.res?.headers);
 
       console.log(`[API Plugin] ${logMessage}`);
     };
@@ -1037,7 +1066,8 @@ export class ApiPlugin extends Plugin {
       docsUI: this.config.docs.ui,
       apiTitle: this.config.docs.title,
       apiVersion: this.config.docs.version,
-      apiDescription: this.config.docs.description
+      apiDescription: this.config.docs.description,
+      startupBanner: this.config.startupBanner
     });
 
     // Start server
