@@ -113,6 +113,7 @@ export class ApiServer {
       options: {
         auth: this.options.auth,
         resources: this.options.resources,
+        routes: this.options.routes,
         versionPrefix: this.options.versionPrefix,
         basePath: this.options.basePath,
         title: this.options.apiTitle,

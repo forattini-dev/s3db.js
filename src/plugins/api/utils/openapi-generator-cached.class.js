@@ -86,6 +86,7 @@ export class OpenAPIGeneratorCached {
 
       // Resource config affects paths
       resourceConfig: Object.keys(this.options.resources || {}).sort(),
+      customRoutes: Object.keys(this.options.routes || {}).sort(),
 
       // Version prefix affects URLs
       versionPrefix: this.options.versionPrefix,

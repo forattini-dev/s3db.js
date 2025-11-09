@@ -181,6 +181,49 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
       expect(spec).toBeDefined();
       expect(spec.components).toBeDefined();
     });
+
+    it('should include plugin-level and resource-level custom routes in the spec', () => {
+      users.config = users.config || {};
+      users.config.routes = {
+        'POST /:id/activate': async () => {}
+      };
+      users.config.api = {
+        'async GET /:id/stats': async () => {}
+      };
+
+      const spec = generateOpenAPISpec(database, {
+        basePath: '/v1',
+        routes: {
+          'GET /health': async () => {}
+        },
+        resources: {
+          users: {
+            routes: users.config.routes
+          }
+        }
+      });
+
+      expect(spec.paths['/v1/health']).toBeDefined();
+      expect(spec.paths['/v1/health'].get).toBeDefined();
+      expect(spec.paths['/v1/health'].get.tags).toContain('Custom Routes');
+
+      expect(spec.paths['/v1/users/{id}/activate']).toBeDefined();
+      expect(spec.paths['/v1/users/{id}/activate'].post.tags).toEqual(
+        expect.arrayContaining(['users', 'Custom Routes'])
+      );
+
+      expect(spec.paths['/v1/users/{id}/stats']).toBeDefined();
+      expect(spec.paths['/v1/users/{id}/stats'].get.tags).toEqual(
+        expect.arrayContaining(['users', 'Custom Routes'])
+      );
+
+      expect(spec.tags.find((tag) => tag.name === 'Custom Routes')).toBeDefined();
+
+      expect(spec.paths['/v1/users'].head).toBeDefined();
+      expect(spec.paths['/v1/users'].options).toBeDefined();
+      expect(spec.paths['/v1/users/{id}'].head).toBeDefined();
+      expect(spec.paths['/v1/users/{id}'].options).toBeDefined();
+    });
   });
 
   describe('Integration - Plugin Attributes Should Be Internal Only', () => {
