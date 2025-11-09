@@ -76,7 +76,8 @@ new ApiPlugin({
     enabled: true,
     format: ':verb :url => :status (:elapsed ms, :res[content-length])',
     colorize: true,
-    verbose: false
+    verbose: false,
+    // Legacy tokens still work (:method, :path, :response-time, :user, :requestId)
   },
 
   // Response compression
@@ -104,7 +105,7 @@ new ApiPlugin({
 })
 ```
 
-> **Tip:** The default format follows the same spirit as Morgan’s `dev` preset—method, URL, colored status, timing, payload size—but with our own `:verb`/`:ruta`/`:elapsed` tokens and arrow style. Set `colorize: false` for plain text logs.
+> **Tip:** The default format follows the same spirit as Morgan’s `dev` preset—method, URL, colored status, timing, payload size—but with our own `:verb`/`:ruta`/`:elapsed` tokens and the pastel `⇒` arrow line. Set `colorize: false` for plain text logs.
 
 ### RelationPlugin Integration
 

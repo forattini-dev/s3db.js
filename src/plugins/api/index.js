@@ -40,6 +40,16 @@ import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceName } from '../concerns/resource-names.js';
 import { normalizeBasePath } from './utils/base-path.js';
 
+const DEFAULT_LOG_FORMAT = ':verb :url => :status (:elapsed ms, :res[content-length])';
+const ANSI_RESET = '\x1b[0m';
+const PASTEL_COLORS = {
+  method: '\x1b[38;5;117m',
+  url: '\x1b[38;5;195m',
+  arrow: '\x1b[38;5;244m',
+  time: '\x1b[38;5;176m',
+  size: '\x1b[38;5;147m'
+};
+
 const AUTH_DRIVER_KEYS = ['jwt', 'apiKey', 'basic', 'oidc', 'oauth2'];
 
 function normalizeAuthConfig(authOptions = {}) {
@@ -216,7 +226,7 @@ export class ApiPlugin extends Plugin {
       // Logging configuration
       logging: {
         enabled: options.logging?.enabled || false,
-        format: options.logging?.format || ':method :url => :status (:response-time ms, :res[content-length])',
+        format: options.logging?.format || DEFAULT_LOG_FORMAT,
         verbose: options.logging?.verbose || false,
         colorize: options.logging?.colorize !== false
       },
@@ -747,6 +757,8 @@ export class ApiPlugin extends Plugin {
    */
   async _createLoggingMiddleware() {
     const { format, colorize } = this.config.logging;
+    const logFormat = format || DEFAULT_LOG_FORMAT;
+    const useDefaultStyle = logFormat === DEFAULT_LOG_FORMAT;
 
     const colorStatus = (status, value) => {
       if (!colorize) return value;
@@ -764,6 +776,18 @@ export class ApiPlugin extends Plugin {
         const value = headers?.get(headerName) ?? headers?.get(headerName.toLowerCase());
         return value ?? '-';
       });
+    };
+
+    const replaceTokens = (message, replacements) => {
+      let result = message;
+      for (const { tokens, value } of replacements) {
+        tokens.forEach((token) => {
+          if (result.includes(token)) {
+            result = result.split(token).join(String(value));
+          }
+        });
+      }
+      return result;
     };
 
     return async (c, next) => {
@@ -789,25 +813,34 @@ export class ApiPlugin extends Plugin {
       }
 
       const baseReplacements = [
-        { token: ':verb', value: method },
-        { token: ':ruta', value: path },
-        { token: ':url', value: urlPath },
-        { token: ':status', value: colorStatus(status, String(status)) },
-        { token: ':elapsed', value: durationFormatted },
-        { token: ':who', value: user },
-        { token: ':reqId', value: requestId }
+        { tokens: [':verb', ':method'], value: method },
+        { tokens: [':ruta', ':path'], value: path },
+        { tokens: [':url'], value: urlPath },
+        { tokens: [':status'], value: colorStatus(status, String(status)) },
+        { tokens: [':elapsed', ':response-time'], value: durationFormatted },
+        { tokens: [':who', ':user'], value: user },
+        { tokens: [':reqId', ':requestId'], value: requestId }
       ];
 
-      let logMessage = format;
-      for (const { token, value } of baseReplacements) {
-        if (logMessage.includes(token)) {
-          logMessage = logMessage.split(token).join(String(value));
-        }
+      const contentLength = c.res?.headers?.get('content-length') ?? '-';
+
+      if (useDefaultStyle) {
+        const sizeDisplay = contentLength === '-' ? '–' : contentLength;
+        const methodText = colorize ? `${PASTEL_COLORS.method}${method}${ANSI_RESET}` : method;
+        const urlText = colorize ? `${PASTEL_COLORS.url}${urlPath}${ANSI_RESET}` : urlPath;
+        const arrowSymbol = colorize ? `${PASTEL_COLORS.arrow}⇒${ANSI_RESET}` : '⇒';
+        const timeText = colorize ? `${PASTEL_COLORS.time}${durationFormatted}${ANSI_RESET}` : durationFormatted;
+        const sizeText = colorize ? `${PASTEL_COLORS.size}${sizeDisplay}${ANSI_RESET}` : sizeDisplay;
+        const line = `${methodText} ${urlText} ${arrowSymbol} ${colorStatus(status, String(status))} (${timeText} ms, ${sizeText})`;
+        console.log(line);
+        return;
       }
+
+      let logMessage = replaceTokens(logFormat, baseReplacements);
 
       logMessage = formatHeaderTokens(logMessage, c.res?.headers);
 
-      console.log(`[API Plugin] ${logMessage}`);
+      console.log(logMessage);
     };
   }
 
