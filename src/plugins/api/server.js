@@ -17,6 +17,7 @@ import { Router } from './server/router.class.js';
 import { HealthManager } from './server/health-manager.class.js';
 import { OpenAPIGeneratorCached } from './utils/openapi-generator-cached.class.js';
 import { AuthStrategyFactory } from './auth/strategies/factory.class.js';
+import { networkInterfaces } from 'node:os';
 
 export class ApiServer {
   constructor(options = {}) {
@@ -47,7 +48,8 @@ export class ApiServer {
       apiTitle: options.docs?.title || options.apiTitle || 's3db.js API',
       apiVersion: options.docs?.version || options.apiVersion || '1.0.0',
       apiDescription: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
-      maxBodySize: options.maxBodySize || 10 * 1024 * 1024
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
+      startupBanner: options.startupBanner !== false
     };
 
     this.app = null;
@@ -230,6 +232,7 @@ export class ApiServer {
             if (this.options.verbose) {
               console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
             }
+            this._printStartupBanner(info);
 
             const shutdownHandler = async (signal) => {
               if (this.options.verbose) {
@@ -538,6 +541,100 @@ export class ApiServer {
       console.error('[API Plugin] Failed to create auth middleware:', err.message);
       throw err;
     }
+  }
+
+  _printStartupBanner(info) {
+    if (this.options.startupBanner === false) {
+      return;
+    }
+
+    const version = this.options.database?.s3dbVersion || 'latest';
+    const basePath = this.options.basePath || '';
+    const localHost = this._resolveLocalHostname();
+    const localUrl = this._buildUrl(localHost, info.port, basePath);
+    const networkHost = this._resolveNetworkHostname();
+    const networkUrl = networkHost ? this._buildUrl(networkHost, info.port, basePath) : null;
+    const docsPath = this.options.docsEnabled !== false
+      ? (basePath ? `${basePath}/docs` : '/docs')
+      : null;
+    const docsUrl = docsPath ? this._buildUrl(localHost, info.port, docsPath) : null;
+
+    const lines = [
+      '',
+      `  🗄️  s3db.js API ${version}`,
+      `     - Local:    ${localUrl}`
+    ];
+
+    if (networkUrl && networkUrl !== localUrl) {
+      lines.push(`     - Network:  ${networkUrl}`);
+    }
+
+    if (docsUrl) {
+      lines.push(`     - Docs:     ${docsUrl}`);
+    }
+
+    const routeSummaries = this.router?.getRouteSummaries?.() || [];
+    if (routeSummaries.length > 0) {
+      lines.push('     Routes:');
+      routeSummaries.forEach((route) => {
+        const methods = route.methods.join(', ');
+        const authLabel = route.authEnabled ? 'auth:on' : 'auth:off';
+        lines.push(`       • ${methods} ${route.path} (${authLabel})`);
+      });
+    }
+
+    lines.push('');
+    console.log(lines.join('\n'));
+  }
+
+  _resolveLocalHostname() {
+    const host = this.options.host;
+    if (!host || host === '0.0.0.0' || host === '::') {
+      return 'localhost';
+    }
+    return host;
+  }
+
+  _resolveNetworkHostname() {
+    const host = this.options.host;
+    if (host && host !== '0.0.0.0' && host !== '::') {
+      return host;
+    }
+    return this._findLanAddress() || null;
+  }
+
+  _findLanAddress() {
+    const nets = networkInterfaces();
+    for (const interfaceDetails of Object.values(nets)) {
+      if (!interfaceDetails) continue;
+      for (const detail of interfaceDetails) {
+        if (detail.family === 'IPv4' && !detail.internal) {
+          return detail.address;
+        }
+      }
+    }
+    return null;
+  }
+
+  _buildUrl(host, port, path = '') {
+    if (!host) return '';
+    const isIPv6 = host.includes(':') && !host.startsWith('[');
+    const hostPart = isIPv6 ? `[${host}]` : host;
+    const base = `http://${hostPart}:${port}`;
+
+    if (!path) {
+      return base;
+    }
+
+    const normalizedPath = path === '/'
+      ? '/'
+      : (path.startsWith('/') ? path : `/${path}`);
+
+    if (normalizedPath === '/') {
+      return `${base}/`;
+    }
+
+    return `${base}${normalizedPath}`;
   }
 
   _generateOpenAPISpec() {

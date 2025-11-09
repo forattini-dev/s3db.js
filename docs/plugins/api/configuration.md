@@ -74,7 +74,8 @@ new ApiPlugin({
   // Request logging
   logging: {
     enabled: true,
-    format: ':method :path :status :response-time ms - :user',
+    format: ':verb :url => :status (:elapsed ms, :res[content-length])',
+    colorize: true,
     verbose: false
   },
 
@@ -102,6 +103,8 @@ new ApiPlugin({
   ]
 })
 ```
+
+> **Tip:** The default format follows the same spirit as Morgan’s `dev` preset—method, URL, colored status, timing, payload size—but with our own `:verb`/`:ruta`/`:elapsed` tokens and arrow style. Set `colorize: false` for plain text logs.
 
 ### RelationPlugin Integration
 
@@ -374,6 +377,22 @@ await db.usePlugin(new ApiPlugin({
 ```
 
 The OpenAPI generator and Swagger/Redoc docs automatically include the base path so the documentation matches the actual routes.
+
+---
+
+### Startup Banner
+
+When the API plugin starts it prints a friendly banner (similar to Next.js) that shows the current `s3db.js` version plus Local/Network/DOCS URLs.  
+The banner also enumerates every mounted resource path with the allowed HTTP methods and whether auth is enabled.
+
+Disable it by setting `startupBanner: false`:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  startupBanner: false
+}));
+```
 
 ---
 
