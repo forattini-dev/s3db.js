@@ -5,6 +5,8 @@
  * Note: OpenAPI 3.2.0 is not yet supported by Redoc v2.5.1
  */
 
+import { applyBasePath, normalizeBasePath } from './base-path.js';
+
 /**
  * Map s3db.js field types to OpenAPI types
  * @param {string} fieldType - s3db.js field type
@@ -186,6 +188,7 @@ function generateResourceSchema(resource) {
  */
 function generateResourcePaths(resource, version, config = {}) {
   const resourceName = resource.name;
+  const basePathPrefix = config.basePath || '';
 
   // Determine version prefix (same logic as server.js)
   let versionPrefixConfig = config.versionPrefix !== undefined ? config.versionPrefix : false;
@@ -199,7 +202,7 @@ function generateResourcePaths(resource, version, config = {}) {
     prefix = versionPrefixConfig;
   }
 
-  const basePath = prefix ? `/${prefix}/${resourceName}` : `/${resourceName}`;
+  const basePath = applyBasePath(basePathPrefix, prefix ? `/${prefix}/${resourceName}` : `/${resourceName}`);
   const schema = generateResourceSchema(resource);
   const methods = config.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
   const authMethods = config.auth || [];
@@ -854,13 +857,17 @@ The response includes pagination metadata in the \`pagination\` object with tota
  * @param {string} version - Resource version
  * @param {Object} relatedSchema - OpenAPI schema for related resource
  * @param {string} versionPrefix - Version prefix to use (empty string for no prefix)
+ * @param {string} basePathPrefix - Normalized base path
  * @returns {Object} OpenAPI paths for relation
  */
-function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema, versionPrefix = '') {
+function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema, versionPrefix = '', basePathPrefix = '') {
   const resourceName = resource.name;
-  const basePath = versionPrefix
-    ? `/${versionPrefix}/${resourceName}/{id}/${relationName}`
-    : `/${resourceName}/{id}/${relationName}`;
+  const basePath = applyBasePath(
+    basePathPrefix,
+    versionPrefix
+      ? `/${versionPrefix}/${resourceName}/{id}/${relationName}`
+      : `/${resourceName}/{id}/${relationName}`
+  );
   const relatedResourceName = relationConfig.resource;
   const isToMany = relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany';
 
@@ -970,8 +977,10 @@ export function generateOpenAPISpec(database, config = {}) {
     serverUrl = 'http://localhost:3000',
     auth = {},
     resources: resourceConfigs = {},
-    versionPrefix: globalVersionPrefix
+    versionPrefix: globalVersionPrefix,
+    basePath = ''
   } = config;
+  const normalizedBasePath = normalizeBasePath(basePath);
 
   // Build resources table for description
   const resourcesTableRows = [];
@@ -1016,9 +1025,9 @@ export function generateOpenAPISpec(database, config = {}) {
       prefix = versionPrefixConfig;
     }
 
-    const basePath = prefix ? `/${prefix}/${name}` : `/${name}`;
+    const resourceBasePath = applyBasePath(normalizedBasePath, prefix ? `/${prefix}/${name}` : `/${name}`);
 
-    resourcesTableRows.push(`| ${name} | ${descText} | \`${basePath}\` |`);
+    resourcesTableRows.push(`| ${name} | ${descText} | \`${resourceBasePath}\` |`);
   }
 
   // Build enhanced description with resources table
@@ -1182,7 +1191,8 @@ For detailed information about each endpoint, see the sections below.`;
     // Generate paths
     const paths = generateResourcePaths(resource, version, {
       ...resourceConfig,
-      versionPrefix: versionPrefixConfig
+      versionPrefix: versionPrefixConfig,
+      basePath: normalizedBasePath
     });
 
     // Merge paths
@@ -1233,7 +1243,8 @@ For detailed information about each endpoint, see the sections below.`;
           relationConfig,
           version,
           relatedSchema,
-          prefix
+          prefix,
+          normalizedBasePath
         );
 
         // Merge relational paths
@@ -1244,7 +1255,8 @@ For detailed information about each endpoint, see the sections below.`;
 
   // Add authentication endpoints if enabled
   if (auth.jwt?.enabled || auth.apiKey?.enabled || auth.basic?.enabled) {
-    spec.paths['/auth/login'] = {
+    const loginPath = applyBasePath(normalizedBasePath, '/auth/login');
+    spec.paths[loginPath] = {
       post: {
         tags: ['Authentication'],
         summary: 'Login',
@@ -1297,7 +1309,8 @@ For detailed information about each endpoint, see the sections below.`;
       }
     };
 
-    spec.paths['/auth/register'] = {
+    const registerPath = applyBasePath(normalizedBasePath, '/auth/register');
+    spec.paths[registerPath] = {
       post: {
         tags: ['Authentication'],
         summary: 'Register',

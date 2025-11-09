@@ -89,6 +89,7 @@ export class OpenAPIGeneratorCached {
 
       // Version prefix affects URLs
       versionPrefix: this.options.versionPrefix,
+      basePath: this.options.basePath || '',
 
       // API info
       apiInfo: {
