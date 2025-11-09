@@ -32,7 +32,7 @@ await db.createResource({
 });
 
 // Start API with Swagger UI
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   docs: {
     ui: 'swagger',  // or 'redoc'
@@ -199,7 +199,7 @@ await db.createResource({
 });
 
 // Start API with custom branding
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   docs: {
     ui: 'swagger',  // or 'redoc' for alternative UI
@@ -462,7 +462,7 @@ docs: {
 ### Custom OpenAPI Schema Overrides
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   docs: {
     ui: 'swagger',

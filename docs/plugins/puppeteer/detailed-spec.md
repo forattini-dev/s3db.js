@@ -675,7 +675,7 @@ const puppeteer = new PuppeteerPlugin({
   }
 });
 
-await db.use(puppeteer);
+await db.usePlugin(puppeteer);
 ```
 
 ---

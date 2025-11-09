@@ -9,7 +9,7 @@
 ## ⚡ TLDR
 
 ```javascript
-await db.use(new ApiPlugin({ port: 3000 }));  // That's it!
+await db.usePlugin(new ApiPlugin({ port: 3000 }));  // That's it!
 ```
 
 > 🧩 **Namespaces**: Provide `namespace: 'public-api'` (or pass an alias to `db.usePlugin`) to isolate this plugin's internal resources—Failban bans/violations will be stored under `plg_public-api_*`.
@@ -53,7 +53,7 @@ await db.createResource({
 });
 
 // Add API Plugin
-await db.use(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
 
 // ✨ API running at http://localhost:3000
 ```
@@ -63,8 +63,8 @@ await db.use(new ApiPlugin({ port: 3000 }));
 Install the [RelationPlugin](./relation.md) before the API plugin to expose relational data effortlessly:
 
 ```javascript
-await db.use(new RelationPlugin({ relations: {/* ... */} }));
-await db.use(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new RelationPlugin({ relations: {/* ... */} }));
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
 ```
 
 Any resource can now hydrate related records with a single query parameter:
@@ -123,6 +123,15 @@ pnpm install openid-client
 
 # Session tracking with encryption
 # (No additional packages needed - uses Node.js built-in crypto)
+```
+
+**Validation & Rate Limiting (Custom Routes):**
+```bash
+# Zod validation with @hono/zod-validator
+pnpm install zod @hono/zod-validator
+
+# Rate limiting for custom endpoints
+pnpm install hono-rate-limiter
 ```
 
 **Security Features:**
@@ -652,14 +661,14 @@ await db.createResource({
   attributes: { email: 'string|required|email', name: 'string|required' }
 });
 
-await db.use(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // ✨ API running at http://localhost:3000
 ```
 
 ### Add Authentication (JWT)
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   auth: {
     resource: 'users',
@@ -704,7 +713,7 @@ auth: {
 ### Production-Ready Stack
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
 
   // 🔒 Security
@@ -780,7 +789,7 @@ const projects = await db.createResource({
 Track every visitor with encrypted cookies and real-time metrics:
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   sessionTracking: {
     enabled: true,
     resource: 'sessions',
@@ -821,7 +830,7 @@ apiPlugin.events.on('request:end', async (data) => {
 Public redirects, admin dashboard, automatic abuse prevention:
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   auth: {
     drivers: {
       oidc: { /* Azure AD for admin */ },
@@ -902,7 +911,7 @@ const orders = await db.createResource({
 });
 
 // Custom route for checkout with validation
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   routes: {
     'POST /checkout': async (c, ctx) => {
       // ✅ Validate cart items
@@ -1060,7 +1069,7 @@ guard: {
 ### Minimal (Development)
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   verbose: true
 }));
@@ -1069,7 +1078,7 @@ await db.use(new ApiPlugin({
 ### Production-Ready
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: process.env.PORT || 3000,
 
   // 🔐 Authentication
@@ -1205,7 +1214,7 @@ The API Plugin includes **6 built-in optimizations** for maximum performance. Al
 #### Maximum Performance (Default)
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   // All optimizations enabled by default
 }));
@@ -1214,7 +1223,7 @@ await db.use(new ApiPlugin({
 #### Custom Configuration
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
 
   // JWT Token Cache (40-60% faster auth)
@@ -1261,7 +1270,7 @@ await db.use(new ApiPlugin({
 #### Disable All Optimizations (Not Recommended)
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   auth: { jwt: { cache: { enabled: false } } },
   docs: { cache: { enabled: false } },
@@ -1284,7 +1293,7 @@ await db.use(new ApiPlugin({
 Enable `verbose: true` to see optimization logs:
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   verbose: true  // Shows: "Compression enabled", "JWT cache HIT", etc.
 }));
@@ -1324,7 +1333,7 @@ app.post('/users', auth, validate, async (req, res) => { /* ... */ });
 
 // API Plugin (2 lines)
 await db.createResource({ name: 'users', attributes: { ... } });
-await db.use(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
 ```
 
 **[→ See comparison](./api/authentication.md#why-api-plugin)**
@@ -1526,6 +1535,59 @@ guard: {
 </details>
 
 ### Security
+
+<details>
+<summary><strong>How do I add rate limiting to custom routes?</strong></summary>
+
+**Use `hono-rate-limiter` for per-route rate limiting:**
+
+```bash
+pnpm install hono-rate-limiter
+```
+
+```javascript
+import { rateLimiter } from 'hono-rate-limiter';
+
+// Create rate limiter middleware
+const leadSubmissionLimiter = rateLimiter({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  limit: 5,                   // Max 5 requests per window
+  standardHeaders: 'draft-6', // Return rate limit info in headers
+  keyGenerator: (c) => c.req.header('x-forwarded-for') || 'unknown'
+});
+
+routes: {
+  'POST /newsletter': {
+    POST: [
+      leadSubmissionLimiter,  // Apply rate limiting
+      async (c, ctx) => {
+        const lead = await ctx.resources.leads.insert(await c.req.json());
+        return ctx.success({ lead }, 201);
+      }
+    ]
+  },
+
+  'POST /contact': {
+    POST: [
+      leadSubmissionLimiter,  // Reuse same limiter
+      async (c, ctx) => {
+        const lead = await ctx.resources.leads.insert(await c.req.json());
+        return ctx.success({ lead }, 201);
+      }
+    ]
+  }
+}
+```
+
+**Rate Limit Headers:**
+- `RateLimit-Limit`: Maximum requests allowed
+- `RateLimit-Remaining`: Requests remaining in window
+- `RateLimit-Reset`: Time when limit resets
+
+**Note:** For global rate limiting, use the built-in `failban` feature instead.
+
+**[→ Learn more: Security features](./api/security.md#failban)**
+</details>
 
 <details>
 <summary><strong>How do I protect against brute force attacks?</strong></summary>
@@ -1778,7 +1840,7 @@ routes: {
 <details>
 <summary><strong>How do I validate request bodies in custom routes?</strong></summary>
 
-**Use the validator helper from enhanced context:**
+**Option 1: Use built-in validator (validates against resource schema):**
 
 ```javascript
 routes: {
@@ -1797,7 +1859,40 @@ routes: {
 }
 ```
 
-**Validator methods:**
+**Option 2: Use Zod for custom validation schemas:**
+
+```bash
+pnpm install zod @hono/zod-validator
+```
+
+```javascript
+import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
+
+const NewsletterSchema = z.object({
+  email: z.string().email(),
+  source: z.string().optional()
+});
+
+routes: {
+  'POST /newsletter': {
+    POST: [
+      zValidator('json', NewsletterSchema),
+      async (c, ctx) => {
+        const data = c.req.valid('json');
+        const lead = await ctx.resources.leads.insert({
+          email: data.email,
+          source: data.source || 'newsletter',
+          type: 'newsletter'
+        });
+        return ctx.success({ lead }, 201);
+      }
+    ]
+  }
+}
+```
+
+**Validator methods (built-in):**
 - `ctx.validator.validate(resourceName, data)` - Validate data against schema
 - `ctx.validator.validateBody(resourceName)` - Validate request body
 - `ctx.validator.validateOrThrow(data)` - Validate or throw 400 error

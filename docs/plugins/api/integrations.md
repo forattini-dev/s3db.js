@@ -14,8 +14,8 @@ The API Plugin plays nicely with other first-party plugins. This guide shows how
 - Individual relations can be hidden by setting `resources[resourceName].relations[relationName].expose = false`.
 
 ```javascript
-await db.use(new RelationPlugin({ relations: { /* ... */ } }));
-await db.use(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new RelationPlugin({ relations: { /* ... */ } }));
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
 
 // GET /orders?populate=customer,items.product
 ```
@@ -27,12 +27,12 @@ await db.use(new ApiPlugin({ port: 3000 }));
 The Cloud Inventory plugin creates a rich catalog of AWS accounts, services, and costs under the `plg_cloud_inventory_*` resources. To expose them via REST:
 
 ```javascript
-await db.use(new CloudInventoryPlugin({
+await db.usePlugin(new CloudInventoryPlugin({
   accounts: ['123456789012'],
   regions: ['us-east-1', 'us-west-2']
 }));
 
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   resources: {
     plg_cloud_inventory_accounts: { methods: ['GET'] },
@@ -56,12 +56,12 @@ All resources created by the plugin are available in `db.resources`. Those whose
 Expose Kubernetes metadata (namespaces, pods, nodes, workloads) collected by the Kubernetes Inventory plugin:
 
 ```javascript
-await db.use(new KubernetesInventoryPlugin({
+await db.usePlugin(new KubernetesInventoryPlugin({
   kubeconfigPath: '~/.kube/config',
   syncInterval: 60_000
 }));
 
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   port: 3000,
   resources: {
     plg_kube_namespaces: { methods: ['GET'] },

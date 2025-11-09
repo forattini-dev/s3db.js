@@ -250,7 +250,7 @@ Customize how the Identity plugin authenticates users and OAuth clients. Built-i
 ```javascript
 import { CustomSAMLDriver } from './custom-auth/saml-driver.js';
 
-await db.use(new IdentityPlugin({
+await db.usePlugin(new IdentityPlugin({
   issuer: 'https://sso.example.com',
   authDrivers: {
     password: {

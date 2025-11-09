@@ -227,18 +227,18 @@ When you create a plugin with a namespace, the system automatically:
 ```javascript
 // First instance
 const uptimePlugin = new ReconPlugin({ namespace: 'uptime' });
-await db.use(uptimePlugin);
+await db.usePlugin(uptimePlugin);
 // Console: [ReconPlugin] Using namespace: "uptime"
 
 // Second instance (detects first)
 const stealthPlugin = new ReconPlugin({ namespace: 'stealth' });
-await db.use(stealthPlugin);
+await db.usePlugin(stealthPlugin);
 // Console: [ReconPlugin] Detected 1 existing namespace(s): uptime
 // Console: [ReconPlugin] Using namespace: "stealth"
 
 // Third instance (detects both)
 const aggressivePlugin = new ReconPlugin({ namespace: 'aggressive' });
-await db.use(aggressivePlugin);
+await db.usePlugin(aggressivePlugin);
 // Console: [ReconPlugin] Detected 2 existing namespace(s): stealth, uptime
 // Console: [ReconPlugin] Using namespace: "aggressive"
 ```
@@ -295,8 +295,8 @@ const stagingCache = new CachePlugin({
   ttl: 1800000
 });
 
-await db.use(prodCache);
-await db.use(stagingCache);
+await db.usePlugin(prodCache);
+await db.usePlugin(stagingCache);
 ```
 
 **2. Multi-Tenant SaaS**
@@ -304,8 +304,8 @@ await db.use(stagingCache);
 const clientAcmeMetrics = new MetricsPlugin({ namespace: 'client-acme' });
 const clientGlobexMetrics = new MetricsPlugin({ namespace: 'client-globex' });
 
-await db.use(clientAcmeMetrics);
-await db.use(clientGlobexMetrics);
+await db.usePlugin(clientAcmeMetrics);
+await db.usePlugin(clientGlobexMetrics);
 ```
 
 **3. Different Behaviors**
@@ -321,8 +321,8 @@ const auditRecon = new ReconPlugin({
   behavior: 'aggressive'
 });
 
-await db.use(uptimeRecon);
-await db.use(auditRecon);
+await db.usePlugin(uptimeRecon);
+await db.usePlugin(auditRecon);
 ```
 
 #### Namespace Validation
@@ -654,10 +654,10 @@ export class MyPlugin extends Plugin {
 const plugin1 = new MyPlugin({ namespace: 'uptime' });
 const plugin2 = new MyPlugin({ namespace: 'monitoring' });
 
-await db.use(plugin1);
+await db.usePlugin(plugin1);
 // Console: [MyPlugin] Using namespace: "uptime"
 
-await db.use(plugin2);
+await db.usePlugin(plugin2);
 // Console: [MyPlugin] Detected 1 existing namespace(s): uptime
 // Console: [MyPlugin] Using namespace: "monitoring"
 ```
@@ -688,7 +688,7 @@ describe('MyPlugin Namespace Support', () => {
 
   test('should create namespaced resources', async () => {
     const plugin = new MyPlugin({ namespace: 'test' });
-    await db.use(plugin);
+    await db.usePlugin(plugin);
 
     const resource = await db.getResource('plg_myplugin_test_hosts');
     expect(resource).toBeDefined();
@@ -698,8 +698,8 @@ describe('MyPlugin Namespace Support', () => {
     const plugin1 = new MyPlugin({ namespace: 'ns1' });
     const plugin2 = new MyPlugin({ namespace: 'ns2' });
 
-    await db.use(plugin1);
-    await db.use(plugin2);
+    await db.usePlugin(plugin1);
+    await db.usePlugin(plugin2);
 
     await plugin1.saveReport({ id: 'report1' });
     await plugin2.saveReport({ id: 'report2' });
@@ -716,10 +716,10 @@ describe('MyPlugin Namespace Support', () => {
     const plugin1 = new MyPlugin({ namespace: 'ns1' });
     const plugin2 = new MyPlugin({ namespace: 'ns2' });
 
-    await db.use(plugin1);
+    await db.usePlugin(plugin1);
     await plugin1.saveReport({ id: 'report1' });
 
-    await db.use(plugin2);
+    await db.usePlugin(plugin2);
     await plugin2.saveReport({ id: 'report2' });
 
     const { listPluginNamespaces } = await import('s3db.js/concerns/plugin-namespace');

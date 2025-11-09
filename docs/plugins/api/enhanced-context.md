@@ -37,7 +37,7 @@ Just add a **second parameter** to your handler:
 ```javascript
 import { Database, ApiPlugin } from 's3db.js';
 
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   routes: {
     // ✅ AUTO-WRAPPED - handler has 2 params (c, ctx)
     'GET /users/:id': async (c, ctx) => {
@@ -256,7 +256,7 @@ routes: {
 **Configure template engine** in API Plugin:
 
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   templates: {
     engine: 'ejs',        // or 'pug', 'jsx'
     templatesDir: './views',

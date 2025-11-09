@@ -356,7 +356,7 @@ static create({ drivers, ... }) {
 
 ### Adding a New Health Check
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   health: {
     readiness: {
       checks: [
@@ -377,7 +377,7 @@ await db.use(new ApiPlugin({
 
 ### Adding Custom Middleware
 ```javascript
-await db.use(new ApiPlugin({
+await db.usePlugin(new ApiPlugin({
   middlewares: [
     (c, next) => {
       // Your middleware logic
