@@ -588,8 +588,8 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         });
       }
 
-      const response = formatter.noContent();
-      return c.json(response, response._status);
+      // Return 204 No Content (without body, as per HTTP spec)
+      return c.body(null, 204);
     }));
   }
 
