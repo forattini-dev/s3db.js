@@ -7,6 +7,7 @@
 
 import { asyncHandler } from './error-handler.js';
 import { withContext, autoWrapHandler } from '../concerns/route-context.js';
+import { applyBasePath } from './base-path.js';
 
 /**
  * Parse route definition from key
@@ -40,11 +41,12 @@ export function mountCustomRoutes(app, routes, context = {}, verbose = false, op
     return;
   }
 
-  const { autoWrap = true } = options;
+  const { autoWrap = true, pathPrefix = '' } = options;
 
   for (const [key, handler] of Object.entries(routes)) {
     try {
       const { method, path } = parseRouteKey(key);
+      const finalPath = pathPrefix ? applyBasePath(pathPrefix, path) : path;
 
       // Wrap handler with async error handler and context
       const wrappedHandler = asyncHandler(async (c) => {
@@ -62,11 +64,11 @@ export function mountCustomRoutes(app, routes, context = {}, verbose = false, op
       });
 
       // Mount route
-      app.on(method, path, wrappedHandler);
+      app.on(method, finalPath, wrappedHandler);
 
       if (verbose) {
         const contextType = (autoWrap && handler.length === 2) ? '(enhanced)' : '(legacy)';
-        console.log(`[Custom Routes] Mounted ${method} ${path} ${contextType}`);
+        console.log(`[Custom Routes] Mounted ${method} ${finalPath} ${contextType}`);
       }
     } catch (err) {
       console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);

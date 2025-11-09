@@ -345,6 +345,38 @@ GET /v2/users  → users_v2 resource
 
 ---
 
+## Global Base Path (API Namespace)
+
+Use the `basePath` option to mount the whole API (resources, auth routes, metrics, docs) under a shared prefix.
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  basePath: '/api'   // Normalized automatically: '/api'
+}));
+```
+
+**Generated endpoints:**
+```
+GET /api/cars
+POST /api/cars
+GET /api/auth/login
+```
+
+Combine `basePath` with `versionPrefix` to produce URLs like `/api/v1/cars`:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  basePath: '/api',
+  versionPrefix: true
+}));
+```
+
+The OpenAPI generator and Swagger/Redoc docs automatically include the base path so the documentation matches the actual routes.
+
+---
+
 ### Complete Example
 
 ```javascript

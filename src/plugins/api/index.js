@@ -38,6 +38,7 @@ import tryFn from '../../concerns/try-fn.js';
 import { ApiServer } from './server.js';
 import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceName } from '../concerns/resource-names.js';
+import { normalizeBasePath } from './utils/base-path.js';
 
 const AUTH_DRIVER_KEYS = ['jwt', 'apiKey', 'basic', 'oidc', 'oauth2'];
 
@@ -161,6 +162,7 @@ export class ApiPlugin extends Plugin {
       port: options.port || 3000,
       host: options.host || '0.0.0.0',
       verbose: options.verbose || false,
+      basePath: normalizeBasePath(options.basePath),
 
       // Version prefix configuration (global default)
       // Can be: true (use resource version), false (no prefix - DEFAULT), or string (custom prefix like 'api/v1')
@@ -1013,6 +1015,7 @@ export class ApiPlugin extends Plugin {
       host: this.config.host,
       database: this.database,
       namespace: this.namespace,
+      basePath: this.config.basePath,
       versionPrefix: this.config.versionPrefix,
       resources: this.config.resources,
       routes: this.config.routes,

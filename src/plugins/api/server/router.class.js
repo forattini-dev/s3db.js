@@ -19,13 +19,15 @@ import { createFilesystemHandler, validateFilesystemConfig } from '../utils/stat
 import { createS3Handler, validateS3Config } from '../utils/static-s3.js';
 import { createFailbanAdminRoutes } from '../middlewares/failban.js';
 import { createContextInjectionMiddleware } from '../middlewares/context-injection.js';
+import { applyBasePath } from '../utils/base-path.js';
 
 export class Router {
-  constructor({ database, resources, routes, versionPrefix, auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono }) {
+  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono }) {
     this.database = database;
     this.resources = resources || {};
     this.routes = routes || {};
     this.versionPrefix = versionPrefix;
+    this.basePath = basePath || '';
     this.auth = auth;
     this.staticConfigs = staticConfigs || [];
     this.failban = failban;
@@ -172,10 +174,11 @@ export class Router {
 
       // Mount resource routes
       const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
-      app.route(mountPath, resourceApp);
+      const fullMountPath = this._withBasePath(mountPath);
+      app.route(fullMountPath, resourceApp);
 
       if (this.verbose) {
-        console.log(`[API Router] Mounted routes for resource '${name}' at ${mountPath}`);
+        console.log(`[API Router] Mounted routes for resource '${name}' at ${fullMountPath}`);
       }
 
       // Mount custom routes for this resource
@@ -261,11 +264,12 @@ export class Router {
     // Create auth routes
     const authApp = createAuthRoutes(authResource, authConfig);
 
-    // Mount auth routes at /auth
-    app.route('/auth', authApp);
+    // Mount auth routes
+    const authPath = this._withBasePath('/auth');
+    app.route(authPath, authApp);
 
     if (this.verbose) {
-      console.log('[API Router] Mounted auth routes (driver: jwt) at /auth');
+      console.log(`[API Router] Mounted auth routes (driver: jwt) at ${authPath}`);
     }
   }
 
@@ -417,11 +421,12 @@ export class Router {
         );
 
         // Mount relational routes
-        app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
+        const relationPath = this._withBasePath(`/${version}/${resourceName}/:id/${relationName}`);
+        app.route(relationPath, relationalApp);
 
         if (this.verbose) {
           console.log(
-            `[API Router] Mounted relational route: /${version}/${resourceName}/:id/${relationName} ` +
+            `[API Router] Mounted relational route: ${relationPath} ` +
             `(${relationConfig.type} -> ${relationConfig.resource})`
           );
         }
@@ -443,7 +448,9 @@ export class Router {
       plugins: this.database?.plugins || {}
     };
 
-    mountCustomRoutes(app, this.routes, context, this.verbose);
+    mountCustomRoutes(app, this.routes, context, this.verbose, {
+      pathPrefix: this.basePath
+    });
 
     if (this.verbose) {
       console.log(`[API Router] Mounted ${Object.keys(this.routes).length} plugin-level custom routes`);
@@ -458,25 +465,35 @@ export class Router {
     // Metrics endpoint
     const metricsEnabled = this.metrics?.options?.enabled ?? false;
     if (metricsEnabled) {
-      app.get('/metrics', (c) => {
+      const metricsPath = this._withBasePath('/metrics');
+      app.get(metricsPath, (c) => {
         const summary = this.metrics.getSummary();
         const response = formatter.success(summary);
         return c.json(response);
       });
 
       if (this.verbose) {
-        console.log('[API Router] Metrics endpoint enabled at /metrics');
+        console.log(`[API Router] Metrics endpoint enabled at ${metricsPath}`);
       }
     }
 
     // Failban admin endpoints
     if (this.failban) {
       const failbanAdminRoutes = createFailbanAdminRoutes(this.Hono, this.failban);
-      app.route('/admin/security', failbanAdminRoutes);
+      const failbanPath = this._withBasePath('/admin/security');
+      app.route(failbanPath, failbanAdminRoutes);
 
       if (this.verbose) {
-        console.log('[API Router] Failban admin endpoints enabled at /admin/security');
+        console.log(`[API Router] Failban admin endpoints enabled at ${failbanPath}`);
       }
     }
+  }
+
+  /**
+   * Helper to prepend base path to a route
+   * @private
+   */
+  _withBasePath(path) {
+    return applyBasePath(this.basePath, path);
   }
 }
