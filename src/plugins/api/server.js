@@ -449,17 +449,19 @@ export class ApiServer {
     const basePath = this.options.basePath || '';
     const openApiPath = applyBasePath(basePath, '/openapi.json');
     const docsPath = applyBasePath(basePath, '/docs');
-    const rootPath = applyBasePath(basePath, '/');
 
+    // OpenAPI spec endpoint
     if (this.options.docsEnabled) {
       this.app.get(openApiPath, (c) => {
         const spec = this.openApiGenerator.generate();
         return c.json(spec);
       });
 
+      // Documentation UI endpoint
       if (this.options.docsUI === 'swagger') {
         this.app.get(docsPath, this.swaggerUI({ url: openApiPath }));
       } else {
+        // Default: Redoc UI
         this.app.get(docsPath, (c) => c.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -478,20 +480,8 @@ export class ApiServer {
       }
     }
 
-    this.app.get(rootPath, (c) => {
-      if (this.options.rootHandler) {
-        return this.options.rootHandler(c);
-      }
-
-      if (this.options.docsEnabled) {
-        return c.redirect(docsPath, 302);
-      }
-
-      return c.json(formatter.success({
-        status: 'ok',
-        message: 's3db.js API is running'
-      }));
-    });
+    // Note: Root route (/) is now handled by Router.mountRootRoute()
+    // This was moved to maintain proper route precedence and avoid conflicts
   }
 
   _setupOIDCRoutes(config) {
