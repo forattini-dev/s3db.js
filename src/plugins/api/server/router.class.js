@@ -22,7 +22,7 @@ import { createContextInjectionMiddleware } from '../middlewares/context-injecti
 import { applyBasePath } from '../utils/base-path.js';
 
 export class Router {
-  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono }) {
+  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono, apiTitle, apiDescription, docsEnabled, rootRoute }) {
     this.database = database;
     this.resources = resources || {};
     this.routes = routes || {};
@@ -36,6 +36,10 @@ export class Router {
     this.authMiddleware = authMiddleware;
     this.verbose = verbose;
     this.Hono = Hono;
+    this.apiTitle = apiTitle || 's3db.js API';
+    this.apiDescription = apiDescription || 'Auto-generated REST API for s3db.js resources';
+    this.docsEnabled = docsEnabled !== false;
+    this.rootRoute = rootRoute; // undefined = default splash, false = disabled, function = custom
     this.routeSummaries = [];
   }
 
@@ -52,6 +56,9 @@ export class Router {
     if (this.verbose) {
       console.log('[API Router] Context injection middleware registered (resources accessible via c.get())');
     }
+
+    // Root splash screen (before static files to allow override)
+    this.mountRootRoute(app);
 
     // Static files first (give them priority)
     this.mountStaticRoutes(app);
@@ -70,6 +77,207 @@ export class Router {
 
     // Admin routes (failban, metrics)
     this.mountAdminRoutes(app);
+  }
+
+  /**
+   * Mount root splash screen route
+   * @private
+   */
+  mountRootRoute(app) {
+    // Skip if explicitly disabled
+    if (this.rootRoute === false) {
+      if (this.verbose) {
+        console.log('[API Router] Root route disabled via config.rootRoute = false');
+      }
+      return;
+    }
+
+    const rootPath = this._withBasePath('/');
+
+    // Custom handler provided
+    if (typeof this.rootRoute === 'function') {
+      app.get(rootPath, this.rootRoute);
+      if (this.verbose) {
+        console.log(`[API Router] Mounted custom root handler at ${rootPath}`);
+      }
+      return;
+    }
+
+    // Default splash screen
+    const docsPath = this._withBasePath('/docs');
+    app.get(rootPath, (c) => {
+      const html = this._createSplashScreen(docsPath);
+      return c.html(html);
+    });
+
+    if (this.verbose) {
+      console.log(`[API Router] Mounted default splash screen at ${rootPath}`);
+    }
+  }
+
+  /**
+   * Create HTML splash screen
+   * @private
+   */
+  _createSplashScreen(docsPath) {
+    const title = this.apiTitle;
+    const description = this.apiDescription;
+    const docsLink = this.docsEnabled
+      ? `<a href="${docsPath}" class="docs-link">📚 View API Documentation</a>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 60px 40px;
+      max-width: 600px;
+      text-align: center;
+      animation: fadeIn 0.5s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .logo {
+      font-size: 72px;
+      margin-bottom: 20px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    h1 {
+      color: #2d3748;
+      font-size: 36px;
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+
+    .description {
+      color: #718096;
+      font-size: 18px;
+      line-height: 1.6;
+      margin-bottom: 40px;
+    }
+
+    .docs-link {
+      display: inline-block;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      text-decoration: none;
+      padding: 16px 32px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .docs-link:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+
+    .footer {
+      margin-top: 60px;
+      padding-top: 30px;
+      border-top: 1px solid #e2e8f0;
+      color: #a0aec0;
+      font-size: 14px;
+    }
+
+    .footer a {
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 600;
+      transition: color 0.2s ease;
+    }
+
+    .footer a:hover {
+      color: #764ba2;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #f0fdf4;
+      color: #166534;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 30px;
+    }
+
+    .status::before {
+      content: '●';
+      color: #22c55e;
+      animation: blink 2s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🚀</div>
+    <div class="status">API Online</div>
+    <h1>${title}</h1>
+    <p class="description">${description}</p>
+    ${docsLink}
+    <div class="footer">
+      Powered by <a href="https://github.com/forattini-dev/s3db.js" target="_blank">s3db.js</a>
+    </div>
+  </div>
+</body>
+</html>`;
   }
 
   /**

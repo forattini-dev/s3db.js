@@ -50,7 +50,8 @@ export class ApiServer {
       apiVersion: options.docs?.version || options.apiVersion || '1.0.0',
       apiDescription: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
-      startupBanner: options.startupBanner !== false
+      startupBanner: options.startupBanner !== false,
+      rootRoute: options.rootRoute // undefined = default splash, false = disabled, function = custom handler
     };
 
     this.app = null;
@@ -185,7 +186,11 @@ export class ApiServer {
         relationsPlugin: this.relationsPlugin,
         authMiddleware,
         verbose: this.options.verbose,
-        Hono: this.Hono
+        Hono: this.Hono,
+        apiTitle: this.options.apiTitle,
+        apiDescription: this.options.apiDescription,
+        docsEnabled: this.options.docsEnabled,
+        rootRoute: this.options.rootRoute
       });
       this.router.mount(this.app, this.events);
 
