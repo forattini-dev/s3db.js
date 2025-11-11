@@ -4,6 +4,10 @@
 
 The API Plugin automatically generates **OpenAPI 3.1 schemas** and serves an interactive **Swagger UI** at `/docs`. This guide shows you how to add descriptions and customize the generated documentation for the best developer experience.
 
+Note on CSP and Docs UI:
+- The `/docs` route applies a route‑level CSP that allows Swagger/Redoc assets to load by default (including Redoc CDN).
+- To self‑host docs assets or tighten CSP, see [Security](./security.md#api-docs-csp-swaggerredoc).
+
 ---
 
 ## 🎯 Quick Start
