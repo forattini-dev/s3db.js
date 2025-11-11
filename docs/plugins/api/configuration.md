@@ -31,6 +31,7 @@ Notes:
 
 - auth.driver: string | null (shorthand)
 - auth.drivers: Array<{ driver: 'jwt'|'basic'|'apiKey'|'oidc'|'oauth2', config: object }>
+- auth.drivers[].config.provider: 'azure'|'auth0'|'keycloak'|'cognito' (preset que preenche issuer/endpoints a partir de poucos campos como tenantId, domain, realm, region/userPoolId)
 - auth.resource: string (defaults to derived name; reuses Identity users when present)
 - auth.createResource: boolean = true
 - auth.usernameField: string = 'email'
