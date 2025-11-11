@@ -125,7 +125,12 @@ export function createAuthMiddleware(options = {}) {
       };
 
       // Try auth method
-      await middleware(c, tempNext);
+      const result = await middleware(c, tempNext);
+
+      // ✨ If middleware returned a response (redirect, JSON, etc), return it immediately
+      if (result !== undefined && result !== null) {
+        return result;
+      }
 
       // If auth succeeded, continue
       if (authSuccess && c.get('user')) {

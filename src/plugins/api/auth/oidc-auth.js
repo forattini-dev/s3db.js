@@ -445,9 +445,15 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
    */
   app.get(loginPath, async (c) => {
     const state = generateState();
+    const returnTo = c.req.query('returnTo') || postLoginRedirect;
 
-    // Store state in short-lived cookie
-    const stateJWT = await encodeSession({ state, type: 'csrf', expires: Date.now() + 600000 });
+    // Store state and returnTo in short-lived cookie
+    const stateJWT = await encodeSession({
+      state,
+      returnTo,
+      type: 'csrf',
+      expires: Date.now() + 600000
+    });
     c.header('Set-Cookie', `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
 
     // Build authorization URL
@@ -629,7 +635,9 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
 
       c.header('Set-Cookie', cookieOptions.join('; '));
 
-      return c.redirect(postLoginRedirect, 302);
+      // Redirect to original destination or default post-login page
+      const redirectUrl = stateData.returnTo || postLoginRedirect;
+      return c.redirect(redirectUrl, 302);
 
     } catch (err) {
       console.error('[OIDC] Error during token exchange:', err);
@@ -700,6 +708,11 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     const protectedPaths = finalConfig.protectedPaths || [];
     const currentPath = c.req.path;
 
+    // Skip auth routes (login, callback, logout)
+    if (currentPath === loginPath || currentPath === callbackPath || currentPath === logoutPath) {
+      return await next();
+    }
+
     // If protectedPaths is configured, only enforce OIDC on matching paths
     if (protectedPaths.length > 0) {
       const isProtected = protectedPaths.some(pattern => matchPath(currentPath, pattern));
@@ -713,23 +726,20 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     const sessionCookie = c.req.cookie(cookieName);
 
     if (!sessionCookie) {
-      // No session cookie - require OIDC for protected paths
-      if (protectedPaths.length > 0) {
-        // Content negotiation: check if client expects HTML
-        const acceptHeader = c.req.header('accept') || '';
-        const acceptsHtml = acceptHeader.includes('text/html');
+      // No session - redirect to login or return 401
+      // Content negotiation: check if client expects HTML
+      const acceptHeader = c.req.header('accept') || '';
+      const acceptsHtml = acceptHeader.includes('text/html');
 
-        if (acceptsHtml) {
-          // Browser request - redirect to login
-          const returnTo = encodeURIComponent(currentPath);
-          return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
-        } else {
-          // API request - return JSON 401
-          const response = unauthorized('Authentication required');
-          return c.json(response, response._status);
-        }
+      if (acceptsHtml) {
+        // Browser request - redirect to login
+        const returnTo = encodeURIComponent(currentPath);
+        return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
+      } else {
+        // API request - return JSON 401
+        const response = unauthorized('Authentication required');
+        return c.json(response, response._status);
       }
-      return await next();
     }
 
     const session = await decodeSession(sessionCookie);
