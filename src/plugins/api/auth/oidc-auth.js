@@ -340,8 +340,8 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     pkce: { enabled: true, method: 'S256', ...(preset.pkce || {}) },
     rateLimit: preset.rateLimit !== undefined ? preset.rateLimit : {
       enabled: true,
-      windowMs: 900000, // 15 minutes
-      maxAttempts: 5,
+      windowMs: 60000, // 1 minute
+      maxAttempts: 200,
       skipSuccessfulRequests: true
     },
     ...preset
