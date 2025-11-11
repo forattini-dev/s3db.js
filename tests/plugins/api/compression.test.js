@@ -115,7 +115,7 @@ describe('API Plugin - Compression Middleware', () => {
         threshold: 1024, // Compress if > 1KB
         level: 6
       },
-      resources: ['articles']
+      resources: '*' // Expose all resources (including tags created in tests)
     });
 
     await db.usePlugin(apiPlugin);
