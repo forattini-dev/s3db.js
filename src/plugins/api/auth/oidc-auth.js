@@ -587,18 +587,25 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       // Retrieve PKCE data and nonce
       const codeVerifier = stateData.code_verifier || null;
       const ep = await getEndpoints();
+      const tokenHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      const tokenBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        ...(codeVerifier ? { code_verifier: codeVerifier } : {})
+      });
+
+      // Confidential client: use Basic auth; Public client (no secret): send client_id in body
+      if (clientSecret) {
+        tokenHeaders['Authorization'] = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+      } else {
+        tokenBody.set('client_id', clientId);
+      }
+
       const tokenResponse = await fetch(ep.tokenEndpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
-        },
-        body: new URLSearchParams({
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: redirectUri,
-          ...(codeVerifier ? { code_verifier: codeVerifier } : {})
-        })
+        headers: tokenHeaders,
+        body: tokenBody
       });
 
       if (!tokenResponse.ok) {
