@@ -446,37 +446,77 @@ export class ApiServer {
   }
 
   _setupDocumentationRoutes() {
+    if (this.options.verbose) {
+      console.log('[API Server] _setupDocumentationRoutes()');
+      console.log('[API Server] docsEnabled =', this.options.docsEnabled);
+      console.log('[API Server] docsUI =', this.options.docsUI);
+    }
+
     const basePath = this.options.basePath || '';
     const openApiPath = applyBasePath(basePath, '/openapi.json');
     const docsPath = applyBasePath(basePath, '/docs');
 
+    if (this.options.verbose) {
+      console.log('[API Server] docsPath =', docsPath);
+      console.log('[API Server] openApiPath =', openApiPath);
+    }
+
     // OpenAPI spec endpoint
     if (this.options.docsEnabled) {
+      if (this.options.verbose) {
+        console.log('[API Server] Registering OpenAPI route:', openApiPath);
+      }
       this.app.get(openApiPath, (c) => {
+        if (this.options.verbose) {
+          console.log('[API Server] OpenAPI route hit');
+        }
         const spec = this.openApiGenerator.generate();
         return c.json(spec);
       });
+      if (this.options.verbose) {
+        console.log('[API Server] OpenAPI route registered');
+      }
 
       // Documentation UI endpoint
       if (this.options.docsUI === 'swagger') {
+        if (this.options.verbose) {
+          console.log('[API Server] Registering Swagger UI at', docsPath);
+        }
         this.app.get(docsPath, this.swaggerUI({ url: openApiPath }));
       } else {
         // Default: Redoc UI
-        this.app.get(docsPath, (c) => c.html(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${this.options.apiTitle} - API Documentation</title>
-  <style>
-    body { margin: 0; padding: 0; }
-  </style>
-</head>
-<body>
-  <redoc spec-url="${openApiPath}"></redoc>
-  <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"></script>
-</body>
-</html>`));
+        if (this.options.verbose) {
+          console.log('[API Server] Registering Redoc UI at', docsPath);
+        }
+        this.app.get(docsPath, (c) => {
+          if (this.options.verbose) {
+            console.log('[API Server] Redoc docs route hit');
+          }
+          const html = [
+            '<!DOCTYPE html>',
+            '<html lang="en">',
+            '<head>',
+            '  <meta charset="UTF-8">',
+            '  <meta name="viewport" content="width=device-width, initial-scale=1.0">',
+            '  <title>' + String(this.options.apiTitle || 's3db.js API') + ' - API Documentation</title>',
+            '  <style>',
+            '    body { margin: 0; padding: 0; }',
+            '  </style>',
+            '</head>',
+            '<body>',
+            '  <redoc spec-url="' + String(openApiPath) + '"></redoc>',
+            '  <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"></script>',
+            '</body>',
+            '</html>'
+          ].join('\n');
+          return c.html(html);
+        });
+        if (this.options.verbose) {
+          console.log('[API Server] Redoc UI route registered');
+        }
+      }
+      if (this.options.verbose) {
+        console.log('[API Server] Documentation routes setup complete');
       }
     }
 
