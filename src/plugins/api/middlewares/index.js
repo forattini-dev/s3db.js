@@ -3,6 +3,7 @@
  */
 
 export { createValidationMiddleware, createQueryValidation, listQueryValidation } from './validator.js';
+export { errorHelper } from './error-helper.js';
 
 // Note: CORS, Rate Limiting, Logging, and Compression middlewares
 // are currently implemented in api.plugin.js as inline functions.
@@ -11,5 +12,6 @@ export { createValidationMiddleware, createQueryValidation, listQueryValidation 
 export default {
   createValidationMiddleware,
   createQueryValidation,
-  listQueryValidation
+  listQueryValidation,
+  errorHelper
 };
