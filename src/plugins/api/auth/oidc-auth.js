@@ -551,6 +551,15 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       secure: cookieSecure
     });
 
+    if (c.get('verbose')) {
+      console.log('[OIDC] Login - State cookie set:', {
+        cookieName: `${cookieName}_state`,
+        sameSite: cookieSameSite,
+        secure: cookieSecure,
+        redirectUri
+      });
+    }
+
     // Build authorization URL
     const params = new URLSearchParams({
       response_type: 'code',
@@ -577,10 +586,31 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     const code = c.req.query('code');
     const state = c.req.query('state');
 
+    // Debug logging
+    if (c.get('verbose')) {
+      const allCookies = c.req.header('cookie');
+      console.log('[OIDC] Callback - Request info:', {
+        cookieName: `${cookieName}_state`,
+        allCookiesHeader: allCookies,
+        requestUrl: c.req.url,
+        requestHost: c.req.header('host'),
+        redirectUri
+      });
+    }
+
     // Validate CSRF state
     const stateCookie = getCookie(c, `${cookieName}_state`);
     if (!stateCookie) {
-      return c.json({ error: 'Missing state cookie (CSRF protection)' }, 400);
+      if (c.get('verbose')) {
+        console.error('[OIDC] Callback - State cookie missing!', {
+          expectedCookieName: `${cookieName}_state`,
+          allCookies: c.req.header('cookie')
+        });
+      }
+      return c.json({
+        error: 'Missing state cookie (CSRF protection)',
+        hint: 'Possible causes: 1) redirectUri domain mismatch, 2) cookies blocked, 3) HTTPS required, 4) proxy removing cookies. Enable verbose logging for details.'
+      }, 400);
     }
 
     const stateData = await decodeSession(stateCookie);
