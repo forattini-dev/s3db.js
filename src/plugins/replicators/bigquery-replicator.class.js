@@ -148,6 +148,34 @@ class BigqueryReplicator extends BaseReplicator {
     if (!this.datasetId) errors.push('datasetId is required');
     if (Object.keys(this.resources).length === 0) errors.push('At least one resource must be configured');
 
+    // Validate credentials structure if provided
+    if (this.credentials) {
+      // Check if credentials is a string (common mistake)
+      if (typeof this.credentials === 'string') {
+        errors.push('credentials must be an object, not a string. Did you forget JSON.parse()?');
+      } else if (typeof this.credentials === 'object') {
+        // Validate service account structure
+        if (!this.credentials.client_email) {
+          errors.push('credentials.client_email is required for service account authentication');
+        } else if (!this.credentials.client_email.includes('@')) {
+          errors.push('credentials.client_email appears invalid (missing @)');
+        }
+
+        if (!this.credentials.private_key) {
+          errors.push('credentials.private_key is required for service account authentication');
+        } else if (typeof this.credentials.private_key === 'string') {
+          // Validate private_key format
+          if (!this.credentials.private_key.includes('BEGIN PRIVATE KEY')) {
+            errors.push('credentials.private_key appears invalid (missing "BEGIN PRIVATE KEY" header)');
+          }
+          if (this.credentials.private_key.length < 100) {
+            errors.push('credentials.private_key appears too short to be valid');
+          }
+        }
+      }
+    }
+    // If credentials not provided, BigQuery SDK will use Application Default Credentials (ADC)
+
     // Validate resource configurations
     for (const [resourceName, tables] of Object.entries(this.resources)) {
       for (const tableConfig of tables) {
@@ -174,6 +202,27 @@ class BigqueryReplicator extends BaseReplicator {
   async initialize(database) {
     await super.initialize(database);
 
+    // Validate configuration before attempting connection
+    const configValidation = this.validateConfig();
+    if (!configValidation.isValid) {
+      const error = this.createError(
+        `BigQuery configuration invalid: ${configValidation.errors.join('; ')}`,
+        {
+          operation: 'initialize',
+          statusCode: 400,
+          retriable: false,
+          errors: configValidation.errors,
+          suggestion: 'Review your BigQuery replicator configuration. Ensure projectId, datasetId, and credentials are correctly set. See docs/plugins/replicator.md'
+        }
+      );
+      if (this.config.verbose) {
+        console.error(`[BigqueryReplicator] Configuration validation failed:`);
+        configValidation.errors.forEach(err => console.error(`  - ${err}`));
+      }
+      this.emit('initialization_error', { replicator: this.name, error: error.message, errors: configValidation.errors });
+      throw error;
+    }
+
     // Validate plugin dependencies are installed
     await requirePluginDependency('bigquery-replicator');
 
@@ -192,6 +241,52 @@ class BigqueryReplicator extends BaseReplicator {
       location: this.location
     });
 
+    // Test connection to BigQuery
+    if (this.config.verbose) {
+      console.log(`[BigqueryReplicator] Testing connection to BigQuery project '${this.projectId}', dataset '${this.datasetId}'...`);
+    }
+
+    const [connOk, connErr] = await tryFn(async () => {
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      await dataset.getMetadata();
+    });
+
+    if (!connOk) {
+      // Parse error for user-friendly message
+      const errorMessage = this._parseGcpError(connErr);
+      const suggestion = this._getCredentialsSuggestion(connErr);
+
+      const error = this.createError(
+        `BigQuery connection failed: ${errorMessage}`,
+        {
+          operation: 'initialize',
+          statusCode: connErr.code || 401,
+          retriable: true,
+          originalError: connErr.message,
+          suggestion
+        }
+      );
+
+      if (this.config.verbose) {
+        console.error(`[BigqueryReplicator] Connection test failed:`);
+        console.error(`  Error: ${errorMessage}`);
+        console.error(`  Suggestion: ${suggestion}`);
+      }
+
+      this.emit('connection_error', {
+        replicator: this.name,
+        error: error.message,
+        suggestion,
+        projectId: this.projectId,
+        datasetId: this.datasetId
+      });
+      throw error;
+    }
+
+    if (this.config.verbose) {
+      console.log(`[BigqueryReplicator] Connection successful!`);
+    }
+
     // Sync schemas if enabled
     if (this.schemaSync.enabled) {
       await this.syncSchemas(database);
@@ -201,7 +296,8 @@ class BigqueryReplicator extends BaseReplicator {
       replicator: this.name,
       projectId: this.projectId,
       datasetId: this.datasetId,
-      resources: Object.keys(this.resources)
+      resources: Object.keys(this.resources),
+      connectionTested: true
     });
   }
 
@@ -733,6 +829,87 @@ class BigqueryReplicator extends BaseReplicator {
       results,
       errors
     };
+  }
+
+  /**
+   * Parse GCP errors into user-friendly messages
+   * @private
+   */
+  _parseGcpError(error) {
+    const message = error.message || String(error);
+
+    // Common GCP authentication errors
+    if (message.includes('invalid_grant') || message.includes('Invalid JWT Signature')) {
+      return 'Invalid service account credentials (private_key or client_email incorrect)';
+    }
+    if (message.includes('JWT validation failed') || message.includes('Invalid JWT')) {
+      return 'Service account key is malformed or expired';
+    }
+
+    // Permission errors
+    if (message.includes('Permission denied') || message.includes('403')) {
+      return 'Credentials valid but missing BigQuery permissions';
+    }
+
+    // Resource not found errors
+    if (message.includes('Not found') || message.includes('404')) {
+      return `Dataset '${this.datasetId}' not found or no access to project '${this.projectId}'`;
+    }
+
+    // Network errors
+    if (message.includes('ENOTFOUND') || message.includes('ETIMEDOUT')) {
+      return 'Network error connecting to BigQuery API (check firewall/proxy)';
+    }
+    if (message.includes('ECONNREFUSED')) {
+      return 'Connection refused by BigQuery API';
+    }
+
+    // Quota/rate limit errors
+    if (message.includes('429') || message.includes('rateLimitExceeded')) {
+      return 'BigQuery API rate limit exceeded';
+    }
+    if (message.includes('quotaExceeded')) {
+      return 'BigQuery quota exceeded for project';
+    }
+
+    // Return original message if no specific match
+    return message;
+  }
+
+  /**
+   * Get actionable suggestions based on error type
+   * @private
+   */
+  _getCredentialsSuggestion(error) {
+    const message = error.message || String(error);
+
+    // Authentication suggestions
+    if (message.includes('invalid_grant') || message.includes('Invalid JWT')) {
+      return 'Verify your service account JSON is correct and not expired. Download fresh credentials from: https://console.cloud.google.com/iam-admin/serviceaccounts';
+    }
+
+    // Permission suggestions
+    if (message.includes('Permission denied') || message.includes('403')) {
+      return `Grant the following roles to service account '${this.credentials?.client_email || 'your-service-account'}': BigQuery Data Editor, BigQuery Job User`;
+    }
+
+    // Dataset not found suggestions
+    if (message.includes('Not found') || message.includes('404')) {
+      return `Create dataset '${this.datasetId}' in project '${this.projectId}' or verify the service account has access: https://console.cloud.google.com/bigquery?project=${this.projectId}`;
+    }
+
+    // Network suggestions
+    if (message.includes('ENOTFOUND') || message.includes('ETIMEDOUT') || message.includes('ECONNREFUSED')) {
+      return 'Check network connectivity, firewall rules, and proxy settings. Ensure outbound HTTPS access to *.googleapis.com is allowed';
+    }
+
+    // Quota suggestions
+    if (message.includes('429') || message.includes('rateLimitExceeded') || message.includes('quotaExceeded')) {
+      return `Check BigQuery quota and billing: https://console.cloud.google.com/apis/api/bigquery.googleapis.com/quotas?project=${this.projectId}`;
+    }
+
+    // Generic suggestion
+    return 'Verify BigQuery configuration, credentials, and network connectivity. See docs/plugins/replicator.md for troubleshooting';
   }
 
   async testConnection() {

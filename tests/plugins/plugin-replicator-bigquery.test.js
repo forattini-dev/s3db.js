@@ -15,7 +15,7 @@ describe('BigQuery Replicator Tests', () => {
       replicator = new BigqueryReplicator({
         datasetId: 'test_dataset'
       }, { users: 'users_table' });
-      
+
       const result = replicator.validateConfig();
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('projectId is required');
@@ -25,7 +25,7 @@ describe('BigQuery Replicator Tests', () => {
       replicator = new BigqueryReplicator({
         projectId: 'test-project'
       }, { users: 'users_table' });
-      
+
       const result = replicator.validateConfig();
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('datasetId is required');
@@ -36,7 +36,118 @@ describe('BigQuery Replicator Tests', () => {
         projectId: 'test-project',
         datasetId: 'test_dataset'
       }, { users: 'users_table' });
-      
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    test('validateConfig should pass when credentials are not provided (ADC mode)', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset'
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    test('validateConfig should reject credentials as string', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: '{"client_email": "test@example.com"}'
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('credentials must be an object, not a string. Did you forget JSON.parse()?');
+    });
+
+    test('validateConfig should reject credentials missing client_email', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: {
+          private_key: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC...\n-----END PRIVATE KEY-----\n'
+        }
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('credentials.client_email is required for service account authentication');
+    });
+
+    test('validateConfig should reject invalid client_email format', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: {
+          client_email: 'not-an-email',
+          private_key: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC...\n-----END PRIVATE KEY-----\n'
+        }
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('credentials.client_email appears invalid (missing @)');
+    });
+
+    test('validateConfig should reject credentials missing private_key', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: {
+          client_email: 'test@example.iam.gserviceaccount.com'
+        }
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('credentials.private_key is required for service account authentication');
+    });
+
+    test('validateConfig should reject invalid private_key format', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: {
+          client_email: 'test@example.iam.gserviceaccount.com',
+          private_key: 'not-a-valid-key'
+        }
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('credentials.private_key appears invalid (missing "BEGIN PRIVATE KEY" header)');
+    });
+
+    test('validateConfig should reject too short private_key', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: {
+          client_email: 'test@example.iam.gserviceaccount.com',
+          private_key: '-----BEGIN PRIVATE KEY-----\nshort\n-----END PRIVATE KEY-----\n'
+        }
+      }, { users: 'users_table' });
+
+      const result = replicator.validateConfig();
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('credentials.private_key appears too short to be valid');
+    });
+
+    test('validateConfig should pass with valid credentials', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        credentials: {
+          client_email: 'test@example.iam.gserviceaccount.com',
+          private_key: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCqZ9pqZ8j1P2Jn8j1P2Jn8j1P2Jn8j1P2Jn8j1P2Jn8j1P2Jn8j1P2Jn\n-----END PRIVATE KEY-----\n'
+        }
+      }, { users: 'users_table' });
+
       const result = replicator.validateConfig();
       expect(result.isValid).toBe(true);
       expect(result.errors).toHaveLength(0);
