@@ -184,7 +184,8 @@ export class ApiPlugin extends Plugin {
         ui: options.docs?.ui || 'redoc', // 'swagger' or 'redoc' (redoc is prettier!)
         title: options.docs?.title || options.apiTitle || 's3db.js API',
         version: options.docs?.version || options.apiVersion || '1.0.0',
-        description: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources'
+        description: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
+        csp: options.docs?.csp || null
       },
 
       // Authentication configuration (multiple drivers)
@@ -441,7 +442,9 @@ export class ApiPlugin extends Plugin {
     try {
       await this._validateDependencies();
     } catch (err) {
-      console.error('[API Plugin] Dependency validation failed:', err.message);
+      if (this.config.verbose) {
+        console.error('[API Plugin] Dependency validation failed:', err.message);
+      }
       throw err;
     }
 
@@ -1095,6 +1098,7 @@ export class ApiPlugin extends Plugin {
       auth: this.config.auth,
       docsEnabled: this.config.docs.enabled,
       docsUI: this.config.docs.ui,
+      docsCsp: this.config.docs.csp,
       apiTitle: this.config.docs.title,
       apiVersion: this.config.docs.version,
       apiDescription: this.config.docs.description,

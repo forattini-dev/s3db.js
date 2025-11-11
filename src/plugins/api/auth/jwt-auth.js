@@ -162,7 +162,9 @@ export function jwtAuth(options = {}) {
         c.set('user', user);
         c.set('authMethod', 'jwt');
       } catch (err) {
-        console.error('[JWT Auth] Error loading user:', err);
+        if (c.get('verbose')) {
+          console.error('[JWT Auth] Error loading user:', err);
+        }
         const response = unauthorized('Authentication error');
         return c.json(response, response._status);
       }

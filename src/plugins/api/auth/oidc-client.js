@@ -111,7 +111,8 @@ export class OIDCClient {
       jwksCacheTTL = 3600000, // 1 hour
       clockTolerance = 60,
       autoRefreshJWKS = true,
-      discoveryUri
+      discoveryUri,
+      verbose = false
     } = options;
 
     if (!issuer) {
@@ -132,6 +133,7 @@ export class OIDCClient {
     this.keys = new Map(); // kid → publicKey (PEM)
     this.cronManager = getCronManager();
     this.refreshJobName = null;
+    this.verbose = Boolean(verbose);
   }
 
   /**
@@ -375,7 +377,9 @@ export class OIDCClient {
         try {
           await this.fetchJWKS(true);
         } catch (error) {
-          console.error('Failed to refresh JWKS:', error);
+          if (this.verbose) {
+            console.error('Failed to refresh JWKS:', error);
+          }
         }
       },
       this.refreshJobName

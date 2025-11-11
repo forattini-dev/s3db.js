@@ -91,7 +91,9 @@ export function validateOidcConfig(config) {
 
   // Validate UUID format for clientId (common for Azure AD/Entra)
   if (config.clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.clientId)) {
-    console.warn('[OIDC] clientId is not in UUID format (may be expected for some providers)');
+    if (config?.verbose) {
+      console.warn('[OIDC] clientId is not in UUID format (may be expected for some providers)');
+    }
   }
 
   if (errors.length > 0) {
@@ -200,7 +202,9 @@ async function getOrCreateUser(usersResource, claims, config) {
           }
         }
       } catch (hookErr) {
-        console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
+          if (c.get('verbose')) {
+            console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
+          }
         // Continue with default updates (don't block auth)
       }
     }
@@ -268,7 +272,9 @@ async function getOrCreateUser(usersResource, claims, config) {
         }
       }
     } catch (hookErr) {
-      console.error('[OIDC] beforeCreateUser hook failed:', hookErr);
+      if (c.get('verbose')) {
+        console.error('[OIDC] beforeCreateUser hook failed:', hookErr);
+      }
       // Continue with default user data (don't block auth)
     }
   }
@@ -510,7 +516,9 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
 
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
-        console.error('[OIDC] Token exchange failed:', error);
+        if (c.get('verbose')) {
+          console.error('[OIDC] Token exchange failed:', error);
+        }
         return c.json({ error: 'Failed to exchange code for tokens' }, 500);
       }
 
@@ -571,12 +579,16 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
                 context: c  // 🔥 Pass Hono context for cookie/header manipulation
               });
             } catch (hookErr) {
-              console.error('[OIDC] onUserAuthenticated hook failed:', hookErr);
+              if (c.get('verbose')) {
+                console.error('[OIDC] onUserAuthenticated hook failed:', hookErr);
+              }
               // Don't block authentication if hook fails
             }
           }
         } catch (err) {
-          console.error('[OIDC] Failed to create/update user:', err);
+          if (c.get('verbose')) {
+            console.error('[OIDC] Failed to create/update user:', err);
+          }
           // Continue without user (will use token claims only)
         }
       }
@@ -640,7 +652,9 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       return c.redirect(redirectUrl, 302);
 
     } catch (err) {
-      console.error('[OIDC] Error during token exchange:', err);
+      if (c.get('verbose')) {
+        console.error('[OIDC] Error during token exchange:', err);
+      }
       return c.json({ error: 'Authentication failed' }, 500);
     }
   };
@@ -777,7 +791,9 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
             session.refresh_token = newTokens.refresh_token;
           }
         } catch (err) {
-          console.error('[OIDC] Token refresh failed:', err);
+          if (c.get('verbose')) {
+            console.error('[OIDC] Token refresh failed:', err);
+          }
           // Continue with existing token (will expire soon)
         }
       }
