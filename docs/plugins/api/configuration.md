@@ -188,6 +188,90 @@ Notes:
 
 For end‑to‑end examples, see the README topics and Authentication/Deployment guides. Other docs link here for configuration and avoid repeating it.
 
+—
+
+## Quick Recipes (Copy & Paste)
+
+OIDC (Azure AD/Entra)
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oidc',
+    config: {
+      provider: 'azure', tenantId: 'YOUR_TENANT_ID',
+      clientId: 'APP_CLIENT_ID', clientSecret: 'APP_SECRET',
+      redirectUri: 'https://app.example.com/auth/callback',
+      cookieSecret: process.env.COOKIE_SECRET
+    }
+  }]}
+})
+```
+
+OIDC (Auth0, public client)
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oidc',
+    config: {
+      provider: 'auth0', domain: 'mytenant.us.auth0.com',
+      clientId: 'APP_CLIENT_ID', // no clientSecret (PKCE)
+      redirectUri: 'https://app.example.com/auth/callback',
+      cookieSecret: process.env.COOKIE_SECRET
+    }
+  }]}
+})
+```
+
+OAuth2 (Keycloak, JWT)
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oauth2',
+    config: {
+      provider: 'keycloak', baseUrl: 'https://kc.example.com', realm: 'myrealm',
+      audience: 'my-api' // optional, if configured no client mismatch
+    }
+  }]}
+})
+```
+
+OAuth2 (Keycloak, tokens opacos com introspecção)
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oauth2',
+    config: {
+      provider: 'keycloak', baseUrl: 'https://kc.example.com', realm: 'myrealm',
+      introspection: { enabled: true, clientId: 'api-client', clientSecret: process.env.KC_SECRET }
+    }
+  }]}
+})
+```
+
+OIDC (Cognito)
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oidc',
+    config: {
+      provider: 'cognito', region: 'us-east-1', userPoolId: 'us-east-1_ABC123',
+      clientId: 'APP_CLIENT_ID', clientSecret: 'APP_SECRET',
+      redirectUri: 'https://app.example.com/auth/callback',
+      cookieSecret: process.env.COOKIE_SECRET
+    }
+  }]}
+})
+```
+
+—
+
+## Troubleshooting (OAuth2/OIDC)
+
+- iss/aud mismatch: confira se `issuer` e `audience` batem com o token emitido; para Auth0/Azure/Keycloak use `provider` para derivar issuer correto.
+- Nonce inválido (OIDC): verifique se o IdP inclui `nonce` no `id_token`; PKCE/nonce ficam ligados por padrão, não remova.
+- Introspecção 401/403: verifique `clientId/clientSecret` do cliente confidencial com permissão no endpoint de introspecção.
+- 404 nos endpoints: discovery pode estar desabilitado; habilite `discovery.enabled=true` ou informe endpoints/issuer corretos.
+
 ### RelationPlugin Integration
 
 - Install the [RelationPlugin](../relation.md) before the API plugin to expose relational hydration automatically.
