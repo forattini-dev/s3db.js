@@ -204,9 +204,9 @@ async function getOrCreateUser(usersResource, claims, config) {
           }
         }
       } catch (hookErr) {
-          if (c.get('verbose')) {
-            console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
-          }
+        if (config?.verbose) {
+          console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
+        }
         // Continue with default updates (don't block auth)
       }
     }
@@ -274,7 +274,7 @@ async function getOrCreateUser(usersResource, claims, config) {
         }
       }
     } catch (hookErr) {
-      if (c.get('verbose')) {
+      if (config?.verbose) {
         console.error('[OIDC] beforeCreateUser hook failed:', hookErr);
       }
       // Continue with default user data (don't block auth)
