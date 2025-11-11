@@ -379,7 +379,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
   // Lazy discovery to avoid top-level await
   let discovered = false;
   async function getEndpoints() {
-    if (discovered || finalConfig.discovery?.enabled === false) {
+    if (discovered || config.discovery?.enabled === false) {
       return { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
     }
     try {
@@ -392,7 +392,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
         discovered = true;
       }
     } catch (e) {
-      if (finalConfig.verbose) {
+      if (config.verbose) {
         console.warn('[OIDC] Discovery failed, using default endpoints:', e.message);
       }
     }
@@ -496,8 +496,8 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
 
   // Create rate limiter if enabled
   let rateLimiter = null;
-  if (finalConfig.rateLimit?.enabled) {
-    rateLimiter = createAuthDriverRateLimiter('oidc', finalConfig.rateLimit);
+  if (config.rateLimit?.enabled) {
+    rateLimiter = createAuthDriverRateLimiter('oidc', config.rateLimit);
   }
 
   /**
@@ -510,7 +510,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
 
     let codeVerifier = null;
     let codeChallenge = null;
-    if (finalConfig.pkce?.enabled !== false) {
+    if (config.pkce?.enabled !== false) {
       try {
         const pair = await createPkcePair();
         codeVerifier = pair.verifier;
@@ -634,7 +634,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       let userCreated = false;
       if (usersResource) {
         try {
-          const result = await getOrCreateUser(usersResource, idTokenClaims, finalConfig);
+          const result = await getOrCreateUser(usersResource, idTokenClaims, config);
           user = result.user;
           userCreated = result.created;
 
@@ -651,22 +651,22 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
               events.emitUserEvent('created', {
                 user: { id: user.id, email: user.email, name: user.name },
                 source: 'oidc',
-                provider: finalConfig.issuer
+                provider: config.issuer
               });
             }
 
             events.emitUserEvent('login', {
               user: { id: user.id, email: user.email, name: user.name },
               source: 'oidc',
-              provider: finalConfig.issuer,
+              provider: config.issuer,
               newUser: userCreated
             });
           }
 
           // Call onUserAuthenticated hook if configured
-          if (finalConfig.onUserAuthenticated && typeof finalConfig.onUserAuthenticated === 'function') {
+          if (config.onUserAuthenticated && typeof config.onUserAuthenticated === 'function') {
             try {
-              await finalConfig.onUserAuthenticated({
+              await config.onUserAuthenticated({
                 user,
                 created: userCreated,
                 claims: idTokenClaims,
@@ -813,7 +813,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
    */
   const middleware = async (c, next) => {
     // Check if this path should be protected by OIDC
-    const protectedPaths = finalConfig.protectedPaths || [];
+    const protectedPaths = config.protectedPaths || [];
     const currentPath = c.req.path;
 
     // Skip auth routes (login, callback, logout)
@@ -945,7 +945,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       [callbackPath]: 'OAuth2 callback',
       [logoutPath]: 'Logout (local + IdP)'
     },
-    config: finalConfig
+    config: config
   };
 }
 
