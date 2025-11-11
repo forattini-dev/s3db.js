@@ -173,9 +173,8 @@ export class MiddlewareChain {
    */
   applyRequestId(app) {
     if (!this.requestId?.enabled) {
-      // Always set requestId and verbose, even if not officially enabled
+      // Only propagate verbose flag when requestId tracking is disabled
       app.use('*', async (c, next) => {
-        c.set('requestId', idGenerator());
         c.set('verbose', this.verbose);
         await next();
       });
