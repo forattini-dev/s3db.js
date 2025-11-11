@@ -391,45 +391,133 @@ routes: {
 }
 ```
 
-#### Custom Error Classes
+#### Standard Error Classes (Pre-built)
 
-Create semantic error classes for better auto-detection:
+**New in v16.1.26+**: s3db.js provides pre-built error classes with semantic names, error codes, and correct HTTP status codes.
+
+**NOTE**: Error classes are exported with `Http` prefix (`HttpNotFoundError`, `HttpValidationError`, etc.) to avoid conflicts with core s3db.js error classes. For convenience, backward-compatible aliases without the prefix are also exported (`NotFoundError`, `ValidationError`, etc.).
 
 ```javascript
-// Define custom errors
-class ValidationError extends Error {
-  constructor(message, details) {
-    super(message);
-    this.name = 'ValidationError';
-    this.details = details;
-  }
-}
+import {
+  ApiPlugin,
+  // Recommended: Use Http prefix to avoid conflicts
+  HttpValidationError,
+  HttpNotFoundError,
+  HttpUnauthorizedError,
+  HttpForbiddenError,
+  HttpConflictError,
+  HttpTooManyRequestsError,
+  HttpInternalServerError,
+  // Or use aliases (backward compatibility)
+  ValidationError,  // → HttpValidationError
+  NotFoundError,    // → HttpNotFoundError
+  createHttpError
+} from 's3db.js/api';
 
-class NotFoundError extends Error {
-  constructor(resource, id) {
-    super(`${resource} with id '${id}' not found`);
-    this.name = 'NotFoundError';
-    this.details = { resource, id };
-  }
-}
-
-// Use in routes
+// ✅ Pre-built error classes (recommended!)
 routes: {
   'POST /users': async (c, ctx) => {
     const { valid, errors } = await ctx.validator.validateBody('users');
     if (!valid) {
-      throw new ValidationError('Invalid user data', { errors });
+      // ✅ All properties pre-configured!
+      return c.error(new ValidationError('Invalid user data', { errors }));
+      // → { success: false, error: {
+      //     message: 'Invalid user data',
+      //     code: 'VALIDATION_ERROR',
+      //     status: 400,
+      //     details: { errors }
+      //   }}
     }
   },
 
   'GET /users/:id': async (c, ctx) => {
     const user = await ctx.resources.users.get(ctx.param('id'));
     if (!user) {
-      throw new NotFoundError('User', ctx.param('id'));
+      // ✅ No need to specify status code!
+      return c.error(new NotFoundError('User not found', {
+        resource: 'users',
+        id: ctx.param('id')
+      }));
+      // → { success: false, error: {
+      //     message: 'User not found',
+      //     code: 'NOT_FOUND',
+      //     status: 404,
+      //     details: { resource, id }
+      //   }}
     }
     return ctx.success(user);
+  },
+
+  'DELETE /users/:id': async (c, ctx) => {
+    if (!ctx.hasScope('admin')) {
+      return c.error(new ForbiddenError('Admin access required', {
+        required: ['admin'],
+        current: ctx.user.scopes
+      }));
+    }
+  },
+
+  'POST /auth/login': async (c, ctx) => {
+    const email = await ctx.query('email');
+    const existingUser = await ctx.resources.users.query({ email });
+
+    if (existingUser.length > 0) {
+      return c.error(new ConflictError('Email already registered', {
+        field: 'email',
+        value: email
+      }));
+    }
   }
 }
+```
+
+**Available Error Classes:**
+
+| Class Name (Http prefix) | Alias | Status | Code | Default Message | Use Case |
+|--------------------------|-------|--------|------|-----------------|----------|
+| `HttpBadRequestError` | `BadRequestError` | 400 | `BAD_REQUEST` | "Bad request" | Invalid syntax/parameters |
+| `HttpValidationError` | `ValidationError` | 400 | `VALIDATION_ERROR` | "Validation failed" | Schema/business rule validation |
+| `HttpUnauthorizedError` | `UnauthorizedError` | 401 | `UNAUTHORIZED` | "Unauthorized" | Authentication required/failed |
+| `HttpForbiddenError` | `ForbiddenError` | 403 | `FORBIDDEN` | "Forbidden" | Insufficient permissions |
+| `HttpNotFoundError` | `NotFoundError` | 404 | `NOT_FOUND` | "Not found" | Resource doesn't exist |
+| `HttpMethodNotAllowedError` | `MethodNotAllowedError` | 405 | `METHOD_NOT_ALLOWED` | "Method not allowed" | HTTP method not supported |
+| `HttpConflictError` | `ConflictError` | 409 | `CONFLICT` | "Conflict" | Duplicate keys, conflicts |
+| `HttpUnprocessableEntityError` | `UnprocessableEntityError` | 422 | `UNPROCESSABLE_ENTITY` | "Unprocessable entity" | Semantic errors |
+| `HttpTooManyRequestsError` | `TooManyRequestsError` | 429 | `TOO_MANY_REQUESTS` | "Too many requests" | Rate limit exceeded |
+| `HttpInternalServerError` | `InternalServerError` | 500 | `INTERNAL_SERVER_ERROR` | "Internal server error" | Unexpected errors |
+| `HttpNotImplementedError` | `NotImplementedError` | 501 | `NOT_IMPLEMENTED` | "Not implemented" | Feature not ready |
+| `HttpServiceUnavailableError` | `ServiceUnavailableError` | 503 | `SERVICE_UNAVAILABLE` | "Service unavailable" | Maintenance/overload |
+
+**Helper Function:**
+
+```javascript
+// Create error by status code
+const err = createHttpError(404, 'User not found', { id: '123' });
+// Returns: NotFoundError instance with all properties set
+```
+
+**Why use these classes?**
+- ✅ **Zero configuration** - All properties (name, code, status, details) pre-set
+- ✅ **Semantic naming** - Clear intent from class name
+- ✅ **Consistent codes** - Standardized error codes across API
+- ✅ **Type-safe** - Better IDE autocomplete and type checking
+- ✅ **Stack traces** - Automatic stack trace capture
+- ✅ **Less code** - No need to manually set status/code
+
+**Comparison:**
+
+```javascript
+// ❌ OLD WAY - Manual configuration
+const err = new Error('User not found');
+err.name = 'NotFoundError';
+err.code = 'NOT_FOUND';
+err.status = 404;
+err.details = { id: 'user-123' };
+return c.error(err);
+
+// ✅ NEW WAY - Pre-built class
+return c.error(new NotFoundError('User not found', { id: 'user-123' }));
+// Same result, 70% less code!
 ```
 
 #### Verbose Logging
