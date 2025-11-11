@@ -173,6 +173,10 @@ export class ApiServer {
 
       const authMiddleware = this._createAuthMiddleware();
 
+      // ⚠️ IMPORTANT: Setup documentation routes BEFORE router mounting
+      // This ensures /docs and /openapi.json are registered before catch-all routes like /:urlId
+      this._setupDocumentationRoutes();
+
       this.router = new Router({
         database: this.options.database,
         resources: this.options.resources,
@@ -202,8 +206,6 @@ export class ApiServer {
         });
         this.healthManager.register(this.app);
       }
-
-      this._setupDocumentationRoutes();
 
       this.app.onError((err, c) => errorHandler(err, c));
       this.app.notFound((c) => {
