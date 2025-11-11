@@ -28,9 +28,7 @@ const apiPlugin = new ApiPlugin({
   port: 3000,
 
   // 👇 ATIVE O LOGGING AQUI
-  logging: {
-    enabled: true  // ✨ Só isso!
-  },
+  logging: true,  // ✨ Só isso!
 
   resources: {
     users: { methods: ['GET', 'POST', 'PUT', 'DELETE'] }
@@ -60,16 +58,46 @@ POST /users ⇒ 400 (20.792 ms, –)
 
 ---
 
+## 🎛️ Sintaxe de Configuração
+
+O campo `logging` aceita 3 formatos:
+
+### 1. Boolean (Mais Simples)
+
+```javascript
+logging: true   // ✅ Liga com configurações padrão
+logging: false  // ❌ Desliga completamente
+```
+
+### 2. Objeto Simples (Auto-enable)
+
+Quando você passa um objeto, o logging é **automaticamente ativado** mesmo sem `enabled: true`:
+
+```javascript
+logging: {
+  format: ':method :url :status'  // ✅ Enabled automaticamente!
+}
+```
+
+### 3. Objeto Completo (Controle Total)
+
+```javascript
+logging: {
+  enabled: true,     // Explicitamente ativado
+  format: '...',     // Formato customizado
+  colorize: false,   // Desativa cores
+  verbose: true      // Logs extras (debug)
+}
+```
+
+---
+
 ## 🎨 Customização do Formato
 
 ### Formato Padrão (Verbose)
 
 ```javascript
-logging: {
-  enabled: true,
-  colorize: true  // default: true
-  // Formato padrão: ':verb :url => :status (:elapsed ms, :res[content-length])'
-}
+logging: true  // Usa formato padrão: ':verb :url => :status (:elapsed ms, :res[content-length])'
 ```
 
 **Output:**
@@ -82,8 +110,7 @@ POST /users ⇒ 201 (20.276 ms, 512)
 
 ```javascript
 logging: {
-  enabled: true,
-  format: ':method :url :status'
+  format: ':method :url :status'  // Auto-enabled!
 }
 ```
 
@@ -98,7 +125,6 @@ DELETE /users/abc123 204
 
 ```javascript
 logging: {
-  enabled: true,
   format: '[:time] :method :url :status (:elapsed ms)'
 }
 ```
@@ -113,7 +139,6 @@ logging: {
 
 ```javascript
 logging: {
-  enabled: true,
   format: ':ip - :user [:time] ":method :url HTTP/1.1" :status :res[content-length]'
 }
 ```
@@ -128,7 +153,6 @@ logging: {
 
 ```javascript
 logging: {
-  enabled: true,
   format: '{"method":":method","url":":url","status"::status,"duration"::elapsed,"user":":user"}'
 }
 ```
@@ -163,10 +187,15 @@ logging: {
 ### Desenvolvimento: Máximo Detalhamento
 
 ```javascript
+logging: true  // Usa formato verbose padrão com cores
+```
+
+Ou customize:
+
+```javascript
 logging: {
-  enabled: true,
-  colorize: true,
   format: ':method :url ⇒ :status (:elapsed ms, :res[content-length])'
+  // colorize é true por padrão
 }
 ```
 
@@ -193,7 +222,6 @@ logging: {
 
 ```javascript
 logging: {
-  enabled: true,
   colorize: false,  // Pipelines não suportam cores
   format: ':method :url :status (:elapsed ms)'
 }
@@ -203,7 +231,6 @@ logging: {
 
 ```javascript
 logging: {
-  enabled: true,
   format: '[:reqId] :user :method :url :status (:elapsed ms) UA=:req[user-agent]'
 }
 ```
@@ -221,9 +248,7 @@ logging: {
 ### Desabilitar Completamente
 
 ```javascript
-logging: {
-  enabled: false
-}
+logging: false  // Mais simples!
 ```
 
 Ou simplesmente omita a opção `logging` (desabilitado por padrão).
@@ -232,8 +257,7 @@ Ou simplesmente omita a opção `logging` (desabilitado por padrão).
 
 ```javascript
 logging: {
-  enabled: true,
-  colorize: false
+  colorize: false  // Auto-enabled, mas sem cores
 }
 ```
 

@@ -225,12 +225,35 @@ export class ApiPlugin extends Plugin {
       },
 
       // Logging configuration
-      logging: {
-        enabled: options.logging?.enabled || false,
-        format: options.logging?.format || DEFAULT_LOG_FORMAT,
-        verbose: options.logging?.verbose || false,
-        colorize: options.logging?.colorize !== false
-      },
+      logging: (() => {
+        // Support shorthand: logging: true → { enabled: true }
+        if (options.logging === true) {
+          return {
+            enabled: true,
+            format: DEFAULT_LOG_FORMAT,
+            verbose: false,
+            colorize: true
+          };
+        }
+
+        // Support shorthand: logging: false → { enabled: false }
+        if (options.logging === false || !options.logging) {
+          return {
+            enabled: false,
+            format: DEFAULT_LOG_FORMAT,
+            verbose: false,
+            colorize: true
+          };
+        }
+
+        // Object configuration
+        return {
+          enabled: options.logging.enabled !== false, // Enabled by default when object is provided
+          format: options.logging.format || DEFAULT_LOG_FORMAT,
+          verbose: options.logging.verbose || false,
+          colorize: options.logging.colorize !== false
+        };
+      })(),
 
       // Compression configuration
       compression: {
