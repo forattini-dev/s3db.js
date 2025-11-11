@@ -37,6 +37,18 @@ For OAuth2/OIDC Authorization Server (SSO), see [IdentityPlugin](./identity.md).
 
 ---
 
+## Escolha Rápida (OIDC vs OAuth2)
+
+Use esta matriz curta para escolher o driver:
+
+- Precisa de login/SSO no próprio API (rotas /auth/login, sessão, cookies)? → Use `oidc` (Relying Party). Habilita Authorization Code + PKCE, sessão segura, hooks pós‑login.
+- A API recebe Bearer tokens emitidos por um IdP externo (gateway/microservices) e só precisa validar autorização? → Use `oauth2` (Resource Server). Valida JWT via JWKS; suporta introspecção para tokens opacos.
+- Quer ambos? Defina `auth.pathRules` e aplique `oidc` nas rotas que exigem sessão de usuário e `oauth2` nas rotas que aceitam Bearer tokens.
+
+Veja todas as opções em [Configuration (Canonical)](./configuration.md).
+
+---
+
 ## JWT Authentication
 
 JWT (JSON Web Token) provides stateless authentication where users receive a token after login that must be included in subsequent requests.
@@ -260,6 +272,85 @@ const apiPlugin = new ApiPlugin({
 
 await db.usePlugin(apiPlugin);
 ```
+
+### Receitas por Provedor (Resource Server e RP)
+
+Receitas mínimas (use provider presets para evitar copiar endpoints manualmente). Todas as opções detalhadas estão em [Configuration](./configuration.md#auth).
+
+OIDC (Azure AD/Entra) — Relying Party (login/sessão)
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oidc',
+    config: {
+      provider: 'azure', tenantId: 'YOUR_TENANT_ID',
+      clientId: 'APP_CLIENT_ID', clientSecret: 'APP_SECRET',
+      redirectUri: 'https://app.example.com/auth/callback',
+      cookieSecret: process.env.COOKIE_SECRET
+    }
+  }]}
+})
+```
+
+OIDC (Auth0, public client) — Relying Party
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oidc',
+    config: {
+      provider: 'auth0', domain: 'mytenant.us.auth0.com',
+      clientId: 'APP_CLIENT_ID', // sem clientSecret; PKCE habilitado
+      redirectUri: 'https://app.example.com/auth/callback',
+      cookieSecret: process.env.COOKIE_SECRET
+    }
+  }]}
+})
+```
+
+OAuth2 (Keycloak, JWT) — Resource Server
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oauth2',
+    config: {
+      provider: 'keycloak', baseUrl: 'https://kc.example.com', realm: 'myrealm',
+      audience: 'my-api'
+    }
+  }]}
+})
+```
+
+OAuth2 (Keycloak, tokens opacos) — Resource Server
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oauth2',
+    config: {
+      provider: 'keycloak', baseUrl: 'https://kc.example.com', realm: 'myrealm',
+      introspection: { enabled: true, clientId: 'api-client', clientSecret: process.env.KC_SECRET }
+    }
+  }]}
+})
+```
+
+OIDC (AWS Cognito) — Relying Party
+```js
+new ApiPlugin({
+  auth: { drivers: [{
+    driver: 'oidc',
+    config: {
+      provider: 'cognito', region: 'us-east-1', userPoolId: 'us-east-1_ABC123',
+      clientId: 'APP_CLIENT_ID', clientSecret: 'APP_SECRET',
+      redirectUri: 'https://app.example.com/auth/callback',
+      cookieSecret: process.env.COOKIE_SECRET
+    }
+  }]}
+})
+```
+
+> Dica: Combine com `auth.pathRules` para exigir `oidc` em rotas de UI e aceitar `oauth2` (Bearer) em rotas para serviços.
+
+—
 
 **When to use:**
 - ✅ **IdentityPlugin** - Create SSO server (Authorization Server that issues tokens)
