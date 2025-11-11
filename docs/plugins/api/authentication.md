@@ -352,6 +352,63 @@ new ApiPlugin({
 
 —
 
+## Mapa mental: OIDC (RP) vs OAuth2 (RS) com pathRules
+
+Use `auth.pathRules` para misturar OIDC (sessão) e OAuth2 (Bearer) na mesma API, por rota:
+
+```mermaid
+flowchart LR
+  subgraph Client Apps
+    UI[Web/App]:::ui
+    Service[Svc / Cron]:::svc
+  end
+
+  subgraph Identity Provider
+    IdP[(OAuth2/OIDC IdP)]
+  end
+
+  subgraph API (this plugin)
+    RP[OIDC (RP)\n/login /callback /logout]:::rp
+    RS[OAuth2 (RS)\nBearer validation]:::rs
+  end
+
+  UI -- auth code + PKCE --> IdP
+  IdP -- id_token/access_token --> UI
+  UI -- cookie/session --> RP
+
+  Service -- Bearer access_token --> RS
+
+  classDef ui fill:#c6f6d5,stroke:#2f855a,color:#22543d
+  classDef svc fill:#bee3f8,stroke:#2b6cb0,color:#2a4365
+  classDef rp fill:#faf089,stroke:#b7791f,color:#744210
+  classDef rs fill:#fed7d7,stroke:#c53030,color:#742a2a
+```
+
+Exemplo de regras:
+```js
+auth: {
+  pathRules: [
+    { path: '/app/**', methods: ['oidc'], required: true },     // UI com sessão
+    { path: '/api/**', methods: ['oauth2'], required: true },   // Bearer tokens
+    { path: '/public/**', methods: [], required: false }        // Público
+  ]
+}
+```
+
+—
+
+## Campos mínimos por provedor (presets)
+
+| Provedor | Campos mínimos | Observações |
+|----------|-----------------|------------|
+| Azure AD/Entra | `tenantId`, `clientId`, (RP: `clientSecret` ou PKCE) | issuer deriva de `tenantId`; discovery resolve endpoints |
+| Auth0 | `domain`, `clientId`, (RP: `clientSecret` opcional com PKCE) | `domain` como `tenant.region.auth0.com`; discovery padrão |
+| Keycloak | `baseUrl`, `realm`, (RS/RP: `clientId`, `clientSecret` para confidencial) | introspecção default em `.../protocol/openid-connect/token/introspect` quando habilitado |
+| Cognito | `region`, `userPoolId`, `clientId`, (RP: `clientSecret` se confidencial) | issuer deriva de `region` e `userPoolId`; discovery resolve endpoints |
+
+> Dica: Sempre que possível, informe só os campos mínimos e deixe `provider` + discovery completar o resto. Para tokens opacos em RS, habilite `introspection.enabled=true` e forneça credenciais do client confidencial.
+
+
 **When to use:**
 - ✅ **IdentityPlugin** - Create SSO server (Authorization Server that issues tokens)
 - ✅ **ApiPlugin with OIDC driver** - Create Resource Server (API that validates tokens from SSO)
