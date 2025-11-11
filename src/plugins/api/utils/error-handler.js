@@ -87,22 +87,24 @@ export function errorHandler(err, c) {
     details
   });
 
-  // Log error (except for expected errors like 404)
-  if (status >= 500) {
-    console.error('[API Plugin] Error:', {
-      message: err.message,
-      code,
-      status,
-      stack: err.stack,
-      details
-    });
-  } else if (status >= 400 && status < 500 && c.get('verbose')) {
-    console.warn('[API Plugin] Client error:', {
-      message: err.message,
-      code,
-      status,
-      details
-    });
+  // Log only when verbose is enabled in context
+  if (c && c.get && c.get('verbose')) {
+    if (status >= 500) {
+      console.error('[API Plugin] Error:', {
+        message: err.message,
+        code,
+        status,
+        stack: err.stack,
+        details
+      });
+    } else if (status >= 400 && status < 500) {
+      console.warn('[API Plugin] Client error:', {
+        message: err.message,
+        code,
+        status,
+        details
+      });
+    }
   }
 
   return c.json(response, response._status);

@@ -360,7 +360,9 @@ export class ApiServer {
 
   async shutdown({ timeout = 30000 } = {}) {
     if (!this.isRunning) {
-      console.warn('[API Server] Server is not running');
+      if (this.options.verbose) {
+        console.warn('[API Server] Server is not running');
+      }
       return;
     }
 
@@ -371,7 +373,9 @@ export class ApiServer {
 
     const finished = await this.waitForRequestsToFinish({ timeout });
     if (!finished) {
-      console.warn('[API Server] Some requests did not finish in time');
+      if (this.options.verbose) {
+        console.warn('[API Server] Some requests did not finish in time');
+      }
     }
 
     if (this.server) {

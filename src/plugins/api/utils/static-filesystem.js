@@ -215,7 +215,9 @@ export function createFilesystemHandler(config = {}) {
       return c.body(stream, 200, headers);
 
     } catch (err) {
-      console.error('[Static Filesystem] Error:', err);
+      if (c && c.get && c.get('verbose')) {
+        console.error('[Static Filesystem] Error:', err);
+      }
       return c.json({ success: false, error: { message: 'Internal Server Error' } }, 500);
     }
   };
