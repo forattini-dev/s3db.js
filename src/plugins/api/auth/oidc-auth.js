@@ -314,7 +314,7 @@ async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientS
 export function createOIDCHandler(inputConfig, app, usersResource, events = null) {
   const preset = applyProviderPreset('oidc', inputConfig || {});
   // Apply defaults
-  const finalConfig = {
+  const config = {
     scopes: ['openid', 'profile', 'email', 'offline_access'],
     cookieName: 'oidc_session',
     cookieMaxAge: 604800000, // 7 days (same as absolute duration)
@@ -336,8 +336,8 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     cookieSameSite: 'Lax',
     defaultRole: 'user',
     defaultScopes: ['openid', 'profile', 'email'],
-    discovery: { enabled: true, ...(config.discovery || {}) },
-    pkce: { enabled: true, method: 'S256', ...(config.pkce || {}) },
+    discovery: { enabled: true, ...(preset.discovery || {}) },
+    pkce: { enabled: true, method: 'S256', ...(preset.pkce || {}) },
     rateLimit: preset.rateLimit !== undefined ? preset.rateLimit : {
       enabled: true,
       windowMs: 900000, // 15 minutes
@@ -369,7 +369,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     refreshThreshold,
     cookieSecure,
     cookieSameSite
-  } = finalConfig;
+  } = config;
 
   // OAuth2/OIDC endpoints (discovery first, fallback to defaults)
   let authorizationEndpoint = `${issuer.replace(/\/$/, '')}/oauth/authorize`;
