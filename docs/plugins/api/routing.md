@@ -66,6 +66,20 @@ Observações:
 - Mais específico primeiro: se houver colisão, a engine de roteamento casa pelas regras de path; prefira rotas específicas e evite duplicar caminhos.
 - `basePath` e `versionPrefix` são respeitados em todas as rotas geradas automaticamente.
 
+Diagrama (alto nível):
+```mermaid
+flowchart TB
+  subgraph App
+    MW[Middlewares\nrequestId → failban → security → CORS → session → custom → templates → size]
+    CRUD[Auto‑CRUD por recurso]
+    RRES[Rotas custom (resource.config.routes)]
+    RPLG[Rotas custom (plugin config.routes)]
+    BUILTIN[Built‑in\n/docs /openapi.json /health /metrics /admin/security]
+  end
+
+  MW --> CRUD --> RRES --> RPLG --> BUILTIN
+```
+
 —
 
 ## Recomendações
@@ -83,4 +97,3 @@ Observações:
 - Resource‑level: `await db.createResource({ name: 'items', routes: { 'POST /:id/activate': handler } })`
 
 Todas as opções relacionadas em [Configuration (Canonical)](./configuration.md).
-

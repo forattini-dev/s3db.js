@@ -117,11 +117,6 @@ export class Database extends SafeEventEmitter {
       exitOnSignal
     });
 
-    if (this.verbose) {
-      console.log(`[Database ${this.id}] ProcessManager initialized`);
-      console.log(`[Database ${this.id}] CronManager initialized`);
-    }
-
     // Initialize hooks system
     this._initHooks();
 
@@ -719,19 +714,11 @@ export class Database extends SafeEventEmitter {
     // Pass ProcessManager to plugin (prevents memory leaks)
     if (!plugin.processManager) {
       plugin.processManager = this.processManager;
-
-      if (this.verbose) {
-        console.log(`[Database ${this.id}] ProcessManager passed to plugin '${pluginName}'`);
-      }
     }
 
     // Pass CronManager to plugin (prevents memory leaks)
     if (!plugin.cronManager) {
       plugin.cronManager = this.cronManager;
-
-      if (this.verbose) {
-        console.log(`[Database ${this.id}] CronManager passed to plugin '${pluginName}'`);
-      }
     }
 
     // Register the plugin
