@@ -181,7 +181,7 @@
     "nodemailer": "^6.0.0 || ^7.0.0",
     "pg": "^8.0.0",
     "pug": "^3.0.0",
-    "puppeteer": "^23.0.0",
+    "puppeteer": "^24.29.1",
     "puppeteer-extra": "^3.0.0",
     "puppeteer-extra-plugin-stealth": "^2.0.0",
     "user-agents": "^1.0.0"
