@@ -6,6 +6,15 @@
 
 ---
 
+## 🧭 Mini Index (Start Here)
+
+- Configuration (Canonical): ./configuration.md — todas as opções, sem repetição
+- Authentication: ./authentication.md — drivers (JWT, API Key, Basic, OAuth2/ OIDC) e receitas por provedor
+- Security: ./security.md — CSP de /docs, Failban/GeoIP, rate limiting por rota
+- Routing: ./routing.md — tipos de rota, sintaxe, precedência e boas práticas
+
+---
+
 ## ⚡ TLDR
 
 ```javascript
