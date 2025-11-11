@@ -371,10 +371,22 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     cookieSameSite
   } = config;
 
-  // OAuth2/OIDC endpoints (discovery first, fallback to defaults)
-  let authorizationEndpoint = `${issuer.replace(/\/$/, '')}/oauth/authorize`;
-  let tokenEndpoint = `${issuer.replace(/\/$/, '')}/oauth/token`;
-  let logoutEndpoint = `${issuer.replace(/\/$/, '')}/oauth2/v2.0/logout`; // Azure AD format
+  // OAuth2/OIDC endpoints (discovery first, provider-aware fallbacks)
+  const issuerNoSlash = `${issuer || ''}`.replace(/\/$/, '');
+
+  // Generic defaults (works for many providers / self-hosted IdPs)
+  let authorizationEndpoint = `${issuerNoSlash}/oauth/authorize`;
+  let tokenEndpoint = `${issuerNoSlash}/oauth/token`;
+  let logoutEndpoint = `${issuerNoSlash}/oauth2/v2.0/logout`;
+
+  // Azure AD / Entra ID: ensure correct v2.0 endpoints when discovery is unavailable
+  // Correct pattern: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/{authorize|token|logout}
+  if (/login\.microsoftonline\.com/i.test(issuerNoSlash)) {
+    const tenantBase = issuerNoSlash.replace(/\/v2\.0$/i, '');
+    authorizationEndpoint = `${tenantBase}/oauth2/v2.0/authorize`;
+    tokenEndpoint = `${tenantBase}/oauth2/v2.0/token`;
+    logoutEndpoint = `${tenantBase}/oauth2/v2.0/logout`;
+  }
 
   // Lazy discovery to avoid top-level await
   let discovered = false;
@@ -535,7 +547,8 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       path: '/',
       httpOnly: true,
       maxAge: 600,
-      sameSite: 'Lax'
+      sameSite: cookieSameSite,
+      secure: cookieSecure
     });
 
     // Build authorization URL
