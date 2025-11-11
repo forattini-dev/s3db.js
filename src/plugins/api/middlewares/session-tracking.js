@@ -38,6 +38,7 @@
 
 import { encrypt, decrypt } from '../../../concerns/crypto.js';
 import { idGenerator } from '../../../concerns/id.js';
+import { getCookie, setCookie } from 'hono/cookie';
 
 /**
  * Create session tracking middleware
@@ -87,7 +88,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
     let isNewSession = false;
 
     // 1. Check if session cookie exists
-    const sessionCookie = c.req.cookie(cookieName);
+    const sessionCookie = getCookie(c, cookieName);
 
     if (sessionCookie) {
       try {
@@ -178,15 +179,13 @@ export function createSessionTrackingMiddleware(config = {}, db) {
     try {
       const encryptedSessionId = await encrypt(sessionId, passphrase);
 
-      c.header(
-        'Set-Cookie',
-        `${cookieName}=${encryptedSessionId}; ` +
-        `Max-Age=${Math.floor(cookieMaxAge / 1000)}; ` +
-        `Path=/; ` +
-        `HttpOnly; ` +
-        (cookieSecure ? 'Secure; ' : '') +
-        `SameSite=${cookieSameSite}`
-      );
+      setCookie(c, cookieName, encryptedSessionId, {
+        maxAge: Math.floor(cookieMaxAge / 1000),
+        path: '/',
+        httpOnly: true,
+        secure: cookieSecure,
+        sameSite: cookieSameSite
+      });
     } catch (encryptErr) {
       if (c.get('verbose')) {
         console.error('[SessionTracking] Failed to encrypt session ID:', encryptErr.message);
