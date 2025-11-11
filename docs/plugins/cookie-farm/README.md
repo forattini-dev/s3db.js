@@ -2,7 +2,7 @@
 
 > **Persona farming pipeline combining Cookie Farm, Puppeteer, S3Queue, and optional TTL.**
 >
-> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
+> **Navigation:** [← Plugin Index](../README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
 
 ---
 

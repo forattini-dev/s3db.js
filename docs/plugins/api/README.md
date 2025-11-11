@@ -968,7 +968,7 @@ failban: {
 }
 ```
 
-**[→ Deep dive: Security features](./api/security.md#failban)**
+**[→ Deep dive: Security features](./api/security.md#failban--geoip-blocking)**
 
 ---
 
@@ -1586,7 +1586,7 @@ routes: {
 
 **Note:** For global rate limiting, use the built-in `failban` feature instead.
 
-**[→ Learn more: Security features](./api/security.md#failban)**
+**[→ Learn more: Security features](./api/security.md#failban--geoip-blocking)**
 </details>
 
 <details>
@@ -1658,7 +1658,7 @@ npm install @maxmind/geoip2-node
 - `X-Country-Code`: ISO 3166-1 alpha-2 code
 - `X-Ban-Status`: `country_blocked` | `banned` | `blacklisted`
 
-**[→ Learn more: GeoIP blocking](./api/security.md#geoip)**
+**[→ Learn more: GeoIP blocking](./api/security.md#failban--geoip-blocking)**
 </details>
 
 ### Observability
