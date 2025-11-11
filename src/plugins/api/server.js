@@ -484,7 +484,20 @@ export class ApiServer {
         if (this.options.verbose) {
           console.log('[API Server] Registering Swagger UI at', docsPath);
         }
-        this.app.get(docsPath, this.swaggerUI({ url: openApiPath }));
+        // Wrap swagger handler to ensure permissive CSP for docs page
+        const swaggerHandler = this.swaggerUI({ url: openApiPath });
+        this.app.get(docsPath, (c) => {
+          const csp = [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https:",
+            "font-src 'self'",
+            "connect-src 'self'"
+          ].join('; ');
+          c.header('Content-Security-Policy', csp);
+          return swaggerHandler(c);
+        });
       } else {
         // Default: Redoc UI
         if (this.options.verbose) {
@@ -494,6 +507,20 @@ export class ApiServer {
           if (this.options.verbose) {
             console.log('[API Server] Redoc docs route hit');
           }
+          // Set CSP to allow Redoc CDN by default
+          const redocCdn = 'https://cdn.redoc.ly';
+          const fontsCss = 'https://fonts.googleapis.com';
+          const fontsGstatic = 'https://fonts.gstatic.com';
+          const csp = [
+            "default-src 'self'",
+            `script-src 'self' 'unsafe-inline' ${redocCdn}`,
+            `script-src-elem 'self' 'unsafe-inline' ${redocCdn}`,
+            `style-src 'self' 'unsafe-inline' ${redocCdn} ${fontsCss}`,
+            "img-src 'self' data: https:",
+            `font-src 'self' ${fontsGstatic}`,
+            "connect-src 'self'"
+          ].join('; ');
+          c.header('Content-Security-Policy', csp);
           const html = [
             '<!DOCTYPE html>',
             '<html lang="en">',
