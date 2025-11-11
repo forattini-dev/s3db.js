@@ -67,8 +67,30 @@ export class ProcessManager {
       this.clearInterval(name);
     }
 
-    const id = setInterval(fn, interval);
-    this.intervals.set(name, { id, fn, interval });
+    // Use precise timer (reduces drift and increases determinism under load)
+    const start = Date.now();
+    let expected = start + interval;
+    let timerId = null;
+
+    const tick = () => {
+      const now = Date.now();
+      const drift = now - expected;
+      // Ensure at least one execution per interval elapsed
+      let executions = 1;
+      if (drift > interval) {
+        executions += Math.floor(drift / interval);
+      }
+      try {
+        for (let i = 0; i < executions; i++) fn();
+      } finally {
+        expected += executions * interval;
+        const nextDelay = Math.max(0, interval - (drift % interval));
+        timerId = setTimeout(tick, nextDelay);
+      }
+    };
+
+    timerId = setTimeout(tick, interval);
+    this.intervals.set(name, { id: timerId, fn, interval, precise: true });
 
     if (this.options.verbose) {
       // console.log(`[ProcessManager] Registered interval '${name}' (${interval}ms)`);
@@ -84,7 +106,11 @@ export class ProcessManager {
   clearInterval(name) {
     const entry = this.intervals.get(name);
     if (entry) {
-      clearInterval(entry.id);
+      if (entry.precise) {
+        clearTimeout(entry.id);
+      } else {
+        clearInterval(entry.id);
+      }
       this.intervals.delete(name);
 
       if (this.options.verbose) {
@@ -272,7 +298,11 @@ export class ProcessManager {
     if (this.intervals.size > 0) {
       // console.log(`[ProcessManager] Clearing ${this.intervals.size} intervals...`);
       for (const [name, entry] of this.intervals.entries()) {
-        clearInterval(entry.id);
+        if (entry.precise) {
+          clearTimeout(entry.id);
+        } else {
+          clearInterval(entry.id);
+        }
         if (this.options.verbose) {
           // console.log(`[ProcessManager]   ✓ Cleared interval '${name}'`);
         }
