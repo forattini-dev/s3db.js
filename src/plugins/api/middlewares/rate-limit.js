@@ -34,7 +34,7 @@ class RateLimitStore {
   constructor(options = {}) {
     this.store = new Map();
     this.cleanupInterval = options.cleanupInterval || 60000; // 1 minute
-    this.windowMs = options.windowMs || 900000; // 15 minutes
+    this.windowMs = options.windowMs || 60000; // 1 minute
     this.cronManager = getCronManager();
     this.cleanupJobName = `rate-limit-cleanup-${Date.now()}`;
 
@@ -180,8 +180,8 @@ class RateLimitStore {
  */
 export function createDriverRateLimiter(config = {}) {
   const {
-    windowMs = 900000, // 15 minutes
-    maxAttempts = 5,
+    windowMs = 60000, // 1 minute
+    maxAttempts = 200,
     keyPrefix = 'ratelimit',
     keyGenerator = null,
     skipSuccessfulRequests = false,
@@ -271,20 +271,20 @@ export function createDriverRateLimiter(config = {}) {
 export function createAuthDriverRateLimiter(driver, config = {}) {
   const defaults = {
     oidc: {
-      windowMs: 900000, // 15 minutes
-      maxAttempts: 5,
+      windowMs: 60000, // 1 minute
+      maxAttempts: 200,
       keyPrefix: 'auth:oidc',
       skipSuccessfulRequests: true
     },
     jwt: {
-      windowMs: 300000, // 5 minutes
-      maxAttempts: 20,
+      windowMs: 60000, // 1 minute
+      maxAttempts: 200,
       keyPrefix: 'auth:jwt',
       skipSuccessfulRequests: false
     },
     basic: {
-      windowMs: 900000, // 15 minutes
-      maxAttempts: 10,
+      windowMs: 60000, // 1 minute
+      maxAttempts: 200,
       keyPrefix: 'auth:basic',
       skipSuccessfulRequests: true
     },
