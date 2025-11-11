@@ -21,6 +21,7 @@
  */
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { applyProviderPreset } from './providers.js';
 
 // Cache for JWKS (avoids fetching on every request)
 const jwksCache = new Map();
@@ -31,7 +32,8 @@ const jwksCache = new Map();
  * @param {Object} usersResource - s3db.js users resource
  * @returns {Function} Hono middleware
  */
-export function createOAuth2Handler(config, usersResource) {
+export function createOAuth2Handler(inputConfig, usersResource) {
+  const config = applyProviderPreset('oauth2', inputConfig || {});
   const {
     issuer,
     jwksUri,
@@ -49,31 +51,44 @@ export function createOAuth2Handler(config, usersResource) {
     throw new Error('[OAuth2 Auth] Missing required config: issuer');
   }
 
-  // Construct JWKS URI from issuer if not provided
-  const finalJwksUri = jwksUri || `${issuer}/.well-known/jwks.json`;
+  // Resolve JWKS URI via discovery (OAuth2/OIDC) or fallback to default path
+  const resolveJwksUri = async () => {
+    if (jwksUri) return jwksUri;
+    const base = issuer.replace(/\/$/, '');
+    // Try OAuth 2.0 Authorization Server Metadata (RFC 8414)
+    try {
+      const asr = await fetch(`${base}/.well-known/oauth-authorization-server`);
+      if (asr.ok) {
+        const meta = await asr.json();
+        if (meta.jwks_uri) return meta.jwks_uri;
+      }
+    } catch {}
+    // Try OIDC discovery
+    try {
+      const oidc = await fetch(`${base}/.well-known/openid-configuration`);
+      if (oidc.ok) {
+        const meta = await oidc.json();
+        if (meta.jwks_uri) return meta.jwks_uri;
+      }
+    } catch {}
+    return `${base}/.well-known/jwks.json`;
+  };
 
   // Get or create JWKS fetcher (cached)
-  const getJWKS = () => {
-    const cacheKey = finalJwksUri;
-
+  const getJWKS = async () => {
+    const url = await resolveJwksUri();
+    const cacheKey = url;
     if (jwksCache.has(cacheKey)) {
       const cached = jwksCache.get(cacheKey);
       if (Date.now() - cached.timestamp < cacheTTL) {
         return cached.jwks;
       }
     }
-
-    // Create remote JWKS fetcher
-    const jwks = createRemoteJWKSet(new URL(finalJwksUri), {
-      cooldownDuration: 30000, // 30 seconds cooldown between fetches
+    const jwks = createRemoteJWKSet(new URL(url), {
+      cooldownDuration: 30000,
       cacheMaxAge: cacheTTL
     });
-
-    jwksCache.set(cacheKey, {
-      jwks,
-      timestamp: Date.now()
-    });
-
+    jwksCache.set(cacheKey, { jwks, timestamp: Date.now() });
     return jwks;
   };
 
@@ -92,7 +107,7 @@ export function createOAuth2Handler(config, usersResource) {
 
     // Helper: Try JWT verification first; optionally fall back to introspection
     const tryJwtVerify = async () => {
-      const jwks = getJWKS();
+      const jwks = await getJWKS();
       const verifyOptions = { issuer, algorithms, clockTolerance, ...(audience ? { audience } : {}) };
       const { payload } = await jwtVerify(token, jwks, verifyOptions);
       

@@ -48,7 +48,9 @@
  */
 
 import { SignJWT, jwtVerify } from 'jose';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { unauthorized } from '../utils/response-formatter.js';
+import { applyProviderPreset } from './providers.js';
 import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
 
 /**
@@ -309,7 +311,8 @@ async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientS
 /**
  * Create OIDC authentication handler and routes
  */
-export function createOIDCHandler(config, app, usersResource, events = null) {
+export function createOIDCHandler(inputConfig, app, usersResource, events = null) {
+  const preset = applyProviderPreset('oidc', inputConfig || {});
   // Apply defaults
   const finalConfig = {
     scopes: ['openid', 'profile', 'email', 'offline_access'],
@@ -335,13 +338,13 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     defaultScopes: ['openid', 'profile', 'email'],
     discovery: { enabled: true, ...(config.discovery || {}) },
     pkce: { enabled: true, method: 'S256', ...(config.pkce || {}) },
-    rateLimit: config.rateLimit !== undefined ? config.rateLimit : {
+    rateLimit: preset.rateLimit !== undefined ? preset.rateLimit : {
       enabled: true,
       windowMs: 900000, // 15 minutes
       maxAttempts: 5,
       skipSuccessfulRequests: true
     },
-    ...config
+    ...preset
   };
 
   const {
@@ -528,7 +531,12 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       type: 'csrf',
       expires: Date.now() + 600000
     });
-    c.header('Set-Cookie', `${cookieName}_state=${stateJWT}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax`);
+    setCookie(c, `${cookieName}_state`, stateJWT, {
+      path: '/',
+      httpOnly: true,
+      maxAge: 600,
+      sameSite: 'Lax'
+    });
 
     // Build authorization URL
     const params = new URLSearchParams({
@@ -557,7 +565,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     const state = c.req.query('state');
 
     // Validate CSRF state
-    const stateCookie = c.req.cookie(`${cookieName}_state`);
+    const stateCookie = getCookie(c, `${cookieName}_state`);
     if (!stateCookie) {
       return c.json({ error: 'Missing state cookie (CSRF protection)' }, 400);
     }
@@ -568,7 +576,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     }
 
     // Clear state cookie
-    c.header('Set-Cookie', `${cookieName}_state=; Path=/; HttpOnly; Max-Age=0`);
+    deleteCookie(c, `${cookieName}_state`, { path: '/' });
 
     if (!code) {
       return c.json({ error: 'Missing authorization code' }, 400);
@@ -717,19 +725,13 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       const sessionJWT = await encodeSession(sessionData);
 
       // Set session cookie
-      const cookieOptions = [
-        `${cookieName}=${sessionJWT}`,
-        'Path=/',
-        'HttpOnly',
-        `Max-Age=${Math.floor(cookieMaxAge / 1000)}`,
-        `SameSite=${cookieSameSite}`
-      ];
-
-      if (cookieSecure) {
-        cookieOptions.push('Secure');
-      }
-
-      c.header('Set-Cookie', cookieOptions.join('; '));
+      setCookie(c, cookieName, sessionJWT, {
+        path: '/',
+        httpOnly: true,
+        maxAge: Math.floor(cookieMaxAge / 1000),
+        sameSite: cookieSameSite,
+        secure: cookieSecure
+      });
 
       // Redirect to original destination or default post-login page
       const redirectUrl = stateData.returnTo || postLoginRedirect;
@@ -754,7 +756,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
    * LOGOUT Route
    */
   app.get(logoutPath, async (c) => {
-    const sessionCookie = c.req.cookie(cookieName);
+    const sessionCookie = getCookie(c, cookieName);
     let idToken = null;
 
     if (sessionCookie) {
@@ -763,7 +765,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     }
 
     // Clear session cookie
-    c.header('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+    deleteCookie(c, cookieName, { path: '/' });
 
     // IdP logout (Azure AD/Entra compatible)
     if (idpLogout && idToken) {
@@ -822,7 +824,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       }
     }
 
-    const sessionCookie = c.req.cookie(cookieName);
+    const sessionCookie = getCookie(c, cookieName);
 
     if (!sessionCookie) {
       // No session - redirect to login or return 401
@@ -851,7 +853,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     const validation = validateSessionDuration(session);
     if (!validation.valid) {
       // Session expired, clear cookie
-      c.header('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+      deleteCookie(c, cookieName, { path: '/' });
       return await next();
     }
 
@@ -890,7 +892,7 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     // Check if user is active (if field exists)
     if (session.user.active !== undefined && !session.user.active) {
       // User account is inactive, clear session
-      c.header('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; Max-Age=0`);
+      deleteCookie(c, cookieName, { path: '/' });
 
       // Content negotiation for inactive account
       const acceptHeader = c.req.header('accept') || '';
@@ -918,19 +920,13 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     // Re-encode session with updated last_activity and tokens
     const newSessionJWT = await encodeSession(session);
 
-    const cookieOptions = [
-      `${cookieName}=${newSessionJWT}`,
-      'Path=/',
-      'HttpOnly',
-      `Max-Age=${Math.floor(cookieMaxAge / 1000)}`,
-      `SameSite=${cookieSameSite}`
-    ];
-
-    if (cookieSecure) {
-      cookieOptions.push('Secure');
-    }
-
-    c.header('Set-Cookie', cookieOptions.join('; '));
+    setCookie(c, cookieName, newSessionJWT, {
+      path: '/',
+      httpOnly: true,
+      maxAge: Math.floor(cookieMaxAge / 1000),
+      sameSite: cookieSameSite,
+      secure: cookieSecure
+    });
 
     return await next();
   };
