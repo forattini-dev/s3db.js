@@ -1,111 +1,191 @@
-# 📋 Configuration Options
+# 📋 Configuration Options (Canonical)
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+This section is the single source of truth for all ApiPlugin options. Other guides link here and avoid repeating config.
 
----
+—
 
-## Complete Configuration
+## Top‑Level
 
-```javascript
-new ApiPlugin({
-  // Server configuration
-  port: 3000,
-  host: '0.0.0.0',
-  verbose: false,
-  maxBodySize: 10 * 1024 * 1024,         // 10MB (default)
+- port: number = 3000
+- host: string = '0.0.0.0'
+- basePath: string = '' (normalized; affects all routes, including /docs and /openapi.json)
+- verbose: boolean = false (gates console output across the plugin)
+- startupBanner: boolean = true
+- versionPrefix: boolean | string = false
+- maxBodySize: number = 10_485_760 (10MB)
 
-  // Authentication (all optional)
-  auth: {
-    jwt: {
-      enabled: true,
-      secret: 'your-jwt-secret-key',
-      expiresIn: '7d'                    // Token expiration
-    },
-    apiKey: {
-      enabled: true,
-      headerName: 'X-API-Key'            // Custom header name
-    },
-    basic: {
-      enabled: true,
-      realm: 'API Access',               // HTTP Basic realm
-      passphrase: 'secret'               // For password decryption
-    }
-  },
+## Docs
 
-  // Resource configuration
-  resources: {
-    cars: {
-      auth: ['jwt', 'apiKey'],           // Required auth methods
-      methods: ['GET', 'POST', 'PUT', 'DELETE'],
-      customMiddleware: [                // Resource-specific middleware
-        async (c, next) => {
-          // Custom logic
-          await next();
-        }
-      ]
-    },
-    products: {
-      auth: false,                       // Public access
-      methods: ['GET']                   // Read-only
-    }
-  },
+- docs.enabled: boolean = true
+- docs.ui: 'redoc' | 'swagger' = 'redoc'
+- docs.title: string = 's3db.js API'
+- docs.version: string = '1.0.0'
+- docs.description: string
+- docs.csp: string | null (route‑level CSP override for /docs; defaults allow Redoc CDN and fonts)
 
-  // CORS configuration
-  cors: {
-    enabled: true,
-    origin: '*',                         // Allow all origins
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
-    exposedHeaders: ['X-Total-Count', 'X-Page-Count'],
-    credentials: true,
-    maxAge: 86400                        // 24 hours
-  },
+Notes:
+- When ui='redoc' and no docs.csp provided, /docs sets CSP including https://cdn.redoc.ly, https://fonts.googleapis.com, https://fonts.gstatic.com.
+- When ui='swagger', a minimal CSP (self + unsafe‑inline) is set unless docs.csp overrides it.
 
-  // Rate limiting
-  rateLimit: {
-    enabled: true,
-    windowMs: 60000,                     // 1 minute
-    maxRequests: 100,                    // 100 requests per window
-    keyGenerator: (c) => {               // Custom key function
-      return c.req.header('x-forwarded-for') || 'unknown';
-    }
-  },
+## Auth
 
-  // Request logging
-  logging: {
-    enabled: true,
-    format: ':verb :url => :status (:elapsed ms, :res[content-length])',
-    colorize: true,
-    verbose: false,
-    // Legacy tokens still work (:method, :path, :response-time, :user, :requestId)
-  },
+- auth.driver: string | null (shorthand)
+- auth.drivers: Array<{ driver: 'jwt'|'basic'|'apiKey'|'oidc'|'oauth2', config: object }>
+- auth.resource: string (defaults to derived name; reuses Identity users when present)
+- auth.createResource: boolean = true
+- auth.usernameField: string = 'email'
+- auth.passwordField: string = 'password'
+- auth.strategy: 'any'|'priority' (for pathRules)
+- auth.priorities: Record<string, number>
+- auth.pathRules: Array<{ path: string; methods: string[]; required: boolean; unauthorizedBehavior?: 'auto'|object; strategy?: string; priorities?: object }>
+- auth.pathAuth: legacy path‑based rules (deprecated; prefer pathRules)
 
-  // Response compression
-  compression: {
-    enabled: true,
-    threshold: 1024,                     // Only compress if >1KB
-    level: 6                             // gzip compression level (1-9)
-  },
+Registration (auth.registration)
+- enabled: boolean = false
+- allowedFields: string[] = []
+- defaultRole: string = 'user'
 
-  // Validation
-  validation: {
-    enabled: true,
-    validateOnInsert: true,
-    validateOnUpdate: true,
-    returnValidationErrors: true
-  },
+Login Throttle (auth.loginThrottle)
+- enabled: boolean = true
+- maxAttempts: number = 5
+- windowMs: number = 60000
+- blockDurationMs: number = 300000
+- maxEntries: number = 10000
 
-  // Global custom middlewares
-  middlewares: [
-    async (c, next) => {
-      c.set('requestId', crypto.randomUUID());
-      await next();
-    }
-  ]
-})
-```
+Driver‑specific (exemplos)
+- JWT: { secret: string; expiresIn?: string }
+- API Key: { headerName?: string }
+- Basic: { realm?: string; passphrase?: string; adminUser?: { enabled: boolean; username: string; password: string; scopes?: string[] } }
+- OAuth2 (RS): { issuer?: string; jwksUri?: string; audience?: string; algorithms?: string[]; cacheTTL?: number; clockTolerance?: number; validateScopes?: boolean; fetchUserInfo?: boolean; introspection?: { enabled?: boolean; endpoint?: string; clientId?: string; clientSecret?: string; useDiscovery?: boolean }; verbose?: boolean }
+- OIDC (RP): { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes?: string[]; cookieSecret: string; loginPath?: string; callbackPath?: string; logoutPath?: string; postLoginRedirect?: string; postLogoutRedirect?: string; idpLogout?: boolean; autoCreateUser?: boolean; autoRefreshTokens?: boolean; refreshThreshold?: number; cookieSecure?: boolean; cookieSameSite?: 'Strict'|'Lax'|'None'; discovery?: { enabled?: boolean }; pkce?: { enabled?: boolean; method?: 'S256' } }
 
-> **Tip:** By default we print a pastel line with method, URL, colored status, timing, and payload size using the custom `:verb`/`:ruta`/`:elapsed` tokens plus the `⇒` arrow. Set `colorize: false` for plain text logs.
+## CORS
+
+- cors.enabled: boolean = false
+- cors.origin: string|string[] = '*'
+- cors.methods: string[] = ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
+- cors.allowedHeaders: string[] = ['Content-Type','Authorization','X-API-Key']
+- cors.exposedHeaders: string[] = ['X-Total-Count','X-Page-Count']
+- cors.credentials: boolean = true
+- cors.maxAge: number = 86400
+
+## Rate Limiting
+
+- rateLimit.enabled: boolean = false
+- rateLimit.windowMs: number = 60000
+- rateLimit.maxRequests: number = 100
+- rateLimit.keyGenerator?: (c) => string
+- rateLimit.maxUniqueKeys?: number = 1000
+
+## Logging
+
+- logging.enabled: boolean = false
+- logging.format: string = ':verb :url => :status (:elapsed ms, :res[content-length])'
+- logging.colorize: boolean = true
+- logging.verbose: boolean = false
+
+## Compression
+
+- compression.enabled: boolean = false
+- compression.threshold: number = 1024
+- compression.level: number = 6
+
+Behavior: honors Accept‑Encoding; gzip/deflate via CompressionStream; brotli falls back to gzip when available.
+
+## Validation
+
+- validation.enabled: boolean = true
+- validation.validateOnInsert: boolean = true
+- validation.validateOnUpdate: boolean = true
+- validation.returnValidationErrors: boolean = true
+
+## Security Headers
+
+- security.enabled: boolean = true
+- security.contentSecurityPolicy: { enabled?: boolean; directives?: Record<string,string[]>; reportOnly?: boolean; reportUri?: string } | false
+- security.frameguard: { action: 'deny'|'sameorigin' } | false
+- security.noSniff: boolean = true
+- security.hsts: { maxAge: number; includeSubDomains?: boolean; preload?: boolean } | false
+- security.referrerPolicy: { policy: string } | false
+- security.dnsPrefetchControl: { allow: boolean } | false
+- security.ieNoOpen: boolean = true
+- security.permittedCrossDomainPolicies: { policy: string } | false
+- security.xssFilter: { mode: 'block' } | false
+- security.permissionsPolicy: { features: Record<string, string[]> } | false
+
+Deprecated: csp (legacy alias) — prefer security.contentSecurityPolicy.
+
+## Request ID
+
+- requestId.enabled: boolean = false
+- requestId.headerName?: string = 'X-Request-ID'
+- requestId.generator?: () => string
+- requestId.includeInResponse?: boolean = true
+
+Note: When disabled, the plugin still works (a local fallback ID is used internally for tracking); the header is not injected.
+
+## Session Tracking
+
+- sessionTracking.enabled: boolean = false
+- sessionTracking.resource?: string (DB‑backed)
+- sessionTracking.cookieName?: string = 'session_id'
+- sessionTracking.cookieMaxAge?: number = 30 days
+- sessionTracking.cookieSecure?: boolean = (NODE_ENV === 'production')
+- sessionTracking.cookieSameSite?: 'Strict'|'Lax'|'None' = 'Strict'
+- sessionTracking.updateOnRequest?: boolean = true
+- sessionTracking.passphrase: string (required when enabled)
+- sessionTracking.enrichSession?: ({ session, context }) => object
+
+## Events & Metrics
+
+- events.enabled: boolean = false
+- metrics.enabled: boolean = false
+
+## Failban
+
+- failban.enabled: boolean = false
+- failban.maxViolations?: number = 3
+- failban.violationWindow?: number = 3600000
+- failban.banDuration?: number = 86400000
+- failban.whitelist?: string[]
+- failban.blacklist?: string[]
+- failban.persistViolations?: boolean = true
+- failban.geo?: { dbPath: string; block?: string[] }
+- failban.resourceNames?: { bans?: string; violations?: string }
+
+## Static & Health
+
+- static: Array<{ path: string; dir?: string; s3?: { bucket, prefix } }>
+- health: { enabled: boolean } | boolean
+
+## Templates (SSR)
+
+- templates.enabled: boolean = false
+- templates.engine: 'jsx'|'ejs'|'custom' = 'jsx'
+- templates.templatesDir?: string = './views'
+- templates.layout?: string | null
+- templates.engineOptions?: object
+- templates.customRenderer?: Function
+
+## Routes & Resources
+
+- routes: Record<'METHOD /path', (c) => any>
+- resources: string[] | Record<string, object | boolean>
+
+Notes:
+- In object form, setting a resource to false disables its auto‑routes.
+- Custom routes support enhanced context when handler has arity 2: (c, ctx).
+
+—
+
+## Deprecated/Legacy
+
+- pathAuth (use auth.pathRules)
+- csp (use security.contentSecurityPolicy)
+
+—
+
+For end‑to‑end examples, see the README topics and Authentication/Deployment guides. Other docs link here for configuration and avoid repeating it.
 
 ### RelationPlugin Integration
 

@@ -333,6 +333,8 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     cookieSameSite: 'Lax',
     defaultRole: 'user',
     defaultScopes: ['openid', 'profile', 'email'],
+    discovery: { enabled: true, ...(config.discovery || {}) },
+    pkce: { enabled: true, method: 'S256', ...(config.pkce || {}) },
     rateLimit: config.rateLimit !== undefined ? config.rateLimit : {
       enabled: true,
       windowMs: 900000, // 15 minutes
@@ -366,10 +368,33 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
     cookieSameSite
   } = finalConfig;
 
-  // OAuth2 endpoints
-  const authorizationEndpoint = `${issuer}/oauth/authorize`;
-  const tokenEndpoint = `${issuer}/oauth/token`;
-  const logoutEndpoint = `${issuer}/oauth2/v2.0/logout`; // Azure AD format
+  // OAuth2/OIDC endpoints (discovery first, fallback to defaults)
+  let authorizationEndpoint = `${issuer.replace(/\/$/, '')}/oauth/authorize`;
+  let tokenEndpoint = `${issuer.replace(/\/$/, '')}/oauth/token`;
+  let logoutEndpoint = `${issuer.replace(/\/$/, '')}/oauth2/v2.0/logout`; // Azure AD format
+
+  // Lazy discovery to avoid top-level await
+  let discovered = false;
+  async function getEndpoints() {
+    if (discovered || finalConfig.discovery?.enabled === false) {
+      return { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
+    }
+    try {
+      const res = await fetch(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
+      if (res.ok) {
+        const doc = await res.json();
+        authorizationEndpoint = doc.authorization_endpoint || authorizationEndpoint;
+        tokenEndpoint = doc.token_endpoint || tokenEndpoint;
+        logoutEndpoint = doc.end_session_endpoint || logoutEndpoint;
+        discovered = true;
+      }
+    } catch (e) {
+      if (finalConfig.verbose) {
+        console.warn('[OIDC] Discovery failed, using default endpoints:', e.message);
+      }
+    }
+    return { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
+  }
 
   /**
    * Encode session data as signed JWT
@@ -424,6 +449,32 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
            Math.random().toString(36).substring(2, 15);
   }
 
+  /** Generate cryptographically random string (base64url) */
+  function randomBase64Url(bytes = 32) {
+    const arr = new Uint8Array(bytes);
+    if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+      throw new Error('WebCrypto not available: getRandomValues missing');
+    }
+    globalThis.crypto.getRandomValues(arr);
+    const b64 = Buffer.from(arr).toString('base64')
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return b64;
+  }
+
+  /** Create PKCE code challenge */
+  async function createPkcePair() {
+    const verifier = randomBase64Url(48); // ~64 chars base64url
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    if (!globalThis.crypto || !globalThis.crypto.subtle) {
+      throw new Error('WebCrypto not available: subtle.digest missing');
+    }
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', data);
+    const challenge = Buffer.from(new Uint8Array(digest)).toString('base64')
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return { verifier, challenge };
+  }
+
   /**
    * Decode JWT without verification (for id_token claims)
    */
@@ -452,11 +503,28 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
   app.get(loginPath, async (c) => {
     const state = generateState();
     const returnTo = c.req.query('returnTo') || postLoginRedirect;
+    const nonce = generateState();
+
+    let codeVerifier = null;
+    let codeChallenge = null;
+    if (finalConfig.pkce?.enabled !== false) {
+      try {
+        const pair = await createPkcePair();
+        codeVerifier = pair.verifier;
+        codeChallenge = pair.challenge;
+      } catch (e) {
+        if (c.get('verbose')) {
+          console.warn('[OIDC] PKCE generation failed:', e.message);
+        }
+      }
+    }
 
     // Store state and returnTo in short-lived cookie
     const stateJWT = await encodeSession({
       state,
       returnTo,
+      nonce,
+      code_verifier: codeVerifier,
       type: 'csrf',
       expires: Date.now() + 600000
     });
@@ -468,10 +536,17 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       client_id: clientId,
       redirect_uri: redirectUri,
       scope: scopes.join(' '),
-      state
+      state,
+      nonce
     });
 
-    return c.redirect(`${authorizationEndpoint}?${params.toString()}`, 302);
+    if (codeChallenge) {
+      params.set('code_challenge_method', 'S256');
+      params.set('code_challenge', codeChallenge);
+    }
+
+    const ep = await getEndpoints();
+    return c.redirect(`${ep.authorizationEndpoint}?${params.toString()}`, 302);
   });
 
   /**
@@ -501,7 +576,10 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
 
     // Exchange code for tokens
     try {
-      const tokenResponse = await fetch(tokenEndpoint, {
+      // Retrieve PKCE data and nonce
+      const codeVerifier = stateData.code_verifier || null;
+      const ep = await getEndpoints();
+      const tokenResponse = await fetch(ep.tokenEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -510,7 +588,8 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
         body: new URLSearchParams({
           grant_type: 'authorization_code',
           code,
-          redirect_uri: redirectUri
+          redirect_uri: redirectUri,
+          ...(codeVerifier ? { code_verifier: codeVerifier } : {})
         })
       });
 
@@ -528,6 +607,11 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
       const idTokenClaims = decodeIdToken(tokens.id_token);
       if (!idTokenClaims) {
         return c.json({ error: 'Failed to decode id_token' }, 500);
+      }
+
+      // Validate nonce if present
+      if (stateData.nonce && idTokenClaims.nonce && idTokenClaims.nonce !== stateData.nonce) {
+        return c.json({ error: 'Invalid nonce' }, 400);
       }
 
       // Auto-create/update user
@@ -683,11 +767,12 @@ export function createOIDCHandler(config, app, usersResource, events = null) {
 
     // IdP logout (Azure AD/Entra compatible)
     if (idpLogout && idToken) {
+      const ep = await getEndpoints();
       const params = new URLSearchParams({
         id_token_hint: idToken,
         post_logout_redirect_uri: `${postLogoutRedirect}`
       });
-      return c.redirect(`${logoutEndpoint}?${params.toString()}`, 302);
+      return c.redirect(`${ep.logoutEndpoint}?${params.toString()}`, 302);
     }
 
     return c.redirect(postLogoutRedirect, 302);

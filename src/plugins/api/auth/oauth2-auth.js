@@ -40,7 +40,9 @@ export function createOAuth2Handler(config, usersResource) {
     cacheTTL = 3600000, // 1 hour
     clockTolerance = 60, // 60 seconds tolerance for exp/nbf
     validateScopes = true,
-    fetchUserInfo = true
+    fetchUserInfo = true,
+    introspection = null, // { enabled, endpoint?, clientId, clientSecret, useDiscovery? }
+    verbose = false
   } = config;
 
   if (!issuer) {
@@ -88,22 +90,12 @@ export function createOAuth2Handler(config, usersResource) {
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    try {
-      // Verify JWT token with remote JWKS
+    // Helper: Try JWT verification first; optionally fall back to introspection
+    const tryJwtVerify = async () => {
       const jwks = getJWKS();
-
-      const verifyOptions = {
-        issuer,
-        algorithms,
-        clockTolerance
-      };
-
-      if (audience) {
-        verifyOptions.audience = audience;
-      }
-
+      const verifyOptions = { issuer, algorithms, clockTolerance, ...(audience ? { audience } : {}) };
       const { payload } = await jwtVerify(token, jwks, verifyOptions);
-
+      
       // Extract user info from token claims
       const userId = payload.sub; // Subject (user ID)
       const email = payload.email || null;
@@ -150,14 +142,114 @@ export function createOAuth2Handler(config, usersResource) {
         tokenClaims: payload,
         isVirtual: true // Flag to indicate user is not in local database
       };
+    };
 
+    const tryIntrospection = async () => {
+      const intCfg = introspection || {};
+      if (intCfg.enabled !== true) return null;
+
+      // Determine endpoint: explicit -> discovery -> issuer default
+      let endpoint = intCfg.endpoint;
+      if (!endpoint && intCfg.useDiscovery !== false && issuer) {
+        try {
+          const res = await fetch(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
+          if (res.ok) {
+            const doc = await res.json();
+            endpoint = doc.introspection_endpoint || endpoint;
+          }
+        } catch (e) {
+          if (verbose || c.get('verbose')) {
+            console.error('[OAuth2 Auth] Discovery for introspection failed:', e.message);
+          }
+        }
+      }
+      if (!endpoint && issuer) {
+        // Common fallback; may vary by provider
+        endpoint = `${issuer.replace(/\/$/, '')}/oauth/introspect`;
+      }
+      if (!endpoint) return null;
+
+      try {
+        const basic = Buffer.from(`${intCfg.clientId || ''}:${intCfg.clientSecret || ''}`).toString('base64');
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': `Basic ${basic}`
+          },
+          body: new URLSearchParams({ token })
+        });
+        if (!resp.ok) {
+          if (verbose || c.get('verbose')) {
+            console.error('[OAuth2 Auth] Introspection failed:', resp.status);
+          }
+          return null;
+        }
+        const data = await resp.json();
+        if (!data || data.active !== true) return null;
+
+        const userId = data.sub || data.username || data.user_id || null;
+        const email = data.email || null;
+        const username = data.preferred_username || data.username || email || userId;
+        const scopes = Array.isArray(data.scope) ? data.scope : (typeof data.scope === 'string' ? data.scope.split(' ') : []);
+        const role = data.role || data.roles || 'user';
+
+        let user = null;
+        if (fetchUserInfo && usersResource && userId) {
+          try {
+            user = await usersResource.get(userId).catch(() => null);
+            if (!user && email) {
+              const res = await usersResource.query({ email }, { limit: 1 });
+              user = res[0] || null;
+            }
+          } catch {}
+        }
+
+        if (user) {
+          return {
+            ...user,
+            scopes: user.scopes || scopes,
+            role: user.role || role,
+            tokenClaims: data
+          };
+        }
+
+        return {
+          id: userId || 'anonymous',
+          username: username || userId || 'anonymous',
+          email,
+          role,
+          scopes,
+          active: true,
+          tokenClaims: data,
+          isVirtual: true
+        };
+      } catch (e) {
+        if (verbose || c.get('verbose')) {
+          console.error('[OAuth2 Auth] Introspection error:', e.message);
+        }
+        return null;
+      }
+    };
+
+    // Attempt JWT verification first; on failure or non-JWT tokens, try introspection when enabled
+    const isLikelyJwt = token.split('.').length === 3;
+    try {
+      if (isLikelyJwt) {
+        return await tryJwtVerify();
+      }
     } catch (err) {
-      // Token verification failed
-      if (config.verbose) {
+      if (verbose || c.get('verbose')) {
         console.error('[OAuth2 Auth] Token verification failed:', err.message);
       }
-      return null; // Invalid token, try next auth method
+      // fallthrough to introspection
     }
+
+    // Try introspection (opaque tokens or jwt verify failed)
+    const introspected = await tryIntrospection();
+    if (introspected) return introspected;
+
+    return null; // Invalid token or not active
   };
 }
 
