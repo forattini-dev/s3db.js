@@ -170,7 +170,9 @@ export function basicAuth(options = {}) {
 
       await next();
     } catch (err) {
-      console.error('[Basic Auth] Error validating credentials:', err);
+      if (c.get('verbose')) {
+        console.error('[Basic Auth] Error validating credentials:', err);
+      }
       c.header('WWW-Authenticate', `Basic realm="${realm}"`);
       const response = unauthorized('Authentication error');
       return c.json(response, response._status);

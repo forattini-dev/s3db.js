@@ -71,7 +71,9 @@ export function mountCustomRoutes(app, routes, context = {}, verbose = false, op
         console.log(`[Custom Routes] Mounted ${method} ${finalPath} ${contextType}`);
       }
     } catch (err) {
-      console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
+      if (verbose) {
+        console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
+      }
     }
   }
 }

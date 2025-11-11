@@ -128,7 +128,9 @@ export class ApiServer {
 
   async start() {
     if (this.isRunning) {
-      console.warn('[API Plugin] Server is already running');
+      if (this.options.verbose) {
+        console.warn('[API Plugin] Server is already running');
+      }
       return;
     }
 
@@ -251,7 +253,9 @@ export class ApiServer {
                 await this.shutdown({ timeout: 30000 });
                 process.exit(0);
               } catch (err) {
-                console.error('[API Server] Error during shutdown:', err);
+                if (this.options.verbose) {
+                  console.error('[API Server] Error during shutdown:', err);
+                }
                 process.exit(1);
               }
             };
@@ -270,7 +274,9 @@ export class ApiServer {
 
   async stop() {
     if (!this.isRunning) {
-      console.warn('[API Plugin] Server is not running');
+      if (this.options.verbose) {
+        console.warn('[API Plugin] Server is not running');
+      }
       return;
     }
 
@@ -487,15 +493,19 @@ export class ApiServer {
         // Wrap swagger handler to ensure permissive CSP for docs page
         const swaggerHandler = this.swaggerUI({ url: openApiPath });
         this.app.get(docsPath, (c) => {
-          const csp = [
-            "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: https:",
-            "font-src 'self'",
-            "connect-src 'self'"
-          ].join('; ');
-          c.header('Content-Security-Policy', csp);
+          // Allow override via options.docsCsp (string)
+          let cspHeader = this.options.docsCsp;
+          if (!cspHeader) {
+            cspHeader = [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: https:",
+              "font-src 'self'",
+              "connect-src 'self'"
+            ].join('; ');
+          }
+          c.header('Content-Security-Policy', cspHeader);
           return swaggerHandler(c);
         });
       } else {
@@ -511,16 +521,19 @@ export class ApiServer {
           const redocCdn = 'https://cdn.redoc.ly';
           const fontsCss = 'https://fonts.googleapis.com';
           const fontsGstatic = 'https://fonts.gstatic.com';
-          const csp = [
-            "default-src 'self'",
-            `script-src 'self' 'unsafe-inline' ${redocCdn}`,
-            `script-src-elem 'self' 'unsafe-inline' ${redocCdn}`,
-            `style-src 'self' 'unsafe-inline' ${redocCdn} ${fontsCss}`,
-            "img-src 'self' data: https:",
-            `font-src 'self' ${fontsGstatic}`,
-            "connect-src 'self'"
-          ].join('; ');
-          c.header('Content-Security-Policy', csp);
+          let cspHeader = this.options.docsCsp;
+          if (!cspHeader) {
+            cspHeader = [
+              "default-src 'self'",
+              `script-src 'self' 'unsafe-inline' ${redocCdn}`,
+              `script-src-elem 'self' 'unsafe-inline' ${redocCdn}`,
+              `style-src 'self' 'unsafe-inline' ${redocCdn} ${fontsCss}`,
+              "img-src 'self' data: https:",
+              `font-src 'self' ${fontsGstatic}`,
+              "connect-src 'self'"
+            ].join('; ');
+          }
+          c.header('Content-Security-Policy', cspHeader);
           const html = [
             '<!DOCTYPE html>',
             '<html lang="en">',
