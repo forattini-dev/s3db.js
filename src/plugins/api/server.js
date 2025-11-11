@@ -46,6 +46,7 @@ export class ApiServer {
       auth: options.auth || {},
       docsEnabled: (options.docs?.enabled !== false) && (options.docsEnabled !== false),
       docsUI: options.docs?.ui || options.docsUI || 'redoc',
+      docsCsp: options.docsCsp || options.docs?.csp || null,
       apiTitle: options.docs?.title || options.apiTitle || 's3db.js API',
       apiVersion: options.docs?.version || options.apiVersion || '1.0.0',
       apiDescription: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
