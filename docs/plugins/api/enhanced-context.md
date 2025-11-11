@@ -251,6 +251,255 @@ routes: {
 
 ---
 
+### Advanced Error Handling with `c.error()`
+
+**New in v16.1.26+**: The API plugin now includes a powerful error helper that standardizes error responses across your API. Available globally on the Hono context (`c`), not just in enhanced context.
+
+#### Basic Usage
+
+```javascript
+routes: {
+  // ✅ String error with custom status
+  'GET /test': async (c) => {
+    return c.error('Something went wrong', 400);
+  },
+
+  // ✅ Error object (auto-detect status)
+  'GET /users/:id': async (c, ctx) => {
+    const user = await ctx.resources.users.get(ctx.param('id'));
+    if (!user) {
+      const err = new Error('User not found');
+      err.name = 'NotFoundError';
+      return c.error(err);  // Auto-returns 404
+    }
+    return ctx.success(user);
+  },
+
+  // ✅ With additional details
+  'POST /users': async (c, ctx) => {
+    const { valid, errors } = await ctx.validator.validateBody('users');
+    if (!valid) {
+      return c.error(
+        new Error('Validation failed'),
+        400,
+        { field: errors[0].field, rule: errors[0].type }
+      );
+    }
+  }
+}
+```
+
+#### Standard Error Response Format
+
+```json
+{
+  "success": false,
+  "error": {
+    "message": "User not found",
+    "code": "NotFoundError",
+    "status": 404,
+    "details": {
+      "field": "email",
+      "rule": "required"
+    },
+    "stack": ["Error: User not found", "at handler..."]
+  }
+}
+```
+
+**Note**: `stack` is only included in development mode (`NODE_ENV !== 'production'`)
+
+#### Auto-Detected Status Codes
+
+The error helper intelligently detects HTTP status codes from:
+
+**Error Names**:
+- `ValidationError` → 400
+- `NotFoundError` → 404
+- `UnauthorizedError` → 401
+- `ForbiddenError` → 403
+- `ConflictError` → 409
+- `TooManyRequestsError` → 429
+
+**Error Messages** (pattern matching):
+- "not found" → 404
+- "unauthorized" / "unauthenticated" → 401
+- "forbidden" / "access denied" → 403
+- "invalid" / "validation" / "bad request" → 400
+- "conflict" / "already exists" → 409
+- "rate limit" / "too many" → 429
+
+**Error Properties**:
+- `error.status`, `error.statusCode`, or `error.httpStatus`
+
+**Default**: 500 for unknown errors
+
+#### Examples with Auto-Detection
+
+```javascript
+routes: {
+  // ✅ Auto-detect from error name
+  'GET /users/:id': async (c, ctx) => {
+    const user = await ctx.resources.users.get(ctx.param('id'));
+    if (!user) {
+      const err = new Error('User not found');
+      err.name = 'NotFoundError';
+      return c.error(err);  // Returns 404 automatically
+    }
+  },
+
+  // ✅ Auto-detect from message pattern
+  'POST /users': async (c, ctx) => {
+    const err = new Error('Email already exists in database');
+    return c.error(err);  // Returns 409 (conflict) from "already exists"
+  },
+
+  // ✅ Auto-detect from error property
+  'GET /protected': async (c, ctx) => {
+    const err = new Error('Invalid token');
+    err.statusCode = 401;
+    return c.error(err);  // Returns 401 from err.statusCode
+  },
+
+  // ✅ Override auto-detection
+  'POST /batch': async (c, ctx) => {
+    const err = new Error('Validation error on item 5');
+    err.name = 'ValidationError';  // Would auto-detect to 400
+    return c.error(err, 422);  // Override to 422 Unprocessable Entity
+  }
+}
+```
+
+#### Integration with Try-Catch
+
+```javascript
+routes: {
+  'POST /users': async (c, ctx) => {
+    try {
+      const { valid, data } = await ctx.validator.validateBody('users');
+      if (!valid) {
+        throw new Error('Invalid input');
+      }
+
+      const user = await ctx.resources.users.insert(data);
+      return ctx.success(user);
+    } catch (err) {
+      // ✅ Centralized error handling
+      return c.error(err, err.status || 500);
+    }
+  }
+}
+```
+
+#### Custom Error Classes
+
+Create semantic error classes for better auto-detection:
+
+```javascript
+// Define custom errors
+class ValidationError extends Error {
+  constructor(message, details) {
+    super(message);
+    this.name = 'ValidationError';
+    this.details = details;
+  }
+}
+
+class NotFoundError extends Error {
+  constructor(resource, id) {
+    super(`${resource} with id '${id}' not found`);
+    this.name = 'NotFoundError';
+    this.details = { resource, id };
+  }
+}
+
+// Use in routes
+routes: {
+  'POST /users': async (c, ctx) => {
+    const { valid, errors } = await ctx.validator.validateBody('users');
+    if (!valid) {
+      throw new ValidationError('Invalid user data', { errors });
+    }
+  },
+
+  'GET /users/:id': async (c, ctx) => {
+    const user = await ctx.resources.users.get(ctx.param('id'));
+    if (!user) {
+      throw new NotFoundError('User', ctx.param('id'));
+    }
+    return ctx.success(user);
+  }
+}
+```
+
+#### Verbose Logging
+
+Enable verbose logging for debugging:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  verbose: true,  // Enables error logging
+  routes: {
+    'GET /test': async (c) => {
+      return c.error(new Error('Test error'), 500);
+    }
+  }
+}));
+
+// Console output:
+// [API Error] {
+//   status: 500,
+//   code: 'Error',
+//   message: 'Test error',
+//   path: '/test',
+//   method: 'GET',
+//   details: undefined
+// }
+```
+
+#### Best Practices
+
+**✅ DO**:
+```javascript
+// Use semantic error names for auto-detection
+const err = new Error('Resource not found');
+err.name = 'NotFoundError';
+return c.error(err);
+
+// Include helpful details for debugging
+return c.error(err, 400, {
+  field: 'email',
+  expected: 'valid email address'
+});
+
+// Let auto-detection work for common patterns
+return c.error(new Error('User not found'));  // Auto-detects 404
+```
+
+**❌ DON'T**:
+```javascript
+// Don't use generic error names
+const err = new Error('Something failed');
+return c.error(err);  // Returns 500, not helpful
+
+// Don't manually construct error responses
+return c.json({
+  success: false,
+  error: { message: 'Not found' }
+}, 404);  // Use c.error() instead!
+
+// Don't swallow errors without details
+try {
+  // ...
+} catch (err) {
+  return c.error('Error');  // Loses original error info!
+}
+```
+
+---
+
+---
+
 ### Template Rendering
 
 **Configure template engine** in API Plugin:

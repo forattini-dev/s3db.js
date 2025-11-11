@@ -246,6 +246,7 @@ routes: {
 - **Resource Proxy**: Automatic validation and helpful error messages when accessing non-existent resources
 - **Request Helpers**: `ctx.param()`, `ctx.query()`, `ctx.body()`, `ctx.header()`
 - **Response Helpers**: `ctx.success()`, `ctx.error()`, `ctx.notFound()`, `ctx.unauthorized()`, `ctx.forbidden()`
+- **Advanced Error Helper**: `c.error()` with auto-detection of HTTP status codes (v16.1.26+) - [See full docs](./enhanced-context.md#advanced-error-handling-with-cerror)
 - **Validator Helpers**: `ctx.validator.validate()`, `ctx.validator.validateBody()`, `ctx.validator.validateOrThrow()`
 - **Auth Helpers**: `ctx.user`, `ctx.session`, `ctx.isAuthenticated`, `ctx.hasScope()`, `ctx.requireAuth()`
 - **Partition Helpers**: `ctx.setPartition()` for tenant isolation in guards
@@ -1395,6 +1396,57 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 - Handles 1000+ req/s on a single instance
 
 **[→ See benchmarks](./api/deployment.md#performance)**
+</details>
+
+<details>
+<summary><strong>What's the difference between ctx.error() and c.error()?</strong></summary>
+
+**Both return standardized error responses, but with different capabilities:**
+
+| Feature | `ctx.error()` | `c.error()` (v16.1.26+) |
+|---------|---------------|-------------------------|
+| **Availability** | Enhanced context only (`async (c, ctx)`) | Global (works everywhere) |
+| **Response Format** | Basic `{ success: false, error: { ... } }` | Advanced with auto-detection |
+| **Status Code** | Manual only | Auto-detects from error name/message |
+| **Stack Traces** | No | Yes (development mode) |
+| **Error Details** | Basic | Supports custom details object |
+| **Verbose Logging** | No | Yes (opt-in) |
+
+**When to use each:**
+
+```javascript
+// ✅ ctx.error() - Quick & simple (enhanced context)
+'GET /users/:id': async (c, ctx) => {
+  if (!user) return ctx.error('Not found', 404);
+  return ctx.success(user);
+}
+
+// ✅ c.error() - Advanced features (anywhere)
+'GET /users/:id': async (c) => {
+  const err = new Error('User not found');
+  err.name = 'NotFoundError';
+  return c.error(err);  // Auto-returns 404
+}
+
+// ✅ c.error() - With details (anywhere)
+'POST /users': async (c, ctx) => {
+  return c.error(
+    new Error('Validation failed'),
+    400,
+    { field: 'email', rule: 'required' }
+  );
+}
+```
+
+**Auto-detected status codes:**
+- `ValidationError` → 400
+- `NotFoundError` → 404
+- `UnauthorizedError` → 401
+- `ForbiddenError` → 403
+- `ConflictError` → 409
+- Message patterns like "not found", "unauthorized", "conflict", etc.
+
+**[→ Full documentation: Advanced Error Handling](./enhanced-context.md#advanced-error-handling-with-cerror)**
 </details>
 
 ### Authentication & Authorization
