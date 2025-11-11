@@ -6,12 +6,13 @@
  * 2. Request tracking (for graceful shutdown)
  * 3. Failban (block banned IPs early)
  * 4. Request ID (before all logging)
- * 5. CORS (before auth checks)
- * 6. Security headers
- * 7. Session tracking
- * 8. Custom middlewares
- * 9. Templates
- * 10. Body size limits
+ * 5. Error helper (adds c.error() method)
+ * 6. CORS (before auth checks)
+ * 7. Security headers
+ * 8. Session tracking
+ * 9. Custom middlewares
+ * 10. Templates
+ * 11. Body size limits
  */
 
 import { idGenerator } from '../../../concerns/id.js';
@@ -19,6 +20,7 @@ import { createRequestIdMiddleware } from '../middlewares/request-id.js';
 import { createSecurityHeadersMiddleware } from '../middlewares/security-headers.js';
 import { createSessionTrackingMiddleware } from '../middlewares/session-tracking.js';
 import { createFailbanMiddleware, setupFailbanViolationListener } from '../middlewares/failban.js';
+import { errorHelper } from '../middlewares/error-helper.js';
 import { setupTemplateEngine } from '../utils/template-engine.js';
 import * as formatter from '../../shared/response-formatter.js';
 
@@ -69,22 +71,25 @@ export class MiddlewareChain {
     // 3. Request ID
     this.applyRequestId(app);
 
-    // 4. CORS
+    // 4. Error helper (adds c.error() method)
+    this.applyErrorHelper(app);
+
+    // 5. CORS
     this.applyCors(app);
 
-    // 5. Security headers
+    // 6. Security headers
     this.applySecurity(app);
 
-    // 6. Session tracking
+    // 7. Session tracking
     this.applySessionTracking(app);
 
-    // 7. Custom middlewares (compression will be applied here via ApiPlugin)
+    // 8. Custom middlewares (compression will be applied here via ApiPlugin)
     this.applyCustomMiddlewares(app);
 
-    // 8. Template engine
+    // 9. Template engine
     this.applyTemplates(app);
 
-    // 9. Body size limits
+    // 10. Body size limits
     this.applyBodySizeLimits(app);
   }
 
@@ -186,6 +191,24 @@ export class MiddlewareChain {
 
     if (this.verbose) {
       console.log(`[MiddlewareChain] Request ID tracking enabled (header: ${this.requestId.headerName || 'X-Request-ID'})`);
+    }
+  }
+
+  /**
+   * Apply error helper middleware
+   * Adds c.error() method to all route handlers
+   * @private
+   */
+  applyErrorHelper(app) {
+    const errorMiddleware = errorHelper({
+      includeStack: process.env.NODE_ENV !== 'production',
+      verbose: this.verbose
+    });
+
+    app.use('*', errorMiddleware);
+
+    if (this.verbose) {
+      console.log('[MiddlewareChain] Error helper enabled (c.error() method available)');
     }
   }
 
