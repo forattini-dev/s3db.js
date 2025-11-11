@@ -190,6 +190,7 @@ ApiPlugin uses peer dependencies to:
 | **[🔒 Security](./api/security.md)** | Failban, rate limiting, GeoIP blocking, CSP headers | Protecting your API |
 | **[🔌 Integrations](./api/integrations.md)** | RelationPlugin populate, Cloud/Kubernetes inventory exposure | Serving data from other plugins |
 | **[📝 OpenAPI & Swagger UI](./api/openapi-docs.md)** | Add descriptions, customize docs, best practices | Creating beautiful API documentation |
+| **[🚦 Routing](./routing.md)** | Ways to add routes, precedence, path rules | Extending the API without conflicts |
 | **[📊 Observability](./api/observability.md)** | Metrics, events, tracing, health checks | Monitoring production APIs |
 | **[📦 Static Files](./api/static-files.md)** | Serve SPAs (React/Vue/Angular) and assets | Building full-stack apps |
 | **[🚀 Deployment](./api/deployment.md)** | Docker, Kubernetes, zero-downtime deploys | Going to production |
