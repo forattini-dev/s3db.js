@@ -658,7 +658,9 @@ export class MemoryClient extends EventEmitter {
           try {
             record = await resource.get(recordId);
           } catch {
-            console.warn(`Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
+            if (this.verbose) {
+              console.warn(`Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
+            }
             record = null;
           }
         }

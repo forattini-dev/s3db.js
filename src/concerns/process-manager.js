@@ -188,11 +188,15 @@ export class ProcessManager {
     process.on('SIGTERM', this._boundSignalHandler);
     process.on('SIGINT', this._boundSignalHandler);
     process.on('uncaughtException', (err) => {
-      console.error('[ProcessManager] Uncaught exception:', err);
+      if (this.options.verbose) {
+        console.error('[ProcessManager] Uncaught exception:', err);
+      }
       this._handleSignal('uncaughtException');
     });
     process.on('unhandledRejection', (reason, promise) => {
-      console.error('[ProcessManager] Unhandled rejection at:', promise, 'reason:', reason);
+      if (this.options.verbose) {
+        console.error('[ProcessManager] Unhandled rejection at:', promise, 'reason:', reason);
+      }
       this._handleSignal('unhandledRejection');
     });
 
@@ -224,7 +228,9 @@ export class ProcessManager {
         process.exit(0);
       }
     } catch (err) {
-      console.error('[ProcessManager] Error during shutdown:', err);
+      if (this.options.verbose) {
+        console.error('[ProcessManager] Error during shutdown:', err);
+      }
       if (this.options.exitOnSignal) {
         process.exit(1);
       }

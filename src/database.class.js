@@ -532,7 +532,9 @@ export class Database extends SafeEventEmitter {
 
             if (!ok) {
               if (this.verbose) {
-                console.warn(`Failed to serialize hook for event '${event}':`, err.message);
+                if (this.verbose) {
+                  console.warn(`Failed to serialize hook for event '${event}':`, err.message);
+                }
               }
               return null;
             }
@@ -569,7 +571,9 @@ export class Database extends SafeEventEmitter {
 
             if (!ok || fn === null) {
               if (this.verbose) {
-                console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err?.message || 'Invalid function');
+                if (this.verbose) {
+                  console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err?.message || 'Invalid function');
+                }
               }
               return null;
             }
@@ -812,7 +816,9 @@ export class Database extends SafeEventEmitter {
           .catch(err => {
             // Log error but don't throw (avoid unhandled rejection)
             if (this.verbose) {
-              console.error('[Database] Metadata upload failed:', err.message);
+              if (this.verbose) {
+                console.error('[Database] Metadata upload failed:', err.message);
+              }
             }
             this._metadataUploadPending = false;
           });
@@ -1266,12 +1272,16 @@ export class Database extends SafeEventEmitter {
       });
 
       if (this.verbose) {
-        console.warn(`S3DB: Created backup of corrupted s3db.json as ${backupKey}`);
+        if (this.verbose) {
+          console.warn(`S3DB: Created backup of corrupted s3db.json as ${backupKey}`);
+        }
       }
     });
 
     if (!ok && this.verbose) {
-      console.warn(`S3DB: Failed to create backup: ${err.message}`);
+      if (this.verbose) {
+        console.warn(`S3DB: Failed to create backup: ${err.message}`);
+      }
     }
   }
 
@@ -1281,8 +1291,10 @@ export class Database extends SafeEventEmitter {
   async _uploadHealedMetadata(metadata, healingLog) {
     const [ok, err] = await tryFn(async () => {
       if (this.verbose && healingLog.length > 0) {
-        console.warn('S3DB Self-Healing Operations:');
-        healingLog.forEach(log => console.warn(`  - ${log}`));
+        if (this.verbose) {
+          console.warn('S3DB Self-Healing Operations:');
+          healingLog.forEach(log => console.warn(`  - ${log}`));
+        }
       }
 
       // Update lastUpdated timestamp
@@ -1297,13 +1309,17 @@ export class Database extends SafeEventEmitter {
       this.emit('db:metadata-healed', { healingLog, metadata });
 
       if (this.verbose) {
-        console.warn('S3DB: Successfully uploaded healed metadata');
+        if (this.verbose) {
+          console.warn('S3DB: Successfully uploaded healed metadata');
+        }
       }
     });
 
     if (!ok) {
       if (this.verbose) {
-        console.error(`S3DB: Failed to upload healed metadata: ${err.message}`);
+        if (this.verbose) {
+          console.error(`S3DB: Failed to upload healed metadata: ${err.message}`);
+        }
       }
       throw err;
     }
