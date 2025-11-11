@@ -27,7 +27,8 @@ export class Seeder {
   constructor(database, options = {}) {
     this.database = database;
     this.options = options;
-    this.verbose = options.verbose !== false;
+    // Default to false; only log when explicitly enabled
+    this.verbose = Boolean(options.verbose);
   }
 
   /**

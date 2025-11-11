@@ -149,6 +149,8 @@ export class Resource extends AsyncEventEmitter {
     this.name = name;
     this.client = client;
     this.version = version;
+    // Verbose follows explicit config, then client, then database (if provided during construction)
+    this.verbose = Boolean(config.verbose ?? (config.client && config.client.verbose) ?? (config.database && config.database.verbose));
     this.behavior = behavior;
     this.observers = observers;
     this.parallelism = parallelism;
@@ -3942,8 +3944,10 @@ export class Resource extends AsyncEventEmitter {
         const result = await guardFn(context, resource);
         return result === true;  // Force boolean
       } catch (err) {
-        // Guard error = deny access
-        console.error(`Guard error for ${operation}:`, err);
+        // Guard error = deny access (log only if verbose is enabled)
+        if (this.verbose || (this.database && this.database.verbose)) {
+          console.error(`Guard error for ${operation}:`, err);
+        }
         return false;
       }
     }

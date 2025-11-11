@@ -25,7 +25,9 @@ class AsyncEventEmitter extends EventEmitter {
           if (event !== 'error') {
             this.emit('error', error);
           } else {
-            console.error('Error in error handler:', error);
+            if (this && this.verbose) {
+              console.error('Error in error handler:', error);
+            }
           }
         }
       }

@@ -278,7 +278,9 @@ export async function generateTypes(database, options = {}) {
  */
 export async function printTypes(database, options = {}) {
   const types = await generateTypes(database, { ...options, outputPath: null });
-  console.log(types);
+  if (options && options.verbose) {
+    console.log(types);
+  }
   return types;
 }
 

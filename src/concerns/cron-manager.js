@@ -197,7 +197,9 @@ export class CronManager {
         }
       })
       .catch((error) => {
-        console.error('[CronManager] Shutdown error:', error);
+        if (this.options.verbose) {
+          console.error('[CronManager] Shutdown error:', error);
+        }
         if (this.options.exitOnSignal) {
           process.exit(1);
         }
@@ -208,7 +210,9 @@ export class CronManager {
    * Handle uncaught errors
    */
   _handleError(error) {
-    console.error('[CronManager] Uncaught error:', error);
+    if (this.options.verbose) {
+      console.error('[CronManager] Uncaught error:', error);
+    }
     this.shutdown({ error })
       .then(() => {
         if (this.options.exitOnSignal) {
@@ -285,7 +289,9 @@ export class CronManager {
    */
   async schedule(expression, fn, name, options = {}) {
     if (this._destroyed) {
-      console.warn(`[CronManager] Cannot schedule job '${name}' - manager is destroyed`);
+      if (this.options.verbose) {
+        console.warn(`[CronManager] Cannot schedule job '${name}' - manager is destroyed`);
+      }
       return null;
     }
 
@@ -401,7 +407,9 @@ export class CronManager {
 
       return true;
     } catch (error) {
-      console.error(`[CronManager] Error stopping job '${name}':`, error);
+      if (this.options.verbose) {
+        console.error(`[CronManager] Error stopping job '${name}':`, error);
+      }
       return false;
     }
   }
@@ -512,7 +520,9 @@ export class CronManager {
         try {
           await fn?.(...args);
         } catch (error) {
-          console.error(`[CronManager] Stub task '${name}' execution error:`, error);
+          if (this.options.verbose) {
+            console.error(`[CronManager] Stub task '${name}' execution error:`, error);
+          }
         }
       }
     };
