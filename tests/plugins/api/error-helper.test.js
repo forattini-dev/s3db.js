@@ -15,7 +15,17 @@ import {
   beforeEach,
   afterEach
 } from '@jest/globals';
-import { ApiPlugin } from '../../../src/plugins/api/index.js';
+import {
+  ApiPlugin,
+  ValidationError,
+  NotFoundError,
+  UnauthorizedError,
+  ForbiddenError,
+  ConflictError,
+  TooManyRequestsError,
+  InternalServerError,
+  createHttpError
+} from '../../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../../config.js';
 
 async function makeRequest(port, path) {
@@ -174,5 +184,107 @@ describe('API Plugin - Error Helper Middleware', () => {
     } finally {
       process.env.NODE_ENV = originalEnv;
     }
+  });
+});
+
+describe('API Plugin - Standard Error Classes', () => {
+  it('should create ValidationError with correct properties', () => {
+    const err = new ValidationError('Invalid email format', { field: 'email' });
+
+    expect(err.name).toBe('ValidationError');
+    expect(err.code).toBe('VALIDATION_ERROR');
+    expect(err.status).toBe(400);
+    expect(err.message).toBe('Invalid email format');
+    expect(err.details).toEqual({ field: 'email' });
+    expect(err.stack).toBeDefined();
+  });
+
+  it('should create NotFoundError with correct properties', () => {
+    const err = new NotFoundError('User not found', { id: 'user-123' });
+
+    expect(err.name).toBe('NotFoundError');
+    expect(err.code).toBe('NOT_FOUND');
+    expect(err.status).toBe(404);
+    expect(err.message).toBe('User not found');
+    expect(err.details).toEqual({ id: 'user-123' });
+  });
+
+  it('should create UnauthorizedError with correct properties', () => {
+    const err = new UnauthorizedError('Token expired');
+
+    expect(err.name).toBe('UnauthorizedError');
+    expect(err.code).toBe('UNAUTHORIZED');
+    expect(err.status).toBe(401);
+    expect(err.message).toBe('Token expired');
+  });
+
+  it('should create ForbiddenError with correct properties', () => {
+    const err = new ForbiddenError('Admin access required', {
+      required: ['admin'],
+      current: ['user']
+    });
+
+    expect(err.name).toBe('ForbiddenError');
+    expect(err.code).toBe('FORBIDDEN');
+    expect(err.status).toBe(403);
+    expect(err.details.required).toEqual(['admin']);
+  });
+
+  it('should create ConflictError with correct properties', () => {
+    const err = new ConflictError('Email already exists');
+
+    expect(err.name).toBe('ConflictError');
+    expect(err.code).toBe('CONFLICT');
+    expect(err.status).toBe(409);
+  });
+
+  it('should create TooManyRequestsError with correct properties', () => {
+    const err = new TooManyRequestsError('Rate limit exceeded', {
+      limit: 100,
+      retryAfter: 60
+    });
+
+    expect(err.name).toBe('TooManyRequestsError');
+    expect(err.code).toBe('TOO_MANY_REQUESTS');
+    expect(err.status).toBe(429);
+    expect(err.details.limit).toBe(100);
+  });
+
+  it('should create InternalServerError with correct properties', () => {
+    const err = new InternalServerError('Database connection failed');
+
+    expect(err.name).toBe('InternalServerError');
+    expect(err.code).toBe('INTERNAL_SERVER_ERROR');
+    expect(err.status).toBe(500);
+  });
+
+  it('should use default messages when not provided', () => {
+    const validationErr = new ValidationError();
+    expect(validationErr.message).toBe('Validation failed');
+
+    const notFoundErr = new NotFoundError();
+    expect(notFoundErr.message).toBe('Not found');
+
+    const unauthorizedErr = new UnauthorizedError();
+    expect(unauthorizedErr.message).toBe('Unauthorized');
+  });
+
+  it('should create errors via createHttpError helper', () => {
+    const err404 = createHttpError(404, 'Resource not found', { id: '123' });
+    expect(err404).toBeInstanceOf(NotFoundError);
+    expect(err404.status).toBe(404);
+    expect(err404.message).toBe('Resource not found');
+
+    const err400 = createHttpError(400, 'Bad request');
+    expect(err400.status).toBe(400);
+
+    const err500 = createHttpError(500, 'Internal error');
+    expect(err500).toBeInstanceOf(InternalServerError);
+  });
+
+  it('should fallback to InternalServerError for unknown status codes', () => {
+    const err = createHttpError(999, 'Unknown error');
+    expect(err).toBeInstanceOf(InternalServerError);
+    expect(err.status).toBe(500);
   });
 });

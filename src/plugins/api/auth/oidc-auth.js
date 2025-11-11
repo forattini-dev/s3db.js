@@ -159,7 +159,7 @@ async function getOrCreateUser(usersResource, claims, config) {
   const now = new Date().toISOString();
 
   if (user) {
-    // Update existing user
+    // Update existing user with ALL Azure AD claims
     const updates = {
       lastLoginAt: now,
       metadata: {
@@ -168,11 +168,9 @@ async function getOrCreateUser(usersResource, claims, config) {
           sub: claims.sub,
           provider: config.issuer,
           lastSync: now,
-          claims: {
-            name: claims.name,
-            email: claims.email,
-            picture: claims.picture
-          }
+          // 🎯 Save ALL claims from Azure AD (not just name/email/picture)
+          // This includes custom claims like costCenter, department, jobTitle, etc
+          claims: { ...claims }  // Full claims object
         }
       }
     };
@@ -242,11 +240,10 @@ async function getOrCreateUser(usersResource, claims, config) {
         sub: claims.sub,
         provider: config.issuer,
         createdAt: now,
-        claims: {
-          name: claims.name,
-          email: claims.email,
-          picture: claims.picture
-        }
+        // 🎯 Save ALL claims from Azure AD (not just name/email/picture)
+        // This includes custom claims like costCenter, department, jobTitle, etc
+        // AND all standard OIDC claims (iss, aud, exp, iat, nbf, nonce, etc)
+        claims: { ...claims }  // Full claims object
       },
       costCenterId: config.defaultCostCenter || null,
       teamId: config.defaultTeam || null
@@ -735,44 +732,56 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
         }
       }
 
+      // 🚧 TEMPORARY DEBUG: Log token sizes
+      console.log('\n========== TOKEN SIZE DEBUG ==========');
+      console.log('access_token bytes:', Buffer.byteLength(tokens.access_token || '', 'utf8'));
+      console.log('id_token bytes:', Buffer.byteLength(tokens.id_token || '', 'utf8'));
+      console.log('refresh_token bytes:', Buffer.byteLength(tokens.refresh_token || '', 'utf8'));
+      console.log('TOTAL tokens bytes:',
+        Buffer.byteLength(tokens.access_token || '', 'utf8') +
+        Buffer.byteLength(tokens.id_token || '', 'utf8') +
+        Buffer.byteLength(tokens.refresh_token || '', 'utf8')
+      );
+      console.log('======================================\n');
+
       // Create session with user data
+      // 🎯 MINIMAL COOKIE STRATEGY: Only essential data for auth (user details in database)
+      // Cookie limit: 4096 bytes - tokens alone exceed this (access_token ~2-3KB, id_token ~1-2KB)
+      // Solution: Store only id/email/scopes in cookie, full user data in database resource
       const now = Date.now();
       const sessionData = {
-        access_token: tokens.access_token,
-        id_token: tokens.id_token,
-        refresh_token: tokens.refresh_token,
-        expires_at: now + (tokens.expires_in * 1000),
-        issued_at: now,
-        last_activity: now,
+        // Session lifecycle
+        expires_at: now + (tokens.expires_in * 1000),  // Token expiry (for session validity)
+        last_activity: now,                            // For rolling session duration
 
-        // User data (avoid DB lookup on every request)
+        // Minimal user data (authorization only, ~200-400 bytes)
         user: user ? {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          name: user.name,
-          picture: user.picture,
-          role: user.role,
-          scopes: user.scopes,
-          active: user.active,
-          metadata: {
-            costCenterId: user.metadata?.costCenterId,
-            teamId: user.metadata?.teamId
-          }
+          id: user.id,           // For user lookup in database
+          email: user.email,     // For display/audit
+          role: user.role,       // For basic authorization
+          scopes: user.scopes    // For scope-based authorization
         } : {
           id: idTokenClaims.sub,
           email: idTokenClaims.email,
-          username: idTokenClaims.preferred_username || idTokenClaims.email,
-          name: idTokenClaims.name,
-          picture: idTokenClaims.picture,
           role: 'user',
           scopes: scopes,
-          active: true,
-          isVirtual: true
+          isVirtual: true  // Flag: user not in database (claims-only mode)
         }
       };
 
       const sessionJWT = await encodeSession(sessionData);
+
+      // 🚧 TEMPORARY DEBUG: Log session cookie size
+      console.log('\n========== SESSION COOKIE SIZE ==========');
+      console.log('Session data (stringified) bytes:', Buffer.byteLength(JSON.stringify(sessionData), 'utf8'));
+      console.log('Session JWT bytes:', Buffer.byteLength(sessionJWT, 'utf8'));
+      console.log('Cookie name bytes:', Buffer.byteLength(cookieName, 'utf8'));
+      console.log('Cookie attributes ~bytes:', 60);  // Approximate (Max-Age, Path, HttpOnly, Secure, SameSite)
+      console.log('TOTAL cookie bytes (name + JWT + attributes):',
+        Buffer.byteLength(cookieName, 'utf8') + Buffer.byteLength(sessionJWT, 'utf8') + 60
+      );
+      console.log('Browser limit: 4096 bytes');
+      console.log('==========================================\n');
 
       // Set session cookie
       setCookie(c, cookieName, sessionJWT, {
@@ -907,34 +916,11 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       return await next();
     }
 
-    // Auto-refresh tokens if needed
-    if (autoRefreshTokens && session.refresh_token && session.expires_at) {
-      const timeUntilExpiry = session.expires_at - Date.now();
-
-      if (timeUntilExpiry < refreshThreshold) {
-        try {
-          const newTokens = await refreshAccessToken(
-            tokenEndpoint,
-            session.refresh_token,
-            clientId,
-            clientSecret
-          );
-
-          session.access_token = newTokens.access_token;
-          session.expires_at = Date.now() + (newTokens.expires_in * 1000);
-
-          // If new refresh token provided, update it
-          if (newTokens.refresh_token) {
-            session.refresh_token = newTokens.refresh_token;
-          }
-        } catch (err) {
-          if (c.get('verbose')) {
-            console.error('[OIDC] Token refresh failed:', err);
-          }
-          // Continue with existing token (will expire soon)
-        }
-      }
-    }
+    // 🎯 Token refresh disabled (minimal cookie strategy)
+    // Since we don't store refresh_token in cookie (size optimization),
+    // user will need to re-authenticate when session expires.
+    // This is more secure and prevents cookie size issues.
+    // If you need auto-refresh, implement server-side session storage (Redis, S3DB, etc)
 
     // Update last_activity (rolling session)
     session.last_activity = Date.now();
@@ -961,13 +947,12 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       ...session.user,
       authMethod: 'oidc',
       session: {
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-        expires_at: session.expires_at
+        expires_at: session.expires_at,  // When session expires (user must re-login)
+        last_activity: session.last_activity  // Last request timestamp
       }
     });
 
-    // Re-encode session with updated last_activity and tokens
+    // Re-encode session with updated last_activity (rolling session)
     const newSessionJWT = await encodeSession(session);
 
     setCookie(c, cookieName, newSessionJWT, {

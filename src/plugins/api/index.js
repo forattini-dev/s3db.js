@@ -1232,3 +1232,36 @@ export { errorResponse, successResponse } from './utils/route-helper.js';
 
 // Export context injection middleware
 export { createContextInjectionMiddleware } from './middlewares/context-injection.js';
+
+// Export standard HTTP error classes
+export {
+  // With Http prefix (recommended to avoid conflicts)
+  HttpBadRequestError,
+  HttpValidationError,
+  HttpUnauthorizedError,
+  HttpForbiddenError,
+  HttpNotFoundError,
+  HttpMethodNotAllowedError,
+  HttpConflictError,
+  HttpUnprocessableEntityError,
+  HttpTooManyRequestsError,
+  HttpInternalServerError,
+  HttpNotImplementedError,
+  HttpServiceUnavailableError,
+  // Backward compatibility aliases (without Http prefix)
+  BadRequestError,
+  ValidationError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  MethodNotAllowedError,
+  ConflictError,
+  UnprocessableEntityError,
+  TooManyRequestsError,
+  InternalServerError,
+  NotImplementedError,
+  ServiceUnavailableError,
+  // Utilities
+  HTTP_ERRORS,
+  createHttpError
+} from './errors.js';
