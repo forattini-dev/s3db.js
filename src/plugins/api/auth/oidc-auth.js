@@ -104,6 +104,63 @@ export function validateOidcConfig(config) {
 }
 
 /**
+ * Apply userMapping configuration to map OIDC claims to user fields
+ * @param {Object} claims - OIDC token claims
+ * @param {Object} mapping - User mapping configuration
+ * @param {Object} defaults - Default values (id, scopes, provider, now)
+ * @returns {Object} Mapped user object
+ *
+ * @example
+ * userMapping: {
+ *   id: 'email',  // Use email claim as user ID
+ *   name: 'name',  // Map name claim to name field
+ *   email: 'email',  // Map email claim to email field (if schema has it)
+ *   customField: 'preferred_username',  // Map any claim to any field
+ *   metadata: (claims) => ({  // Function to build metadata
+ *     oidc: { sub: claims.sub, ... },
+ *     custom: claims.customClaim
+ *   })
+ * }
+ */
+function applyUserMapping(claims, mapping, defaults) {
+  const user = {
+    id: defaults.defaultId,  // Start with default ID
+    scopes: defaults.defaultScopes,  // Default scopes
+    lastLoginAt: defaults.now  // Always set lastLoginAt
+  };
+
+  // Apply simple field mappings (string → string)
+  for (const [userField, claimName] of Object.entries(mapping)) {
+    if (userField === 'metadata') continue;  // Skip metadata, handle separately
+
+    if (typeof claimName === 'string' && claims[claimName] !== undefined) {
+      user[userField] = claims[claimName];
+    }
+  }
+
+  // Handle metadata mapping (can be function or object)
+  if (mapping.metadata) {
+    if (typeof mapping.metadata === 'function') {
+      user.metadata = mapping.metadata(claims);
+    } else if (typeof mapping.metadata === 'object') {
+      user.metadata = mapping.metadata;
+    }
+  } else {
+    // Default metadata if not mapped
+    user.metadata = {
+      oidc: {
+        sub: claims.sub,
+        provider: defaults.provider,
+        createdAt: defaults.now,
+        claims: { ...claims }
+      }
+    };
+  }
+
+  return user;
+}
+
+/**
  * Get or create user from OIDC claims
  * @param {Object} usersResource - s3db.js users resource
  * @param {Object} claims - ID token claims
@@ -160,43 +217,51 @@ async function getOrCreateUser(usersResource, claims, config) {
 
   if (user) {
     // Update existing user with ALL Azure AD claims
-    const updates = {
+    // 🎯 Use replace() to avoid validation errors from invalid existing fields
+    // Explicitly exclude problematic fields that may have invalid data
+    const { webpush, lastUrlId, lastLoginIp, lastLoginUserAgent, ...userWithoutProblematicFields } = user;
+
+    // 🎯 Build clean user object with ONLY fields from custom schema
+    const cleanUser = {
+      ...userWithoutProblematicFields,
+
+      // Update fields that exist in custom schema
       lastLoginAt: now,
+      name: claims.name || user.name,
+      isActive: user.isActive !== undefined ? user.isActive : true,
+
+      // Rebuild metadata cleanly
       metadata: {
-        ...user.metadata,
+        costCenterId: user.metadata?.costCenterId,
+        teamId: user.metadata?.teamId,
+        needsOnboarding: user.metadata?.needsOnboarding,
+
+        // Update OIDC data with ALL Azure AD claims
         oidc: {
           sub: claims.sub,
           provider: config.issuer,
           lastSync: now,
-          // 🎯 Save ALL claims from Azure AD (not just name/email/picture)
-          // This includes custom claims like costCenter, department, jobTitle, etc
-          claims: { ...claims }  // Full claims object
+          claims: { ...claims }  // Email, picture, username are in claims
         }
       }
     };
 
-    // Update name if changed
-    if (claims.name && claims.name !== user.name) {
-      updates.name = claims.name;
-    }
-
-    // Call beforeUpdateUser hook if configured (allows refreshing external API data)
+    // Call beforeUpdateUser hook if configured
+    let finalUser = cleanUser;
     if (config.beforeUpdateUser && typeof config.beforeUpdateUser === 'function') {
       try {
         const enrichedData = await config.beforeUpdateUser({
-          user,
-          updates,
+          user: cleanUser,
+          updates: cleanUser,
           claims,
           usersResource
         });
 
-        // Merge enriched data into updates
         if (enrichedData && typeof enrichedData === 'object') {
-          Object.assign(updates, enrichedData);
-          // Deep merge metadata
+          finalUser = { ...cleanUser, ...enrichedData };
           if (enrichedData.metadata) {
-            updates.metadata = {
-              ...updates.metadata,
+            finalUser.metadata = {
+              ...cleanUser.metadata,
               ...enrichedData.metadata
             };
           }
@@ -205,11 +270,11 @@ async function getOrCreateUser(usersResource, claims, config) {
         if (config?.verbose) {
           console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
         }
-        // Continue with default updates (don't block auth)
       }
     }
 
-    user = await usersResource.update(userId, updates);
+    // Use replace() instead of update() to avoid merging with invalid existing fields
+    user = await usersResource.replace(user.id, finalUser);
     return { user, created: false };
   }
 
@@ -224,31 +289,34 @@ async function getOrCreateUser(usersResource, claims, config) {
     throw new Error('Cannot determine user ID from OIDC claims');
   }
 
-  const newUser = {
-    id: newUserId,
-    email: claims.email || newUserId,
-    username: claims.preferred_username || claims.email || newUserId,
-    name: claims.name || claims.email || newUserId,
-    picture: claims.picture || null,
-    role: config.defaultRole || 'user',
-    scopes: config.defaultScopes || ['openid', 'profile', 'email'],
-    active: true,
-    apiKey: null, // Will be generated on first API usage if needed
-    lastLoginAt: now,
-    metadata: {
-      oidc: {
-        sub: claims.sub,
-        provider: config.issuer,
-        createdAt: now,
-        // 🎯 Save ALL claims from Azure AD (not just name/email/picture)
-        // This includes custom claims like costCenter, department, jobTitle, etc
-        // AND all standard OIDC claims (iss, aud, exp, iat, nbf, nonce, etc)
-        claims: { ...claims }  // Full claims object
-      },
-      costCenterId: config.defaultCostCenter || null,
-      teamId: config.defaultTeam || null
-    }
-  };
+  // 🎯 Apply userMapping if configured (allows custom field mapping from claims)
+  let newUser;
+  if (config.userMapping && typeof config.userMapping === 'object') {
+    newUser = applyUserMapping(claims, config.userMapping, {
+      defaultId: newUserId,
+      defaultScopes: config.defaultScopes || ['preset:user'],
+      provider: config.issuer,
+      now
+    });
+  } else {
+    // Fallback to default mapping if no userMapping configured
+    newUser = {
+      id: newUserId,
+      name: claims.name || claims.email || newUserId,
+      scopes: config.defaultScopes || ['preset:user'],
+      isActive: true,
+      lastLoginAt: now,
+      // apiToken will be auto-generated by beforeInsert hook if not provided
+      metadata: {
+        oidc: {
+          sub: claims.sub,
+          provider: config.issuer,
+          createdAt: now,
+          claims: { ...claims }
+        }
+      }
+    };
+  }
 
   // Call beforeCreateUser hook if configured (allows enriching with external API data)
   if (config.beforeCreateUser && typeof config.beforeCreateUser === 'function') {

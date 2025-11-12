@@ -22,6 +22,7 @@ export function createAuthRoutes(authResource, config = {}) {
   const app = new Hono();
   const {
     driver,                          // 'jwt' or 'basic'
+    drivers = [],                    // All enabled drivers
     usernameField = 'email',         // Field name for username (default: 'email')
     passwordField = 'password',      // Field name for password (default: 'password')
     jwtSecret,
@@ -30,6 +31,11 @@ export function createAuthRoutes(authResource, config = {}) {
     registration = {},
     loginThrottle = {}
   } = config;
+
+  // Check if using external auth (OIDC/OAuth2) where password is managed externally
+  const hasExternalAuth = Array.isArray(drivers) && drivers.some(d =>
+    ['oidc', 'oauth2'].includes(d)
+  );
 
   const registrationConfig = {
     enabled: registration.enabled === true,
@@ -155,18 +161,33 @@ export function createAuthRoutes(authResource, config = {}) {
       const username = data[usernameField];
       const password = data[passwordField];
 
-      // Validate input
-      if (!username || !password) {
+      // Validate input (password optional for external auth)
+      if (!username) {
         const response = formatter.validationError([
-          { field: usernameField, message: `${usernameField} is required` },
-          { field: passwordField, message: `${passwordField} is required` }
+          { field: usernameField, message: `${usernameField} is required` }
         ]);
         return c.json(response, response._status);
       }
 
-      if (password.length < 8) {
+      // Password validation (only required when NOT using external auth)
+      if (!hasExternalAuth) {
+        if (!password) {
+          const response = formatter.validationError([
+            { field: passwordField, message: `${passwordField} is required` }
+          ]);
+          return c.json(response, response._status);
+        }
+
+        if (password.length < 8) {
+          const response = formatter.validationError([
+            { field: passwordField, message: 'Password must be at least 8 characters' }
+          ]);
+          return c.json(response, response._status);
+        }
+      } else if (password && password.length < 8) {
+        // If password provided with external auth, it must still meet minimum length
         const response = formatter.validationError([
-          { field: passwordField, message: 'Password must be at least 8 characters' }
+          { field: passwordField, message: 'Password must be at least 8 characters if provided' }
         ]);
         return c.json(response, response._status);
       }
@@ -196,10 +217,13 @@ export function createAuthRoutes(authResource, config = {}) {
 
       userData[usernameField] = username;
 
-      if (isPasswordType) {
-        userData[passwordField] = password;
-      } else {
-        userData[passwordField] = await hashPassword(password);
+      // Only set password if provided (optional for external auth)
+      if (password) {
+        if (isPasswordType) {
+          userData[passwordField] = password;
+        } else {
+          userData[passwordField] = await hashPassword(password);
+        }
       }
 
       if (schemaAttributes.role !== undefined) {
