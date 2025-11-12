@@ -516,6 +516,16 @@ export class ApiPlugin extends Plugin {
       return;
     }
 
+    // Check if using external auth (OIDC/OAuth2) - password managed externally
+    const hasExternalAuth = this.config.auth.drivers.some(driver =>
+      ['oidc', 'oauth2'].includes(driver)
+    );
+
+    // Password is optional when using external auth providers
+    const passwordValidation = hasExternalAuth
+      ? 'secret|optional|minlength:8'  // Optional for OIDC/OAuth2 (external password management)
+      : 'secret|required|minlength:8'; // Required for local auth (Basic, JWT, API Key)
+
     const [ok, err, resource] = await tryFn(() =>
       this.database.createResource({
         name: this.usersResourceName,
@@ -523,7 +533,7 @@ export class ApiPlugin extends Plugin {
           id: 'string|required',
           username: 'string|required|minlength:3',
           email: 'string|required|email',
-          password: 'secret|required|minlength:8',
+          password: passwordValidation,
           apiKey: 'string|optional',
           jwtSecret: 'string|optional',
           role: 'string|default:user',
@@ -546,7 +556,9 @@ export class ApiPlugin extends Plugin {
     this.usersResource = resource;
     this.config.auth.resource = resource.name;
     if (this.config.verbose) {
-      console.log(`[API Plugin] Created ${this.usersResourceName} resource for authentication`);
+      const authType = hasExternalAuth ? 'external auth (OIDC/OAuth2)' : 'local auth';
+      const passwordNote = hasExternalAuth ? ' (password optional - managed externally)' : ' (password required)';
+      console.log(`[API Plugin] Created ${this.usersResourceName} resource for ${authType}${passwordNote}`);
     }
   }
 

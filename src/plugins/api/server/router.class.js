@@ -468,6 +468,7 @@ export class Router {
     // Prepare auth config for routes
     const authConfig = {
       driver: 'jwt',
+      drivers: this.config.auth.drivers,  // Pass all enabled drivers
       usernameField,
       passwordField,
       jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
