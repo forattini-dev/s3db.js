@@ -73,7 +73,7 @@ describe('API Plugin - Error Helper Middleware', () => {
     await db.usePlugin(apiPlugin);
 
     // Get Hono app instance to add test routes
-    app = apiPlugin.app;
+    app = apiPlugin.getApp();
 
     // Test routes using c.error()
     app.get('/test/error-string', (c) => {
@@ -136,7 +136,8 @@ describe('API Plugin - Error Helper Middleware', () => {
     expect(data.error).toBeDefined();
     expect(data.error.message).toBe('Database connection failed');
     expect(data.error.status).toBe(500);
-    expect(data.error.code).toBe('Error');
+    // Plain Error objects with name='Error' default to 'INTERNAL_ERROR' code
+    expect(data.error.code).toBe('INTERNAL_ERROR');
   });
 
   it('should auto-detect status code from error name', async () => {
@@ -191,7 +192,7 @@ describe('API Plugin - Standard Error Classes', () => {
   it('should create ValidationError with correct properties', () => {
     const err = new ValidationError('Invalid email format', { field: 'email' });
 
-    expect(err.name).toBe('ValidationError');
+    expect(err.name).toBe('HttpValidationError'); // Aliases use Http prefix internally
     expect(err.code).toBe('VALIDATION_ERROR');
     expect(err.status).toBe(400);
     expect(err.message).toBe('Invalid email format');
@@ -202,7 +203,7 @@ describe('API Plugin - Standard Error Classes', () => {
   it('should create NotFoundError with correct properties', () => {
     const err = new NotFoundError('User not found', { id: 'user-123' });
 
-    expect(err.name).toBe('NotFoundError');
+    expect(err.name).toBe('HttpNotFoundError'); // Aliases use Http prefix internally
     expect(err.code).toBe('NOT_FOUND');
     expect(err.status).toBe(404);
     expect(err.message).toBe('User not found');
@@ -212,7 +213,7 @@ describe('API Plugin - Standard Error Classes', () => {
   it('should create UnauthorizedError with correct properties', () => {
     const err = new UnauthorizedError('Token expired');
 
-    expect(err.name).toBe('UnauthorizedError');
+    expect(err.name).toBe('HttpUnauthorizedError'); // Aliases use Http prefix internally
     expect(err.code).toBe('UNAUTHORIZED');
     expect(err.status).toBe(401);
     expect(err.message).toBe('Token expired');
@@ -224,7 +225,7 @@ describe('API Plugin - Standard Error Classes', () => {
       current: ['user']
     });
 
-    expect(err.name).toBe('ForbiddenError');
+    expect(err.name).toBe('HttpForbiddenError'); // Aliases use Http prefix internally
     expect(err.code).toBe('FORBIDDEN');
     expect(err.status).toBe(403);
     expect(err.details.required).toEqual(['admin']);
@@ -233,7 +234,7 @@ describe('API Plugin - Standard Error Classes', () => {
   it('should create ConflictError with correct properties', () => {
     const err = new ConflictError('Email already exists');
 
-    expect(err.name).toBe('ConflictError');
+    expect(err.name).toBe('HttpConflictError'); // Aliases use Http prefix internally
     expect(err.code).toBe('CONFLICT');
     expect(err.status).toBe(409);
   });
@@ -244,7 +245,7 @@ describe('API Plugin - Standard Error Classes', () => {
       retryAfter: 60
     });
 
-    expect(err.name).toBe('TooManyRequestsError');
+    expect(err.name).toBe('HttpTooManyRequestsError'); // Aliases use Http prefix internally
     expect(err.code).toBe('TOO_MANY_REQUESTS');
     expect(err.status).toBe(429);
     expect(err.details.limit).toBe(100);
@@ -253,7 +254,7 @@ describe('API Plugin - Standard Error Classes', () => {
   it('should create InternalServerError with correct properties', () => {
     const err = new InternalServerError('Database connection failed');
 
-    expect(err.name).toBe('InternalServerError');
+    expect(err.name).toBe('HttpInternalServerError'); // Aliases use Http prefix internally
     expect(err.code).toBe('INTERNAL_SERVER_ERROR');
     expect(err.status).toBe(500);
   });

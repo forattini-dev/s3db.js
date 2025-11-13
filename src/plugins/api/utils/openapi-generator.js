@@ -7,6 +7,7 @@
 
 import { applyBasePath, normalizeBasePath } from './base-path.js';
 import startCase from 'lodash-es/startCase.js';
+import { findBestMatch } from './path-matcher.js';
 
 const CUSTOM_ROUTES_TAG = 'Custom Routes';
 const CUSTOM_ROUTE_METHOD_REGEX = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i;
@@ -56,6 +57,142 @@ function methodSupportsRequestBody(method) {
   return ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase());
 }
 
+const DRIVER_SECURITY_MAP = {
+  jwt: 'bearerAuth',
+  apiKey: 'apiKeyAuth',
+  basic: 'basicAuth',
+  oidc: 'oidcAuth'
+};
+
+function toRuntimePath(path = '') {
+  return path.replace(/{([^}]+)}/g, ':$1');
+}
+
+/**
+ * Infer tag from custom route path by extracting first segment after prefixes
+ *
+ * Examples:
+ *   inferTagFromPath('/api/v1/analytics/reports', '/api', 'v1') → 'analytics'
+ *   inferTagFromPath('/api/v1/admin/settings', '/api', 'v1') → 'admin'
+ *   inferTagFromPath('/api/v1/:id', '/api', 'v1') → null (fallback to Custom Routes)
+ *
+ * @param {string} fullPath - Full path including basePrefix and versionPrefix
+ * @param {string} basePrefix - Base path prefix (e.g., '/api')
+ * @param {string} versionPrefix - Version prefix (e.g., 'v1', 'v2', or '')
+ * @returns {string|null} - Inferred tag name or null if inference failed
+ */
+function inferTagFromPath(fullPath, basePrefix = '', versionPrefix = '') {
+  if (!fullPath || typeof fullPath !== 'string') {
+    return null;
+  }
+
+  let path = fullPath.trim();
+
+  // Remove basePrefix if present
+  if (basePrefix && typeof basePrefix === 'string') {
+    const normalizedBase = basePrefix.trim();
+    if (normalizedBase && path.startsWith(normalizedBase)) {
+      path = path.substring(normalizedBase.length);
+    }
+  }
+
+  // Remove versionPrefix if present (could be /v1 or just v1)
+  if (versionPrefix && typeof versionPrefix === 'string') {
+    const normalizedVersion = versionPrefix.trim();
+    if (normalizedVersion) {
+      // Handle both /v1 and v1 formats
+      const versionPattern = normalizedVersion.startsWith('/')
+        ? normalizedVersion
+        : `/${normalizedVersion}`;
+      if (path.startsWith(versionPattern)) {
+        path = path.substring(versionPattern.length);
+      }
+    }
+  }
+
+  // Ensure path starts with /
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
+  }
+
+  // Split path into segments
+  const segments = path.split('/').filter(segment => segment.length > 0);
+
+  // If no segments, cannot infer tag
+  if (segments.length === 0) {
+    return null;
+  }
+
+  // Get first segment
+  const firstSegment = segments[0];
+
+  // Check if segment is a parameter (starts with : or is wrapped in {})
+  if (firstSegment.startsWith(':') || firstSegment.startsWith('{') || firstSegment === '*') {
+    return null;
+  }
+
+  // Check if segment is empty or only whitespace
+  if (!firstSegment.trim()) {
+    return null;
+  }
+
+  // Return the first segment as-is (lowercase, no formatting)
+  return firstSegment.toLowerCase();
+}
+
+function createPathSecurityResolver(auth = {}) {
+  const rawRules = Array.isArray(auth.pathRules) ? auth.pathRules : [];
+  if (rawRules.length === 0) {
+    return () => null;
+  }
+
+  const normalizedRules = rawRules
+    .map((rule, index) => {
+      if (!rule || typeof rule !== 'object') {
+        return null;
+      }
+      let pattern = rule.path || rule.pattern;
+      if (typeof pattern !== 'string' || !pattern.trim()) {
+        return null;
+      }
+      pattern = pattern.trim();
+      if (!pattern.startsWith('/')) {
+        pattern = `/${pattern.replace(/^\/*/, '')}`;
+      }
+
+      return {
+        id: `path-rule-${index}`,
+        pattern,
+        required: rule.required !== false,
+        methods: Array.isArray(rule.methods)
+          ? rule.methods.map((m) => String(m).trim().toLowerCase()).filter(Boolean)
+          : []
+      };
+    })
+    .filter(Boolean);
+
+  if (normalizedRules.length === 0) {
+    return () => null;
+  }
+
+  return (path) => {
+    const match = findBestMatch(normalizedRules, path);
+    if (!match) {
+      return null;
+    }
+    if (!match.required) {
+      return [];
+    }
+    const schemes = match.methods
+      .map((driver) => DRIVER_SECURITY_MAP[driver])
+      .filter(Boolean);
+    if (schemes.length === 0) {
+      return [];
+    }
+    return schemes.map((scheme) => ({ [scheme]: [] }));
+  };
+}
+
 function buildCustomRouteOperationId(scope, method, path) {
   const sanitizedPath = path
     .replace(/[{}\/:\-\s]+/g, '_')
@@ -64,7 +201,7 @@ function buildCustomRouteOperationId(scope, method, path) {
   return `${scope}_${method.toLowerCase()}_${sanitizedPath}`;
 }
 
-function createCustomRouteOperation({ method, path, originalKey, scope, tags }) {
+function createCustomRouteOperation({ method, path, originalKey, scope, tags, security }) {
   const summary = `Custom ${method} ${path}`;
   const descriptionLines = [
     `Custom route defined ${scope}.`,
@@ -137,7 +274,8 @@ function createCustomRouteOperation({ method, path, originalKey, scope, tags }) 
     description: descriptionLines.join('\n\n'),
     operationId: buildCustomRouteOperationId(scope, method, path),
     requestBody,
-    responses
+    responses,
+    security: Array.isArray(security) && security.length > 0 ? security : undefined
   };
 }
 
@@ -158,7 +296,8 @@ function addCustomRouteOperation(spec, path, method, details) {
     path: normalizedPath,
     originalKey: details.originalKey,
     scope: details.scope,
-    tags: details.tags
+    tags: details.tags,
+    security: details.security
   });
 
   return true;
@@ -383,6 +522,9 @@ function generateResourcePaths(resource, version, config = {}) {
   const resourceName = resource.name;
   const resourceLabel = formatResourceLabel(resourceName);
   const basePathPrefix = config.basePath || '';
+  const resolveSecurity = typeof config.resolveSecurityForPath === 'function'
+    ? config.resolveSecurityForPath
+    : null;
 
   // Determine version prefix (same logic as server.js)
   let versionPrefixConfig = config.versionPrefix !== undefined ? config.versionPrefix : false;
@@ -404,6 +546,8 @@ function generateResourcePaths(resource, version, config = {}) {
   const hasRelations = resource._relations && Object.keys(resource._relations).length > 0;
 
   const paths = {};
+  const runtimeBasePath = basePath;
+  const runtimeItemPath = toRuntimePath(`${basePath}/{id}`);
 
   // Security schemes
   const security = [];
@@ -411,7 +555,19 @@ function generateResourcePaths(resource, version, config = {}) {
     if (authMethods.includes('jwt')) security.push({ bearerAuth: [] });
     if (authMethods.includes('apiKey')) security.push({ apiKeyAuth: [] });
     if (authMethods.includes('basic')) security.push({ basicAuth: [] });
+    if (authMethods.includes('oidc')) security.push({ oidcAuth: [] });
   }
+
+  const formatSecurityForPath = (runtimePath) => {
+    if (!resolveSecurity) {
+      return security.length > 0 ? security : undefined;
+    }
+    const resolved = resolveSecurity(runtimePath);
+    if (resolved === null || resolved === undefined) {
+      return security.length > 0 ? security : undefined;
+    }
+    return resolved.length > 0 ? resolved : undefined;
+  };
 
   // Extract partition information for documentation
   // Use $schema for reliable access to partition definitions
@@ -629,7 +785,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
             }
           }
         },
-        security: security.length > 0 ? security : undefined
+        security: formatSecurityForPath(runtimeBasePath)
       }
     };
   }
@@ -702,7 +858,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
             }
           }
         },
-        security: security.length > 0 ? security : undefined
+        security: formatSecurityForPath(runtimeItemPath)
       }
     };
   }
@@ -752,7 +908,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
           }
         }
       },
-      security: security.length > 0 ? security : undefined
+      security: formatSecurityForPath(runtimeBasePath)
     };
   }
 
@@ -803,7 +959,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
           }
         }
       },
-      security: security.length > 0 ? security : undefined
+      security: formatSecurityForPath(runtimeItemPath)
     };
   }
 
@@ -857,7 +1013,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
           }
         }
       },
-      security: security.length > 0 ? security : undefined
+      security: formatSecurityForPath(runtimeItemPath)
     };
   }
 
@@ -889,7 +1045,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
           }
         }
       },
-      security: security.length > 0 ? security : undefined
+      security: formatSecurityForPath(runtimeItemPath)
     };
   }
 
@@ -919,7 +1075,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
           }
         }
       },
-      security: security.length > 0 ? security : undefined
+      security: formatSecurityForPath(runtimeBasePath)
     };
 
     // HEAD for individual resource
@@ -950,7 +1106,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
           description: 'Resource not found'
         }
       },
-      security: security.length > 0 ? security : undefined
+      security: formatSecurityForPath(runtimeItemPath)
     };
   }
 
@@ -1054,7 +1210,16 @@ The response includes pagination metadata in the \`pagination\` object with tota
  * @param {string} basePathPrefix - Normalized base path
  * @returns {Object} OpenAPI paths for relation
  */
-function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema, versionPrefix = '', basePathPrefix = '') {
+function generateRelationalPaths(
+  resource,
+  relationName,
+  relationConfig,
+  version,
+  relatedSchema,
+  versionPrefix = '',
+  basePathPrefix = '',
+  resolveSecurityForPath = null
+) {
   const resourceName = resource.name;
   const resourceLabel = formatResourceLabel(resourceName);
   const relationLabel = formatResourceLabel(relationName);
@@ -1066,6 +1231,20 @@ function generateRelationalPaths(resource, relationName, relationConfig, version
   );
   const relatedResourceName = relationConfig.resource;
   const isToMany = relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany';
+  const runtimeRelationPath = toRuntimePath(basePath);
+  const resolveSecurity = typeof resolveSecurityForPath === 'function'
+    ? resolveSecurityForPath
+    : null;
+  const formatSecurityForPath = (runtimePath) => {
+    if (!resolveSecurity) {
+      return undefined;
+    }
+    const resolved = resolveSecurity(runtimePath);
+    if (!resolved || resolved.length === 0) {
+      return undefined;
+    }
+    return resolved;
+  };
 
   const paths = {};
 
@@ -1152,7 +1331,8 @@ function generateRelationalPaths(resource, relationName, relationConfig, version
             }
           }
         }
-      }
+      },
+      security: formatSecurityForPath(runtimeRelationPath)
     }
   };
 
@@ -1310,19 +1490,73 @@ For detailed information about each endpoint, see the sections below.`;
     tags: []
   };
 
+  const resolveSecurityForPath = createPathSecurityResolver(auth);
+
   const documentedCustomRouteOperations = new Set();
   let customRoutesUsed = false;
 
-  const registerCustomRouteOperation = ({ fullPath, method, originalKey, scope, tags }) => {
+  const registerCustomRouteOperation = ({ fullPath, method, originalKey, scope, tags, basePrefix, versionPrefix }) => {
     const opKey = `${method.toUpperCase()} ${convertPathToOpenAPI(fullPath)}`;
     if (documentedCustomRouteOperations.has(opKey)) {
       return;
     }
 
+    // Use provided tags (already processed for resource-level routes)
+    let finalTags = tags || [];
+
+    // If tags include CUSTOM_ROUTES_TAG, try to infer a better tag
+    if (finalTags.includes(CUSTOM_ROUTES_TAG)) {
+      const inferredTag = inferTagFromPath(fullPath, basePrefix, versionPrefix);
+
+      if (inferredTag) {
+        // Replace CUSTOM_ROUTES_TAG with inferred tag
+        finalTags = finalTags.map(tag => tag === CUSTOM_ROUTES_TAG ? inferredTag : tag);
+
+        // Remove duplicates (e.g., if inferred tag equals resource name)
+        finalTags = [...new Set(finalTags)];
+
+        // Ensure inferred tag exists in spec.tags if not already present
+        if (!spec.tags.some(t => t.name === inferredTag)) {
+          spec.tags.push({
+            name: inferredTag,
+            description: `Custom routes for ${inferredTag}`
+          });
+        }
+      }
+    } else if (finalTags.length === 0) {
+      // If no tags provided, try to infer
+      const inferredTag = inferTagFromPath(fullPath, basePrefix, versionPrefix);
+      if (inferredTag) {
+        finalTags = [inferredTag];
+        if (!spec.tags.some(t => t.name === inferredTag)) {
+          spec.tags.push({
+            name: inferredTag,
+            description: `Custom routes for ${inferredTag}`
+          });
+        }
+      } else {
+        finalTags = [CUSTOM_ROUTES_TAG];
+      }
+    } else {
+      // Tags already provided (e.g., resource-level with inferred tag)
+      // Ensure all tags exist in spec.tags
+      for (const tag of finalTags) {
+        if (tag !== CUSTOM_ROUTES_TAG && !spec.tags.some(t => t.name === tag)) {
+          spec.tags.push({
+            name: tag,
+            description: `Custom routes for ${tag}`
+          });
+        }
+      }
+    }
+
     const added = addCustomRouteOperation(spec, fullPath, method, {
       originalKey,
       scope,
-      tags
+      tags: finalTags,
+      security: resolveSecurityForPath
+        ? resolveSecurityForPath(fullPath)
+        : null
     });
 
     if (added) {
@@ -1331,8 +1565,13 @@ For detailed information about each endpoint, see the sections below.`;
     }
   };
 
+  const driverEntries = Array.isArray(auth.drivers) ? auth.drivers : [];
+  const driverNames = driverEntries
+    .map((driver) => driver?.driver || driver?.type)
+    .filter(Boolean);
+
   // Add security schemes
-  if (auth.jwt?.enabled) {
+  if (auth.jwt?.enabled || driverNames.includes('jwt')) {
     spec.components.securitySchemes.bearerAuth = {
       type: 'http',
       scheme: 'bearer',
@@ -1341,7 +1580,7 @@ For detailed information about each endpoint, see the sections below.`;
     };
   }
 
-  if (auth.apiKey?.enabled) {
+  if (auth.apiKey?.enabled || driverNames.includes('apiKey')) {
     spec.components.securitySchemes.apiKeyAuth = {
       type: 'apiKey',
       in: 'header',
@@ -1350,11 +1589,25 @@ For detailed information about each endpoint, see the sections below.`;
     };
   }
 
-  if (auth.basic?.enabled) {
+  if (auth.basic?.enabled || driverNames.includes('basic')) {
     spec.components.securitySchemes.basicAuth = {
       type: 'http',
       scheme: 'basic',
       description: 'HTTP Basic authentication'
+    };
+  }
+
+  const oidcDriver = driverEntries.find((driver) => driver?.driver === 'oidc');
+  if (oidcDriver) {
+    const issuer = oidcDriver.config?.issuer;
+    const discoveryUrl = oidcDriver.config?.openIdConnectUrl ||
+      (issuer ? `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration` : null) ||
+      `${serverUrl}/.well-known/openid-configuration`;
+
+    spec.components.securitySchemes.oidcAuth = {
+      type: 'openIdConnect',
+      openIdConnectUrl: discoveryUrl,
+      description: 'OIDC authentication'
     };
   }
 
@@ -1416,7 +1669,8 @@ For detailed information about each endpoint, see the sections below.`;
     const paths = generateResourcePaths(resource, version, {
       ...resourceConfig,
       versionPrefix: versionPrefixConfig,
-      basePath: normalizedBasePath
+      basePath: normalizedBasePath,
+      resolveSecurityForPath
     });
 
     // Merge paths
@@ -1468,7 +1722,8 @@ For detailed information about each endpoint, see the sections below.`;
           version,
           relatedSchema,
           prefix,
-          normalizedBasePath
+          normalizedBasePath,
+          resolveSecurityForPath
         );
 
         // Merge relational paths
@@ -1488,12 +1743,21 @@ For detailed information about each endpoint, see the sections below.`;
         ? `${resourceBaseMountPath}${relativePath}`
         : resourceBaseMountPath;
 
+      // For resource-level routes, infer tag from the relative path (not fullPath)
+      // because fullPath already includes the resource name
+      const inferredTag = relativePath ? inferTagFromPath(relativePath, '', '') : null;
+      const tags = inferredTag && inferredTag !== name
+        ? [name, inferredTag]
+        : [name];
+
       registerCustomRouteOperation({
         fullPath,
         method: routeDef.method,
         originalKey: routeDef.originalKey,
         scope: `for resource "${resourceLabel}"`,
-        tags: [name, CUSTOM_ROUTES_TAG]
+        tags,
+        basePrefix: normalizedBasePath,
+        versionPrefix: prefix
       });
     }
   }
@@ -1506,7 +1770,9 @@ For detailed information about each endpoint, see the sections below.`;
       method: routeDef.method,
       originalKey: routeDef.originalKey,
       scope: 'at plugin level',
-      tags: [CUSTOM_ROUTES_TAG]
+      tags: [CUSTOM_ROUTES_TAG],
+      basePrefix: normalizedBasePath,
+      versionPrefix: globalVersionPrefix || ''
     });
   }
 
