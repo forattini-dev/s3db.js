@@ -17,7 +17,8 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
       attributes: {
         id: 'string|optional',
         token: 'string'
-      }
+      },
+      timestamps: true  // Required for TTL to work correctly with _createdAt
     });
 
     plugin = new TTLPlugin({

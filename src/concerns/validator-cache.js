@@ -111,7 +111,7 @@ export function evictUnusedValidators(maxAgeMs = 5 * 60 * 1000) {
   let evicted = 0;
 
   for (const [fingerprint, cached] of validatorCache.entries()) {
-    if (cached.refCount === 0 && (now - cached.lastAccessedAt) > maxAgeMs) {
+    if (cached.refCount === 0 && (now - cached.lastAccessedAt) >= maxAgeMs) {
       validatorCache.delete(fingerprint);
       evicted++;
     }

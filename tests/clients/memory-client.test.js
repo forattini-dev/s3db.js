@@ -1478,7 +1478,7 @@ describe('MemoryClient - Direct API Tests', () => {
       });
 
       const failingResource = {
-        get: jest.fn().mockRejectedValue(new Error('not available')),
+        get: async () => { throw new Error('not available'); },
         schema: null
       };
 
@@ -1486,7 +1486,12 @@ describe('MemoryClient - Direct API Tests', () => {
         resources: { logs: failingResource }
       };
 
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      // Capture console.warn calls
+      const warnCalls = [];
+      const originalWarn = console.warn;
+      console.warn = (...args) => {
+        warnCalls.push(args);
+      };
 
       const result = await client.exportBackup(tmpDir, {
         compress: false,
@@ -1506,8 +1511,8 @@ describe('MemoryClient - Direct API Tests', () => {
       expect(malformedRecord._body).toContain('{"level":"warn"');
       expect(metaRecord).toBeDefined();
 
-      expect(warnSpy).toHaveBeenCalled();
-      warnSpy.mockRestore();
+      expect(warnCalls.length).toBeGreaterThan(0);
+      console.warn = originalWarn;
 
       await fs.rm(tmpDir, { recursive: true, force: true });
     });
@@ -1547,9 +1552,19 @@ describe('MemoryClient - Direct API Tests', () => {
       await client.putObject({ key: 'resource=temp/id=temp', metadata: { temp: 'true' } });
 
       client.verbose = true;
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-      const createResource = jest.fn().mockRejectedValue(new Error('already exists'));
+      // Capture console.warn calls
+      const warnCalls = [];
+      const originalWarn = console.warn;
+      console.warn = (...args) => {
+        warnCalls.push(args);
+      };
+
+      const createResourceCalls = [];
+      const createResource = async (...args) => {
+        createResourceCalls.push(args);
+        throw new Error('already exists');
+      };
       const database = { createResource };
 
       const stats = await client.importBackup(tmpDir, {
@@ -1557,15 +1572,16 @@ describe('MemoryClient - Direct API Tests', () => {
         database
       });
 
-      expect(createResource).toHaveBeenCalledWith(expect.objectContaining({ name: 'items' }));
+      expect(createResourceCalls.length).toBeGreaterThan(0);
+      expect(createResourceCalls[0][0]).toMatchObject({ name: 'items' });
       expect(stats.resourcesImported).toBe(1);
       expect(stats.recordsImported).toBe(1);
       expect(stats.errors.length).toBe(1);
       expect(client.getStats().objectCount).toBeGreaterThanOrEqual(1);
 
-      expect(warnSpy).toHaveBeenCalled();
+      expect(warnCalls.length).toBeGreaterThan(0);
       client.verbose = false;
-      warnSpy.mockRestore();
+      console.warn = originalWarn;
 
       await fs.rm(tmpDir, { recursive: true, force: true });
     });
@@ -1825,16 +1841,24 @@ describe('MemoryClient - Direct API Tests', () => {
 
     it('should favour fallback when key for token is empty', async () => {
       const stubClient = new MemoryClient();
-      jest.spyOn(stubClient, 'getAllKeys').mockResolvedValue(['first', '']);
+
+      // Override method to return test data
+      const originalGetAllKeys = stubClient.getAllKeys.bind(stubClient);
+      stubClient.getAllKeys = async () => ['first', ''];
 
       const token = await stubClient.getContinuationTokenAfterOffset({ prefix: '', offset: 1 });
       expect(Buffer.from(token, 'base64').toString('utf8')).toBe('');
+
+      // Restore
+      stubClient.getAllKeys = originalGetAllKeys;
     });
 
     it('should aggregate deleteObjects errors', async () => {
       const errorClient = new MemoryClient();
       const originalDeleteMultiple = errorClient.storage.deleteMultiple.bind(errorClient.storage);
-      jest.spyOn(errorClient.storage, 'deleteMultiple').mockResolvedValue({
+
+      // Override method to return error
+      errorClient.storage.deleteMultiple = async () => ({
         Deleted: [],
         Errors: [{ Key: 'fail', Code: 'Boom', Message: 'boom' }]
       });
@@ -1842,31 +1866,35 @@ describe('MemoryClient - Direct API Tests', () => {
       const result = await errorClient.deleteObjects(['fail']);
       expect(result.Errors).toHaveLength(1);
 
-      errorClient.storage.deleteMultiple.mockRestore();
+      // Restore
       errorClient.storage.deleteMultiple = originalDeleteMultiple;
     });
 
     it('should handle storage.list returning empty object in getKeysPage', async () => {
       const listClient = new MemoryClient();
       const originalList = listClient.storage.list.bind(listClient.storage);
-      jest.spyOn(listClient.storage, 'list').mockResolvedValue({});
+
+      // Override method to return empty object
+      listClient.storage.list = async () => ({});
 
       const keys = await listClient.getKeysPage({ prefix: 'none/', offset: 5, amount: 2 });
       expect(keys).toEqual([]);
 
-      listClient.storage.list.mockRestore();
+      // Restore
       listClient.storage.list = originalList;
     });
 
     it('should handle storage.list returning empty object in getAllKeys', async () => {
       const allKeysClient = new MemoryClient();
       const originalList = allKeysClient.storage.list.bind(allKeysClient.storage);
-      jest.spyOn(allKeysClient.storage, 'list').mockResolvedValue({});
+
+      // Override method to return empty object
+      allKeysClient.storage.list = async () => ({});
 
       const keys = await allKeysClient.getAllKeys({ prefix: 'missing/' });
       expect(keys).toEqual([]);
 
-      allKeysClient.storage.list.mockRestore();
+      // Restore
       allKeysClient.storage.list = originalList;
     });
 
