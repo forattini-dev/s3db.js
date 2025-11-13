@@ -42,6 +42,7 @@
 // Base plugin classes (always available, no peer dependencies)
 export * from './plugin.class.js'
 export * from './plugin.obj.js'
+export { CoordinatorPlugin } from './concerns/coordinator-plugin.class.js'
 
 // Core plugins (no external peer dependencies required)
 export * from './audit.plugin.js'
