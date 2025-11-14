@@ -564,6 +564,34 @@ export class PuppeteerPlugin extends Plugin {
     }
 
     this.emit('puppeteer.consoleMonitor.initialized');
+
+    // Storage Manager - for localStorage/IndexedDB capture
+    const {
+      captureLocalStorage,
+      captureSessionStorage,
+      captureIndexedDB,
+      captureAllStorage
+    } = await import('./puppeteer/storage-manager.js');
+    this.storageManager = {
+      captureLocalStorage,
+      captureSessionStorage,
+      captureIndexedDB,
+      captureAllStorage
+    };
+
+    // Anti-Bot Detector - for anti-bot and fingerprinting detection
+    const {
+      detectAntiBotServices,
+      detectFingerprinting,
+      detectBlockingSignals,
+      detectAntiBotsAndFingerprinting
+    } = await import('./puppeteer/anti-bot-detector.js');
+    this.antiBotDetector = {
+      detectAntiBotServices,
+      detectFingerprinting,
+      detectBlockingSignals,
+      detectAntiBotsAndFingerprinting
+    };
   }
 
   /**
@@ -1350,6 +1378,139 @@ export class PuppeteerPlugin extends Plugin {
     }
 
     return await this.proxyManager.checkAllProxies();
+  }
+
+  /**
+   * Capture all storage data (localStorage, sessionStorage, IndexedDB) from page
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Storage data
+   */
+  async captureAllStorage(page) {
+    if (!this.storageManager) {
+      throw new PluginError('Storage manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'captureAllStorage',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before capturing storage.'
+      });
+    }
+
+    return await this.storageManager.captureAllStorage(page);
+  }
+
+  /**
+   * Capture localStorage from page
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} localStorage data
+   */
+  async captureLocalStorage(page) {
+    if (!this.storageManager) {
+      throw new PluginError('Storage manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'captureLocalStorage',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before capturing storage.'
+      });
+    }
+
+    return await this.storageManager.captureLocalStorage(page);
+  }
+
+  /**
+   * Capture sessionStorage from page
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} sessionStorage data
+   */
+  async captureSessionStorage(page) {
+    if (!this.storageManager) {
+      throw new PluginError('Storage manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'captureSessionStorage',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before capturing storage.'
+      });
+    }
+
+    return await this.storageManager.captureSessionStorage(page);
+  }
+
+  /**
+   * Capture IndexedDB structure from page
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} IndexedDB data
+   */
+  async captureIndexedDB(page) {
+    if (!this.storageManager) {
+      throw new PluginError('Storage manager not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'captureIndexedDB',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before capturing storage.'
+      });
+    }
+
+    return await this.storageManager.captureIndexedDB(page);
+  }
+
+  /**
+   * Detect anti-bot services and CAPTCHA implementations
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Anti-bot detection results
+   */
+  async detectAntiBotServices(page) {
+    if (!this.antiBotDetector) {
+      throw new PluginError('Anti-bot detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectAntiBotServices',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting anti-bot services.'
+      });
+    }
+
+    return await this.antiBotDetector.detectAntiBotServices(page);
+  }
+
+  /**
+   * Detect browser fingerprinting capabilities and attempts
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Fingerprinting detection results
+   */
+  async detectFingerprinting(page) {
+    if (!this.antiBotDetector) {
+      throw new PluginError('Anti-bot detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectFingerprinting',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting fingerprinting.'
+      });
+    }
+
+    return await this.antiBotDetector.detectFingerprinting(page);
+  }
+
+  /**
+   * Comprehensive anti-bot and fingerprinting detection
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Combined anti-bot and fingerprinting results
+   */
+  async detectAntiBotsAndFingerprinting(page) {
+    if (!this.antiBotDetector) {
+      throw new PluginError('Anti-bot detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectAntiBotsAndFingerprinting',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting anti-bot and fingerprinting.'
+      });
+    }
+
+    return await this.antiBotDetector.detectAntiBotsAndFingerprinting(page);
   }
 }
 
