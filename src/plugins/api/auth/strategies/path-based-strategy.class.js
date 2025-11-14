@@ -13,6 +13,12 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
   constructor({ drivers, authResource, oidcMiddleware, pathAuth, verbose }) {
     super({ drivers, authResource, oidcMiddleware, verbose });
     this.pathAuth = pathAuth;
+
+    console.warn(
+      '[ApiPlugin] DEPRECATED: The pathAuth configuration is deprecated. ' +
+      'Use pathRules instead: { pathRules: [{ path: "/...", drivers: [...], required: true }] }. ' +
+      'This will be removed in v17.0.'
+    );
   }
 
   createMiddleware() {

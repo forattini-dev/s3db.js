@@ -182,7 +182,16 @@ export class IdentityPlugin extends Plugin {
         tagline: options.ui?.tagline || 'Secure Identity & Access Management',
         welcomeMessage: options.ui?.welcomeMessage || 'Welcome back!',
         logoUrl: options.ui?.logoUrl || null,
-        logo: options.ui?.logo || null,  // Deprecated, use logoUrl
+        logo: (() => {
+          if (options.ui?.logo) {
+            console.warn(
+              '[IdentityPlugin] DEPRECATED: The "logo" field is deprecated. ' +
+              'Use "logoUrl" instead: { ui: { logoUrl: "..." } }. ' +
+              'This will be removed in v17.0.'
+            );
+          }
+          return options.ui?.logo || null;
+        })(),
         favicon: options.ui?.favicon || null,
 
         // Colors (11 options)

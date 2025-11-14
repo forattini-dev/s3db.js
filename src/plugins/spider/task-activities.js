@@ -286,6 +286,52 @@ export const AVAILABLE_ACTIVITIES = {
     description: 'Extract and analyze audio assets',
     category: 'assets',
     enabled: true
+  },
+
+  // ============================================
+  // STORAGE & STATE ACTIVITIES
+  // ============================================
+  storage_localstorage: {
+    name: 'storage_localstorage',
+    label: 'localStorage Extraction',
+    description: 'Extract all localStorage key-value pairs',
+    category: 'storage',
+    enabled: true
+  },
+
+  storage_indexeddb: {
+    name: 'storage_indexeddb',
+    label: 'IndexedDB Analysis',
+    description: 'Extract IndexedDB databases, object stores, and data',
+    category: 'storage',
+    enabled: true
+  },
+
+  storage_sessionstorage: {
+    name: 'storage_sessionstorage',
+    label: 'sessionStorage Extraction',
+    description: 'Extract all sessionStorage key-value pairs',
+    category: 'storage',
+    enabled: true
+  },
+
+  // ============================================
+  // CONTENT & EMBEDS ACTIVITIES
+  // ============================================
+  content_iframes: {
+    name: 'content_iframes',
+    label: 'IFrame Detection',
+    description: 'Analyze all iframes, sources, and embedded content',
+    category: 'content',
+    enabled: true
+  },
+
+  content_tracking_pixels: {
+    name: 'content_tracking_pixels',
+    label: 'Tracking Pixels Detection',
+    description: 'Detect tracking pixels, beacons, and analytics pixels',
+    category: 'content',
+    enabled: true
   }
 }
 
@@ -319,6 +365,16 @@ export const ACTIVITY_CATEGORIES = {
     name: 'assets',
     label: 'Asset Analysis',
     description: 'CSS, JS, images, and media assets'
+  },
+  storage: {
+    name: 'storage',
+    label: 'Storage & State',
+    description: 'Browser storage (localStorage, IndexedDB, sessionStorage)'
+  },
+  content: {
+    name: 'content',
+    label: 'Content & Embeds',
+    description: 'IFrames, tracking pixels, and embedded content'
   }
 }
 
@@ -436,6 +492,33 @@ export const ACTIVITY_PRESETS = {
       'performance_navigation_timing',
       'performance_resource_timing',
       'performance_memory'
+    ]
+  },
+
+  reconnaissance: {
+    name: 'reconnaissance',
+    label: 'Deep Reconnaissance',
+    description: 'Complete page analysis including storage, embeds, and tracking',
+    activities: [
+      'screenshot_full',
+      'screenshot_viewport',
+      'security_headers',
+      'security_csp',
+      'security_cors',
+      'security_console_logs',
+      'security_websockets',
+      'seo_meta_tags',
+      'seo_opengraph',
+      'seo_twitter_card',
+      'tech_frameworks',
+      'tech_analytics',
+      'tech_marketing',
+      'tech_cdn',
+      'content_iframes',
+      'content_tracking_pixels',
+      'storage_localstorage',
+      'storage_indexeddb',
+      'storage_sessionstorage'
     ]
   },
 
