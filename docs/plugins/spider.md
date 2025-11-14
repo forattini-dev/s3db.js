@@ -1381,6 +1381,15 @@ Activities are organized into **6 categories**:
 - `assets_videos` - Video analysis
 - `assets_audios` - Audio analysis
 
+#### Storage (3 Activities)
+- `storage_localstorage` - Extract all localStorage key-value pairs
+- `storage_indexeddb` - Extract IndexedDB databases and structure
+- `storage_sessionstorage` - Extract all sessionStorage key-value pairs
+
+#### Content & Embeds (2 Activities)
+- `content_iframes` - Analyze embedded iframes (categorize by type)
+- `content_tracking_pixels` - Detect tracking pixels and analytics pixels
+
 ### Activity Presets
 
 Use presets for quick, pre-configured activity combinations:
@@ -1426,6 +1435,13 @@ await spider.enqueueTarget({
   url: 'https://example.com',
   activityPreset: 'full'
   // Equivalent to default behavior
+});
+
+// Reconnaissance - deep analysis including storage and tracking
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'reconnaissance'
+  // 19 activities: screenshots, security, SEO, tech, iframes, tracking pixels, storage
 });
 ```
 
@@ -2658,6 +2674,341 @@ await spider.enqueueTarget({
   // All 40+ activities
 });
 ```
+
+---
+
+## FAQ - Storage & Content Activities
+
+**Q: What's the difference between `storage_localstorage`, `storage_sessionstorage`, and `storage_indexeddb`?**
+
+A: They capture different browser storage mechanisms:
+
+- **`storage_localstorage`**: Persistent key-value pairs stored per domain, survives browser restart
+- **`storage_sessionstorage`**: Session-only key-value pairs, cleared when tab closes
+- **`storage_indexeddb`**: Large structured databases with object stores, indexes, and transactions
+
+Example use cases:
+```javascript
+// Get all three storage types
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: ['storage_localstorage', 'storage_sessionstorage', 'storage_indexeddb']
+});
+```
+
+The results show item counts, data keys, and for IndexedDB: database version, object store names, and record counts.
+
+---
+
+**Q: Why would I capture browser storage data?**
+
+A: Storage analysis reveals:
+
+- **Authentication tokens** (stored in localStorage or sessionStorage)
+- **User preferences and settings** (localStorage)
+- **Cached data** (IndexedDB for offline-capable apps)
+- **Application state** (session state in sessionStorage)
+- **Analytics or tracking IDs** (persistent identifiers)
+- **API credentials** (sometimes insecurely stored)
+- **Feature flags and configuration** (cached from server)
+
+This helps identify what data the application persists locally and how.
+
+---
+
+**Q: What does the `content_iframes` activity capture?**
+
+A: It detects all embedded iframes on the page and categorizes them:
+
+```javascript
+{
+  iframes: [
+    {
+      src: 'https://ads.example.com/frame',
+      category: 'advertising',    // advertising, analytics, social, embedded_content, unknown
+      title: 'Advertisement',
+      name: 'ad_frame',
+      sandbox: 'allow-scripts allow-same-origin',
+      allow: 'payment *'
+    },
+    // ... more iframes
+  ],
+  totalCount: 5,
+  categorized: {
+    advertising: 2,
+    analytics: 1,
+    social: 1,
+    embedded_content: 1,
+    unknown: 0
+  }
+}
+```
+
+**Categories**:
+- **advertising**: Ad networks (Google AdSense, AppNexus, etc.)
+- **analytics**: Analytics platforms (Google Analytics, Mixpanel, etc.)
+- **social**: Social media embeds (Facebook, Twitter, LinkedIn)
+- **embedded_content**: Maps, videos, documents
+- **unknown**: Unable to classify
+
+---
+
+**Q: What does the `content_tracking_pixels` activity detect?**
+
+A: It finds tracking pixels and analytics tracking mechanisms:
+
+```javascript
+{
+  trackingPixels: [
+    {
+      type: 'pixel',                    // pixel, script, html_attribute
+      src: 'https://analytics.example.com/track.gif?id=123',
+      service: 'Google Analytics',
+      visible: false                    // Usually 1x1 and hidden
+    },
+    {
+      type: 'script',
+      src: 'https://cdn.segment.com/analytics.js',
+      service: 'Segment'
+    }
+  ],
+  detectedServices: ['Google Analytics', 'Facebook Pixel', 'LinkedIn Insight Tag'],
+  totalCount: 8
+}
+```
+
+**Tracked services** (30+): Google Analytics, Facebook Pixel, LinkedIn, Twitter, TikTok, HubSpot, Mixpanel, Amplitude, Segment, Hotjar, Crazy Egg, Mouseflow, FullStory, Drift, Intercom, Zendesk, Qualtrics, Google AdSense, AppNexus, Criteo, Rubicon, and more.
+
+---
+
+**Q: How is tracking detected? Can it be bypassed?**
+
+A: Detection uses multiple methods:
+
+1. **Pattern matching**: Known tracking pixel URLs and script sources
+2. **IFrame categorization**: Analytics and advertising iframes
+3. **Inline scripts**: gtag(), analytics.push() calls
+4. **HTML attributes**: data-track, data-analytics, data-event attributes
+5. **Common library detection**: Popular analytics library CDN URLs
+
+**Limitations**:
+- Can't detect obfuscated or custom analytics implementations
+- May miss tracking if:
+  - URLs are proxied or rewritten
+  - Analytics loaded dynamically after page load
+  - Custom tracking implementations
+  - Encrypted or hidden in minified JavaScript
+
+**Note**: Detection runs synchronously on initial page content. Server-side or dynamically-loaded tracking may not be detected.
+
+---
+
+**Q: What's the "reconnaissance" preset used for?**
+
+A: It's a comprehensive data collection preset with 19 activities designed for deep security and infrastructure analysis:
+
+```javascript
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'reconnaissance'  // Captures 19 key activities
+});
+```
+
+**Activities included**:
+- Visual: Full screenshot, viewport screenshot
+- Security: Headers, SSL/TLS, CSP, DNS, security DNS records
+- SEO: Page title, meta description, Open Graph, robots.txt
+- Technology: Technology stack detection, JavaScript libs, frameworks
+- Storage: localStorage, sessionStorage, IndexedDB
+- Content: iframes, tracking pixels
+
+**Use case**: Initial security assessment, compliance checks, third-party risk analysis.
+
+**Performance**: ~30-45 seconds per URL (slower than minimal/basic presets, but comprehensive).
+
+---
+
+**Q: Can I combine storage and content activities with screenshots?**
+
+A: Yes! Mix and match any activities:
+
+```javascript
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'screenshot_full',
+    'screenshot_viewport',
+    'storage_localstorage',
+    'storage_indexeddb',
+    'content_iframes',
+    'content_tracking_pixels',
+    'security_headers',
+    'technology_stack'
+  ]
+});
+```
+
+This runs all 8 activities and returns aggregated results with both visual (screenshots) and data analysis (storage, content).
+
+---
+
+**Q: Where are storage and content activity results stored?**
+
+A: Results are stored in separate resources:
+
+- **`storageAnalysis` resource**: Storage data (localStorage, sessionStorage, IndexedDB)
+- **`contentAnalysis` resource**: Content analysis (iframes, tracking pixels)
+- Linked to the **`crawlResults` resource** via the task ID
+
+Access results:
+```javascript
+const storageData = await spider.resource('storageAnalysis').get(taskId);
+const contentData = await spider.resource('contentAnalysis').get(taskId);
+```
+
+---
+
+**Q: Is capturing storage data safe? Privacy concerns?**
+
+A: **Important considerations**:
+
+1. **Only access your own sites** - Only crawl URLs you own or have permission to crawl
+2. **Data sensitivity** - Storage may contain:
+   - Authentication tokens
+   - Personally identifiable information (PII)
+   - Passwords or API keys (if insecurely stored)
+3. **GDPR/Privacy compliance** - Ensure crawling complies with:
+   - Site's Terms of Service
+   - Privacy regulations (GDPR, CCPA, etc.)
+   - User consent requirements
+4. **Data retention** - Implement appropriate retention policies for captured storage data
+
+**Best practice**: Use for security audits of your own applications, not for unauthorized data collection.
+
+---
+
+**Q: Why isn't my storage data being captured?**
+
+A: Several reasons:
+
+1. **Storage doesn't exist**: Page uses no localStorage/sessionStorage/IndexedDB
+2. **Access denied**: CORS restrictions or same-origin policy prevents access
+3. **Timing issue**: Storage populated after page fully loads
+4. **Sandboxed iframes**: Content in sandboxed iframes can't be accessed from main page
+
+**Debugging**:
+```javascript
+// Capture with debugging
+const result = await spider.captureAllStorage(page);
+
+if (!result.localStorage.present) {
+  console.log('No localStorage data found');
+}
+
+if (result.indexedDB.databases.length === 0) {
+  console.log('No IndexedDB databases detected');
+}
+```
+
+---
+
+**Q: How do I use storage data for debugging?**
+
+A: Common debugging use cases:
+
+```javascript
+// Check for auth tokens
+const token = storageData.localStorage.data['auth_token'];
+if (token) console.log('Auth token found:', token.substring(0, 20) + '...');
+
+// Find cached API responses
+const apiCache = Object.keys(storageData.localStorage.data)
+  .filter(key => key.includes('api_cache_'));
+
+// Check user preferences
+const preferences = storageData.localStorage.data['user_preferences'];
+if (preferences) {
+  const parsed = JSON.parse(preferences);
+  console.log('Theme:', parsed.theme);
+}
+
+// Find IndexedDB stores
+const dbStores = storageData.indexedDB.databases
+  .flatMap(db => db.stores)
+  .map(store => store.name);
+```
+
+---
+
+**Q: Which tracking services are detected?**
+
+A: The plugin detects 30+ major tracking services:
+
+**Analytics**:
+- Google Analytics, Google Tag Manager
+- Mixpanel, Amplitude, Segment
+- Hotjar, Crazy Egg, Mouseflow, FullStory
+
+**Marketing & Social**:
+- Facebook Pixel, LinkedIn Insight Tag
+- Twitter/X Pixel, TikTok Pixel
+- Pinterest Tag, Snapchat Pixel
+
+**Customer Intelligence**:
+- HubSpot, Drift, Intercom
+- Zendesk, Qualtrics
+- VWO (Visual Website Optimizer)
+
+**Ad Networks**:
+- Google AdSense, AppNexus
+- Criteo, Rubicon Project
+- OpenX, AdRoll/RollWorks
+
+**Other**:
+- Sentry (error tracking)
+- New Relic (monitoring)
+- Datadog (monitoring)
+- Many more via pattern matching
+
+---
+
+**Q: Can I exclude certain activities to improve performance?**
+
+A: Yes, use the `'minimal'` preset or specify only needed activities:
+
+```javascript
+// Minimal - fastest, visual only
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'minimal'  // ~5-10 seconds
+});
+
+// Custom - only what you need
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'screenshot_viewport',
+    'storage_localstorage',
+    'content_iframes'
+  ]
+  // ~15-20 seconds, custom selection
+});
+
+// Basic - balanced
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'basic'  // ~15-25 seconds
+});
+```
+
+**Performance by preset**:
+- `minimal`: ~5-10 seconds (visual only)
+- `basic`: ~15-25 seconds (visual + headers + tech)
+- `security`: ~20-30 seconds (security focused)
+- `seo_complete`: ~20-30 seconds (SEO analysis)
+- `performance`: ~25-35 seconds (performance metrics)
+- `reconnaissance`: ~30-45 seconds (comprehensive)
+- `full`: ~60+ seconds (all activities)
 
 ---
 
