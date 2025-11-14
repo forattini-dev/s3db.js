@@ -108,6 +108,18 @@ export class SpiderPlugin extends Plugin {
         ...options.screenshot
       },
 
+      // Persistence configuration
+      persistence: {
+        enabled: options.persistence?.enabled === true,
+        saveResults: options.persistence?.saveResults !== false,
+        saveSEOAnalysis: options.persistence?.saveSEOAnalysis !== false,
+        saveTechFingerprint: options.persistence?.saveTechFingerprint !== false,
+        saveSecurityAnalysis: options.persistence?.saveSecurityAnalysis !== false,
+        saveScreenshots: options.persistence?.saveScreenshots !== false,
+        savePerformanceMetrics: options.persistence?.savePerformanceMetrics !== false,
+        ...options.persistence
+      },
+
       // Performance metrics
       performance: {
         enabled: true,
@@ -438,63 +450,77 @@ export class SpiderPlugin extends Plugin {
           processingTime: Date.now() - startTime
         }
 
-        // Store result
-        const resultsResource = await this.database.getResource(this.resourceNames.results)
-        const [ok, err] = await tryFn(async () => {
-          return await resultsResource.insert(result)
-        })
-
-        if (!ok) {
-          console.error(`[SpiderPlugin] Failed to store result for ${task.url}:`, err)
-        }
-
-        // Store SEO analysis separately if available
-        if (seoAnalysis) {
-          const seoResource = await this.database.getResource(this.resourceNames.seoAnalysis)
-          await tryFn(async () => {
-            return await seoResource.insert({
-              targetId: task.id,
-              url: task.url,
-              ...seoAnalysis
+        // Store results based on persistence configuration
+        if (this.config.persistence.enabled) {
+          // Store main result if enabled
+          if (this.config.persistence.saveResults) {
+            const resultsResource = await this.database.getResource(this.resourceNames.results)
+            await tryFn(async () => {
+              return await resultsResource.insert(result)
             })
-          })
-        }
+          }
 
-        // Store tech fingerprint separately if available
-        if (techFingerprint) {
-          const techResource = await this.database.getResource(this.resourceNames.techFingerprint)
-          await tryFn(async () => {
-            return await techResource.insert({
-              targetId: task.id,
-              url: task.url,
-              ...techFingerprint
+          // Store SEO analysis separately if available and enabled
+          if (seoAnalysis && this.config.persistence.saveSEOAnalysis) {
+            const seoResource = await this.database.getResource(this.resourceNames.seoAnalysis)
+            await tryFn(async () => {
+              return await seoResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...seoAnalysis
+              })
             })
-          })
-        }
+          }
 
-        // Store security analysis separately if available
-        if (securityAnalysis) {
-          const securityResource = await this.database.getResource(this.resourceNames.securityAnalysis)
-          await tryFn(async () => {
-            return await securityResource.insert({
-              targetId: task.id,
-              url: task.url,
-              ...securityAnalysis
+          // Store tech fingerprint separately if available and enabled
+          if (techFingerprint && this.config.persistence.saveTechFingerprint) {
+            const techResource = await this.database.getResource(this.resourceNames.techFingerprint)
+            await tryFn(async () => {
+              return await techResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...techFingerprint
+              })
             })
-          })
-        }
+          }
 
-        // Store screenshot separately if available
-        if (screenshotData) {
-          const screenshotResource = await this.database.getResource(this.resourceNames.screenshots)
-          await tryFn(async () => {
-            return await screenshotResource.insert({
-              targetId: task.id,
-              url: task.url,
-              ...screenshotData,
-              capturedAt: Date.now()
+          // Store security analysis separately if available and enabled
+          if (securityAnalysis && this.config.persistence.saveSecurityAnalysis) {
+            const securityResource = await this.database.getResource(this.resourceNames.securityAnalysis)
+            await tryFn(async () => {
+              return await securityResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...securityAnalysis
+              })
             })
-          })
+          }
+
+          // Store screenshot separately if available and enabled
+          if (screenshotData && this.config.persistence.saveScreenshots) {
+            const screenshotResource = await this.database.getResource(this.resourceNames.screenshots)
+            await tryFn(async () => {
+              return await screenshotResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...screenshotData,
+                capturedAt: Date.now()
+              })
+            })
+          }
+
+          // Store performance metrics if available and enabled
+          if (performanceMetrics && this.config.persistence.savePerformanceMetrics) {
+            // Performance metrics are already included in results, but can be logged separately
+            if (this.verbose) {
+              console.log(`[SpiderPlugin] Persisted performance metrics for ${task.url}`)
+            }
+          }
+        } else {
+          // If persistence disabled, store minimal data (for queue tracking)
+          if (this.verbose) {
+            console.log(`[SpiderPlugin] Persistence disabled, skipping storage for ${task.url}`)
+          }
         }
 
         // Close page
@@ -622,6 +648,56 @@ export class SpiderPlugin extends Plugin {
    */
   async stopProcessing() {
     return await this.queuePlugin.stop()
+  }
+
+  /**
+   * Get persistence configuration
+   *
+   * @returns {Object} Persistence settings
+   */
+  getPersistenceConfig() {
+    return {
+      enabled: this.config.persistence.enabled,
+      saveResults: this.config.persistence.saveResults,
+      saveSEOAnalysis: this.config.persistence.saveSEOAnalysis,
+      saveTechFingerprint: this.config.persistence.saveTechFingerprint,
+      saveSecurityAnalysis: this.config.persistence.saveSecurityAnalysis,
+      saveScreenshots: this.config.persistence.saveScreenshots,
+      savePerformanceMetrics: this.config.persistence.savePerformanceMetrics
+    }
+  }
+
+  /**
+   * Enable persistence
+   *
+   * @param {Object} [config] - Partial persistence configuration
+   * @returns {void}
+   */
+  enablePersistence(config = {}) {
+    this.config.persistence.enabled = true
+    if (config.saveResults !== undefined) this.config.persistence.saveResults = config.saveResults
+    if (config.saveSEOAnalysis !== undefined) this.config.persistence.saveSEOAnalysis = config.saveSEOAnalysis
+    if (config.saveTechFingerprint !== undefined) this.config.persistence.saveTechFingerprint = config.saveTechFingerprint
+    if (config.saveSecurityAnalysis !== undefined) this.config.persistence.saveSecurityAnalysis = config.saveSecurityAnalysis
+    if (config.saveScreenshots !== undefined) this.config.persistence.saveScreenshots = config.saveScreenshots
+    if (config.savePerformanceMetrics !== undefined) this.config.persistence.savePerformanceMetrics = config.savePerformanceMetrics
+
+    if (this.verbose) {
+      console.log('[SpiderPlugin] Persistence enabled with config:', this.getPersistenceConfig())
+    }
+  }
+
+  /**
+   * Disable persistence
+   *
+   * @returns {void}
+   */
+  disablePersistence() {
+    this.config.persistence.enabled = false
+
+    if (this.verbose) {
+      console.log('[SpiderPlugin] Persistence disabled')
+    }
   }
 
   /**

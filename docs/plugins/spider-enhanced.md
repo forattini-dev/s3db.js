@@ -479,6 +479,17 @@ new SpiderPlugin({
     maxHeight: 1080                     // Screenshot height
   },
 
+  // Persistence configuration
+  persistence: {
+    enabled: true,                      // Enable data persistence to S3
+    saveResults: true,                  // Save main crawl results
+    saveSEOAnalysis: true,              // Save SEO analysis data
+    saveTechFingerprint: true,          // Save technology fingerprints
+    saveSecurityAnalysis: true,         // Save security analysis data
+    saveScreenshots: true,              // Save captured screenshots
+    savePerformanceMetrics: true        // Save performance metrics
+  },
+
   // Security analysis configuration
   security: {
     enabled: true,
@@ -1925,6 +1936,121 @@ await db.usePlugin(seoSpider);
 await db.usePlugin(techSpider);
 ```
 
+### Data Persistence & Storage
+
+**Q: How do I enable data persistence?**
+A: Set `persistence.enabled: true` in configuration:
+```javascript
+new SpiderPlugin({
+  persistence: {
+    enabled: true,                    // Enable persistence
+    saveResults: true,                // Save main results
+    saveSEOAnalysis: true,            // Save SEO analysis
+    saveTechFingerprint: true,        // Save tech detection
+    saveSecurityAnalysis: true,       // Save security analysis
+    saveScreenshots: true,            // Save screenshots
+    savePerformanceMetrics: true      // Save performance metrics
+  }
+});
+```
+
+By default, persistence is **disabled** to avoid storing unnecessary data. Enable it explicitly when you want to persist data.
+
+**Q: Can I enable persistence dynamically after initialization?**
+A: Yes, use the `enablePersistence()` method:
+```javascript
+const spider = new SpiderPlugin({ /* ... */ });
+
+// Later, enable persistence
+spider.enablePersistence({
+  saveResults: true,
+  saveScreenshots: true,
+  saveSecurityAnalysis: false  // Skip security analysis
+});
+
+// Check current config
+console.log(spider.getPersistenceConfig());
+
+// Disable persistence
+spider.disablePersistence();
+```
+
+**Q: What data is persisted when persistence is enabled?**
+A: When enabled, persists:
+- **Results** - Main crawl data (URL, status code, title, processing time)
+- **SEO Analysis** - Meta tags, OpenGraph, Twitter Cards, assets, links
+- **Technology Fingerprints** - Detected frameworks, analytics, CDN, etc.
+- **Security Analysis** - Headers, CSP, CORS, console logs, WebSockets, score
+- **Screenshots** - Base64-encoded page screenshots with metadata
+- **Performance Metrics** - Core Web Vitals, navigation timing, memory usage
+
+Each data type is stored in its own S3 resource for efficient querying and management.
+
+**Q: Can I save some data types but not others?**
+A: Yes, toggle individual data types:
+```javascript
+new SpiderPlugin({
+  persistence: {
+    enabled: true,
+    saveResults: true,                // Save main results
+    saveSEOAnalysis: false,           // Skip SEO (save space)
+    saveTechFingerprint: true,
+    saveSecurityAnalysis: true,
+    saveScreenshots: false,           // Skip screenshots (large files)
+    savePerformanceMetrics: true
+  }
+});
+```
+
+**Q: What are the storage implications of persistence?**
+A: Approximate size per crawl (varies by page):
+- **Results**: ~1-5 KB per page
+- **SEO Analysis**: ~5-20 KB per page (with all links)
+- **Technology Fingerprints**: ~0.5-2 KB per page
+- **Security Analysis**: ~2-10 KB per page
+- **Screenshots**: ~100-500 KB per page (quality 80 JPEG)
+- **Performance Metrics**: ~1-3 KB per page
+
+Total: ~110-540 KB per page with all features enabled
+
+Screenshots are the largest consumer. Disable `saveScreenshots` to significantly reduce storage.
+
+**Q: Should I disable persistence for large crawls?**
+A: Consider these scenarios:
+
+**Enable persistence when:**
+- You need historical data for analysis
+- You're auditing specific sites
+- You want to build a knowledge base
+- Storage is not a constraint
+
+**Disable persistence when:**
+- Running large-scale crawls (1000+ URLs)
+- You only need real-time analysis results
+- Storage is limited
+- Data is temporary/for testing
+
+You can mix: crawl with persistence disabled, then enable for specific important URLs.
+
+**Q: How do I retrieve persisted data?**
+A: Use the getter methods:
+```javascript
+// Get all results
+const results = await spider.getResults();
+
+// Get specific analysis type
+const seoData = await spider.getSEOAnalysis();
+const tech = await spider.getTechFingerprints();
+const security = await spider.getSecurityAnalysis();
+const screenshots = await spider.getScreenshots();
+
+// Query with filters
+const crawledUrls = await spider.getResults({ url: 'example.com' });
+const jpegScreenshots = await spider.getScreenshots({ format: 'jpeg' });
+```
+
+Data is persisted in separate S3 resources managed by S3DB, making them queryable and analyzable.
+
 ### Screenshots & Visual Capture
 
 **Q: How do I capture screenshots of crawled pages?**
@@ -2136,4 +2262,4 @@ const spider = new SpiderPlugin({
 
 **Last Updated**: 2025-11-14
 **Status**: Production Ready
-**Version**: 1.2.0 (with SEO, Tech Detection, Security Analysis, WebSocket Detection & Screenshot Capture)
+**Version**: 1.3.0 (with SEO, Tech Detection, Security Analysis, WebSocket Detection, Screenshot Capture & Configurable Persistence)
