@@ -693,7 +693,7 @@ const cached = await coldDriver.get(analyticsKey);
 
 ### Cache management namespace
 
-Whenever the CachePlugin is installed for a resource, that resource gains `resource.cache`: a lightweight façade that forwards to the driver **and** adds operational helpers.
+Whenever the CachePlugin is installed for a resource, that resource gains `resource.cache`: a lightweight facade that forwards to the driver **and** adds operational helpers.
 
 | Helper | Purpose |
 |--------|---------|

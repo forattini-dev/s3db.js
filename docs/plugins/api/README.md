@@ -61,7 +61,7 @@ auth: {
 }
 ```
 
-**✨ NEW in v16.3:** Auto token refresh • Continue URL • Provider quirks (Google/Azure/Auth0) • Cross-subdomain auth
+**✨ Latest OIDC enhancements:** Auto token refresh • Continue URL • Provider quirks (Google/Azure/Auth0) • Cross-subdomain auth
 **[→ OIDC Quick Start](./guides/oidc.md)**
 
 ---
@@ -98,7 +98,7 @@ auth: {
 | Example | Description |
 |---------|-------------|
 | [e50-oidc-simple.js](../../examples/e50-oidc-simple.js) | Basic OIDC with Google |
-| [e88-oidc-v16.3-features.js](../../examples/e88-oidc-v16.3-features.js) | All v16.3 features demo |
+| [e88-oidc-enhancements.js](../../examples/e88-oidc-enhancements.js) | Complete OIDC enhancements demo |
 | [e101-path-based-basic-oidc.js](../../examples/e101-path-based-basic-oidc.js) | Dual auth (Basic + OIDC) |
 
 ---

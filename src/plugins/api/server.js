@@ -8,6 +8,7 @@
 import { errorHandler } from '../shared/error-handler.js';
 import * as formatter from '../shared/response-formatter.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
+import { createSessionStore } from './concerns/session-store-factory.js';
 import { FailbanManager } from './concerns/failban-manager.js';
 import { validatePathAuth } from './utils/path-matcher.js';
 import { ApiEventEmitter } from './concerns/event-emitter.js';
@@ -176,7 +177,7 @@ export class ApiServer {
 
       const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === 'oidc');
       if (oidcDriver) {
-        this._setupOIDCRoutes(oidcDriver.config);
+        await this._setupOIDCRoutes(oidcDriver.config);
       }
 
       const authMiddleware = this._createAuthMiddleware();
@@ -644,13 +645,40 @@ export class ApiServer {
     // This was moved to maintain proper route precedence and avoid conflicts
   }
 
-  _setupOIDCRoutes(config) {
+  async _setupOIDCRoutes(config) {
     const { database, auth } = this.options;
     const authResource = database.resources[auth.resource];
 
     if (!authResource) {
       console.error(`[API Plugin] Auth resource '${auth.resource}' not found for OIDC`);
       return;
+    }
+
+    // Create session store if configured
+    let sessionStore = null;
+    if (config.sessionStore) {
+      try {
+        // sessionStore can be either:
+        // 1. A driver config: { driver: 's3db', config: {...} }
+        // 2. An already instantiated SessionStore
+        if (config.sessionStore.driver) {
+          // Driver config - instantiate using factory
+          sessionStore = await createSessionStore(config.sessionStore, database);
+
+          if (this.options.verbose) {
+            console.log(`[API Plugin] Session store initialized: ${config.sessionStore.driver}`);
+          }
+        } else {
+          // Already instantiated store
+          sessionStore = config.sessionStore;
+        }
+      } catch (err) {
+        console.error('[API Plugin] Failed to create session store:', err.message);
+        throw err;
+      }
+
+      // Replace config.sessionStore with instantiated store
+      config.sessionStore = sessionStore;
     }
 
     const oidcHandler = createOIDCHandler(config, this.app, authResource, this.events);

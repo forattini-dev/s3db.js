@@ -1,10 +1,10 @@
 # API Plugin - Request Logging Quick Start
 
-Como ativar e customizar os logs de requisições HTTP no API Plugin.
+How to enable and customize HTTP request logs in the API Plugin.
 
 ---
 
-## ✅ Ativação Básica (1 linha!)
+## ✅ Basic Activation (1 line!)
 
 ```javascript
 import { Database } from 's3db.js';
@@ -27,8 +27,8 @@ await db.createResource({
 const apiPlugin = new ApiPlugin({
   port: 3000,
 
-  // 👇 ATIVE O LOGGING AQUI
-  logging: true,  // ✨ Só isso!
+  // 👇 Enable logging here
+  logging: true,  // ✨ That's it!
 
   resources: {
     users: { methods: ['GET', 'POST', 'PUT', 'DELETE'] }
@@ -38,7 +38,7 @@ const apiPlugin = new ApiPlugin({
 await db.usePlugin(apiPlugin);
 ```
 
-### Output (Colorido no Terminal)
+### Output (Colorized in the terminal)
 
 ```bash
 GET /users ⇒ 200 (13.497 ms, –)
@@ -50,54 +50,54 @@ GET /notfound ⇒ 404 (1.115 ms, –)
 POST /users ⇒ 400 (20.792 ms, –)
 ```
 
-**Cores por Status Code:**
-- 🟢 **200-299** (Sucesso): Verde
-- 🔵 **300-399** (Redirect): Cyan
-- 🟡 **400-499** (Client Error): Amarelo
-- 🔴 **500-599** (Server Error): Vermelho
+**Color legend:**
+- 🟢 **200-299** (success): green
+- 🔵 **300-399** (redirect): cyan
+- 🟡 **400-499** (client error): yellow
+- 🔴 **500-599** (server error): red
 
 ---
 
-## 🎛️ Sintaxe de Configuração
+## 🎛️ Configuration Syntax
 
-O campo `logging` aceita 3 formatos:
+The `logging` option accepts three forms:
 
-### 1. Boolean (Mais Simples)
+### 1. Boolean (simplest)
 
 ```javascript
-logging: true   // ✅ Liga com configurações padrão
-logging: false  // ❌ Desliga completamente
+logging: true   // ✅ Turns it on with default settings
+logging: false  // ❌ Fully disables logging
 ```
 
-### 2. Objeto Simples (Auto-enable)
+### 2. Shorthand object (auto-enabled)
 
-Quando você passa um objeto, o logging é **automaticamente ativado** mesmo sem `enabled: true`:
+Passing an object **automatically enables logging** even without `enabled: true`:
 
 ```javascript
 logging: {
-  format: ':method :url :status'  // ✅ Enabled automaticamente!
+  format: ':method :url :status'  // ✅ Auto-enabled
 }
 ```
 
-### 3. Objeto Completo (Controle Total)
+### 3. Full object (complete control)
 
 ```javascript
 logging: {
-  enabled: true,     // Explicitamente ativado
-  format: '...',     // Formato customizado
-  colorize: false,   // Desativa cores
-  verbose: true      // Logs extras (debug)
+  enabled: true,     // Explicit opt-in
+  format: '...',     // Custom format string
+  colorize: false,   // Disable colors
+  verbose: true      // Extra diagnostics
 }
 ```
 
 ---
 
-## 🎨 Customização do Formato
+## 🎨 Formatting Options
 
-### Formato Padrão (Verbose)
+### Default (verbose)
 
 ```javascript
-logging: true  // Usa formato padrão: ':verb :url => :status (:elapsed ms, :res[content-length])'
+logging: true  // Uses the default ':verb :url => :status (:elapsed ms, :res[content-length])'
 ```
 
 **Output:**
@@ -106,7 +106,7 @@ GET /users ⇒ 200 (13.497 ms, 256)
 POST /users ⇒ 201 (20.276 ms, 512)
 ```
 
-### Formato Compacto
+### Compact format
 
 ```javascript
 logging: {
@@ -121,7 +121,7 @@ POST /users 201
 DELETE /users/abc123 204
 ```
 
-### Formato com Timestamp
+### With timestamp
 
 ```javascript
 logging: {
@@ -135,7 +135,7 @@ logging: {
 [12:34:57] POST /users 201 (20.276 ms)
 ```
 
-### Formato Apache-Style
+### Apache-style
 
 ```javascript
 logging: {
@@ -149,7 +149,7 @@ logging: {
 192.168.1.100 - anonymous [12:34:57] "POST /users HTTP/1.1" 201 512
 ```
 
-### Formato JSON (Para Log Aggregation)
+### JSON (log aggregation friendly)
 
 ```javascript
 logging: {
@@ -165,29 +165,29 @@ logging: {
 
 ---
 
-## 🏷️ Tokens Disponíveis
+## 🏷️ Available Tokens
 
-| Token | Descrição | Exemplo |
-|-------|-----------|---------|
-| `:verb` ou `:method` | HTTP method | `GET` |
-| `:path` ou `:ruta` | Request path (sem query) | `/users` |
-| `:url` | Full URL (com query) | `/users?page=2` |
-| `:status` | Status code | `200` |
-| `:elapsed` ou `:response-time` | Duração em ms | `13.497` |
-| `:who` ou `:user` | Username (auth) | `john` ou `anonymous` |
-| `:reqId` ou `:requestId` | Request ID único | `abc-123-def` |
-| `:time` | Timestamp atual | `12:34:56` |
-| `:res[header]` | Response header | `:res[content-length]` → `256` |
-| `:req[header]` | Request header | `:req[user-agent]` → `curl/7.68.0` |
+| Token | Description | Example |
+|-------|-------------|---------|
+| `:verb` or `:method` | HTTP method | `GET` |
+| `:path` or `:ruta` | Request path (no query string) | `/users` |
+| `:url` | Full URL (with query) | `/users?page=2` |
+| `:status` | HTTP status code | `200` |
+| `:elapsed` or `:response-time` | Duration in ms | `13.497` |
+| `:who` or `:user` | Authenticated user | `john` or `anonymous` |
+| `:reqId` or `:requestId` | Unique request ID | `abc-123-def` |
+| `:time` | Current timestamp | `12:34:56` |
+| `:res[header]` | Response header value | `:res[content-length]` → `256` |
+| `:req[header]` | Request header value | `:req[user-agent]` → `curl/7.68.0` |
 
 ---
 
-## 🎯 Casos de Uso Comuns
+## 🎯 Common Use Cases
 
-### Desenvolvimento: Máximo Detalhamento
+### Development: maximum detail
 
 ```javascript
-logging: true  // Usa formato verbose padrão com cores
+logging: true  // Verbose default with colors
 ```
 
 Ou customize:
@@ -195,39 +195,39 @@ Ou customize:
 ```javascript
 logging: {
   format: ':method :url ⇒ :status (:elapsed ms, :res[content-length])'
-  // colorize é true por padrão
+  // colorize defaults to true
 }
 ```
 
-**Vantagens:**
-- ✅ Cores facilitam identificar erros
-- ✅ Tempo de resposta visível
-- ✅ Tamanho da resposta
+**Benefits:**
+- ✅ Colors make it easy to spot errors
+- ✅ Response time is always visible
+- ✅ Shows payload size
 
-### Produção: Formato Limpo
+### Production: clean format
 
 ```javascript
 const isProduction = process.env.NODE_ENV === 'production';
 
 logging: {
   enabled: true,
-  colorize: !isProduction,  // Sem cores em prod
+  colorize: !isProduction,  // No colors in prod
   format: isProduction
-    ? ':method :url :status (:elapsed ms)'  // Simples
-    : ':method :url ⇒ :status (:elapsed ms, :res[content-length])'  // Detalhado
+    ? ':method :url :status (:elapsed ms)'  // Simple
+    : ':method :url ⇒ :status (:elapsed ms, :res[content-length])'  // Detailed
 }
 ```
 
-### CI/CD: Sem Cores
+### CI/CD: disable colors
 
 ```javascript
 logging: {
-  colorize: false,  // Pipelines não suportam cores
+  colorize: false,  // Pipelines usually lack ANSI support
   format: ':method :url :status (:elapsed ms)'
 }
 ```
 
-### Debug: Máximo Contexto
+### Debug: maximum context
 
 ```javascript
 logging: {
@@ -243,27 +243,27 @@ logging: {
 
 ---
 
-## 🔕 Desabilitar Logging
+## 🔕 Turning Logging Off
 
-### Desabilitar Completamente
+### Disable entirely
 
 ```javascript
-logging: false  // Mais simples!
+logging: false  // Simplest option!
 ```
 
-Ou simplesmente omita a opção `logging` (desabilitado por padrão).
+Or omit the `logging` option (disabled by default).
 
-### Desabilitar Apenas Cores
+### Disable only colors
 
 ```javascript
 logging: {
-  colorize: false  // Auto-enabled, mas sem cores
+  colorize: false  // Auto-enabled, but colorless
 }
 ```
 
 ---
 
-## 🚀 Exemplo Completo
+## 🚀 Full Example
 
 ```javascript
 import { Database } from 's3db.js';
@@ -288,18 +288,18 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 const apiPlugin = new ApiPlugin({
   port: process.env.PORT || 3000,
-  verbose: !isProduction,  // Verbose logs em dev
+  verbose: !isProduction,  // Verbose logs in dev
 
   // Request logging
   logging: {
     enabled: true,
-    colorize: !isProduction,  // Cores apenas em dev
+    colorize: !isProduction,  // Colors only in dev
     format: isProduction
-      ? ':method :url :status (:elapsed ms)'  // Produção: simples
-      : ':method :url ⇒ :status (:elapsed ms, :res[content-length])'  // Dev: detalhado
+      ? ':method :url :status (:elapsed ms)'  // Production: simple
+      : ':method :url ⇒ :status (:elapsed ms, :res[content-length])'  // Dev: detailed
   },
 
-  // Request ID tracking (útil para correlação)
+  // Request ID tracking (useful for correlation)
   requestId: {
     enabled: true,
     headerName: 'X-Request-ID'
@@ -317,7 +317,7 @@ await db.usePlugin(apiPlugin);
 console.log('✅ API started with request logging enabled!');
 ```
 
-### Output em Desenvolvimento
+### Output (development)
 
 ```bash
 ✅ API started with request logging enabled!
@@ -329,7 +329,7 @@ PUT /products/abc123 ⇒ 200 (38.027 ms, 256)
 DELETE /products/abc123 ⇒ 204 (8.776 ms, –)
 ```
 
-### Output em Produção
+### Output (production)
 
 ```bash
 ✅ API started with request logging enabled!
@@ -343,14 +343,14 @@ DELETE /products/abc123 204 (8.776 ms)
 
 ---
 
-## 💡 Dicas
+## 💡 Tips
 
-### 1. Combine com Eventos para Logs Estruturados
+### 1. Combine with events for structured logs
 
 ```javascript
 new ApiPlugin({
-  logging: { enabled: false },  // Desliga logs de texto
-  events: { enabled: true },     // Liga eventos
+  logging: { enabled: false },  // Turn off text logs
+  events: { enabled: true },    // Emit events
 
   // ...
 });
@@ -368,7 +368,7 @@ apiPlugin.on('request:end', (data) => {
 });
 ```
 
-### 2. Use Request ID para Debugging
+### 2. Use request IDs for debugging
 
 ```javascript
 logging: {
@@ -381,9 +381,9 @@ requestId: {
 }
 ```
 
-Cada request terá um ID único para rastrear através dos logs.
+Each request will include a unique ID that can be followed across logs.
 
-### 3. Monitore Performance
+### 3. Monitor performance
 
 ```javascript
 logging: {
@@ -391,7 +391,7 @@ logging: {
   format: ':method :url :status (:elapsed ms)'
 }
 
-// Filtre requests lentos
+// Flag slow requests
 apiPlugin.on('request:end', (data) => {
   if (data.duration > 1000) {
     console.warn(`⚠️ Slow request: ${data.method} ${data.path} (${data.duration}ms)`);
@@ -399,12 +399,12 @@ apiPlugin.on('request:end', (data) => {
 });
 ```
 
-### 4. Silence Health Checks
+### 4. Silence health checks
 
-Se não quiser logar health checks:
+If you don’t want health checks in the logs:
 
 ```javascript
-// Use custom middleware para filtrar
+// Use custom middleware to filter them
 middlewares: [
   async (c, next) => {
     if (c.req.path.startsWith('/health')) {
@@ -416,20 +416,20 @@ middlewares: [
 
 logging: {
   enabled: true,
-  filter: (c) => !c.get('skipLogging')  // Note: filter ainda não implementado
+  filter: (c) => !c.get('skipLogging')  // Note: filter not yet implemented
 }
 ```
 
-*(Feature `filter` planejada para próxima versão)*
+*(The `filter` option is slated for a future release.)*
 
 ---
 
-## 📚 Mais Informações
+## 📚 More Information
 
-- [API Plugin Logging Examples](./api-plugin-logging-examples.md) - Exemplos completos
-- [API Plugin Configuration](./plugins/api.md) - Todas as opções
-- [Events Reference](./api-plugin-events.md) - Event-based logging
+- [API Plugin Logging Examples](./api-plugin-logging-examples.md) - Complete outputs
+- [API Plugin Configuration](./plugins/api.md) - Every option explained
+- [Events Reference](./api-plugin-events.md) - Event-driven logging hooks
 
 ---
 
-**Última atualização**: 2025-11-10
+**Last updated**: 2025-11-10

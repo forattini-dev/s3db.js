@@ -264,7 +264,7 @@ new ApiPlugin({
 })
 ```
 
-OAuth2 (Keycloak, tokens opacos com introspecção)
+OAuth2 (Keycloak, opaque tokens with introspection)
 ```js
 new ApiPlugin({
   auth: { drivers: [{
@@ -296,10 +296,10 @@ new ApiPlugin({
 
 ## Troubleshooting (OAuth2/OIDC)
 
-- iss/aud mismatch: confira se `issuer` e `audience` batem com o token emitido; para Auth0/Azure/Keycloak use `provider` para derivar issuer correto.
-- Nonce inválido (OIDC): verifique se o IdP inclui `nonce` no `id_token`; PKCE/nonce ficam ligados por padrão, não remova.
-- Introspecção 401/403: verifique `clientId/clientSecret` do cliente confidencial com permissão no endpoint de introspecção.
-- 404 nos endpoints: discovery pode estar desabilitado; habilite `discovery.enabled=true` ou informe endpoints/issuer corretos.
+- iss/aud mismatch: confirm `issuer` and `audience` match the issued token; for Auth0/Azure/Keycloak set the `provider` to derive the correct issuer automatically.
+- Invalid nonce (OIDC): ensure the IdP includes `nonce` in the `id_token`; PKCE/nonce are tied together by default, do not remove them.
+- Introspection 401/403: verify the confidential client’s `clientId/clientSecret` and ensure it has permission to call the introspection endpoint.
+- 404 on endpoints: discovery may be disabled; enable `discovery.enabled=true` or provide explicit endpoints/issuer values.
 
 ### RelationPlugin Integration
 
@@ -709,7 +709,7 @@ middlewares: [
 
 ---
 
-## 🚀 NEW in v16.3: OIDC Enhancements
+## 🚀 OIDC Enhancements
 
 The OIDC driver received significant enhancements. See **[OIDC Enhancements Guide](./oidc-enhancements.md)** for complete documentation.
 

@@ -1021,12 +1021,12 @@ resource.removePluginAttribute('_hasEmbedding', 'WrongPlugin');
 If you have existing plugins adding attributes directly:
 
 ```javascript
-// ❌ OLD WAY (before s3db.js v13)
+// ❌ OLD WAY (manual schema mutation)
 if (!resource.schema.attributes['_myField']) {
   resource.schema.attributes['_myField'] = { type: 'boolean', optional: true };
 }
 
-// ✅ NEW WAY (s3db.js v13+)
+// ✅ NEW WAY (Plugin Attribute API)
 resource.addPluginAttribute('_myField', {
   type: 'boolean',
   optional: true

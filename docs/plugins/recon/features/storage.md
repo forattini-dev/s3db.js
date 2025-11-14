@@ -1,12 +1,12 @@
 # Recon Plugin - Storage Architecture & Insights Generation
 
-**Como salvamos TODAS as informações de CADA ferramenta e como agregamos nas resources para tirar insights**
+**How every tool persists its output and how we aggregate the data into resources for insights**
 
 ---
 
-## 📊 Visão Geral
+## 📊 Overview
 
-O ReconPlugin implementa uma arquitetura de armazenamento em **3 camadas** que captura dados em múltiplos níveis de granularidade:
+ReconPlugin uses a **3-layer storage architecture** that captures data at multiple levels of detail:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -16,11 +16,11 @@ O ReconPlugin implementa uma arquitetura de armazenamento em **3 camadas** que c
 │         plugin=recon/reports/<host>/stages/<timestamp>/     │
 │                      tools/<tool>.json                      │
 │                                                             │
-│  Cada ferramenta gera um arquivo JSON individual com:      │
-│  - Saída completa (stdout/stderr)                          │
-│  - Status de execução (ok/error/unavailable)               │
-│  - Métricas específicas da ferramenta                      │
-│  - Timestamp de execução                                   │
+│  Each tool writes its own JSON artifact with:              │
+│  - Full stdout/stderr                                      │
+│  - Execution status (ok/error/unavailable)                 │
+│  - Tool-specific metrics                                   │
+│  - Execution timestamp                                     │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -30,17 +30,17 @@ O ReconPlugin implementa uma arquitetura de armazenamento em **3 camadas** que c
 │         plugin=recon/reports/<host>/stages/<timestamp>/     │
 │                   aggregated/<stage>.json                   │
 │                                                             │
-│  Resultados combinados de múltiplas ferramentas:           │
-│  - ports.json = nmap + masscan (portas únicas)             │
-│  - subdomains.json = amass + subfinder + crtsh (únicos)    │
-│  - vulnerabilities.json = nikto + wpscan + droopescan       │
+│  Combined results from multiple tools:                     │
+│  - ports.json = nmap + masscan (unique ports)              │
+│  - subdomains.json = amass + subfinder + crtsh (unique)    │
+│  - vulnerabilities.json = nikto + wpscan + droopescan      │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                  LAYER 3: DATABASE RESOURCES                │
 │                   (Queryable, Indexed Data)                 │
 ├─────────────────────────────────────────────────────────────┤
-│  7 Resources para análise e insights:                      │
+│  7 resources for analytics & insights:                     │
 │  - plg_recon_hosts (fingerprints, summaries)               │
 │  - plg_recon_reports (scan history)                        │
 │  - plg_recon_stages (per-stage metadata)                   │
@@ -55,28 +55,28 @@ O ReconPlugin implementa uma arquitetura de armazenamento em **3 camadas** que c
 
 ## 🔧 LAYER 1: Per-Tool Raw Artifacts
 
-### Estrutura de Armazenamento
+### Storage layout
 
-Cada ferramenta salva seu output em um arquivo JSON individual:
+Each tool saves its output into an individual JSON file:
 
 ```
 plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 └── tools/
-    ├── nmap.json           # Scan de portas do nmap
-    ├── masscan.json        # Scan de portas do masscan
-    ├── amass.json          # Enumeração de subdomínios do amass
-    ├── subfinder.json      # Enumeração de subdomínios do subfinder
-    ├── assetfinder.json    # Enumeração de subdomínios do assetfinder
-    ├── crtsh.json          # Subdomínios do certificate transparency
-    ├── ffuf.json           # Directory fuzzing do ffuf
-    ├── feroxbuster.json    # Directory fuzzing do feroxbuster
-    ├── gobuster.json       # Directory fuzzing do gobuster
-    ├── nikto.json          # Vulnerability scan do nikto
-    ├── wpscan.json         # WordPress scan do wpscan
-    ├── droopescan.json     # Drupal/Joomla scan
-    ├── openssl.json        # TLS audit do openssl
-    ├── sslyze.json         # TLS audit do sslyze
-    ├── testssl.json        # TLS audit do testssl.sh
+    ├── nmap.json           # nmap port scan
+    ├── masscan.json        # masscan port scan
+    ├── amass.json          # amass subdomain enumeration
+    ├── subfinder.json      # subfinder subdomain enumeration
+    ├── assetfinder.json    # assetfinder subdomain enumeration
+    ├── crtsh.json          # Certificate Transparency subdomains
+    ├── ffuf.json           # ffuf directory fuzzing
+    ├── feroxbuster.json    # feroxbuster directory fuzzing
+    ├── gobuster.json       # gobuster directory fuzzing
+    ├── nikto.json          # nikto vulnerability scan
+    ├── wpscan.json         # wpscan (WordPress)
+    ├── droopescan.json     # droopescan (Drupal/Joomla)
+    ├── openssl.json        # openssl TLS audit
+    ├── sslyze.json         # sslyze TLS audit
+    ├── testssl.json        # testssl.sh TLS audit
     ├── whatweb.json        # Technology fingerprinting
     ├── aquatone.json       # Screenshot capture
     ├── eyewitness.json     # Screenshot capture
@@ -84,7 +84,7 @@ plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
     └── recon-ng.json       # OSINT framework
 ```
 
-### Exemplo: nmap.json
+### Example: nmap.json
 
 ```json
 {
@@ -121,7 +121,7 @@ plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 }
 ```
 
-### Exemplo: amass.json
+### Example: amass.json
 
 ```json
 {
@@ -146,7 +146,7 @@ plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 }
 ```
 
-### Exemplo: nikto.json
+### Example: nikto.json
 
 ```json
 {
@@ -158,51 +158,51 @@ plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 }
 ```
 
-### Como Acessar os Artifacts
+### Accessing artifacts
 
 ```javascript
 const report = await plugin.runDiagnostics('example.com', { persist: true });
 const storage = plugin.getStorage();
 
-// Carregar artifact individual do nmap
+// Load an individual nmap artifact
 const nmapArtifact = await storage.get(report.toolStorageKeys.nmap);
-console.log('Nmap encontrou:', nmapArtifact.summary.openPorts.length, 'portas');
+console.log('Nmap found:', nmapArtifact.summary.openPorts.length, 'ports');
 
-// Carregar artifact individual do amass
+// Load an individual amass artifact
 const amassArtifact = await storage.get(report.toolStorageKeys.amass);
-console.log('Amass encontrou:', amassArtifact.count, 'subdomínios');
+console.log('Amass discovered:', amassArtifact.count, 'subdomains');
 
-// Comparar performance entre ferramentas
+// Compare tool performance
 const subfinderArtifact = await storage.get(report.toolStorageKeys.subfinder);
 console.log('Amass:', amassArtifact.count, 'vs Subfinder:', subfinderArtifact.count);
-console.log('Tempo Amass:', amassArtifact.executionTimeMs, 'ms');
-console.log('Tempo Subfinder:', subfinderArtifact.executionTimeMs, 'ms');
+console.log('Amass duration:', amassArtifact.executionTimeMs, 'ms');
+console.log('Subfinder duration:', subfinderArtifact.executionTimeMs, 'ms');
 ```
 
 ---
 
 ## 🎯 LAYER 2: Aggregated Stage Results
 
-### Estrutura de Armazenamento
+### Storage layout
 
-Resultados combinados de múltiplas ferramentas do mesmo estágio:
+Combined outputs for each stage:
 
 ```
 plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 └── aggregated/
-    ├── dns.json                # Registros DNS (não agregado)
-    ├── certificate.json        # Certificado TLS (não agregado)
-    ├── ping.json               # Latência ping (não agregado)
-    ├── traceroute.json         # Traceroute (não agregado)
-    ├── curl.json               # Headers HTTP (não agregado)
-    ├── ports.json              # ✨ AGREGADO: nmap + masscan
-    ├── subdomains.json         # ✨ AGREGADO: amass + subfinder + assetfinder + crtsh
-    ├── webDiscovery.json       # ✨ AGREGADO: ffuf + feroxbuster + gobuster
-    ├── vulnerabilityScan.json  # ✨ AGREGADO: nikto + wpscan + droopescan
-    ├── tlsAudit.json           # ✨ AGREGADO: openssl + sslyze + testssl
+    ├── dns.json                # DNS records (raw)
+    ├── certificate.json        # TLS certificate (raw)
+    ├── ping.json               # Ping latency (raw)
+    ├── traceroute.json         # Traceroute (raw)
+    ├── curl.json               # HTTP headers (raw)
+    ├── ports.json              # ✨ AGGREGATED: nmap + masscan
+    ├── subdomains.json         # ✨ AGGREGATED: amass + subfinder + assetfinder + crtsh
+    ├── webDiscovery.json       # ✨ AGGREGATED: ffuf + feroxbuster + gobuster
+    ├── vulnerabilityScan.json  # ✨ AGGREGATED: nikto + wpscan + droopescan
+    ├── tlsAudit.json           # ✨ AGGREGATED: openssl + sslyze + testssl
     ├── fingerprintTools.json   # Technologies (whatweb)
-    ├── screenshots.json        # ✨ AGREGADO: aquatone + eyewitness
-    └── osint.json              # ✨ AGREGADO: theHarvester + recon-ng
+    ├── screenshots.json        # ✨ AGGREGATED: aquatone + eyewitness
+    └── osint.json              # ✨ AGGREGATED: theHarvester + recon-ng
 ```
 
 ### Exemplo: ports.json (Agregado)
@@ -243,11 +243,11 @@ plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 }
 ```
 
-**Insights Gerados**:
-- ✅ Lista única de portas abertas (união de nmap + masscan)
-- ✅ Masscan descobriu 2 portas extras (3306, 8080)
-- ✅ Nmap forneceu detalhes de serviço mais precisos
-- ✅ Correlação entre ferramentas para validação cruzada
+**Insights produced**:
+- ✅ Unique list of open ports (union of nmap + masscan)
+- ✅ Masscan found two extra ports (3306, 8080)
+- ✅ Nmap delivers precise service detail
+- ✅ Cross-check between scanners
 
 ### Exemplo: subdomains.json (Agregado)
 
@@ -288,27 +288,27 @@ plugin=recon/reports/example.com/stages/2025-01-01T06-00-00-000Z/
 }
 ```
 
-**Insights Gerados**:
-- ✅ **245 subdomínios únicos** descobertos (união de 4 fontes)
-- ✅ **Amass**: 127 descobertas (melhor para OSINT)
-- ✅ **crt.sh**: 156 descobertas (melhor para Certificate Transparency)
-- ✅ **Subfinder**: 98 descobertas (mais rápido)
-- ✅ **Assetfinder**: 45 descobertas (menor cobertura)
-- ✅ Overlap entre ferramentas indica confiabilidade
+**Insights produced**:
+- ✅ **245 unique subdomains** collected across four sources
+- ✅ **Amass**: 127 findings (excellent OSINT coverage)
+- ✅ **crt.sh**: 156 findings (Certificate Transparency)
+- ✅ **Subfinder**: 98 findings (fastest)
+- ✅ **Assetfinder**: 45 findings (least coverage)
+- ✅ Overlap between sources indicates reliability
 
-### Como Acessar os Aggregados
+### Accessing the aggregated data
 
 ```javascript
-// Carregar stage agregado
+// Load aggregated stage
 const portsStage = await storage.get(report.stageStorageKeys.ports);
-console.log('Total de portas únicas:', portsStage.openPorts.length);
-console.log('Scanners usados:', Object.keys(portsStage.scanners));
+console.log('Unique ports:', portsStage.openPorts.length);
+console.log('Scanners used:', Object.keys(portsStage.scanners));
 
-// Comparar coberturas
+// Compare coverage per source
 const subdomainsStage = await storage.get(report.stageStorageKeys.subdomains);
-console.log('Total único:', subdomainsStage.total);
+console.log('Total unique:', subdomainsStage.total);
 for (const [source, data] of Object.entries(subdomainsStage.sources)) {
-  console.log(`  ${source}: ${data.count} descobertas`);
+  console.log(`  ${source}: ${data.count} findings`);
 }
 ```
 
@@ -316,9 +316,9 @@ for (const [source, data] of Object.entries(subdomainsStage.sources)) {
 
 ## 💾 LAYER 3: Database Resources (Insights & Analytics)
 
-### 1. **plg_recon_hosts** - Fingerprints e Summaries
+### 1. **plg_recon_hosts** – Fingerprints & summaries
 
-**Propósito**: Armazena o estado atual de cada host descoberto.
+**Purpose**: store the current state of each discovered host.
 
 **Schema**:
 ```javascript
@@ -360,47 +360,47 @@ for (const [source, data] of Object.entries(subdomainsStage.sources)) {
 }
 ```
 
-**Queries para Insights**:
+**Insight-friendly queries**:
 
 ```javascript
 const hostsResource = await db.resources.plg_recon_hosts;
 
-// 1. Hosts com portas críticas expostas
+// 1. Hosts exposing critical ports
 const criticalPorts = await hostsResource.query({
   'summary.openPorts.port': { $in: ['3306/tcp', '5432/tcp', '27017/tcp', '6379/tcp'] }
 });
-console.log('Hosts com DBs expostos:', criticalPorts.length);
+console.log('Hosts with exposed databases:', criticalPorts.length);
 
-// 2. Hosts usando tecnologias específicas
+// 2. Hosts running a specific stack
 const wordpressSites = await hostsResource.query({
   'fingerprint.technologies': 'WordPress'
 });
-console.log('Sites WordPress:', wordpressSites.length);
+console.log('WordPress sites:', wordpressSites.length);
 
-// 3. Hosts atrás de CDN
+// 3. Hosts behind a CDN
 const cdnHosts = await hostsResource.query({
   'fingerprint.cdn': { $exists: true, $ne: null }
 });
-console.log('Hosts com CDN:', cdnHosts.length);
+console.log('Hosts with CDN:', cdnHosts.length);
 
-// 4. Hosts com alta latência
+// 4. Hosts with high latency
 const slowHosts = await hostsResource.query({
   'fingerprint.latencyMs': { $gt: 100 }
 });
-console.log('Hosts lentos (>100ms):', slowHosts.length);
+console.log('High-latency hosts (>100ms):', slowHosts.length);
 
-// 5. Hosts com muitos subdomínios (possível sprawl)
+// 5. Hosts with extensive subdomain sprawl
 const sprawlHosts = await hostsResource.query({
   'summary.subdomainCount': { $gt: 100 }
 });
-console.log('Hosts com subdomain sprawl:', sprawlHosts.length);
+console.log('Hosts with subdomain sprawl:', sprawlHosts.length);
 ```
 
 ---
 
-### 2. **plg_recon_reports** - Scan History
+### 2. **plg_recon_reports** – Scan history
 
-**Propósito**: Histórico completo de todos os scans executados.
+**Purpose**: full record of every scan executed.
 
 **Schema**:
 ```javascript
@@ -427,37 +427,37 @@ console.log('Hosts com subdomain sprawl:', sprawlHosts.length);
 }
 ```
 
-**Queries para Insights**:
+**Insight-friendly queries**:
 
 ```javascript
 const reportsResource = await db.resources.plg_recon_reports;
 
-// 1. Scans recentes (últimas 24h)
+// 1. Recent scans (last 24h)
 const recentScans = await reportsResource.query({
   endedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }
 });
-console.log('Scans nas últimas 24h:', recentScans.length);
+console.log('Scans in the last 24h:', recentScans.length);
 
-// 2. Scans com erros
+// 2. Scans with issues
 const failedScans = await reportsResource.query({
   status: { $in: ['partial', 'error'] }
 });
-console.log('Scans com problemas:', failedScans.length);
+console.log('Problematic scans:', failedScans.length);
 
-// 3. Histórico de scans de um host
+// 3. Scan history for a host
 const hostHistory = await reportsResource.query({
   host: 'example.com'
 });
-console.log('Scans do example.com:', hostHistory.length);
+console.log('Scans for example.com:', hostHistory.length);
 hostHistory.sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt));
-console.log('Último scan:', hostHistory[0].endedAt);
+console.log('Most recent scan:', hostHistory[0].endedAt);
 ```
 
 ---
 
-### 3. **plg_recon_stages** - Per-Stage Metadata
+### 3. **plg_recon_stages** – Per-stage metadata
 
-**Propósito**: Metadados de cada estágio de cada scan (performance tracking).
+**Purpose**: capture per-stage metadata for performance tracking.
 
 **Schema**:
 ```javascript
@@ -477,12 +477,12 @@ console.log('Último scan:', hostHistory[0].endedAt);
 }
 ```
 
-**Queries para Insights**:
+**Insight-friendly queries**:
 
 ```javascript
 const stagesResource = await db.resources.plg_recon_stage_results;
 
-// 1. Estágios que falharam com mais frequência
+// 1. Stages that failed most often
 const failedStages = await stagesResource.query({
   status: { $in: ['error', 'unavailable'] }
 });
@@ -490,21 +490,21 @@ const stageCounts = {};
 for (const stage of failedStages) {
   stageCounts[stage.stage] = (stageCounts[stage.stage] || 0) + 1;
 }
-console.log('Estágios mais problemáticos:', stageCounts);
+console.log('Most problematic stages:', stageCounts);
 
-// 2. Performance por estágio
+// 2. Stage performance
 const portsScans = await stagesResource.query({
   stage: 'ports',
   status: 'ok'
 });
-console.log('Total de port scans bem-sucedidos:', portsScans.length);
+console.log('Successful port scans:', portsScans.length);
 ```
 
 ---
 
-### 4. **plg_recon_diffs** - Change Detection & Alerts
+### 4. **plg_recon_diffs** – Change detection & alerts
 
-**Propósito**: Rastreia mudanças ao longo do tempo (novos subdomínios, portas, tecnologias).
+**Purpose**: track changes over time (new subdomains, ports, technologies, etc.).
 
 **Schema**:
 ```javascript
@@ -516,7 +516,7 @@ console.log('Total de port scans bem-sucedidos:', portsScans.length);
     {
       type: 'subdomain:add',
       values: ['new-api.example.com', 'staging2.example.com'],
-      description: 'Novos subdomínios: new-api.example.com, staging2.example.com',
+      description: 'New subdomains: new-api.example.com, staging2.example.com',
       severity: 'medium',
       critical: false,
       detectedAt: '2025-01-01T06:00:00.000Z'
@@ -524,7 +524,7 @@ console.log('Total de port scans bem-sucedidos:', portsScans.length);
     {
       type: 'port:add',
       values: ['3306/tcp'],
-      description: 'Novas portas expostas: 3306/tcp',
+      description: 'Newly exposed port: 3306/tcp',
       severity: 'high',
       critical: true,
       detectedAt: '2025-01-01T06:00:00.000Z'
@@ -533,7 +533,7 @@ console.log('Total de port scans bem-sucedidos:', portsScans.length);
       type: 'field:primaryIp',
       previous: '93.184.216.34',
       current: '93.184.216.35',
-      description: 'primaryIp alterado de 93.184.216.34 para 93.184.216.35',
+      description: 'primaryIp changed from 93.184.216.34 to 93.184.216.35',
       severity: 'high',
       critical: true,
       detectedAt: '2025-01-01T06:00:00.000Z'
@@ -544,19 +544,19 @@ console.log('Total de port scans bem-sucedidos:', portsScans.length);
 }
 ```
 
-**Queries para Insights**:
+**Insight-friendly queries**:
 
 ```javascript
 const diffsResource = await db.resources.plg_recon_diffs;
 
-// 1. Mudanças críticas recentes
+// 1. Recent critical changes
 const criticalChanges = await diffsResource.query({
   'changes.critical': true,
   timestamp: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }
 });
-console.log('Mudanças críticas nos últimos 7 dias:', criticalChanges.length);
+console.log('Critical changes last 7 days:', criticalChanges.length);
 
-// 2. Novos subdomínios descobertos
+// 2. Newly discovered subdomains
 const newSubdomains = await diffsResource.query({
   'changes.type': 'subdomain:add'
 });
@@ -568,26 +568,26 @@ for (const diff of newSubdomains) {
     }
   }
 }
-console.log('Total de novos subdomínios:', totalNewSubdomains);
+console.log('Total new subdomains:', totalNewSubdomains);
 
-// 3. Portas recentemente expostas
+// 3. Newly exposed ports
 const newPorts = await diffsResource.query({
   'changes.type': 'port:add'
 });
-console.log('Eventos de novas portas expostas:', newPorts.length);
+console.log('Exposed-port events:', newPorts.length);
 
-// 4. Mudanças de IP (possível migração/fail over)
+// 4. IP changes (possible migration/failover)
 const ipChanges = await diffsResource.query({
   'changes.type': 'field:primaryIp'
 });
-console.log('Mudanças de IP detectadas:', ipChanges.length);
+console.log('IP changes detected:', ipChanges.length);
 ```
 
 ---
 
 ### 5. **plg_recon_subdomains** - Discovered Subdomains
 
-**Propósito**: Lista consolidada de subdomínios descobertos por host.
+**Purpose**: consolidated list of subdomains per host.
 
 **Schema**:
 ```javascript
@@ -613,24 +613,24 @@ console.log('Mudanças de IP detectadas:', ipChanges.length);
 }
 ```
 
-**Queries para Insights**:
+**Insight-friendly queries**:
 
 ```javascript
 const subdomainsResource = await db.resources.plg_recon_subdomains;
 
-// 1. Hosts com mais subdomínios
+// 1. Hosts with the most subdomains
 const allSubdomains = await subdomainsResource.list({ limit: 1000 });
 allSubdomains.sort((a, b) => b.total - a.total);
-console.log('Top 10 hosts por subdomínios:');
+console.log('Top 10 hosts by subdomains:');
 for (const entry of allSubdomains.slice(0, 10)) {
-  console.log(`  ${entry.host}: ${entry.total} subdomínios`);
+  console.log(`  ${entry.host}: ${entry.total} subdomains`);
 }
 
-// 2. Total de subdomínios descobertos no inventário
+// 2. Total subdomains discovered
 const totalSubdomains = allSubdomains.reduce((sum, entry) => sum + entry.total, 0);
-console.log('Total de subdomínios no inventário:', totalSubdomains);
+console.log('Inventory-wide subdomain total:', totalSubdomains);
 
-// 3. Fontes mais efetivas
+// 3. Most effective sources
 const sourceCounts = { amass: 0, subfinder: 0, assetfinder: 0, crtsh: 0 };
 for (const entry of allSubdomains) {
   for (const [source, data] of Object.entries(entry.sources || {})) {
@@ -639,14 +639,14 @@ for (const entry of allSubdomains) {
     }
   }
 }
-console.log('Descobertas por fonte:', sourceCounts);
+console.log('Discoveries per source:', sourceCounts);
 ```
 
 ---
 
 ### 6. **plg_recon_paths** - Discovered Endpoints
 
-**Propósito**: Endpoints/paths descobertos via fuzzing.
+**Purpose**: endpoints/paths discovered via fuzzing.
 
 **Schema**:
 ```javascript
@@ -677,30 +677,30 @@ console.log('Descobertas por fonte:', sourceCounts);
 ```javascript
 const pathsResource = await db.resources.plg_recon_paths;
 
-// 1. Hosts com admin panels expostos
+// 1. Hosts exposing admin panels
 const adminPaths = await pathsResource.query({
   paths: { $regex: /admin|panel|dashboard/i }
 });
-console.log('Hosts com admin panels:', adminPaths.length);
+console.log('Hosts with admin panels:', adminPaths.length);
 
-// 2. Hosts com APIs descobertas
+// 2. Hosts with discovered APIs
 const apiPaths = await pathsResource.query({
   paths: { $regex: /api|rest|graphql/i }
 });
-console.log('Hosts com APIs:', apiPaths.length);
+console.log('Hosts with APIs:', apiPaths.length);
 
-// 3. Hosts com uploads/backups expostos
-const sensitiveaths = await pathsResource.query({
+// 3. Hosts exposing uploads/backups
+const sensitivePaths = await pathsResource.query({
   paths: { $regex: /upload|backup|temp|old/i }
 });
-console.log('Hosts com paths sensíveis:', sensitivePaths.length);
+console.log('Hosts with sensitive paths:', sensitivePaths.length);
 ```
 
 ---
 
-### 7. **plg_recon_targets** - Dynamic Target Management
+### 7. **plg_recon_targets** – Dynamic target management
 
-**Propósito**: Gerenciamento de targets dinâmicos com metadados.
+**Purpose**: manage dynamic targets alongside metadata.
 
 **Schema**:
 ```javascript
@@ -727,53 +727,53 @@ console.log('Hosts com paths sensíveis:', sensitivePaths.length);
 }
 ```
 
-**Queries para Insights**:
+**Insight-friendly queries**:
 
 ```javascript
 const targetsResource = await db.resources.plg_recon_targets;
 
-// 1. Targets ativos
+// 1. Active targets
 const activeTargets = await targetsResource.query({ enabled: true });
-console.log('Targets ativos:', activeTargets.length);
+console.log('Active targets:', activeTargets.length);
 
-// 2. Targets por criticality
+// 2. Targets by criticality
 const criticalTargets = await targetsResource.query({
   'metadata.criticality': 'high'
 });
-console.log('Targets críticos:', criticalTargets.length);
+console.log('High criticality targets:', criticalTargets.length);
 
-// 3. Targets por owner
+// 3. Targets by owner
 const securityTeamTargets = await targetsResource.query({
   'metadata.owner': 'Security Team'
 });
-console.log('Targets do Security Team:', securityTeamTargets.length);
+console.log('Security Team targets:', securityTeamTargets.length);
 
-// 4. Targets com scans falhando
+// 4. Targets with failing scans
 const failingTargets = await targetsResource.query({
   lastScanStatus: { $in: ['partial', 'error'] }
 });
-console.log('Targets com scans problemáticos:', failingTargets.length);
+console.log('Targets with scan issues:', failingTargets.length);
 
-// 5. Targets por tag
+// 5. Targets by tag
 const productionTargets = await targetsResource.query({
   tags: 'production'
 });
-console.log('Targets de produção:', productionTargets.length);
+console.log('Production targets:', productionTargets.length);
 ```
 
 ---
 
-## 📊 Insights Avançados - Queries Cross-Resource
+## 📊 Advanced Insights – cross-resource queries
 
-### 1. **Attack Surface Monitoring**
+### 1. **Attack surface monitoring**
 
-Combine múltiplas resources para visualizar a superfície de ataque completa:
+Combine multiple resources to visualize the full attack surface:
 
 ```javascript
-// Carregar todos os hosts
+// Load all hosts
 const hosts = await db.resources.plg_recon_hosts.list({ limit: 1000 });
 
-// Carregar todos os subdomínios
+// Load all subdomains
 const subdomainEntries = await db.resources.plg_recon_subdomains.list({ limit: 1000 });
 
 // Carregar todas as portas abertas
@@ -787,27 +787,27 @@ const attackSurface = {
 };
 
 for (const host of hosts) {
-  // Contar portas abertas
+  // Count open ports
   attackSurface.totalOpenPorts += host.summary?.openPortCount || 0;
 
-  // Contar portas críticas (DBs, etc.)
+  // Count critical ports (DBs, etc.)
   const critical = (host.summary?.openPorts || []).filter(p =>
     ['3306/tcp', '5432/tcp', '27017/tcp', '6379/tcp'].includes(p.port)
   );
   attackSurface.criticalPorts += critical.length;
 
-  // Agrupar por tecnologia
+  // Group by technology
   for (const tech of host.fingerprint?.technologies || []) {
     attackSurface.hostsByTechnology[tech] = (attackSurface.hostsByTechnology[tech] || 0) + 1;
   }
 
-  // Agrupar por CDN
+  // Group by CDN
   if (host.fingerprint?.cdn) {
     attackSurface.hostsByCDN[host.fingerprint.cdn] = (attackSurface.hostsByCDN[host.fingerprint.cdn] || 0) + 1;
   }
 }
 
-// Contar subdomínios
+// Count subdomains
 for (const entry of subdomainEntries) {
   attackSurface.totalSubdomains += entry.total || 0;
 }
@@ -826,14 +826,14 @@ for (const [tech, count] of topTech) {
 }
 ```
 
-### 2. **Change Velocity Tracking**
+### 2. **Change velocity tracking**
 
-Monitore a velocidade de mudanças na infraestrutura:
+Monitor how fast infrastructure changes:
 
 ```javascript
 const diffs = await db.resources.plg_recon_diffs.list({ limit: 1000 });
 
-// Agrupar mudanças por tipo e período
+// Group changes by type and period
 const now = Date.now();
 const last7Days = now - 7 * 24 * 60 * 60 * 1000;
 const last30Days = now - 30 * 24 * 60 * 60 * 1000;
@@ -869,9 +869,9 @@ console.log('    Critical changes:', changeStats.last30Days.critical);
 console.log('    Changes per day:', (changeStats.last30Days.total / 30).toFixed(1));
 ```
 
-### 3. **Tool Effectiveness Analysis**
+### 3. **Tool effectiveness analysis**
 
-Compare a efetividade de diferentes ferramentas:
+Compare how effective each tool is:
 
 ```javascript
 const reports = await db.resources.plg_recon_reports.list({ limit: 1000 });
@@ -886,7 +886,7 @@ const toolStats = {
 const storage = plugin.getStorage();
 
 for (const report of reports) {
-  // Carregar artifacts de ferramentas
+  // Load tool artifacts
   if (report.toolKeys?.nmap) {
     const artifact = await storage.get(report.toolKeys.nmap);
     toolStats.nmap.executions++;
@@ -898,19 +898,19 @@ for (const report of reports) {
     }
   }
 
-  // Repetir para outras ferramentas...
+  // Repeat for other tools...
 }
 
-// Calcular médias
+// Calculate averages
 for (const [tool, stats] of Object.entries(toolStats)) {
   const avgFindings = stats.avgFindings.length > 0
     ? stats.avgFindings.reduce((a, b) => a + b, 0) / stats.avgFindings.length
     : 0;
 
   console.log(`${tool}:`);
-  console.log(`  Execuções: ${stats.executions}`);
-  console.log(`  Taxa de sucesso: ${((stats.successes / stats.executions) * 100).toFixed(1)}%`);
-  console.log(`  Média de descobertas: ${avgFindings.toFixed(1)}`);
+  console.log(`  Executions: ${stats.executions}`);
+  console.log(`  Success rate: ${((stats.successes / stats.executions) * 100).toFixed(1)}%`);
+  console.log(`  Average findings: ${avgFindings.toFixed(1)}`);
 }
 ```
 
@@ -920,13 +920,13 @@ for (const [tool, stats] of Object.entries(toolStats)) {
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  1. EXECUÇÃO DE SCAN                                     │
+│  1. SCAN EXECUTION                                       │
 ├──────────────────────────────────────────────────────────┤
 │  plugin.runDiagnostics('example.com', { persist: true })│
 └──────────────────────────────────────────────────────────┘
                         ↓
 ┌──────────────────────────────────────────────────────────┐
-│  2. STAGES EXECUTADOS EM PARALELO                        │
+│  2. STAGES EXECUTED IN PARALLEL                          │
 ├──────────────────────────────────────────────────────────┤
 │  - DnsStage.execute()                                    │
 │  - CertificateStage.execute()                            │
@@ -936,7 +936,7 @@ for (const [tool, stats] of Object.entries(toolStats)) {
 └──────────────────────────────────────────────────────────┘
                         ↓
 ┌──────────────────────────────────────────────────────────┐
-│  3. CADA FERRAMENTA GERA ARTIFACT                        │
+│  3. EACH TOOL GENERATES AN ARTIFACT                      │
 ├──────────────────────────────────────────────────────────┤
 │  StorageManager.persistReport()                          │
 │  ├─ tools/nmap.json                                      │
@@ -946,7 +946,7 @@ for (const [tool, stats] of Object.entries(toolStats)) {
 └──────────────────────────────────────────────────────────┘
                         ↓
 ┌──────────────────────────────────────────────────────────┐
-│  4. STAGES AGREGAM RESULTADOS                            │
+│  4. STAGES AGGREGATE RESULTS                             │
 ├──────────────────────────────────────────────────────────┤
 │  StorageManager.persistReport()                          │
 │  ├─ aggregated/ports.json (nmap + masscan)               │
@@ -955,7 +955,7 @@ for (const [tool, stats] of Object.entries(toolStats)) {
 └──────────────────────────────────────────────────────────┘
                         ↓
 ┌──────────────────────────────────────────────────────────┐
-│  5. DADOS PERSISTIDOS EM RESOURCES                       │
+│  5. DATA PERSISTED INTO RESOURCES                        │
 ├──────────────────────────────────────────────────────────┤
 │  StorageManager.persistToResources()                     │
 │  ├─ plg_recon_hosts (fingerprint, summary)               │
@@ -967,7 +967,7 @@ for (const [tool, stats] of Object.entries(toolStats)) {
 └──────────────────────────────────────────────────────────┘
                         ↓
 ┌──────────────────────────────────────────────────────────┐
-│  6. INSIGHTS GERADOS VIA QUERIES                         │
+│  6. INSIGHTS GENERATED THROUGH QUERIES                   │
 ├──────────────────────────────────────────────────────────┤
 │  - Attack surface monitoring                             │
 │  - Change velocity tracking                              │
@@ -982,40 +982,40 @@ for (const [tool, stats] of Object.entries(toolStats)) {
 ## 🚀 Exemplo Completo: Do Scan ao Insight
 
 ```javascript
-// 1. Executar scan
+// 1. Execute scan
 const report = await plugin.runDiagnostics('example.com', { persist: true });
 
-// 2. Acessar artifacts individuais de ferramentas
+// 2. Read individual tool artifacts
 const storage = plugin.getStorage();
 const nmapArtifact = await storage.get(report.toolStorageKeys.nmap);
 const amassArtifact = await storage.get(report.toolStorageKeys.amass);
 
-console.log('Nmap encontrou:', nmapArtifact.summary.openPorts.length, 'portas');
-console.log('Amass encontrou:', amassArtifact.count, 'subdomínios');
+console.log('Nmap found:', nmapArtifact.summary.openPorts.length, 'ports');
+console.log('Amass found:', amassArtifact.count, 'subdomains');
 
-// 3. Acessar stage agregado
+// 3. Read aggregated stage
 const portsStage = await storage.get(report.stageStorageKeys.ports);
-console.log('Total de portas únicas:', portsStage.openPorts.length);
+console.log('Unique ports:', portsStage.openPorts.length);
 
-// 4. Consultar resources para insights
+// 4. Query resources for insights
 const hostsResource = await db.resources.plg_recon_hosts;
 const host = await hostsResource.get('example.com');
-console.log('Fingerprint atual:', host.fingerprint);
+console.log('Current fingerprint:', host.fingerprint);
 
-// 5. Detectar mudanças
+// 5. Detect changes
 const diffsResource = await db.resources.plg_recon_diffs;
 const recentChanges = await diffsResource.query({
   host: 'example.com',
   'changes.critical': true
 });
-console.log('Mudanças críticas:', recentChanges.length);
+console.log('Critical changes:', recentChanges.length);
 
-// 6. Análise cross-resource
+// 6. Cross-resource analysis
 const allHosts = await hostsResource.list({ limit: 1000 });
 const criticalPorts = allHosts.filter(h =>
   (h.summary?.openPorts || []).some(p => ['3306/tcp', '5432/tcp'].includes(p.port))
 );
-console.log('Hosts com DBs expostos:', criticalPorts.length);
+console.log('Hosts with exposed databases:', criticalPorts.length);
 ```
 
 ---
@@ -1024,7 +1024,7 @@ console.log('Hosts com DBs expostos:', criticalPorts.length);
 
 ### 1. Security Dashboard
 ```javascript
-// Agregação para dashboard de segurança
+// Aggregation for a security dashboard
 const dashboard = {
   totalHosts: 0,
   totalSubdomains: 0,
@@ -1033,12 +1033,12 @@ const dashboard = {
   exposedDatabases: 0
 };
 
-// Popular dashboard com queries cross-resource...
+// Populate dashboard using cross-resource queries...
 ```
 
-### 2. Compliance Reporting
+### 2. Compliance reporting
 ```javascript
-// Relatório de compliance
+// Compliance report scaffold
 const complianceReport = {
   tlsEnabled: 0,
   outdatedTech: [],
@@ -1046,21 +1046,21 @@ const complianceReport = {
   exposedServices: []
 };
 
-// Queries em plg_recon_hosts + plg_recon_stages...
+// Run queries across plg_recon_hosts + plg_recon_stages...
 ```
 
-### 3. Incident Response
+### 3. Incident response
 ```javascript
-// Investigação de incidente
+// Incident investigation snapshot
 const incident = {
   newSubdomains: [],  // plg_recon_diffs
   newPorts: [],       // plg_recon_diffs
   ipChanges: []       // plg_recon_diffs
 };
 
-// Queries em plg_recon_diffs com filtros temporais...
+// Execute time-bound queries against plg_recon_diffs...
 ```
 
 ---
 
-**Documentação completa de como TODAS as informações de CADA ferramenta são salvas e agregadas para insights! 🎯**
+**Complete documentation of how every tool’s data is captured and aggregated for insights! 🎯**

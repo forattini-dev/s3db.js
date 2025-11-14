@@ -300,7 +300,7 @@ const stores = await db.createResource({
 // 2. Filter by city, then proximity
 const cityStores = await stores.listPartition({
   partition: 'byCity',
-  partitionValues: { city: 'São Paulo' }
+  partitionValues: { city: 'Sao Paulo' }
 });
 
 const nearby = cityStores

@@ -46,7 +46,7 @@ $ node my-api.js
 [HealthManager]   GET /health/ready
 [API Plugin] Server listening on http://0.0.0.0:3000
 
-  🗄️  s3db.js API v1.0.0
+  🗄️  s3db.js API ready
      - Local:    http://localhost:3000/api/v1
      - Network:  http://192.168.1.100:3000/api/v1
      - Docs:     http://localhost:3000/api/v1/docs
@@ -78,7 +78,7 @@ When `verbose: false` (default), you only see the startup banner:
 ```bash
 $ node my-api.js
 
-  🗄️  s3db.js API v1.0.0
+  🗄️  s3db.js API ready
      - Local:    http://localhost:3000
      - Network:  http://192.168.1.100:3000
      - Docs:     http://localhost:3000/docs

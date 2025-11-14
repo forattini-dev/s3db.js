@@ -388,7 +388,7 @@ plugin.on('plg:s3-queue:coordinator-demoted', ({ workerId }) => {
 
 **Golden Rule:** As pod count increases, **increase intervals** to reduce S3 operation pressure.
 
-### Future Optimizations (v15+)
+### Future Optimizations
 
 These optimizations are planned for even better scalability:
 
@@ -568,4 +568,3 @@ app.get('/ready', (req, res) => {
 **Bottom Line:** 100 pods is the **sweet spot** for coordinator mode with S3 backend. Beyond that, evaluate sharding or alternative coordination layers (SQS/Redis).
 
 ---
-

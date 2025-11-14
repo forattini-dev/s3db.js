@@ -1,6 +1,6 @@
 # 🎯 Enhanced Context API - Developer-Friendly Routes
 
-**New in s3db.js v13.7.0+**
+**Enhanced context keeps route handlers concise and expressive.**
 
 ## 📋 TL;DR
 
@@ -253,7 +253,7 @@ routes: {
 
 ### Advanced Error Handling with `c.error()`
 
-**New in v16.1.26+**: The API plugin now includes a powerful error helper that standardizes error responses across your API. Available globally on the Hono context (`c`), not just in enhanced context.
+The API plugin includes a powerful error helper that standardizes error responses across your API. It's available globally on the Hono context (`c`), not just in enhanced context.
 
 #### Basic Usage
 
@@ -393,7 +393,7 @@ routes: {
 
 #### Standard Error Classes (Pre-built)
 
-**New in v16.1.26+**: s3db.js provides pre-built error classes with semantic names, error codes, and correct HTTP status codes.
+s3db.js provides pre-built error classes with semantic names, error codes, and correct HTTP status codes.
 
 **NOTE**: Error classes are exported with `Http` prefix (`HttpNotFoundError`, `HttpValidationError`, etc.) to avoid conflicts with core s3db.js error classes. For convenience, backward-compatible aliases without the prefix are also exported (`NotFoundError`, `ValidationError`, etc.).
 
