@@ -202,9 +202,9 @@ function buildCustomRouteOperationId(scope, method, path) {
 }
 
 function createCustomRouteOperation({ method, path, originalKey, scope, tags, security }) {
-  const summary = `Custom ${method} ${path}`;
+  const summary = `${method} ${path}`;
   const descriptionLines = [
-    `Custom route defined ${scope}.`,
+    `Route defined ${scope}.`,
     `Original definition: \`${originalKey}\`.`,
     'Request and response payloads depend on the handler implementation.'
   ];
@@ -1519,7 +1519,7 @@ For detailed information about each endpoint, see the sections below.`;
         if (!spec.tags.some(t => t.name === inferredTag)) {
           spec.tags.push({
             name: inferredTag,
-            description: `Custom routes for ${inferredTag}`
+            description: `Routes for ${inferredTag}`
           });
         }
       }
@@ -1531,7 +1531,7 @@ For detailed information about each endpoint, see the sections below.`;
         if (!spec.tags.some(t => t.name === inferredTag)) {
           spec.tags.push({
             name: inferredTag,
-            description: `Custom routes for ${inferredTag}`
+            description: `Routes for ${inferredTag}`
           });
         }
       } else {
@@ -1544,7 +1544,7 @@ For detailed information about each endpoint, see the sections below.`;
         if (tag !== CUSTOM_ROUTES_TAG && !spec.tags.some(t => t.name === tag)) {
           spec.tags.push({
             name: tag,
-            description: `Custom routes for ${tag}`
+            description: `Routes for ${tag}`
           });
         }
       }

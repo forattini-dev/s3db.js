@@ -645,7 +645,7 @@ plugin.on('plg:s3-queue:coordinator-demoted', ({ workerId }) => {
 
 **Golden Rule:** As pod count increases, **increase intervals** to reduce S3 operation pressure.
 
-### Future Optimizations (v15+)
+### Future Optimizations
 
 These optimizations are planned for even better scalability:
 
@@ -1384,4 +1384,3 @@ Redis (ElastiCache):     ~$12   (monthly server cost)
 ```
 
 ---
-

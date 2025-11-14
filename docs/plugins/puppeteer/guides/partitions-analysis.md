@@ -1,13 +1,13 @@
 # PuppeteerPlugin Partitions Analysis & Optimization
 
-Análise completa de todas as resources criadas pelo PuppeteerPlugin e otimização de partições para queries O(1).
+Complete breakdown of every resource created by the PuppeteerPlugin plus partition recommendations for O(1) queries.
 
-## 📊 Resources Existentes
+## 📊 Existing Resources
 
 ### 1. **puppeteer_cookies** (Cookie Storage)
-**Localização**: `puppeteer.plugin.js:399`
+**Location**: `puppeteer.plugin.js:399`
 
-**Schema Atual**:
+**Current Schema**:
 ```javascript
 {
   sessionId: 'string|required',
@@ -20,35 +20,35 @@ Análise completa de todas as resources criadas pelo PuppeteerPlugin e otimizaç
 }
 ```
 
-**Partitions Atuais**: ❌ NENHUMA
+**Current Partitions**: ❌ None
 
-**Query Patterns Identificados**:
-- ✅ Buscar por sessionId (get)
-- 🔍 Buscar cookies de um proxy específico
-- 🔍 Buscar cookies por reputação (success rate)
-- 🔍 Buscar cookies expiradas (by date)
-- 🔍 Buscar cookies de um domínio
+**Observed Query Patterns**:
+- ✅ Fetch by sessionId (get)
+- 🔍 Find cookies for a specific proxy
+- 🔍 Filter cookies by reputation (success rate)
+- 🔍 Locate expired cookies (by date)
+- 🔍 Lookup cookies for a given domain
 
-**Partitions Recomendadas**:
+**Recommended Partitions**:
 ```javascript
 partitions: {
-  byProxy: { fields: { proxyId: 'string' } },           // Cookies de um proxy
-  byDate: { fields: { date: 'string' } },               // Rotação por data
-  byDomain: { fields: { domain: 'string' } }            // Cookies por domínio (requer adicionar)
+  byProxy: { fields: { proxyId: 'string' } },           // Cookies for a proxy
+  byDate: { fields: { date: 'string' } },               // Rotation by date
+  byDomain: { fields: { domain: 'string' } }            // Cookies by domain (requires attribute)
 }
 ```
 
-**Campos Adicionais Necessários**:
-- `domain: 'string'` - Domínio principal dos cookies
-- `date: 'string'` - YYYY-MM-DD para partitioning temporal
-- `expiresAt: 'number'` - Timestamp de expiração
+**Additional Fields Needed**:
+- `domain: 'string'` - Primary cookie domain
+- `date: 'string'` - YYYY-MM-DD for temporal partitioning
+- `expiresAt: 'number'` - Expiration timestamp
 
 ---
 
 ### 2. **network_sessions** (Network Metadata)
-**Localização**: `network-monitor.js:81`
+**Location**: `network-monitor.js:81`
 
-**Schema Atual**:
+**Current Schema**:
 ```javascript
 {
   sessionId: 'string|required',
@@ -70,35 +70,35 @@ partitions: {
 }
 ```
 
-**Partitions Atuais**: ✅ `byUrl`, `byDate`, `byDomain`
+**Current Partitions**: ✅ `byUrl`, `byDate`, `byDomain`
 
-**Query Patterns Adicionais Identificados**:
-- 🔍 Buscar sessões com muitas falhas (failedRequests > threshold)
-- 🔍 Buscar sessões pesadas (totalBytes > threshold)
-- 🔍 Buscar por performance score
-- 🔍 Buscar por user agent (bot detection)
+**Extra Query Patterns**:
+- 🔍 Sessions with many failures (failedRequests > threshold)
+- 🔍 Heavy sessions (totalBytes > threshold)
+- 🔍 Filter by performance score
+- 🔍 Group by user agent (bot detection)
 
-**Partitions Adicionais Recomendadas**:
+**Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  byUrl: { fields: { url: 'string' } },                 // ✅ Já existe
-  byDate: { fields: { date: 'string' } },               // ✅ Já existe
-  byDomain: { fields: { domain: 'string' } },           // ✅ Já existe
+  byUrl: { fields: { url: 'string' } },                 // ✅ Already present
+  byDate: { fields: { date: 'string' } },               // ✅ Already present
+  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
   byQuality: { fields: { quality: 'string' } },         // 🆕 good/medium/poor (score-based)
   byUserAgent: { fields: { userAgentType: 'string' } }  // 🆕 desktop/mobile/bot
 }
 ```
 
-**Campos Adicionais Necessários**:
-- `quality: 'string'` - Classificação (good/medium/poor) baseada em score
-- `userAgentType: 'string'` - Tipo (desktop/mobile/tablet/bot)
+**Additional Fields Needed**:
+- `quality: 'string'` - Classification (good/medium/poor) based on score
+- `userAgentType: 'string'` - Device class (desktop/mobile/tablet/bot)
 
 ---
 
 ### 3. **network_requests** (Detailed Requests)
-**Localização**: `network-monitor.js:125`
+**Location**: `network-monitor.js:125`
 
-**Schema Atual**:
+**Current Schema**:
 ```javascript
 {
   requestId: 'string|required',
@@ -135,24 +135,24 @@ partitions: {
 }
 ```
 
-**Partitions Atuais**: ✅ `bySession`, `byType`, `byStatus`, `bySize`, `byDomain`
+**Current Partitions**: ✅ `bySession`, `byType`, `byStatus`, `bySize`, `byDomain`
 
-**Query Patterns Adicionais Identificados**:
-- 🔍 Buscar requests lentas (duration > threshold)
-- 🔍 Buscar por CDN provider (cdn field)
-- 🔍 Buscar requests em cache (fromCache = true)
-- 🔍 Buscar por compression type
-- 🔍 Buscar por método HTTP
-- 🔍 Buscar redirects
+**Extra Query Patterns**:
+- 🔍 Slow requests (duration > threshold)
+- 🔍 Group by CDN provider (`cdn`)
+- 🔍 Cached responses (`fromCache = true`)
+- 🔍 Compression types
+- 🔍 HTTP method
+- 🔍 Redirect tracking
 
-**Partitions Adicionais Recomendadas**:
+**Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  bySession: { fields: { sessionId: 'string' } },       // ✅ Já existe
-  byType: { fields: { type: 'string' } },               // ✅ Já existe
-  byStatus: { fields: { statusCode: 'number' } },       // ✅ Já existe
-  bySize: { fields: { size: 'number' } },               // ✅ Já existe
-  byDomain: { fields: { domain: 'string' } },           // ✅ Já existe
+  bySession: { fields: { sessionId: 'string' } },       // ✅ Already present
+  byType: { fields: { type: 'string' } },               // ✅ Already present
+  byStatus: { fields: { statusCode: 'number' } },       // ✅ Already present
+  bySize: { fields: { size: 'number' } },               // ✅ Already present
+  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
   byCDN: { fields: { cdn: 'string' } },                 // 🆕 cloudflare/cloudfront/etc
   byCompression: { fields: { compression: 'string' } }, // 🆕 gzip/brotli/none
   byMethod: { fields: { method: 'string' } },           // 🆕 GET/POST/PUT/etc
@@ -160,13 +160,13 @@ partitions: {
 }
 ```
 
-**Campos Adicionais Necessários**:
-- `performance: 'string'` - Classificação (fast <500ms, medium <2s, slow >2s)
+**Additional Fields Needed**:
+- `performance: 'string'` - Classification (fast <500ms, medium <2s, slow >2s)
 
 ---
 
 ### 4. **network_errors** (Network Failures)
-**Localização**: `network-monitor.js:197`
+**Location**: `network-monitor.js:197`
 
 **Schema Atual**:
 ```javascript
@@ -190,12 +190,12 @@ partitions: {
 
 **Partitions Atuais**: ✅ `bySession`, `byErrorType`, `byDate`, `byDomain`
 
-**Status**: ✅ **OTIMIZADO** - Partições cobrem todos os principais casos de uso.
+**Status**: ✅ **OPTIMIZED** – current partitions already cover all primary use cases.
 
 ---
 
 ### 5. **console_sessions** (Console Metadata)
-**Localização**: `console-monitor.js:75`
+**Location**: `console-monitor.js:75`
 
 **Schema Atual**:
 ```javascript
@@ -218,34 +218,34 @@ partitions: {
 }
 ```
 
-**Partitions Atuais**: ✅ `byUrl`, `byDate`, `byDomain`
+**Current Partitions**: ✅ `byUrl`, `byDate`, `byDomain`
 
-**Query Patterns Adicionais Identificados**:
-- 🔍 Buscar sessões com muitos erros (errorCount > threshold)
-- 🔍 Buscar sessões com warnings (warningCount > 0)
-- 🔍 Buscar por user agent type
+**Extra Query Patterns**:
+- 🔍 Sessions with many errors (`errorCount > threshold`)
+- 🔍 Sessions with warnings (`warningCount > 0`)
+- 🔍 Filter by user agent type
 
-**Partitions Adicionais Recomendadas**:
+**Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  byUrl: { fields: { url: 'string' } },                 // ✅ Já existe
-  byDate: { fields: { date: 'string' } },               // ✅ Já existe
-  byDomain: { fields: { domain: 'string' } },           // ✅ Já existe
+  byUrl: { fields: { url: 'string' } },                 // ✅ Already present
+  byDate: { fields: { date: 'string' } },               // ✅ Already present
+  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
   byQuality: { fields: { quality: 'string' } },         // 🆕 clean/warnings/errors
   byUserAgent: { fields: { userAgentType: 'string' } }  // 🆕 desktop/mobile/bot
 }
 ```
 
-**Campos Adicionais Necessários**:
-- `quality: 'string'` - Classificação (clean: 0 errors, warnings: >0 warnings, errors: >0 errors)
-- `userAgentType: 'string'` - Tipo (desktop/mobile/tablet/bot)
+**Additional Fields Needed**:
+- `quality: 'string'` - Classification (clean: 0 errors, warnings: >0 warnings, errors: >0 errors)
+- `userAgentType: 'string'` - Device class (desktop/mobile/tablet/bot)
 
 ---
 
 ### 6. **console_messages** (All Console Messages)
-**Localização**: `console-monitor.js:115`
+**Location**: `console-monitor.js:115`
 
-**Schema Atual**:
+**Current Schema**:
 ```javascript
 {
   messageId: 'string|required',
@@ -262,32 +262,32 @@ partitions: {
 }
 ```
 
-**Partitions Atuais**: ✅ `bySession`, `byType`, `byDate`, `byDomain`
+**Current Partitions**: ✅ `bySession`, `byType`, `byDate`, `byDomain`
 
-**Query Patterns Adicionais Identificados**:
-- 🔍 Buscar mensagens de um script específico (source.url)
-- 🔍 Buscar por padrão de texto (text contains)
+**Extra Query Patterns**:
+- 🔍 Messages from a specific script (`source.url`)
+- 🔍 Text pattern search (message contains)
 
-**Partitions Adicionais Recomendadas**:
+**Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  bySession: { fields: { sessionId: 'string' } },       // ✅ Já existe
-  byType: { fields: { type: 'string' } },               // ✅ Já existe
-  byDate: { fields: { date: 'string' } },               // ✅ Já existe
-  byDomain: { fields: { domain: 'string' } },           // ✅ Já existe
+  bySession: { fields: { sessionId: 'string' } },       // ✅ Already present
+  byType: { fields: { type: 'string' } },               // ✅ Already present
+  byDate: { fields: { date: 'string' } },               // ✅ Already present
+  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
   bySource: { fields: { sourceUrl: 'string' } }         // 🆕 script URL
 }
 ```
 
-**Campos Adicionais Necessários**:
-- `sourceUrl: 'string'` - URL do script que gerou a mensagem (extraído de source.url)
+**Additional Fields Needed**:
+- `sourceUrl: 'string'` - Script URL extracted from `source.url`
 
 ---
 
 ### 7. **console_errors** (Errors & Exceptions Only)
-**Localização**: `console-monitor.js:154`
+**Location**: `console-monitor.js:154`
 
-**Schema Atual**:
+**Current Schema**:
 ```javascript
 {
   errorId: 'string|required',
@@ -310,195 +310,195 @@ partitions: {
 }
 ```
 
-**Partitions Atuais**: ✅ `bySession`, `byErrorType`, `byDate`, `byDomain`
+**Current Partitions**: ✅ `bySession`, `byErrorType`, `byDate`, `byDomain`
 
-**Query Patterns Adicionais Identificados**:
-- 🔍 Buscar uncaught exceptions (isUncaught = true)
-- 🔍 Buscar promise rejections (isPromiseRejection = true)
-- 🔍 Buscar network errors (isNetworkError = true)
-- 🔍 Buscar por script URL
+**Extra Query Patterns**:
+- 🔍 Uncaught exceptions (`isUncaught = true`)
+- 🔍 Promise rejections (`isPromiseRejection = true`)
+- 🔍 Network errors (`isNetworkError = true`)
+- 🔍 Filter by script URL
 
-**Partitions Adicionais Recomendadas**:
+**Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  bySession: { fields: { sessionId: 'string' } },       // ✅ Já existe
-  byErrorType: { fields: { errorType: 'string' } },     // ✅ Já existe
-  byDate: { fields: { date: 'string' } },               // ✅ Já existe
-  byDomain: { fields: { domain: 'string' } },           // ✅ Já existe
+  bySession: { fields: { sessionId: 'string' } },       // ✅ Already present
+  byErrorType: { fields: { errorType: 'string' } },     // ✅ Already present
+  byDate: { fields: { date: 'string' } },               // ✅ Already present
+  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
   byScript: { fields: { scriptUrl: 'string' } },        // 🆕 script causing error
   byCategory: { fields: { category: 'string' } }        // 🆕 uncaught/promise/network/syntax
 }
 ```
 
-**Campos Adicionais Necessários**:
-- `scriptUrl: 'string'` - URL do script que gerou o erro (extraído de url field)
-- `category: 'string'` - Categoria (uncaught/promise/network/syntax/other)
+**Additional Fields Needed**:
+- `scriptUrl: 'string'` - Script URL causing the error (derived from `url`)
+- `category: 'string'` - Category (uncaught/promise/network/syntax/other)
 
 ---
 
-## 📈 Resumo de Otimizações
+## 📈 Optimization Summary
 
-### Resources que NÃO possuem partitions:
-1. ❌ **puppeteer_cookies** - Precisa de 3 partições
+### Resources without partitions:
+1. ❌ **puppeteer_cookies** – needs three partitions
 
-### Resources que PRECISAM de partições adicionais:
-2. 🟡 **network_sessions** - +2 partições (byQuality, byUserAgent)
-3. 🟡 **network_requests** - +4 partições (byCDN, byCompression, byMethod, byPerformance)
-4. ✅ **network_errors** - OK (4 partições suficientes)
-5. 🟡 **console_sessions** - +2 partições (byQuality, byUserAgent)
-6. 🟡 **console_messages** - +1 partição (bySource)
-7. 🟡 **console_errors** - +2 partições (byScript, byCategory)
+### Resources needing additional partitions:
+2. 🟡 **network_sessions** – +2 (byQuality, byUserAgent)
+3. 🟡 **network_requests** – +4 (byCDN, byCompression, byMethod, byPerformance)
+4. ✅ **network_errors** – already sufficient (four partitions)
+5. 🟡 **console_sessions** – +2 (byQuality, byUserAgent)
+6. 🟡 **console_messages** – +1 (bySource)
+7. 🟡 **console_errors** – +2 (byScript, byCategory)
 
-### Total:
-- **Partições Atuais**: 25
-- **Partições Recomendadas**: 39
-- **Aumento**: +14 partições (+56%)
-
----
-
-## 🎯 Plano de Implementação
-
-### Prioridade ALTA (Critical for Performance):
-1. **puppeteer_cookies**: Adicionar partições (byProxy, byDate, byDomain)
-2. **network_requests**: Adicionar byPerformance (queries lentas são comuns)
-3. **console_errors**: Adicionar byCategory (separar tipos de erro)
-
-### Prioridade MÉDIA (Nice to Have):
-4. **network_sessions**: Adicionar byQuality (filtro comum)
-5. **network_requests**: Adicionar byCDN, byMethod
-6. **console_sessions**: Adicionar byQuality
-7. **console_messages**: Adicionar bySource
-
-### Prioridade BAIXA (Edge Cases):
-8. **network_requests**: Adicionar byCompression
-9. **network_sessions**: Adicionar byUserAgent
-10. **console_sessions**: Adicionar byUserAgent
-11. **console_errors**: Adicionar byScript
+### Totals:
+- **Current partitions**: 25
+- **Recommended partitions**: 39
+- **Delta**: +14 partitions (+56%)
 
 ---
 
-## 🔍 Query Patterns Comuns (Use Cases)
+## 🎯 Implementation Plan
+
+### High Priority (critical path):
+1. **puppeteer_cookies**: add partitions (`byProxy`, `byDate`, `byDomain`)
+2. **network_requests**: add `byPerformance` (slow-request queries are frequent)
+3. **console_errors**: add `byCategory` (separate error types)
+
+### Medium Priority (nice-to-have):
+4. **network_sessions**: add `byQuality` (common filter)
+5. **network_requests**: add `byCDN`, `byMethod`
+6. **console_sessions**: add `byQuality`
+7. **console_messages**: add `bySource`
+
+### Low Priority (edge cases):
+8. **network_requests**: add `byCompression`
+9. **network_sessions**: add `byUserAgent`
+10. **console_sessions**: add `byUserAgent`
+11. **console_errors**: add `byScript`
+
+---
+
+## 🔍 Common Query Patterns (Use Cases)
 
 ### SEO Analysis:
 ```javascript
-// Buscar páginas pesadas
+// Heavy pages
 const heavySessions = await networkSessions.listPartition('byQuality', { quality: 'poor' });
 
-// Buscar images grandes
+// Large images
 const largeImages = await networkRequests.query({ type: 'image', size: { $gt: 1048576 } });
 
-// Buscar requests lentas
+// Slow requests
 const slowRequests = await networkRequests.listPartition('byPerformance', { performance: 'slow' });
 ```
 
 ### Error Tracking:
 ```javascript
-// Buscar uncaught exceptions
+// Uncaught exceptions
 const uncaught = await consoleErrors.listPartition('byCategory', { category: 'uncaught' });
 
-// Buscar erros de um script específico
+// Errors for a given script
 const scriptErrors = await consoleErrors.listPartition('byScript', { scriptUrl: 'https://cdn.com/app.js' });
 
-// Buscar network errors
+// Network errors
 const netErrors = await networkErrors.listPartition('byErrorType', { errorType: 'timeout' });
 ```
 
 ### Performance Debugging:
 ```javascript
-// Buscar requests lentas
+// Slow requests
 const slow = await networkRequests.listPartition('byPerformance', { performance: 'slow' });
 
-// Buscar por CDN
+// Filter by CDN
 const cloudflare = await networkRequests.listPartition('byCDN', { cdn: 'cloudflare' });
 
-// Buscar sessões com muitos erros
+// Sessions with lots of errors
 const errorSessions = await consoleSessions.listPartition('byQuality', { quality: 'errors' });
 ```
 
 ### Cookie Analysis:
 ```javascript
-// Buscar cookies de um proxy
+// Cookies tied to a proxy
 const proxyCookies = await puppeteerCookies.listPartition('byProxy', { proxyId: 'proxy_1' });
 
-// Buscar cookies expiradas
+// Expired cookies
 const today = new Date().toISOString().split('T')[0];
 const expired = await puppeteerCookies.listPartition('byDate', { date: { $lt: today } });
 
-// Buscar cookies de um domínio
+// Cookies for a specific domain
 const domainCookies = await puppeteerCookies.listPartition('byDomain', { domain: 'example.com' });
 ```
 
 ---
 
-## 💡 Recomendações Finais
+## 💡 Final Recommendations
 
-### 1. Implementar em Fases:
-- **Fase 1** (Crítico): puppeteer_cookies, network_requests.byPerformance, console_errors.byCategory
-- **Fase 2** (Importante): *_sessions.byQuality, network_requests.byCDN
-- **Fase 3** (Opcional): Demais partições
+### 1. Roll out in phases:
+- **Phase 1** (critical): `puppeteer_cookies`, `network_requests.byPerformance`, `console_errors.byCategory`
+- **Phase 2** (important): `*_sessions.byQuality`, `network_requests.byCDN`
+- **Phase 3** (optional): remaining partitions
 
-### 2. Campos Computados:
-Adicionar helpers para computar campos derivados:
+### 2. Derived fields:
+Add helpers to compute derived values:
 ```javascript
-// quality (baseado em métricas)
+// quality (based on metrics)
 quality = errorCount > 0 ? 'errors' : warningCount > 0 ? 'warnings' : 'clean';
 
-// performance (baseado em duration)
+// performance (based on duration)
 performance = duration < 500 ? 'fast' : duration < 2000 ? 'medium' : 'slow';
 
-// category (baseado em flags)
+// category (based on flags)
 category = isUncaught ? 'uncaught' : isPromiseRejection ? 'promise' : 'other';
 
-// userAgentType (parseado de userAgent string)
+// userAgentType (parsed from userAgent string)
 userAgentType = parseUserAgent(userAgent).deviceType;
 ```
 
-### 3. Índices Compostos (Future):
-Para queries complexas, considerar índices compostos:
+### 3. Composite indexes (future):
+For complex queries, consider compound partitions:
 ```javascript
-// Exemplo: byDomainAndDate
+// Example: byDomainAndDate
 partitions: {
   byDomainDate: { fields: { domain: 'string', date: 'string' } }
 }
 
-// Query: Erros de example.com em 2025-10-31
+// Query: Errors for example.com on 2025-10-31
 const errors = await resource.listPartition('byDomainDate', {
   domain: 'example.com',
   date: '2025-10-31'
 });
 ```
 
-### 4. TTL Plugin Integration:
-Usar TTL plugin para auto-cleanup de sessões antigas:
+### 4. TTL Plugin integration:
+Use the TTL plugin to clean up stale sessions automatically:
 ```javascript
 const ttlPlugin = new TTLPlugin({
   resources: {
-    network_sessions: { ttl: 30 * 24 * 60 * 60 * 1000 },  // 30 dias
-    console_sessions: { ttl: 30 * 24 * 60 * 60 * 1000 },  // 30 dias
-    network_requests: { ttl: 7 * 24 * 60 * 60 * 1000 },   // 7 dias
-    console_messages: { ttl: 7 * 24 * 60 * 60 * 1000 }    // 7 dias
+    network_sessions: { ttl: 30 * 24 * 60 * 60 * 1000 },  // 30 days
+    console_sessions: { ttl: 30 * 24 * 60 * 60 * 1000 },  // 30 days
+    network_requests: { ttl: 7 * 24 * 60 * 60 * 1000 },   // 7 days
+    console_messages: { ttl: 7 * 24 * 60 * 60 * 1000 }    // 7 days
   }
 });
 ```
 
 ---
 
-## 🚀 Impacto Esperado
+## 🚀 Expected Impact
 
 ### Performance:
-- **Queries O(1)**: 39 partições (vs 25 atuais)
-- **Redução de Scans**: ~70% menos full-table scans
-- **Latência**: 10-100x mais rápido para queries particionadas
+- **O(1) queries**: 39 partitions (vs 25 today)
+- **Scan reduction**: ~70% fewer full-table scans
+- **Latency**: 10–100× faster for partitioned queries
 
-### Casos de Uso Habilitados:
-- ✅ SEO analysis por qualidade de página
-- ✅ Error tracking por categoria
-- ✅ Performance debugging por CDN/compression
-- ✅ Cookie management por proxy/domain
+### Enabled use cases:
+- ✅ SEO analysis by page quality
+- ✅ Error tracking by category
+- ✅ Performance debugging by CDN/compression
+- ✅ Cookie management by proxy/domain
 - ✅ Script-level error tracking
-- ✅ User agent analysis
+- ✅ User-agent analytics
 
 ### Storage:
-- **Aumento**: ~5-10% (campos adicionais para partitioning)
-- **Benefício**: Queries 10-100x mais rápidas
-- **ROI**: Positivo para >1000 registros por resource
+- **Growth**: ~5–10% (extra partitioning fields)
+- **Benefit**: Queries 10–100× faster
+- **ROI**: Positive for datasets with >1k records per resource

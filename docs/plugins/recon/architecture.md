@@ -1,25 +1,25 @@
-# ReconPlugin - Correções Arquiteturais Críticas
+# ReconPlugin - Critical Architecture Fixes
 
-**Data**: 2025-01-01
-**Status**: ✅ Todas as correções críticas implementadas
-
----
-
-## 🎯 Resumo das Correções
-
-Foram identificados e corrigidos **4 problemas críticos** na arquitetura do ReconPlugin que impediam o funcionamento correto da persistência em 3 camadas e análise time-series.
+**Date**: 2025-01-01
+**Status**: ✅ Every critical fix applied
 
 ---
 
-## 🔴 Problema 1: `persistToResources()` NÃO era chamado
+## 🎯 Summary
 
-### **Impacto**: CRÍTICO
-- Layer 3 (database resources) **NÃO funcionava**
-- Queries como `hostsResource.query()` **retornavam vazio**
-- Change detection (diffs) **NÃO era computada**
-- Subdomains/paths **NÃO eram indexados**
+We identified and resolved **four critical issues** in the ReconPlugin architecture that broke the three-layer persistence model and time-series analysis.
 
-### **Causa**
+---
+
+## 🔴 Issue 1: `persistToResources()` was never called
+
+### **Impact**: CRITICAL
+- Layer 3 (database resources) **never received data**
+- Queries such as `hostsResource.query()` **returned empty arrays**
+- Change detection (diffs) **was never computed**
+- Subdomains/paths **were not indexed**
+
+### **Cause**
 ```javascript
 // index.js - ANTES (ERRADO)
 if (this.config.storage.enabled) {
@@ -28,7 +28,7 @@ if (this.config.storage.enabled) {
 }
 ```
 
-### **Correção**
+### **Fix**
 ```javascript
 // index.js - DEPOIS (CORRETO)
 if (this.config.storage.enabled) {
@@ -42,64 +42,64 @@ if (this.config.storage.enabled) {
 }
 ```
 
-### **Resultado**
-✅ Agora todos os 7 database resources são populados corretamente:
-- `plg_recon_hosts` - Fingerprints completos
-- `plg_recon_reports` - Histórico de scans
-- `plg_recon_stages` - Metadata de execução
-- `plg_recon_diffs` - Change detection
-- `plg_recon_subdomains` - Subdomínios consolidados
-- `plg_recon_paths` - Endpoints descobertos
-- `plg_recon_targets` - Dynamic targets
+### **Result**
+✅ All seven database resources are now populated correctly:
+- `plg_recon_hosts` – Complete fingerprints
+- `plg_recon_reports` – Scan history
+- `plg_recon_stages` – Execution metadata
+- `plg_recon_diffs` – Change detection
+- `plg_recon_subdomains` – Consolidated subdomains
+- `plg_recon_paths` – Discovered endpoints
+- `plg_recon_targets` – Dynamic targets
 
 ---
 
-## 🔴 Problema 2: Schema de subdomains/paths incompatível
+## 🔴 Issue 2: Subdomain/path schema mismatch
 
-### **Impacto**: CRÍTICO
-- Validação de schema **falhava**
-- Tentava inserir array de subdomains onde schema esperava string
+### **Impact**: CRITICAL
+- Schema validation **failed**
+- Arrays of subdomains were inserted where the schema expected a string
 
-### **Causa**
+### **Cause**
 ```javascript
 // config/resources.js - ANTES (ERRADO)
 subdomains: {
   attributes: {
     host: 'string|required',
-    subdomain: 'string|required',  // ❌ Esperava 1 subdomain por record
+    subdomain: 'string|required',  // ❌ Expected one subdomain per record
     // ...
   }
 }
 
-// storage-manager.js - Código real
+// storage-manager.js - actual code
 const subdomainRecord = {
   host: hostId,
-  subdomains: list,  // ❌ Array de TODOS os subdomains!
+  subdomains: list,  // ❌ Array with ALL subdomains!
   total: list.length
 };
 ```
 
-**Conflito**: Schema esperava 1 record por subdomain, mas código salvava 1 record por host com array de subdomains.
+**Conflict**: the schema expected one record per subdomain, but the implementation stored one record per host with an array of subdomains.
 
-### **Correção**
+### **Fix**
 ```javascript
 // config/resources.js - DEPOIS (CORRETO)
 subdomains: {
   attributes: {
     host: 'string|required',
-    subdomains: 'array|items:string|required',  // ✅ Array de subdomains
+    subdomains: 'array|items:string|required',  // ✅ Array of subdomains
     total: 'number|required',
     sources: 'object|optional',
     lastScanAt: 'string|required'
   },
-  behavior: 'body-overflow'  // Listas podem ser grandes
+  behavior: 'body-overflow'  // Lists can be large
 }
 
-// Mesma correção para paths resource
+// Same adjustment for the paths resource
 paths: {
   attributes: {
     host: 'string|required',
-    paths: 'array|items:string|required',  // ✅ Array de paths
+    paths: 'array|items:string|required',  // ✅ Array of paths
     total: 'number|required',
     sources: 'object|optional',
     lastScanAt: 'string|required'
@@ -108,46 +108,46 @@ paths: {
 }
 ```
 
-### **Resultado**
-✅ Schema alinhado com implementação (1 record por host)
-✅ Mais eficiente (menos writes, queries por host O(1))
-✅ Validação passa sem erros
+### **Result**
+✅ Schema and implementation aligned (one record per host)
+✅ More efficient (fewer writes, O(1) host lookups)
+✅ Validation succeeds without errors
 
 ---
 
-## 🟠 Problema 3: Time-series NÃO otimizado
+## 🟠 Issue 3: Time-series not optimized
 
-### **Impacto**: ALTO
-- Queries por range de datas eram **lentas** (string comparison)
-- Partitions por data **ineficientes**
-- Impossível agrupar scans por dia/semana/mês
+### **Impact**: HIGH
+- Date-range queries were **slow** (string comparisons)
+- Date partitions were **inefficient**
+- Impossible to group scans by day/week/month
 
-### **Causa**
+### **Cause**
 ```javascript
 // config/resources.js - ANTES (ERRADO)
 reports: {
   attributes: {
-    timestamp: 'string|required',  // ❌ ISO string, não otimizado
+    timestamp: 'string|required',  // ❌ ISO string, no helpers
     // ...
   },
   partitions: {
     byDate: {
-      fields: { timestamp: 'string' }  // ❌ Partition por string completa
+      fields: { timestamp: 'string' }  // ❌ Partition using the raw ISO string
     }
   },
-  behavior: 'body-only'  // ❌ Metadados não queryables
+  behavior: 'body-only'  // ❌ Metadata not queryable
 }
 ```
 
-### **Correção**
+### **Fix**
 ```javascript
 // config/resources.js - DEPOIS (CORRETO)
 reports: {
   attributes: {
     timestamp: 'string|required',
-    timestampDay: 'string|required',  // ✅ "2025-01-01" para partitioning
+    timestampDay: 'string|required',  // ✅ "2025-01-01" for partitioning
     // ...
-    summary: {  // ✅ Campos queryables em metadata
+    summary: {  // ✅ Queryable metadata
       totalIPs: 'number|default:0',
       totalPorts: 'number|default:0',
       totalSubdomains: 'number|default:0',
@@ -156,26 +156,26 @@ reports: {
   },
   partitions: {
     byHost: { fields: { 'target.host': 'string' } },
-    byDay: { fields: { timestampDay: 'string' } }  // ✅ Partition por dia
+    byDay: { fields: { timestampDay: 'string' } }  // ✅ Partition by day
   },
-  behavior: 'body-overflow'  // ✅ Overflow permite metadata queryable
+  behavior: 'body-overflow'  // ✅ Metadata stays queryable
 }
 
-// Mesma correção para stages resource
+// Same adjustment for the stages resource
 stages: {
   attributes: {
     timestamp: 'string|required',
-    timestampDay: 'string|required',  // ✅ Partition por dia
+    timestampDay: 'string|required',  // ✅ Day partition
     // ...
   },
   partitions: {
     byStage: { fields: { stageName: 'string' } },
-    byDay: { fields: { timestampDay: 'string' } }  // ✅ Time-series eficiente
+    byDay: { fields: { timestampDay: 'string' } }  // ✅ Efficient time-series lookup
   }
 }
 ```
 
-### **Storage Manager - Helper**
+### **Storage Manager - helper**
 ```javascript
 // storage-manager.js
 _extractTimestampDay(isoTimestamp) {
@@ -187,24 +187,24 @@ _extractTimestampDay(isoTimestamp) {
 const reportRecord = {
   // ...
   timestamp: report.timestamp,
-  timestampDay: this._extractTimestampDay(report.timestamp),  // ✅ Auto-calculado
+  timestampDay: this._extractTimestampDay(report.timestamp),  // ✅ Auto-calculated
   // ...
 };
 ```
 
-### **Resultado**
-✅ Queries por dia são **O(1)** (partition-based)
-✅ Campos summary queryables (sem ler body)
-✅ Análise time-series eficiente:
+### **Result**
+✅ Day queries are **O(1)** (partition-based)
+✅ Summary fields are queryable (no body reads)
+✅ Efficient time-series analysis:
 
 ```javascript
-// Query scans de um dia específico (O(1))
+// Query scans for a specific day (O(1))
 const scans = await reportsResource.listPartition('byDay', { timestampDay: '2025-01-01' });
 
-// Query por risk level (metadata, não precisa ler body)
+// Query by risk level (metadata; no body read)
 const highRisk = await reportsResource.query({ 'summary.riskLevel': 'high' });
 
-// Análise de tendência temporal
+// Temporal trend analysis
 const last7Days = ['2025-01-01', '2025-01-02', '2025-01-03', ...];
 for (const day of last7Days) {
   const dayScans = await reportsResource.listPartition('byDay', { timestampDay: day });
@@ -214,33 +214,33 @@ for (const day of last7Days) {
 
 ---
 
-## 🟠 Problema 4: Uptime isolado dos reports
+## 🟠 Issue 4: Uptime isolated from reports
 
-### **Impacto**: ALTO
-- Dados de uptime e recon **desconectados**
-- Impossível queries como "scans durante downtime"
-- Sem contexto de disponibilidade nos reports
+### **Impact**: HIGH
+- Uptime and recon data were **disconnected**
+- Could not run queries like “scans during downtime”
+- Reports lacked availability context
 
-### **Causa**
+### **Cause**
 ```javascript
 // Uptime persistia aqui:
 plugin=recon/uptime/example.com/status.json
 
-// Reports persistiam aqui (SEM referência ao uptime):
+// Reports were stored here (with NO uptime reference):
 plugin=recon/reports/example.com/<timestamp>.json
 
-// ❌ NÃO HÁ CONEXÃO ENTRE OS DOIS!
+// ❌ NO LINK BETWEEN THEM!
 ```
 
-### **Correção - Adicionar campo uptime em reports**
+### **Fix – embed uptime inside reports**
 
-#### **1. Schema do resource**
+#### **1. Resource schema**
 ```javascript
 // config/resources.js
 reports: {
   attributes: {
     // ... outros campos
-    uptime: {  // ✅ Uptime status no momento do scan
+    uptime: {  // ✅ Uptime at the scan moment
       status: 'string|optional',              // 'up', 'down', 'unknown'
       uptimePercentage: 'string|optional',    // "99.85"
       lastCheck: 'string|optional',           // ISO timestamp
@@ -251,7 +251,7 @@ reports: {
 }
 ```
 
-#### **2. Index.js - Capturar uptime ao scanear**
+#### **2. `index.js` – capture uptime during scans**
 ```javascript
 // index.js
 // Get uptime status if monitoring is enabled
@@ -271,7 +271,7 @@ const report = {
   target: normalizedTarget,
   results,
   fingerprint,
-  uptime: uptimeStatus ? {  // ✅ Incluir uptime no report
+  uptime: uptimeStatus ? {  // ✅ Include uptime in the report
     status: uptimeStatus.status,
     uptimePercentage: uptimeStatus.uptimePercentage,
     lastCheck: uptimeStatus.lastCheck,
@@ -281,7 +281,7 @@ const report = {
 };
 ```
 
-#### **3. Storage Manager - Persistir uptime**
+#### **3. Storage manager – persist uptime**
 ```javascript
 // storage-manager.js
 const reportRecord = {
@@ -290,7 +290,7 @@ const reportRecord = {
 };
 ```
 
-#### **4. UptimeBehavior - Link bidirecional**
+#### **4. `UptimeBehavior` – bidirectional link**
 ```javascript
 // behaviors/uptime-behavior.js
 async linkReportToUptime(host, reportId, reportTimestamp) {
@@ -298,7 +298,7 @@ async linkReportToUptime(host, reportId, reportTimestamp) {
 
   await storage.set(key, {
     host,
-    reportId,              // ✅ Referência ao report
+    reportId,              // ✅ Reference to report
     reportTimestamp,
     uptimeStatus: status.status,
     uptimePercentage: status.uptimePercentage,
@@ -307,7 +307,7 @@ async linkReportToUptime(host, reportId, reportTimestamp) {
 }
 ```
 
-#### **5. Index.js - Chamar link após persistir**
+#### **5. `index.js` – link after persistence**
 ```javascript
 // index.js
 if (this.config.storage.enabled) {
@@ -325,30 +325,30 @@ if (this.config.storage.enabled) {
 }
 ```
 
-### **Resultado**
-✅ Reports incluem uptime status no momento do scan
-✅ Link bidirecional entre uptime e reports
-✅ Queries poderosas possíveis:
+### **Result**
+✅ Reports now include uptime data at scan time
+✅ Bidirectional link between uptime and reports
+✅ Enables richer queries:
 
 ```javascript
-// Query: Scans realizados durante downtime
+// Query: scans performed during downtime
 const downtimeScans = await reportsResource.query({
   'uptime.isDown': true
 });
 
-// Query: Hosts com baixo uptime
+// Query: hosts with low uptime
 const lowUptimeHosts = await reportsResource.query({
   'uptime.uptimePercentage': { $lt: '95.00' }
 });
 
-// Correlação: Mudanças detectadas durante downtime?
+// Correlation: changes detected during downtime?
 const scansWithChanges = await reportsResource.query({
   'uptime.isDown': true,
   'summary.totalSubdomains': { $gt: 0 }  // Novos subdomains durante downtime
 });
 ```
 
-### **Storage Structure Final**
+### **Final storage structure**
 ```
 plugin=recon/
 ├── uptime/
@@ -357,11 +357,11 @@ plugin=recon/
 │       ├── transitions/
 │       │   └── <timestamp>.json             # Status changes
 │       └── scans/
-│           └── <timestamp>.json             # ✅ Link para reportId
+│           └── <timestamp>.json             # ✅ Links to reportId
 │
 ├── reports/
 │   └── example.com/
-│       ├── <timestamp>.json                 # ✅ Inclui uptime field
+│       ├── <timestamp>.json                 # ✅ Includes uptime field
 │       ├── stages/
 │       │   └── <timestamp>/
 │       │       ├── tools/                   # Per-tool artifacts
@@ -374,40 +374,40 @@ plugin=recon/
 
 ---
 
-## 📊 Resultado Final: Arquitetura Completa e Integrada
+## 📊 Final Result: Integrated Architecture
 
-### **Antes das Correções** ❌
+### **Before fixes** ❌
 ```
-Layer 1: PluginStorage (raw artifacts)       ✅ Funcionava
-Layer 2: PluginStorage (aggregated)          ✅ Funcionava
-Layer 3: Database Resources (queryable)      ❌ NÃO FUNCIONAVA
+Layer 1: PluginStorage (raw artifacts)       ✅ Working
+Layer 2: PluginStorage (aggregated)          ✅ Working
+Layer 3: Database resources (queryable)      ❌ BROKEN
 
-Time-series queries                           ❌ Lentas (string comparison)
-Subdomains/paths schema                       ❌ Erro de validação
-Uptime + Reports                              ❌ Desconectados
+Time-series queries                           ❌ Slow (string comparison)
+Subdomains/paths schema                       ❌ Validation errors
+Uptime + reports                              ❌ Disconnected
 ```
 
-### **Depois das Correções** ✅
+### **After fixes** ✅
 ```
-Layer 1: PluginStorage (raw artifacts)       ✅ Funcionando
-Layer 2: PluginStorage (aggregated)          ✅ Funcionando
-Layer 3: Database Resources (queryable)      ✅ FUNCIONANDO!
+Layer 1: PluginStorage (raw artifacts)       ✅ Working
+Layer 2: PluginStorage (aggregated)          ✅ Working
+Layer 3: Database resources (queryable)      ✅ Working!
 
-Time-series queries                           ✅ Rápidas (partition O(1))
-Subdomains/paths schema                       ✅ Validação passa
-Uptime + Reports                              ✅ Totalmente integrados
+Time-series queries                           ✅ Fast (O(1) partitions)
+Subdomains/paths schema                       ✅ Validation succeeds
+Uptime + reports                              ✅ Fully integrated
 ```
 
 ---
 
-## 🚀 Queries Possíveis Agora
+## 🚀 Queries Enabled Now
 
 ### **Time-Series Analysis**
 ```javascript
-// Scans por dia (O(1) partition-based)
+// Scans per day (O(1) partition-based)
 const scans = await reportsResource.listPartition('byDay', { timestampDay: '2025-01-01' });
 
-// Tendência temporal
+// Temporal trend
 const last30Days = generateDateRange(30);
 const scanCounts = await Promise.all(
   last30Days.map(day => reportsResource.listPartition('byDay', { timestampDay: day }))
@@ -416,15 +416,15 @@ const scanCounts = await Promise.all(
 
 ### **Attack Surface Monitoring**
 ```javascript
-// Hosts com alto risco
+// High-risk hosts
 const highRisk = await hostsResource.query({ riskLevel: 'high' });
 
-// Hosts com muitas portas abertas
+// Hosts with many open ports
 const manyPorts = await hostsResource.query({
   'openPorts': { $size: { $gte: 10 } }
 });
 
-// Novos subdomínios (via diffs)
+// New subdomains (via diffs)
 const newSubdomains = await diffsResource.query({
   'changes.subdomains.added': { $exists: true },
   'summary.severity': { $in: ['medium', 'high', 'critical'] }
@@ -433,33 +433,33 @@ const newSubdomains = await diffsResource.query({
 
 ### **Uptime Correlation**
 ```javascript
-// Scans durante downtime
+// Scans during downtime
 const downtimeScans = await reportsResource.query({ 'uptime.isDown': true });
 
-// Hosts frequentemente down
+// Hosts frequently down
 const unreliableHosts = await reportsResource.query({
   'uptime.consecutiveFails': { $gte: 5 }
 });
 
-// Correlação: Mudanças durante downtime (possível ataque?)
+// Correlation: changes while down (potential attack?)
 const suspiciousChanges = await reportsResource.query({
   'uptime.isDown': true,
   $or: [
-    { 'summary.totalPorts': { $gt: 0 } },     // Novas portas abertas
-    { 'summary.totalSubdomains': { $gt: 0 } } // Novos subdomains
+    { 'summary.totalPorts': { $gt: 0 } },     // New ports while down
+    { 'summary.totalSubdomains': { $gt: 0 } } // New subdomains while down
   ]
 });
 ```
 
 ### **Performance Analysis**
 ```javascript
-// Stages mais lentos
+// Slowest stages
 const slowStages = await stagesResource.query({
   duration: { $gt: 5000 }, // > 5 seconds
   timestampDay: '2025-01-01'
 });
 
-// Taxa de sucesso por ferramenta
+// Tool success rate
 const stages = await stagesResource.list({ limit: 1000 });
 const toolSuccessRate = stages.reduce((acc, stage) => {
   stage.toolsUsed.forEach(tool => {
@@ -473,39 +473,39 @@ const toolSuccessRate = stages.reduce((acc, stage) => {
 
 ---
 
-## 📝 Mudanças nos Arquivos
+## 📝 File Changes
 
-| Arquivo | Mudanças |
+| File | Updates |
 |---------|----------|
-| `src/plugins/recon/index.js` | ✅ Adicionado `persistToResources()`<br>✅ Capturar uptime ao scanear<br>✅ Link uptime-report |
-| `src/plugins/recon/config/resources.js` | ✅ Schema subdomains corrigido<br>✅ Schema paths corrigido<br>✅ Adicionado `timestampDay`<br>✅ Adicionado campo `uptime`<br>✅ Behavior `body-overflow` |
-| `src/plugins/recon/managers/storage-manager.js` | ✅ Helper `_extractTimestampDay()`<br>✅ reportRecord atualizado<br>✅ stageRecord atualizado<br>✅ Helpers `_extractToolNames()` e `_countResults()` |
-| `src/plugins/recon/behaviors/uptime-behavior.js` | ✅ Método `linkReportToUptime()` |
+| `src/plugins/recon/index.js` | ✅ Added `persistToResources()`<br>✅ Capture uptime during scans<br>✅ Link uptime ↔ report |
+| `src/plugins/recon/config/resources.js` | ✅ Fixed subdomains schema<br>✅ Fixed paths schema<br>✅ Added `timestampDay`<br>✅ Added `uptime` field<br>✅ Switched to `body-overflow` |
+| `src/plugins/recon/managers/storage-manager.js` | ✅ Added `_extractTimestampDay()` helper<br>✅ Updated `reportRecord`<br>✅ Updated `stageRecord`<br>✅ Added `_extractToolNames()` and `_countResults()` |
+| `src/plugins/recon/behaviors/uptime-behavior.js` | ✅ Added `linkReportToUptime()` |
 
 ---
 
-## ✅ Checklist de Verificação
+## ✅ Verification Checklist
 
-- [x] Layer 3 (resources) funciona
-- [x] Subdomains/paths schema validado
-- [x] Time-series otimizado (partition por dia)
-- [x] Uptime integrado com reports
-- [x] Queries O(1) por partition
-- [x] Metadados queryables (summary)
-- [x] Link bidirecional uptime<->reports
-- [x] Helper methods para timestamps
+- [x] Layer 3 (resources) works
+- [x] Subdomain/path schema validated
+- [x] Time-series optimized (day partitions)
+- [x] Uptime integrated with reports
+- [x] O(1) partition queries
+- [x] Summary metadata is queryable
+- [x] Bidirectional uptime ↔ reports link
+- [x] Timestamp helper methods
 - [x] Tool success/failure tracking
 
 ---
 
-## 🎯 Próximos Passos (Melhorias Futuras)
+## 🎯 Next Steps (Future Improvements)
 
-1. **Testes unitários** para validar correções
-2. **Migration script** para dados antigos (se existirem)
-3. **Dashboard** para visualizar time-series
-4. **Alertas** baseados em queries (uptime + changes)
-5. **Agregações** pré-computadas (ex: scans por semana)
+1. **Unit tests** covering the fixes
+2. **Migration script** for historical data (if present)
+3. **Dashboard** to visualize time-series metrics
+4. **Alerts** powered by uptime + change queries
+5. **Precomputed aggregates** (e.g., scans per week)
 
 ---
 
-**Status Final**: ✅ **Arquitetura totalmente funcional e integrada**
+**Final Status**: ✅ **Architecture fully functional and integrated**

@@ -2,7 +2,7 @@
 
 > **Complete OAuth2/OIDC setup for Azure AD, Google, Keycloak, Auth0, and any OIDC provider**
 
-**NEW in v16.3:** Auto token refresh • Continue URL • Provider quirks • Cross-subdomain • Dual-cookie deletion
+**Key OIDC enhancements:** Auto token refresh • Continue URL • Provider quirks • Cross-subdomain • Dual-cookie deletion
 
 ---
 
@@ -44,7 +44,7 @@ await db.usePlugin(new ApiPlugin({
 
 ---
 
-## 🆕 What's New in v16.3
+## 🆕 Key Enhancements
 
 | Feature | Benefit | Status |
 |---------|---------|--------|
@@ -59,7 +59,7 @@ await db.usePlugin(new ApiPlugin({
 
 ---
 
-## 🔥 What's New in v16.3.1+
+## 🔥 Security & Scalability Upgrades
 
 **Phase 1 Security & Scalability Improvements** (Inspired by Auth0's express-openid-connect):
 
@@ -159,7 +159,7 @@ await db.usePlugin(new ApiPlugin({
 ## 📖 Table of Contents
 
 - [Quick Start](#-quick-start-30-seconds)
-- [What's New](#-whats-new-in-v163)
+- [Key Enhancements](#-key-enhancements)
 - [Supported Providers](#-supported-providers)
 - [Getting Started](#-getting-started)
   - [Google OAuth2](#google-oauth2)
@@ -168,7 +168,7 @@ await db.usePlugin(new ApiPlugin({
   - [Auth0](#auth0)
 - [Configuration](#-configuration)
   - [Basic Options](#basic-options)
-  - [v16.3 Features](#v163-features)
+  - [OIDC Enhancement Options](#oidc-enhancement-options)
   - [Session Management](#session-management)
   - [Security Options](#security-options)
 - [Features Deep Dive](#-features-deep-dive)
@@ -179,14 +179,14 @@ await db.usePlugin(new ApiPlugin({
   - [Cache-Control Headers](#-cache-control-headers)
   - [Discovery Cache](#-discovery-cache)
 - [Advanced Features](#-advanced-features)
-  - [HKDF Key Derivation](#hkdf-key-derivation-v1631)
-  - [Cookie Chunking](#cookie-chunking-v1631)
-  - [Rolling Session Duration](#rolling-session-duration-v163)
-  - [External Session Store](#external-session-store-v1632)
-  - [WeakMap Token Caching](#weakmap-token-caching-v1632)
-  - [Token Validation](#token-validation-v1633)
-  - [User-Friendly Error Pages](#user-friendly-error-pages-v1633)
-  - [Session Regeneration](#session-regeneration-v1633)
+  - [HKDF Key Derivation](#hkdf-key-derivation)
+  - [Cookie Chunking](#cookie-chunking)
+  - [Rolling Session Duration](#rolling-session-duration)
+  - [External Session Store](#external-session-store)
+  - [WeakMap Token Caching](#weakmap-token-caching)
+  - [Token Validation](#token-validation)
+  - [User-Friendly Error Pages](#user-friendly-error-pages)
+  - [Session Regeneration](#session-regeneration)
   - [Provider Compatibility Validation](#provider-compatibility-validation-phase-4)
   - [Silent Login (prompt=none)](#silent-login-promptnone-phase-4)
   - [PAR - Pushed Authorization Requests](#par---pushed-authorization-requests-phase-4)
@@ -387,7 +387,7 @@ config: {
 }
 ```
 
-### v16.3 Features
+### OIDC Enhancement Options
 
 ```javascript
 config: {
@@ -544,8 +544,8 @@ config: {
 }
 ```
 
-**Before v16.3:** User stuck logged in after logout
-**After v16.3:** Clean logout ✅
+**Before these enhancements:** User stuck logged in after logout
+**After these enhancements:** Clean logout ✅
 
 ---
 
@@ -650,7 +650,7 @@ config: {
 
 ## 🔧 Advanced Features
 
-### HKDF Key Derivation (v16.3.1+)
+### HKDF Key Derivation
 
 **What it is:** HMAC-based Extract-and-Expand Key Derivation Function (RFC 5869)
 
@@ -661,11 +661,11 @@ config: {
 
 **How it works:**
 ```javascript
-// Before (v16.3 and earlier)
+// Before the upgrade
 const secret = Buffer.from(cookieSecret);
 await signJWT(data, secret);  // Direct secret usage
 
-// After (v16.3.1+)
+// After the upgrade
 import { deriveOidcKeys } from './concerns/crypto.js';
 const { current } = deriveOidcKeys(cookieSecret);
 await signJWT(data, current.signing);      // Derived signing key
@@ -691,7 +691,7 @@ config: {
 
 ---
 
-### Cookie Chunking (v16.3.1+)
+### Cookie Chunking
 
 **The Problem:**
 - Browser cookie limit: **4096 bytes** per cookie
@@ -747,7 +747,7 @@ console.log('Session size:', Buffer.byteLength(sessionJWT, 'utf8'));
 
 ---
 
-### Rolling Session Duration (v16.3+)
+### Rolling Session Duration
 
 **Enterprise Feature:** Idle timeout + absolute maximum
 
@@ -785,7 +785,7 @@ last_activity = 9:25 AM  // Session extends to 9:55 AM
 
 ---
 
-### External Session Store (v16.3.2+)
+### External Session Store
 
 **The Problem:**
 - **Cookie-based sessions**: 4-40KB in cookies → Large HTTP headers, bandwidth waste
@@ -823,11 +823,18 @@ config: {
 
 **Available Stores:**
 
-| Store | Use Case | Performance |
-|-------|----------|-------------|
-| `MemoryStore` | Development, testing | ⚡ Fastest |
-| `RedisStore` | Production, horizontal scaling | 🚀 Fast |
-| Custom | MongoDB, PostgreSQL, etc. | 🔧 DIY |
+| Store | Use Case | Persistence | Horizontal Scaling |
+|-------|----------|-------------|-------------------|
+| `MemoryStore` | Development, testing | ❌ Restart wipes data | ❌ Local only |
+| `RedisStore` | Production, high-throughput | ✅ In-memory (volatile) | ✅ Yes |
+| `S3DBSessionStore` | Production, S3-backed | ✅ Persistent (S3) | ✅ Yes |
+| Custom (MongoDB, PostgreSQL) | Custom backends | ✅ Yes | ✅ Yes |
+
+**Quick Comparison:**
+- **MemoryStore**: Dev/testing only (fast, loses data on restart)
+- **RedisStore**: Production default (fastest, volatile but with persistence options)
+- **S3DBSessionStore**: Persistent sessions in your existing s3db.js database
+- **Custom**: Use any backend (MongoDB, PostgreSQL, etc.)
 
 **MemoryStore Example** (Testing Only):
 ```javascript
@@ -918,6 +925,72 @@ class MongoSessionStore extends SessionStore {
 }
 ```
 
+**S3DB Session Store** (Using s3db.js Resources):
+```javascript
+// OIDC configuration with S3DB session store
+{
+  driver: 'oidc',
+  config: {
+    issuer: 'https://accounts.google.com',
+    clientId: 'your-client-id',
+    clientSecret: 'your-client-secret',
+    redirectUri: 'http://localhost:3000/auth/callback',
+
+    // 🎯 Session store using S3DB resource driver
+    sessionStore: {
+      driver: 's3db',          // ← Use s3db.js resource
+      config: {
+        resourceName: 'oidc_sessions'  // ← Resource to use
+      }
+    },
+
+    cookieMaxAge: 86400000,    // 24 hours
+    // ... rest of OIDC config
+  }
+}
+```
+
+**Setup Requirements:**
+```javascript
+import { Database } from 's3db.js';
+
+const db = new Database({ /* ... */ });
+await db.connect();
+
+// 1. Create OIDC sessions resource (optional - auto-created if missing)
+await db.createResource({
+  name: 'oidc_sessions',
+  attributes: {
+    expiresAt: 'string|required',  // Required for TTL cleanup
+    userId: 'string',
+    email: 'string'
+  }
+});
+
+// 2. Configure API plugin - the factory handles resource lookup
+const apiPlugin = new APIPlugin({
+  auth: {
+    drivers: [
+      {
+        driver: 'oidc',
+        config: {
+          // ... OIDC settings ...
+          sessionStore: {
+            driver: 's3db',
+            config: {
+              resourceName: 'oidc_sessions'
+            }
+          }
+        }
+      }
+    ]
+  }
+});
+
+// 3. Resource must exist on db by the time auth is initialized
+await apiPlugin.initialize(db);
+```
+
 **Benefits:**
 - ✅ 99% smaller cookies (50 bytes vs 4-40KB)
 - ✅ Horizontal scaling (load balancers, Kubernetes)
@@ -925,6 +998,25 @@ class MongoSessionStore extends SessionStore {
 - ✅ Faster requests (smaller headers)
 - ✅ Lower bandwidth costs
 - ✅ Serverless-compatible (CloudFront limits)
+
+**When to Use Each Store:**
+
+```
+My app is in...          Best Choice              Why?
+─────────────────────────────────────────────────────────────
+Development              MemoryStore              Simple, no setup
+Testing/CI               MemoryStore              Fast, clean state
+Production, single app   RedisStore               Industry standard
+Production, microservices RedisStore               Shared via network
+S3-centric app           S3DBSessionStore         Uses existing DB
+Custom backend           Custom (MongoDB/etc)     Full control
+```
+
+**Choosing a Store Quickly:**
+1. **Do you already use s3db.js?** → Use `S3DBSessionStore` ✨
+2. **Need production reliability?** → Use `RedisStore` 🚀
+3. **Just testing/developing?** → Use `MemoryStore` ⚡
+4. **Custom requirements?** → Implement `SessionStore` interface 🔧
 
 **Monitoring:**
 ```javascript
@@ -942,9 +1034,47 @@ console.log(sessionStore.getStats());
 await sessionStore.clear();
 ```
 
+**S3DBSessionStore Cleanup and Monitoring:**
+```javascript
+// List all expired sessions for cleanup
+const allSessions = await db.resources.oidc_sessions.query();
+const now = new Date();
+const expiredSessions = allSessions.filter(
+  s => new Date(s.expiresAt) < now
+);
+
+console.log(`Found ${expiredSessions.length} expired sessions`);
+
+// Delete expired sessions (optional, can be automated with TTL plugin)
+for (const session of expiredSessions) {
+  await db.resources.oidc_sessions.delete(session.id);
+}
+
+// Get session stats
+const stats = await db.resources.oidc_sessions.list({ limit: 1 });
+console.log(`Total sessions: ${stats.total}`);
+console.log(`Active sessions: ${allSessions.filter(s => new Date(s.expiresAt) >= now).length}`);
+```
+
+**Pro Tip:** Use the **TTL Plugin** to automatically cleanup expired sessions:
+```javascript
+import { TTLPlugin } from 's3db.js/plugins/ttl.plugin';
+
+const ttlPlugin = new TTLPlugin({
+  // auto-delete sessions where expiresAt < now
+  resources: {
+    oidc_sessions: {
+      field: 'expiresAt'  // Use this field for expiration
+    }
+  }
+});
+
+await db.usePlugin(ttlPlugin);
+```
+
 ---
 
-### WeakMap Token Caching (v16.3.2+)
+### WeakMap Token Caching
 
 **The Problem:**
 - Session decoding happens **multiple times per request**:
@@ -1029,7 +1159,7 @@ config: {
 
 ---
 
-### Token Validation (v16.3.3+)
+### Token Validation
 
 **The Problem:**
 - Basic OIDC implementations skip validation → Security vulnerabilities
@@ -1105,7 +1235,7 @@ config: {
 
 ---
 
-###User-Friendly Error Pages (v16.3.3+)
+### User-Friendly Error Pages
 
 **The Problem:**
 - Generic error responses: `{ "error": "Authentication failed" }`
@@ -1225,7 +1355,7 @@ app.use(async (c, next) => {
 
 ---
 
-### Session Regeneration (v16.3.3+)
+### Session Regeneration
 
 **The Problem:**
 - **Session fixation attacks**: Attacker sets victim's session ID, then waits for victim to login
@@ -2388,7 +2518,7 @@ A: Yes, but some providers don't return `refresh_token` (e.g., GitHub). Check pr
 **Q: What's the cookie size impact?**
 A: Adds ~200-400 bytes for `refresh_token`. Total: ~600-1000 bytes (well under 4KB limit).
 
-**Q: Can I disable specific v16.3 features?**
+**Q: Can I disable specific OIDC enhancements?**
 A: Yes! All features can be disabled:
 ```javascript
 {
@@ -2449,7 +2579,7 @@ auth: {
 - [Configuration Reference](../reference/configuration.md) - Complete options
 - [Guards](./guards.md) - Row-level security
 - [Example: e50-oidc-simple.js](../../../examples/e50-oidc-simple.js)
-- [Example: e88-oidc-v16.3-features.js](../../../examples/e88-oidc-v16.3-features.js)
+- [Example: e88-oidc-enhancements.js](../../../examples/e88-oidc-enhancements.js)
 
 ---
 

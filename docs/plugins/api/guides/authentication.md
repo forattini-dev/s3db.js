@@ -341,7 +341,7 @@ await db.usePlugin(new ApiPlugin({
         redirectUri: 'http://localhost:3000/auth/callback',
         cookieSecret: process.env.COOKIE_SECRET,  // 32+ characters
 
-        // ✨ NEW in v16.3: Auto token refresh, continue URL, provider quirks
+        // ✨ Auto token refresh, continue URL, provider quirks
       }
     },
     pathRules: [
@@ -395,7 +395,7 @@ oidc: {
 }
 ```
 
-### NEW in v16.3
+### OIDC Enhancements
 
 ✨ **Production-grade features enabled by default:**
 
@@ -674,7 +674,7 @@ attributes: {
 ```
 
 **Q: What about refresh tokens?**
-A: OIDC driver handles refresh tokens automatically in v16.3+. For JWT, implement your own refresh token endpoint.
+A: OIDC driver handles refresh tokens automatically. For JWT, implement your own refresh token endpoint.
 
 **Q: How do I test auth locally?**
 A:
