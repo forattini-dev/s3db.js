@@ -592,6 +592,20 @@ export class PuppeteerPlugin extends Plugin {
       detectBlockingSignals,
       detectAntiBotsAndFingerprinting
     };
+
+    // WebRTC & Streams Detector - for WebRTC connections and streaming protocol detection
+    const {
+      detectWebRTC,
+      detectMediaStreams,
+      detectStreamingProtocols,
+      detectWebRTCAndStreams
+    } = await import('./puppeteer/webrtc-streams-detector.js');
+    this.webrtcStreamsDetector = {
+      detectWebRTC,
+      detectMediaStreams,
+      detectStreamingProtocols,
+      detectWebRTCAndStreams
+    };
   }
 
   /**
@@ -1511,6 +1525,82 @@ export class PuppeteerPlugin extends Plugin {
     }
 
     return await this.antiBotDetector.detectAntiBotsAndFingerprinting(page);
+  }
+
+  /**
+   * Detect WebRTC peer connections and ICE candidates
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} WebRTC detection results
+   */
+  async detectWebRTC(page) {
+    if (!this.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectWebRTC',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting WebRTC.'
+      });
+    }
+
+    return await this.webrtcStreamsDetector.detectWebRTC(page);
+  }
+
+  /**
+   * Detect media streams (audio, video, display capture)
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Media streams detection results
+   */
+  async detectMediaStreams(page) {
+    if (!this.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectMediaStreams',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting media streams.'
+      });
+    }
+
+    return await this.webrtcStreamsDetector.detectMediaStreams(page);
+  }
+
+  /**
+   * Detect streaming protocols (HLS, DASH, RTMP, etc.)
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Streaming protocols detection results
+   */
+  async detectStreamingProtocols(page) {
+    if (!this.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectStreamingProtocols',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting streaming protocols.'
+      });
+    }
+
+    return await this.webrtcStreamsDetector.detectStreamingProtocols(page);
+  }
+
+  /**
+   * Comprehensive WebRTC and streaming detection
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Combined WebRTC and streaming results
+   */
+  async detectWebRTCAndStreams(page) {
+    if (!this.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized', {
+        pluginName: 'PuppeteerPlugin',
+        operation: 'detectWebRTCAndStreams',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure plugin is fully initialized before detecting WebRTC and streaming.'
+      });
+    }
+
+    return await this.webrtcStreamsDetector.detectWebRTCAndStreams(page);
   }
 }
 

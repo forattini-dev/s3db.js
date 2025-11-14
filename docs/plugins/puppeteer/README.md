@@ -37,6 +37,9 @@ await puppeteerPlugin.releasePage(page);
 - ✅ **Proxy Rotation** - Multi-proxy with health monitoring & auto-failover
 - ✅ **Performance** - Resource blocking (50-70% faster), caching, connection reuse
 - ✅ **Monitoring** - Network/console tracking with compression
+- ✅ **WebRTC Detection** - Detect peer connections, ICE candidates, IP leakage
+- ✅ **Streams Detection** - Detect audio/video elements, media permissions, canvas
+- ✅ **Streaming Protocols** - Detect HLS, DASH, RTMP, and streaming players
 
 **Performance comparison:**
 ```javascript
@@ -1546,6 +1549,158 @@ console.log(stats);
 
 ---
 
+### Detection Methods
+
+#### `detectWebRTC(page): Promise<Object>`
+
+Detect WebRTC peer connections and ICE candidate information.
+
+```javascript
+const result = await plugin.detectWebRTC(page);
+console.log(result);
+// {
+//   webrtcDetected: true,
+//   webrtcInfo: {
+//     peerConnections: [],
+//     iceServers: [],
+//     iceGatheringState: 'complete',
+//     connectionState: 'new',
+//     iceConnectionState: 'new',
+//     signalingState: 'stable',
+//     dataChannels: [],
+//     mediaStreams: [],
+//     detectedIPs: [
+//       {
+//         candidate: 'candidate:...',
+//         protocol: 'udp',
+//         type: 'host',
+//         address: '192.168.1.1',
+//         port: 54321
+//       }
+//     ],
+//     stunServers: [],
+//     turnServers: [],
+//     isActive: true
+//   }
+// }
+```
+
+**Use Cases**:
+- Detect WebRTC calls and video conferencing
+- Extract local IP addresses
+- Identify STUN/TURN server usage
+- Monitor real-time communication channels
+
+---
+
+#### `detectMediaStreams(page): Promise<Object>`
+
+Detect media streams (audio, video, canvas) and permission states.
+
+```javascript
+const result = await plugin.detectMediaStreams(page);
+console.log(result);
+// {
+//   streamsDetected: true,
+//   streamsInfo: {
+//     audioElements: [
+//       { src: 'audio.mp3', autoplay: false, controls: true, muted: false }
+//     ],
+//     videoElements: [
+//       {
+//         src: 'video.mp4',
+//         width: 1280,
+//         height: 720,
+//         autoplay: true,
+//         controls: true,
+//         muted: false,
+//         poster: 'poster.jpg'
+//       }
+//     ],
+//     canvasElements: [
+//       { width: 800, height: 600, id: 'my-canvas', class: 'graphics' }
+//     ],
+//     mediaRecorders: ['MediaRecorder available'],
+//     audioContexts: ['AudioContext available'],
+//     videoStreams: [],
+//     displayCapture: true,
+//     permissions: {
+//       microphone: 'prompt',
+//       camera: 'granted',
+//       displayCapture: 'denied'
+//     }
+//   }
+// }
+```
+
+**Use Cases**:
+- Detect media playback elements
+- Check microphone/camera permissions
+- Identify screen/display capture support
+- Monitor audio/video streaming setup
+
+---
+
+#### `detectStreamingProtocols(page): Promise<Object>`
+
+Detect streaming protocols (HLS, DASH, RTMP, etc.) and manifest files.
+
+```javascript
+const result = await plugin.detectStreamingProtocols(page);
+console.log(result);
+// {
+//   streamingProtocolsDetected: true,
+//   protocolsInfo: {
+//     hls: true,
+//     dash: false,
+//     rtmp: false,
+//     smoothStreaming: false,
+//     protocols: ['HLS (hls.js)', 'Video.js'],
+//     m3u8Files: [
+//       'https://example.com/stream/playlist.m3u8',
+//       'https://cdn.example.com/media/index.m3u8'
+//     ],
+//     mpdFiles: [],
+//     manifestFiles: []
+//   }
+// }
+```
+
+**Use Cases**:
+- Detect live streaming services
+- Identify streaming video players (HLS.js, DASH.js, Shaka, Video.js, JW Player)
+- Extract playlist/manifest URLs
+- Monitor streaming infrastructure
+
+---
+
+#### `detectWebRTCAndStreams(page): Promise<Object>`
+
+Comprehensive detection combining WebRTC, media streams, and streaming protocols.
+
+```javascript
+const result = await plugin.detectWebRTCAndStreams(page);
+console.log(result);
+// {
+//   webrtc: { webrtcDetected: true, webrtcInfo: {...} },
+//   streams: { streamsDetected: true, streamsInfo: {...} },
+//   protocols: { streamingProtocolsDetected: true, protocolsInfo: {...} },
+//   summary: {
+//     webrtcActive: true,
+//     streamsPresent: true,
+//     streamingProtocols: true,
+//     anyActivity: true
+//   }
+// }
+```
+
+**Use Cases**:
+- Quick comprehensive analysis of media/streaming capabilities
+- Detect if page uses any real-time communication
+- Identify media and streaming infrastructure all at once
+
+---
+
 ## ✅ Best Practices
 
 ### Do's ✅
@@ -2253,6 +2408,173 @@ new PuppeteerPlugin({
 ```
 
 **Trade-off**: Faster but easier to detect as bot
+
+---
+
+### WebRTC & Streams Detection
+
+**Q: How do I detect WebRTC connections on a page?**
+
+A: Use the `detectWebRTC()` method:
+
+```javascript
+const result = await plugin.detectWebRTC(page);
+
+if (result.webrtcDetected) {
+  console.log('WebRTC is active');
+  console.log('Detected IPs:', result.webrtcInfo.detectedIPs);
+  console.log('Connection state:', result.webrtcInfo.connectionState);
+}
+```
+
+Returns WebRTC peer connection info, ICE candidates, and extracted IP addresses.
+
+---
+
+**Q: How do I check if a page has video/audio streams?**
+
+A: Use the `detectMediaStreams()` method:
+
+```javascript
+const result = await plugin.detectMediaStreams(page);
+
+if (result.streamsDetected) {
+  console.log('Found audio elements:', result.streamsInfo.audioElements.length);
+  console.log('Found video elements:', result.streamsInfo.videoElements.length);
+  console.log('Camera permission:', result.streamsInfo.permissions.camera);
+  console.log('Microphone permission:', result.streamsInfo.permissions.microphone);
+}
+```
+
+Returns audio/video elements, permissions, MediaRecorder, and AudioContext availability.
+
+---
+
+**Q: How do I detect streaming protocols like HLS or DASH?**
+
+A: Use the `detectStreamingProtocols()` method:
+
+```javascript
+const result = await plugin.detectStreamingProtocols(page);
+
+if (result.streamingProtocolsDetected) {
+  console.log('Detected protocols:', result.protocolsInfo.protocols);
+  console.log('HLS streams:', result.protocolsInfo.m3u8Files);
+  console.log('DASH streams:', result.protocolsInfo.mpdFiles);
+}
+```
+
+Returns detected protocols (HLS, DASH, RTMP, etc.) and playlist/manifest URLs.
+
+---
+
+**Q: How do I do a comprehensive media/streaming analysis in one call?**
+
+A: Use the `detectWebRTCAndStreams()` method:
+
+```javascript
+const result = await plugin.detectWebRTCAndStreams(page);
+
+console.log('WebRTC active:', result.summary.webrtcActive);
+console.log('Streams present:', result.summary.streamsPresent);
+console.log('Streaming protocols:', result.summary.streamingProtocols);
+
+if (result.summary.anyActivity) {
+  console.log('Page uses real-time communication or streaming');
+  // result.webrtc, result.streams, result.protocols available
+}
+```
+
+Combines all three detections for comprehensive analysis.
+
+---
+
+**Q: Can I use detection methods before page loads?**
+
+A: No - always wait for page load:
+
+```javascript
+// ❌ Too early
+await page.goto(url);  // Navigation started but not finished
+const result = await plugin.detectWebRTC(page);
+
+// ✅ Correct - Wait for page to load
+await page.goto(url, { waitUntil: 'networkidle2' });
+const result = await plugin.detectWebRTC(page);
+
+// ✅ Also correct - Wait for specific element
+await page.goto(url);
+await page.waitForSelector('#video-player');
+const result = await plugin.detectMediaStreams(page);
+```
+
+---
+
+**Q: What's the performance impact of detection methods?**
+
+A: Minimal overhead (15-50ms per detection):
+
+```javascript
+// Fast (15-30ms)
+await plugin.detectWebRTC(page);
+await plugin.detectMediaStreams(page);
+await plugin.detectStreamingProtocols(page);
+
+// Comprehensive (40-50ms)
+await plugin.detectWebRTCAndStreams(page);  // All-in-one is faster than calling individually
+```
+
+Each detection runs JavaScript evaluation in browser context - no network impact.
+
+---
+
+**Q: Can I use detection methods in a loop?**
+
+A: Yes, but batch them efficiently:
+
+```javascript
+// ❌ Inefficient - Separate calls
+for (const url of urls) {
+  const page = await plugin.getPage();
+  await page.goto(url);
+
+  const webrtc = await plugin.detectWebRTC(page);
+  const streams = await plugin.detectMediaStreams(page);
+  const protocols = await plugin.detectStreamingProtocols(page);
+
+  await plugin.releasePage(page);
+}
+
+// ✅ Efficient - One comprehensive call
+for (const url of urls) {
+  const page = await plugin.getPage();
+  await page.goto(url);
+
+  const result = await plugin.detectWebRTCAndStreams(page);  // All at once
+
+  await plugin.releasePage(page);
+}
+```
+
+---
+
+**Q: What information can I extract from WebRTC detection?**
+
+A: Complete ICE candidate information:
+
+```javascript
+const result = await plugin.detectWebRTC(page);
+
+result.webrtcInfo.detectedIPs.forEach(ip => {
+  console.log('IP:', ip.address);
+  console.log('Port:', ip.port);
+  console.log('Protocol:', ip.protocol);  // 'udp' or 'tcp'
+  console.log('Type:', ip.type);           // 'host', 'srflx', 'prflx', 'relay'
+  console.log('Candidate:', ip.candidate); // Full ICE candidate string
+});
+```
+
+Useful for analyzing network configuration and detecting NAT/proxy usage.
 
 ---
 
