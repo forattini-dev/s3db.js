@@ -1,3 +1,5 @@
+import { getCookie, setCookie } from 'hono/cookie';
+
 /**
  * Cookie Chunking Utilities
  *
@@ -58,7 +60,7 @@ export function setChunkedCookie(context, name, value, options = {}) {
     // Clean up any existing chunks
     deleteChunkedCookie(context, name, options);
     // Set single cookie
-    context.cookie(name, value, options);
+    setCookie(context, name, value, options);
     return;
   }
 
@@ -78,11 +80,11 @@ export function setChunkedCookie(context, name, value, options = {}) {
 
   // Set chunk cookies
   chunks.forEach((chunk, index) => {
-    context.cookie(`${name}.${index}`, chunk, options);
+    setCookie(context, `${name}.${index}`, chunk, options);
   });
 
   // Set metadata cookie with chunk count
-  context.cookie(`${name}.__chunks`, String(chunks.length), {
+  setCookie(context, `${name}.__chunks`, String(chunks.length), {
     ...options,
     // Metadata cookie can have same expiry
   });
@@ -91,7 +93,7 @@ export function setChunkedCookie(context, name, value, options = {}) {
   // (e.g., if previous session had 5 chunks, now has 3)
   for (let i = chunks.length; i < MAX_CHUNKS; i++) {
     try {
-      context.cookie(`${name}.${i}`, '', {
+      setCookie(context, `${name}.${i}`, '', {
         ...options,
         maxAge: 0, // Delete
       });
@@ -119,11 +121,11 @@ export function setChunkedCookie(context, name, value, options = {}) {
  */
 export function getChunkedCookie(context, name) {
   // Try to get metadata cookie
-  const chunkCountStr = context.req.cookie(`${name}.__chunks`);
+  const chunkCountStr = getCookie(context, `${name}.__chunks`);
 
   // No metadata - try single cookie
   if (!chunkCountStr) {
-    return context.req.cookie(name) || null;
+    return getCookie(context, name) || null;
   }
 
   // Parse chunk count
@@ -136,7 +138,7 @@ export function getChunkedCookie(context, name) {
   // Reassemble chunks
   const chunks = [];
   for (let i = 0; i < chunkCount; i++) {
-    const chunk = context.req.cookie(`${name}.${i}`);
+    const chunk = getCookie(context, `${name}.${i}`);
     if (!chunk) {
       console.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
       return null;
@@ -161,20 +163,20 @@ export function getChunkedCookie(context, name) {
  */
 export function deleteChunkedCookie(context, name, options = {}) {
   // Delete main cookie
-  context.cookie(name, '', {
+  setCookie(context, name, '', {
     ...options,
     maxAge: 0,
   });
 
   // Delete metadata cookie
-  context.cookie(`${name}.__chunks`, '', {
+  setCookie(context, `${name}.__chunks`, '', {
     ...options,
     maxAge: 0,
   });
 
   // Delete all possible chunk cookies
   for (let i = 0; i < MAX_CHUNKS; i++) {
-    context.cookie(`${name}.${i}`, '', {
+    setCookie(context, `${name}.${i}`, '', {
       ...options,
       maxAge: 0,
     });
@@ -189,5 +191,5 @@ export function deleteChunkedCookie(context, name, options = {}) {
  * @returns {boolean} True if cookie is chunked
  */
 export function isChunkedCookie(context, name) {
-  return !!context.req.cookie(`${name}.__chunks`);
+  return !!getCookie(context, `${name}.__chunks`);
 }

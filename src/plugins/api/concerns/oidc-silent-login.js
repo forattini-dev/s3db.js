@@ -1,3 +1,5 @@
+import { getCookie, setCookie } from 'hono/cookie';
+
 /**
  * OIDC Silent Login (prompt=none)
  *
@@ -35,7 +37,7 @@ export function shouldAttemptSilentLogin(context, options = {}) {
   }
 
   // Already attempted (prevent infinite loop)
-  const attemptedCookie = context.req.cookie(SILENT_LOGIN_COOKIE);
+  const attemptedCookie = getCookie(context, SILENT_LOGIN_COOKIE);
   if (attemptedCookie) {
     return false;
   }
@@ -81,7 +83,7 @@ export function markSilentLoginAttempted(context, options = {}) {
     path = '/'
   } = options;
 
-  context.cookie(SILENT_LOGIN_COOKIE, '1', {
+  setCookie(context, SILENT_LOGIN_COOKIE, '1', {
     httpOnly: true,
     secure,
     sameSite,
@@ -108,7 +110,7 @@ export function clearSilentLoginAttempt(context, options = {}) {
   } = options;
 
   // Delete cookie
-  context.cookie(SILENT_LOGIN_COOKIE, '', {
+  setCookie(context, SILENT_LOGIN_COOKIE, '', {
     httpOnly: true,
     secure,
     sameSite,
