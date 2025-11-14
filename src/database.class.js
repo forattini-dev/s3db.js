@@ -18,17 +18,17 @@ import { CronManager } from "./concerns/cron-manager.js";
 
 export class Database extends SafeEventEmitter {
   constructor(options) {
-    // ✨ VERTICALIZADO CONFIG (v16+)
-    // Database config at root level, client config in clientOptions wrapper
+    // ✨ CLEAN CONFIG STRUCTURE (v16+)
+    // Database config at root level, pool config nested under operationsPool
     //
     // Structure:
     //   new S3db({
     //     connectionString: 'file:///path?compression.enabled=true',
     //     verbose: false,              // Database option (root)
-    //     parallelism: 10,             // Database option (root)
-    //     clientOptions: {             // Client options (wrapper)
-    //       compression: { enabled: true },
-    //       ttl: { enabled: true }
+    //     operationsPool: {            // Pool options (nested)
+    //       concurrency: 100,          // Parallelism for operations
+    //       retries: 3,
+    //       autotune: { ... }
     //     }
     //   })
 
@@ -85,7 +85,7 @@ export class Database extends SafeEventEmitter {
 
     // ✨ Database-level options (root level)
     this.verbose = options.verbose ?? false;
-    this.parallelism = parseInt((options.parallelism ?? 100) + "") || 100; // CHANGED: Default concurrency is now 100 (was 10)
+    this.operationsPool = options.operationsPool ?? { concurrency: 100 }; // Parallelism config
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry
@@ -201,7 +201,7 @@ export class Database extends SafeEventEmitter {
           // Use S3Client for s3://, http://, https:// protocols
           this.client = new S3Client(this._deepMerge({
             verbose: this.verbose,
-            parallelism: this.parallelism,
+            operationsPool: this.operationsPool,
             connectionString: connectionString,
           }, mergedClientOptions)); // ✨ Deep merge client options
         }
@@ -209,7 +209,7 @@ export class Database extends SafeEventEmitter {
         // If URL parsing fails, fall back to S3Client
         this.client = new S3Client(this._deepMerge({
           verbose: this.verbose,
-          parallelism: this.parallelism,
+          operationsPool: this.operationsPool,
           connectionString: connectionString,
         }, mergedClientOptions)); // ✨ Deep merge client options
       }
@@ -217,7 +217,7 @@ export class Database extends SafeEventEmitter {
       // No connection string provided, use S3Client with defaults
       this.client = new S3Client(this._deepMerge({
         verbose: this.verbose,
-        parallelism: this.parallelism,
+        operationsPool: this.operationsPool,
       }, mergedClientOptions)); // ✨ Deep merge client options
     } else {
       // Use provided client
@@ -374,7 +374,6 @@ export class Database extends SafeEventEmitter {
           version: currentVersion,
           attributes: versionData.attributes,
           behavior: versionData.behavior || 'user-managed',
-          parallelism: this.parallelism,
           passphrase: this.passphrase,
           bcryptRounds: this.bcryptRounds,
           observers: [this],
@@ -603,7 +602,7 @@ export class Database extends SafeEventEmitter {
         }
       }
 
-      const concurrency = Math.max(1, Number.isFinite(this.parallelism) ? this.parallelism : 5);
+      const concurrency = Math.max(1, Number.isFinite(this.operationsPool?.concurrency) ? this.operationsPool.concurrency : 5);
 
       const installResult = await PromisePool
         .withConcurrency(concurrency)
@@ -1495,7 +1494,6 @@ export class Database extends SafeEventEmitter {
       version: config.version !== undefined ? config.version : version,
       attributes,
       behavior,
-      parallelism: this.parallelism,
       passphrase: config.passphrase !== undefined ? config.passphrase : this.passphrase,
       bcryptRounds: config.bcryptRounds !== undefined ? config.bcryptRounds : this.bcryptRounds,
       observers: [this],
@@ -1628,7 +1626,7 @@ export class Database extends SafeEventEmitter {
       s3dbVersion: this.s3dbVersion,
       bucket: this.bucket,
       keyPrefix: this.keyPrefix,
-      parallelism: this.parallelism,
+      operationsPool: this.operationsPool,
       verbose: this.verbose
     };
   }
@@ -1656,7 +1654,7 @@ export class Database extends SafeEventEmitter {
           }
         }
         // Also stop plugins if they have a stop method (includes second removeAllListeners() call)
-        const stopConcurrency = Math.max(1, Number.isFinite(this.parallelism) ? this.parallelism : 5);
+        const stopConcurrency = Math.max(1, Number.isFinite(this.operationsPool?.concurrency) ? this.operationsPool.concurrency : 5);
         await PromisePool
           .withConcurrency(stopConcurrency)
           .for(this.pluginList)

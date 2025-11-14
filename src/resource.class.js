@@ -26,7 +26,6 @@ export class Resource extends AsyncEventEmitter {
    * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
    * @param {string} [config.passphrase='secret'] - Encryption passphrase (for 'secret' type)
    * @param {number} [config.bcryptRounds=10] - Bcrypt rounds (for 'password' type)
-   * @param {number} [config.parallelism=100] - Parallelism for bulk operations (default changed to 100)
    * @param {Array} [config.observers=[]] - Observer instances
    * @param {boolean} [config.cache=false] - Enable caching
    * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
@@ -123,7 +122,6 @@ export class Resource extends AsyncEventEmitter {
       behavior = DEFAULT_BEHAVIOR,
       passphrase = 'secret',
       bcryptRounds = 10,
-      parallelism = 100, // CHANGED: Default concurrency is now 100 (was 10)
       observers = [],
       cache = false,
       autoDecrypt = true,
@@ -152,7 +150,6 @@ export class Resource extends AsyncEventEmitter {
     this.verbose = Boolean(config.verbose ?? (config.client && config.client.verbose) ?? (config.database && config.database.verbose));
     this.behavior = behavior;
     this.observers = observers;
-    this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
     this.bcryptRounds = bcryptRounds;
     this.versioningEnabled = versioningEnabled;
@@ -4257,14 +4254,6 @@ function validateResourceConfig(config) {
 
   if (config.passphrase !== undefined && typeof config.passphrase !== 'string') {
     errors.push("Resource 'passphrase' must be a string");
-  }
-
-  if (config.parallelism !== undefined) {
-    if (typeof config.parallelism !== 'number' || !Number.isInteger(config.parallelism)) {
-      errors.push("Resource 'parallelism' must be an integer");
-    } else if (config.parallelism < 1) {
-      errors.push("Resource 'parallelism' must be greater than 0");
-    }
   }
 
   if (config.observers !== undefined && !Array.isArray(config.observers)) {
