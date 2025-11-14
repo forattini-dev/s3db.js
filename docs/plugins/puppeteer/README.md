@@ -6,6 +6,134 @@
 
 ---
 
+## 📋 Documentation Index
+
+Complete documentation organized by topic. Find what you need below:
+
+### Quick Navigation
+
+**Start here:**
+- ⚡ [TLDR](#-tldr) - 30-second overview
+- 📑 [Quickstart](#-quickstart) - Get running in 5 minutes
+- 📚 [Usage Journey](#usage-journey) - Progressive learning (7 levels)
+
+**By Experience Level:**
+- **Beginner**: [TLDR](#-tldr) → [Quickstart](#-quickstart) → [Level 1](#level-1-basic-page-visit)
+- **Intermediate**: [Usage Journey](#usage-journey) → [Configuration Examples](#-configuration-examples) → [Best Practices](#✅-best-practices)
+- **Advanced**: [Performance Guide](./guides/performance.md) → [Network Monitoring Guide](./guides/network-monitoring.md) → [Detailed Spec](./reference/detailed-spec.md)
+
+### By Feature
+
+**Browser Pooling:**
+- [Usage Level 2](./README.md#level-2-enable-browser-pooling)
+- [Configuration](./README.md#-configuration-reference) → Pool section
+- [Best Practices](./README.md#-best-practices)
+
+**Stealth Mode & Detection:**
+- [Usage Level 3](./README.md#level-3-add-stealth-mode)
+- [Configuration](./README.md#-configuration-reference) → Stealth section
+- [FAQ - Detection](./README.md#-faq) section
+
+**Human Behavior:**
+- [Usage Level 4](./README.md#level-4-human-behavior-simulation)
+- [Configuration](./README.md#-configuration-reference) → Human Behavior section
+
+**Cookie Farming:**
+- [Usage Level 5](./README.md#level-5-cookie-farming)
+- [Configuration](./README.md#-configuration-reference) → Cookies section
+- [FAQ - Cookies](./README.md#-faq)
+
+**Proxy Rotation:**
+- [Usage Level 6](./README.md#level-6-proxy-rotation)
+- [Configuration](./README.md#-configuration-reference) → Proxy section
+- [API Reference](./README.md#-api-reference) → Proxy methods
+
+**Storage Capture:**
+- [Storage Quickstart](./storage/quickstart.md)
+- [Storage Design](./storage/design.md)
+- [Implementation Details](./storage/implementation.md)
+
+**Performance Monitoring:**
+- [Performance Guide](./guides/performance.md) - Core Web Vitals, Lighthouse scoring
+- [Best Practices](./README.md#-best-practices) → Performance section
+- [Configuration Examples](./README.md#-configuration-examples) → Performance
+
+**Network Debugging:**
+- [Network Monitoring Guide](./guides/network-monitoring.md)
+- [Configuration Examples](./README.md#-configuration-examples) → Monitoring
+- [Best Practices](./README.md#-best-practices) → Monitoring
+
+**WebRTC & Streams Detection:**
+- [Detection Guide](./guides/detection.md) - WebRTC, media streams, streaming protocols
+- [API Reference](./README.md#-api-reference) → Detection Methods
+
+### By Use Case
+
+| Use Case | Documentation |
+|----------|---------------|
+| **Getting started** | [TLDR](#-tldr) + [Quickstart](#-quickstart) |
+| **Performance optimization** | [Performance Guide](./guides/performance.md) |
+| **Avoiding bot detection** | [Stealth Mode](#level-3-add-stealth-mode) + [Human Behavior](#level-4-human-behavior-simulation) |
+| **Managing cookies & sessions** | [Cookie Farming](#level-5-cookie-farming) |
+| **Distributed scraping** | [Proxy Rotation](#level-6-proxy-rotation) |
+| **Production setup** | [Level 7 - Production Setup](#level-7-production-setup) |
+| **Debugging issues** | [Error Handling](#-error-handling) + [FAQ](#-faq) |
+| **Network analysis** | [Network Monitoring Guide](./guides/network-monitoring.md) |
+| **Browser storage** | [Storage Quickstart](./storage/quickstart.md) |
+| **Detecting WebRTC/streams** | [Detection Guide](./guides/detection.md) |
+
+### Documentation Structure
+
+```
+puppeteer/
+├── README.md                           # This file (main documentation)
+│
+├── guides/                             # Advanced guides
+│   ├── README.md                       # Guide index
+│   ├── detection.md                    # WebRTC & streams detection
+│   ├── performance.md                  # Core Web Vitals, Lighthouse scoring
+│   ├── network-monitoring.md           # CDP network traffic tracking
+│   └── partitions-analysis.md          # Data partitioning strategies
+│
+├── storage/                            # Browser storage capture
+│   ├── README.md                       # Storage capture index
+│   ├── quickstart.md                   # Quick start (5 minutes)
+│   ├── design.md                       # Architecture & design
+│   ├── implementation.md               # Implementation details
+│   ├── quick-reference.txt             # Quick lookup
+│   └── architecture-diagram.txt        # ASCII diagram
+│
+└── reference/                          # Technical reference
+    ├── README.md                       # Reference index
+    └── detailed-spec.md                # Complete specification
+```
+
+### Getting Help
+
+1. **Check [FAQ](#-faq)** - Most questions answered
+2. **Read [Error Handling](#-error-handling)** - For error messages
+3. **Browse [Best Practices](#-best-practices)** - For design patterns
+4. **Review relevant guide** - Performance, network, storage, or detection
+5. **Check [Detailed Spec](./reference/detailed-spec.md)** - For internals
+
+### Related Resources
+
+- **[← All Plugins](../README.md)** - Other s3db.js plugins
+- **[Spider Plugin](../spider/README.md)** - Web crawling suite (uses PuppeteerPlugin)
+- **[Cookie Farm Plugin](../cookie-farm/README.md)** - Persona farming (uses PuppeteerPlugin)
+- **[s3db.js Documentation](../../README.md)** - Core library docs
+
+### Documentation Standards
+
+This documentation follows the [Plugin Documentation Standard](../plugin-docs-standard.md):
+- ✅ 12 required sections
+- ✅ 20+ FAQ entries
+- ✅ Real-world examples
+- ✅ Complete API reference
+- ✅ Best practices and error handling
+
+---
+
 ## ⚡ TLDR
 
 **Enterprise-grade browser automation with anti-bot detection and intelligent cookie farming.**
