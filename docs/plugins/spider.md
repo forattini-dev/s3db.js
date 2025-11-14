@@ -46,6 +46,12 @@ await spider.enqueueTarget({ url: 'https://example.com' });
 - ✅ **Integrated Browser Automation** - PuppeteerPlugin with sensible defaults
 - ✅ **Distributed Queue** - S3QueuePlugin for scalable task processing
 - ✅ **Automatic TTL Cleanup** - Optional TTL management for stale tasks
+- ✅ **SEO Analysis** - Meta tags, OpenGraph, Twitter Cards, assets, links
+- ✅ **Technology Fingerprinting** - Detect 100+ frameworks, analytics, CDN
+- ✅ **Security Analysis** - Headers, CSP, CORS, WebSockets, vulnerabilities
+- ✅ **Visual Capture** - Screenshot capture with configurable format/quality
+- ✅ **Performance Metrics** - Core Web Vitals, navigation timing, memory
+- ✅ **Data Persistence** - Configurable opt-in storage to S3
 - ✅ **Namespaced Resources** - Isolated crawler data (`<namespace>_targets`)
 - ✅ **Simple API** - Unified interface hiding complexity
 - ✅ **Production Ready** - Error handling, retries, and monitoring built-in
@@ -576,6 +582,76 @@ new SpiderPlugin({
     await page.close();
 
     return data;
+  },
+
+  // ============================================
+  // SECTION 6: Advanced Analysis Features
+  // ============================================
+
+  // SEO Analysis
+  seo: {
+    enabled: true,                      // Enable SEO analysis
+    extractMetaTags: true,              // Extract meta tags
+    extractOpenGraph: true,             // Extract OpenGraph tags
+    extractTwitterCard: true,           // Extract Twitter Card tags
+    extractAssets: true,                // Extract CSS, JS, images
+    assetMetadata: true                 // Collect asset metadata
+  },
+
+  // Technology Detection
+  techDetection: {
+    enabled: true,                      // Enable tech fingerprinting
+    detectFrameworks: true,             // React, Vue, Angular, etc.
+    detectAnalytics: true,              // Google Analytics, Amplitude, etc.
+    detectMarketing: true,              // Facebook Pixel, LinkedIn, etc.
+    detectCDN: true,                    // Cloudflare, CloudFront, etc.
+    detectWebServer: true,              // Nginx, Apache, IIS, etc.
+    detectCMS: true                     // WordPress, Shopify, etc.
+  },
+
+  // Screenshot Capture
+  screenshot: {
+    enabled: true,                      // Enable screenshot capture
+    captureFullPage: true,              // Full page or viewport
+    quality: 80,                        // Quality 0-100 (JPEG only)
+    format: 'jpeg',                     // 'jpeg' or 'png'
+    maxWidth: 1920,                     // Screenshot width
+    maxHeight: 1080                     // Screenshot height
+  },
+
+  // Security Analysis
+  security: {
+    enabled: true,                      // Enable security analysis
+    analyzeSecurityHeaders: true,       // HTTP security headers
+    analyzeCSP: true,                   // Content Security Policy
+    analyzeCORS: true,                  // CORS configuration
+    captureConsoleLogs: true,           // Browser console logs
+    consoleLogLevels: ['error', 'warn'],// Log levels to capture
+    maxConsoleLogLines: 100,            // Max console logs
+    analyzeTLS: true,                   // TLS/HTTPS verification
+    checkVulnerabilities: true,         // Security vulnerability detection
+    captureWebSockets: true,            // WebSocket detection
+    maxWebSocketMessages: 50            // Max WebSocket messages
+  },
+
+  // Performance Metrics
+  performance: {
+    enabled: true,                      // Enable performance collection
+    collectCoreWebVitals: true,         // LCP, FID, CLS
+    collectNavigationTiming: true,      // Page load timing
+    collectResourceTiming: true,        // Resource timing
+    collectMemory: true                 // Memory usage
+  },
+
+  // Data Persistence
+  persistence: {
+    enabled: false,                     // Enable data persistence (opt-in)
+    saveResults: true,                  // Save main crawl results
+    saveSEOAnalysis: true,              // Save SEO analysis
+    saveTechFingerprint: true,          // Save technology fingerprints
+    saveSecurityAnalysis: true,         // Save security analysis
+    saveScreenshots: true,              // Save captured screenshots
+    savePerformanceMetrics: true        // Save performance metrics
   }
 })
 ```
