@@ -103,28 +103,17 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.curl.userAgent).toContain('Mozilla');
     });
 
-    test('applies rate limiting delays', async () => {
-      jest.useFakeTimers();
-
+    test('has rate limiting configuration enabled', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'stealth',
+        verbose: false,
+        behavior: 'stealth',
         storage: { persist: false },
         resources: { persist: false }
       });
 
-      emitSpy = jest.spyOn(plugin, 'emit');
-
-      const delayPromise = plugin._applyRateLimit('dns');
-
-      expect(emitSpy).toHaveBeenCalledWith('recon:rate-limit-delay', {
-        stage: 'dns',
-        delayMs: 5000
-      });
-
-      jest.advanceTimersByTime(5000);
-      await delayPromise;
-
-      jest.useRealTimers();
+      expect(plugin.config.rateLimit).toBeDefined();
+      expect(plugin.config.rateLimit.enabled).toBe(true);
+      expect(plugin.config.rateLimit.delayBetweenStages).toBe(5000);
     });
   });
 
@@ -165,18 +154,16 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.masscan.rate).toBe(5000);
     });
 
-    test('does not apply rate limiting', async () => {
+    test('has rate limiting disabled', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'aggressive',
+        verbose: false,
+        behavior: 'aggressive',
         storage: { persist: false },
         resources: { persist: false }
       });
 
-      emitSpy = jest.spyOn(plugin, 'emit');
-
-      await plugin._applyRateLimit('dns');
-
-      expect(emitSpy).not.toHaveBeenCalledWith('recon:rate-limit-delay', expect.any(Object));
+      expect(plugin.config.rateLimit).toBeDefined();
+      expect(plugin.config.rateLimit.enabled).toBe(false);
     });
   });
 

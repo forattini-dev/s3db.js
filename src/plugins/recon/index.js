@@ -198,6 +198,32 @@ export class ReconPlugin extends Plugin {
   }
 
   /**
+   * Apply rate limiting between stages when enabled
+   * @param {string} stage
+   * @private
+   */
+  async _applyRateLimit(stage) {
+    const rateLimit = this.config?.rateLimit;
+    if (!rateLimit || rateLimit.enabled === false) {
+      return;
+    }
+
+    const delayMs =
+      rateLimit.delayBetweenStages ??
+      (rateLimit.requestsPerMinute
+        ? Math.floor(60000 / Math.max(1, rateLimit.requestsPerMinute))
+        : 0);
+
+    if (delayMs > 0) {
+      this.emit('recon:rate-limit-delay', {
+        stage,
+        delayMs
+      });
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  /**
    * Plugin cleanup hook
    */
   async cleanup() {

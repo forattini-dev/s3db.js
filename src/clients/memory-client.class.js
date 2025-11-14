@@ -30,6 +30,16 @@ export class MemoryClient extends EventEmitter {
     this.id = config.id || idGenerator(77);
     this.verbose = Boolean(config.verbose);
 
+    // Normalize execution config (mirrors S3Client taskExecutorConfig)
+    this.taskExecutorConfig = {
+      enabled: true,
+      concurrency: config.concurrency || 5,
+      retries: config.retries ?? 3,
+      retryDelay: config.retryDelay ?? 1000,
+      timeout: config.timeout ?? 30000,
+      retryableErrors: config.retryableErrors || []
+    };
+
     // TasksRunner for batch operations (MemoryClient analog to TasksPool)
     // Accepts either a pre-instantiated TaskExecutor or configuration object
     if (config.taskExecutor) {
@@ -37,13 +47,7 @@ export class MemoryClient extends EventEmitter {
       this.taskManager = config.taskExecutor;
     } else {
       // Create new TasksRunner instance with configuration
-      this.taskManager = new TasksRunner({
-        concurrency: config.concurrency || 5,
-        retries: config.retries ?? 3,
-        retryDelay: config.retryDelay ?? 1000,
-        timeout: config.timeout ?? 30000,
-        retryableErrors: config.retryableErrors || []
-      });
+      this.taskManager = new TasksRunner({ ...this.taskExecutorConfig });
     }
 
     // Storage configuration
