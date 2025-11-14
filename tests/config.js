@@ -12,11 +12,19 @@ import {
 import Database from '#src/database.class.js';
 import { idGenerator } from '#src/concerns/id.js';
 import { CronManager } from '#src/concerns/cron-manager.js';
+import { ProcessManager } from '#src/concerns/process-manager.js';
 import { S3Client } from '#src/clients/s3-client.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
 
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Increase max listeners to prevent warnings in tests with multiple databases
+process.setMaxListeners(50);
+
+// Shared ProcessManager and CronManager for all tests (prevents signal handler leak)
+const testProcessManager = new ProcessManager({ verbose: false, exitOnSignal: false });
+const testCronManager = new CronManager({ disabled: true, verbose: false });
 
 // Global counter to ensure unique S3 prefixes even when tests run in same millisecond (CI environments)
 let prefixCounter = 0;
@@ -59,8 +67,12 @@ export function createDatabaseForTest(testName, options = {}) {
     ...options,
   }
 
+  // Use shared managers to prevent signal handler leaks in tests
+  if (!params.processManager) {
+    params.processManager = testProcessManager;
+  }
   if (!params.cronManager) {
-    params.cronManager = new CronManager({ disabled: true, verbose: false });
+    params.cronManager = testCronManager;
   }
 
   const database = new Database(params);

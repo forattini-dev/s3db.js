@@ -299,7 +299,13 @@ export class Database extends SafeEventEmitter {
    * @private
    */
   _normalizeOperationsPool(config = {}) {
+    // If explicitly disabled, return minimal config
+    if (config === false || config?.enabled === false) {
+      return { enabled: false };
+    }
+
     return {
+      enabled: true, // ENABLED BY DEFAULT
       concurrency: config?.concurrency ?? 100,
       retries: config?.retries ?? 3,
       retryDelay: config?.retryDelay ?? 1000,
