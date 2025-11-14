@@ -1825,7 +1825,7 @@ proxy: {
 
 ### Related Plugins
 - **[Cookie Farm Plugin](../cookie-farm/README.md)** - Automated cookie farming and persona management for anti-bot evasion
-- **[Spider Plugin](../spider.md)** - Web crawling suite combining Puppeteer with S3 queue and TTL for production scraping
+- **[Spider Plugin](../spider/) - Web crawling suite combining Puppeteer with S3 queue and TTL for production scraping
 
 ### Related Documentation
 - [Network Monitoring Guide](./NETWORK_MONITORING.md) - Advanced network tracking
