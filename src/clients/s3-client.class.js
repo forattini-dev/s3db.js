@@ -31,14 +31,12 @@ export class S3Client extends EventEmitter {
     id = null,
     AwsS3Client,
     connectionString,
-    parallelism = 100, // CHANGED: Default concurrency is now 100 (was 10)
     httpClientOptions = {},
-    operationsPool = { enabled: true }, // ENABLED BY DEFAULT - uses addBatch() for bulk operations
+    operationsPool = { concurrency: 100 }, // Default concurrency: 100 (Separate OperationsPools per Database)
   }) {
     super();
     this.verbose = verbose;
     this.id = id ?? idGenerator(77);
-    this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.httpClientOptions = {
       keepAlive: true, // Enabled for better performance
@@ -66,7 +64,7 @@ export class S3Client extends EventEmitter {
 
     const normalized = {
       enabled: config.enabled ?? true, // ENABLED BY DEFAULT
-      concurrency: config.concurrency ?? this.parallelism,
+      concurrency: config.concurrency ?? 100, // Default: 100 concurrent operations per pool
       retries: config.retries ?? 3,
       retryDelay: config.retryDelay ?? 1000,
       timeout: config.timeout ?? 30000,

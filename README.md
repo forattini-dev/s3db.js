@@ -316,8 +316,7 @@ import { Database, DatabaseConfig, Resource } from 's3db.js';
 const config: DatabaseConfig = {
   connectionString: 's3://ACCESS_KEY:SECRET@bucket/path',
   verbose: true,
-  parallelism: 100,  // Default - Separate OperationsPool per database
-  cache: { enabled: true, ttl: 3600 }
+  operationsPool: { concurrency: 100 }  // Default - nested under operationsPool
 };
 
 const db = new Database(config);
@@ -689,8 +688,12 @@ await db.connect();
 const db = new S3db({
   connectionString: 's3://bucket/databases/myapp',
   verbose: true,
-  parallelism: 100,  // Default - increase for high-throughput scenarios
   versioningEnabled: true,
+  operationsPool: {
+    concurrency: 100,  // Default concurrency (can increase for high-throughput)
+    retries: 3,
+    retryDelay: 1000
+  },
   plugins: [
     new CachePlugin({ ttl: 300000 }),
     new MetricsPlugin()
@@ -1376,31 +1379,31 @@ OperationPool is **enabled by default** with optimized settings:
 import { Database } from 's3db.js'
 
 const db = new Database({
-  connectionString: 's3://bucket/database',
-  parallelism: 100  // Default - each database gets its own pool!
+  connectionString: 's3://bucket/database'
+  // That's it! OperationsPool is automatically configured with:
+  // - Separate pool per database (zero contention)
+  // - Concurrency: 100 (default)
+  // - Auto-retry with exponential backoff
+  // - Priority queue for important operations
+  // - Real-time metrics
 })
 
-// That's it! OperationsPool is automatically configured with:
-// - Separate pool per database (zero contention)
-// - Concurrency: 100
-// - Auto-retry with exponential backoff
-// - Priority queue for important operations
-// - Real-time metrics
 await db.connect()
 ```
 
 ### Adaptive Tuning (Optional)
 
-Customize parallelism for your specific workload:
+Customize concurrency for your specific workload:
 
 ```javascript
 import { Database } from 's3db.js'
 
 const db = new Database({
   connectionString: 's3://bucket/database',
-  parallelism: 200,  // Increase for high-throughput scenarios
   operationsPool: {
-    concurrency: 'auto',      // Auto-tune based on system load
+    concurrency: 200,         // Increase for high-throughput scenarios
+    // Or use auto-tuning:
+    // concurrency: 'auto',   // Auto-tune based on system load
     autotune: {
       targetLatency: 100,     // Target 100ms per operation
       minConcurrency: 50,     // Never go below 50
@@ -1486,16 +1489,16 @@ Benchmark results from comprehensive testing of 108 scenarios (see [docs/benchma
 
 **✅ Automatic (no configuration needed):**
 - All operations benefit from Separate Pools
-- Default configuration optimized for S3
+- Default concurrency: 100 (optimized for S3)
 - Zero contention between databases
 - Auto-retry with exponential backoff
 - Adaptive tuning available for custom scenarios
 
-**Customize parallelism for:**
-- **High-throughput APIs**: `parallelism: 200`
-- **Data pipelines**: `parallelism: 300-500`
-- **Single operations**: `parallelism: 10` (override default)
-- **Memory-constrained**: `parallelism: 25-50`
+**Customize concurrency for:**
+- **High-throughput APIs**: `operationsPool: { concurrency: 200 }`
+- **Data pipelines**: `operationsPool: { concurrency: 300-500 }`
+- **Single/low-frequency ops**: `operationsPool: { concurrency: 10 }`
+- **Memory-constrained**: `operationsPool: { concurrency: 25-50 }`
 
 ### Configuration Reference
 
@@ -1505,13 +1508,14 @@ Separate Pools comes pre-configured with production-ready defaults. Override onl
 // Minimal - uses all defaults (recommended)
 const db = new Database({
   connectionString: 's3://bucket/database'
+  // operationsPool uses defaults: { concurrency: 100 }
 })
 
 // Custom - override specific settings
 const db = new Database({
   connectionString: 's3://bucket/database',
-  parallelism: 200,                 // Concurrency per database pool
   operationsPool: {
+    concurrency: 200,               // Concurrency per database pool (default: 100)
     retries: 3,                     // Max retry attempts
     retryDelay: 1000,               // Initial retry delay (ms)
     timeout: 30000,                 // Operation timeout (ms)
