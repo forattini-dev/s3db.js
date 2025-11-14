@@ -32,13 +32,20 @@ export class FileSystemClient extends EventEmitter {
     this.verbose = Boolean(config.verbose);
 
     // TaskManager for batch operations (FileSystemClient analog to OperationsPool)
-    this.taskManager = new TaskManager({
-      concurrency: config.concurrency || 5,
-      retries: config.retries ?? 3,
-      retryDelay: config.retryDelay ?? 1000,
-      timeout: config.timeout ?? 30000,
-      retryableErrors: config.retryableErrors || []
-    });
+    // Accepts either a pre-instantiated TaskExecutor or configuration object
+    if (config.taskExecutor) {
+      // Use provided TaskExecutor (satisfies Strategy pattern)
+      this.taskManager = config.taskExecutor;
+    } else {
+      // Create new TaskManager instance with configuration
+      this.taskManager = new TaskManager({
+        concurrency: config.concurrency || 5,
+        retries: config.retries ?? 3,
+        retryDelay: config.retryDelay ?? 1000,
+        timeout: config.timeout ?? 30000,
+        retryableErrors: config.retryableErrors || []
+      });
+    }
 
     // Storage configuration
     this.basePath = config.basePath || './s3db-data';

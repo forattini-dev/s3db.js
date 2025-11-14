@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { cpus } from 'os'
 import { setTimeout as delay } from 'timers/promises'
 import { nanoid } from 'nanoid'
+import { TaskExecutor } from '../concurrency/task-executor.interface.js'
 
 const scheduleDrain =
   typeof queueMicrotask === 'function'
@@ -22,8 +23,10 @@ const INTERNAL_DEFER = '__operationsPoolInternalDefer'
  * - Comprehensive metrics collection
  * - Event emission for monitoring
  *
+ * Implements TaskExecutor interface for interchangeability with TaskManager.
+ *
  * @class OperationsPool
- * @extends EventEmitter
+ * @extends EventEmitter, TaskExecutor
  */
 export class OperationsPool extends EventEmitter {
   /**
@@ -793,6 +796,14 @@ export class OperationsPool extends EventEmitter {
     }
     this.concurrency = n
     this.processNext()
+  }
+
+  /**
+   * Get current concurrency setting
+   * @returns {number} Current concurrency level
+   */
+  getConcurrency () {
+    return this.concurrency
   }
 
   /**

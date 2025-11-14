@@ -61,6 +61,7 @@ export { CronManager, getCronManager, resetCronManager, createCronManager, inter
 // Operations Pool & Task Management
 // =============================================================================
 
+export { TaskExecutor } from './concurrency/index.js'
 export { OperationsPool } from './concerns/operations-pool.js'
 export { AdaptiveTuning } from './concerns/adaptive-tuning.js'
 export { TaskManager } from './task-manager.class.js'
