@@ -629,6 +629,89 @@ new SMTPPlugin({
 
 ---
 
+### Use Case 6: Multi-Relay (Dynamic Routing)
+
+Route emails through different SMTP relays based on domain, volume, or other logic.
+
+```javascript
+// Start with primary relay
+let plugin = new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',
+  from: 'noreply@yourdomain.com',
+  config: {
+    host: 'primary-mail.yourdomain.com',
+    port: 587,
+    secure: true,
+    auth: {
+      user: process.env.PRIMARY_SMTP_USER,
+      pass: process.env.PRIMARY_SMTP_PASSWORD
+    }
+  }
+});
+
+// Switch to backup relay if primary fails
+const backupPlugin = new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',
+  from: 'noreply@yourdomain.com',
+  config: {
+    host: 'backup-mail.yourdomain.com',
+    port: 587,
+    secure: true,
+    auth: {
+      user: process.env.BACKUP_SMTP_USER,
+      pass: process.env.BACKUP_SMTP_PASSWORD
+    }
+  }
+});
+
+// Route emails with retry to different relays
+await plugin.sendEmail({
+  to: recipient,
+  subject: 'Test',
+  body: 'Content'
+}).catch(async (error) => {
+  console.log('Primary relay failed, trying backup:', error.message);
+  return await backupPlugin.sendEmail({
+    to: recipient,
+    subject: 'Test',
+    body: 'Content'
+  });
+});
+```
+
+**Or use different relays by domain:**
+
+```javascript
+const relays = {
+  'gmail.com': { host: 'gmail-relay.yourdomain.com', ... },
+  'hotmail.com': { host: 'hotmail-relay.yourdomain.com', ... },
+  'default': { host: 'primary-mail.yourdomain.com', ... }
+};
+
+const getDomainRelay = (email) => {
+  const domain = email.split('@')[1];
+  return relays[domain] || relays['default'];
+};
+
+const plugin = new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',
+  from: 'noreply@yourdomain.com',
+  config: getDomainRelay('user@example.com')
+  // Reconfigure for each domain as needed
+});
+```
+
+**Why this configuration:**
+- Load balancing across multiple relays
+- Failover/high availability for email delivery
+- Domain-specific routing (e.g., different mail servers for different regions)
+- Compliance: Route through different servers for different customers
+
+---
+
 ## 📬 Server Mode & Storage Architecture
 
 ### Server Mode Overview
@@ -1424,6 +1507,62 @@ for (let user of users) {
     plugin.sendEmail({ to: user.email })
   );
 }
+```
+
+---
+
+**Q: Can I use multiple SMTP relays with failover or load balancing?**
+
+A: Yes! Relay Mode supports multiple relays. Use two patterns:
+
+**Pattern 1: Failover (try backup if primary fails)**
+```javascript
+const primaryPlugin = new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',
+  config: { host: 'primary-mail.com', ... }
+});
+
+const backupPlugin = new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',
+  config: { host: 'backup-mail.com', ... }
+});
+
+try {
+  await primaryPlugin.sendEmail(emailData);
+} catch (error) {
+  console.log('Primary failed, using backup');
+  await backupPlugin.sendEmail(emailData);
+}
+```
+
+**Pattern 2: Domain-based routing**
+```javascript
+const relaysByDomain = {
+  'gmail.com': primaryPlugin,
+  'hotmail.com': backupPlugin,
+  'default': primaryPlugin
+};
+
+const recipient = 'user@gmail.com';
+const domain = recipient.split('@')[1];
+const relay = relaysByDomain[domain] || relaysByDomain['default'];
+await relay.sendEmail(emailData);
+```
+
+**Pattern 3: Load balancing round-robin**
+```javascript
+const relays = [primaryPlugin, backupPlugin, tertiaryPlugin];
+let index = 0;
+
+const nextRelay = () => {
+  const relay = relays[index];
+  index = (index + 1) % relays.length;
+  return relay;
+};
+
+await nextRelay().sendEmail(emailData);
 ```
 
 ---
