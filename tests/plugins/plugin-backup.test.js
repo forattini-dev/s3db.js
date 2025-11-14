@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { createDatabaseForTest } from '../config.js';
+import { createMemoryDatabaseForTest } from '../config.js';
 import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
 import { mkdir, writeFile, readFile, unlink, stat, rmdir, access } from 'fs/promises';
 import path from 'path';
@@ -15,7 +15,7 @@ describe('BackupPlugin (New Driver API)', () => {
     await mkdir(tempDir, { recursive: true });
 
     // Setup database
-    database = createDatabaseForTest('suite=plugins/backup-new');
+    database = createMemoryDatabaseForTest('suite=plugins/backup-new');
 
     // Create plugin with test configuration (new driver-based API)
     plugin = new BackupPlugin({
@@ -352,7 +352,7 @@ describe('BackupPlugin (New Driver API)', () => {
   describe('Error Handling', () => {
     it('should handle backup with no user resources', async () => {
       // Create empty database
-      const emptyDb = createDatabaseForTest('suite=plugins/backup-empty');
+      const emptyDb = createMemoryDatabaseForTest('suite=plugins/backup-empty');
       await emptyDb.connect();
       
       const emptyPlugin = new BackupPlugin({
