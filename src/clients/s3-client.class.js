@@ -32,13 +32,13 @@ export class S3Client extends EventEmitter {
     AwsS3Client,
     connectionString,
     httpClientOptions = {},
-    operationsPool = false, // Disabled by default (tests can opt-in)
-    operationPool
+    taskExecutor = false, // Disabled by default (tests can opt-in)
   }) {
     super();
     this.verbose = verbose;
     this.id = id ?? idGenerator(77);
     this.config = new ConnectionString(connectionString);
+    this.connectionString = connectionString;
     this.httpClientOptions = {
       keepAlive: true, // Enabled for better performance
       keepAliveMsecs: 1000, // 1 second keep-alive
@@ -49,21 +49,24 @@ export class S3Client extends EventEmitter {
     };
     this.client = AwsS3Client || this.createClient();
 
-    const poolOptions = typeof operationPool !== 'undefined' ? operationPool : operationsPool;
-
-    // Initialize OperationsPool (ENABLED BY DEFAULT!)
-    this.operationsPoolConfig = this._normalizeOperationsPoolConfig(poolOptions);
-    this.operationsPool = this.operationsPoolConfig.enabled ? this._createOperationsPool() : null;
-    // Legacy aliases (operationPool*)
-    this.operationPoolConfig = this.operationsPoolConfig;
-    this.operationPool = this.operationsPool;
+    // Initialize TasksPool (ENABLED BY DEFAULT!)
+    this.taskExecutorConfig = this._normalizeTaskExecutorConfig(taskExecutor);
+    this.taskExecutor = this.taskExecutorConfig.enabled ? this._createTasksPool() : null;
   }
 
   /**
-   * Normalize OperationsPool configuration
+   * Get parallelism value from taskExecutor config
+   * @type {number|string}
+   */
+  get parallelism() {
+    return this.taskExecutorConfig?.concurrency !== undefined ? this.taskExecutorConfig.concurrency : 100;
+  }
+
+  /**
+   * Normalize TaskExecutor configuration
    * @private
    */
-  _normalizeOperationsPoolConfig(config) {
+  _normalizeTaskExecutorConfig(config) {
     if (config === false || config?.enabled === false) {
       return { enabled: false };
     }
@@ -83,27 +86,27 @@ export class S3Client extends EventEmitter {
   }
 
   /**
-   * Create OperationsPool instance
+   * Create TasksPool instance
    * @private
    */
-  _createOperationsPool() {
+  _createTasksPool() {
     const poolConfig = {
-      concurrency: this.operationsPoolConfig.concurrency,
-      retries: this.operationsPoolConfig.retries,
-      retryDelay: this.operationsPoolConfig.retryDelay,
-      timeout: this.operationsPoolConfig.timeout,
-      retryableErrors: this.operationsPoolConfig.retryableErrors,
-      monitoring: this.operationsPoolConfig.monitoring,
+      concurrency: this.taskExecutorConfig.concurrency,
+      retries: this.taskExecutorConfig.retries,
+      retryDelay: this.taskExecutorConfig.retryDelay,
+      timeout: this.taskExecutorConfig.timeout,
+      retryableErrors: this.taskExecutorConfig.retryableErrors,
+      monitoring: this.taskExecutorConfig.monitoring,
     };
 
     // Handle 'auto' concurrency
     if (poolConfig.concurrency === 'auto') {
-      const tuner = new AdaptiveTuning(this.operationsPoolConfig.autotune || {});
+      const tuner = new AdaptiveTuning(this.taskExecutorConfig.autotune || {});
       poolConfig.concurrency = tuner.currentConcurrency;
       poolConfig.autotune = tuner;
-    } else if (this.operationsPoolConfig.autotune) {
+    } else if (this.taskExecutorConfig.autotune) {
       const tuner = new AdaptiveTuning({
-        ...this.operationsPoolConfig.autotune,
+        ...this.taskExecutorConfig.autotune,
         initialConcurrency: poolConfig.concurrency,
       });
       poolConfig.autotune = tuner;
@@ -126,13 +129,13 @@ export class S3Client extends EventEmitter {
    * @private
    */
   async _executeOperation(fn, options = {}) {
-    if (!this.operationsPool || options.bypassPool) {
+    if (!this.taskExecutor || options.bypassPool) {
       // Pool disabled or explicitly bypassed
       return await fn();
     }
 
     // Execute through pool - THIS IS THE MAGIC!
-    return await this.operationsPool.enqueue(fn, {
+    return await this.taskExecutor.enqueue(fn, {
       priority: options.priority ?? 0,
       retries: options.retries,
       timeout: options.timeout,
@@ -141,7 +144,7 @@ export class S3Client extends EventEmitter {
   }
 
   /**
-   * Execute batch of operations without re-enqueueing them into the OperationsPool.
+   * Execute batch of operations without re-enqueueing them into the TasksPool.
    *
    * Each operation is still free to call `_executeOperation`, so the underlying S3
    * commands remain throttled by the pool without causing recursive deadlocks.
@@ -176,34 +179,34 @@ export class S3Client extends EventEmitter {
   }
 
   /**
-   * OperationsPool helpers exposed for monitoring/tests
+   * TasksPool helpers exposed for monitoring/tests
    */
   getQueueStats() {
-    return this.operationsPool ? this.operationsPool.getStats() : null;
+    return this.taskExecutor ? this.taskExecutor.getStats() : null;
   }
 
   getAggregateMetrics(since = 0) {
-    return this.operationsPool ? this.operationsPool.getAggregateMetrics(since) : null;
+    return this.taskExecutor ? this.taskExecutor.getAggregateMetrics(since) : null;
   }
 
   async pausePool() {
-    if (!this.operationsPool) return null;
-    return this.operationsPool.pause();
+    if (!this.taskExecutor) return null;
+    return this.taskExecutor.pause();
   }
 
   resumePool() {
-    if (!this.operationsPool) return null;
-    this.operationsPool.resume();
+    if (!this.taskExecutor) return null;
+    this.taskExecutor.resume();
   }
 
   async drainPool() {
-    if (!this.operationsPool) return null;
-    return this.operationsPool.drain();
+    if (!this.taskExecutor) return null;
+    return this.taskExecutor.drain();
   }
 
   stopPool() {
-    if (!this.operationsPool) return;
-    this.operationsPool.stop();
+    if (!this.taskExecutor) return;
+    this.taskExecutor.stop();
   }
 
   createClient() {
@@ -480,7 +483,7 @@ export class S3Client extends EventEmitter {
     const results = [];
     const errors = [];
 
-    // Process each package - OperationsPool controls concurrency automatically
+    // Process each package - TasksPool controls concurrency automatically
     for (const packageKeys of packages) {
       const [ok, err, response] = await tryFn(async () => {
         return await this._executeOperation(async () => {
@@ -739,7 +742,7 @@ export class S3Client extends EventEmitter {
     const results = [];
     const errors = [];
 
-    // Process each key - OperationsPool controls concurrency automatically
+    // Process each key - TasksPool controls concurrency automatically
     for (const key of keys) {
       const to = key.replace(prefixFrom, prefixTo);
       const [ok, err] = await tryFn(async () => {

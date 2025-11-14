@@ -9,7 +9,7 @@ const scheduleDrain =
     ? queueMicrotask
     : (fn) => setTimeout(fn, 0)
 
-const INTERNAL_DEFER = '__operationsPoolInternalDefer'
+const INTERNAL_DEFER = '__taskExecutorInternalDefer'
 
 /**
  * TasksPool - Global operation queue for controlling S3 operation concurrency
@@ -49,10 +49,14 @@ export class TasksPool extends EventEmitter {
     super()
 
     // Normalize configuration
-    this.autoConcurrency = options.concurrency === 'auto'
-    this.concurrency = this.autoConcurrency
+    const requestedConcurrency = options.concurrency ?? 10
+    this.autoConcurrency = requestedConcurrency === 'auto'
+    this._configuredConcurrency = this.autoConcurrency
+      ? 'auto'
+      : this._normalizeConcurrency(requestedConcurrency)
+    this._effectiveConcurrency = this.autoConcurrency
       ? this._defaultAutoConcurrency()
-      : this._normalizeConcurrency(options.concurrency)
+      : this._configuredConcurrency
     this.retries = options.retries ?? 3
     this.retryDelay = options.retryDelay || 1000
     this.timeout = options.timeout ?? 30000
@@ -135,6 +139,14 @@ export class TasksPool extends EventEmitter {
     return 10 // Default fallback
   }
 
+  get concurrency () {
+    return this._configuredConcurrency
+  }
+
+  get effectiveConcurrency () {
+    return this._effectiveConcurrency
+  }
+
   /**
    * Default concurrency when 'auto' is requested but tuner isn't attached yet
    * @private
@@ -182,7 +194,7 @@ export class TasksPool extends EventEmitter {
   setTuner (tuner) {
     this.tuner = tuner
     if (this.autoConcurrency) {
-      this.concurrency = tuner.getConcurrency()
+      this._effectiveConcurrency = tuner.getConcurrency()
       this.processNext()
     }
   }
@@ -376,7 +388,7 @@ export class TasksPool extends EventEmitter {
    * @private
    */
   _drainQueue () {
-    const maxPerTick = this.concurrency * 2 || 16
+    const maxPerTick = this.effectiveConcurrency * 2 || 16
     let processed = 0
 
     while (this._canProcessNext()) {

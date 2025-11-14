@@ -52,6 +52,17 @@ export class MemoryClient extends EventEmitter {
     this.region = config.region || 'us-east-1';
     this._keyPrefixForStrip = this.keyPrefix ? pathPosix.join(this.keyPrefix, '') : '';
 
+    const encodedBucket = encodeURIComponent(this.bucket);
+    const encodedPrefix = this.keyPrefix
+      ? this.keyPrefix
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join('/')
+      : '';
+    const prefixPath = encodedPrefix ? `/${encodedPrefix}` : '';
+    this.connectionString = `memory://${encodedBucket}${prefixPath}`;
+
     // Get or create shared storage for this bucket
     // This allows multiple MemoryClient instances to share the same data (simulating S3 persistence)
     if (!globalStorageRegistry.has(this.bucket)) {
