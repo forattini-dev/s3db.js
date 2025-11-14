@@ -113,12 +113,21 @@ function normalizeAuthConfig(authOptions = {}) {
     }
   }
 
-  // Support legacy per-driver objects (jwt: {...}, apiKey: {...})
+  // Support legacy per-driver objects (DEPRECATED - jwt: {...}, apiKey: {...} → use driver array)
+  // This will be removed in v17.0
   for (const driverName of AUTH_DRIVER_KEYS) {
     if (authOptions[driverName] === undefined) continue;
 
     const value = authOptions[driverName];
     if (!value || value.enabled === false) continue;
+
+    if (this.database?.verbose) {
+      console.warn(
+        `[ApiPlugin] DEPRECATED: Using per-driver auth config (${driverName}: {...}) is deprecated. ` +
+        `Use the driver array instead: driver: [{ driver: '${driverName}', ... }]. ` +
+        `This will be removed in v17.0.`
+      );
+    }
 
     const config = typeof value === 'object' ? { ...value } : {};
     if (config.enabled !== undefined) {
@@ -362,7 +371,7 @@ export class ApiPlugin extends Plugin {
         } : false
       },
 
-      // Legacy CSP config (backward compatibility)
+      // Legacy CSP config (DEPRECATED - use security.contentSecurityPolicy)
       csp: {
         enabled: options.csp?.enabled || false,
         directives: options.csp?.directives || {},

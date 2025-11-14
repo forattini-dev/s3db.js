@@ -77,9 +77,16 @@ export default class MultiBackupDriver extends BaseBackupDriver {
       }
     }
 
-    // Legacy support for requireAll
-    if (this.config.requireAll === false) {
-      this.config.strategy = 'any';
+    // Legacy support for requireAll (DEPRECATED)
+    if (this.config.requireAll !== undefined) {
+      console.warn(
+        '[MultiBackupDriver] DEPRECATED: The "requireAll" option is deprecated. ' +
+        'Use "strategy" instead: strategy: "any" (instead of requireAll: false) or strategy: "all" (instead of requireAll: true). ' +
+        'This will be removed in v17.0.'
+      );
+      if (this.config.requireAll === false) {
+        this.config.strategy = 'any';
+      }
     }
 
     this.log(`Initialized with ${this.drivers.length} destinations, strategy: ${this.config.strategy}`);

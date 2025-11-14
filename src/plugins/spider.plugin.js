@@ -16,6 +16,8 @@ import {
   validateActivities,
   getPreset
 } from './spider/task-activities.js'
+import { analyzeIFrames, detectTrackingPixels } from './spider/content-analyzer.js'
+import { analyzeAllStorage } from './spider/storage-analyzer.js'
 
 /**
  * SpiderPlugin - All-in-one web crawler suite
@@ -165,7 +167,9 @@ export class SpiderPlugin extends Plugin {
       seoAnalysis: `${this.config.resourcePrefix}_seo_analysis`,
       techFingerprint: `${this.config.resourcePrefix}_tech_fingerprint`,
       securityAnalysis: `${this.config.resourcePrefix}_security_analysis`,
-      screenshots: `${this.config.resourcePrefix}_screenshots`
+      screenshots: `${this.config.resourcePrefix}_screenshots`,
+      contentAnalysis: `${this.config.resourcePrefix}_content_analysis`,
+      storageAnalysis: `${this.config.resourcePrefix}_storage_analysis`
     }
 
     // Plugin instances
@@ -355,6 +359,32 @@ export class SpiderPlugin extends Plugin {
         },
         behavior: 'body-overflow',
         timestamps: true
+      },
+      contentAnalysis: {
+        name: this.resourceNames.contentAnalysis,
+        attributes: {
+          targetId: 'string|required',
+          url: 'string|required',
+          iframes: 'object',
+          trackingPixels: 'object',
+          createdAt: 'number'
+        },
+        behavior: 'body-overflow',
+        timestamps: true
+      },
+      storageAnalysis: {
+        name: this.resourceNames.storageAnalysis,
+        attributes: {
+          targetId: 'string|required',
+          url: 'string|required',
+          localStorage: 'object',
+          sessionStorage: 'object',
+          indexedDB: 'object',
+          summary: 'object',
+          createdAt: 'number'
+        },
+        behavior: 'body-overflow',
+        timestamps: true
       }
     }
 
@@ -480,6 +510,43 @@ export class SpiderPlugin extends Plugin {
           }
         }
 
+        // Content Analysis - only if content activities are requested
+        let contentAnalysis = null
+        if (this._shouldExecuteCategory(task, 'content')) {
+          try {
+            const [iframes, trackingPixels] = await Promise.all([
+              analyzeIFrames(page),
+              detectTrackingPixels(page)
+            ])
+
+            contentAnalysis = {
+              iframes,
+              trackingPixels
+            }
+
+            if (this.verbose) {
+              console.log(`[SpiderPlugin] Analyzed content (iframes/tracking) for ${task.url}`)
+            }
+          } catch (error) {
+            console.error(`[SpiderPlugin] Failed to analyze content for ${task.url}:`, error)
+          }
+        }
+
+        // Storage Analysis - only if storage activities are requested
+        let storageAnalysis = null
+        if (this._shouldExecuteCategory(task, 'storage')) {
+          try {
+            const storage = await analyzeAllStorage(page)
+            storageAnalysis = storage
+
+            if (this.verbose) {
+              console.log(`[SpiderPlugin] Analyzed storage (localStorage/IndexedDB/sessionStorage) for ${task.url}`)
+            }
+          } catch (error) {
+            console.error(`[SpiderPlugin] Failed to analyze storage for ${task.url}:`, error)
+          }
+        }
+
         // Create result record
         const result = {
           targetId: task.id,
@@ -559,6 +626,30 @@ export class SpiderPlugin extends Plugin {
             if (this.verbose) {
               console.log(`[SpiderPlugin] Persisted performance metrics for ${task.url}`)
             }
+          }
+
+          // Store content analysis (iframes, tracking pixels) if available
+          if (contentAnalysis) {
+            const contentResource = await this.database.getResource(this.resourceNames.contentAnalysis)
+            await tryFn(async () => {
+              return await contentResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...contentAnalysis
+              })
+            })
+          }
+
+          // Store storage analysis (localStorage, IndexedDB, sessionStorage) if available
+          if (storageAnalysis) {
+            const storageResource = await this.database.getResource(this.resourceNames.storageAnalysis)
+            await tryFn(async () => {
+              return await storageResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...storageAnalysis
+              })
+            })
           }
         } else {
           // If persistence disabled, store minimal data (for queue tracking)
