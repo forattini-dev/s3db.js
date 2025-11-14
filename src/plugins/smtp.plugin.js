@@ -2,6 +2,7 @@ import { Plugin } from './plugin.class.js';
 import { SMTPConnectionManager } from './smtp/connection-manager.js';
 import { SMTPTemplateEngine, defaultHandlebarsHelpers } from './smtp/template-engine.js';
 import { WebhookReceiver } from './smtp/webhook-receiver.js';
+import { createDriver, getAvailableDrivers, MultiRelayManager } from './smtp/drivers/index.js';
 import {
   SMTPError,
   AuthenticationError,
@@ -68,10 +69,18 @@ export class SMTPPlugin extends Plugin {
 
     const {
       mode = 'relay', // 'relay' or 'server'
+      // New driver/config pattern
+      driver = null, // 'sendgrid', 'aws-ses', 'mailgun', 'postmark', 'smtp', etc.
+      config = {}, // Driver-specific configuration
+      relays = null, // Array of relay configs for multi-relay mode
+      relayStrategy = 'failover', // 'failover', 'round-robin', 'domain-based'
+      from = null, // Sender email (required for relay mode)
+      // Legacy host/port/auth pattern (backward compatibility)
       host = null,
       port = null,
       secure = false,
       auth = {},
+      // Common options
       emailResource = 'emails',
       retryPolicy = {},
       rateLimit = {},
@@ -85,11 +94,21 @@ export class SMTPPlugin extends Plugin {
     } = this.options;
 
     this.mode = mode;
+    this.from = from;
+    this.emailResource = emailResource;
+
+    // Support both new (driver/config) and legacy (host/port/auth) patterns
+    this.useDriverPattern = Boolean(driver);
+    this.driver = driver;
+    this.config = config;
+    this.relays = relays;
+    this.relayStrategy = relayStrategy;
+
+    // Legacy pattern support
     this.host = host;
     this.port = port;
     this.secure = secure;
     this.auth = auth;
-    this.emailResource = emailResource;
     this.templateEngine = templateEngine;
     this.templateDir = templateDir;
     this.maxAttachmentSize = maxAttachmentSize;
@@ -157,18 +176,16 @@ export class SMTPPlugin extends Plugin {
       // Create email resource if not exists
       await this._ensureEmailResource();
 
-      // Initialize connection manager
-      this.connectionManager = new SMTPConnectionManager({
-        mode: this.mode,
-        host: this.host,
-        port: this.port,
-        secure: this.secure,
-        auth: this.auth,
-        requireAuth: this.options.requireAuth || false,
-        ...this.options
-      });
-
-      await this.connectionManager.initialize();
+      // Initialize based on mode and pattern
+      if (this.mode === 'relay') {
+        if (this.useDriverPattern) {
+          await this._initializeDriverMode();
+        } else {
+          await this._initializeLegacyMode();
+        }
+      } else if (this.mode === 'server') {
+        await this._initializeServerMode();
+      }
 
       // Emit initialize event
       this.emit('initialize', { mode: this.mode });
@@ -176,6 +193,62 @@ export class SMTPPlugin extends Plugin {
       this.emit('error', { event: 'initialize', error: err });
       throw err;
     }
+  }
+
+  /**
+   * Initialize using new driver/config pattern
+   * @private
+   */
+  async _initializeDriverMode() {
+    // Support multi-relay if configured
+    if (this.relays && Array.isArray(this.relays) && this.relays.length > 0) {
+      this.multiRelayManager = new MultiRelayManager({
+        strategy: this.relayStrategy
+      });
+      await this.multiRelayManager.initialize(this.relays);
+    } else if (this.driver) {
+      // Single relay with driver pattern
+      this.relayDriver = await createDriver(this.driver, this.config, {
+        from: this.from,
+        emailResource: this.emailResource
+      });
+    } else {
+      throw new Error('Driver mode requires either "driver" or "relays" option');
+    }
+  }
+
+  /**
+   * Initialize using legacy host/port/auth pattern
+   * @private
+   */
+  async _initializeLegacyMode() {
+    this.connectionManager = new SMTPConnectionManager({
+      mode: this.mode,
+      host: this.host,
+      port: this.port,
+      secure: this.secure,
+      auth: this.auth,
+      requireAuth: this.options.requireAuth || false,
+      ...this.options
+    });
+
+    await this.connectionManager.initialize();
+  }
+
+  /**
+   * Initialize server mode
+   * @private
+   */
+  async _initializeServerMode() {
+    this.connectionManager = new SMTPConnectionManager({
+      mode: 'server',
+      port: this.options.serverPort || 25,
+      host: this.options.serverHost || '0.0.0.0',
+      requireAuth: this.options.requireAuth || false,
+      ...this.options
+    });
+
+    await this.connectionManager.initialize();
   }
 
   /**
@@ -297,24 +370,52 @@ export class SMTPPlugin extends Plugin {
         metadata: options.metadata || {}
       });
 
-      // Attempt delivery
+      // Attempt delivery via appropriate driver
       let result;
       try {
-        result = await this.connectionManager.sendEmail({
-          from: options.from,
-          to: to.join(','),
-          cc: cc.length ? cc.join(',') : undefined,
-          bcc: bcc.length ? bcc.join(',') : undefined,
-          subject: options.subject,
-          text: body,
-          html,
-          attachments: options.attachments || []
-        });
+        if (this.multiRelayManager) {
+          // Multi-relay mode
+          result = await this.multiRelayManager.sendEmail({
+            from: options.from,
+            to: to,
+            cc: cc,
+            bcc: bcc,
+            subject: options.subject,
+            body,
+            html,
+            attachments: options.attachments || []
+          });
+        } else if (this.relayDriver) {
+          // Single driver mode
+          result = await this.relayDriver.sendEmail({
+            from: options.from,
+            to: to,
+            cc: cc,
+            bcc: bcc,
+            subject: options.subject,
+            body,
+            html,
+            attachments: options.attachments || []
+          });
+        } else {
+          // Legacy connection manager mode
+          result = await this.connectionManager.sendEmail({
+            from: options.from,
+            to: to.join(','),
+            cc: cc.length ? cc.join(',') : undefined,
+            bcc: bcc.length ? bcc.join(',') : undefined,
+            subject: options.subject,
+            text: body,
+            html,
+            attachments: options.attachments || []
+          });
+        }
 
         // Update email record as sent
         await this._updateEmailStatus(emailRecord.id, 'sent', {
           messageId: result.messageId,
-          sentAt: Date.now()
+          sentAt: Date.now(),
+          relayUsed: result.relayUsed || null
         });
 
         // Emit send event
@@ -702,12 +803,32 @@ export class SMTPPlugin extends Plugin {
    * Get plugin status
    */
   getStatus() {
-    return {
-      name: this.name,
+    const status = {
       mode: this.mode,
-      connected: this.connectionManager ? this.connectionManager._isConnected : false,
       queuedEmails: this._queuedCount,
       rateLimitTokens: Math.floor(this._rateLimitTokens)
     };
+
+    // Add driver-specific status
+    if (this.multiRelayManager) {
+      status.configType = 'multi-relay';
+      status.relayStatus = this.multiRelayManager.getStatus();
+    } else if (this.relayDriver) {
+      status.configType = 'driver';
+      status.driver = this.relayDriver.name;
+      status.driverInfo = this.relayDriver.getInfo();
+    } else if (this.connectionManager) {
+      status.configType = 'legacy';
+      status.connected = this.connectionManager._isConnected;
+    }
+
+    return status;
+  }
+
+  /**
+   * Get available drivers
+   */
+  static getAvailableDrivers() {
+    return getAvailableDrivers();
   }
 }
