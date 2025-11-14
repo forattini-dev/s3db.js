@@ -58,7 +58,7 @@ Driver‑specific (exemplos)
 - API Key: { headerName?: string }
 - Basic: { realm?: string; passphrase?: string; adminUser?: { enabled: boolean; username: string; password: string; scopes?: string[] } }
 - OAuth2 (RS): { issuer?: string; jwksUri?: string; audience?: string; algorithms?: string[]; cacheTTL?: number; clockTolerance?: number; validateScopes?: boolean; fetchUserInfo?: boolean; introspection?: { enabled?: boolean; endpoint?: string; clientId?: string; clientSecret?: string; useDiscovery?: boolean }; verbose?: boolean }
-- OIDC (RP): { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes?: string[]; cookieSecret: string; loginPath?: string; callbackPath?: string; logoutPath?: string; postLoginRedirect?: string; postLogoutRedirect?: string; idpLogout?: boolean; autoCreateUser?: boolean; autoRefreshTokens?: boolean; refreshThreshold?: number; cookieSecure?: boolean; cookieSameSite?: 'Strict'|'Lax'|'None'; discovery?: { enabled?: boolean }; pkce?: { enabled?: boolean; method?: 'S256' } }
+- OIDC (RP): { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes?: string[]; cookieSecret: string; cookieName?: string; cookieDomain?: string; cookieMaxAge?: number; loginPath?: string; callbackPath?: string; logoutPath?: string; postLoginRedirect?: string; postLogoutRedirect?: string; idpLogout?: boolean; autoCreateUser?: boolean; autoRefreshTokens?: boolean; refreshThreshold?: number; externalUrl?: string; cookieSecure?: boolean; cookieSameSite?: 'Strict'|'Lax'|'None'; rollingDuration?: number; absoluteDuration?: number; discovery?: { enabled?: boolean }; pkce?: { enabled?: boolean; method?: 'S256' }; verbose?: boolean }
 
 ## CORS
 
@@ -77,6 +77,22 @@ Driver‑specific (exemplos)
 - rateLimit.maxRequests: number = 100
 - rateLimit.keyGenerator?: (c) => string
 - rateLimit.maxUniqueKeys?: number = 1000
+- rateLimit.rules?: Array<{ path: string; windowMs?: number; maxRequests?: number; key?: 'ip'|'user'|'apiKey'; keyHeader?: string; keyGenerator?: (c) => string }>
+
+Rules are evaluated by path specificity (exact > `*` > `**`). If a rule matches, it overrides the global window/maxRequests and key strategy. Example:
+
+```js
+rateLimit: {
+  enabled: true,
+  windowMs: 60000,
+  maxRequests: 300,
+  rules: [
+    { path: '/v1/**', windowMs: 60000, maxRequests: 120, key: 'apiKey', keyHeader: 'x-api-key' },
+    { path: '/app/**', windowMs: 60000, maxRequests: 60, key: 'user' },
+    { path: '/health/**', maxRequests: 1000, key: 'ip' } // effectively public
+  ]
+}
+```
 
 ## Logging
 
@@ -84,6 +100,18 @@ Driver‑specific (exemplos)
 - logging.format: string = ':verb :url => :status (:elapsed ms, :res[content-length])'
 - logging.colorize: boolean = true
 - logging.verbose: boolean = false
+- logging.filter?: ({ context, method, path, status, duration, requestId }) => boolean
+- logging.excludePaths?: string[]
+
+Use `excludePaths` (supports globs like `/health/**`) to silence noisy endpoints, or `filter` to implement custom logic:
+
+```js
+logging: {
+  enabled: true,
+  excludePaths: ['/health/**', '/metrics'],
+  filter: ({ duration }) => duration > 1 // log only slow requests (ms)
+}
+```
 
 ## Compression
 
@@ -141,6 +169,7 @@ Note: When disabled, the plugin still works (a local fallback ID is used interna
 
 - events.enabled: boolean = false
 - metrics.enabled: boolean = false
+- metrics.format: 'json' | 'prometheus' = 'json'
 
 ## Failban
 
@@ -677,3 +706,71 @@ middlewares: [
 ---
 
 > **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+
+---
+
+## 🚀 NEW in v16.3: OIDC Enhancements
+
+The OIDC driver received significant enhancements. See **[OIDC Enhancements Guide](./oidc-enhancements.md)** for complete documentation.
+
+### New OIDC Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `autoRefreshTokens` | boolean | `true` | Enable implicit token refresh before expiry |
+| `refreshThreshold` | number | `300000` (5 min) | Time before expiry to trigger refresh (ms) |
+| `externalUrl` | string | `undefined` | External URL for reverse proxy scenarios (e.g., `https://api.example.com`) |
+| `cookieDomain` | string | `undefined` | Cookie domain for cross-subdomain auth (e.g., `.example.com`) |
+| `cookieMaxAge` | number | `86400000` (24h) | Cookie max age in milliseconds |
+| `rollingDuration` | number | `86400000` (24h) | Idle timeout - session expires after this period of inactivity |
+| `absoluteDuration` | number | `604800000` (7d) | Maximum session duration regardless of activity |
+| `verbose` | boolean | `false` | Enable debug logging for OIDC operations |
+
+### Quick Example
+
+```javascript
+auth: {
+  driver: 'oidc',
+  config: {
+    issuer: 'https://accounts.google.com',
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    redirectUri: 'http://localhost:3000/auth/callback',
+    cookieSecret: process.env.COOKIE_SECRET,
+
+    // 🎯 NEW: Implicit token refresh (enabled by default)
+    autoRefreshTokens: true,      // Seamless sessions - no expiration for active users
+    refreshThreshold: 300000,     // Refresh 5 min before expiry
+
+    // 🎯 NEW: Continue URL with reverse proxy support
+    externalUrl: 'https://api.example.com',  // Public-facing URL
+
+    // 🎯 NEW: Cross-subdomain authentication
+    cookieDomain: '.example.com',  // Works for a.example.com, b.example.com
+
+    // Session duration
+    rollingDuration: 86400000,     // 24 hours idle timeout
+    absoluteDuration: 604800000,   // 7 days max session
+
+    // Debug
+    verbose: process.env.NODE_ENV !== 'production',
+  }
+}
+```
+
+### Provider Quirks (Auto-Configuration)
+
+Provider-specific parameters are added automatically based on `issuer` URL:
+
+| Provider | Detection | Auto-Added Parameters |
+|----------|-----------|----------------------|
+| Google | `accounts.google.com` | `access_type=offline`, `prompt=consent` |
+| Azure AD | `login.microsoftonline.com` | `prompt=select_account` |
+| Auth0 | `.auth0.com` | `audience=<config.audience>` |
+| GitHub | `github.com` | Removes `offline_access` scope |
+| Slack | `slack.com` | `team=<config.teamId>` |
+| GitLab | `gitlab.com` | Adds `read_user` scope |
+
+No configuration needed - works automatically! See [OIDC Enhancements](./oidc-enhancements.md) for details.
+
+---

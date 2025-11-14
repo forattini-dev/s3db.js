@@ -62,6 +62,7 @@
 ### 🔐 **Security & Performance**
 - **Field-level Encryption** - Secure sensitive data
 - **Intelligent Caching** - Reduce API calls
+- **Concurrency Control** - Optimized bulk operations
 - **Auto-generated Passwords** - Secure by default
 - **Cost Tracking** - Monitor AWS expenses
 
@@ -99,6 +100,7 @@
 - [💾 Installation](#-installation)
 - [🗄️ Database](#️-database)
 - [📋 Resources](#-resources)
+- [⚡ Performance & Concurrency](#-performance--concurrency)
 - [🔌 Plugins](#-plugins)
 - [🤖 MCP & Integrations](#-mcp--integrations)
 - [🔧 CLI](#-cli)
@@ -112,9 +114,12 @@
 
 > **Plugins:** [API Plugin](./docs/plugins/api/README.md) • [Identity Plugin](./docs/plugins/identity/README.md) • [All Plugins](#-plugins)
 
+> **Guides:** [Path-based Basic + OIDC Migration](./docs/guides/path-based-auth-migration.md)
+
+
 > **Integrations:** [MCP Server](./docs/mcp.md) • [Model Context Protocol](./docs/mcp.md)
 
-> **Advanced:** [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
+> **Advanced:** [OperationPool Benchmark](./docs/benchmarks/operation-pool.md) • [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
 
 ---
 
@@ -1345,6 +1350,181 @@ orders.useMiddleware('updated', async (ctx, next) => {
 ```
 
 **Complete documentation**: [**docs/resources.md**](./docs/resources.md)
+
+---
+
+## ⚡ Performance & Concurrency
+
+s3db.js includes **OperationPool** - a high-performance concurrency control system that dramatically improves bulk operation throughput while preventing S3 rate limit throttling.
+
+### Why OperationPool?
+
+Without concurrency control, bulk operations can overwhelm S3 endpoints and trigger rate limiting. OperationPool solves this by:
+
+- **🚀 35.7% faster** execution time on bulk operations
+- **📈 55.4% higher** throughput (1,680 → 2,611 ops/sec)
+- **⏱️ 35.7% lower** latency per operation
+- **🛡️ Anti-throttling** - respects S3 rate limits automatically
+- **🧠 Adaptive tuning** - automatically adjusts concurrency based on performance
+
+### Quick Start
+
+OperationPool is **opt-in** and disabled by default for backward compatibility:
+
+```javascript
+import { Database } from 's3db.js'
+
+const db = new Database({
+  connectionString: 's3://bucket/database',
+  clientOptions: {
+    operationPool: {
+      enabled: true,           // Enable OperationPool
+      concurrency: 50,         // Fixed concurrency
+      retries: 3,              // Retry failed operations
+      retryDelay: 1000,        // Initial retry delay (ms)
+      timeout: 30000           // Operation timeout (ms)
+    }
+  }
+})
+
+await db.connect()
+```
+
+### Adaptive Tuning (Recommended)
+
+Let OperationPool automatically adjust concurrency based on system load and latency:
+
+```javascript
+clientOptions: {
+  operationPool: {
+    enabled: true,
+    concurrency: 'auto',      // Auto-tuning mode
+    autotune: {
+      targetLatency: 100,     // Target 100ms per operation
+      minConcurrency: 10,     // Never go below 10
+      maxConcurrency: 200     // Never exceed 200
+    }
+  }
+}
+```
+
+### Monitoring & Control
+
+```javascript
+// Get queue statistics
+const stats = db.client.getQueueStats()
+console.log(stats)
+// {
+//   queueSize: 0,
+//   activeCount: 50,
+//   processedCount: 15420,
+//   errorCount: 3,
+//   retryCount: 8
+// }
+
+// Get performance metrics
+const metrics = db.client.getAggregateMetrics()
+console.log(metrics)
+// {
+//   count: 15420,
+//   avgExecution: 45,
+//   p50: 42,
+//   p95: 78,
+//   p99: 125
+// }
+
+// Lifecycle control
+await db.client.pausePool()    // Pause processing
+db.client.resumePool()         // Resume processing
+await db.client.drainPool()    // Wait for queue to empty
+db.client.stopPool()           // Stop and cleanup
+```
+
+### Event Monitoring
+
+OperationPool emits events for monitoring and observability:
+
+| Event | Parameters | Description |
+|-------|------------|-------------|
+| `pool:taskStarted` | `(task)` | Task execution started |
+| `pool:taskCompleted` | `(task, result)` | Task completed successfully |
+| `pool:taskError` | `(task, error)` | Task failed with error |
+| `pool:taskRetry` | `(task, attempt)` | Task retry attempt (1-based) |
+| `pool:taskMetrics` | `(metrics)` | Task performance metrics |
+| `pool:paused` | `()` | Pool paused (waiting for active tasks) |
+| `pool:resumed` | `()` | Pool resumed processing |
+| `pool:drained` | `()` | All tasks completed (queue empty) |
+| `pool:stopped` | `()` | Pool stopped (pending tasks cancelled) |
+
+**Example:**
+```javascript
+db.client.on('pool:taskCompleted', (task, result) => {
+  console.log(`✓ ${task.id}: ${task.timings.execution}ms`)
+})
+
+db.client.on('pool:taskError', (task, error) => {
+  console.error(`✗ ${task.id}:`, error.message)
+})
+```
+
+See [src/concerns/operation-pool.js](./src/concerns/operation-pool.js) for event implementation details.
+
+### Performance Comparison
+
+Benchmark results from 10,000 write operations (see [docs/benchmarks/operation-pool.md](./docs/benchmarks/operation-pool.md)):
+
+| Metric | Without Pool | With Pool (50 concurrent) | Improvement |
+|--------|--------------|---------------------------|-------------|
+| **Duration** | 5,953ms | 3,830ms | **35.7% faster** |
+| **Throughput** | 1,680 ops/sec | 2,611 ops/sec | **55.4% higher** |
+| **Latency** | 0.60ms/op | 0.38ms/op | **35.7% lower** |
+
+### When to Use
+
+**✅ Use OperationPool when:**
+- Bulk insert/update operations (>100 records)
+- High-throughput applications (APIs, data pipelines)
+- Batch processing jobs
+- Migration scripts
+- Data replication
+
+**⚠️ Consider disabling when:**
+- Single record operations
+- Low-frequency requests
+- Development/testing (unless testing concurrency)
+
+### Configuration Reference
+
+```javascript
+operationPool: {
+  enabled: true,                    // Enable/disable pool
+  concurrency: 50,                  // Or 'auto' for adaptive tuning
+  retries: 3,                       // Max retry attempts
+  retryDelay: 1000,                 // Initial retry delay (ms)
+  timeout: 30000,                   // Operation timeout (ms)
+  retryableErrors: [                // Errors to retry (empty = all)
+    'NetworkingError',
+    'TimeoutError',
+    'RequestTimeout',
+    'ServiceUnavailable',
+    'SlowDown',
+    'RequestLimitExceeded'
+  ],
+  autotune: {                       // Auto-tuning config (when concurrency='auto')
+    enabled: true,
+    targetLatency: 100,             // Target latency (ms)
+    minConcurrency: 10,             // Min concurrent operations
+    maxConcurrency: 200,            // Max concurrent operations
+    targetMemoryPercent: 0.7,       // Target memory usage (70%)
+    adjustmentInterval: 5000        // Check interval (ms)
+  },
+  monitoring: {
+    collectMetrics: true            // Enable detailed metrics
+  }
+}
+```
+
+**Complete documentation**: [**docs/benchmarks/operation-pool.md**](./docs/benchmarks/operation-pool.md)
 
 ---
 

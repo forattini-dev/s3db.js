@@ -5,6 +5,7 @@
  * - Worker registration & heartbeats
  * - Deterministic coordinator election (lexicographic)
  * - Epoch-based leadership with automatic renewal
+ * - Startup jitter to prevent thundering herd
  * - Cold start observation period
  * - Active workers discovery
  * - Lifecycle hooks for coordinator transitions
@@ -14,8 +15,40 @@
  * - onStopBeingCoordinator(): Called when this worker stops being coordinator
  * - coordinatorWork(): Periodic work that only coordinator should do
  *
+ * Configuration Options:
+ * - enableCoordinator: Enable/disable coordination (default: true)
+ * - heartbeatInterval: Heartbeat frequency in ms (default: 5000)
+ * - heartbeatTTL: Heartbeat TTL multiplier (default: 3, means 15s TTL)
+ * - epochDuration: Coordinator epoch duration in ms (default: 300000 = 5min)
+ * - coldStartDuration: Observation period before election in ms (default: 0)
+ * - skipColdStart: Skip cold start phase (default: false)
+ * - coordinatorWorkInterval: Coordinator work frequency in ms (default: null = disabled)
+ * - startupJitterMin: Minimum startup jitter delay in ms (default: 0)
+ * - startupJitterMax: Maximum startup jitter delay in ms (default: 5000)
+ *
+ * Startup Jitter:
+ * Prevents thundering herd when multiple workers start simultaneously (e.g., full pod restart).
+ * Each worker waits a random delay between startupJitterMin and startupJitterMax before
+ * beginning coordinator election. This spreads S3 requests over a time window, preventing
+ * rate limiting and improving system stability during cold starts.
+ *
+ * Tuning Guidelines:
+ * - Small deployments (<10 workers): Set startupJitterMax: 0 to disable
+ * - Medium deployments (10-50 workers): Use defaults (0-5000ms)
+ * - Large deployments (>50 workers): Increase to 10000-30000ms
+ *
  * @example
  * class MyPlugin extends CoordinatorPlugin {
+ *   constructor(config = {}) {
+ *     super({
+ *       ...config,
+ *       startupJitterMin: 0,     // Min jitter delay (0ms)
+ *       startupJitterMax: 5000,  // Max jitter delay (5s)
+ *       heartbeatInterval: 5000, // Heartbeat every 5s
+ *       epochDuration: 300000    // Epoch lasts 5 minutes
+ *     });
+ *   }
+ *
  *   async onBecomeCoordinator() {
  *     console.log('I am the coordinator now!');
  *   }
@@ -29,6 +62,17 @@
  *     await this.doSomeCleanup();
  *   }
  * }
+ *
+ * @example
+ * // Disable jitter for testing
+ * new MyPlugin({ startupJitterMax: 0 })
+ *
+ * @example
+ * // Large deployment with extended jitter
+ * new MyPlugin({
+ *   startupJitterMin: 0,
+ *   startupJitterMax: 15000  // Spread startup over 15 seconds
+ * })
  */
 
 import { Plugin } from '../plugin.class.js';
@@ -41,6 +85,9 @@ let workerCounter = 0;
 export class CoordinatorPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
+
+    // Alias for compatibility (Plugin base uses this.options)
+    this.config = this.options;
 
     // Worker identity with monotonic counter for uniqueness
     this.workerId = `worker-${Date.now()}-${++workerCounter}-${Math.random().toString(36).slice(2, 9)}`;
@@ -108,8 +155,18 @@ export class CoordinatorPlugin extends Plugin {
       epochDuration = 300000,
       coldStartDuration = 0,
       skipColdStart = false,
-      coordinatorWorkInterval = null
+      coordinatorWorkInterval = null,
+      startupJitterMin = 0,
+      startupJitterMax = 5000
     } = config;
+
+    // Validate jitter configuration
+    if (startupJitterMin < 0) {
+      throw new Error('CoordinatorPlugin: startupJitterMin must be >= 0');
+    }
+    if (startupJitterMax < startupJitterMin) {
+      throw new Error('CoordinatorPlugin: startupJitterMax must be >= startupJitterMin');
+    }
 
     return {
       enableCoordinator: Boolean(enableCoordinator),
@@ -118,7 +175,9 @@ export class CoordinatorPlugin extends Plugin {
       epochDuration: Math.max(60000, epochDuration),
       coldStartDuration: Math.max(0, coldStartDuration),
       skipColdStart: Boolean(skipColdStart),
-      coordinatorWorkInterval: coordinatorWorkInterval ? Math.max(100, coordinatorWorkInterval) : null
+      coordinatorWorkInterval: coordinatorWorkInterval ? Math.max(100, coordinatorWorkInterval) : null,
+      startupJitterMin: Math.max(0, startupJitterMin),
+      startupJitterMax: Math.max(0, startupJitterMax)
     };
   }
 
@@ -534,6 +593,7 @@ export class CoordinatorPlugin extends Plugin {
 
   /**
    * Start coordination system
+   * - Applies startup jitter to prevent thundering herd
    * - Executes cold start if configured
    * - Starts heartbeat loop
    * - Starts coordinator work loop if this worker is coordinator
@@ -552,6 +612,20 @@ export class CoordinatorPlugin extends Plugin {
         console.log(`[${this.constructor.name}] Coordination already started`);
       }
       return;
+    }
+
+    // Apply startup jitter to prevent thundering herd on cold start
+    // Spreads S3 requests over configured window (default: 0-5s)
+    // This prevents all workers from hitting S3 simultaneously during mass pod restarts
+    if (this.coordinatorConfig.startupJitterMax > 0) {
+      const jitterMs = this.coordinatorConfig.startupJitterMin +
+        Math.random() * (this.coordinatorConfig.startupJitterMax - this.coordinatorConfig.startupJitterMin);
+
+      if (this.config.verbose) {
+        console.log(`[${this.constructor.name}] Applying startup jitter: ${Math.round(jitterMs)}ms`);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, jitterMs));
     }
 
     // Cold start

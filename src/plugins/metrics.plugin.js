@@ -631,7 +631,17 @@ export class MetricsPlugin extends Plugin {
         mode: prometheus.mode || 'auto',
         port: prometheus.port || 9090,
         path: prometheus.path || '/metrics',
-        includeResourceLabels: prometheus.includeResourceLabels !== false
+        includeResourceLabels: prometheus.includeResourceLabels !== false,
+        // IP allowlist for /metrics endpoint (security)
+        ipAllowlist: prometheus.ipAllowlist || [
+          '127.0.0.1',           // localhost IPv4
+          '::1',                 // localhost IPv6
+          '10.0.0.0/8',          // Private network (RFC 1918) - Kubernetes, VPCs
+          '172.16.0.0/12',       // Private network (RFC 1918) - Docker Compose default bridge
+          '192.168.0.0/16'       // Private network (RFC 1918) - Local networks
+        ],
+        // Set to false to disable IP filtering (NOT recommended in production)
+        enforceIpAllowlist: prometheus.enforceIpAllowlist !== false
       },
       verbose: this.verbose,
       ...rest
@@ -645,6 +655,14 @@ export class MetricsPlugin extends Plugin {
         get: { count: 0, totalTime: 0, errors: 0 },
         list: { count: 0, totalTime: 0, errors: 0 },
         count: { count: 0, totalTime: 0, errors: 0 }
+      },
+      pool: {
+        tasksStarted: 0,
+        tasksCompleted: 0,
+        tasksFailed: 0,
+        tasksRetried: 0,
+        totalExecutionTime: 0,
+        avgExecutionTime: 0
       },
       resources: {},
       errors: [],
@@ -757,6 +775,47 @@ export class MetricsPlugin extends Plugin {
   async start() {
     // Setup Prometheus metrics exporter
     await this._setupPrometheusExporter();
+
+    // Setup OperationPool event listeners (if pool is enabled)
+    this._setupOperationPoolListeners();
+  }
+
+  /**
+   * Setup OperationPool event listeners for metrics collection
+   * @private
+   */
+  _setupOperationPoolListeners() {
+    const client = this.database?.client;
+    if (!client || !client.operationPool) {
+      return; // Pool not enabled
+    }
+
+    // Listen to pool events for metrics collection
+    client.on('pool:taskStarted', (task) => {
+      this.metrics.pool.tasksStarted++;
+    });
+
+    client.on('pool:taskCompleted', (task, result) => {
+      this.metrics.pool.tasksCompleted++;
+
+      if (task.timings?.execution) {
+        this.metrics.pool.totalExecutionTime += task.timings.execution;
+        this.metrics.pool.avgExecutionTime =
+          this.metrics.pool.totalExecutionTime / this.metrics.pool.tasksCompleted;
+      }
+    });
+
+    client.on('pool:taskError', (task, error) => {
+      this.metrics.pool.tasksFailed++;
+    });
+
+    client.on('pool:taskRetry', (task, attempt) => {
+      this.metrics.pool.tasksRetried++;
+    });
+
+    if (this.config.verbose) {
+      console.log('[MetricsPlugin] OperationPool event listeners registered');
+    }
   }
 
   async stop() {
@@ -1303,6 +1362,7 @@ export class MetricsPlugin extends Plugin {
       avgResponseTime: 0,
       operationsByType: {},
       resources: {},
+      pool: this.metrics.pool, // Include OperationPool metrics
       uptime: {
         startTime: this.metrics.startTime,
         duration: now.getTime() - new Date(this.metrics.startTime).getTime()
@@ -1461,33 +1521,20 @@ export class MetricsPlugin extends Plugin {
    * @private
    */
   async _setupIntegratedMetrics(apiPlugin) {
-    const app = apiPlugin.getApp();
-    const path = this.config.prometheus.path;
-
-    if (!app) {
-      console.error('[Metrics Plugin] Failed to get Hono app from API Plugin');
-      return;
-    }
-
-    // Add /metrics route to Hono app
-    app.get(path, async (c) => {
-      try {
-        const metrics = await this.getPrometheusMetrics();
-        return c.text(metrics, 200, {
-          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'
-        });
-      } catch (err) {
-        if (this.config.verbose) {
-          console.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
-        }
-        return c.text('Internal Server Error', 500);
-      }
-    });
+    // NOTE: The APIPlugin now registers the /metrics route itself during its
+    // initialize() method, BEFORE applying auth middlewares. This ensures
+    // the /metrics endpoint is public and doesn't require authentication.
+    // See ApiServer._registerMetricsPluginRoute() for the implementation.
 
     const port = apiPlugin.config?.port || 3000;
+    const path = this.config.prometheus.path;
+
     if (this.config.verbose) {
       console.log(
-        `[Metrics Plugin] Prometheus metrics available at http://localhost:${port}${path} (integrated mode)`
+        `[Metrics Plugin] Prometheus metrics will be available at http://localhost:${port}${path} (integrated mode)`
+      );
+      console.log(
+        `[Metrics Plugin] Route registered by APIPlugin (public, no auth required)`
       );
     }
   }
@@ -1500,6 +1547,15 @@ export class MetricsPlugin extends Plugin {
     const { createServer } = await import('http');
     const port = this.config.prometheus.port;
     const path = this.config.prometheus.path;
+    const enforceIpAllowlist = this.config.prometheus.enforceIpAllowlist;
+    const ipAllowlist = this.config.prometheus.ipAllowlist || [];
+
+    // Lazy-load IP allowlist helper (only if needed)
+    let isIpAllowed;
+    if (enforceIpAllowlist) {
+      const ipHelper = await import('./concerns/ip-allowlist.js');
+      isIpAllowed = ipHelper.isIpAllowed;
+    }
 
     this.metricsServer = createServer(async (req, res) => {
       // CORS headers to allow scraping from anywhere
@@ -1508,6 +1564,26 @@ export class MetricsPlugin extends Plugin {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
       if (req.url === path && req.method === 'GET') {
+        // IP allowlist check (if enabled)
+        if (enforceIpAllowlist) {
+          // Extract client IP (handle proxies)
+          const forwarded = req.headers['x-forwarded-for'];
+          const clientIp = forwarded
+            ? forwarded.split(',')[0].trim()
+            : req.socket.remoteAddress;
+
+          if (!clientIp || !isIpAllowed(clientIp, ipAllowlist)) {
+            if (this.config.verbose) {
+              console.warn(
+                `[Metrics Plugin] Blocked /metrics request from unauthorized IP: ${clientIp || 'unknown'}`
+              );
+            }
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('Forbidden');
+            return;
+          }
+        }
+
         try {
           const metrics = await this.getPrometheusMetrics();
           res.writeHead(200, {
@@ -1532,8 +1608,9 @@ export class MetricsPlugin extends Plugin {
 
     this.metricsServer.listen(port, '0.0.0.0', () => {
       if (this.config.verbose) {
+        const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
         console.log(
-          `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)`
+          `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)${ipFilter}`
         );
       }
     });

@@ -96,7 +96,7 @@ export class ProcessManager {
       // console.log(`[ProcessManager] Registered interval '${name}' (${interval}ms)`);
     }
 
-    return id;
+    return timerId;
   }
 
   /**

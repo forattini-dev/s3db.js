@@ -22,6 +22,24 @@ export function applyProviderPreset(kind, cfg = {}) {
     if (!config.issuer) {
       config.issuer = `https://login.microsoftonline.com/${tenantId}/v2.0`;
     }
+
+    // Reasonable defaults for Microsoft Entra ID (optional, overridable)
+    if (!config.userIdClaim) {
+      config.userIdClaim = 'email';
+    }
+    if (!config.fallbackIdClaims) {
+      config.fallbackIdClaims = ['preferred_username', 'upn', 'sub'];
+    }
+    if (!config.lookupFields) {
+      config.lookupFields = ['email', 'preferred_username', 'upn'];
+    }
+    if (Array.isArray(config.scopes)) {
+      const want = ['openid', 'profile', 'email', 'offline_access'];
+      config.scopes = Array.from(new Set([...config.scopes, ...want]));
+    }
+    if (config.apiTokenCookie === undefined) {
+      config.apiTokenCookie = { enabled: true, name: 'api_token' };
+    }
   }
 
   // Auth0
@@ -62,5 +80,75 @@ export function applyProviderPreset(kind, cfg = {}) {
   return config;
 }
 
-export default { applyProviderPreset };
+/**
+ * 🎯 NEW: Provider-specific authorization URL quirks
+ * Inspired by @hono/oidc-auth
+ *
+ * Some OAuth2/OIDC providers require specific query parameters to work correctly.
+ * This function applies known quirks automatically based on issuer URL.
+ *
+ * @param {URL} authUrl - Authorization URL to modify
+ * @param {string} issuer - OIDC issuer URL
+ * @param {Object} config - Provider configuration
+ */
+export function applyProviderQuirks(authUrl, issuer, config = {}) {
+  if (!authUrl || !issuer) return;
 
+  const issuerLower = issuer.toLowerCase();
+
+  // 🔍 Google OAuth2 quirks
+  // Google requires 'access_type=offline' and 'prompt=consent' to obtain refresh_token
+  // Without these, no refresh_token is returned and session can't be extended
+  if (issuerLower.includes('accounts.google.com')) {
+    authUrl.searchParams.set('access_type', 'offline');
+    authUrl.searchParams.set('prompt', 'consent');
+    return;
+  }
+
+  // 🔍 Azure AD / Microsoft Entra quirks
+  // Default prompt to 'select_account' for better UX (allows account switching)
+  if (issuerLower.includes('login.microsoftonline.com')) {
+    if (!authUrl.searchParams.has('prompt')) {
+      authUrl.searchParams.set('prompt', 'select_account');
+    }
+    return;
+  }
+
+  // 🔍 Auth0 quirks
+  // If audience is configured, pass it to get proper access_token
+  // Auth0 requires 'audience' parameter to receive non-opaque access tokens
+  if (issuerLower.includes('.auth0.com') && config.audience) {
+    authUrl.searchParams.set('audience', config.audience);
+    return;
+  }
+
+  // 🔍 GitHub OAuth quirks
+  // GitHub doesn't support offline_access scope - remove it
+  if (issuerLower.includes('github.com')) {
+    const scope = authUrl.searchParams.get('scope') || '';
+    const filteredScope = scope.split(' ').filter(s => s !== 'offline_access').join(' ');
+    if (filteredScope !== scope) {
+      authUrl.searchParams.set('scope', filteredScope);
+    }
+    return;
+  }
+
+  // 🔍 Slack OAuth quirks
+  // Slack requires 'team' parameter if team ID is provided
+  if (issuerLower.includes('slack.com') && config.teamId) {
+    authUrl.searchParams.set('team', config.teamId);
+    return;
+  }
+
+  // 🔍 GitLab quirks
+  // GitLab supports offline_access but prefers explicit scope
+  if (issuerLower.includes('gitlab.com')) {
+    const scope = authUrl.searchParams.get('scope') || '';
+    if (!scope.includes('read_user')) {
+      authUrl.searchParams.set('scope', scope ? `${scope} read_user` : 'read_user');
+    }
+    return;
+  }
+}
+
+export default { applyProviderPreset, applyProviderQuirks };

@@ -2,7 +2,6 @@ import { join } from "path";
 import { createHash } from "crypto";
 import AsyncEventEmitter from "./concerns/async-event-emitter.js";
 import jsonStableStringify from "json-stable-stringify";
-import { PromisePool } from "@supercharge/promise-pool";
 import { chunk, cloneDeep, merge, isEmpty, isObject } from "lodash-es";
 
 import Schema from "./schema.class.js";
@@ -27,7 +26,7 @@ export class Resource extends AsyncEventEmitter {
    * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
    * @param {string} [config.passphrase='secret'] - Encryption passphrase (for 'secret' type)
    * @param {number} [config.bcryptRounds=10] - Bcrypt rounds (for 'password' type)
-   * @param {number} [config.parallelism=10] - Parallelism for bulk operations
+   * @param {number} [config.parallelism=100] - Parallelism for bulk operations (default changed to 100)
    * @param {Array} [config.observers=[]] - Observer instances
    * @param {boolean} [config.cache=false] - Enable caching
    * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
@@ -124,7 +123,7 @@ export class Resource extends AsyncEventEmitter {
       behavior = DEFAULT_BEHAVIOR,
       passphrase = 'secret',
       bcryptRounds = 10,
-      parallelism = 10,
+      parallelism = 100, // CHANGED: Default concurrency is now 100 (was 10)
       observers = [],
       cache = false,
       autoDecrypt = true,
@@ -2603,19 +2602,44 @@ export class Resource extends AsyncEventEmitter {
    * const insertedUsers = await resource.insertMany(users);
       */
   async insertMany(objects) {
-    const { results } = await PromisePool.for(objects)
-      .withConcurrency(this.parallelism)
-      .handleError(async (error, content) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-      })
-      .process(async (attributes) => {
-        const result = await this.insert(attributes);
-        return result;
-      });
+    // Create batch of operations - OperationsPool in client controls concurrency
+    const operations = objects.map((attributes) => async () => {
+      return await this.insert(attributes);
+    });
+
+    const { results, errors } = await this._executeBatchHelper(operations, {
+      onItemError: (error, index) => {
+        this.emit("error", error, objects[index]);
+        this.observers.map((x) => x.emit("error", this.name, error, objects[index]));
+      }
+    });
 
     this._emitStandardized("inserted-many", objects.length);
-    return results;
+    return results.filter(r => r !== null);
+  }
+
+  /**
+   * Execute batch helper - uses client's _executeBatch if available, otherwise Promise.allSettled
+   * @private
+   */
+  async _executeBatchHelper(operations, options = {}) {
+    // Use client's _executeBatch if available (S3Client with OperationsPool)
+    if (this.client._executeBatch) {
+      return await this.client._executeBatch(operations, options);
+    }
+
+    // Fallback: use Promise.allSettled for clients without pool
+    const settled = await Promise.allSettled(operations.map(op => op()));
+    const results = settled.map((s, index) => {
+      if (s.status === 'fulfilled') return s.value;
+      if (options.onItemError) options.onItemError(s.reason, index);
+      return null;
+    });
+    const errors = settled
+      .map((s, index) => s.status === 'rejected' ? { error: s.reason, index } : null)
+      .filter(Boolean);
+
+    return { results, errors };
   }
 
   /**
@@ -2638,28 +2662,30 @@ export class Resource extends AsyncEventEmitter {
     // Debug log: print all keys to be deleted
     const allKeys = ids.map((id) => this.getResourceKey(id));
 
-    const { results } = await PromisePool.for(packages)
-      .withConcurrency(this.parallelism)
-      .handleError(async (error, content) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-      })
-      .process(async (keys) => {
-        const response = await this.client.deleteObjects(keys);
+    // Create batch of operations - OperationsPool in client controls concurrency
+    const operations = packages.map((keys) => async () => {
+      const response = await this.client.deleteObjects(keys);
 
-        keys.forEach((key) => {
-          // Extract ID from key path
-          const parts = key.split('/');
-          const idPart = parts.find(part => part.startsWith('id='));
-          const id = idPart ? idPart.replace('id=', '') : null;
-          if (id) {
-            this.emit("deleted", id);
-            this.observers.map((x) => x.emit("deleted", this.name, id));
-          }
-        });
-
-        return response;
+      keys.forEach((key) => {
+        // Extract ID from key path
+        const parts = key.split('/');
+        const idPart = parts.find(part => part.startsWith('id='));
+        const id = idPart ? idPart.replace('id=', '') : null;
+        if (id) {
+          this.emit("deleted", id);
+          this.observers.map((x) => x.emit("deleted", this.name, id));
+        }
       });
+
+      return response;
+    });
+
+    const { results, errors } = await this._executeBatchHelper(operations, {
+      onItemError: (error, index) => {
+        this.emit("error", error, packages[index]);
+        this.observers.map((x) => x.emit("error", this.name, error, packages[index]));
+      }
+    });
 
     // Execute afterDeleteMany hooks
     await this.executeHooks('afterDeleteMany', { ids, results });
@@ -2886,21 +2912,24 @@ export class Resource extends AsyncEventEmitter {
    * Process list results with error handling
    */
   async processListResults(ids, context = 'main') {
-    const { results, errors } = await PromisePool.for(ids)
-      .withConcurrency(this.parallelism)
-      .handleError(async (error, id) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-      })
-      .process(async (id) => {
-        const [ok, err, result] = await tryFn(() => this.get(id));
-        if (ok) {
-          return result;
-        }
-        return this.handleResourceError(err, id, context);
-      });
+    // Create batch of operations - OperationsPool in client controls concurrency
+    const operations = ids.map((id) => async () => {
+      const [ok, err, result] = await tryFn(() => this.get(id));
+      if (ok) {
+        return result;
+      }
+      return this.handleResourceError(err, id, context);
+    });
+
+    const { results, errors } = await this._executeBatchHelper(operations, {
+      onItemError: (error, index) => {
+        this.emit("error", error, ids[index]);
+        this.observers.map((x) => x.emit("error", this.name, error, ids[index]));
+      }
+    });
+
     this._emitStandardized("list", { count: results.length, errors: 0 });
-    return results;
+    return results.filter(r => r !== null);
   }
 
   /**
@@ -2908,24 +2937,28 @@ export class Resource extends AsyncEventEmitter {
    */
   async processPartitionResults(ids, partition, partitionDef, keys) {
     const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-    const { results, errors } = await PromisePool.for(ids)
-      .withConcurrency(this.parallelism)
-      .handleError(async (error, id) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-      })
-      .process(async (id) => {
-        const [ok, err, result] = await tryFn(async () => {
-          const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
-          return await this.getFromPartition({
-            id,
-            partitionName: partition,
-            partitionValues: actualPartitionValues
-          });
+
+    // Create batch of operations - OperationsPool in client controls concurrency
+    const operations = ids.map((id) => async () => {
+      const [ok, err, result] = await tryFn(async () => {
+        const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
+        return await this.getFromPartition({
+          id,
+          partitionName: partition,
+          partitionValues: actualPartitionValues
         });
-        if (ok) return result;
-        return this.handleResourceError(err, id, 'partition');
       });
+      if (ok) return result;
+      return this.handleResourceError(err, id, 'partition');
+    });
+
+    const { results, errors } = await this._executeBatchHelper(operations, {
+      onItemError: (error, index) => {
+        this.emit("error", error, ids[index]);
+        this.observers.map((x) => x.emit("error", this.name, error, ids[index]));
+      }
+    });
+
     return results.filter(item => item !== null);
   }
 
@@ -2991,32 +3024,34 @@ export class Resource extends AsyncEventEmitter {
     // Execute beforeGetMany hooks
     await this.executeHooks('beforeGetMany', { ids });
 
-    const { results, errors } = await PromisePool.for(ids)
-      .withConcurrency(this.client.parallelism)
-      .handleError(async (error, id) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
+    // Create batch of operations - OperationsPool in client controls concurrency
+    const operations = ids.map((id) => async () => {
+      const [ok, err, data] = await tryFn(() => this.get(id));
+      if (ok) return data;
+      if (err.message.includes('Cipher job failed') || err.message.includes('OperationError')) {
         return {
           id,
+          _decryptionFailed: true,
+          _error: err.message
+        };
+      }
+      throw err;
+    });
+
+    const { results, errors } = await this._executeBatchHelper(operations, {
+      onItemError: (error, index) => {
+        this.emit("error", error, ids[index]);
+        this.observers.map((x) => x.emit("error", this.name, error, ids[index]));
+        return {
+          id: ids[index],
           _error: error.message,
           _decryptionFailed: error.message.includes('Cipher job failed') || error.message.includes('OperationError')
         };
-      })
-      .process(async (id) => {
-        const [ok, err, data] = await tryFn(() => this.get(id));
-        if (ok) return data;
-        if (err.message.includes('Cipher job failed') || err.message.includes('OperationError')) {
-          return {
-            id,
-            _decryptionFailed: true,
-            _error: err.message
-          };
-        }
-        throw err;
-      });
+      }
+    });
 
     // Execute afterGetMany hooks
-    const finalResults = await this.executeHooks('afterGetMany', results);
+    const finalResults = await this.executeHooks('afterGetMany', results.filter(r => r !== null));
 
     this._emitStandardized("fetched-many", ids.length);
     return finalResults;

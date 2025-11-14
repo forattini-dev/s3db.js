@@ -417,12 +417,29 @@ export class Router {
    * @private
    */
   mountAuthRoutes(app) {
-    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = this.auth;
+    // Be tolerant when auth is not configured (legacy/partial configs)
+    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = (this.auth || {});
+
+    if (!drivers || (Array.isArray(drivers) && drivers.length === 0)) {
+      if (this.verbose) {
+        console.warn('[API Router] Auth not configured or empty drivers; skipping built-in auth routes');
+      }
+      return;
+    }
 
     const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
     if (identityPlugin) {
       if (this.verbose) {
         console.warn('[API Router] IdentityPlugin detected. Skipping built-in auth routes.');
+      }
+      return;
+    }
+
+    // Skip JWT auth routes if OIDC driver exists (OIDC provides its own /auth/login)
+    const oidcDriver = drivers?.find(d => d.driver === 'oidc');
+    if (oidcDriver) {
+      if (this.verbose) {
+        console.log('[API Router] OIDC driver detected. Skipping JWT auth routes (OIDC provides /auth/login).');
       }
       return;
     }
@@ -468,7 +485,7 @@ export class Router {
     // Prepare auth config for routes
     const authConfig = {
       driver: 'jwt',
-      drivers: this.config.auth.drivers,  // Pass all enabled drivers
+      drivers: this.auth.drivers,  // Pass all enabled drivers
       usernameField,
       passwordField,
       jwtSecret: driverConfig.jwtSecret || driverConfig.secret,
@@ -684,7 +701,13 @@ export class Router {
     const metricsEnabled = this.metrics?.options?.enabled ?? false;
     if (metricsEnabled) {
       const metricsPath = this._withBasePath('/metrics');
+      const metricsFormat = (this.metrics?.options?.format || 'json').toLowerCase();
       app.get(metricsPath, (c) => {
+        if (metricsFormat === 'prometheus') {
+          const body = this.metrics.getPrometheusMetrics();
+          c.header('Content-Type', 'text/plain; version=0.0.4');
+          return c.body(body);
+        }
         const summary = this.metrics.getSummary();
         const response = formatter.success(summary);
         return c.json(response);

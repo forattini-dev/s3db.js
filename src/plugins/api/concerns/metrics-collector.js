@@ -34,7 +34,8 @@ export class MetricsCollector {
       enabled: options.enabled !== false, // Enabled by default
       verbose: options.verbose || false,
       maxPathsTracked: options.maxPathsTracked || 100, // Limit memory usage
-      resetInterval: options.resetInterval || 300000 // Reset every 5 minutes
+      resetInterval: options.resetInterval || 300000, // Reset every 5 minutes
+      format: options.format || 'json'
     };
 
     this.metrics = this._createEmptyMetrics();
@@ -69,7 +70,8 @@ export class MetricsCollector {
         byMethod: {},
         byStatus: {},
         byPath: {},
-        durations: []
+        durations: [],
+        totalDuration: 0
       },
       auth: {
         success: 0,
@@ -103,6 +105,7 @@ export class MetricsCollector {
     const metrics = this.metrics.requests;
 
     metrics.total++;
+    metrics.totalDuration += duration;
 
     // By method
     metrics.byMethod[method] = (metrics.byMethod[method] || 0) + 1;
@@ -289,6 +292,82 @@ export class MetricsCollector {
         byType: this.metrics.errors.byType
       }
     };
+  }
+
+  /**
+   * Get metrics in Prometheus/OpenMetrics format
+   * @returns {string}
+   */
+  getPrometheusMetrics() {
+    const escapeLabel = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const lines = [];
+    const uptimeSeconds = Math.floor((Date.now() - this.startTime) / 1000);
+    const requests = this.metrics.requests;
+    const auth = this.metrics.auth;
+    const resources = this.metrics.resources;
+    const users = this.metrics.users;
+    const errors = this.metrics.errors;
+
+    lines.push('# HELP s3db_uptime_seconds API uptime in seconds');
+    lines.push('# TYPE s3db_uptime_seconds gauge');
+    lines.push(`s3db_uptime_seconds ${uptimeSeconds}`);
+
+    lines.push('# HELP s3db_requests_total Total HTTP requests processed');
+    lines.push('# TYPE s3db_requests_total counter');
+    lines.push(`s3db_requests_total ${requests.total}`);
+    Object.entries(requests.byMethod).forEach(([method, count]) => {
+      lines.push(`s3db_requests_method_total{method="${escapeLabel(method)}"} ${count}`);
+    });
+    Object.entries(requests.byStatus).forEach(([status, count]) => {
+      lines.push(`s3db_requests_status_total{status="${escapeLabel(status)}"} ${count}`);
+    });
+
+    lines.push('# HELP s3db_request_duration_ms Request duration percentiles in milliseconds');
+    lines.push('# TYPE s3db_request_duration_ms summary');
+    [
+      { quantile: '0.5', value: this._percentile(requests.durations, 50) },
+      { quantile: '0.95', value: this._percentile(requests.durations, 95) },
+      { quantile: '0.99', value: this._percentile(requests.durations, 99) }
+    ].forEach(({ quantile, value }) => {
+      lines.push(`s3db_request_duration_ms{quantile="${quantile}"} ${Number(value || 0).toFixed(3)}`);
+    });
+    lines.push(`s3db_request_duration_ms_sum ${Number(requests.totalDuration || 0).toFixed(3)}`);
+    lines.push(`s3db_request_duration_ms_count ${requests.total}`);
+
+    lines.push('# HELP s3db_auth_events_total Authentication events');
+    lines.push('# TYPE s3db_auth_events_total counter');
+    lines.push(`s3db_auth_events_total{result="success"} ${auth.success}`);
+    lines.push(`s3db_auth_events_total{result="failure"} ${auth.failure}`);
+    Object.entries(auth.byMethod).forEach(([method, stats]) => {
+      lines.push(`s3db_auth_events_total{method="${escapeLabel(method)}",result="success"} ${stats.success}`);
+      lines.push(`s3db_auth_events_total{method="${escapeLabel(method)}",result="failure"} ${stats.failure}`);
+    });
+
+    lines.push('# HELP s3db_resource_operations_total Resource operations by action');
+    lines.push('# TYPE s3db_resource_operations_total counter');
+    lines.push(`s3db_resource_operations_total{action="created"} ${resources.created}`);
+    lines.push(`s3db_resource_operations_total{action="updated"} ${resources.updated}`);
+    lines.push(`s3db_resource_operations_total{action="deleted"} ${resources.deleted}`);
+    Object.entries(resources.byResource).forEach(([resourceName, stats]) => {
+      lines.push(`s3db_resource_operations_resource_total{resource="${escapeLabel(resourceName)}",action="created"} ${stats.created}`);
+      lines.push(`s3db_resource_operations_resource_total{resource="${escapeLabel(resourceName)}",action="updated"} ${stats.updated}`);
+      lines.push(`s3db_resource_operations_resource_total{resource="${escapeLabel(resourceName)}",action="deleted"} ${stats.deleted}`);
+    });
+
+    lines.push('# HELP s3db_user_events_total User events');
+    lines.push('# TYPE s3db_user_events_total counter');
+    Object.entries(users).forEach(([event, value]) => {
+      lines.push(`s3db_user_events_total{event="${escapeLabel(event)}"} ${value}`);
+    });
+
+    lines.push('# HELP s3db_errors_total Total errors recorded');
+    lines.push('# TYPE s3db_errors_total counter');
+    lines.push(`s3db_errors_total ${errors.total}`);
+    Object.entries(errors.byType).forEach(([type, count]) => {
+      lines.push(`s3db_errors_by_type_total{type="${escapeLabel(type)}"} ${count}`);
+    });
+
+    return lines.join('\n') + '\n';
   }
 
   /**

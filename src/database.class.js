@@ -85,7 +85,7 @@ export class Database extends SafeEventEmitter {
 
     // ✨ Database-level options (root level)
     this.verbose = options.verbose ?? false;
-    this.parallelism = parseInt((options.parallelism ?? 10) + "") || 10;
+    this.parallelism = parseInt((options.parallelism ?? 100) + "") || 100; // CHANGED: Default concurrency is now 100 (was 10)
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry

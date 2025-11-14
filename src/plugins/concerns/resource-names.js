@@ -63,10 +63,10 @@ export function resolveResourceName(pluginKey, { defaultName, override, suffix }
   }
 
   if (override) {
-    // 🎯 If override is provided, respect it as-is (don't force plg_ prefix)
-    // User knows what they're doing - let them use custom resource names
+    // 🎯 If override is provided, ensure plg_ prefix but don't namespace unless requested
     const sanitized = sanitizeName(override);
-    return applyOverrideNamespace ? applyNamespace(sanitized, namespace) : sanitized;
+    const ensured = ensurePlgPrefix(sanitized);
+    return applyOverrideNamespace ? applyNamespace(ensured, namespace) : ensured;
   }
 
   if (defaultName) {
