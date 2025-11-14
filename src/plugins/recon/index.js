@@ -652,32 +652,14 @@ export class ReconPlugin extends Plugin {
   }
 
   /**
-   * Legacy hook: afterInstall
-   * Registers legacy alias database.pluginRegistry.network
-   */
-  afterInstall() {
-    super.afterInstall();
-
-    // Register legacy alias
-    if (this.database) {
-      this.database.pluginRegistry.network = this;
-    }
-  }
-
-  /**
-   * Legacy hook: afterUninstall
-   * Removes legacy alias database.pluginRegistry.network
+   * Hook: afterUninstall
+   * Cleanup processes before uninstall
    */
   afterUninstall() {
     super.afterUninstall();
 
     // Cleanup processes
     this.processManager.cleanup({ silent: true }).catch(() => {});
-
-    // Remove legacy alias
-    if (this.database && this.database.pluginRegistry.network === this) {
-      delete this.database.pluginRegistry.network;
-    }
   }
 }
 

@@ -118,6 +118,8 @@ export class SpiderPlugin extends Plugin {
         maxConsoleLogLines: options.security?.maxConsoleLogLines || 100,
         analyzeTLS: options.security?.analyzeTLS !== false,
         checkVulnerabilities: options.security?.checkVulnerabilities !== false,
+        captureWebSockets: options.security?.captureWebSockets !== false,
+        maxWebSocketMessages: options.security?.maxWebSocketMessages || 50,
         ...options.security
       }
     }
@@ -293,6 +295,7 @@ export class SpiderPlugin extends Plugin {
           cors: 'object',
           consoleLogs: 'object',
           tls: 'object',
+          websockets: 'object',
           vulnerabilities: 'array',
           securityScore: 'number',
           createdAt: 'number'

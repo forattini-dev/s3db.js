@@ -29,6 +29,10 @@ export class SecurityAnalyzer {
       // TLS/SSL
       analyzeTLS: config.analyzeTLS !== false,
 
+      // WebSockets
+      captureWebSockets: config.captureWebSockets !== false,
+      maxWebSocketMessages: config.maxWebSocketMessages || 50,
+
       // Vulnerabilities
       checkVulnerabilities: config.checkVulnerabilities !== false
     }
@@ -50,6 +54,7 @@ export class SecurityAnalyzer {
       consoleLogs: null,
       tls: null,
       captcha: null,
+      websockets: null,
       vulnerabilities: [],
       securityScore: 0
     }
@@ -106,6 +111,11 @@ export class SecurityAnalyzer {
       // Analyze TLS/SSL
       if (this.config.analyzeTLS) {
         result.tls = this._analyzeTLS(baseUrl, responseHeaders)
+      }
+
+      // Capture WebSockets
+      if (this.config.captureWebSockets) {
+        result.websockets = await this._captureWebSockets(page)
       }
 
       // Detect CAPTCHA
@@ -532,6 +542,104 @@ export class SecurityAnalyzer {
     }
 
     return grouped
+  }
+
+  /**
+   * Capture WebSocket connections and messages
+   * @private
+   */
+  async _captureWebSockets(page) {
+    const websockets = []
+    const wsMessages = new Map() // URL -> messages array
+
+    try {
+      // Intercept WebSocket connections via console messages
+      // This detects WebSocket activity and allows us to track connections
+      const wsDetectionCode = `
+        (function() {
+          const wsConnections = [];
+          const originalWebSocket = window.WebSocket;
+
+          window.WebSocket = class extends originalWebSocket {
+            constructor(url, protocols) {
+              super(url, protocols);
+              const wsInfo = {
+                url: url,
+                protocols: Array.isArray(protocols) ? protocols : protocols ? [protocols] : [],
+                messages: [],
+                readyState: this.readyState,
+                timestamp: Date.now()
+              };
+              wsConnections.push(wsInfo);
+
+              // Capture sent messages
+              const originalSend = this.send.bind(this);
+              this.send = function(data) {
+                wsInfo.messages.push({
+                  type: 'sent',
+                  data: typeof data === 'string' ? data : '[binary data]',
+                  timestamp: Date.now()
+                });
+                return originalSend(data);
+              };
+
+              // Capture received messages
+              this.addEventListener('message', (event) => {
+                wsInfo.messages.push({
+                  type: 'received',
+                  data: typeof event.data === 'string' ? event.data : '[binary data]',
+                  timestamp: Date.now()
+                });
+              });
+
+              // Track state changes
+              this.addEventListener('open', () => {
+                wsInfo.readyState = 1;
+              });
+              this.addEventListener('close', () => {
+                wsInfo.readyState = 3;
+              });
+            }
+          };
+
+          // Expose for collection
+          window.__wsConnections = wsConnections;
+        })();
+      `;
+
+      // Inject WebSocket tracking code
+      await page.evaluateOnNewDocument(wsDetectionCode)
+
+      // Wait a moment for page interactions
+      await page.waitForTimeout(100)
+
+      // Collect WebSocket information
+      const wsData = await page.evaluate(() => {
+        return window.__wsConnections || []
+      }).catch(() => [])
+
+      // Process and limit messages
+      for (const wsInfo of wsData) {
+        const limitedMessages = wsInfo.messages.slice(0, this.config.maxWebSocketMessages)
+        websockets.push({
+          url: wsInfo.url,
+          protocols: wsInfo.protocols,
+          messageCount: wsInfo.messages.length,
+          readyState: wsInfo.readyState,
+          messages: limitedMessages,
+          timestamp: wsInfo.timestamp
+        })
+      }
+
+      return websockets.length > 0 ? {
+        present: true,
+        count: websockets.length,
+        connections: websockets
+      } : null
+    } catch (error) {
+      console.error('[SecurityAnalyzer] Error capturing WebSockets:', error)
+      return null
+    }
   }
 
   /**

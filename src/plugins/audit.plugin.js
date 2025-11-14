@@ -615,11 +615,6 @@ export class AuditPlugin extends Plugin {
     resource._originalDeleteMany = originalDeleteMany;
   }
 
-  // Backward compatibility for tests
-  installEventListenersForResource(resource) {
-    return this.setupResourceAuditing(resource);
-  }
-
   async logAudit(auditData) {
     if (!this.auditResource) {
       return;
