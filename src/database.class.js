@@ -85,7 +85,8 @@ export class Database extends SafeEventEmitter {
 
     // ✨ Database-level options (root level)
     this.verbose = options.verbose ?? false;
-    this.operationsPool = options.operationsPool ?? { concurrency: 100 }; // Parallelism config
+    // Normalize operationsPool config with defaults
+    this.operationsPool = this._normalizeOperationsPool(options.operationsPool);
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry
@@ -199,26 +200,40 @@ export class Database extends SafeEventEmitter {
           }, mergedClientOptions)); // ✨ Deep merge client options
         } else {
           // Use S3Client for s3://, http://, https:// protocols
-          this.client = new S3Client(this._deepMerge({
+          // Merge client options first, then set operationsPool (takes precedence)
+          const s3ClientOptions = this._deepMerge({
             verbose: this.verbose,
-            operationsPool: this.operationsPool,
             connectionString: connectionString,
-          }, mergedClientOptions)); // ✨ Deep merge client options
+          }, mergedClientOptions);
+          // operationsPool from Database (normalized) takes precedence over any in clientOptions
+          s3ClientOptions.operationsPool = this._deepMerge(
+            s3ClientOptions.operationsPool || {},
+            this.operationsPool
+          );
+          this.client = new S3Client(s3ClientOptions);
         }
       } catch (err) {
         // If URL parsing fails, fall back to S3Client
-        this.client = new S3Client(this._deepMerge({
+        const s3ClientOptions = this._deepMerge({
           verbose: this.verbose,
-          operationsPool: this.operationsPool,
           connectionString: connectionString,
-        }, mergedClientOptions)); // ✨ Deep merge client options
+        }, mergedClientOptions);
+        s3ClientOptions.operationsPool = this._deepMerge(
+          s3ClientOptions.operationsPool || {},
+          this.operationsPool
+        );
+        this.client = new S3Client(s3ClientOptions);
       }
     } else if (!options.client) {
       // No connection string provided, use S3Client with defaults
-      this.client = new S3Client(this._deepMerge({
+      const s3ClientOptions = this._deepMerge({
         verbose: this.verbose,
-        operationsPool: this.operationsPool,
-      }, mergedClientOptions)); // ✨ Deep merge client options
+      }, mergedClientOptions);
+      s3ClientOptions.operationsPool = this._deepMerge(
+        s3ClientOptions.operationsPool || {},
+        this.operationsPool
+      );
+      this.client = new S3Client(s3ClientOptions);
     } else {
       // Use provided client
       this.client = options.client;
@@ -277,6 +292,22 @@ export class Database extends SafeEventEmitter {
     }
 
     return result;
+  }
+
+  /**
+   * Normalize OperationsPool configuration with defaults
+   * @private
+   */
+  _normalizeOperationsPool(config = {}) {
+    return {
+      concurrency: config?.concurrency ?? 100,
+      retries: config?.retries ?? 3,
+      retryDelay: config?.retryDelay ?? 1000,
+      timeout: config?.timeout ?? 30000,
+      retryableErrors: config?.retryableErrors ?? [],
+      autotune: config?.autotune ?? null,
+      monitoring: config?.monitoring ?? { collectMetrics: true },
+    };
   }
 
   async connect() {
