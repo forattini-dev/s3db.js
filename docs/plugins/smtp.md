@@ -12,17 +12,23 @@
 
 **1 line to get started:**
 ```javascript
-await db.usePlugin(new SMTPPlugin({ provider: 'sendgrid', from: 'noreply@example.com', sendgridApiKey: 'SG.xxx' }));
+await db.usePlugin(new SMTPPlugin({
+  driver: 'sendgrid',
+  from: 'noreply@example.com',
+  config: { apiKey: 'SG.xxx' }
+}));
 ```
 
 **Production-ready setup:**
 ```javascript
 await db.usePlugin(new SMTPPlugin({
   mode: 'relay',                         // 'relay' or 'server'
-  provider: 'sendgrid',                  // SendGrid, AWS SES, Mailgun, Postmark
+  driver: 'sendgrid',                    // Driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark'
   from: 'noreply@yourdomain.com',       // Sender address
-  sendgridApiKey: process.env.SENDGRID_API_KEY,
-  sendgridWebhookSecret: process.env.SENDGRID_WEBHOOK_SECRET,
+  config: {
+    apiKey: process.env.SENDGRID_API_KEY,
+    webhookSecret: process.env.SENDGRID_WEBHOOK_SECRET
+  },
   emailResource: 'emails',               // S3DB resource name
   rateLimit: 500,                        // emails/minute
   maxRetries: 3                          // max retry attempts
@@ -87,9 +93,11 @@ const db = new Database({
 // Create plugin with essential options
 const smtpPlugin = new SMTPPlugin({
   mode: 'relay',
-  provider: 'sendgrid',
+  driver: 'sendgrid',
   from: 'noreply@yourdomain.com',
-  sendgridApiKey: process.env.SENDGRID_API_KEY
+  config: {
+    apiKey: process.env.SENDGRID_API_KEY
+  }
 });
 
 await db.usePlugin(smtpPlugin);
@@ -144,9 +152,11 @@ import { SMTPPlugin } from 's3db.js/plugins';
 
 const plugin = new SMTPPlugin({
   mode: 'relay',
-  provider: 'sendgrid',
+  driver: 'sendgrid',
   from: 'noreply@example.com',
-  sendgridApiKey: 'SG.xxx...'
+  config: {
+    apiKey: 'SG.xxx...'
+  }
 });
 
 await db.usePlugin(plugin);
@@ -253,9 +263,11 @@ Configure rate limiting and automatic retry behavior.
 ```javascript
 const plugin = new SMTPPlugin({
   mode: 'relay',
-  provider: 'sendgrid',
+  driver: 'sendgrid',
   from: 'noreply@example.com',
-  sendgridApiKey: 'SG.xxx',
+  config: {
+    apiKey: 'SG.xxx'
+  },
 
   // Rate limiting
   rateLimit: 500,                // 500 emails/minute
@@ -299,10 +311,12 @@ Complete production configuration with monitoring and error handling.
 ```javascript
 const plugin = new SMTPPlugin({
   mode: 'relay',
-  provider: 'sendgrid',
+  driver: 'sendgrid',
   from: process.env.SMTP_FROM_ADDRESS,
-  sendgridApiKey: process.env.SENDGRID_API_KEY,
-  sendgridWebhookSecret: process.env.SENDGRID_WEBHOOK_SECRET,
+  config: {
+    apiKey: process.env.SENDGRID_API_KEY,
+    webhookSecret: process.env.SENDGRID_WEBHOOK_SECRET
+  },
 
   // Rate limiting
   rateLimit: 500,
@@ -377,22 +391,31 @@ new SMTPPlugin({
   // CORE OPTIONS
   // ============================================
   mode: 'relay',                         // 'relay' or 'server' (default: 'relay')
-  provider: 'sendgrid',                  // 'sendgrid', 'aws-ses', 'mailgun', 'postmark'
+  driver: 'sendgrid',                    // Driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark'
   from: 'noreply@yourdomain.com',       // Sender email address (required)
 
   // ============================================
-  // RELAY MODE OPTIONS (when mode: 'relay')
+  // PROVIDER CONFIG (when mode: 'relay')
   // ============================================
-  sendgridApiKey: 'SG.xxx...',           // SendGrid API key
-  sendgridWebhookSecret: 'whsec_xxx',   // SendGrid webhook secret
-  awsRegion: 'us-east-1',               // AWS region for SES
-  awsAccessKeyId: 'AKIA...',            // AWS access key
-  awsSecretAccessKey: 'xxx...',         // AWS secret key
-  mailgunApiKey: 'xxx...',              // Mailgun API key
-  mailgunDomain: 'yourdomain.mailgun.org', // Mailgun domain
-  mailgunWebhookSecret: 'xxx...',       // Mailgun webhook secret
-  postmarkServerToken: 'xxx...',        // Postmark server token
-  postmarkWebhookSecret: 'xxx...',      // Postmark webhook secret
+  config: {
+    // SendGrid
+    apiKey: 'SG.xxx...',                 // SendGrid API key
+    webhookSecret: 'whsec_xxx',          // SendGrid webhook secret
+
+    // AWS SES
+    // region: 'us-east-1',               // AWS region
+    // accessKeyId: 'AKIA...',            // AWS access key
+    // secretAccessKey: 'xxx...',         // AWS secret key
+
+    // Mailgun
+    // apiKey: 'xxx...',                  // Mailgun API key
+    // domain: 'yourdomain.mailgun.org',  // Mailgun domain
+    // webhookSecret: 'xxx...',           // Mailgun webhook secret
+
+    // Postmark
+    // serverToken: 'xxx...',             // Postmark server token
+    // webhookSecret: 'xxx...'            // Postmark webhook secret
+  },
 
   // ============================================
   // RETRY & RATE LIMITING
@@ -447,8 +470,9 @@ new SMTPPlugin({
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `mode` | string | `'relay'` | Operating mode: `'relay'` (send via provider) or `'server'` (listen for incoming) |
-| `provider` | string | `'sendgrid'` | Email provider: SendGrid, AWS SES, Mailgun, Postmark |
+| `driver` | string | `'sendgrid'` | Email driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark' |
 | `from` | string | — | Sender email address (required for relay mode) |
+| `config` | object | — | Provider-specific configuration object |
 | `maxRetries` | number | `3` | Maximum retry attempts for failed emails |
 | `retryDelay` | number | `1000` | Initial retry delay in milliseconds |
 | `retryMultiplier` | number | `1.5` | Exponential backoff multiplier for retries |
@@ -470,10 +494,12 @@ For transactional emails with bounce/complaint tracking.
 ```javascript
 new SMTPPlugin({
   mode: 'relay',
-  provider: 'sendgrid',
+  driver: 'sendgrid',
   from: 'noreply@yourdomain.com',
-  sendgridApiKey: process.env.SENDGRID_API_KEY,
-  sendgridWebhookSecret: process.env.SENDGRID_WEBHOOK_SECRET,
+  config: {
+    apiKey: process.env.SENDGRID_API_KEY,
+    webhookSecret: process.env.SENDGRID_WEBHOOK_SECRET
+  },
   emailResource: 'emails',
   rateLimit: 500
 })
@@ -493,11 +519,13 @@ Cheapest option for high-volume email.
 ```javascript
 new SMTPPlugin({
   mode: 'relay',
-  provider: 'aws-ses',
+  driver: 'aws-ses',
   from: 'noreply@yourdomain.com',
-  awsRegion: 'us-east-1',
-  awsAccessKeyId: process.env.AWS_ACCESS_KEY,
-  awsSecretAccessKey: process.env.AWS_SECRET_KEY,
+  config: {
+    region: 'us-east-1',
+    accessKeyId: process.env.AWS_ACCESS_KEY,
+    secretAccessKey: process.env.AWS_SECRET_KEY
+  },
   rateLimit: 200  // SES has stricter initial limits
 })
 ```
@@ -549,9 +577,11 @@ Low-cost development setup.
 ```javascript
 new SMTPPlugin({
   mode: 'relay',
-  provider: 'mailgun',
+  driver: 'mailgun',
   from: 'dev@example.com',
-  mailgunApiKey: process.env.MAILGUN_API_KEY,
+  config: {
+    apiKey: process.env.MAILGUN_API_KEY
+  },
   rateLimit: 10,  // Conservative for testing
   verbose: true   // Debug logging
 })
@@ -973,7 +1003,10 @@ Emitted when email bounces (before webhook processing).
    ```javascript
    // ✅ Good
    const plugin = new SMTPPlugin({
-     sendgridApiKey: process.env.SENDGRID_API_KEY
+     driver: 'sendgrid',
+     config: {
+       apiKey: process.env.SENDGRID_API_KEY
+     }
    });
    ```
 
@@ -1022,10 +1055,16 @@ Emitted when email bounces (before webhook processing).
 1. **Don't hardcode API keys**
    ```javascript
    // ❌ Bad
-   sendgridApiKey: 'SG.xxx...'
+   driver: 'sendgrid',
+   config: {
+     apiKey: 'SG.xxx...'
+   }
 
    // ✅ Correct
-   sendgridApiKey: process.env.SENDGRID_API_KEY
+   driver: 'sendgrid',
+   config: {
+     apiKey: process.env.SENDGRID_API_KEY
+   }
    ```
 
 2. **Don't ignore rate limiting**
@@ -1191,7 +1230,12 @@ A: Yes! Email history is stored in S3DB. Switch provider config anytime without 
 ```javascript
 // Switch from SendGrid to AWS SES
 const plugin = new SMTPPlugin({
-  provider: 'aws-ses',  // Changed
+  driver: 'aws-ses',  // Changed
+  config: {
+    region: 'us-east-1',
+    accessKeyId: process.env.AWS_ACCESS_KEY,
+    secretAccessKey: process.env.AWS_SECRET_KEY
+  },
   // Keep emailResource: 'emails' to reuse existing records
 });
 ```
