@@ -862,7 +862,6 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         version: currentVersion,
         attributes: versionData.attributes,
         behavior: versionData.behavior || 'user-managed',
-        parallelism: database.parallelism,
         passphrase: database.passphrase,
         observers: [database],
         cache: database.cache,

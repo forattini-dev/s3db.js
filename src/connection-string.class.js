@@ -235,14 +235,26 @@ export class ConnectionString {
 
     // Parse hostname as bucket (or default to 's3db')
     const bucketFromHost = uri.hostname || '';
-    this.bucket = bucketFromHost || 's3db';
+    if (bucketFromHost) {
+      const [okBucket, errBucket, decodedBucket] = tryFnSync(() => decodeURIComponent(bucketFromHost));
+      this.bucket = okBucket ? decodedBucket : bucketFromHost;
+    } else {
+      this.bucket = 's3db';
+    }
 
     // Parse pathname as keyPrefix
     if (["/", "", null].includes(uri.pathname)) {
       this.keyPrefix = "";
     } else {
       let [, ...subpath] = uri.pathname.split("/");
-      this.keyPrefix = [...(subpath || [])].join("/");
+      const decodedSegments = (subpath || []).map(segment => {
+        if (!segment) {
+          return segment;
+        }
+        const [okSegment, errSegment, decodedSegment] = tryFnSync(() => decodeURIComponent(segment));
+        return okSegment ? decodedSegment : segment;
+      });
+      this.keyPrefix = decodedSegments.filter(Boolean).join("/");
     }
 
     // Set synthetic endpoint for compatibility

@@ -55,14 +55,6 @@ export class S3Client extends EventEmitter {
   }
 
   /**
-   * Get parallelism value from taskExecutor config
-   * @type {number|string}
-   */
-  get parallelism() {
-    return this.taskExecutorConfig?.concurrency !== undefined ? this.taskExecutorConfig.concurrency : 100;
-  }
-
-  /**
    * Normalize TaskExecutor configuration
    * @private
    */
