@@ -1,8 +1,6 @@
 # 📧 SMTP Plugin
 
-> **Enterprise-grade email delivery with relay and server modes. Send emails via external SMTP, store delivery status in S3DB, process webhooks (SendGrid, AWS SES, Mailgun, Postmark), and run as in-process SMTP server to receive emails from SMTP clients.**
->
-> **⚠️ Note:** This documentation describes planned architecture. Current implementation supports relay mode with provider webhooks and server mode. Multi-relay and custom SMTP drivers coming in future releases.
+> **Enterprise-grade email delivery with multiple operating modes: Send via email providers (SendGrid, AWS SES, Mailgun, Postmark), custom SMTP relay servers, or multiple relays with failover/load-balancing. Receive emails via in-process SMTP server. Full S3DB integration with webhook processing and delivery tracking.**
 >
 > **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
 
@@ -128,9 +126,10 @@ await db.disconnect();
 | **Templates (Handlebars)** | ✅ Implemented | YAML front matter, custom helpers |
 | **Rate Limiting** | ✅ Implemented | Per-second token bucket |
 | **Automatic Retry** | ✅ Implemented | Exponential backoff with jitter |
-| **Custom SMTP Relay** | 🚧 Planned | driver: 'smtp' with config object |
-| **Multi-Relay** | 🚧 Planned | Failover, load balancing, domain routing |
-| **Driver/Config Pattern** | 🚧 Planned | Standardized `{ driver, config }` format |
+| **Custom SMTP Relay** | ✅ Implemented | driver: 'smtp' with any SMTP server |
+| **Multi-Relay** | ✅ Implemented | Failover, round-robin, domain routing |
+| **Driver/Config Pattern** | ✅ Implemented | Standardized `{ driver, config }` format |
+| **Backwards Compatibility** | ✅ Implemented | Legacy host/port/auth still works |
 
 ---
 
@@ -671,8 +670,6 @@ new SMTPPlugin({
 
 ### Use Case 5: Custom SMTP Relay (Self-Hosted)
 
-**🚧 Planned Feature** - Currently implement via direct SMTP configuration until custom driver support is available.
-
 Relay through your own SMTP server instead of using a third-party provider.
 
 ```javascript
@@ -704,9 +701,7 @@ new SMTPPlugin({
 
 ### Use Case 6: Multi-Relay (Dynamic Routing)
 
-**🚧 Planned Feature** - Coming in future releases. For now, instantiate multiple plugin instances.
-
-Route emails through different SMTP relays based on domain, volume, or other logic.
+Route emails through different SMTP relays based on domain, volume, or other logic with automatic failover and load balancing.
 
 ```javascript
 // Start with primary relay
