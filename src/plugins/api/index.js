@@ -39,6 +39,7 @@ import { ApiServer } from './server.js';
 import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceName } from '../concerns/resource-names.js';
 import { normalizeBasePath } from './utils/base-path.js';
+import { findBestMatch, matchPath } from './utils/path-matcher.js';
 
 const DEFAULT_LOG_FORMAT = ':verb :url => :status (:elapsed ms, :res[content-length])';
 const ANSI_RESET = '\x1b[0m';
@@ -220,19 +221,38 @@ export class ApiPlugin extends Plugin {
         enabled: options.rateLimit?.enabled || false,
         windowMs: options.rateLimit?.windowMs || 60000, // 1 minute
         maxRequests: options.rateLimit?.maxRequests || 100,
-        keyGenerator: options.rateLimit?.keyGenerator || null,
-        maxUniqueKeys: options.rateLimit?.maxUniqueKeys || 1000
+        keyGenerator: typeof options.rateLimit?.keyGenerator === 'function'
+          ? options.rateLimit.keyGenerator
+          : null,
+        maxUniqueKeys: options.rateLimit?.maxUniqueKeys || 1000,
+        rules: this._normalizeRateLimitRules(options.rateLimit?.rules)
       },
 
       // Logging configuration
       logging: (() => {
+        const normalizeExclude = (value) => {
+          if (Array.isArray(value)) {
+            return value.filter(Boolean).map((v) => String(v).trim()).filter(Boolean);
+          }
+          if (typeof value === 'string' && value.trim().length > 0) {
+            return [value.trim()];
+          }
+          return [];
+        };
+
+        const baseConfig = {
+          format: DEFAULT_LOG_FORMAT,
+          verbose: false,
+          colorize: true,
+          filter: null,
+          excludePaths: []
+        };
+
         // Support shorthand: logging: true → { enabled: true }
         if (options.logging === true) {
           return {
             enabled: true,
-            format: DEFAULT_LOG_FORMAT,
-            verbose: false,
-            colorize: true
+            ...baseConfig
           };
         }
 
@@ -240,9 +260,7 @@ export class ApiPlugin extends Plugin {
         if (options.logging === false || !options.logging) {
           return {
             enabled: false,
-            format: DEFAULT_LOG_FORMAT,
-            verbose: false,
-            colorize: true
+            ...baseConfig
           };
         }
 
@@ -251,7 +269,9 @@ export class ApiPlugin extends Plugin {
           enabled: options.logging.enabled !== false, // Enabled by default when object is provided
           format: options.logging.format || DEFAULT_LOG_FORMAT,
           verbose: options.logging.verbose || false,
-          colorize: options.logging.colorize !== false
+          colorize: options.logging.colorize !== false,
+          filter: typeof options.logging.filter === 'function' ? options.logging.filter : null,
+          excludePaths: normalizeExclude(options.logging.excludePaths)
         };
       })(),
 
@@ -440,6 +460,50 @@ export class ApiPlugin extends Plugin {
     }
 
     return {};
+  }
+
+  _normalizeRateLimitRules(rules) {
+    if (!Array.isArray(rules) || rules.length === 0) {
+      return [];
+    }
+
+    const normalized = [];
+    const verbose = this.options?.verbose;
+
+    rules.forEach((rawRule, index) => {
+      if (!rawRule || typeof rawRule !== 'object') {
+        if (verbose) {
+          console.warn('[API Plugin] Ignoring rateLimit rule (expected object):', rawRule);
+        }
+        return;
+      }
+
+      let pattern = rawRule.path || rawRule.pattern;
+      if (typeof pattern !== 'string' || !pattern.trim()) {
+        if (verbose) {
+          console.warn(`[API Plugin] rateLimit.rules[${index}] missing path/pattern`);
+        }
+        return;
+      }
+
+      pattern = pattern.trim();
+      if (!pattern.startsWith('/')) {
+        pattern = `/${pattern.replace(/^\/*/, '')}`;
+      }
+
+      normalized.push({
+        id: `rate-limit-${index}-${pattern}`,
+        pattern,
+        windowMs: typeof rawRule.windowMs === 'number' ? rawRule.windowMs : undefined,
+        maxRequests: typeof rawRule.maxRequests === 'number' ? rawRule.maxRequests : undefined,
+        maxUniqueKeys: typeof rawRule.maxUniqueKeys === 'number' ? rawRule.maxUniqueKeys : undefined,
+        key: rawRule.key || rawRule.scope || 'ip',
+        keyHeader: rawRule.keyHeader || rawRule.header || 'x-api-key',
+        keyGenerator: typeof rawRule.keyGenerator === 'function' ? rawRule.keyGenerator : null
+      });
+    });
+
+    return normalized;
   }
 
   /**
@@ -721,8 +785,11 @@ export class ApiPlugin extends Plugin {
    * Uses IP address or custom key generator to track request counts.
    */
   async _createRateLimitMiddleware() {
-    const requests = new Map();
-    const { windowMs, maxRequests, keyGenerator, maxUniqueKeys } = this.config.rateLimit;
+    const defaultStore = new Map();
+    const ruleStores = new Map();
+    const { windowMs, maxRequests, keyGenerator, maxUniqueKeys, rules = [] } = this.config.rateLimit;
+    const hasRules = Array.isArray(rules) && rules.length > 0;
+    const ruleKeyGenerators = new Map();
 
     const getClientIp = (c) => {
       const forwarded = c.req.header('x-forwarded-for');
@@ -736,34 +803,81 @@ export class ApiPlugin extends Plugin {
       return c.req.raw?.socket?.remoteAddress || 'unknown';
     };
 
-    return async (c, next) => {
-      // Generate key (IP or custom)
-      const key = keyGenerator ? keyGenerator(c) : getClientIp(c) || 'unknown';
+    const getRuleForPath = (path) => {
+      if (!hasRules) return null;
+      return findBestMatch(rules, path) || null;
+    };
 
-      let record = requests.get(key);
+    const getStoreForRule = (rule) => {
+      if (!rule) return defaultStore;
+      if (!ruleStores.has(rule.id)) {
+        ruleStores.set(rule.id, new Map());
+      }
+      return ruleStores.get(rule.id);
+    };
+
+    const getRuleKeyGenerator = (rule) => {
+      if (!rule) return null;
+      if (ruleKeyGenerators.has(rule.id)) {
+        return ruleKeyGenerators.get(rule.id);
+      }
+
+      let generator = null;
+      if (typeof rule.keyGenerator === 'function') {
+        generator = rule.keyGenerator;
+      } else {
+        const keyType = (rule.key || 'ip').toLowerCase();
+        if (keyType === 'user') {
+          generator = (c) => c.get('user')?.id || c.get('user')?.email || getClientIp(c) || 'anonymous';
+        } else if (keyType === 'apikey' || keyType === 'api-key') {
+          const headerName = (rule.keyHeader || 'x-api-key').toLowerCase();
+          generator = (c) => c.req.header(headerName) || getClientIp(c) || 'unknown';
+        } else {
+          generator = (c) => getClientIp(c) || 'unknown';
+        }
+      }
+
+      ruleKeyGenerators.set(rule.id, generator);
+      return generator;
+    };
+
+    return async (c, next) => {
+      const currentPath = c.req.path || '/';
+      const matchedRule = getRuleForPath(currentPath);
+      const bucket = getStoreForRule(matchedRule);
+      const effectiveWindow = matchedRule?.windowMs ?? windowMs;
+      const effectiveLimit = matchedRule?.maxRequests ?? maxRequests;
+      const effectiveMaxKeys = matchedRule?.maxUniqueKeys ?? maxUniqueKeys;
+      const generator = matchedRule ? getRuleKeyGenerator(matchedRule) : keyGenerator;
+
+      // Generate key (IP or custom)
+      const keySource = typeof generator === 'function' ? generator(c) : getClientIp(c);
+      const key = keySource || 'unknown';
+
+      let record = bucket.get(key);
 
       // Reset expired records to prevent unbounded memory growth
       if (record && Date.now() > record.resetAt) {
-        requests.delete(key);
+        bucket.delete(key);
         record = null;
       }
 
       if (!record) {
-        record = { count: 0, resetAt: Date.now() + windowMs };
-        requests.set(key, record);
-        if (requests.size > maxUniqueKeys) {
-          const oldestKey = requests.keys().next().value;
+        record = { count: 0, resetAt: Date.now() + effectiveWindow };
+        bucket.set(key, record);
+        if (bucket.size > effectiveMaxKeys) {
+          const oldestKey = bucket.keys().next().value;
           if (oldestKey) {
-            requests.delete(oldestKey);
+            bucket.delete(oldestKey);
           }
         }
       }
 
       // Check limit
-      if (record.count >= maxRequests) {
+      if (record.count >= effectiveLimit) {
         const retryAfter = Math.ceil((record.resetAt - Date.now()) / 1000);
         c.header('Retry-After', retryAfter.toString());
-        c.header('X-RateLimit-Limit', maxRequests.toString());
+        c.header('X-RateLimit-Limit', effectiveLimit.toString());
         c.header('X-RateLimit-Remaining', '0');
         c.header('X-RateLimit-Reset', record.resetAt.toString());
 
@@ -781,8 +895,8 @@ export class ApiPlugin extends Plugin {
       record.count++;
 
       // Set rate limit headers
-      c.header('X-RateLimit-Limit', maxRequests.toString());
-      c.header('X-RateLimit-Remaining', (maxRequests - record.count).toString());
+      c.header('X-RateLimit-Limit', effectiveLimit.toString());
+      c.header('X-RateLimit-Remaining', Math.max(0, effectiveLimit - record.count).toString());
       c.header('X-RateLimit-Reset', record.resetAt.toString());
 
       await next();
@@ -794,9 +908,10 @@ export class ApiPlugin extends Plugin {
    * @private
    */
   async _createLoggingMiddleware() {
-    const { format, colorize } = this.config.logging;
+    const { format, colorize, filter, excludePaths } = this.config.logging;
     const logFormat = format || DEFAULT_LOG_FORMAT;
     const useDefaultStyle = logFormat === DEFAULT_LOG_FORMAT;
+    const excludedPatterns = Array.isArray(excludePaths) ? excludePaths : [];
 
     const colorStatus = (status, value) => {
       if (!colorize) return value;
@@ -841,6 +956,22 @@ export class ApiPlugin extends Plugin {
       const durationFormatted = duration.toFixed(3);
       const status = c.res?.status ?? 0;
       const user = c.get('user')?.username || c.get('user')?.email || 'anonymous';
+
+      const skipByPath = excludedPatterns.some((pattern) => matchPath(pattern, path));
+      const skipByFilter = typeof filter === 'function'
+        ? filter({
+            context: c,
+            method,
+            path,
+            status,
+            duration,
+            requestId
+          }) === false
+        : false;
+
+      if (skipByPath || skipByFilter) {
+        return;
+      }
 
       let urlPath = path;
       try {

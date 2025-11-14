@@ -6,6 +6,7 @@
 
 import { createHash } from 'crypto';
 import { unauthorized } from '../utils/response-formatter.js';
+import { getCookie } from 'hono/cookie';
 import { LRUCache } from '../concerns/lru-cache.js';
 
 // Token verification cache (40-60% performance improvement)
@@ -108,7 +109,7 @@ export function verifyToken(token, secret) {
  * @returns {Function} Hono middleware
  */
 export function jwtAuth(options = {}) {
-  const { secret, usersResource, optional = false } = options;
+  const { secret, usersResource, optional = false, cookieName = null } = options;
 
   if (!secret) {
     throw new Error('JWT secret is required');
@@ -118,10 +119,34 @@ export function jwtAuth(options = {}) {
     const authHeader = c.req.header('authorization');
 
     if (!authHeader) {
+      // Optional cookie-based fallback: JWT in cookieName
+      if (cookieName) {
+        try {
+          const token = getCookie(c, cookieName);
+          if (token) {
+            const payload = verifyToken(token, secret);
+            if (payload) {
+              if (usersResource && payload.userId) {
+                try {
+                  const user = await usersResource.get(payload.userId);
+                  if (user && user.active !== false) {
+                    c.set('user', user);
+                    c.set('authMethod', 'jwt-cookie');
+                    return await next();
+                  }
+                } catch (__) {}
+              } else {
+                c.set('user', payload);
+                c.set('authMethod', 'jwt-cookie');
+                return await next();
+              }
+            }
+          }
+        } catch (__) {}
+      }
       if (optional) {
         return await next();
       }
-
       const response = unauthorized('No authorization header provided');
       return c.json(response, response._status);
     }

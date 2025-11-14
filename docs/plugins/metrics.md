@@ -21,6 +21,7 @@ The Metrics Plugin has **zero external dependencies** - it's built into s3db.js 
 
 **Optional Integrations:**
 - **Prometheus**: Built-in Prometheus text format exporter (no dependencies)
+- **Datadog**: OpenMetrics integration via same `/metrics` endpoint
 - **Grafana**: Works out of the box with Prometheus integration
 - **API Plugin**: Auto-integrates when available for `/metrics` endpoint
 
@@ -53,6 +54,7 @@ await db.usePlugin(new MetricsPlugin({ enabled: true }));  // Automatic collecti
 - ✅ Error tracking + error rates
 - ✅ Slow query detection
 - ✅ Real-time alerts + thresholds
+- ✅ OperationPool metrics (when enabled)
 
 **When to use:**
 - 📈 Performance optimization
@@ -1227,12 +1229,18 @@ new MetricsPlugin({
 
 **Q: What metrics are exported to Prometheus?**
 A:
-- `s3db_operations_total` (counter)
-- `s3db_operation_duration_seconds` (gauge)
-- `s3db_operation_errors_total` (counter)
-- `s3db_uptime_seconds` (gauge)
-- `s3db_resources_total` (gauge)
-- `s3db_info` (gauge)
+- `s3db_operations_total` (counter) - Total operations by type
+- `s3db_operation_duration_seconds` (gauge) - Average operation duration
+- `s3db_operation_errors_total` (counter) - Total errors by type
+- `s3db_uptime_seconds` (gauge) - Process uptime
+- `s3db_resources_total` (gauge) - Number of tracked resources
+- `s3db_pool_tasks_started_total` (counter) - OperationPool tasks started
+- `s3db_pool_tasks_completed_total` (counter) - OperationPool tasks completed
+- `s3db_pool_tasks_failed_total` (counter) - OperationPool tasks failed
+- `s3db_pool_tasks_retried_total` (counter) - OperationPool retry attempts
+- `s3db_pool_task_execution_seconds` (gauge) - Average task execution time
+- `s3db_pool_task_execution_total_seconds` (counter) - Total cumulative execution time
+- `s3db_info` (gauge) - Build and runtime information
 
 **Q: How to customize Prometheus path?**
 A: Use `prometheus.path`:
@@ -1293,6 +1301,133 @@ A: Yes, use curl or promtool:
 ```bash
 curl http://localhost:3000/metrics
 curl http://localhost:3000/metrics | promtool check metrics
+```
+
+---
+
+### Datadog
+
+**Q: Does MetricsPlugin work with Datadog?**
+A: Yes! Datadog's OpenMetrics integration can scrape the same `/metrics` endpoint as Prometheus. No additional configuration needed in s3db.js.
+
+**Q: How to configure Datadog in Kubernetes?**
+A: Add annotations to your Pod spec:
+```yaml
+annotations:
+  ad.datadoghq.com/s3db-api.checks: |
+    {
+      "openmetrics": {
+        "instances": [{
+          "openmetrics_endpoint": "http://%%host%%:%%port%%/metrics",
+          "namespace": "s3db",
+          "metrics": [".*"]
+        }]
+      }
+    }
+```
+
+**Q: What's the difference between Prometheus and Datadog metrics?**
+A: Datadog converts Prometheus format automatically:
+- `s3db_operations_total` → `s3db.operations_total`
+- All labels become Datadog tags
+- Same data, different naming convention
+
+**Q: Can I use both Prometheus and Datadog?**
+A: Yes! Both can scrape the same `/metrics` endpoint simultaneously with zero performance overhead. Just add both sets of annotations to your Pod.
+
+**Q: How to query s3db metrics in Datadog?**
+A: Use Datadog's query syntax:
+```
+sum:s3db.operations_total{*}.as_rate()  # Operation rate
+avg:s3db.operation_duration_seconds{*} by {operation}  # Avg duration
+```
+
+**Q: How to set up Datadog alerts?**
+A: Create monitors in Datadog UI or via API:
+```
+sum(last_5m):sum:s3db.operation_errors_total{*}.as_rate() > 10
+```
+
+**Q: Do I need to install Datadog agents?**
+A: Yes, Datadog Agent DaemonSet must be running in your Kubernetes cluster to scrape metrics.
+
+**Q: What's the recommended Datadog namespace?**
+A: Use `namespace: "s3db"` in your OpenMetrics config to prefix all metrics with `s3db.` and avoid conflicts.
+
+**Q: How to test Datadog integration locally?**
+A:
+1. Start s3db app: `node app.js`
+2. Verify endpoint: `curl http://localhost:3000/metrics`
+3. Check Datadog Agent logs: `kubectl logs -l app=datadog -n datadog`
+4. Search metrics in Datadog UI: Metrics → Explorer → "s3db"
+
+**Q: Can I use Datadog StatsD instead of OpenMetrics?**
+A: Not directly. MetricsPlugin exports Prometheus format only. For StatsD, you'd need to implement a custom exporter using `getStats()` API.
+
+**Q: How to secure /metrics endpoint?**
+A: Use IP allowlist (enabled by default):
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    ipAllowlist: [
+      '127.0.0.1',       // localhost
+      '10.0.0.0/8',      // Kubernetes cluster
+      '203.0.113.50'     // Prometheus server IP
+    ],
+    enforceIpAllowlist: true
+  }
+}));
+```
+
+**Q: What IPs are allowed by default?**
+A: Localhost and RFC 1918 private networks:
+- `127.0.0.1` (localhost IPv4)
+- `::1` (localhost IPv6)
+- `10.0.0.0/8` (private - Kubernetes, VPCs)
+- `172.16.0.0/12` (private - Docker Compose bridge: 172.17-31.x.x)
+- `192.168.0.0/16` (private - local networks)
+
+**Q: Does it work with Docker Compose out of the box?**
+A: Yes! Docker Compose networks use `172.17.0.0/16` - `172.31.0.0/16` ranges, which are covered by the default allowlist (`172.16.0.0/12`). No extra configuration needed:
+
+```yaml
+# docker-compose.yml
+services:
+  s3db-app:
+    ports: ["3000:3000"]
+  prometheus:
+    image: prom/prometheus
+    # Can scrape s3db-app:3000/metrics ✅
+```
+
+**Q: Why am I getting 403 Forbidden on /metrics?**
+A: Your IP is not in the allowlist. Either:
+1. Add your IP to `ipAllowlist` configuration
+2. Check `X-Forwarded-For` header if behind proxy
+3. Disable filtering (dev only): `enforceIpAllowlist: false`
+
+**Q: Does IP allowlist work with proxies/load balancers?**
+A: Yes! Automatically checks:
+1. `X-Forwarded-For` header (most proxies)
+2. `X-Real-IP` header (nginx)
+3. `socket.remoteAddress` (direct connection)
+
+**Q: Can I disable IP filtering in production?**
+A: **NOT recommended**. If absolutely necessary:
+```javascript
+prometheus: { enforceIpAllowlist: false }
+```
+This exposes /metrics to the public internet. Use firewall rules instead.
+
+**Q: Does IP allowlist support IPv6?**
+A: Yes! Supports both IPv4 and IPv6 CIDR notation:
+```javascript
+ipAllowlist: [
+  '192.168.0.0/16',    // IPv4
+  'fe80::/10',         // IPv6
+  '::ffff:192.168.1.1' // IPv4-mapped IPv6
+]
 ```
 
 ---
@@ -1699,6 +1834,187 @@ await db.usePlugin(new MetricsPlugin({
 
 ---
 
+### IP Allowlist (Security)
+
+The `/metrics` endpoint is protected by **IP allowlist** to prevent unauthorized access in production environments.
+
+#### Default Configuration
+
+By default, the allowlist includes **localhost** and **private networks** (RFC 1918):
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    // Default IP allowlist (automatically applied)
+    ipAllowlist: [
+      '127.0.0.1',           // localhost IPv4
+      '::1',                 // localhost IPv6
+      '10.0.0.0/8',          // Private network (Kubernetes pods, VPCs)
+      '172.16.0.0/12',       // Private network (Docker Compose bridge: 172.17-31.x.x)
+      '192.168.0.0/16'       // Private network (local development)
+    ],
+    enforceIpAllowlist: true  // Enable IP filtering (default: true)
+  }
+}));
+```
+
+**Result**: Prometheus/Datadog agents running inside your **private network** (VPC, Kubernetes cluster, Docker Compose) can access `/metrics`. Public internet requests are blocked.
+
+#### Custom IP Allowlist
+
+Add specific IP ranges for your monitoring infrastructure:
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    ipAllowlist: [
+      '127.0.0.1',           // localhost
+      '10.0.0.0/8',          // Kubernetes cluster pods
+      '203.0.113.50',        // Specific Prometheus server IP
+      '198.51.100.0/24'      // Corporate network range
+    ]
+  }
+}));
+```
+
+#### Disable IP Filtering (Development Only)
+
+**⚠️ NOT recommended for production:**
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    enforceIpAllowlist: false  // Disable IP filtering (UNSAFE!)
+  }
+}));
+```
+
+#### How It Works
+
+1. **Client IP extraction**: Checks `X-Forwarded-For` → `X-Real-IP` → `socket.remoteAddress`
+2. **CIDR matching**: Supports both IPv4 (`192.168.0.0/16`) and IPv6 (`fe80::/10`)
+3. **IPv4-mapped IPv6**: Automatically handles `::ffff:192.168.1.1` format
+4. **Forbidden response**: Returns `403 Forbidden` if IP not in allowlist
+
+#### Docker Compose Example
+
+Prometheus running in **Docker Compose** (same network):
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  s3db-app:
+    image: my-s3db-app:latest
+    ports:
+      - "3000:3000"
+    # Container gets IP from 172.17.0.0/16 range → allowed by default!
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    # Can scrape s3db-app:3000/metrics within Docker network
+```
+
+```javascript
+// No custom config needed - default allowlist includes 172.16.0.0/12
+await db.usePlugin(new MetricsPlugin({
+  prometheus: { enabled: true }
+}));
+```
+
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 's3db'
+    static_configs:
+      - targets: ['s3db-app:3000']  # Use Docker service name
+    metrics_path: '/metrics'
+```
+
+**Result**: Prometheus can scrape `http://s3db-app:3000/metrics` from within Docker network (IP `172.17.x.x` allowed by default).
+
+#### Kubernetes Example
+
+Prometheus running **inside the same Kubernetes cluster**:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3db-api
+spec:
+  containers:
+  - name: app
+    image: my-s3db-app:latest
+    # Pod gets IP from 10.0.0.0/8 range → allowed by default!
+```
+
+```javascript
+// No custom config needed - default allowlist includes 10.0.0.0/8
+await db.usePlugin(new MetricsPlugin({
+  prometheus: { enabled: true }
+}));
+```
+
+#### Prometheus Outside Cluster
+
+Prometheus running **outside Kubernetes** (different network):
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    ipAllowlist: [
+      '10.0.0.0/8',          // Keep for internal services
+      '203.0.113.0/24'       // Add external Prometheus IP range
+    ]
+  }
+}));
+```
+
+#### Troubleshooting
+
+**403 Forbidden when accessing /metrics:**
+
+1. Check client IP:
+   ```bash
+   curl -v http://localhost:3000/metrics
+   # Look for your IP in headers
+   ```
+
+2. Enable verbose logging:
+   ```javascript
+   await db.usePlugin(new MetricsPlugin({
+     prometheus: { enabled: true },
+     verbose: true  // Logs blocked IPs
+   }));
+   // Console: [API Server] Blocked /metrics request from unauthorized IP: 8.8.8.8
+   ```
+
+3. Add your IP to allowlist or disable filtering (dev only)
+
+**Load balancer / reverse proxy issues:**
+
+Ensure `X-Forwarded-For` header is set correctly:
+
+```nginx
+# nginx configuration
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+---
+
 ### Exported Metrics
 
 The plugin exports the following metrics in Prometheus format:
@@ -1994,6 +2310,355 @@ scrape_configs:
 
 ---
 
+### OperationPool Metrics
+
+**Q: Does MetricsPlugin track OperationPool operations?**
+A: Yes! When OperationPool is enabled, MetricsPlugin automatically collects detailed pool metrics.
+
+**Q: What OperationPool metrics are collected?**
+A: The following metrics are available via `getStats()` and Prometheus:
+
+```javascript
+const stats = await metricsPlugin.getStats();
+console.log(stats.pool);
+// {
+//   tasksStarted: 1500,
+//   tasksCompleted: 1450,
+//   tasksFailed: 50,
+//   tasksRetried: 75,
+//   totalExecutionTime: 65000,  // milliseconds
+//   avgExecutionTime: 44.83      // milliseconds
+// }
+```
+
+**Q: How to enable OperationPool metrics?**
+A: Just enable OperationPool in your database configuration - MetricsPlugin will detect and track it automatically:
+
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  clientOptions: {
+    operationPool: {
+      enabled: true,
+      concurrency: 50
+    }
+  }
+});
+
+await db.usePlugin(new MetricsPlugin({ enabled: true }));
+await db.start();
+
+// Pool metrics are now collected automatically!
+```
+
+**Q: What Prometheus metrics are exported for OperationPool?**
+A: Six metrics are exported:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `s3db_pool_tasks_started_total` | counter | Total tasks started |
+| `s3db_pool_tasks_completed_total` | counter | Total tasks completed successfully |
+| `s3db_pool_tasks_failed_total` | counter | Total tasks that failed |
+| `s3db_pool_tasks_retried_total` | counter | Total retry attempts |
+| `s3db_pool_task_execution_seconds` | gauge | Average task execution time |
+| `s3db_pool_task_execution_total_seconds` | counter | Cumulative execution time |
+
+**Q: How to monitor OperationPool performance in Grafana?**
+A: Example PromQL queries:
+
+```promql
+# Task success rate
+rate(s3db_pool_tasks_completed_total[5m]) / rate(s3db_pool_tasks_started_total[5m])
+
+# Task failure rate
+rate(s3db_pool_tasks_failed_total[5m]) / rate(s3db_pool_tasks_started_total[5m])
+
+# Average task execution time (last 5 minutes)
+rate(s3db_pool_task_execution_total_seconds[5m]) / rate(s3db_pool_tasks_completed_total[5m])
+
+# Tasks per second
+rate(s3db_pool_tasks_completed_total[1m])
+
+# Retry ratio
+rate(s3db_pool_tasks_retried_total[5m]) / rate(s3db_pool_tasks_started_total[5m])
+```
+
+**Q: How to set up alerts for OperationPool issues?**
+A: Example Prometheus alert rules:
+
+```yaml
+groups:
+  - name: s3db_pool_alerts
+    rules:
+      - alert: HighPoolFailureRate
+        expr: |
+          rate(s3db_pool_tasks_failed_total[5m]) /
+          rate(s3db_pool_tasks_started_total[5m]) > 0.05
+        for: 5m
+        annotations:
+          summary: "High failure rate in OperationPool (>5%)"
+
+      - alert: HighPoolRetryRate
+        expr: |
+          rate(s3db_pool_tasks_retried_total[5m]) /
+          rate(s3db_pool_tasks_started_total[5m]) > 0.10
+        for: 5m
+        annotations:
+          summary: "High retry rate in OperationPool (>10%)"
+
+      - alert: SlowPoolExecution
+        expr: s3db_pool_task_execution_seconds > 1.0
+        for: 10m
+        annotations:
+          summary: "Slow OperationPool task execution (>1s average)"
+```
+
+**Q: Can I track OperationPool metrics without Prometheus?**
+A: Yes, use the `getStats()` API:
+
+```javascript
+// Poll metrics every minute
+setInterval(async () => {
+  const stats = await metricsPlugin.getStats();
+
+  console.log('Pool Performance:', {
+    throughput: stats.pool.tasksCompleted,
+    successRate: (stats.pool.tasksCompleted / stats.pool.tasksStarted * 100).toFixed(2) + '%',
+    avgTime: stats.pool.avgExecutionTime.toFixed(2) + 'ms',
+    retryRate: (stats.pool.tasksRetried / stats.pool.tasksStarted * 100).toFixed(2) + '%'
+  });
+}, 60000);
+```
+
+**Q: How are pool metrics different from operation metrics?**
+A:
+- **Operation metrics** track individual resource operations (insert, update, get, etc.)
+- **Pool metrics** track the OperationPool's internal task queue and execution
+
+Pool metrics show the concurrency control layer, while operation metrics show the actual database operations. Both are valuable for performance analysis.
+
+**Q: What if OperationPool is not enabled?**
+A: The `pool` section in `getStats()` will return zeros, and pool metrics won't appear in Prometheus export. No errors or warnings are generated.
+
+---
+
+### Datadog Integration
+
+MetricsPlugin works seamlessly with Datadog through its **OpenMetrics integration**. Datadog can scrape the Prometheus-format `/metrics` endpoint automatically.
+
+#### Auto-Discovery in Kubernetes
+
+Add Datadog annotations to your Pod spec:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3db-api
+spec:
+  template:
+    metadata:
+      annotations:
+        # Enable Datadog OpenMetrics check
+        ad.datadoghq.com/s3db-api.checks: |
+          {
+            "openmetrics": {
+              "instances": [
+                {
+                  "openmetrics_endpoint": "http://%%host%%:%%port%%/metrics",
+                  "namespace": "s3db",
+                  "metrics": [".*"]
+                }
+              ]
+            }
+          }
+      labels:
+        app: s3db-api
+    spec:
+      containers:
+      - name: s3db-api
+        image: my-s3db-api:latest
+        ports:
+        - containerPort: 3000
+          name: http
+```
+
+**Configuration Details:**
+- `openmetrics_endpoint`: Uses auto-discovery variables (`%%host%%`, `%%port%%`)
+- `namespace`: Prefix for metrics in Datadog (e.g., `s3db.operations_total`)
+- `metrics`: `[".*"]` collects all s3db metrics
+
+#### Datadog Agent Configuration
+
+For **standalone mode** (separate port 9090):
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3db-api
+spec:
+  template:
+    metadata:
+      annotations:
+        ad.datadoghq.com/s3db-api.checks: |
+          {
+            "openmetrics": {
+              "instances": [
+                {
+                  "openmetrics_endpoint": "http://%%host%%:9090/metrics",
+                  "namespace": "s3db",
+                  "metrics": [".*"],
+                  "timeout": 5
+                }
+              ]
+            }
+          }
+```
+
+#### Metric Mapping
+
+s3db.js Prometheus metrics are automatically mapped to Datadog:
+
+| Prometheus Metric | Datadog Metric | Type |
+|-------------------|----------------|------|
+| `s3db_operations_total` | `s3db.operations_total` | count |
+| `s3db_operation_errors_total` | `s3db.operation_errors_total` | count |
+| `s3db_operation_duration_seconds` | `s3db.operation_duration_seconds` | gauge |
+| `s3db_pool_tasks_started_total` | `s3db.pool_tasks_started_total` | count |
+| `s3db_pool_tasks_completed_total` | `s3db.pool_tasks_completed_total` | count |
+| `s3db_pool_tasks_failed_total` | `s3db.pool_tasks_failed_total` | count |
+| `s3db_uptime_seconds` | `s3db.uptime_seconds` | gauge |
+| `s3db_resources_total` | `s3db.resources_total` | gauge |
+
+**Labels preserved**: All Prometheus labels (`operation`, `resource`, `version`, `node_version`) are converted to Datadog tags.
+
+#### Datadog Dashboard Queries
+
+Example queries for Datadog dashboards:
+
+**Operation Rate:**
+```
+sum:s3db.operations_total{*}.as_rate()
+```
+
+**Error Rate:**
+```
+sum:s3db.operation_errors_total{*}.as_rate()
+```
+
+**Average Operation Duration:**
+```
+avg:s3db.operation_duration_seconds{*} by {operation}
+```
+
+**Pool Success Rate:**
+```
+(sum:s3db.pool_tasks_completed_total{*}.as_rate() / sum:s3db.pool_tasks_started_total{*}.as_rate()) * 100
+```
+
+**Pool Throughput:**
+```
+sum:s3db.pool_tasks_completed_total{*}.as_rate()
+```
+
+#### Datadog Monitors (Alerts)
+
+**High Error Rate:**
+```
+sum(last_5m):sum:s3db.operation_errors_total{*}.as_rate() > 10
+```
+
+**Slow Operations:**
+```
+avg(last_10m):avg:s3db.operation_duration_seconds{operation:insert} > 0.5
+```
+
+**Pool Failure Rate:**
+```
+(sum(last_5m):sum:s3db.pool_tasks_failed_total{*}.as_rate() /
+ sum(last_5m):sum:s3db.pool_tasks_started_total{*}.as_rate()) > 0.05
+```
+
+#### Testing Datadog Integration
+
+```bash
+# 1. Start your s3db.js application with MetricsPlugin
+node app.js
+
+# 2. Verify metrics endpoint
+curl http://localhost:3000/metrics
+
+# 3. Check Datadog Agent logs
+kubectl logs -l app=datadog -n datadog
+
+# 4. Verify metrics in Datadog UI
+# Navigate to: Metrics → Explorer → Search "s3db"
+```
+
+#### Datadog vs Prometheus Comparison
+
+| Feature | Prometheus | Datadog |
+|---------|-----------|---------|
+| **Model** | Pull (scrape) | Pull (OpenMetrics check) |
+| **Setup** | ServiceMonitor or annotations | Pod annotations |
+| **Storage** | Self-hosted | SaaS (cloud) |
+| **Dashboards** | Grafana | Built-in Datadog dashboards |
+| **Alerting** | Prometheus AlertManager | Datadog Monitors |
+| **Cost** | Infrastructure cost | Per-host pricing |
+| **Retention** | Configurable (local) | 15 months (cloud) |
+
+**Recommendation**:
+- **Small teams / cost-conscious**: Prometheus + Grafana (free, self-hosted)
+- **Enterprise / multi-cloud**: Datadog (managed, APM integration, logs correlation)
+- **Best of both**: Run both simultaneously (no overhead in s3db.js)
+
+#### Running Prometheus + Datadog Together
+
+You can use both simultaneously - MetricsPlugin serves the same `/metrics` endpoint to both:
+
+```javascript
+// s3db.js configuration (no changes needed)
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'integrated'  // Single endpoint for both Prometheus + Datadog
+  }
+}));
+```
+
+```yaml
+# Kubernetes Pod with both integrations
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3db-api
+spec:
+  template:
+    metadata:
+      annotations:
+        # Prometheus autodiscovery
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+
+        # Datadog autodiscovery
+        ad.datadoghq.com/s3db-api.checks: |
+          {
+            "openmetrics": {
+              "instances": [{
+                "openmetrics_endpoint": "http://%%host%%:3000/metrics",
+                "namespace": "s3db",
+                "metrics": [".*"]
+              }]
+            }
+          }
+```
+
+**No performance impact**: Both systems scrape the same cached metrics snapshot from MetricsPlugin. The overhead is negligible (~1-2ms per scrape).
+
+---
+
 ### Best Practices
 
 1. **Use Integrated Mode in Kubernetes**: Single scrape target simplifies configuration
@@ -2001,6 +2666,11 @@ scrape_configs:
 3. **Monitor Error Rates**: Alert on `s3db_operation_errors_total` increases
 4. **Track Duration**: Set alerts for slow operations (>100ms for simple ops)
 5. **Use Labels Wisely**: `resource` and `operation` labels enable detailed filtering
+6. **Datadog Namespace**: Always set `namespace: "s3db"` to avoid metric name conflicts
+7. **Run Both Systems**: Prometheus for long-term storage, Datadog for correlation with APM/logs
+8. **Keep IP Allowlist Enabled**: Default is secure (private networks only). Only disable in development.
+9. **Review Allowlist Regularly**: Update IP ranges when infrastructure changes (new VPCs, clusters)
+10. **Use CIDR Notation**: Prefer ranges (`10.0.0.0/8`) over individual IPs for easier maintenance
 
 ---
 
@@ -2030,6 +2700,54 @@ A:
 new MetricsPlugin({
   prometheus: { enabled: false }
 })
+```
+
+**Q: Getting 403 Forbidden on /metrics?**
+A: IP allowlist is blocking your request:
+1. **Check your IP**: `curl ifconfig.me` or check request headers
+2. **Enable verbose logging**: `prometheus: { verbose: true }` to see blocked IPs
+3. **Add your IP to allowlist**:
+   ```javascript
+   prometheus: {
+     ipAllowlist: [
+       '127.0.0.1',
+       '10.0.0.0/8',
+       'YOUR.IP.ADDRESS.HERE'  // Add your IP
+     ]
+   }
+   ```
+4. **Disable filtering (dev only)**: `enforceIpAllowlist: false`
+
+**Q: /metrics works locally but not in Kubernetes?**
+A: Check pod IP range:
+```bash
+kubectl get pods -o wide  # Check pod IPs
+# If pods use different range (e.g., 100.96.0.0/12), add to allowlist
+```
+```javascript
+prometheus: {
+  ipAllowlist: [
+    '10.0.0.0/8',       // Default
+    '100.96.0.0/12'     // Add Kubernetes pod range
+  ]
+}
+```
+
+**Q: Prometheus scraping fails behind load balancer?**
+A: Ensure load balancer forwards client IP:
+1. **AWS ALB**: Automatically sets `X-Forwarded-For`
+2. **nginx**: Add `proxy_set_header X-Forwarded-For $remote_addr;`
+3. **Kubernetes Ingress**: Check `use-forwarded-headers: "true"`
+4. **Verify**: Check logs with `verbose: true` to see detected IP
+
+**Q: IPv6 addresses not working?**
+A: Ensure proper format:
+```javascript
+ipAllowlist: [
+  '::1',                 // IPv6 localhost (not 0:0:0:0:0:0:0:1)
+  'fe80::/10',           // IPv6 CIDR
+  '::ffff:192.168.1.1'   // IPv4-mapped IPv6
+]
 ```
 
 ---

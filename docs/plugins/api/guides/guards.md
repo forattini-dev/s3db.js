@@ -678,10 +678,11 @@ You learned:
 ## 🔗 See Also
 
 **Related Documentation:**
-- [API Plugin](./README.md) - Main API Plugin documentation
+- **[Authorization Patterns](./authorization-patterns.md)** - ✨ Advanced patterns (ABAC, granular scopes, middleware)
+- [API Plugin](../README.md) - Main API Plugin documentation
 - [Authentication](./authentication.md) - Set up JWT/OIDC authentication
-- [Resource Documentation](../../resource.md) - Partitions and resource config
-- [Guards Design](../../guards-design.md) - Detailed design document
+- [OIDC Guide](./oidc.md) - OAuth2/OIDC setup
+- [Configuration Reference](../reference/configuration.md) - All options
 
 **Examples:**
 - [e66-guards-live.js](../../examples/e66-guards-live.js) - Complete guards example with live API

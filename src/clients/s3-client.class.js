@@ -3,7 +3,6 @@ import EventEmitter from "events";
 import { chunk } from "lodash-es";
 import { Agent as HttpAgent } from 'http';
 import { Agent as HttpsAgent } from 'https';
-import { PromisePool } from "@supercharge/promise-pool";
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 
 import {
@@ -23,6 +22,8 @@ import { idGenerator } from "../concerns/id.js";
 import { metadataEncode, metadataDecode } from "../concerns/metadata-encoding.js";
 import { ConnectionString } from "../connection-string.class.js";
 import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "../errors.js";
+import { OperationsPool } from "../concerns/operations-pool.js";
+import { AdaptiveTuning } from "../concerns/adaptive-tuning.js";
 
 export class S3Client extends EventEmitter {
   constructor({
@@ -30,8 +31,9 @@ export class S3Client extends EventEmitter {
     id = null,
     AwsS3Client,
     connectionString,
-    parallelism = 10,
+    parallelism = 100, // CHANGED: Default concurrency is now 100 (was 10)
     httpClientOptions = {},
+    operationsPool = { enabled: true }, // ENABLED BY DEFAULT - uses addBatch() for bulk operations
   }) {
     super();
     this.verbose = verbose;
@@ -46,7 +48,119 @@ export class S3Client extends EventEmitter {
       timeout: 60000, // 60 second timeout
       ...httpClientOptions,
     };
-    this.client = AwsS3Client || this.createClient()
+    this.client = AwsS3Client || this.createClient();
+
+    // Initialize OperationsPool (ENABLED BY DEFAULT!)
+    this.operationsPoolConfig = this._normalizeOperationsPoolConfig(operationsPool);
+    this.operationsPool = this.operationsPoolConfig.enabled ? this._createOperationsPool() : null;
+  }
+
+  /**
+   * Normalize OperationsPool configuration
+   * @private
+   */
+  _normalizeOperationsPoolConfig(config) {
+    if (config === false || config?.enabled === false) {
+      return { enabled: false };
+    }
+
+    const normalized = {
+      enabled: config.enabled ?? true, // ENABLED BY DEFAULT
+      concurrency: config.concurrency ?? this.parallelism,
+      retries: config.retries ?? 3,
+      retryDelay: config.retryDelay ?? 1000,
+      timeout: config.timeout ?? 30000,
+      retryableErrors: config.retryableErrors ?? [],
+      autotune: config.autotune ?? null,
+      monitoring: config.monitoring ?? { collectMetrics: true },
+    };
+
+    return normalized;
+  }
+
+  /**
+   * Create OperationsPool instance
+   * @private
+   */
+  _createOperationsPool() {
+    const poolConfig = {
+      concurrency: this.operationsPoolConfig.concurrency,
+      retries: this.operationsPoolConfig.retries,
+      retryDelay: this.operationsPoolConfig.retryDelay,
+      timeout: this.operationsPoolConfig.timeout,
+      retryableErrors: this.operationsPoolConfig.retryableErrors,
+      monitoring: this.operationsPoolConfig.monitoring,
+    };
+
+    // Handle 'auto' concurrency
+    if (poolConfig.concurrency === 'auto') {
+      const tuner = new AdaptiveTuning(this.operationsPoolConfig.autotune);
+      poolConfig.concurrency = tuner.currentConcurrency;
+      poolConfig.autotune = tuner;
+    } else if (this.operationsPoolConfig.autotune) {
+      const tuner = new AdaptiveTuning({
+        ...this.operationsPoolConfig.autotune,
+        initialConcurrency: poolConfig.concurrency,
+      });
+      poolConfig.autotune = tuner;
+    }
+
+    const pool = new OperationsPool(poolConfig);
+
+    // Forward pool events to client
+    pool.on('pool:taskStarted', (task) => this.emit('pool:taskStarted', task));
+    pool.on('pool:taskCompleted', (task) => this.emit('pool:taskCompleted', task));
+    pool.on('pool:taskFailed', (task, error) => this.emit('pool:taskFailed', task, error));
+    pool.on('pool:taskRetried', (task, attempt) => this.emit('pool:taskRetried', task, attempt));
+
+    return pool;
+  }
+
+  /**
+   * Execute an S3 operation through the pool (if enabled)
+   * ALL S3 operations go through this method!
+   * @private
+   */
+  async _executeOperation(fn, options = {}) {
+    if (!this.operationsPool || options.bypassPool) {
+      // Pool disabled or explicitly bypassed
+      return await fn();
+    }
+
+    // Execute through pool - THIS IS THE MAGIC!
+    return await this.operationsPool.enqueue(fn, {
+      priority: options.priority ?? 0,
+      retries: options.retries,
+      timeout: options.timeout,
+      metadata: options.metadata || {},
+    });
+  }
+
+  /**
+   * Execute batch of operations through the pool (if enabled)
+   * ALL operations in the batch go through this method!
+   * @private
+   */
+  async _executeBatch(fns, options = {}) {
+    if (!this.operationsPool || options.bypassPool) {
+      // Pool disabled or explicitly bypassed - use Promise.allSettled
+      const settled = await Promise.allSettled(fns.map(fn => fn()));
+      const results = settled.map(s => s.status === 'fulfilled' ? s.value : null);
+      const errors = settled
+        .map((s, index) => s.status === 'rejected' ? { error: s.reason, index } : null)
+        .filter(Boolean);
+      return { results, errors };
+    }
+
+    // Execute batch through pool - THIS IS THE MAGIC FOR BATCHES!
+    return await this.operationsPool.addBatch(fns, {
+      priority: options.priority ?? 0,
+      retries: options.retries,
+      timeout: options.timeout,
+      metadata: options.metadata || {},
+      onItemComplete: options.onItemComplete,
+      onItemError: options.onItemError,
+    });
   }
 
   createClient() {
@@ -117,163 +231,171 @@ export class S3Client extends EventEmitter {
   }
 
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch, ifNoneMatch }) {
-    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
-    const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
+    return await this._executeOperation(async () => {
+      const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+      const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
 
-    // Ensure all metadata values are strings and use smart encoding
-    const stringMetadata = {};
-    if (metadata) {
-      for (const [k, v] of Object.entries(metadata)) {
-        // Ensure key is a valid string
-        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
+      // Ensure all metadata values are strings and use smart encoding
+      const stringMetadata = {};
+      if (metadata) {
+        for (const [k, v] of Object.entries(metadata)) {
+          // Ensure key is a valid string
+          const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
 
-        // Smart encode the value
-        const { encoded } = metadataEncode(v);
-        stringMetadata[validKey] = encoded;
+          // Smart encode the value
+          const { encoded } = metadataEncode(v);
+          stringMetadata[validKey] = encoded;
+        }
       }
-    }
 
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key,
-      Metadata: stringMetadata,
-      Body: body || Buffer.alloc(0),
-    };
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key,
+        Metadata: stringMetadata,
+        Body: body || Buffer.alloc(0),
+      };
 
-    if (contentType !== undefined) options.ContentType = contentType;
-    if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding;
-    if (contentLength !== undefined) options.ContentLength = contentLength;
-    if (ifMatch !== undefined) options.IfMatch = ifMatch;
-    if (ifNoneMatch !== undefined) options.IfNoneMatch = ifNoneMatch;
+      if (contentType !== undefined) options.ContentType = contentType;
+      if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding;
+      if (contentLength !== undefined) options.ContentLength = contentLength;
+      if (ifMatch !== undefined) options.IfMatch = ifMatch;
+      if (ifNoneMatch !== undefined) options.IfNoneMatch = ifNoneMatch;
 
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new PutObjectCommand(options)));
-    this.emit('cl:PutObject', err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
+      const [ok, err, response] = await tryFn(() => this.sendCommand(new PutObjectCommand(options)));
+      this.emit('cl:PutObject', err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
 
-    if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: 'PutObjectCommand',
-        commandInput: options,
-      });
-    }
+      if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: 'PutObjectCommand',
+          commandInput: options,
+        });
+      }
 
-    return response;
+      return response;
+    }, { metadata: { operation: 'putObject', key } });
   }
 
   async getObject(key) {
-    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key,
-    };
+    return await this._executeOperation(async () => {
+      const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key,
+      };
 
-    const [ok, err, response] = await tryFn(async () => {
-      const res = await this.sendCommand(new GetObjectCommand(options));
+      const [ok, err, response] = await tryFn(async () => {
+        const res = await this.sendCommand(new GetObjectCommand(options));
 
-      // Smart decode metadata values
-      if (res.Metadata) {
-        const decodedMetadata = {};
-        for (const [key, value] of Object.entries(res.Metadata)) {
-          decodedMetadata[key] = metadataDecode(value);
+        // Smart decode metadata values
+        if (res.Metadata) {
+          const decodedMetadata = {};
+          for (const [key, value] of Object.entries(res.Metadata)) {
+            decodedMetadata[key] = metadataDecode(value);
+          }
+          res.Metadata = decodedMetadata;
         }
-        res.Metadata = decodedMetadata;
+
+        return res;
+      });
+
+      this.emit('cl:GetObject', err || response, { key });
+
+      if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: 'GetObjectCommand',
+          commandInput: options,
+        });
       }
 
-      return res;
-    });
-
-    this.emit('cl:GetObject', err || response, { key });
-
-    if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: 'GetObjectCommand',
-        commandInput: options,
-      });
-    }
-
-    return response;
+      return response;
+    }, { metadata: { operation: 'getObject', key } });
   }
 
   async headObject(key) {
-    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key,
-    };
+    return await this._executeOperation(async () => {
+      const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key,
+      };
 
-    const [ok, err, response] = await tryFn(async () => {
-      const res = await this.sendCommand(new HeadObjectCommand(options));
+      const [ok, err, response] = await tryFn(async () => {
+        const res = await this.sendCommand(new HeadObjectCommand(options));
 
-      // Smart decode metadata values (same as getObject)
-      if (res.Metadata) {
-        const decodedMetadata = {};
-        for (const [key, value] of Object.entries(res.Metadata)) {
-          decodedMetadata[key] = metadataDecode(value);
+        // Smart decode metadata values (same as getObject)
+        if (res.Metadata) {
+          const decodedMetadata = {};
+          for (const [key, value] of Object.entries(res.Metadata)) {
+            decodedMetadata[key] = metadataDecode(value);
+          }
+          res.Metadata = decodedMetadata;
         }
-        res.Metadata = decodedMetadata;
+
+        return res;
+      });
+
+      this.emit('cl:HeadObject', err || response, { key });
+
+      if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: 'HeadObjectCommand',
+          commandInput: options,
+        });
       }
 
-      return res;
-    });
-
-    this.emit('cl:HeadObject', err || response, { key });
-
-    if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: 'HeadObjectCommand',
-        commandInput: options,
-      });
-    }
-
-    return response;
+      return response;
+    }, { metadata: { operation: 'headObject', key } });
   }
 
   async copyObject({ from, to, metadata, metadataDirective, contentType }) {
-    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, to) : to,
-      CopySource: path.join(this.config.bucket, keyPrefix ? path.join(keyPrefix, from) : from),
-    };
+    return await this._executeOperation(async () => {
+      const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, to) : to,
+        CopySource: path.join(this.config.bucket, keyPrefix ? path.join(keyPrefix, from) : from),
+      };
 
-    // Add metadata directive if specified
-    if (metadataDirective) {
-      options.MetadataDirective = metadataDirective; // 'COPY' or 'REPLACE'
-    }
-
-    // Add metadata if specified (and encode values)
-    if (metadata && typeof metadata === 'object') {
-      const encodedMetadata = {};
-      for (const [key, value] of Object.entries(metadata)) {
-        const { encoded } = metadataEncode(value);
-        encodedMetadata[key] = encoded;
+      // Add metadata directive if specified
+      if (metadataDirective) {
+        options.MetadataDirective = metadataDirective; // 'COPY' or 'REPLACE'
       }
-      options.Metadata = encodedMetadata;
-    }
 
-    // Add content type if specified
-    if (contentType) {
-      options.ContentType = contentType;
-    }
+      // Add metadata if specified (and encode values)
+      if (metadata && typeof metadata === 'object') {
+        const encodedMetadata = {};
+        for (const [key, value] of Object.entries(metadata)) {
+          const { encoded } = metadataEncode(value);
+          encodedMetadata[key] = encoded;
+        }
+        options.Metadata = encodedMetadata;
+      }
 
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new CopyObjectCommand(options)));
-    this.emit('cl:CopyObject', err || response, { from, to, metadataDirective });
+      // Add content type if specified
+      if (contentType) {
+        options.ContentType = contentType;
+      }
 
-    if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key: to,
-        commandName: 'CopyObjectCommand',
-        commandInput: options,
-      });
-    }
+      const [ok, err, response] = await tryFn(() => this.sendCommand(new CopyObjectCommand(options)));
+      this.emit('cl:CopyObject', err || response, { from, to, metadataDirective });
 
-    return response;
+      if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key: to,
+          commandName: 'CopyObjectCommand',
+          commandInput: options,
+        });
+      }
+
+      return response;
+    }, { metadata: { operation: 'copyObject', from, to } });
   }
 
   async exists(key) {
@@ -284,63 +406,77 @@ export class S3Client extends EventEmitter {
   }
 
   async deleteObject(key) {
-    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
-    const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key,
-    };
+    return await this._executeOperation(async () => {
+      const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+      const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key,
+      };
 
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new DeleteObjectCommand(options)));
-    this.emit('cl:DeleteObject', err || response, { key });
+      const [ok, err, response] = await tryFn(() => this.sendCommand(new DeleteObjectCommand(options)));
+      this.emit('cl:DeleteObject', err || response, { key });
 
-    if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: 'DeleteObjectCommand',
-        commandInput: options,
-      });
-    }
+      if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: 'DeleteObjectCommand',
+          commandInput: options,
+        });
+      }
 
-    return response;
+      return response;
+    }, { metadata: { operation: 'deleteObject', key } });
   }
 
   async deleteObjects(keys) {
     const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const packages = chunk(keys, 1000);
 
-    const { results, errors } = await PromisePool.for(packages)
-      .withConcurrency(this.parallelism)
-      .process(async (keys) => {
-        // Log existence before deletion
-        for (const key of keys) {
-          const resolvedKey = keyPrefix ? path.join(keyPrefix, key) : key;
-          const bucket = this.config.bucket;
-          const existsBefore = await this.exists(key);
-        }
-        const options = {
-          Bucket: this.config.bucket,
-          Delete: {
-            Objects: keys.map((key) => ({
-              Key: keyPrefix ? path.join(keyPrefix, key) : key,
-            })),
-          },
-        };
+    const results = [];
+    const errors = [];
 
-        // Debug log
-        let response;
-        const [ok, err, res] = await tryFn(() => this.sendCommand(new DeleteObjectsCommand(options)));
-        if (!ok) throw err;
-        response = res;
-          if (response && response.Errors && response.Errors.length > 0) {
-            // console.error('[Client][ERROR] DeleteObjectsCommand errors:', response.Errors);
+    // Process each package - OperationsPool controls concurrency automatically
+    for (const packageKeys of packages) {
+      const [ok, err, response] = await tryFn(async () => {
+        return await this._executeOperation(async () => {
+          // Log existence before deletion
+          for (const key of packageKeys) {
+            const resolvedKey = keyPrefix ? path.join(keyPrefix, key) : key;
+            const bucket = this.config.bucket;
+            const existsBefore = await this.exists(key);
           }
-          if (response && response.Deleted && response.Deleted.length !== keys.length) {
-            // console.error('[Client][ERROR] Not all objects were deleted:', response.Deleted, 'expected:', keys);
-        }
-        return response;
+
+          const options = {
+            Bucket: this.config.bucket,
+            Delete: {
+              Objects: packageKeys.map((key) => ({
+                Key: keyPrefix ? path.join(keyPrefix, key) : key,
+              })),
+            },
+          };
+
+          const [ok, err, res] = await tryFn(() => this.sendCommand(new DeleteObjectsCommand(options)));
+          if (!ok) throw err;
+
+          if (res && res.Errors && res.Errors.length > 0) {
+            // console.error('[Client][ERROR] DeleteObjectsCommand errors:', res.Errors);
+          }
+          if (res && res.Deleted && res.Deleted.length !== packageKeys.length) {
+            // console.error('[Client][ERROR] Not all objects were deleted:', res.Deleted, 'expected:', packageKeys);
+          }
+
+          return res;
+        }, { metadata: { operation: 'deleteObjects', count: packageKeys.length } });
       });
+
+      if (ok) {
+        results.push(response);
+      } else {
+        errors.push({ message: err.message, raw: err });
+      }
+    }
 
     const report = {
       deleted: results,
@@ -557,23 +693,32 @@ export class S3Client extends EventEmitter {
 
   async moveAllObjects({ prefixFrom, prefixTo }) {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
-    const { results, errors } = await PromisePool
-      .for(keys)
-      .withConcurrency(this.parallelism)
-      .process(async (key) => {
-        const to = key.replace(prefixFrom, prefixTo)
-        const [ok, err] = await tryFn(async () => {
-          await this.moveObject({ 
-            from: key, 
-            to,
-          });
-          });
-        if (!ok) {
-          throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
-        }
-        return to;
+    const results = [];
+    const errors = [];
+
+    // Process each key - OperationsPool controls concurrency automatically
+    for (const key of keys) {
+      const to = key.replace(prefixFrom, prefixTo);
+      const [ok, err] = await tryFn(async () => {
+        await this.moveObject({
+          from: key,
+          to,
+        });
       });
+
+      if (ok) {
+        results.push(to);
+      } else {
+        errors.push({
+          message: err.message,
+          raw: err,
+          item: key
+        });
+      }
+    }
+
     this.emit("cl:MoveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+
     if (errors.length > 0) {
       throw new UnknownError("Some objects could not be moved", {
         bucket: this.config.bucket,

@@ -1,8 +1,10 @@
-# Authorization Patterns with s3db.js
+# 🎯 Advanced Authorization Patterns
+
+> **Advanced guide** - For basics, start with [Guards Guide](./guards.md)
 
 Authentication answers **"who are you?"**, authorization answers **"what can you do?"**.
 
-This guide shows complete authorization patterns using s3db.js:
+This guide shows **advanced** authorization patterns using s3db.js:
 - **Granular Scopes** - Scalable scope structure
 - **Row-Level Security (RLS)** - Per-row access control using partitions
 - **Multi-Tenancy** - Complete data isolation per tenant

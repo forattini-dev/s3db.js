@@ -47,11 +47,31 @@
  * }
  */
 
+import crypto from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { unauthorized } from '../utils/response-formatter.js';
-import { applyProviderPreset } from './providers.js';
+import { applyProviderPreset, applyProviderQuirks } from './providers.js';
 import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
+import { deriveOidcKeys } from '../concerns/crypto.js';
+import {
+  setChunkedCookie,
+  getChunkedCookie,
+  deleteChunkedCookie
+} from '../concerns/cookie-chunking.js';
+import {
+  validateIdToken,
+  validateTokenResponse,
+  validateConfig as validateOidcConfigStrict,
+  getUserFriendlyError
+} from '../concerns/oidc-validator.js';
+import {
+  ErrorTypes,
+  getErrorType,
+  getErrorDetails,
+  generateErrorPage,
+  generateErrorJSON
+} from '../concerns/oidc-errors.js';
 
 /**
  * Validate OIDC configuration at startup
@@ -160,6 +180,7 @@ function applyUserMapping(claims, mapping, defaults) {
   return user;
 }
 
+
 /**
  * Get or create user from OIDC claims
  * @param {Object} usersResource - s3db.js users resource
@@ -217,9 +238,9 @@ async function getOrCreateUser(usersResource, claims, config) {
 
   if (user) {
     // Update existing user with ALL Azure AD claims
-    // 🎯 Use replace() to avoid validation errors from invalid existing fields
+    // 🎯 Use update() to merge and preserve existing fields like apiToken
     // Explicitly exclude problematic fields that may have invalid data
-    const { webpush, lastUrlId, lastLoginIp, lastLoginUserAgent, ...userWithoutProblematicFields } = user;
+    const { webpush, lastUrlId, lastLoginIp, lastLoginUserAgent, password, ...userWithoutProblematicFields } = user;
 
     // 🎯 Build clean user object with ONLY fields from custom schema
     const cleanUser = {
@@ -273,8 +294,9 @@ async function getOrCreateUser(usersResource, claims, config) {
       }
     }
 
-    // Use replace() instead of update() to avoid merging with invalid existing fields
-    user = await usersResource.replace(user.id, finalUser);
+    // 🎯 Use update() to merge and preserve existing fields
+    // update() doesn't validate fields we're not updating (avoids password validation)
+    user = await usersResource.update(user.id, finalUser);
     return { user, created: false };
   }
 
@@ -379,7 +401,7 @@ async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientS
 export function createOIDCHandler(inputConfig, app, usersResource, events = null) {
   const preset = applyProviderPreset('oidc', inputConfig || {});
   // Apply defaults
-  const config = {
+const config = {
     scopes: ['openid', 'profile', 'email', 'offline_access'],
     cookieName: 'oidc_session',
     cookieMaxAge: 604800000, // 7 days (same as absolute duration)
@@ -409,6 +431,10 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       maxAttempts: 200,
       skipSuccessfulRequests: true
     },
+    apiTokenField: undefined,
+    detectApiTokenField: true,
+    generateApiToken: true,
+    apiTokenLength: 48,
     ...preset
   };
 
@@ -430,11 +456,32 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     postLogoutRedirect,
     idpLogout,
     autoCreateUser,
-    autoRefreshTokens,
-    refreshThreshold,
+    autoRefreshTokens = true,           // 🎯 NEW: Enable implicit token refresh (default: true)
+    refreshThreshold = 300000,          // 🎯 NEW: Refresh 5min before expiry (default: 300000ms)
     cookieSecure,
-    cookieSameSite
+    cookieSameSite,
+    apiTokenCookie,
+    sessionStore                         // 🎯 NEW (v16.3.1): External session storage (Redis, etc.)
   } = config;
+
+  // 🔐 Derive cryptographic keys using HKDF (RFC 5869)
+  // Separates encryption and signing keys from single secret for better security
+  const { current: derivedKeys } = deriveOidcKeys(cookieSecret);
+  const signingKey = derivedKeys.signing;
+
+  /**
+   * WeakMap for caching session data per request
+   * Prevents multiple decode operations for the same session
+   * Auto garbage-collected when request completes
+   */
+  const sessionCache = new WeakMap();
+
+  /**
+   * Generate secure random session ID
+   */
+  function generateSessionId() {
+    return crypto.randomBytes(32).toString('base64url');
+  }
 
   // OAuth2/OIDC endpoints (discovery first, provider-aware fallbacks)
   const issuerNoSlash = `${issuer || ''}`.replace(/\/$/, '');
@@ -453,51 +500,292 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     logoutEndpoint = `${tenantBase}/oauth2/v2.0/logout`;
   }
 
-  // Lazy discovery to avoid top-level await
-  let discovered = false;
-  async function getEndpoints() {
-    if (discovered || config.discovery?.enabled === false) {
-      return { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
+  /**
+   * 🎯 NEW: Lazy discovery with context-based caching
+   * Inspired by @hono/oidc-auth's getAuthorizationServer pattern
+   *
+   * Benefits:
+   * - Thread-safe: cache per-request, no race conditions
+   * - Efficient: discovery called only once per request
+   * - Reusable: multiple calls in same request reuse cached endpoints
+   *
+   * @param {Context} c - Hono context (optional, for caching)
+   * @returns {Promise<Object>} Endpoints object
+   */
+  async function getEndpoints(c = null) {
+    // Check context cache first (if context available)
+    if (c) {
+      const cached = c.get('oidc_endpoints');
+      if (cached) {
+        return cached;
+      }
     }
+
+    // Discovery disabled - return defaults
+    if (config.discovery?.enabled === false) {
+      const endpoints = { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
+      if (c) c.set('oidc_endpoints', endpoints);
+      return endpoints;
+    }
+
+    // Perform discovery
     try {
       const res = await fetch(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
       if (res.ok) {
         const doc = await res.json();
-        authorizationEndpoint = doc.authorization_endpoint || authorizationEndpoint;
-        tokenEndpoint = doc.token_endpoint || tokenEndpoint;
-        logoutEndpoint = doc.end_session_endpoint || logoutEndpoint;
-        discovered = true;
+        const endpoints = {
+          authorizationEndpoint: doc.authorization_endpoint || authorizationEndpoint,
+          tokenEndpoint: doc.token_endpoint || tokenEndpoint,
+          logoutEndpoint: doc.end_session_endpoint || logoutEndpoint
+        };
+
+        // Cache in context for this request
+        if (c) c.set('oidc_endpoints', endpoints);
+        return endpoints;
       }
     } catch (e) {
       if (config.verbose) {
         console.warn('[OIDC] Discovery failed, using default endpoints:', e.message);
       }
     }
-    return { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
+
+    // Fallback to defaults
+    const endpoints = { authorizationEndpoint, tokenEndpoint, logoutEndpoint };
+    if (c) c.set('oidc_endpoints', endpoints);
+    return endpoints;
   }
 
   /**
-   * Encode session data as signed JWT
+   * Encode session data
+   *
+   * With sessionStore:
+   * - Generates session ID
+   * - Stores data in external store (Redis, etc.)
+   * - Returns session ID (small, ~50 bytes)
+   *
+   * Without sessionStore (default):
+   * - Signs data as JWT
+   * - Returns JWT (may be large, 2-8KB)
+   *
+   * 🔐 Uses HKDF-derived signing key for better security
    */
   async function encodeSession(data) {
-    const secret = new TextEncoder().encode(cookieSecret);
-    const jwt = await new SignJWT(data)
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime(`${Math.floor(cookieMaxAge / 1000)}s`)
-      .sign(secret);
-    return jwt;
+    if (sessionStore) {
+      // External store mode: generate ID, store data
+      const sessionId = generateSessionId();
+      await sessionStore.set(sessionId, data, cookieMaxAge);
+      return sessionId;
+    } else {
+      // Cookie-only mode: sign as JWT
+      const jwt = await new SignJWT(data)
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime(`${Math.floor(cookieMaxAge / 1000)}s`)
+        .sign(signingKey);
+      return jwt;
+    }
   }
 
   /**
-   * Decode and verify session JWT
+   * Decode session data
+   *
+   * With sessionStore:
+   * - Receives session ID
+   * - Retrieves data from external store
+   * - Returns session data or null
+   *
+   * Without sessionStore (default):
+   * - Receives JWT
+   * - Verifies and decodes JWT
+   * - Returns payload or null
+   *
+   * 🔐 Uses HKDF-derived signing key for better security
    */
-  async function decodeSession(jwt) {
+  async function decodeSession(idOrJwt) {
+    if (sessionStore) {
+      // External store mode: fetch by ID
+      try {
+        return await sessionStore.get(idOrJwt);
+      } catch (err) {
+        console.error('[OIDC] Session store get error:', err.message);
+        return null;
+      }
+    } else {
+      // Cookie-only mode: verify JWT
+      try {
+        const { payload } = await jwtVerify(idOrJwt, signingKey);
+        return payload;
+      } catch (err) {
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Get session with WeakMap caching (per-request)
+   * Prevents multiple decode operations for the same request
+   *
+   * @param {Object} c - Hono context
+   * @param {string} cookieName - Cookie name
+   * @returns {Promise<Object|null>} Session data or null
+   */
+  async function getCachedSession(c, cookieName) {
+    // Check cache first
+    if (sessionCache.has(c)) {
+      return sessionCache.get(c);
+    }
+
+    // Not in cache - decode session
+    const sessionCookie = getChunkedCookie(c, cookieName);
+    if (!sessionCookie) {
+      return null;
+    }
+
+    const session = await decodeSession(sessionCookie);
+
+    // Cache for this request (auto GC'd when request completes)
+    if (session) {
+      sessionCache.set(c, session);
+    }
+
+    return session;
+  }
+
+  /**
+   * 🎯 NEW: Delete session cookie using dual-cookie deletion pattern
+   * Ensures cookies are deleted across both host-only and domain-scoped configurations
+   * Also handles chunked cookies (deletes all chunks)
+   * Also destroys session in external store if using sessionStore
+   * Inspired by @hono/oidc-auth
+   *
+   * @param {Context} c - Hono context
+   * @param {string} name - Cookie name
+   * @param {Object} options - Cookie options
+   */
+  async function deleteSessionCookie(c, name, options = {}) {
+    const path = options.path || '/';
+    const domain = options.domain || config.cookieDomain;
+
+    // If using session store, destroy session data
+    if (sessionStore) {
+      const sessionId = getChunkedCookie(c, name);
+      if (sessionId) {
+        try {
+          await sessionStore.destroy(sessionId);
+        } catch (err) {
+          console.error('[OIDC] Session store destroy error:', err.message);
+        }
+      }
+    }
+
+    // Always delete host-only cookie (includes all chunks)
+    deleteChunkedCookie(c, name, { path });
+
+    // Also delete domain-scoped cookie if configured
+    // This fixes cross-subdomain logout issues
+    if (domain) {
+      deleteChunkedCookie(c, name, { path, domain });
+    }
+  }
+
+  /**
+   * 🎯 NEW (Phase 3): Regenerate session ID
+   * Security best practice: regenerate session ID when user privileges change
+   * (e.g., user becomes admin, permissions updated, etc.)
+   *
+   * This prevents session fixation attacks by:
+   * 1. Destroying the old session
+   * 2. Creating a new session with a new ID
+   * 3. Preserving session data
+   *
+   * @param {Context} c - Hono context
+   * @param {Object} sessionData - Current session data to preserve
+   * @returns {Promise<string>} New session ID/JWT
+   */
+  async function regenerateSession(c, sessionData) {
+    const cookieName = config.cookieName || 'oidc_session';
+
+    // 1. Delete old session
+    await deleteSessionCookie(c, cookieName, {
+      path: '/',
+      domain: config.cookieDomain
+    });
+
+    // 2. Clear request cache (WeakMap)
+    if (sessionCache.has(c)) {
+      sessionCache.delete(c);
+    }
+
+    // 3. Create new session with new ID
+    const newSessionIdOrJwt = await encodeSession(sessionData);
+
+    // 4. Set new session cookie
+    setChunkedCookie(c, cookieName, newSessionIdOrJwt, {
+      httpOnly: true,
+      secure: cookieSecure,
+      sameSite: cookieSameSite,
+      path: '/',
+      ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
+      maxAge: cookieMaxAge / 1000  // Convert ms to seconds
+    });
+
+    // 5. Update cache with new session
+    sessionCache.set(c, sessionData);
+
+    if (c.get('verbose')) {
+      console.log('[OIDC] Session regenerated (new ID issued)');
+    }
+
+    return newSessionIdOrJwt;
+  }
+
+  /**
+   * 🎯 NEW: Refresh OAuth2 tokens using refresh_token
+   * Inspired by @hono/oidc-auth's implicit refresh pattern
+   *
+   * @param {Context} c - Hono context
+   * @param {string} refreshToken - OAuth2 refresh token
+   * @returns {Promise<Object|null>} New tokens or null if refresh failed
+   */
+  async function refreshTokens(c, refreshToken) {
+    if (!refreshToken) return null;
+
     try {
-      const secret = new TextEncoder().encode(cookieSecret);
-      const { payload } = await jwtVerify(jwt, secret);
-      return payload;
+      const ep = await getEndpoints(c);
+      const tokenHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      const tokenBody = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken
+      });
+
+      // Confidential client: use Basic auth
+      if (clientSecret) {
+        tokenHeaders['Authorization'] = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+      } else {
+        tokenBody.set('client_id', clientId);
+      }
+
+      const response = await fetch(ep.tokenEndpoint, {
+        method: 'POST',
+        headers: tokenHeaders,
+        body: tokenBody
+      });
+
+      if (!response.ok) {
+        if (c.get('verbose')) {
+          const error = await response.text();
+          console.warn('[OIDC] Token refresh failed:', error);
+        }
+        return null;
+      }
+
+      const tokens = await response.json();
+      return tokens;
+
     } catch (err) {
+      if (c.get('verbose')) {
+        console.warn('[OIDC] Token refresh error:', err.message);
+      }
       return null;
     }
   }
@@ -508,13 +796,19 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
   function validateSessionDuration(session) {
     const now = Date.now();
 
-    // Check absolute expiry
-    if (session.issued_at + absoluteDuration < now) {
+    // Use explicit issued_at if provided; fall back to JWT iat (seconds → ms)
+    const issuedMs = session.issued_at
+      ? Number(session.issued_at)
+      : (typeof session.iat === 'number' ? session.iat * 1000 : now);
+
+    // Check absolute expiry (issued + absoluteDuration)
+    if (issuedMs + absoluteDuration < now) {
       return { valid: false, reason: 'absolute_expired' };
     }
 
-    // Check rolling expiry
-    if (session.last_activity + rollingDuration < now) {
+    // Check rolling expiry (last_activity + rollingDuration)
+    const lastActivity = typeof session.last_activity === 'number' ? session.last_activity : issuedMs;
+    if (lastActivity + rollingDuration < now) {
       return { valid: false, reason: 'rolling_expired' };
     }
 
@@ -527,6 +821,33 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
   function generateState() {
     return Math.random().toString(36).substring(2, 15) +
            Math.random().toString(36).substring(2, 15);
+  }
+
+  /**
+   * 🎯 NEW: Reconstruct external URL for reverse proxy scenarios
+   * Inspired by @hono/oidc-auth's OIDC_AUTH_EXTERNAL_URL pattern
+   *
+   * @param {string} externalUrl - External base URL (e.g., 'https://api.example.com')
+   * @param {string} originalUrl - Original request URL
+   * @returns {string} Reconstructed URL
+   */
+  function reconstructExternalUrl(externalUrl, originalUrl) {
+    if (!externalUrl) return originalUrl;
+
+    try {
+      const external = new URL(externalUrl);
+      const original = new URL(originalUrl);
+
+      // Preserve pathname, search, and hash from original request
+      external.pathname = `${external.pathname.replace(/\/$/, '')}${original.pathname}`;
+      external.search = original.search;
+      external.hash = original.hash;
+
+      return external.toString();
+    } catch (err) {
+      // Fallback to original URL if parsing fails
+      return originalUrl;
+    }
   }
 
   /** Generate cryptographically random string (base64url) */
@@ -582,7 +903,18 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
    */
   app.get(loginPath, async (c) => {
     const state = generateState();
-    const returnTo = c.req.query('returnTo') || postLoginRedirect;
+
+    // 🎯 NEW: Continue URL pattern - preserve original destination after login
+    // Supports reverse proxy scenarios via externalUrl config
+    const returnToParam = c.req.query('returnTo');
+    const continueUrl = returnToParam
+      ? (config.externalUrl
+          ? reconstructExternalUrl(config.externalUrl, new URL(returnToParam, c.req.url).toString())
+          : returnToParam)
+      : (config.externalUrl
+          ? reconstructExternalUrl(config.externalUrl, c.req.url)
+          : postLoginRedirect);
+
     const nonce = generateState();
 
     let codeVerifier = null;
@@ -599,21 +931,26 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       }
     }
 
-    // Store state and returnTo in short-lived cookie
+    // Store state and continueUrl in short-lived cookie
     const stateJWT = await encodeSession({
       state,
-      returnTo,
+      returnTo: continueUrl,  // Continue URL for post-login redirect
       nonce,
       code_verifier: codeVerifier,
       type: 'csrf',
       expires: Date.now() + 600000
     });
+    // 🎯 CRITICAL: State cookie configuration for OAuth2 redirects
+    // - HTTPS: use SameSite=None + Secure=true (cross-site redirects work)
+    // - HTTP (localhost dev): use SameSite=Lax (browsers block SameSite=None on HTTP)
+    // Modern browsers treat localhost specially but still enforce SameSite=None security
+    const isSecure = config.baseURL && config.baseURL.startsWith('https://');
     setCookie(c, `${cookieName}_state`, stateJWT, {
       path: '/',
       httpOnly: true,
       maxAge: 600,
-      sameSite: cookieSameSite,
-      secure: cookieSecure
+      sameSite: isSecure ? 'None' : 'Lax',  // Lax for HTTP localhost, None for HTTPS
+      secure: isSecure  // Only set Secure flag on HTTPS
     });
 
     if (c.get('verbose')) {
@@ -641,7 +978,17 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     }
 
     const ep = await getEndpoints();
-    return c.redirect(`${ep.authorizationEndpoint}?${params.toString()}`, 302);
+    const authUrl = new URL(ep.authorizationEndpoint);
+    // Copy all params to URL
+    params.forEach((value, key) => {
+      authUrl.searchParams.set(key, value);
+    });
+
+    // 🎯 NEW: Apply provider-specific quirks (Google, Azure, Auth0, GitHub, Slack, GitLab)
+    // Automatically adds required parameters based on issuer URL
+    applyProviderQuirks(authUrl, issuer, config);
+
+    return c.redirect(authUrl.toString(), 302);
   });
 
   /**
@@ -683,8 +1030,8 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       return c.json({ error: 'Invalid state (CSRF protection)' }, 400);
     }
 
-    // Clear state cookie
-    deleteCookie(c, `${cookieName}_state`, { path: '/' });
+    // Clear state cookie (dual-cookie deletion)
+    await deleteSessionCookie(c, `${cookieName}_state`, { path: '/' });
 
     if (!code) {
       return c.json({ error: 'Missing authorization code' }, 400);
@@ -694,7 +1041,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     try {
       // Retrieve PKCE data and nonce
       const codeVerifier = stateData.code_verifier || null;
-      const ep = await getEndpoints();
+      const ep = await getEndpoints(c);  // With context cache
       const tokenHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -726,15 +1073,65 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
 
       const tokens = await tokenResponse.json();
 
+      // Validate token response (Phase 3)
+      const tokenValidation = validateTokenResponse(tokens, config);
+      if (!tokenValidation.valid) {
+        if (c.get('verbose')) {
+          console.error('[OIDC] Token response validation failed:', tokenValidation.errors);
+        }
+        const errorType = getErrorType(tokenValidation.errors);
+        const errorDetails = getErrorDetails(errorType, tokenValidation.errors);
+
+        // Return HTML error page if browser request, JSON otherwise
+        const acceptsHtml = c.req.header('accept')?.includes('text/html');
+        if (acceptsHtml && config.errorPage !== false) {
+          const html = generateErrorPage(errorDetails, {
+            loginUrl: `/auth/login`,
+            showTechnicalDetails: c.get('verbose') || false
+          });
+          return c.html(html, 401);
+        }
+        return c.json(generateErrorJSON(errorDetails, 401), 401);
+      }
+
       // Decode id_token claims
       const idTokenClaims = decodeIdToken(tokens.id_token);
       if (!idTokenClaims) {
-        return c.json({ error: 'Failed to decode id_token' }, 500);
+        const errorDetails = getErrorDetails(ErrorTypes.TOKEN_INVALID, ['Failed to decode ID token']);
+        const acceptsHtml = c.req.header('accept')?.includes('text/html');
+        if (acceptsHtml && config.errorPage !== false) {
+          const html = generateErrorPage(errorDetails, {
+            loginUrl: `/auth/login`,
+            showTechnicalDetails: c.get('verbose') || false
+          });
+          return c.html(html, 401);
+        }
+        return c.json(generateErrorJSON(errorDetails, 401), 401);
       }
 
-      // Validate nonce if present
-      if (stateData.nonce && idTokenClaims.nonce && idTokenClaims.nonce !== stateData.nonce) {
-        return c.json({ error: 'Invalid nonce' }, 400);
+      // Validate ID token claims (Phase 3)
+      const idTokenValidation = validateIdToken(idTokenClaims, config, {
+        nonce: stateData.nonce,
+        clockTolerance: 60,  // 60 seconds
+        maxAge: 86400        // 24 hours
+      });
+
+      if (!idTokenValidation.valid) {
+        if (c.get('verbose')) {
+          console.error('[OIDC] ID token validation failed:', idTokenValidation.errors);
+        }
+        const errorType = getErrorType(idTokenValidation.errors);
+        const errorDetails = getErrorDetails(errorType, idTokenValidation.errors);
+
+        const acceptsHtml = c.req.header('accept')?.includes('text/html');
+        if (acceptsHtml && config.errorPage !== false) {
+          const html = generateErrorPage(errorDetails, {
+            loginUrl: `/auth/login`,
+            showTechnicalDetails: c.get('verbose') || false
+          });
+          return c.html(html, 401);
+        }
+        return c.json(generateErrorJSON(errorDetails, 401), 401);
       }
 
       // Auto-create/update user
@@ -812,6 +1209,50 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       );
       console.log('======================================\n');
 
+      // Optional: set API token cookie (generic, opt-in)
+      try {
+        const apiTokenCfg = {
+          enabled: !!(apiTokenCookie && apiTokenCookie.enabled),
+          name: (apiTokenCookie && apiTokenCookie.name) || 'api_token',
+          httpOnly: apiTokenCookie?.httpOnly !== false,
+          sameSite: apiTokenCookie?.sameSite || cookieSameSite,
+          secure: apiTokenCookie?.secure ?? cookieSecure,
+          maxAge: apiTokenCookie?.maxAge || (7 * 24 * 60 * 60) // seconds
+        };
+
+        if (apiTokenCfg.enabled && user && user.apiToken) {
+          setCookie(c, apiTokenCfg.name, user.apiToken, {
+            path: '/',
+            httpOnly: apiTokenCfg.httpOnly,
+            sameSite: apiTokenCfg.sameSite,
+            secure: apiTokenCfg.secure,
+            maxAge: apiTokenCfg.maxAge
+          });
+        }
+      } catch (_) {
+        // non-fatal
+      }
+
+
+      // Optional: issue JWT for API (Bearer) and set cookie fallback
+      try {
+        const jwtSecret = config.jwtSecret || cookieSecret; // reuse cookieSecret if no explicit secret
+        if (jwtSecret && user && user.id) {
+          const { createToken } = await import('./jwt-auth.js');
+          const jwtPayload = { userId: user.id, scopes: user.scopes || [] };
+          const jwtToken = createToken(jwtPayload, jwtSecret, '7d');
+          setCookie(c, 'mrt_jwt', jwtToken, {
+            path: '/',
+            httpOnly: true,
+            sameSite: cookieSameSite,
+            secure: cookieSecure,
+            maxAge: 7 * 24 * 60 * 60
+          });
+        }
+      } catch (__) {
+        // non-fatal
+      }
+
       // Create session with user data
       // 🎯 MINIMAL COOKIE STRATEGY: Only essential data for auth (user details in database)
       // Cookie limit: 4096 bytes - tokens alone exceed this (access_token ~2-3KB, id_token ~1-2KB)
@@ -819,8 +1260,15 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       const now = Date.now();
       const sessionData = {
         // Session lifecycle
-        expires_at: now + (tokens.expires_in * 1000),  // Token expiry (for session validity)
-        last_activity: now,                            // For rolling session duration
+        issued_at: now,                                // Absolute session start (ms)
+        expires_at: now + (tokens.expires_in * 1000),  // Token expiry hint (ms)
+        last_activity: now,                            // For rolling session duration (ms)
+
+        // 🎯 NEW: Refresh token for implicit refresh (if enabled and available)
+        // Only stored if autoRefreshTokens = true to keep cookie size minimal
+        ...(autoRefreshTokens && tokens.refresh_token ? {
+          refresh_token: tokens.refresh_token
+        } : {}),
 
         // Minimal user data (authorization only, ~200-400 bytes)
         user: user ? {
@@ -851,8 +1299,8 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       console.log('Browser limit: 4096 bytes');
       console.log('==========================================\n');
 
-      // Set session cookie
-      setCookie(c, cookieName, sessionJWT, {
+      // Set session cookie (with automatic chunking if > 4KB)
+      setChunkedCookie(c, cookieName, sessionJWT, {
         path: '/',
         httpOnly: true,
         maxAge: Math.floor(cookieMaxAge / 1000),
@@ -883,7 +1331,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
    * LOGOUT Route
    */
   app.get(logoutPath, async (c) => {
-    const sessionCookie = getCookie(c, cookieName);
+    const sessionCookie = getChunkedCookie(c, cookieName);
     let idToken = null;
 
     if (sessionCookie) {
@@ -891,12 +1339,12 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       idToken = session?.id_token;
     }
 
-    // Clear session cookie
-    deleteCookie(c, cookieName, { path: '/' });
+    // Clear session cookie (dual-cookie deletion + all chunks)
+    await deleteSessionCookie(c, cookieName, { path: '/' });
 
     // IdP logout (Azure AD/Entra compatible)
     if (idpLogout && idToken) {
-      const ep = await getEndpoints();
+      const ep = await getEndpoints(c);  // With context cache
       const params = new URLSearchParams({
         id_token_hint: idToken,
         post_logout_redirect_uri: `${postLogoutRedirect}`
@@ -951,7 +1399,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       }
     }
 
-    const sessionCookie = getCookie(c, cookieName);
+    const sessionCookie = getChunkedCookie(c, cookieName);
 
     if (!sessionCookie) {
       // No session - redirect to login or return 401
@@ -960,8 +1408,12 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       const acceptsHtml = acceptHeader.includes('text/html');
 
       if (acceptsHtml) {
-        // Browser request - redirect to login
-        const returnTo = encodeURIComponent(currentPath);
+        // 🎯 NEW: Browser request - redirect to login with full continue URL
+        // Preserves query strings, hash fragments, and external URL reconstruction
+        const continueUrl = config.externalUrl
+          ? reconstructExternalUrl(config.externalUrl, c.req.url)
+          : c.req.url;
+        const returnTo = encodeURIComponent(continueUrl);
         return c.redirect(`${loginPath}?returnTo=${returnTo}`, 302);
       } else {
         // API request - return JSON 401
@@ -971,32 +1423,61 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     }
 
     const session = await decodeSession(sessionCookie);
-
-    if (!session || !session.access_token) {
+    if (!session) {
+      // Invalid or tampered cookie: clear and proceed to unauthorized handling (dual-cookie deletion)
+      await deleteSessionCookie(c, cookieName, { path: '/' });
       return await next();
     }
 
     // Validate session duration
     const validation = validateSessionDuration(session);
     if (!validation.valid) {
-      // Session expired, clear cookie
-      deleteCookie(c, cookieName, { path: '/' });
+      // Session expired, clear cookie (dual-cookie deletion)
+      await deleteSessionCookie(c, cookieName, { path: '/' });
       return await next();
     }
 
-    // 🎯 Token refresh disabled (minimal cookie strategy)
-    // Since we don't store refresh_token in cookie (size optimization),
-    // user will need to re-authenticate when session expires.
-    // This is more secure and prevents cookie size issues.
-    // If you need auto-refresh, implement server-side session storage (Redis, S3DB, etc)
+    // 🎯 NEW: Implicit token refresh (inspired by @hono/oidc-auth)
+    // If autoRefreshTokens is enabled and token is about to expire, refresh it silently
+    const now = Date.now();
+    if (autoRefreshTokens && session.refresh_token && session.expires_at) {
+      const timeUntilExpiry = session.expires_at - now;
+
+      // Refresh if token expires within refreshThreshold (default: 5 minutes)
+      if (timeUntilExpiry > 0 && timeUntilExpiry < refreshThreshold) {
+        const newTokens = await refreshTokens(c, session.refresh_token);
+
+        if (newTokens) {
+          // Update session with new tokens
+          session.expires_at = now + (newTokens.expires_in * 1000);
+          session.refresh_token = newTokens.refresh_token || session.refresh_token;
+
+          // Mark session as refreshed for JWT workaround
+          const updatedSessionJWT = await encodeSession(session);
+          c.set('oidc_session_jwt_updated', updatedSessionJWT);
+
+          if (c.get('verbose')) {
+            console.log('[OIDC] Token refreshed implicitly:', {
+              timeUntilExpiry: Math.round(timeUntilExpiry / 1000),
+              newExpiresIn: newTokens.expires_in
+            });
+          }
+        } else {
+          // Refresh failed - let session continue until it expires
+          if (c.get('verbose')) {
+            console.warn('[OIDC] Token refresh failed, session will expire naturally');
+          }
+        }
+      }
+    }
 
     // Update last_activity (rolling session)
     session.last_activity = Date.now();
 
     // Check if user is active (if field exists)
     if (session.user.active !== undefined && !session.user.active) {
-      // User account is inactive, clear session
-      deleteCookie(c, cookieName, { path: '/' });
+      // User account is inactive, clear session (dual-cookie deletion)
+      await deleteSessionCookie(c, cookieName, { path: '/' });
 
       // Content negotiation for inactive account
       const acceptHeader = c.req.header('accept') || '';
@@ -1010,7 +1491,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       }
     }
 
-    // Set user in context
+    // Set user in context (minimal, from session)
     c.set('user', {
       ...session.user,
       authMethod: 'oidc',
@@ -1023,7 +1504,7 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
     // Re-encode session with updated last_activity (rolling session)
     const newSessionJWT = await encodeSession(session);
 
-    setCookie(c, cookieName, newSessionJWT, {
+    setChunkedCookie(c, cookieName, newSessionJWT, {
       path: '/',
       httpOnly: true,
       maxAge: Math.floor(cookieMaxAge / 1000),
@@ -1031,7 +1512,26 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       secure: cookieSecure
     });
 
-    return await next();
+    await next();
+
+    // 🎯 NEW: Set Cache-Control header to prevent caching of authenticated responses
+    // Prevents CDNs/proxies from caching user-specific content
+    if (!c.res.headers.has('Cache-Control')) {
+      c.res.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    }
+
+    // 🎯 NEW: Session JWT workaround - re-set cookie if session was refreshed during request
+    // This handles cases where implicit refresh happens after next() completes
+    const updatedSessionJWT = c.get('oidc_session_jwt_updated');
+    if (updatedSessionJWT) {
+      setChunkedCookie(c, cookieName, updatedSessionJWT, {
+        path: '/',
+        httpOnly: true,
+        maxAge: Math.floor(cookieMaxAge / 1000),
+        sameSite: cookieSameSite,
+        secure: cookieSecure
+      });
+    }
   };
 
   return {
@@ -1041,7 +1541,39 @@ export function createOIDCHandler(inputConfig, app, usersResource, events = null
       [callbackPath]: 'OAuth2 callback',
       [logoutPath]: 'Logout (local + IdP)'
     },
-    config: config
+    config: config,
+    // Phase 3: Expose utilities for advanced use cases
+    utils: {
+      /**
+       * Regenerate session ID (security best practice)
+       * Call when user privileges change (e.g., becomes admin)
+       *
+       * @example
+       * const oidcDriver = await createOIDCHandler(config);
+       * app.post('/promote-to-admin', async (c) => {
+       *   const session = c.get('session');
+       *   session.roles = ['admin'];
+       *   await oidcDriver.utils.regenerateSession(c, session);
+       *   return c.json({ success: true });
+       * });
+       */
+      regenerateSession,
+
+      /**
+       * Get current session (with caching)
+       * Useful for manual session access in hooks
+       */
+      getCachedSession: (c) => getCachedSession(c, config.cookieName || 'oidc_session'),
+
+      /**
+       * Delete session (logout without provider redirect)
+       * Useful for local-only logout
+       */
+      deleteSession: (c) => deleteSessionCookie(c, config.cookieName || 'oidc_session', {
+        path: '/',
+        domain: config.cookieDomain
+      })
+    }
   };
 }
 

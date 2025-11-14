@@ -69,6 +69,9 @@ export class PathRulesAuthStrategy extends BaseAuthStrategy {
           passwordField: driverConfig.passwordField || 'password',
           passphrase: driverConfig.passphrase || 'secret',
           adminUser: driverConfig.adminUser || null,
+          // Pass-through cookie fallback options if provided
+          cookieName: driverConfig.cookieName || null,
+          tokenField: driverConfig.tokenField || 'apiToken',
           optional: true
         });
       }

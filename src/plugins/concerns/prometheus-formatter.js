@@ -225,7 +225,64 @@ export function formatPrometheusMetrics(metricsPlugin) {
   ));
   lines.push('');
 
-  // 6. Build Info (gauge - always 1)
+  // 6. OperationPool Metrics (if pool is enabled)
+  if (metrics.pool) {
+    // Pool tasks started (counter)
+    lines.push(formatMetric(
+      's3db_pool_tasks_started_total',
+      'counter',
+      'Total number of pool tasks started',
+      [{ labels: {}, value: metrics.pool.tasksStarted }]
+    ));
+    lines.push('');
+
+    // Pool tasks completed (counter)
+    lines.push(formatMetric(
+      's3db_pool_tasks_completed_total',
+      'counter',
+      'Total number of pool tasks completed successfully',
+      [{ labels: {}, value: metrics.pool.tasksCompleted }]
+    ));
+    lines.push('');
+
+    // Pool tasks failed (counter)
+    lines.push(formatMetric(
+      's3db_pool_tasks_failed_total',
+      'counter',
+      'Total number of pool tasks that failed',
+      [{ labels: {}, value: metrics.pool.tasksFailed }]
+    ));
+    lines.push('');
+
+    // Pool tasks retried (counter)
+    lines.push(formatMetric(
+      's3db_pool_tasks_retried_total',
+      'counter',
+      'Total number of pool task retry attempts',
+      [{ labels: {}, value: metrics.pool.tasksRetried }]
+    ));
+    lines.push('');
+
+    // Pool task execution time (gauge - average)
+    lines.push(formatMetric(
+      's3db_pool_task_execution_seconds',
+      'gauge',
+      'Average task execution time in seconds',
+      [{ labels: {}, value: (metrics.pool.avgExecutionTime / 1000).toFixed(6) }]
+    ));
+    lines.push('');
+
+    // Pool task total execution time (counter)
+    lines.push(formatMetric(
+      's3db_pool_task_execution_total_seconds',
+      'counter',
+      'Total cumulative task execution time in seconds',
+      [{ labels: {}, value: (metrics.pool.totalExecutionTime / 1000).toFixed(6) }]
+    ));
+    lines.push('');
+  }
+
+  // 7. Build Info (gauge - always 1)
   const nodeVersion = process.version || 'unknown';
   const s3dbVersion = '1.0.0'; // TODO: Get from package.json
 

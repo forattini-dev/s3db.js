@@ -58,6 +58,16 @@ export { SafeEventEmitter, createSafeEventEmitter } from './concerns/safe-event-
 export { CronManager, getCronManager, resetCronManager, createCronManager, intervalToCron, CRON_PRESETS } from './concerns/cron-manager.js'
 
 // =============================================================================
+// Operations Pool & Task Management
+// =============================================================================
+
+export { OperationsPool } from './concerns/operations-pool.js'
+export { AdaptiveTuning } from './concerns/adaptive-tuning.js'
+export { TaskManager } from './task-manager.class.js'
+export { Benchmark, benchmark } from './concerns/benchmark.js'
+export { PerformanceMonitor } from './concerns/performance-monitor.js'
+
+// =============================================================================
 // Testing Utilities
 // =============================================================================
 

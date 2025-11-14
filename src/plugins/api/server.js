@@ -77,7 +77,8 @@ export class ApiServer {
       enabled: this.options.metrics?.enabled !== false,
       verbose: this.options.metrics?.verbose || this.options.verbose,
       maxPathsTracked: this.options.metrics?.maxPathsTracked,
-      resetInterval: this.options.metrics?.resetInterval
+      resetInterval: this.options.metrics?.resetInterval,
+      format: this.options.metrics?.format || 'json'
     });
 
     if (this.options.metrics?.enabled && this.options.events?.enabled !== false) {
@@ -150,6 +151,10 @@ export class ApiServer {
       if (this.failban) {
         await this.failban.initialize();
       }
+
+      // IMPORTANT: Register MetricsPlugin /metrics route BEFORE middlewares
+      // This allows Prometheus scraping without authentication
+      this._registerMetricsPluginRoute();
 
       this.middlewareChain = new MiddlewareChain({
         requestId: this.options.requestId,
@@ -329,6 +334,74 @@ export class ApiServer {
     this.acceptingRequests = false;
     if (this.options.verbose) {
       console.log('[API Server] Stopped accepting new requests');
+    }
+  }
+
+  /**
+   * Register MetricsPlugin /metrics route BEFORE auth middlewares
+   * Called during initialize() before middlewareChain.apply()
+   * @private
+   */
+  _registerMetricsPluginRoute() {
+    // Find MetricsPlugin instance
+    const metricsPlugin = this.options.database?.plugins?.metrics ||
+                          this.options.database?.plugins?.MetricsPlugin;
+
+    if (!metricsPlugin) {
+      return; // No MetricsPlugin installed
+    }
+
+    // Check if Prometheus is enabled
+    if (!metricsPlugin.config?.prometheus?.enabled) {
+      return; // Prometheus export disabled
+    }
+
+    // Only register if mode is 'integrated' or 'auto' (and API Plugin detected)
+    const mode = metricsPlugin.config.prometheus.mode;
+    if (mode !== 'integrated' && mode !== 'auto') {
+      return; // Standalone mode doesn't use APIPlugin
+    }
+
+    const path = metricsPlugin.config.prometheus.path || '/metrics';
+    const enforceIpAllowlist = metricsPlugin.config.prometheus.enforceIpAllowlist;
+    const ipAllowlist = metricsPlugin.config.prometheus.ipAllowlist || [];
+
+    // Register PUBLIC route (no auth middlewares applied yet, but with IP filtering)
+    this.app.get(path, async (c) => {
+      // IP allowlist check (if enabled)
+      if (enforceIpAllowlist) {
+        // Lazy-load IP allowlist helper (only when needed)
+        const { isIpAllowed, getClientIp } = await import('../concerns/ip-allowlist.js');
+        const clientIp = getClientIp(c);
+
+        if (!clientIp || !isIpAllowed(clientIp, ipAllowlist)) {
+          if (this.options.verbose) {
+            console.warn(
+              `[API Server] Blocked /metrics request from unauthorized IP: ${clientIp || 'unknown'}`
+            );
+          }
+          return c.text('Forbidden', 403);
+        }
+      }
+
+      try {
+        const metrics = await metricsPlugin.getPrometheusMetrics();
+        return c.text(metrics, 200, {
+          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'
+        });
+      } catch (err) {
+        if (this.options.verbose) {
+          console.error('[API Server] Error generating Prometheus metrics:', err);
+        }
+        return c.text('Internal Server Error', 500);
+      }
+    });
+
+    if (this.options.verbose) {
+      const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
+      console.log(
+        `[API Server] Registered MetricsPlugin route: ${path}${ipFilter}`
+      );
     }
   }
 
