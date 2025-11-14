@@ -2,7 +2,7 @@
 
 > **Lightweight vector store with compression, similarity search, and clustering.**
 >
-> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#configuration) | [FAQ ↓](#-faq)
+> **Navigation:** [Getting Started ↓](#-getting-started) | [Guides ↓](#-documentation-guides) | [Features ↓](#-key-features)
 
 ---
 
@@ -26,19 +26,19 @@ const products = await db.createResource({
   }
 });
 
-// Store vectors (use OpenAI, Anthropic, Cohere, etc. externally for generation)
+// Store vectors (get from OpenAI, Anthropic, Cohere, etc.)
 await products.insert({
   name: 'Laptop Pro',
-  vector: [0.1, 0.2, ... ]  // 1536 dimensions from your embedding provider
+  vector: [0.1, 0.2, ... ]  // 1536 dimensions
 });
 
 // Find similar items (KNN search)
-const similar = await vectorPlugin.findSimilar('products', 'vector', queryVector, { k: 5 });
+const similar = await products.similarTo(queryVector, { limit: 5 });
 console.log(`Found ${similar.length} similar items`);
 
 // Auto-detect optimal clusters
-const optimalK = await vectorPlugin.findOptimalK('products', 'vector', { minK: 2, maxK: 10 });
-console.log(`Optimal clusters: ${optimalK.bestK} (score: ${optimalK.bestScore})`);
+const optimalK = await VectorPlugin.findOptimalK(vectors, { minK: 2, maxK: 10 });
+console.log(`Optimal clusters: ${optimalK.consensus}`);
 ```
 
 **Key Features:**
@@ -49,11 +49,6 @@ console.log(`Optimal clusters: ${optimalK.bestK} (score: ${optimalK.bestScore})`
 - ✅ **Optimal K selection**: 5 evaluation metrics (Silhouette, Davies-Bouldin, Calinski-Harabasz, Gap, Stability)
 - ✅ **Auto-validation**: Dimension checking and storage warnings
 - ✅ **Events & Monitoring**: Progress tracking and comprehensive metrics
-
-**Storage:**
-- OpenAI text-embedding-3-small/large (1536): ~2.3KB with compression (✅ fits with body-overflow)
-- Sentence Transformers (384): ~620 bytes (✅ fits in metadata)
-- Small models (128): ~207 bytes (✅ fits in metadata)
 
 ---
 
@@ -88,2897 +83,357 @@ VectorPlugin is **built into s3db.js core** with zero external dependencies!
 
 **External Embedding Providers (Separate API Calls):**
 
-VectorPlugin does NOT generate embeddings. You'll need to use external providers:
+VectorPlugin does NOT generate embeddings. You need external providers:
 
 ```bash
-# Choose ONE embedding provider based on your needs:
+# Choose ONE embedding provider:
 
 # OpenAI (1536D, high accuracy, $0.00002/1K tokens)
 pnpm install openai
 
-# Anthropic via Voyage AI (1024D, partnership, $0.00012/1K tokens)
-pnpm install @anthropic-ai/sdk
+# Voyage AI (1024D, Anthropic partnership, $0.00012/1K tokens)
+pnpm install voyageai
 
 # Cohere (1024D, multilingual, $0.0001/1K tokens)
 pnpm install cohere-ai
 
 # Google Vertex AI (768D, enterprise, varies)
-pnpm install @google-cloud/aiplatform
+pnpm install @google-cloud/vertexai
 
 # Open Source (384D, free, self-hosted)
-# No installation needed - use via HTTP API
+# Use via HTTP API - no installation needed
 ```
 
-**Minimum Node.js Version:** 18.x (for async/await, native Map/Set performance)
+See [**Embedding Providers Guide**](./guides/embedding-providers.md) for detailed provider comparison.
 
-**Browser Support:** ✅ All modern browsers (Chrome 90+, Firefox 88+, Safari 14+, Edge 90+)
+---
 
-**Production Recommendations:**
+## 🚀 Getting Started
 
-1. **Use `embedding:XXX` notation** for automatic compression (77% space savings)
-2. **Set `behavior: 'body-overflow'`** for large vectors (>1KB after compression)
-3. **Enable partition support** for optional embedding fields (95% query speed improvement)
-4. **Choose the right embedding provider** based on cost, accuracy, and latency requirements
+### Installation & Setup (3 minutes)
 
 ```javascript
-// Production-ready configuration
-import { Database, VectorPlugin } from 's3db.js';
+import { Database, VectorPlugin } from 's3db';
 
-const db = new Database({ connectionString: 's3://key:secret@bucket' });
-
-const vectorPlugin = new VectorPlugin({
-  dimensions: 1536,            // Match your embedding model
-  distanceMetric: 'cosine',    // Best for normalized embeddings
-  autoDetectVectorField: true, // Auto-detect embedding:XXX fields
-  emitEvents: true,            // Enable monitoring
-  verboseEvents: false         // Disable verbose logging in prod
-});
-
+const db = new Database('s3://key:secret@bucket');
+const vectorPlugin = new VectorPlugin({ dimensions: 1536 });
 await vectorPlugin.install(db);
+await db.connect();
 
 // Create resource with auto-compression
 const products = await db.createResource({
   name: 'products',
   attributes: {
+    id: 'string|required',
     name: 'string|required',
-    description: 'string',
-    vector: 'embedding:1536'  // 77% compression built-in
-  },
-  behavior: 'body-overflow'   // Handle large vectors
+    vector: 'embedding:1536'  // Auto-compressed!
+  }
 });
+
+// Use your embedding provider (OpenAI, etc.)
+const embedding = await openai.embeddings.create({
+  model: 'text-embedding-3-small',
+  input: 'Gaming laptop'
+});
+
+// Store with vector
+await products.insert({
+  id: 'prod-1',
+  name: 'Laptop Pro',
+  vector: embedding.data[0].embedding
+});
+
+// Search!
+const results = await products.similarTo(queryVector, { limit: 5 });
 ```
+
+**Next Steps:**
+1. See [**Getting Started Guide**](./guides/getting-started.md) for detailed setup
+2. See [**Embedding Providers Guide**](./guides/embedding-providers.md) to choose a provider
+3. See [**Usage Patterns Guide**](./guides/usage-patterns.md) for 5 real-world examples
 
 ---
 
-## 📋 Table of Contents
+## 📚 Documentation Guides
 
-- [Dependencies](#-dependencies)
-- [Overview](#overview)
-- [Installation](#installation)
-- [Core Concepts](#core-concepts)
-- [Quick Start](#quick-start)
-- [Embedding Providers](#embedding-providers)
-  - [OpenAI](#openai-recommended)
-  - [Google Vertex AI](#google-vertex-ai)
-  - [Cohere](#cohere)
-  - [Voyage AI (Anthropic)](#voyage-ai-anthropic-recommended)
-  - [Model Comparison](#model-comparison-table)
-  - [Choosing the Right Model](#choosing-the-right-model)
-- [Use Cases](#use-cases)
-  - [1. Similarity Search (KNN)](#1-similarity-search-knn)
-  - [2. Automatic Clustering with Optimal K](#2-automatic-clustering-with-optimal-k)
-  - [3. Product Recommendations](#3-product-recommendations)
-  - [4. Duplicate Detection](#4-duplicate-detection)
-  - [5. User Segmentation](#5-user-segmentation)
-- [API Reference](#api-reference)
-- [Events & Monitoring](#events--monitoring)
-- [Performance Tips](#performance-tips)
-- [Troubleshooting](#troubleshooting)
+All documentation is organized into focused guides:
 
-## Overview
+### 🎯 For First-Time Users
+- **[Getting Started](./guides/getting-started.md)** (10 min)
+  - Installation & setup
+  - Configuration options
+  - First example with explanation
+  - Common mistakes to avoid
 
-VectorPlugin enables semantic search, clustering, and similarity analysis using vector embeddings in S3DB. It provides:
+### 🔑 Choose Your Embedding Provider
+- **[Embedding Providers](./guides/embedding-providers.md)** (15 min)
+  - 5 major providers (OpenAI, Google, Cohere, Voyage AI, Open Source)
+  - Cost and quality comparison
+  - Model selection guide
+  - Complete code examples for each
 
-- **🎯 Embedding Shorthand Notation**: `embedding:1536` for clean, auto-optimized vector fields
-- **🗜️ Automatic Compression**: 77% space savings with fixed-point encoding
-- **📏 Multiple Distance Metrics**: Cosine, Euclidean, Manhattan
-- **🎨 K-means Clustering**: With k-means++ initialization for better convergence
-- **🎲 Optimal K Selection**: 5 evaluation metrics (Silhouette, Davies-Bouldin, Calinski-Harabasz, Gap Statistic, Stability)
-- **🔍 KNN Search**: Find similar items with configurable thresholds
-- **⚠️ Storage Validation**: Automatic warnings for vectors exceeding S3 metadata limits
-- **✨ Auto-detect Vector Fields**: Automatically detects `embedding:XXX` fields (NEW!)
-- **📊 Comprehensive Events**: Full observability with progress tracking and metrics (NEW!)
-- **🎛️ Configurable Monitoring**: Verbose mode, event throttling, and performance metrics (NEW!)
+### 💡 Real-World Examples
+- **[Usage Patterns](./guides/usage-patterns.md)** (25 min)
+  - 5 complete working examples:
+    1. Similarity Search (KNN)
+    2. Clustering with Optimal K
+    3. Product Recommendations
+    4. Duplicate Detection
+    5. User Segmentation
+  - Copy-paste ready code
+  - Progressive learning (Beginner → Advanced)
 
-### ✨ New: Embedding Shorthand Notation
+### 📖 Complete API Reference
+- **[API Reference](./guides/api-reference.md)** (15 min)
+  - Plugin configuration
+  - All resource methods
+  - Static utilities
+  - Method aliases & comparison
+  - Distance metrics reference
 
-Instead of verbose array definitions, use the clean `embedding:XXX` notation:
+### 🚀 Advanced Topics
+- **[Advanced Features](./guides/advanced.md)** (20 min)
+  - Event system & monitoring
+  - Production monitoring patterns
+  - Performance optimization
+  - Partition-based filtering
+  - Caching strategies
+
+### ✅ Best Practices
+- **[Best Practices & FAQ](./guides/best-practices.md)** (30 min)
+  - 5 essential best practices
+  - Pro tips & tricks
+  - Common mistakes with solutions
+  - Error handling guide
+  - 70+ FAQ entries
+
+---
+
+## 🎯 Key Features
+
+### Automatic Compression
+
+Use clean `embedding:XXX` notation for automatic 77% compression:
 
 ```javascript
-// ✅ NEW: Clean shorthand with auto-compression (77% space savings)
 attributes: {
-  vector: 'embedding:1536'  // OpenAI text-embedding-3-small/3-large
-}
-
-// ✅ Alternative: Pipe notation
-attributes: {
-  vector: 'embedding|length:768'  // BERT/Sentence Transformers
-}
-
-// ❌ OLD: Verbose without compression
-attributes: {
-  vector: {
-    type: 'array',
-    items: 'number',
-    length: 1536
-  }
+  vector: 'embedding:1536'  // Auto-compressed from 12.3KB → 2.8KB
 }
 ```
 
-**Benefits**:
-- 📝 **Cleaner syntax** - One line instead of five
-- 🗜️ **Automatic compression** - 77% space savings with fixed-point encoding
-- ✅ **Auto-validation** - Dimension checking built-in
-- 🚀 **Performance** - Optimized storage and retrieval
-- 📚 **Common dimensions** - 256, 384, 512, 768, 1024, 1536, 2048, 3072
+### Multiple Distance Metrics
 
-### What VectorPlugin Does
-
-✅ Store vectors efficiently
-✅ Calculate distances between vectors
-✅ Cluster vectors using k-means
-✅ Find optimal number of clusters
-✅ Search for similar vectors (KNN)
-✅ Validate storage configuration
-
-### What VectorPlugin Does NOT Do
-
-❌ Generate embeddings (use OpenAI, Anthropic, Cohere, etc. externally)
-❌ Process text (embeddings must be created before storage)
-❌ Train models (only uses pre-computed vectors)
-
-## Installation
+Choose the right metric for your data:
 
 ```javascript
-import { Database, VectorPlugin } from 's3db';
-
-const db = new Database('s3://key:secret@bucket');
-
-// Install plugin with full configuration
-const vectorPlugin = new VectorPlugin({
-  dimensions: 1536,            // Default embedding size (OpenAI text-embedding-3-small/3-large)
-  distanceMetric: 'cosine',    // Default distance metric
-  storageThreshold: 1500,      // Warn if vectors exceed 1.5KB
-  autoFixBehavior: false,      // Auto-set body-overflow if needed
-  autoDetectVectorField: true, // Auto-detect embedding:XXX fields (NEW!)
-  emitEvents: true,            // Emit events for monitoring (NEW!)
-  verboseEvents: false,        // Emit detailed progress events (NEW!)
-  eventThrottle: 100           // Throttle progress events (ms) (NEW!)
-});
-
-await vectorPlugin.install(db);
-```
-
-### Configuration Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `dimensions` | number | `1536` | Expected vector dimensions |
-| `distanceMetric` | string | `'cosine'` | Default distance metric (`'cosine'`, `'euclidean'`, `'manhattan'`) |
-| `storageThreshold` | number | `1500` | Warn if vectors exceed this size (bytes) |
-| `autoFixBehavior` | boolean | `false` | Automatically set `body-overflow` for large vectors |
-| `autoDetectVectorField` | boolean | `true` | Automatically detect `embedding:XXX` fields |
-| `emitEvents` | boolean | `true` | Enable event emission for monitoring |
-| `verboseEvents` | boolean | `false` | Emit detailed progress events (use for debugging) |
-| `eventThrottle` | number | `100` | Throttle progress events (milliseconds) |
-
-### Storage Considerations
-
-**⚠️ S3 Metadata Limit: 2KB (2047 bytes)**
-
-Large vectors will exceed this limit:
-
-| Model | Dimensions | Size (uncompressed) | Size (with `embedding:XXX`) | body-overflow? |
-|-------|-----------|---------------------|----------------------------|----------------|
-| OpenAI text-embedding-3-small/3-large | 1536 | ~10KB | **~2.3KB** (77% saved) | ✅ YES |
-| Sentence Transformers | 384 | ~2.7KB | **~620 bytes** (77% saved) | ❌ NO |
-| Small models | 128 | ~900 bytes | **~207 bytes** (77% saved) | ❌ NO |
-
-> 💡 **Pro tip**: Using `embedding:XXX` notation automatically applies fixed-point encoding, saving ~77% space compared to raw float arrays!
-
-**Solution**: Use `embedding:XXX` notation which automatically applies 77% compression with fixed-point encoding:
-
-```javascript
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    id: 'string|required',
-    name: 'string|required',
-    description: 'string',
-    vector: 'embedding:1536'  // OpenAI text-embedding-3-small/3-large (auto-compressed)
-  },
-  behavior: 'body-overflow'  // ← Still recommended for large vectors
-});
-```
-
-**Alternative notations**:
-```javascript
-// Pipe notation
-vector: 'embedding|length:768'  // BERT/Sentence Transformers
-
-// Traditional array notation (no auto-compression)
-vector: {
-  type: 'array',
-  items: 'number',
-  length: 1536
-}
-```
-
-The plugin will **automatically warn** you if vectors are too large without proper behavior set.
-
-## Core Concepts
-
-### 🎯 Partition Support (NEW!)
-
-**VectorPlugin now supports automatic partitioning for optional embedding fields**, enabling **O(1) filtered searches** instead of O(n) full scans.
-
-#### Auto-Partition for Optional Embeddings
-
-When you have a resource where the embedding field is optional (not all records have embeddings), VectorPlugin automatically creates a partition to separate records with embeddings from those without.
-
-**Performance Impact:**
-- **Before:** Scans ALL records (e.g., 100k books) then filters in memory
-- **After:** Scans ONLY records with embeddings (e.g., 5k books) using O(1) partition lookup
-- **Result:** 95% reduction in records processed! 🚀
-
-**Example:**
-```javascript
-// Create resource with optional embedding
-const books = await db.createResource({
-  name: 'books',
-  attributes: {
-    id: 'string|required',
-    title: 'string|required',
-    category: 'string|required',
-    embedding: 'embedding:1536'  // ← OPTIONAL (no |required flag)
-  },
-  behavior: 'body-overflow',
-  partitions: {
-    byCategory: {
-      fields: { category: 'string' }
-    }
-  }
-});
-
-// ✨ VectorPlugin automatically creates:
-// - Partition: `byHasEmbedding`
-// - Tracking field: `_hasEmbedding` (boolean)
-// - Hooks to maintain synchronization automatically
-
-// ✅ Auto-uses embedding partition (searches only 5k books with embeddings)
-const results = await books.vectorSearch(queryVector, {
-  limit: 10
-  // No partition specified → uses byHasEmbedding automatically
-});
-
-// ✅ Custom partition (searches only sci-fi books with embeddings)
-const sciFiResults = await books.vectorSearch(queryVector, {
-  limit: 10,
-  partition: 'byCategory',
-  partitionValues: { category: 'sci-fi' }
-});
-```
-
-#### Combined Partitions
-
-You can **combine** the auto-created embedding partition with your custom partitions for even more precise filtering.
-
-**Example 1: Category + Has Embedding**
-
-If you want to search only books that:
-- Have embeddings populated **AND**
-- Belong to a specific category
-
-Create a **combined partition**:
-
-```javascript
-const books = await db.createResource({
-  name: 'books',
-  attributes: {
-    id: 'string|required',
-    title: 'string|required',
-    category: 'string|required',
-    embedding: 'embedding:1536'  // Optional
-  },
-  behavior: 'body-overflow',
-  partitions: {
-    // Custom partition: category
-    byCategory: {
-      fields: { category: 'string' }
-    },
-
-    // ✨ Combined partition: category + has embedding
-    byCategoryWithEmbedding: {
-      fields: {
-        category: 'string',
-        _hasEmbedding: 'boolean'  // Auto-maintained by VectorPlugin
-      }
-    }
-  }
-});
-
-// Search only sci-fi books that have embeddings
-const results = await books.vectorSearch(queryVector, {
-  limit: 10,
-  partition: 'byCategoryWithEmbedding',
-  partitionValues: {
-    category: 'sci-fi',
-    _hasEmbedding: true
-  }
-});
-
-// Cluster only fantasy books that have embeddings
-const clusters = await books.cluster({
-  k: 5,
-  partition: 'byCategoryWithEmbedding',
-  partitionValues: {
-    category: 'fantasy',
-    _hasEmbedding: true
-  }
-});
-```
-
-**Example 2: Multiple Criteria Partitions**
-
-```javascript
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    id: 'string|required',
-    name: 'string|required',
-    category: 'string|required',
-    price: 'number|required',
-    priceRange: 'string|required',  // 'budget', 'mid', 'premium'
-    inStock: 'boolean|required',
-    embedding: 'embedding:1536'  // Optional
-  },
-  behavior: 'body-overflow',
-  partitions: {
-    // Single field partitions
-    byCategory: {
-      fields: { category: 'string' }
-    },
-
-    // Combined: category + price range + has embedding
-    byCategoryPriceWithEmbedding: {
-      fields: {
-        category: 'string',
-        priceRange: 'string',
-        _hasEmbedding: 'boolean'
-      }
-    },
-
-    // Combined: in stock + has embedding (for live product search)
-    byInStockWithEmbedding: {
-      fields: {
-        inStock: 'boolean',
-        _hasEmbedding: 'boolean'
-      }
-    }
-  }
-});
-
-// Search premium electronics that have embeddings
-const premiumElectronics = await products.vectorSearch(queryVector, {
-  limit: 10,
-  partition: 'byCategoryPriceWithEmbedding',
-  partitionValues: {
-    category: 'electronics',
-    priceRange: 'premium',
-    _hasEmbedding: true
-  }
-});
-
-// Search only in-stock products with embeddings
-const inStockResults = await products.vectorSearch(queryVector, {
-  limit: 10,
-  partition: 'byInStockWithEmbedding',
-  partitionValues: {
-    inStock: true,
-    _hasEmbedding: true
-  }
-});
-```
-
-#### Performance Warning
-
-When operating on >1000 records without a partition, VectorPlugin emits a warning:
-
-```
-⚠️  VectorPlugin: Performing vectorSearch on 100000 records without partition filter
-   Resource: 'books'
-   Recommendation: Use partition parameter to reduce search space
-   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'sci-fi' } })
-```
-
-**Best Practice:** Always use partitions for large datasets (>1000 records) to optimize performance.
-
-#### How Auto-Partition Works
-
-1. **Detection:** VectorPlugin detects optional embedding fields during `validateVectorStorage()`
-2. **Creation:** Automatically creates partition `byHasEmbedding` with tracking field `_hasEmbedding`
-3. **Maintenance:** Installs hooks (`beforeInsert`, `beforeUpdate`) to keep `_hasEmbedding` synchronized
-4. **Usage:** `vectorSearch()` and `cluster()` auto-use the partition when no custom partition is specified
-
-**Zero configuration required!** The partition is created and maintained automatically.
-
-#### Technical Details: Plugin Attributes
-
-The `_hasEmbedding` tracking field is created using S3DB's **plugin attribute isolation system**, which ensures plugin-created attributes never interfere with your user-defined schema.
-
-**How It Works:**
-- Plugin attributes use a separate mapping namespace with `p`-prefixed IDs (`p0`, `p1`, `p2`...)
-- User attributes remain in the standard namespace (`0`, `1`, `2`...)
-- Adding/removing plugins **never affects** your existing data or field IDs
-- Prevents data corruption when plugins are installed/uninstalled
-
-**Example:**
-```javascript
-// Your resource schema (user-defined attributes)
-const books = await db.createResource({
-  name: 'books',
-  attributes: {
-    id: 'string|required',      // Maps to: 0
-    title: 'string|required',   // Maps to: 1
-    embedding: 'embedding:1536' // Maps to: 2
-  }
-});
-
-// VectorPlugin automatically adds tracking attribute
-// _hasEmbedding field uses plugin namespace (maps to: p0)
-// ✅ Your fields (0, 1, 2) remain stable forever!
-```
-
-**Why This Matters:**
-
-Without plugin attribute isolation, adding VectorPlugin could shift your field IDs:
-```javascript
-// ❌ WITHOUT ISOLATION (old behavior):
-// Before plugin: { id: '0', title: '1', embedding: '2' }
-// After plugin:  { _hasEmbedding: '0', id: '1', title: '2', embedding: '3' }
-// Result: Historical data corruption! 🔥
-
-// ✅ WITH ISOLATION (new behavior):
-// Before plugin: { id: '0', title: '1', embedding: '2' }
-// After plugin:  { id: '0', title: '1', embedding: '2', _hasEmbedding: 'p0' }
-// Result: Perfect data stability! ✨
-```
-
-**Learn More:** See the [Plugin Attributes section](./README.md#plugin-attributes-isolation-system) in the Plugin Development Guide for complete details on the plugin attribute isolation system.
-
-### Distance Metrics
-
-Choose the right metric for your use case:
-
-| Metric | Best For | Range | Characteristics |
-|--------|----------|-------|----------------|
-| **Cosine** | Semantic similarity, text embeddings | [0, 2] | Direction-based, ignores magnitude |
-| **Euclidean** | Geometric proximity, continuous data | [0, ∞) | Standard L2 distance |
-| **Manhattan** | Grid-based, faster computation | [0, ∞) | L1 distance, sum of absolute differences |
-
-```javascript
-// Cosine - Best for text embeddings
-const distance = products.vectorDistance(vector1, vector2, 'cosine');
-
-// Euclidean - Standard geometric distance
-const distance = products.vectorDistance(vector1, vector2, 'euclidean');
-
-// Manhattan - Faster, good for high dimensions
-const distance = products.vectorDistance(vector1, vector2, 'manhattan');
-```
-
-### K-means Clustering
-
-Unsupervised learning algorithm that groups similar vectors into K clusters.
-
-**Features**:
-- k-means++ initialization (faster convergence than random)
-- Multiple distance metrics supported
-- Configurable max iterations and tolerance
-- Returns cluster assignments, centroids, and inertia
-
-### Optimal K Selection
-
-Finding the right number of clusters is critical. VectorPlugin analyzes 5 metrics:
-
-1. **Elbow Method** - Point of diminishing returns in inertia
-2. **Silhouette Score** - How well-separated clusters are [-1, 1]
-3. **Davies-Bouldin Index** - Ratio of intra/inter-cluster distances [0, ∞)
-4. **Calinski-Harabasz Index** - Variance ratio [0, ∞)
-5. **Gap Statistic** - Comparison to random distribution
-
-The plugin provides a **consensus recommendation** based on all metrics.
-
-## Quick Start
-
-### Basic Setup
-
-```javascript
-import { Database, VectorPlugin } from 's3db';
-
-// 1. Connect to database
-const db = new Database('s3://key:secret@bucket');
-await db.connect();
-
-// 2. Install vector plugin
-const vectorPlugin = new VectorPlugin({
-  dimensions: 1536,
-  distanceMetric: 'cosine'
-});
-await vectorPlugin.install(db);
-
-// 3. Create resource with vectors (using shorthand notation)
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    id: 'string|required',
-    name: 'string|required',
-    description: 'string',
-    category: 'string',
-    price: 'number',
-    vector: 'embedding:1536'  // ✨ Auto-compression (77% space savings)
-  },
-  behavior: 'body-overflow'  // For large vectors
-});
-
-// 4. Insert data with vectors (generated externally)
-await products.insert({
-  id: 'prod-1',
-  name: 'Gaming Laptop',
-  description: 'High-performance laptop for gaming',
-  category: 'Electronics',
-  price: 1299.99,
-  vector: [0.123, -0.456, 0.789, ...]  // 1536 dimensions from OpenAI text-embedding-3-small
-});
-```
-
-## Embedding Providers
-
-VectorPlugin works with embeddings from any provider. Below are examples for the most popular embedding models in 2025.
-
-### OpenAI (Recommended)
-
-**Models**:
-- `text-embedding-3-small` - 1536 dims, best cost/performance ($0.00002/1k tokens)
-- `text-embedding-3-large` - 1536 or 3072 dims, highest quality ($0.00013/1k tokens)
-
-**Features**: Adjustable dimensions, multilingual, best-in-class performance
-
-```javascript
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-async function getEmbedding(text, options = {}) {
-  const response = await openai.embeddings.create({
-    model: options.model || 'text-embedding-3-small',  // or 'text-embedding-3-large'
-    input: text,
-    dimensions: options.dimensions  // Optional: 256, 512, 1024, 1536 (default), or 3072
-  });
-
-  return response.data[0].embedding;
-}
-
-// Usage with S3DB
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    id: 'string|required',
-    name: 'string|required',
-    description: 'string',
-    vector: 'embedding:1536'  // OpenAI default dimension
-  },
-  behavior: 'body-overflow'
-});
-
-// Generate and store embeddings
-const embedding = await getEmbedding('Gaming laptop with RGB keyboard');
-await products.insert({
-  id: 'prod-1',
-  name: 'Gaming Laptop',
-  description: 'High-performance laptop',
-  vector: embedding,
-  vectorModel: 'text-embedding-3-small',
-  vectorDimensions: 1536
-});
-```
-
-**Pro tip**: Use `text-embedding-3-large` with `dimensions: 1536` for 3072-quality embeddings in 1536 dimensions (best compression).
-
-### Google Vertex AI
-
-**Models**:
-- `text-embedding-005` - 768 dims, optimized for English
-- `text-multilingual-embedding-002` - 768 dims, 100+ languages
-- `text-embedding-004` - 768 dims, previous generation
-- `textembedding-gecko@003` - 768 dims, legacy
-- **`gemini-embedding-001`** - 768/1536/3072 dims (recommended, adjustable)
-
-**Features**: Matryoshka Representation Learning (MRL), flexible dimensions, multilingual
-
-```javascript
-import { VertexAI } from '@google-cloud/vertexai';
-
-const vertexAI = new VertexAI({
-  project: process.env.GOOGLE_CLOUD_PROJECT,
-  location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1'
-});
-
-const model = vertexAI.preview.getGenerativeModel({
-  model: 'gemini-embedding-001'  // Latest model
-});
-
-async function getEmbedding(text, dimensions = 768) {
-  const result = await model.embedContent({
-    content: [{ role: 'user', parts: [{ text }] }],
-    outputDimensionality: dimensions  // 768, 1536, or 3072
-  });
-
-  return result.embedding.values;
-}
-
-// Usage with S3DB
-const documents = await db.createResource({
-  name: 'documents',
-  attributes: {
-    id: 'string|required',
-    content: 'string|required',
-    vector: 'embedding:768'  // Google default dimension
-  },
-  behavior: 'body-overflow'
-});
-
-// Generate and store embeddings
-const embedding = await getEmbedding('Machine learning tutorial', 768);
-await documents.insert({
-  id: 'doc-1',
-  content: 'Introduction to ML',
-  vector: embedding,
-  vectorModel: 'gemini-embedding-001',
-  vectorDimensions: 768
-});
-```
-
-**Dimension recommendations**:
-- 768 dims: Best balance (default)
-- 1536 dims: Higher quality, more storage
-- 3072 dims: Maximum quality for critical applications
-
-### Cohere
-
-**Models**:
-- `embed-english-v3.0` - 1024 dims, English only, best performance
-- `embed-multilingual-v3.0` - 1024 dims, 100+ languages
-- `embed-english-light-v3.0` - 384 dims, faster/smaller
-- `embed-multilingual-light-v3.0` - 384 dims, 100+ languages
-- `embed-english-image-v3.0` - 1024 dims, multimodal (text + images)
-- `embed-multilingual-image-v3.0` - 1024 dims, multimodal + multilingual
-
-**Features**: Multimodal support, compression-aware training, semantic search optimized
-
-```javascript
-import { CohereClient } from 'cohere-ai';
-
-const cohere = new CohereClient({
-  token: process.env.COHERE_API_KEY
-});
-
-async function getEmbedding(text, options = {}) {
-  const response = await cohere.embed({
-    texts: [text],
-    model: options.model || 'embed-english-v3.0',
-    inputType: options.inputType || 'search_document',  // or 'search_query', 'classification', 'clustering'
-    embeddingTypes: ['float']
-  });
-
-  return response.embeddings.float[0];
-}
-
-// Usage with S3DB
-const articles = await db.createResource({
-  name: 'articles',
-  attributes: {
-    id: 'string|required',
-    title: 'string|required',
-    content: 'string',
-    vector: 'embedding:1024'  // Cohere standard dimension
-  },
-  behavior: 'body-overflow'
-});
-
-// Generate embeddings with task-specific optimization
-const embedding = await getEmbedding('AI research paper', {
-  model: 'embed-english-v3.0',
-  inputType: 'search_document'  // Optimized for document storage
-});
-
-await articles.insert({
-  id: 'article-1',
-  title: 'Deep Learning Advances',
-  content: 'Latest AI research',
-  vector: embedding,
-  vectorModel: 'embed-english-v3.0',
-  vectorDimensions: 1024
-});
-
-// For queries, use search_query input type
-const queryEmbedding = await getEmbedding('machine learning tutorial', {
-  inputType: 'search_query'  // Optimized for search queries
-});
-```
-
-**Input Types**:
-- `search_document`: For indexing documents (asymmetric search)
-- `search_query`: For search queries (asymmetric search)
-- `classification`: For classification tasks
-- `clustering`: For clustering tasks
-
-### Voyage AI (Anthropic Recommended)
-
-**Models**:
-- `voyage-3` - 1024 dims, best general-purpose
-- `voyage-3-large` - 1024 dims, highest quality
-- `voyage-code-3` - 1536 dims, code-specific
-- `voyage-finance-2` - 1024 dims, finance domain
-- `voyage-law-2` - 1024 dims, legal domain
-- `voyage-multilingual-2` - 1024 dims, 100+ languages
-
-**Features**: Domain-specific models, recommended by Anthropic for Claude RAG applications
-
-**Note**: Anthropic does NOT offer native embedding models - they recommend Voyage AI
-
-```javascript
-import { VoyageAIClient } from 'voyageai';
-
-const voyage = new VoyageAIClient({
-  apiKey: process.env.VOYAGE_API_KEY
-});
-
-async function getEmbedding(text, model = 'voyage-3') {
-  const response = await voyage.embed({
-    input: [text],
-    model: model,
-    inputType: 'document'  // or 'query'
-  });
-
-  return response.data[0].embedding;
-}
-
-// Usage with S3DB
-const knowledge = await db.createResource({
-  name: 'knowledge_base',
-  attributes: {
-    id: 'string|required',
-    content: 'string|required',
-    vector: 'embedding:1024'  // Voyage standard dimension
-  },
-  behavior: 'body-overflow'
-});
-
-// Generate embeddings (optimized for Claude RAG)
-const embedding = await getEmbedding(
-  'Cloud computing infrastructure guide',
-  'voyage-3'
-);
-
-await knowledge.insert({
-  id: 'kb-1',
-  content: 'Cloud computing guide',
-  vector: embedding,
-  vectorModel: 'voyage-3',
-  vectorDimensions: 1024
-});
-
-// Domain-specific example (Finance)
-const financeEmbedding = await getEmbedding(
-  'Q4 earnings report analysis',
-  'voyage-finance-2'  // Specialized for finance
-});
-```
-
-**Use with Claude**:
-```javascript
-// Typical RAG pattern with Anthropic Claude
-const query = 'What is cloud computing?';
-const queryEmbedding = await getEmbedding(query, 'voyage-3');
-
-// Search knowledge base
-const results = await knowledge.vectorSearch(queryEmbedding, {
-  limit: 5,
-  distanceMetric: 'cosine'
-});
-
-// Use results as context for Claude
-const context = results.map(r => r.record.content).join('\n\n');
-
-const message = await anthropic.messages.create({
-  model: 'claude-3-5-sonnet-20241022',
-  messages: [{
-    role: 'user',
-    content: `Context:\n${context}\n\nQuestion: ${query}`
-  }]
-});
-```
-
-### Model Comparison Table
-
-| Provider | Model | Dimensions | Use Case | Cost (per 1M tokens) | Notes |
-|----------|-------|-----------|----------|---------------------|-------|
-| **OpenAI** | text-embedding-3-small | 1536 | General purpose | $0.02 | Best cost/performance |
-| **OpenAI** | text-embedding-3-large | 1536/3072 | High quality | $0.13 | Adjustable dimensions |
-| **Google** | gemini-embedding-001 | 768-3072 | General purpose | Free* | Flexible dimensions (MRL) |
-| **Google** | text-embedding-005 | 768 | English | Free* | Optimized for English |
-| **Cohere** | embed-english-v3.0 | 1024 | English | $0.10 | Semantic search optimized |
-| **Cohere** | embed-multilingual-v3.0 | 1024 | Multilingual | $0.10 | 100+ languages |
-| **Cohere** | embed-english-light-v3.0 | 384 | Fast/small | $0.10 | Lower cost storage |
-| **Voyage** | voyage-3 | 1024 | General purpose | $0.12 | Anthropic recommended |
-| **Voyage** | voyage-3-large | 1024 | High quality | $0.12 | Best quality |
-| **Voyage** | voyage-code-3 | 1536 | Code | $0.12 | Code-specific |
-| **Voyage** | voyage-finance-2 | 1024 | Finance | $0.12 | Domain-specific |
-
-*Google Vertex AI pricing varies by region and usage
-
-### Storage Size Comparison
-
-With S3DB's automatic compression (`embedding:XXX` notation):
-
-| Dimensions | Uncompressed | With Compression (77% savings) | body-overflow Required? |
-|-----------|--------------|-------------------------------|------------------------|
-| 384 | ~2.7KB | **~620 bytes** | ❌ NO |
-| 768 | ~5.4KB | **~1.2KB** | ❌ NO |
-| 1024 | ~7.2KB | **~1.7KB** | ❌ NO |
-| 1536 | ~10.8KB | **~2.5KB** | ✅ YES |
-| 3072 | ~21.6KB | **~5.0KB** | ✅ YES |
-
-### Choosing the Right Model
-
-**For RAG Applications**:
-- **Claude + Voyage AI**: Best quality, Anthropic-recommended
-- **GPT + OpenAI**: Integrated ecosystem, adjustable dimensions
-- **Gemini + Google**: Free tier, flexible dimensions
-
-**For Semantic Search**:
-- **Cohere**: Optimized input types (document vs query)
-- **OpenAI 3-small**: Best cost/performance
-- **Voyage-3**: High quality, domain-specific options
-
-**For Multilingual**:
-- **Cohere multilingual-v3.0**: 100+ languages
-- **Google text-multilingual-embedding-002**: 100+ languages
-- **Voyage multilingual-2**: 100+ languages
-
-**For Code Search**:
-- **Voyage code-3**: Code-specific (1536 dims)
-- **OpenAI 3-small**: Good general-purpose code
-- **Google gemini-embedding-001**: Multi-modal (code + text)
-
-**For Cost Optimization**:
-- **OpenAI 3-small**: $0.02 per 1M tokens (cheapest)
-- **Cohere light models**: 384 dims, less storage
-- **Google Vertex AI**: Free tier available
-
-## Use Cases
-
-### 1. Similarity Search (KNN)
-
-**Scenario**: User searches for "gaming laptop", find 10 most similar products.
-
-```javascript
-// Step 1: Generate embedding for search query (external)
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-async function getEmbedding(text) {
-  const response = await openai.embeddings.create({
-    model: 'text-embedding-3-small',  // or 'text-embedding-3-large' for better quality
-    input: text
-  });
-  return response.data[0].embedding;
-}
-
-// Step 2: Search for similar products
-const searchQuery = 'gaming laptop';
-const queryVector = await getEmbedding(searchQuery);
-
+// Cosine (default) - Best for normalized embeddings
 const results = await products.vectorSearch(queryVector, {
-  limit: 10,
-  distanceMetric: 'cosine',
-  threshold: 0.5  // Optional: only return distance <= 0.5
+  distanceMetric: 'cosine'
 });
 
-// Step 3: Display results
-console.log(`Found ${results.length} similar products:\n`);
-
-results.forEach(({ record, distance }) => {
-  console.log(`${record.name}`);
-  console.log(`  Category: ${record.category}`);
-  console.log(`  Price: $${record.price}`);
-  console.log(`  Similarity: ${(1 - distance).toFixed(3)}`);
-  console.log();
-});
-```
-
-**Output**:
-```
-Found 10 similar products:
-
-Gaming Laptop Pro
-  Category: Electronics
-  Price: $1499.99
-  Similarity: 0.987
-
-High-Performance Gaming Desktop
-  Category: Electronics
-  Price: $1899.99
-  Similarity: 0.894
-
-...
-```
-
-**Advanced: Filter by Category**
-
-```javascript
-// Search only within specific category
+// Euclidean - For spatial data
 const results = await products.vectorSearch(queryVector, {
-  limit: 10,
-  distanceMetric: 'cosine',
-  partition: 'byCategory',
-  partitionValues: { category: 'Electronics' }
-});
-```
-
-### 2. Automatic Clustering with Optimal K
-
-**Scenario**: Group 1000 products into natural categories without manual labeling.
-
-```javascript
-// Step 1: Get all product vectors
-const allProducts = await products.getAll();
-const vectors = allProducts.map(p => p.vector);
-
-console.log(`Analyzing ${vectors.length} products to find optimal K...\n`);
-
-// Step 2: Find optimal number of clusters
-const analysis = await VectorPlugin.findOptimalK(vectors, {
-  minK: 2,
-  maxK: 10,
-  distanceMetric: 'cosine',
-  nReferences: 10,      // For Gap Statistic
-  stabilityRuns: 5      // For stability analysis
-});
-
-// Step 3: Review recommendations
-console.log('📊 Optimal K Analysis Results:\n');
-console.log(`Recommended K: ${analysis.consensus} (confidence: ${(analysis.summary.confidence * 100).toFixed(0)}%)\n`);
-
-console.log('Metric Recommendations:');
-console.log(`  Elbow Method:        K = ${analysis.recommendations.elbow}`);
-console.log(`  Silhouette Score:    K = ${analysis.recommendations.silhouette}`);
-console.log(`  Davies-Bouldin:      K = ${analysis.recommendations.daviesBouldin}`);
-console.log(`  Calinski-Harabasz:   K = ${analysis.recommendations.calinskiHarabasz}`);
-console.log(`  Gap Statistic:       K = ${analysis.recommendations.gap}`);
-console.log(`  Stability:           K = ${analysis.recommendations.stability}\n`);
-
-// Step 4: View detailed metrics for each K
-console.log('Detailed Metrics:\n');
-analysis.results.forEach(result => {
-  console.log(`K = ${result.k}:`);
-  console.log(`  Inertia:           ${result.inertia.toFixed(2)}`);
-  console.log(`  Silhouette:        ${result.silhouette.toFixed(4)} (higher better)`);
-  console.log(`  Davies-Bouldin:    ${result.daviesBouldin.toFixed(4)} (lower better)`);
-  console.log(`  Calinski-Harabasz: ${result.calinskiHarabasz.toFixed(2)} (higher better)`);
-  console.log(`  Gap:               ${result.gap.toFixed(4)} (higher better)`);
-  console.log(`  Stability:         ${result.stability.toFixed(4)} (higher better)`);
-  console.log();
-});
-
-// Step 5: Cluster with optimal K
-const optimalK = analysis.consensus;
-console.log(`\n🎯 Clustering with K = ${optimalK}...\n`);
-
-const clustering = await products.cluster({
-  k: optimalK,
-  distanceMetric: 'cosine',
-  maxIterations: 100
-});
-
-console.log('✅ Clustering Complete!\n');
-console.log(`  Iterations:  ${clustering.iterations}`);
-console.log(`  Converged:   ${clustering.converged}`);
-console.log(`  Inertia:     ${clustering.inertia.toFixed(2)}\n`);
-
-// Step 6: Analyze each cluster
-clustering.clusters.forEach((cluster, i) => {
-  console.log(`\nCluster ${i + 1} (${cluster.length} products):`);
-
-  // Show top 5 products in cluster
-  cluster.slice(0, 5).forEach(product => {
-    console.log(`  - ${product.name} ($${product.price})`);
-  });
-
-  if (cluster.length > 5) {
-    console.log(`  ... and ${cluster.length - 5} more`);
-  }
-
-  // Calculate average price in cluster
-  const avgPrice = cluster.reduce((sum, p) => sum + p.price, 0) / cluster.length;
-  console.log(`  Average Price: $${avgPrice.toFixed(2)}`);
-
-  // Most common category
-  const categories = cluster.map(p => p.category);
-  const categoryCount = categories.reduce((acc, cat) => {
-    acc[cat] = (acc[cat] || 0) + 1;
-    return acc;
-  }, {});
-  const topCategory = Object.entries(categoryCount).sort((a, b) => b[1] - a[1])[0];
-  console.log(`  Primary Category: ${topCategory[0]} (${topCategory[1]} products)`);
-});
-```
-
-**Output**:
-```
-📊 Optimal K Analysis Results:
-
-Recommended K: 3 (confidence: 83%)
-
-Metric Recommendations:
-  Elbow Method:        K = 3
-  Silhouette Score:    K = 3
-  Davies-Bouldin:      K = 4
-  Calinski-Harabasz:   K = 3
-  Gap Statistic:       K = 3
-  Stability:           K = 2
-
-🎯 Clustering with K = 3...
-
-✅ Clustering Complete!
-
-  Iterations:  12
-  Converged:   true
-  Inertia:     1234.56
-
-Cluster 1 (387 products):
-  - Gaming Laptop Pro ($1499.99)
-  - High-Performance Desktop ($1899.99)
-  - Gaming Monitor 27" ($399.99)
-  - Mechanical Keyboard RGB ($129.99)
-  - Gaming Mouse ($79.99)
-  ... and 382 more
-  Average Price: $456.78
-  Primary Category: Electronics (352 products)
-
-Cluster 2 (421 products):
-  - Office Desk Chair ($299.99)
-  - Standing Desk ($449.99)
-  ...
-```
-
-### 3. Product Recommendations
-
-**Scenario**: User is viewing a product, show "Customers who viewed this also viewed...".
-
-```javascript
-// Step 1: Get current product
-const currentProduct = await products.get('prod-123');
-
-console.log(`User is viewing: ${currentProduct.name}\n`);
-
-// Step 2: Find similar products
-const recommendations = await products.vectorSearch(currentProduct.vector, {
-  limit: 11,  // Get 11 to exclude current product
-  distanceMetric: 'cosine'
-});
-
-// Step 3: Remove current product from results
-const filtered = recommendations
-  .filter(result => result.record.id !== currentProduct.id)
-  .slice(0, 10);
-
-// Step 4: Display recommendations
-console.log('Customers who viewed this also viewed:\n');
-
-filtered.forEach(({ record, distance }, index) => {
-  const similarity = (1 - distance) * 100;
-  console.log(`${index + 1}. ${record.name}`);
-  console.log(`   Price: $${record.price}`);
-  console.log(`   Match: ${similarity.toFixed(1)}%`);
-  console.log();
-});
-
-// Step 5: Track recommendation performance (optional)
-// Store which recommendations were clicked for future optimization
-```
-
-**Advanced: Category-Aware Recommendations**
-
-```javascript
-// Recommend similar products within same category
-const recommendations = await products.vectorSearch(currentProduct.vector, {
-  limit: 10,
-  distanceMetric: 'cosine',
-  partition: 'byCategory',
-  partitionValues: { category: currentProduct.category }
-});
-
-// Or recommend complementary products from different category
-const complementary = await products.vectorSearch(currentProduct.vector, {
-  limit: 5,
-  distanceMetric: 'cosine'
-});
-
-const differentCategory = complementary.filter(
-  r => r.record.category !== currentProduct.category
-);
-```
-
-**Hybrid Recommendations (Vector + Business Rules)**
-
-```javascript
-// Combine semantic similarity with business logic
-const candidates = await products.vectorSearch(currentProduct.vector, {
-  limit: 50,
-  distanceMetric: 'cosine'
-});
-
-const recommendations = candidates
-  // Filter by price range (±30%)
-  .filter(r => {
-    const priceDiff = Math.abs(r.record.price - currentProduct.price);
-    return priceDiff <= currentProduct.price * 0.3;
-  })
-  // Filter by minimum rating
-  .filter(r => r.record.rating >= 4.0)
-  // Sort by combination of similarity and popularity
-  .sort((a, b) => {
-    const scoreA = (1 - a.distance) * 0.7 + (a.record.sales / 1000) * 0.3;
-    const scoreB = (1 - b.distance) * 0.7 + (b.record.sales / 1000) * 0.3;
-    return scoreB - scoreA;
-  })
-  .slice(0, 10);
-```
-
-### 4. Duplicate Detection
-
-**Scenario**: Detect near-duplicate products in catalog to merge or remove.
-
-```javascript
-// Step 1: Define duplicate detection settings
-const DUPLICATE_THRESHOLD = 0.05;  // Very similar (cosine distance < 0.05)
-
-console.log('🔍 Scanning for duplicate products...\n');
-
-// Step 2: Get all products
-const allProducts = await products.getAll();
-
-// Step 3: Find duplicates for each product
-const duplicatePairs = [];
-const processedIds = new Set();
-
-for (const product of allProducts) {
-  // Skip if already processed
-  if (processedIds.has(product.id)) continue;
-
-  // Find similar products
-  const similar = await products.vectorSearch(product.vector, {
-    limit: 10,
-    distanceMetric: 'cosine',
-    threshold: DUPLICATE_THRESHOLD
-  });
-
-  // Check for duplicates (excluding self)
-  const duplicates = similar.filter(s => s.record.id !== product.id);
-
-  if (duplicates.length > 0) {
-    duplicatePairs.push({
-      primary: product,
-      duplicates: duplicates
-    });
-
-    // Mark all as processed
-    processedIds.add(product.id);
-    duplicates.forEach(d => processedIds.add(d.record.id));
-  }
-}
-
-// Step 4: Report duplicates
-console.log(`Found ${duplicatePairs.length} potential duplicate groups:\n`);
-
-duplicatePairs.forEach((group, index) => {
-  console.log(`\nGroup ${index + 1}:`);
-  console.log(`  PRIMARY: ${group.primary.name} (ID: ${group.primary.id})`);
-  console.log(`           ${group.primary.description.substring(0, 80)}...`);
-
-  group.duplicates.forEach(({ record, distance }) => {
-    const similarity = (1 - distance) * 100;
-    console.log(`  DUPLICATE: ${record.name} (ID: ${record.id})`);
-    console.log(`             ${record.description.substring(0, 80)}...`);
-    console.log(`             Similarity: ${similarity.toFixed(2)}%`);
-  });
-});
-
-// Step 5: Auto-merge or flag for review
-for (const group of duplicatePairs) {
-  const primary = group.primary;
-
-  for (const { record: duplicate, distance } of group.duplicates) {
-    if (distance < 0.01) {
-      // Extremely similar - auto-merge
-      console.log(`\n⚠️  Auto-merging ${duplicate.id} into ${primary.id}`);
-
-      // Merge logic: keep primary, delete duplicate
-      await products.delete(duplicate.id);
-
-      // Optional: update primary with combined data
-      await products.update(primary.id, {
-        description: primary.description + ' ' + duplicate.description,
-        // Merge other fields as needed
-      });
-    } else {
-      // Somewhat similar - flag for manual review
-      console.log(`\n🔎 Flagging ${duplicate.id} for manual review against ${primary.id}`);
-
-      // Add to review queue
-      await reviewQueue.insert({
-        type: 'duplicate',
-        primaryId: primary.id,
-        duplicateId: duplicate.id,
-        similarity: 1 - distance,
-        status: 'pending'
-      });
-    }
-  }
-}
-```
-
-**Preventive Duplicate Detection (Before Insert)**
-
-```javascript
-import { PluginError } from 's3db.js';
-
-// Add hook to check for duplicates before inserting
-products.beforeInsert(async (data) => {
-  // Generate embedding for new product
-  const embedding = await getEmbedding(data.description);
-  data.vector = embedding;
-
-  // Check for existing similar products
-  const similar = await products.vectorSearch(embedding, {
-    limit: 1,
-    distanceMetric: 'cosine',
-    threshold: 0.05
-  });
-
-  if (similar.length > 0) {
-    const existing = similar[0];
-    throw new PluginError('Potential duplicate product detected', {
-      statusCode: 409,
-      retriable: false,
-      suggestion: 'Review the similar product and adjust the description or metadata before inserting.',
-      metadata: {
-        similarId: existing.record.id,
-        similarityPercent: Number(((1 - existing.distance) * 100).toFixed(1))
-      }
-    });
-  }
-
-  return data;
-});
-```
-
-### 5. User Segmentation
-
-**Scenario**: Group users by browsing behavior to create targeted marketing campaigns.
-
-```javascript
-// Step 1: Create user behavior vectors
-// Each dimension represents interaction with a product category/feature
-
-const users = await db.createResource({
-  name: 'users',
-  attributes: {
-    id: 'string|required',
-    email: 'string|required',
-    name: 'string',
-    behaviorVector: 'embedding:10',  // Custom behavior dimensions (10 categories)
-    segment: 'string'                // Will be filled by clustering
-  },
-  behavior: 'body-overflow'
-});
-
-await vectorPlugin.install(db);
-
-// Step 2: Build behavior vectors (example with 10 categories)
-async function buildBehaviorVector(userId) {
-  // Get user's browsing history
-  const history = await browsingHistory.list({
-    filter: { userId }
-  });
-
-  // Count interactions per category (Electronics, Fashion, Home, etc.)
-  const categories = [
-    'Electronics', 'Fashion', 'Home', 'Sports',
-    'Books', 'Toys', 'Food', 'Beauty', 'Health', 'Auto'
-  ];
-
-  const vector = categories.map(category => {
-    const views = history.filter(h => h.category === category).length;
-    const purchases = history.filter(h => h.category === category && h.purchased).length;
-
-    // Weighted: purchases count more than views
-    return views + (purchases * 5);
-  });
-
-  // Normalize vector
-  return VectorPlugin.normalize(vector);
-}
-
-// Step 3: Generate vectors for all users
-console.log('Building behavior vectors for all users...\n');
-
-const allUsers = await users.getAll();
-
-for (const user of allUsers) {
-  const behaviorVector = await buildBehaviorVector(user.id);
-  await users.update(user.id, { behaviorVector });
-}
-
-// Step 4: Find optimal number of segments
-console.log('Finding optimal number of user segments...\n');
-
-const userVectors = allUsers.map(u => u.behaviorVector);
-
-const segmentAnalysis = await VectorPlugin.findOptimalK(userVectors, {
-  minK: 3,
-  maxK: 8,
-  distanceMetric: 'euclidean',  // Better for behavioral data
-  nReferences: 10,
-  stabilityRuns: 5
-});
-
-console.log(`Recommended segments: ${segmentAnalysis.consensus}\n`);
-
-// Step 5: Cluster users into segments
-const clustering = await users.cluster({
-  k: segmentAnalysis.consensus,
-  vectorField: 'behaviorVector',
   distanceMetric: 'euclidean'
 });
 
-// Step 6: Analyze and name each segment
-const segmentNames = [
-  'Tech Enthusiasts',
-  'Fashion Lovers',
-  'Home Improvers',
-  'Sports Fans',
-  'Bookworms'
-];
-
-clustering.clusters.forEach(async (cluster, i) => {
-  const segmentName = segmentNames[i] || `Segment ${i + 1}`;
-
-  console.log(`\n${segmentName} (${cluster.length} users):`);
-
-  // Update users with segment name
-  for (const user of cluster) {
-    await users.update(user.id, { segment: segmentName });
-  }
-
-  // Analyze segment characteristics
-  const avgVector = clustering.centroids[i];
-  const categories = [
-    'Electronics', 'Fashion', 'Home', 'Sports',
-    'Books', 'Toys', 'Food', 'Beauty', 'Health', 'Auto'
-  ];
-
-  // Find top 3 categories for this segment
-  const topCategories = avgVector
-    .map((value, index) => ({ category: categories[index], score: value }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-
-  console.log('  Top interests:');
-  topCategories.forEach(({ category, score }) => {
-    console.log(`    - ${category}: ${(score * 100).toFixed(1)}%`);
-  });
-
-  // Sample users
-  console.log('  Sample users:');
-  cluster.slice(0, 3).forEach(user => {
-    console.log(`    - ${user.name} (${user.email})`);
-  });
+// Manhattan - For high-dimensional sparse data
+const results = await products.vectorSearch(queryVector, {
+  distanceMetric: 'manhattan'
 });
-
-// Step 7: Create targeted campaigns
-console.log('\n\n📧 Creating targeted email campaigns...\n');
-
-const campaigns = {
-  'Tech Enthusiasts': {
-    subject: '🚀 New Tech Arrivals - Exclusive Early Access',
-    products: 'electronics',
-    discount: '15%'
-  },
-  'Fashion Lovers': {
-    subject: '👗 Spring Collection Now Live - 20% Off',
-    products: 'fashion',
-    discount: '20%'
-  },
-  'Home Improvers': {
-    subject: '🏠 Transform Your Space - Home Essentials Sale',
-    products: 'home',
-    discount: '25%'
-  }
-};
-
-for (const [segment, campaign] of Object.entries(campaigns)) {
-  const segmentUsers = await users.list({
-    filter: { segment }
-  });
-
-  console.log(`Sending "${campaign.subject}" to ${segmentUsers.length} ${segment}`);
-
-  // Send emails (pseudo-code)
-  // await sendCampaignEmail(segmentUsers, campaign);
-}
 ```
 
-**Output**:
-```
-Finding optimal number of user segments...
+### KNN Search with Partitions
 
-Recommended segments: 5
-
-Tech Enthusiasts (2,341 users):
-  Top interests:
-    - Electronics: 87.3%
-    - Sports: 45.2%
-    - Auto: 32.1%
-  Sample users:
-    - John Doe (john@example.com)
-    - Jane Smith (jane@example.com)
-    - Bob Wilson (bob@example.com)
-
-Fashion Lovers (1,892 users):
-  Top interests:
-    - Fashion: 91.5%
-    - Beauty: 78.4%
-    - Home: 34.7%
-  ...
-
-📧 Creating targeted email campaigns...
-
-Sending "🚀 New Tech Arrivals" to 2,341 Tech Enthusiasts
-Sending "👗 Spring Collection" to 1,892 Fashion Lovers
-Sending "🏠 Transform Your Space" to 1,567 Home Improvers
-```
-
-## API Reference
-
-### Plugin Configuration
+Search with optional filtering for performance:
 
 ```javascript
-new VectorPlugin({
-  dimensions: 1536,            // Expected vector dimensions
-  distanceMetric: 'cosine',    // Default: 'cosine', 'euclidean', 'manhattan'
-  storageThreshold: 1500,      // Bytes - warn if vectors exceed this
-  autoFixBehavior: false,      // Auto-set body-overflow when needed
-  autoDetectVectorField: true, // Auto-detect embedding:XXX fields
-  emitEvents: true,            // Emit events for monitoring
-  verboseEvents: false,        // Emit detailed progress events
-  eventThrottle: 100           // Throttle progress events (ms)
-})
-```
+// All vectors
+const all = await products.vectorSearch(queryVector, { limit: 10 });
 
-**Configuration Options**:
-- `dimensions` (number): Expected vector dimensions (default: `1536`)
-- `distanceMetric` (string): Default distance metric - `'cosine'`, `'euclidean'`, or `'manhattan'` (default: `'cosine'`)
-- `storageThreshold` (number): Warn if vectors exceed this size in bytes (default: `1500`)
-- `autoFixBehavior` (boolean): Automatically set `body-overflow` for large vectors (default: `false`)
-- `autoDetectVectorField` (boolean): Automatically detect `embedding:XXX` fields (default: `true`)
-- `emitEvents` (boolean): Enable event emission for monitoring (default: `true`)
-- `verboseEvents` (boolean): Emit detailed progress events - use for debugging (default: `false`)
-- `eventThrottle` (number): Throttle progress events in milliseconds (default: `100`)
-
-### Resource Methods
-
-Added to all resources after plugin installation:
-
-#### `vectorSearch(queryVector, options)`
-
-Find K-nearest neighbors with optional partition filtering.
-
-**Parameters**:
-- `queryVector` (number[]): Vector to search for
-- `options` (object):
-  - `vectorField` (string): Field containing vectors (optional - auto-detected if `embedding:XXX` notation used, default: `'vector'`)
-  - `limit` (number): Max results to return (default: `10`)
-  - `distanceMetric` (string): Distance function (default: plugin config)
-  - `threshold` (number): Only return distances <= threshold (optional)
-  - **`partition` (string): Partition name for filtered search (optional)**
-  - **`partitionValues` (object): Partition field values to filter by (optional)**
-
-**Returns**: Array of `{ record, distance }` sorted by distance (ascending)
-
-**Partition Behavior:**
-- **No partition specified:** Auto-uses `byHasEmbedding` partition if available (searches only records with embeddings)
-- **Custom partition specified:** Uses your partition for filtered search (e.g., only sci-fi books)
-- **Combined partition:** Can filter by multiple criteria (e.g., category + has embedding)
-
-```javascript
-// ✅ Auto-uses embedding partition (searches only records with embeddings)
-const results = await resource.vectorSearch([0.1, 0.2, ...], {
-  limit: 10,
-  distanceMetric: 'cosine',
-  threshold: 0.5
-});
-
-// ✅ Custom partition (searches only sci-fi books)
-const results = await resource.vectorSearch([0.1, 0.2, ...], {
+// Only specific category (10x faster!)
+const filtered = await products.vectorSearch(queryVector, {
   limit: 10,
   partition: 'byCategory',
-  partitionValues: { category: 'sci-fi' }
-});
-
-// ✅ Combined partition (sci-fi books with embeddings)
-const results = await resource.vectorSearch([0.1, 0.2, ...], {
-  limit: 10,
-  partition: 'byCategoryWithEmbedding',
-  partitionValues: {
-    category: 'sci-fi',
-    _hasEmbedding: true
-  }
-});
-
-// Specify vectorField explicitly (if not using auto-detect)
-const results = await resource.vectorSearch([0.1, 0.2, ...], {
-  vectorField: 'embedding',
-  limit: 10,
-  distanceMetric: 'cosine'
+  partitionValues: { category: 'electronics' }
 });
 ```
 
-#### `cluster(options)`
+### K-Means Clustering
 
-Perform k-means clustering with optional partition filtering.
-
-**Parameters**:
-- `options` (object):
-  - `k` (number): Number of clusters (required)
-  - `vectorField` (string): Field containing vectors (optional - auto-detected if `embedding:XXX` notation used, default: `'vector'`)
-  - `distanceMetric` (string): Distance function (default: plugin config)
-  - `maxIterations` (number): Max iterations (default: `100`)
-  - `tolerance` (number): Convergence tolerance (default: `0.0001`)
-  - **`partition` (string): Partition name to cluster within (optional)**
-  - **`partitionValues` (object): Partition field values to filter by (optional)**
-
-**Returns**: Object with:
-- `clusters` (array[]): Array of cluster arrays (records)
-- `centroids` (number[][]): Cluster centers
-- `inertia` (number): Sum of squared distances to centroids
-- `iterations` (number): Number of iterations run
-- `converged` (boolean): Whether algorithm converged
-
-**Partition Behavior:**
-- **No partition specified:** Auto-uses `byHasEmbedding` partition if available (clusters only records with embeddings)
-- **Custom partition specified:** Clusters within your partition (e.g., only sci-fi books)
-- **Combined partition:** Can cluster by multiple criteria (e.g., category + has embedding)
+Group items automatically:
 
 ```javascript
-// ✅ Auto-uses embedding partition (clusters only records with embeddings)
-const result = await resource.cluster({
-  k: 5,
-  distanceMetric: 'euclidean',
-  maxIterations: 100
-});
-
-// ✅ Custom partition (cluster only sci-fi books)
-const result = await resource.cluster({
-  k: 3,
-  partition: 'byCategory',
-  partitionValues: { category: 'sci-fi' }
-});
-
-// ✅ Combined partition (cluster fantasy books with embeddings)
-const result = await resource.cluster({
-  k: 4,
-  partition: 'byCategoryWithEmbedding',
-  partitionValues: {
-    category: 'fantasy',
-    _hasEmbedding: true
-  }
-});
-
-// Specify vectorField explicitly (if not using auto-detect)
-const result = await resource.cluster({
-  k: 5,
-  vectorField: 'embedding',
-  distanceMetric: 'euclidean',
-  maxIterations: 100
-});
-```
-
-#### `vectorDistance(vector1, vector2, metric)`
-
-Calculate distance between two vectors.
-
-**Parameters**:
-- `vector1` (number[]): First vector
-- `vector2` (number[]): Second vector
-- `metric` (string): Distance metric (default: plugin config)
-
-**Returns**: number (distance)
-
-```javascript
-const distance = resource.vectorDistance(
-  [1, 2, 3],
-  [4, 5, 6],
-  'euclidean'
-);
-```
-
-### Static Utilities
-
-#### `VectorPlugin.findOptimalK(vectors, options)`
-
-Analyze optimal number of clusters using 5 metrics.
-
-**Parameters**:
-- `vectors` (number[][]): Array of vectors to analyze
-- `options` (object):
-  - `minK` (number): Minimum K to test (default: `2`)
-  - `maxK` (number): Maximum K to test (default: `sqrt(n/2)`)
-  - `distanceFn` (function): Distance function (default: euclidean)
-  - `nReferences` (number): Reference datasets for Gap Statistic (default: `10`)
-  - `stabilityRuns` (number): Runs for stability analysis (default: `5`)
-
-**Returns**: Promise<object> with:
-- `results` (array): Metrics for each K value
-- `recommendations` (object): Best K by each metric
-- `consensus` (number): Recommended K (most votes)
-- `summary` (object): Analysis summary
-
-```javascript
+// Find optimal K
 const analysis = await VectorPlugin.findOptimalK(vectors, {
   minK: 2,
-  maxK: 10,
+  maxK: 10
+});
+
+// Cluster with optimal K
+const result = await products.cluster({
+  k: analysis.consensus,
   distanceMetric: 'cosine'
 });
 
-console.log(`Best K: ${analysis.consensus}`);
+console.log(`Created ${result.clusters.length} clusters`);
 ```
 
-#### `VectorPlugin.normalize(vector)`
+### Events & Monitoring
 
-Normalize vector to unit length.
-
-```javascript
-const normalized = VectorPlugin.normalize([3, 4]);
-// Returns: [0.6, 0.8]
-```
-
-#### `VectorPlugin.dotProduct(vector1, vector2)`
-
-Calculate dot product.
+Track operations in real-time:
 
 ```javascript
-const product = VectorPlugin.dotProduct([1, 2, 3], [4, 5, 6]);
-// Returns: 32
-```
-
-
-### 🎯 Intuitive Method Aliases
-
-For better developer experience, VectorPlugin provides intuitive aliases for common operations:
-
-#### `similarTo(queryVector, options)` & `findSimilar(queryVector, options)`
-
-Natural alternatives to `vectorSearch()` - both aliases point to the same method.
-
-```javascript
-// ✨ More intuitive: "find products similar to this query"
-const results = await products.similarTo(queryVector, {
-  limit: 10,
-  distanceMetric: 'cosine'
-});
-
-// ✨ Alternative:  descriptive name
-const results = await products.findSimilar(queryVector, {
-  limit: 10
-});
-
-// Original (still works):
-const results = await products.vectorSearch(queryVector, { limit: 10 });
-```
-
-**When to use**:
-- `similarTo()` - Best for general similarity search ("products similar to X")
-- `findSimilar()` - Alternative descriptive name
-- `vectorSearch()` - When you want to emphasize the technical aspect
-
-#### `distance(vector1, vector2, metric)`
-
-Simpler alternative to `vectorDistance()`.
-
-```javascript
-// ✨ Simpler
-const dist = products.distance([1, 2, 3], [4, 5, 6], 'euclidean');
-
-// Original (still works):
-const dist = products.vectorDistance([1, 2, 3], [4, 5, 6], 'euclidean');
-```
-
-### Method Comparison
-
-| Operation | Technical Name | Intuitive Alias | Use Case |
-|-----------|---------------|-----------------|----------|
-| Search similar vectors | `vectorSearch()` | `similarTo()`, `findSimilar()` | Recommendations, search |
-| K-means clustering | `cluster()` | - | Grouping, segmentation |
-| Calculate distance | `vectorDistance()` | `distance()` | Comparisons, metrics |
-
-**All methods are fully equivalent** - aliases simply point to the same underlying implementation. Choose the name that makes your code most readable!
-
-```javascript
-// Example: Product recommendations with intuitive API
-const current = await products.get('laptop-123');
-
-// Natural language-like API
-const recommendations = await products.similarTo(current.vector, {
-  limit: 5
-});
-
-// Calculate similarity percentage  
-for (const { record, distance } of recommendations) {
-  const dist = products.distance(current.vector, record.vector, 'cosine');
-  console.log(`${record.name}: ${((1 - dist) * 100).toFixed(1)}% similar`);
-}
-```
-## Events & Monitoring
-
-VectorPlugin emits comprehensive events for monitoring, debugging, and observability. All events can be disabled by setting `emitEvents: false` in the plugin configuration.
-
-### Event Categories
-
-#### 🔄 Lifecycle Events
-
-Already emitted by base Plugin class:
-
-| Event | When | Payload |
-|-------|------|---------|
-| `db:plugin:installed` | Plugin installed | `{ plugin: 'VectorPlugin' }` |
-| `db:plugin:started` | Plugin started | `{ plugin: 'VectorPlugin' }` |
-| `db:plugin:stopped` | Plugin stopped | `{ plugin: 'VectorPlugin' }` |
-| `uninstalled` | Plugin uninstalled | `{ plugin: 'VectorPlugin' }` |
-
-#### 🔍 Search Events
-
-| Event | When | Payload |
-|-------|------|---------|
-| `plg:vector:search-start` | Search initiated | `{ resource, vectorField, limit, distanceMetric, partition, threshold, queryDimensions, timestamp }` |
-| `plg:vector:search-progress` | Search progress (throttled, verbose mode only) | `{ resource, processed, total, progress, timestamp }` |
-| `plg:vector:search-complete` | Search completed | `{ resource, vectorField, resultsCount, totalRecords, processedRecords, dimensionMismatches, duration, throughput, timestamp }` |
-| `plg:vector:search-error` | Search error | `{ resource, error, stack, timestamp }` |
-
-#### 🎯 Clustering Events
-
-| Event | When | Payload |
-|-------|------|---------|
-| `plg:vector:cluster-start` | Clustering initiated | `{ resource, vectorField, k, distanceMetric, partition, maxIterations, timestamp }` |
-| `plg:vector:cluster-iteration` | Each k-means iteration (throttled, verbose mode only) | `{ resource, k, iteration, inertia, converged, timestamp }` |
-| `plg:vector:cluster-converged` | Clustering converged | `{ resource, k, iterations, inertia, timestamp }` |
-| `plg:vector:cluster-complete` | Clustering completed | `{ resource, vectorField, k, vectorCount, iterations, converged, inertia, clusterSizes, duration, timestamp }` |
-| `plg:vector:cluster-error` | Clustering error | `{ resource, error, stack, timestamp }` |
-
-#### ⚙️ Configuration & Validation Events
-
-| Event | When | Payload |
-|-------|------|---------|
-| `plg:vector:field-detected` | Auto-detected embedding field | `{ resource, vectorField, timestamp }` |
-| `plg:vector:storage-warning` | Large vectors without proper behavior | `{ resource, vectorFields, totalEstimatedBytes, metadataLimit, currentBehavior, recommendation }` |
-| `plg:vector:behavior-fixed` | Auto-fixed behavior | `{ resource, newBehavior }` |
-| `plg:vector:dimension-mismatch` | Dimension mismatch detected (verbose mode only) | `{ resource, recordIndex, expected, got, timestamp }` |
-| `plg:vector:empty-dataset` | No vectors found | `{ resource, vectorField, totalRecords, timestamp }` |
-| `plg:vector:partition-filter` | Partition filter applied | `{ resource, partition, timestamp }` |
-
-#### 📊 Performance Events
-
-| Event | When | Payload |
-|-------|------|---------|
-| `plg:vector:performance` | After operations (verbose mode only) | `{ operation, resource, duration, throughput, recordsPerSecond, timestamp }` |
-
-### Usage Examples
-
-#### Basic Monitoring
-
-```javascript
-// Monitor all search operations
-vectorPlugin.on('plg:vector:search-start', (data) => {
-  console.log(`🔍 Starting search on ${data.resource}...`);
-  console.log(`   Query dimensions: ${data.queryDimensions}`);
-  console.log(`   Distance metric: ${data.distanceMetric}`);
-  console.log(`   Limit: ${data.limit}`);
-});
-
 vectorPlugin.on('plg:vector:search-complete', (data) => {
-  console.log(`✅ Search completed in ${data.duration}ms`);
-  console.log(`   Found: ${data.resultsCount} results`);
-  console.log(`   Throughput: ${data.throughput} records/s`);
-  if (data.dimensionMismatches > 0) {
-    console.warn(`   ⚠️  ${data.dimensionMismatches} dimension mismatches`);
-  }
-});
-
-vectorPlugin.on('plg:vector:search-error', (data) => {
-  console.error(`❌ Search error on ${data.resource}:`, data.error);
-});
-```
-
-#### Clustering Progress Tracking
-
-```javascript
-// Enable verbose events for progress tracking
-const vectorPlugin = new VectorPlugin({
-  verboseEvents: true,
-  eventThrottle: 500  // Update every 500ms
-});
-
-let lastIteration = 0;
-
-vectorPlugin.on('plg:vector:cluster-start', (data) => {
-  console.log(`\n🎯 Clustering ${data.vectorCount} vectors with k=${data.k}`);
-  console.log(`   Resource: ${data.resource}`);
-  console.log(`   Distance metric: ${data.distanceMetric}`);
-  console.log(`   Max iterations: ${data.maxIterations}\n`);
-  lastIteration = 0;
-});
-
-vectorPlugin.on('plg:vector:cluster-iteration', (data) => {
-  if (data.iteration > lastIteration) {
-    const bar = '█'.repeat(Math.floor(data.iteration / data.maxIterations * 20));
-    console.log(`   Iteration ${data.iteration}: ${bar} Inertia: ${data.inertia.toFixed(2)}`);
-    lastIteration = data.iteration;
-  }
-});
-
-vectorPlugin.on('plg:vector:cluster-converged', (data) => {
-  console.log(`\n✅ Converged after ${data.iterations} iterations!`);
-  console.log(`   Final inertia: ${data.inertia.toFixed(2)}`);
+  console.log(`Search: ${data.resultsCount} results in ${data.duration}ms`);
 });
 
 vectorPlugin.on('plg:vector:cluster-complete', (data) => {
-  console.log(`\n📊 Clustering Results:`);
-  console.log(`   Duration: ${data.duration}ms`);
-  console.log(`   Cluster sizes:`, data.clusterSizes);
-  console.log(`   Converged: ${data.converged ? 'Yes' : 'No'}\n`);
+  console.log(`Cluster: k=${data.k}, converged=${data.converged}`);
 });
 ```
 
-**Output**:
-```
-🎯 Clustering 1000 vectors with k=5
-   Resource: products
-   Distance metric: cosine
-   Max iterations: 100
-
-   Iteration 1: ████░░░░░░░░░░░░░░░░ Inertia: 1234.56
-   Iteration 2: ████████░░░░░░░░░░░░ Inertia: 987.65
-   Iteration 3: ████████████░░░░░░░░ Inertia: 765.43
-   Iteration 4: ████████████████░░░░ Inertia: 654.32
-   Iteration 5: ████████████████████ Inertia: 623.21
-
-✅ Converged after 5 iterations!
-   Final inertia: 623.21
-
-📊 Clustering Results:
-   Duration: 1234ms
-   Cluster sizes: [ 234, 198, 256, 187, 125 ]
-   Converged: Yes
-```
-
-#### Production Monitoring with Metrics
-
-```javascript
-import { Database, VectorPlugin } from 's3db';
-import prometheus from 'prom-client';
-
-// Prometheus metrics
-const searchDuration = new prometheus.Histogram({
-  name: 'vector_search_duration_ms',
-  help: 'Vector search duration in milliseconds',
-  labelNames: ['resource', 'metric']
-});
-
-const searchResults = new prometheus.Histogram({
-  name: 'vector_search_results',
-  help: 'Number of results returned',
-  labelNames: ['resource']
-});
-
-const clusteringDuration = new prometheus.Histogram({
-  name: 'vector_clustering_duration_ms',
-  help: 'Clustering duration in milliseconds',
-  labelNames: ['resource', 'k']
-});
-
-const dimensionMismatches = new prometheus.Counter({
-  name: 'vector_dimension_mismatches_total',
-  help: 'Total dimension mismatches detected',
-  labelNames: ['resource']
-});
-
-// Hook up events
-vectorPlugin.on('plg:vector:search-complete', (data) => {
-  searchDuration.labels(data.resource, data.distanceMetric).observe(data.duration);
-  searchResults.labels(data.resource).observe(data.resultsCount);
-
-  if (data.dimensionMismatches > 0) {
-    dimensionMismatches.labels(data.resource).inc(data.dimensionMismatches);
-  }
-});
-
-vectorPlugin.on('plg:vector:cluster-complete', (data) => {
-  clusteringDuration.labels(data.resource, data.k.toString()).observe(data.duration);
-});
-
-// Alert on errors
-vectorPlugin.on('plg:vector:search-error', (data) => {
-  logger.error('Vector search error', {
-    resource: data.resource,
-    error: data.error,
-    timestamp: data.timestamp
-  });
-
-  alerting.notify('VectorPlugin Search Error', data);
-});
-
-vectorPlugin.on('plg:vector:cluster-error', (data) => {
-  logger.error('Vector clustering error', {
-    resource: data.resource,
-    error: data.error,
-    timestamp: data.timestamp
-  });
-
-  alerting.notify('VectorPlugin Clustering Error', data);
-});
-```
-
-#### Auto-detection Feedback
-
-```javascript
-// Get notified when vector fields are auto-detected
-vectorPlugin.on('plg:vector:field-detected', (data) => {
-  console.log(`✨ Auto-detected vector field: ${data.vectorField}`);
-  console.log(`   Resource: ${data.resource}`);
-
-  // Optional: Log for audit trail
-  logger.info('Vector field auto-detected', data);
-});
-
-// Now you can omit vectorField parameter
-const results = await products.vectorSearch(queryVector, {
-  limit: 10  // vectorField automatically detected as 'embedding'
-});
-```
-
-#### Development/Debugging with Verbose Events
-
-```javascript
-if (process.env.NODE_ENV === 'development') {
-  const vectorPlugin = new VectorPlugin({
-    verboseEvents: true,    // Enable all events
-    eventThrottle: 50       // Fast updates for debugging
-  });
-
-  // Log everything
-  vectorPlugin.on('plg:vector:search-progress', (data) => {
-    console.log(`[PROGRESS] Processed ${data.processed}/${data.total} (${data.progress.toFixed(1)}%)`);
-  });
-
-  vectorPlugin.on('plg:vector:dimension-mismatch', (data) => {
-    console.warn(`[MISMATCH] Record ${data.recordIndex}: expected ${data.expected} dims, got ${data.got}`);
-  });
-
-  vectorPlugin.on('plg:vector:performance', (data) => {
-    console.log(`[PERF] ${data.operation} on ${data.resource}: ${data.duration}ms (${data.throughput} records/s)`);
-  });
-
-  vectorPlugin.on('plg:vector:partition-filter', (data) => {
-    console.log(`[PARTITION] Filtering by partition: ${JSON.stringify(data.partition)}`);
-  });
-}
-```
-
-#### Analytics & Business Intelligence
-
-```javascript
-// Track vector operations for analytics
-const analytics = {
-  searches: 0,
-  clusterings: 0,
-  avgSearchDuration: 0,
-  avgClusteringDuration: 0,
-  totalVectorsProcessed: 0
-};
-
-vectorPlugin.on('plg:vector:search-complete', (data) => {
-  analytics.searches++;
-  analytics.avgSearchDuration =
-    (analytics.avgSearchDuration * (analytics.searches - 1) + data.duration) / analytics.searches;
-  analytics.totalVectorsProcessed += data.processedRecords;
-
-  // Send to analytics platform
-  mixpanel.track('Vector Search', {
-    resource: data.resource,
-    resultsCount: data.resultsCount,
-    duration: data.duration,
-    throughput: data.throughput
-  });
-});
-
-vectorPlugin.on('plg:vector:cluster-complete', (data) => {
-  analytics.clusterings++;
-  analytics.avgClusteringDuration =
-    (analytics.avgClusteringDuration * (analytics.clusterings - 1) + data.duration) / analytics.clusterings;
-
-  mixpanel.track('Vector Clustering', {
-    resource: data.resource,
-    k: data.k,
-    vectorCount: data.vectorCount,
-    iterations: data.iterations,
-    converged: data.converged,
-    duration: data.duration
-  });
-});
-
-// Periodic reporting
-setInterval(() => {
-  console.log('\n📊 Vector Analytics Report:');
-  console.log(`   Total searches: ${analytics.searches}`);
-  console.log(`   Total clusterings: ${analytics.clusterings}`);
-  console.log(`   Avg search duration: ${analytics.avgSearchDuration.toFixed(2)}ms`);
-  console.log(`   Avg clustering duration: ${analytics.avgClusteringDuration.toFixed(2)}ms`);
-  console.log(`   Total vectors processed: ${analytics.totalVectorsProcessed.toLocaleString()}`);
-}, 60000); // Every minute
-```
-
-#### Quality Monitoring
-
-```javascript
-// Monitor search quality and alert on degradation
-const qualityThresholds = {
-  minResults: 5,              // Alert if < 5 results
-  maxAvgDistance: 0.7,        // Alert if avg distance > 0.7
-  maxDimensionMismatches: 10  // Alert if > 10 mismatches
-};
-
-let recentSearches = [];
-
-vectorPlugin.on('plg:vector:search-complete', (data) => {
-  // Track recent searches (last 100)
-  recentSearches.push(data);
-  if (recentSearches.length > 100) {
-    recentSearches.shift();
-  }
-
-  // Check quality
-  if (data.resultsCount < qualityThresholds.minResults) {
-    logger.warn('Low search results', {
-      resource: data.resource,
-      resultsCount: data.resultsCount,
-      threshold: qualityThresholds.minResults
-    });
-  }
-
-  if (data.dimensionMismatches > qualityThresholds.maxDimensionMismatches) {
-    logger.error('High dimension mismatch rate', {
-      resource: data.resource,
-      mismatches: data.dimensionMismatches,
-      totalRecords: data.totalRecords
-    });
-
-    alerting.notify('Vector Dimension Mismatch Alert', data);
-  }
-});
-
-// Periodic quality analysis
-setInterval(() => {
-  if (recentSearches.length === 0) return;
-
-  const avgDuration = recentSearches.reduce((sum, s) => sum + s.duration, 0) / recentSearches.length;
-  const avgResults = recentSearches.reduce((sum, s) => sum + s.resultsCount, 0) / recentSearches.length;
-
-  console.log('\n🔍 Search Quality Report:');
-  console.log(`   Recent searches: ${recentSearches.length}`);
-  console.log(`   Avg duration: ${avgDuration.toFixed(2)}ms`);
-  console.log(`   Avg results: ${avgResults.toFixed(1)}`);
-
-  if (avgDuration > 5000) {
-    logger.warn('Search performance degradation', { avgDuration });
-  }
-}, 300000); // Every 5 minutes
-```
-
-### Event Configuration Best Practices
-
-#### Production Setup
-
-```javascript
-// Production: Only essential events
-const vectorPlugin = new VectorPlugin({
-  emitEvents: true,       // Enable monitoring
-  verboseEvents: false,   // Disable verbose (performance)
-  eventThrottle: 1000     // Throttle to reduce overhead
-});
-```
-
-#### Development Setup
-
-```javascript
-// Development: All events for debugging
-const vectorPlugin = new VectorPlugin({
-  emitEvents: true,
-  verboseEvents: true,    // Full visibility
-  eventThrottle: 100      // Fast updates
-});
-```
-
-#### Performance Testing
-
-```javascript
-// Performance testing: Disable events
-const vectorPlugin = new VectorPlugin({
-  emitEvents: false       // No event overhead
-});
-```
-
-### Event Throttling
-
-Progress events (`plg:vector:search-progress`, `plg:vector:cluster-iteration`) are automatically throttled to prevent event spam:
-
-```javascript
-// Default: 100ms throttle
-const vectorPlugin = new VectorPlugin({
-  eventThrottle: 100  // Max 1 progress event per 100ms
-});
-
-// Fast updates (more CPU overhead)
-const vectorPlugin = new VectorPlugin({
-  eventThrottle: 50   // Max 1 progress event per 50ms
-});
-
-// Slow updates (less CPU overhead)
-const vectorPlugin = new VectorPlugin({
-  eventThrottle: 500  // Max 1 progress event per 500ms
-});
-```
-
-## Performance Tips
-
-### Distance Metric Selection
-
-| Use Case | Recommended Metric | Why |
-|----------|-------------------|-----|
-| Text embeddings | Cosine | Direction matters, magnitude doesn't |
-| Image features | Euclidean | Absolute differences matter |
-| High-dimensional data | Manhattan | Faster, less sensitive to outliers |
-| Normalized vectors | Cosine or Dot Product | Already unit length |
-
-### Memory & Storage
-
-1. **Use partitions** for large datasets:
-```javascript
-// Partition by category for faster filtered search
-const products = await db.createResource({
-  name: 'products',
-  partitions: {
-    byCategory: {
-      fields: { category: 'string' }
-    }
-  }
-});
-```
-
-2. **Batch operations** for large inserts:
-```javascript
-// Insert many at once
-await products.insertMany(items);
-```
-
-3. **Limit vector dimensions** if possible:
-- 128-256 dims: Fast, good for most use cases
-- 512-768 dims: Sentence Transformers, balanced
-- 1536 dims: OpenAI text-embedding-3-small/3-large, best quality but slower
-- 3072 dims: OpenAI text-embedding-3-large (maximum quality, requires more storage)
-
-### Clustering Performance
-
-- **Start with small maxK**: Test 2-10 before going higher
-- **Use fewer stabilityRuns** for initial exploration: `stabilityRuns: 3`
-- **Reduce nReferences** for Gap Statistic: `nReferences: 5`
-- **Cache results**: Store optimal K analysis results
-
-```javascript
-// Fast exploration
-const quickAnalysis = await VectorPlugin.findOptimalK(vectors, {
-  minK: 2,
-  maxK: 5,
-  nReferences: 3,
-  stabilityRuns: 2
-});
-
-// Detailed analysis later
-const detailedAnalysis = await VectorPlugin.findOptimalK(vectors, {
-  minK: 2,
-  maxK: 10,
-  nReferences: 10,
-  stabilityRuns: 5
-});
-```
-
-## Troubleshooting
-
-### Error: "No vectors found in resource"
-
-**Cause**: Trying to cluster/search but records don't have vector field.
-
-**Solution**:
-```javascript
-// Ensure vectors are present
-const record = await resource.get(id);
-console.log('Has vector?', !!record.vector);
-
-// Check vector field name
-await resource.cluster({
-  k: 3,
-  vectorField: 'embedding'  // Use correct field name
-});
-```
-
-### Error: "Dimension mismatch"
-
-**Cause**: Vectors have different dimensions.
-
-**Solution**:
-```javascript
-// Validate all vectors have same dimensions
-const allProducts = await products.getAll();
-const dimensions = new Set(allProducts.map(p => p.vector?.length));
-
-if (dimensions.size > 1) {
-  console.error('Multiple dimensions found:', [...dimensions]);
-  // Fix: regenerate embeddings with consistent model
-}
-```
-
-`cosineDistance`, `euclideanDistance`, and clustering helpers now throw a `ValidationError` with:
-- `statusCode: 422`
-- `retriable: false`
-- `suggestion: 'Ensure both vectors have identical lengths before calling distance utilities.'`
-- `metadata: { vectorALength, vectorBLength }`
-
-### Warning: "Vector fields exceed metadata limit"
-
-**Cause**: Vectors too large for S3 metadata (2KB limit).
-
-**Solution**:
-```javascript
-// Use embedding notation (automatically optimizes storage)
-await db.createResource({
-  name: 'products',
-  attributes: {
-    vector: 'embedding:1536'  // ✨ Auto-compression + validation
-  },
-  behavior: 'body-overflow'  // ← Still recommended for large vectors
-});
-```
-
-Or enable auto-fix:
-```javascript
-const vectorPlugin = new VectorPlugin({
-  autoFixBehavior: true  // Automatically set body-overflow
-});
-```
-
-### Poor Clustering Results
-
-**Symptoms**: All points in one cluster, or random-looking clusters.
-
-**Causes & Solutions**:
-
-1. **Wrong distance metric**:
-```javascript
-// For text embeddings, use cosine
-await resource.cluster({
-  k: 5,
-  distanceMetric: 'cosine'  // Not euclidean
-});
-```
-
-2. **K too high or too low**:
-```javascript
-// Let algorithm find optimal K
-const analysis = await VectorPlugin.findOptimalK(vectors);
-const k = analysis.consensus;
-```
-
-3. **Data not normalized**:
-```javascript
-// Normalize vectors before storage
-const normalized = VectorPlugin.normalize(vector);
-await resource.insert({ id, vector: normalized });
-```
-
-4. **Insufficient data**:
-- Need at least 50-100 vectors per expected cluster
-- If K=5, need 250-500+ vectors minimum
-
-### Slow Search Performance
-
-**Causes & Solutions**:
-
-1. **Too many records**:
-```javascript
-// Use partitions to filter
-await resource.vectorSearch(query, {
-  partition: 'byCategory',
-  partitionValues: { category: 'Electronics' }
-});
-```
-
-2. **High dimensions**:
-- Consider using smaller embeddings (384 instead of 1536)
-- Use faster distance metric (Manhattan instead of Euclidean)
-
-3. **No indexing**:
-```javascript
-// Create partitions for common filters
-const products = await db.createResource({
-  partitions: {
-    byCategory: { fields: { category: 'string' } },
-    byPrice: { fields: { priceRange: 'string' } }
-  }
-});
-```
-
-## Best Practices
-
-### 1. Generate Quality Embeddings
-
-```javascript
-// Use latest models
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-async function getEmbedding(text) {
-  // Clean text first
-  const cleaned = text
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ');
-
-  const response = await openai.embeddings.create({
-    model: 'text-embedding-3-large',  // Best quality (1536 dims) - or use 3-small for lower cost
-    input: cleaned
-  });
-
-  return response.data[0].embedding;
-}
-```
-
-### 2. Validate Vectors
-
-```javascript
-import { ValidationError } from 's3db.js';
-
-// When using embedding notation, dimension validation is automatic!
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    vector: 'embedding:1536'  // ✅ Dimension validation built-in
-  }
-});
-
-// Hook to validate additional constraints
-products.beforeInsert(async (data) => {
-  if (data.vector) {
-    // Check for NaN/Infinity
-    if (data.vector.some(v => !isFinite(v))) {
-      throw new ValidationError('Vector payload contains NaN or Infinity values', {
-        statusCode: 422,
-        retriable: false,
-        suggestion: 'Cleanse embeddings before insert; ensure upstream model outputs finite numbers.',
-        metadata: { resource: 'products', field: 'vector' }
-      });
-    }
-
-    // Optionally normalize
-    data.vector = VectorPlugin.normalize(data.vector);
-  }
-
-  return data;
-});
-```
-
-### 3. Monitor Quality
-
-```javascript
-// Track search quality
-const results = await products.vectorSearch(query, { limit: 10 });
-
-// Log metrics
-console.log(`Search returned ${results.length} results`);
-console.log(`Best match distance: ${results[0]?.distance.toFixed(4)}`);
-console.log(`Worst match distance: ${results[results.length-1]?.distance.toFixed(4)}`);
-
-// Alert if quality drops
-if (results[0]?.distance > 0.5) {
-  console.warn('⚠️  Poor match quality - consider retraining embeddings');
-}
-```
-
-### 4. Cache Expensive Operations
-
-```javascript
-// Cache optimal K analysis
-const cacheKey = `optimal-k-${vectors.length}`;
-let analysis = await cache.get(cacheKey);
-
-if (!analysis) {
-  analysis = await VectorPlugin.findOptimalK(vectors);
-  await cache.set(cacheKey, analysis, { ttl: 86400 }); // 24h
-}
-```
-
-### 5. Version Your Embeddings
-
-```javascript
-// Track embedding model version
-await products.insert({
-  id: 'prod-1',
-  name: 'Laptop',
-  vector: embedding,
-  vectorModel: 'text-embedding-3-large',
-  vectorVersion: '2024-01',
-  vectorDimensions: 1536
-});
-
-// Migrate when upgrading models
-async function migrateEmbeddings(oldVersion, newVersion) {
-  const oldProducts = await products.list({
-    filter: { vectorVersion: oldVersion }
-  });
-
-  for (const product of oldProducts) {
-    const newVector = await getEmbedding(product.description);
-    await products.update(product.id, {
-      vector: newVector,
-      vectorVersion: newVersion
-    });
-  }
-}
-```
+See [Advanced Features](./guides/advanced.md) for complete monitoring guide.
 
 ---
 
-## ❓ FAQ
+## ⚡ Performance Comparison
 
-### For Developers
-
-**Q: Does VectorPlugin generate embeddings?**
-**A:** No! VectorPlugin stores and searches pre-computed vectors. You must generate embeddings externally using:
-- OpenAI (text-embedding-3-small, text-embedding-3-large)
-- Anthropic (via Voyage AI partnership)
-- Cohere (embed-english-v3.0, embed-multilingual-v3.0)
-- Google Vertex AI (textembedding-gecko)
-- Open source models (Sentence Transformers, all-MiniLM-L6-v2, etc.)
-
-**Q: What's the best embedding model to use?**
-**A:** Depends on your use case:
-- **Semantic search**: OpenAI text-embedding-3-large (1536D, high accuracy)
-- **Budget-conscious**: OpenAI text-embedding-3-small (1536D, 80% of large quality)
-- **Real-time/low-latency**: Sentence Transformers all-MiniLM-L6-v2 (384D, fast)
-- **Multilingual**: Cohere embed-multilingual-v3.0 (1024D, 100+ languages)
-- **Anthropic users**: Voyage AI voyage-2 (1024D, Anthropic partnership)
-
-See [Model Comparison Table](#model-comparison-table) for detailed benchmarks.
-
-**Q: How do I handle large vectors that exceed S3's 2KB metadata limit?**
-**A:** Use the `embedding:XXX` notation which automatically applies 77% compression with fixed-point encoding:
-```javascript
-attributes: {
-  vector: 'embedding:1536'  // Auto-compressed, ~2.3KB (fits with body-overflow)
-}
-```
-
-For even larger vectors, set behavior to `body-overflow`:
-```javascript
-await db.createResource({
-  name: 'products',
-  attributes: { vector: 'embedding:3072' },  // Large model
-  behavior: 'body-overflow'  // Stores in S3 object body
-});
-```
-
-**Q: Can I use multiple embedding models in the same resource?**
-**A:** Yes! Store metadata about which model generated each vector:
-```javascript
-await products.insert({
-  name: 'Product 1',
-  vector: embedding,
-  vectorModel: 'text-embedding-3-large',
-  vectorVersion: '2024-01',
-  vectorDimensions: 1536
-});
-
-// Query by model when searching
-const results = await vectorPlugin.findSimilar('products', 'vector', queryVector, {
-  filter: { vectorModel: 'text-embedding-3-large' }
-});
-```
-
-**Q: How do I choose the optimal number of clusters (K)?**
-**A:** Use `findOptimalK()` with multiple evaluation metrics:
-```javascript
-const optimalK = await vectorPlugin.findOptimalK('products', 'vector', {
-  minK: 2,
-  maxK: 15,
-  methods: ['silhouette', 'davies-bouldin', 'gap']  // 5 methods available
-});
-console.log(`Best K: ${optimalK.bestK} (score: ${optimalK.bestScore})`);
-```
-
-The plugin automatically evaluates multiple K values and returns the optimal one based on consensus across metrics.
-
-**Q: What distance metric should I use?**
-**A:**
-- **Cosine**: Best for normalized vectors, focuses on direction (most common for embeddings)
-- **Euclidean**: Best for spatial data, considers magnitude
-- **Manhattan**: Best for high-dimensional sparse vectors, robust to outliers
-
-Most embedding providers normalize vectors, so **cosine** is the recommended default.
-
-### For AI Agents
-
-**Q: What problem does this plugin solve?**
-**A:** Enables semantic search, similarity analysis, and clustering of pre-computed vector embeddings stored in S3DB with automatic compression, multiple distance metrics, and intelligent K-means clustering.
-
-**Q: What are the minimum required parameters?**
-**A:** None! Can be initialized with `new VectorPlugin()` and all defaults will work:
-- `dimensions`: 1536 (OpenAI default)
-- `distanceMetric`: 'cosine'
-- `autoDetectVectorField`: true (auto-finds `embedding:XXX` fields)
-
-**Q: What are the default values for all configurations?**
-**A:**
-```javascript
-{
-  dimensions: 1536,              // OpenAI text-embedding-3-small/large
-  distanceMetric: 'cosine',      // Best for normalized embeddings
-  storageThreshold: 1500,        // Warn if vectors exceed 1.5KB
-  autoFixBehavior: false,        // Don't auto-change resource behavior
-  autoDetectVectorField: true,   // Auto-detect embedding:XXX fields
-  emitEvents: true,              // Enable event emission
-  verboseEvents: false,          // Don't emit detailed progress
-  eventThrottle: 100             // Throttle progress events (ms)
-}
-```
-
-**Q: What events does this plugin emit?**
-**A:**
-- `plg:vector:search:start` - Search started
-- `plg:vector:search:complete` - Search completed with results
-- `plg:vector:cluster:start` - Clustering started
-- `plg:vector:cluster:progress` - Clustering iteration progress
-- `plg:vector:cluster:complete` - Clustering completed
-- `plg:vector:optimalK:start` - Optimal K search started
-- `plg:vector:optimalK:progress` - K evaluation progress
-- `plg:vector:optimalK:complete` - Optimal K found
-
-Enable `verboseEvents: true` for detailed progress tracking.
-
-**Q: How do I debug issues with this plugin?**
-**A:** Enable verbose events and listen to all emitted events:
-```javascript
-const vectorPlugin = new VectorPlugin({
-  verboseEvents: true,
-  eventThrottle: 0  // No throttling for debugging
-});
-
-db.on('plg:vector:*', (data) => {
-  console.log('Vector event:', data);
-});
-```
-
-**Q: What are the supported distance metrics?**
-**A:**
-- **cosine**: `1 - (dot(a, b) / (norm(a) * norm(b)))` - Range: [0, 2], 0 = identical
-- **euclidean**: `sqrt(sum((a[i] - b[i])^2))` - Range: [0, ∞], 0 = identical
-- **manhattan**: `sum(abs(a[i] - b[i]))` - Range: [0, ∞], 0 = identical
-
-All metrics return **lower values for more similar vectors**.
-
-**Q: Can I use this plugin without OpenAI?**
-**A:** Yes! VectorPlugin is provider-agnostic. It only stores and searches vectors. You can use:
-- Google Vertex AI
-- Cohere
-- Anthropic (via Voyage AI)
-- Open source models (Sentence Transformers, BERT, etc.)
-- Any embedding provider that outputs numeric vectors
-
-Just ensure the dimensions match what you configure in the plugin.
-
-### Performance & Optimization
-
-**Q: How fast is VectorPlugin compared to dedicated vector databases?**
-
-**A:** VectorPlugin uses brute-force KNN search which scales linearly O(n). Performance comparison:
-
-| Records | VectorPlugin (S3) | Dedicated Vector DB | Use Case |
-|---------|-------------------|---------------------|----------|
+| Records | VectorPlugin | Dedicated Vector DB | Use Case |
+|---------|--------------|---------------------|----------|
 | <10K | ~100-500ms | ~10-50ms | ✅ Perfect for VectorPlugin |
-| 10K-100K | ~500ms-5s | ~50-200ms | ✅ Acceptable for VectorPlugin |
+| 10K-100K | ~500ms-5s | ~50-200ms | ✅ Acceptable |
 | 100K-1M | ~5-50s | ~200ms-1s | ⚠️ Consider dedicated DB |
 | >1M | ~50s+ | ~1-5s | ❌ Use dedicated vector DB |
 
 **When to use VectorPlugin:**
 - ✅ Small to medium datasets (<100K vectors)
-- ✅ Cost-sensitive applications (S3 is 10-100x cheaper than vector DBs)
-- ✅ Infrequent searches (batch processing, daily analytics)
-- ✅ Already using S3DB for other data (no new infrastructure)
+- ✅ Cost-sensitive (S3 is 10-100x cheaper than vector DBs)
+- ✅ Infrequent searches
+- ✅ Already using S3DB for other data
 
-**When to use dedicated vector DB (Pinecone, Weaviate, Qdrant):**
+**When to use dedicated vector DB:**
 - ⚠️ Large datasets (>100K vectors)
 - ⚠️ Real-time low-latency searches (<100ms)
 - ⚠️ High query volume (>100 queries/second)
-- ⚠️ Need HNSW/IVF indexing for sub-linear search
-
-**Q: Can I cache search results to improve performance?**
-
-**A:** Yes! Use CachePlugin to cache frequent searches:
-
-```javascript
-import { CachePlugin } from 's3db.js/plugins';
-
-// Add caching
-const cache = new CachePlugin({
-  driver: 'memory',
-  ttl: 3600000  // 1 hour
-});
-await db.usePlugin(cache);
-
-// Searches are automatically cached
-const results = await vectorPlugin.findSimilar('products', 'vector', queryVector);
-// Second call uses cache (100x faster!)
-```
-
-**Q: How can I speed up similarity search for large datasets?**
-
-**A:** Use partition-based filtering to reduce the search space:
-
-```javascript
-// Create resource with category partition
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    name: 'string|required',
-    category: 'string|required',
-    vector: 'embedding:1536'
-  },
-  partitions: {
-    byCategory: { fields: { category: 'string' } }
-  }
-});
-
-// Search only within a specific partition
-const results = await vectorPlugin.findSimilar('products', 'vector', queryVector, {
-  filter: { category: 'electronics' },  // Filters before vector search!
-  k: 10
-});
-```
-
-This reduces the search space from 100K products to ~10K electronics, making searches **10x faster**.
-
-**Q: Does VectorPlugin work with streaming/pagination?**
-
-**A:** Yes! Use the `limit` option and batch process results:
-
-```javascript
-// Process in batches of 1000
-let offset = 0;
-const batchSize = 1000;
-
-while (true) {
-  const batch = await resource.list({ limit: batchSize, offset });
-
-  for (const item of batch) {
-    // Process each vector
-    const distance = vectorPlugin.distance(queryVector, item.vector, 'cosine');
-    console.log(`Item ${item.id}: distance = ${distance}`);
-  }
-
-  if (batch.length < batchSize) break;
-  offset += batchSize;
-}
-```
-
-### Clustering & Analysis
-
-**Q: What's the difference between k-means clustering and KNN search?**
-
-**A:**
-
-**K-means clustering** (`cluster()`) - Groups similar items together:
-- **Input**: All vectors in a resource
-- **Output**: K cluster assignments for each vector
-- **Use case**: Product categorization, user segmentation, pattern discovery
-- **Example**: "Group my 10K products into 20 categories"
-
-**KNN search** (`findSimilar()`) - Finds items similar to a query:
-- **Input**: One query vector
-- **Output**: K most similar vectors
-- **Use case**: Recommendation systems, duplicate detection, semantic search
-- **Example**: "Find 5 products most similar to this one"
-
-```javascript
-// K-means: Group all products into categories
-const clusters = await vectorPlugin.cluster('products', 'vector', 10);
-console.log(`Cluster 0 has ${clusters.assignments.filter(x => x === 0).length} products`);
-
-// KNN: Find similar products to a specific query
-const similar = await vectorPlugin.findSimilar('products', 'vector', queryVector, { k: 5 });
-console.log(`Found ${similar.length} similar products`);
-```
-
-**Q: How do I interpret clustering results?**
-
-**A:** Clustering returns assignments and centroids:
-
-```javascript
-const result = await vectorPlugin.cluster('products', 'vector', 5);
-
-// result.assignments: Array of cluster IDs (one per record)
-// Example: [0, 2, 0, 1, 2, ...] means:
-//   - Record 0 belongs to cluster 0
-//   - Record 1 belongs to cluster 2
-//   - Record 2 belongs to cluster 0
-
-// result.centroids: Array of cluster centers (one per cluster)
-// Example: [[0.1, 0.2, ...], [0.3, 0.4, ...], ...]
-
-// Find all products in cluster 0
-const allProducts = await resource.list();
-const cluster0Products = allProducts.filter((_, i) => result.assignments[i] === 0);
-console.log(`Cluster 0 has ${cluster0Products.length} products`);
-```
-
-**Q: Can I re-cluster when I add new records?**
-
-**A:** Yes! Re-run clustering periodically:
-
-```javascript
-// Initial clustering
-let clusterResult = await vectorPlugin.cluster('products', 'vector', 10);
-
-// Store assignments in metadata
-for (let i = 0; i < allProducts.length; i++) {
-  await resource.update(allProducts[i].id, {
-    clusterId: clusterResult.assignments[i]
-  });
-}
-
-// Later: New products added, re-cluster
-clusterResult = await vectorPlugin.cluster('products', 'vector', 10);
-
-// Update assignments
-const updatedProducts = await resource.list();
-for (let i = 0; i < updatedProducts.length; i++) {
-  await resource.update(updatedProducts[i].id, {
-    clusterId: clusterResult.assignments[i]
-  });
-}
-```
-
-### Edge Cases & Limitations
-
-**Q: What happens if I search with a vector of the wrong dimensions?**
-
-**A:** VectorPlugin validates dimensions and throws `DimensionMismatchError`:
-
-```javascript
-try {
-  // Plugin configured for 1536D, but query is 768D
-  const results = await vectorPlugin.findSimilar('products', 'vector', wrongSizeVector);
-} catch (error) {
-  if (error.name === 'DimensionMismatchError') {
-    console.error(`Expected ${error.expected} dimensions, got ${error.actual}`);
-    // Handle error (resize vector, use different model, etc.)
-  }
-}
-```
-
-**Q: Can I have multiple vector fields in the same resource?**
-
-**A:** Yes! Store multiple embeddings for different purposes:
-
-```javascript
-const products = await db.createResource({
-  name: 'products',
-  attributes: {
-    name: 'string|required',
-    description: 'string',
-    textVector: 'embedding:1536',     // OpenAI text embedding
-    imageVector: 'embedding:2048'      // CLIP image embedding
-  },
-  behavior: 'body-overflow'
-});
-
-// Search by text similarity
-const textResults = await vectorPlugin.findSimilar('products', 'textVector', queryTextVector);
-
-// Search by image similarity
-const imageResults = await vectorPlugin.findSimilar('products', 'imageVector', queryImageVector);
-```
-
-**Q: What if my embedding field is optional (some records don't have vectors)?**
-
-**A:** VectorPlugin automatically creates a partition to skip null vectors:
-
-```javascript
-const books = await db.createResource({
-  name: 'books',
-  attributes: {
-    title: 'string|required',
-    vector: 'embedding:1536'  // Optional (not required)
-  }
-});
-
-// Insert some books without vectors
-await books.insert({ title: 'Book without embedding' });  // No vector field
-
-// Insert books with vectors
-await books.insert({ title: 'Book with embedding', vector: [...] });
-
-// Search only processes records with vectors (auto-filtered!)
-const results = await vectorPlugin.findSimilar('books', 'vector', queryVector);
-```
-
-VectorPlugin automatically:
-1. Creates a partition separating records with/without embeddings
-2. Searches only records that have the embedding field
-3. Achieves 95% performance improvement by skipping null records
+- ⚠️ Need HNSW/IVF indexing
 
 ---
 
-## More Examples
+## 🛠️ Configuration
 
-See the `examples/` directory for complete working examples:
+### Default Configuration
 
-- `examples/vector-search.js` - Similarity search
-- `examples/vector-clustering.js` - K-means clustering
-- `examples/vector-optimal-k.js` - Optimal K analysis
+```javascript
+new VectorPlugin({
+  dimensions: 1536,              // OpenAI default
+  distanceMetric: 'cosine',      // Best for normalized vectors
+  storageThreshold: 1500,        // Warn if vectors exceed 1.5KB
+  autoFixBehavior: false,        // Don't auto-change behavior
+  autoDetectVectorField: true,   // Auto-detect embedding:XXX fields
+  emitEvents: true,              // Enable monitoring
+  verboseEvents: false,          // Disable verbose logs in production
+  eventThrottle: 100             // Throttle progress events (ms)
+})
+```
 
-## Error Reference
+See [API Reference](./guides/api-reference.md) for all configuration options.
 
-See [Error Handling documentation](../errors.md) for complete error reference.
+---
 
-Common VectorPlugin errors:
+## ❓ Quick FAQ
 
-- `VectorError`: Base error for all vector operations
-- `DimensionMismatchError`: Vectors have different dimensions
-- `InvalidMetricError`: Unknown distance metric specified
-- `NoVectorsError`: Resource has no vectors to process
+**Q: Does VectorPlugin generate embeddings?**
+A: No! It stores and searches pre-computed vectors. Use OpenAI, Cohere, Voyage AI, Google, or open-source models. See [Embedding Providers](./guides/embedding-providers.md).
 
-## Related Documentation
+**Q: What embedding provider should I use?**
+A: Depends on your needs:
+- **High accuracy**: OpenAI text-embedding-3-large
+- **Cost-conscious**: OpenAI text-embedding-3-small
+- **Anthropic users**: Voyage AI
+- **Multilingual**: Cohere
+- **Free/Self-hosted**: Sentence Transformers
 
-- [Cache Plugin](./cache.md) - Speed up vector searches
-- [Partitions](../partitions.md) - Organize vectors for faster filtering
-- [Behaviors](../behaviors.md) - Handle large vectors with body-overflow
-- [Hooks](../hooks.md) - Validate vectors before insert
+See [Embedding Providers Guide](./guides/embedding-providers.md) for detailed comparison.
+
+**Q: How do I handle large vectors (>2KB)?**
+A: Use `embedding:XXX` notation for compression + `body-overflow` behavior:
+
+```javascript
+await db.createResource({
+  name: 'products',
+  attributes: { vector: 'embedding:3072' },
+  behavior: 'body-overflow'
+});
+```
+
+**Q: What's the best distance metric?**
+A: **Cosine** for most cases (normalized embeddings). See [API Reference](./guides/api-reference.md) for metric comparison.
+
+**Q: How do I speed up search for large datasets?**
+A: Use partition-based filtering to reduce search space by 10x. See [Advanced Features](./guides/advanced.md).
+
+**Q: Can I cache search results?**
+A: Yes! Combine with CachePlugin for 100x faster repeated searches.
+
+---
+
+## 📖 Full Documentation Index
+
+| Topic | Guide | Time |
+|-------|-------|------|
+| **Setup** | [Getting Started](./guides/getting-started.md) | 10 min |
+| **Providers** | [Embedding Providers](./guides/embedding-providers.md) | 15 min |
+| **Examples** | [Usage Patterns](./guides/usage-patterns.md) | 25 min |
+| **API** | [API Reference](./guides/api-reference.md) | 15 min |
+| **Advanced** | [Advanced Features](./guides/advanced.md) | 20 min |
+| **Best Practices** | [Best Practices & FAQ](./guides/best-practices.md) | 30 min |
+
+**Total Reading Time: ~115 minutes for complete understanding**
+
+---
+
+## 🔗 Related Documentation
+
+- **[Cache Plugin](../cache.md)** - Speed up vector searches with caching
+- **[Partitions](../../partitions.md)** - Organize vectors for faster filtering
+- **[Behaviors](../../behaviors.md)** - Handle large vectors with body-overflow
+- **[Hooks](../../hooks.md)** - Validate vectors before insert
+- **[Events](../../events.md)** - Comprehensive event system
+
+---
+
+## 📝 Common Use Cases
+
+### 1. Product Recommendations
+Find similar products for "customers also viewed" sections.
+See [Usage Patterns: Product Recommendations](./guides/usage-patterns.md#use-case-3-product-recommendations)
+
+### 2. Duplicate Detection
+Find and merge near-duplicate records.
+See [Usage Patterns: Duplicate Detection](./guides/usage-patterns.md#use-case-4-duplicate-detection)
+
+### 3. User Segmentation
+Group users by behavior for targeted campaigns.
+See [Usage Patterns: User Segmentation](./guides/usage-patterns.md#use-case-5-user-segmentation)
+
+### 4. Semantic Search
+Find semantically similar content.
+See [Usage Patterns: Similarity Search](./guides/usage-patterns.md#use-case-1-similarity-search-knn)
+
+### 5. Automatic Categorization
+Group items into natural categories.
+See [Usage Patterns: Clustering](./guides/usage-patterns.md#use-case-2-automatic-clustering-with-optimal-k)
+
+---
+
+## 🚀 Next Steps
+
+1. **New to vectors?** Start with [Getting Started Guide](./guides/getting-started.md)
+2. **Need an embedding provider?** See [Embedding Providers](./guides/embedding-providers.md)
+3. **Want real-world examples?** Check [Usage Patterns](./guides/usage-patterns.md)
+4. **Need API reference?** See [API Reference](./guides/api-reference.md)
+5. **Going to production?** Read [Best Practices](./guides/best-practices.md)
+
+---
+
+**Questions?** Check [FAQ in Best Practices Guide](./guides/best-practices.md#-faq) for 70+ answers.
