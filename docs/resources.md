@@ -165,7 +165,7 @@ const orders = await db.createResource({
   paranoid: true,
 
   // Parallelism for bulk operations
-  parallelism: 20,
+  parallelism: 100,  // Separate OperationsPool per database (default)
 
   // Strict validation
   strictValidation: true,
@@ -209,7 +209,7 @@ const orders = await db.createResource({
 | `passphrase` | `string` | `'secret'` | Encryption passphrase for secret fields |
 | `autoDecrypt` | `boolean` | `true` | Auto-decrypt secret fields on retrieval |
 | `paranoid` | `boolean` | `true` | Prevent dangerous operations (deleteAll, etc.) |
-| `parallelism` | `number` | `10` | Concurrent operations for bulk ops |
+| `parallelism` | `number` | `100` | Concurrent operations for bulk ops (Separate OperationsPool per Database) |
 | `strictValidation` | `boolean` | `true` | Strict schema validation |
 | `hooks` | `object` | `{}` | Lifecycle hooks |
 | `events` | `object` | `{}` | Event listeners |

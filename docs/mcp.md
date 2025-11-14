@@ -1004,7 +1004,7 @@ And create partitions by status and region"
 await agent.callTool('dbConnect', {
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@bucket/databases/blog',
   verbose: false,
-  parallelism: 10,
+  parallelism: 100,         // Separate OperationsPool per database (default)
   enableCache: true,        // Cache enabled by default
   enableCosts: true,        // Costs tracking enabled by default
   cacheDriver: 'memory',    // 'memory' or 'filesystem'
