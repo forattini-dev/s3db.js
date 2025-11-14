@@ -6,6 +6,16 @@ import { S3QueuePlugin } from './s3-queue.plugin.js'
 import { TTLPlugin } from './ttl.plugin.js'
 import tryFn from '../concerns/try-fn.js'
 import { PluginError } from '../errors.js'
+import {
+  AVAILABLE_ACTIVITIES,
+  ACTIVITY_CATEGORIES,
+  ACTIVITY_PRESETS,
+  getActivitiesByCategory,
+  getAllActivities,
+  getCategoriesWithActivities,
+  validateActivities,
+  getPreset
+} from './spider/task-activities.js'
 
 /**
  * SpiderPlugin - All-in-one web crawler suite
@@ -256,6 +266,8 @@ export class SpiderPlugin extends Plugin {
           priority: 'number',
           retries: 'number',
           metadata: 'object',
+          activities: 'array|items:string',
+          activityPreset: 'string',
           createdAt: 'number'
         },
         behavior: 'body-overflow',
@@ -362,6 +374,19 @@ export class SpiderPlugin extends Plugin {
   }
 
   /**
+   * Check if a category's activities should be executed
+   * @private
+   */
+  _shouldExecuteCategory(task, category) {
+    if (!task.activities || task.activities.length === 0) {
+      return true // Default to all if no activities specified
+    }
+
+    const categoryActivities = getActivitiesByCategory(category)
+    return categoryActivities.some((activity) => task.activities.includes(activity.name))
+  }
+
+  /**
    * Setup queue processor function
    * @private
    */
@@ -372,6 +397,9 @@ export class SpiderPlugin extends Plugin {
       try {
         if (this.verbose) {
           console.log(`[SpiderPlugin] Processing: ${task.url}`)
+          if (task.activities && task.activities.length > 0) {
+            console.log(`[SpiderPlugin] Activities: ${task.activities.join(', ')}`)
+          }
         }
 
         // Open browser page
@@ -385,33 +413,45 @@ export class SpiderPlugin extends Plugin {
         const statusCode = page.response()?.status() || 200
         const title = await page.title()
 
-        // SEO Analysis
+        // SEO Analysis - only if SEO activities are requested
         let seoAnalysis = null
-        if (this.config.seo.enabled) {
+        if (this.config.seo.enabled && this._shouldExecuteCategory(task, 'seo')) {
           seoAnalysis = this.seoAnalyzer.analyze(html, task.url)
+          if (this.verbose) {
+            console.log(`[SpiderPlugin] Executed SEO analysis for ${task.url}`)
+          }
         }
 
-        // Tech Detection
+        // Tech Detection - only if technology activities are requested
         let techFingerprint = null
-        if (this.config.techDetection.enabled) {
+        if (this.config.techDetection.enabled && this._shouldExecuteCategory(task, 'technology')) {
           techFingerprint = this.techDetector.fingerprint(html)
+          if (this.verbose) {
+            console.log(`[SpiderPlugin] Executed tech detection for ${task.url}`)
+          }
         }
 
-        // Performance Metrics
+        // Performance Metrics - only if performance activities are requested
         let performanceMetrics = null
-        if (this.config.performance.enabled) {
+        if (this.config.performance.enabled && this._shouldExecuteCategory(task, 'performance')) {
           performanceMetrics = await this.puppeteerPlugin.performanceManager.collectMetrics(page)
+          if (this.verbose) {
+            console.log(`[SpiderPlugin] Collected performance metrics for ${task.url}`)
+          }
         }
 
-        // Security Analysis
+        // Security Analysis - only if security activities are requested
         let securityAnalysis = null
-        if (this.config.security.enabled) {
+        if (this.config.security.enabled && this._shouldExecuteCategory(task, 'security')) {
           securityAnalysis = await this.securityAnalyzer.analyze(page, task.url, html)
+          if (this.verbose) {
+            console.log(`[SpiderPlugin] Executed security analysis for ${task.url}`)
+          }
         }
 
-        // Screenshot Capture
+        // Screenshot Capture - only if screenshot activities are requested
         let screenshotData = null
-        if (this.config.screenshot.enabled) {
+        if (this.config.screenshot.enabled && this._shouldExecuteCategory(task, 'visual')) {
           try {
             const screenshotBuffer = await page.screenshot({
               fullPage: this.config.screenshot.captureFullPage,
@@ -430,6 +470,10 @@ export class SpiderPlugin extends Plugin {
               height: this.config.screenshot.maxHeight,
               format: this.config.screenshot.format,
               quality: this.config.screenshot.quality
+            }
+
+            if (this.verbose) {
+              console.log(`[SpiderPlugin] Captured screenshot for ${task.url}`)
             }
           } catch (error) {
             console.error(`[SpiderPlugin] Failed to capture screenshot for ${task.url}:`, error)
@@ -543,18 +587,48 @@ export class SpiderPlugin extends Plugin {
    * @param {Object} target - Target configuration
    * @param {string} target.url - URL to crawl
    * @param {number} [target.priority=0] - Task priority
+   * @param {Array<string>} [target.activities] - List of activity names to execute
+   * @param {string} [target.activityPreset] - Preset name (minimal, basic, security, seo_complete, performance, full)
    * @param {Object} [target.metadata] - Custom metadata
    * @returns {Promise<Object>} Queued task
+   * @throws {PluginError} If URL missing or activities invalid
    */
   async enqueueTarget(target) {
     if (!target.url) {
       throw new PluginError('Target must have a url property')
     }
 
+    // Resolve activities: either from explicit list or from preset
+    let activities = []
+    let activityPreset = null
+
+    if (target.activityPreset) {
+      // User provided a preset name
+      const preset = getPreset(target.activityPreset)
+      if (!preset) {
+        throw new PluginError(`Unknown activity preset: ${target.activityPreset}. Available: ${Object.keys(ACTIVITY_PRESETS).join(', ')}`)
+      }
+      activities = preset.activities
+      activityPreset = target.activityPreset
+    } else if (target.activities && Array.isArray(target.activities) && target.activities.length > 0) {
+      // User provided explicit activity list
+      const validation = validateActivities(target.activities)
+      if (!validation.valid) {
+        throw new PluginError(validation.message)
+      }
+      activities = target.activities
+    } else {
+      // Default to 'full' preset if nothing specified
+      activities = getAllActivities().map((a) => a.name)
+      activityPreset = 'full'
+    }
+
     const task = {
       url: target.url,
       priority: target.priority || 0,
       metadata: target.metadata || {},
+      activities,
+      activityPreset,
       status: 'pending'
     }
 
@@ -566,13 +640,25 @@ export class SpiderPlugin extends Plugin {
    * Enqueue multiple targets
    *
    * @param {Array<Object>} targets - Array of target configurations
+   * @param {Object} [defaultConfig] - Default configuration for all targets
+   * @param {Array<string>} [defaultConfig.activities] - Default activities list
+   * @param {string} [defaultConfig.activityPreset] - Default preset name
    * @returns {Promise<Array>} Array of queued tasks
    */
-  async enqueueBatch(targets) {
+  async enqueueBatch(targets, defaultConfig = {}) {
     const results = []
 
     for (const target of targets) {
-      const result = await this.enqueueTarget(target)
+      // Merge default config with target-specific config (target takes precedence)
+      const mergedTarget = {
+        ...defaultConfig,
+        ...target,
+        // Explicitly override activities if both are provided
+        activities: target.activities || defaultConfig.activities,
+        activityPreset: target.activityPreset || defaultConfig.activityPreset
+      }
+
+      const result = await this.enqueueTarget(mergedTarget)
       results.push(result)
     }
 
@@ -698,6 +784,67 @@ export class SpiderPlugin extends Plugin {
     if (this.verbose) {
       console.log('[SpiderPlugin] Persistence disabled')
     }
+  }
+
+  // ============================================
+  // ACTIVITY MANAGEMENT API
+  // ============================================
+
+  /**
+   * Get all available activities
+   *
+   * @returns {Array<Object>} Array of activity definitions
+   */
+  getAvailableActivities() {
+    return getAllActivities()
+  }
+
+  /**
+   * Get activities by category
+   *
+   * @param {string} category - Category name
+   * @returns {Array<Object>} Activities in that category
+   */
+  getActivitiesByCategory(category) {
+    return getActivitiesByCategory(category)
+  }
+
+  /**
+   * Get all activity categories with their activities
+   *
+   * @returns {Object} Categories with nested activities
+   */
+  getActivityCategories() {
+    return getCategoriesWithActivities()
+  }
+
+  /**
+   * Get all available activity presets
+   *
+   * @returns {Object} Preset definitions
+   */
+  getActivityPresets() {
+    return ACTIVITY_PRESETS
+  }
+
+  /**
+   * Get a specific preset by name
+   *
+   * @param {string} presetName - Preset name
+   * @returns {Object|null} Preset definition or null if not found
+   */
+  getPresetByName(presetName) {
+    return getPreset(presetName)
+  }
+
+  /**
+   * Validate a list of activity names
+   *
+   * @param {Array<string>} activityNames - Activity names to validate
+   * @returns {Object} Validation result with valid flag and invalid list
+   */
+  validateActivityList(activityNames) {
+    return validateActivities(activityNames)
   }
 
   /**
