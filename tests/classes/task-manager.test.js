@@ -20,7 +20,7 @@ describe('TaskManager', () => {
   describe('Constructor and Configuration', () => {
     test('should create manager with default config', () => {
       const defaultManager = new TaskManager()
-      expect(defaultManager.concurrency).toBe(10)
+      expect(defaultManager.concurrency).toBe(5)
       expect(defaultManager.retries).toBe(3)
       expect(defaultManager.retryDelay).toBe(1000)
       expect(defaultManager.timeout).toBe(30000)

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { nanoid } from 'nanoid'
+import { TaskExecutor } from './concurrency/task-executor.interface.js' // eslint-disable-line no-unused-vars
 
 /**
  * TaskManager - Temporary batch processor for custom workflows
@@ -14,6 +15,8 @@ import { nanoid } from 'nanoid'
  * - Support for iterables and generators
  * - Corresponding results (order-preserving)
  *
+ * Implements TaskExecutor interface for interchangeability with OperationsPool.
+ *
  * Use cases:
  * - Ad-hoc batch processing
  * - Custom workflows with multiple steps
@@ -21,7 +24,7 @@ import { nanoid } from 'nanoid'
  * - When you need local concurrency control
  *
  * @class TaskManager
- * @extends EventEmitter
+ * @extends EventEmitter, TaskExecutor
  *
  * @example
  * const manager = new TaskManager({ concurrency: 10 })
@@ -521,6 +524,14 @@ export class TaskManager extends EventEmitter {
     }
     this.concurrency = n
     this.processNext()
+  }
+
+  /**
+   * Get current concurrency setting
+   * @returns {number} Current concurrency level
+   */
+  getConcurrency () {
+    return this.concurrency
   }
 
   /**
