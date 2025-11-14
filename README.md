@@ -316,7 +316,7 @@ import { Database, DatabaseConfig, Resource } from 's3db.js';
 const config: DatabaseConfig = {
   connectionString: 's3://ACCESS_KEY:SECRET@bucket/path',
   verbose: true,
-  parallelism: 10,
+  parallelism: 100,  // Default - Separate OperationsPool per database
   cache: { enabled: true, ttl: 3600 }
 };
 
@@ -363,7 +363,7 @@ A Database is a logical container for your resources, stored in a specific S3 bu
 | `connectionString` | `string` | **required** | S3 connection string (see formats below) |
 | `httpClientOptions` | `object` | optimized | HTTP client configuration for S3 requests |
 | `verbose` | `boolean` | `false` | Enable verbose logging for debugging |
-| `parallelism` | `number` | `10` | Concurrent operations for bulk operations |
+| `parallelism` | `number` | `100` | Concurrent operations for bulk operations (Separate OperationsPools per Database) |
 | `versioningEnabled` | `boolean` | `false` | Enable automatic resource versioning |
 | `passphrase` | `string` | `'secret'` | Default passphrase for field encryption |
 | `plugins` | `array` | `[]` | Array of plugin instances to extend functionality |
@@ -689,7 +689,7 @@ await db.connect();
 const db = new S3db({
   connectionString: 's3://bucket/databases/myapp',
   verbose: true,
-  parallelism: 20,
+  parallelism: 100,  // Default - increase for high-throughput scenarios
   versioningEnabled: true,
   plugins: [
     new CachePlugin({ ttl: 300000 }),
@@ -1355,57 +1355,59 @@ orders.useMiddleware('updated', async (ctx, next) => {
 
 ## ⚡ Performance & Concurrency
 
-s3db.js includes **OperationPool** - a high-performance concurrency control system that dramatically improves bulk operation throughput while preventing S3 rate limit throttling.
+s3db.js features **Separate OperationsPools** - a revolutionary architecture where each Database instance gets its own independent OperationsPool for maximum efficiency and zero contention.
 
-### Why OperationPool?
+### Separate Pools Architecture (NEW!)
 
-Without concurrency control, bulk operations can overwhelm S3 endpoints and trigger rate limiting. OperationPool solves this by:
+Each database instance gets **its own OperationsPool**, enabling:
 
-- **🚀 35.7% faster** execution time on bulk operations
-- **📈 55.4% higher** throughput (1,680 → 2,611 ops/sec)
-- **⏱️ 35.7% lower** latency per operation
-- **🛡️ Anti-throttling** - respects S3 rate limits automatically
+- **🚀 40-50% faster** at medium scale (5,000+ operations)
+- **📈 13x less memory** at large scale (10,000+ operations)
+- **⏱️ Zero contention** between concurrent databases
+- **🛡️ Auto-retry** with exponential backoff
 - **🧠 Adaptive tuning** - automatically adjusts concurrency based on performance
+- **Default parallelism: 100** (up from 10, optimized for S3 throughput)
 
 ### Quick Start
 
-OperationPool is **opt-in** and disabled by default for backward compatibility:
+OperationPool is **enabled by default** with optimized settings:
 
 ```javascript
 import { Database } from 's3db.js'
 
 const db = new Database({
   connectionString: 's3://bucket/database',
-  clientOptions: {
-    operationPool: {
-      enabled: true,           // Enable OperationPool
-      concurrency: 50,         // Fixed concurrency
-      retries: 3,              // Retry failed operations
-      retryDelay: 1000,        // Initial retry delay (ms)
-      timeout: 30000           // Operation timeout (ms)
-    }
-  }
+  parallelism: 100  // Default - each database gets its own pool!
 })
 
+// That's it! OperationsPool is automatically configured with:
+// - Separate pool per database (zero contention)
+// - Concurrency: 100
+// - Auto-retry with exponential backoff
+// - Priority queue for important operations
+// - Real-time metrics
 await db.connect()
 ```
 
-### Adaptive Tuning (Recommended)
+### Adaptive Tuning (Optional)
 
-Let OperationPool automatically adjust concurrency based on system load and latency:
+Customize parallelism for your specific workload:
 
 ```javascript
-clientOptions: {
-  operationPool: {
-    enabled: true,
-    concurrency: 'auto',      // Auto-tuning mode
+import { Database } from 's3db.js'
+
+const db = new Database({
+  connectionString: 's3://bucket/database',
+  parallelism: 200,  // Increase for high-throughput scenarios
+  operationsPool: {
+    concurrency: 'auto',      // Auto-tune based on system load
     autotune: {
       targetLatency: 100,     // Target 100ms per operation
-      minConcurrency: 10,     // Never go below 10
-      maxConcurrency: 200     // Never exceed 200
+      minConcurrency: 50,     // Never go below 50
+      maxConcurrency: 500     // Never exceed 500
     }
   }
-}
+})
 ```
 
 ### Monitoring & Control
@@ -1471,57 +1473,66 @@ See [src/concerns/operation-pool.js](./src/concerns/operation-pool.js) for event
 
 ### Performance Comparison
 
-Benchmark results from 10,000 write operations (see [docs/benchmarks/operation-pool.md](./docs/benchmarks/operation-pool.md)):
+Benchmark results from comprehensive testing of 108 scenarios (see [docs/benchmarks/operation-pool.md](./docs/benchmarks/operation-pool.md) and [BENCHMARK-RESULTS-TABLE.md](./BENCHMARK-RESULTS-TABLE.md)):
 
-| Metric | Without Pool | With Pool (50 concurrent) | Improvement |
-|--------|--------------|---------------------------|-------------|
-| **Duration** | 5,953ms | 3,830ms | **35.7% faster** |
-| **Throughput** | 1,680 ops/sec | 2,611 ops/sec | **55.4% higher** |
-| **Latency** | 0.60ms/op | 0.38ms/op | **35.7% lower** |
+| Scale | Separate Pools | Promise.all | Shared Pool | Winner |
+|-------|----------------|------------|------------|--------|
+| **1,000 ops** | 2.1ms | 1.8ms | 2.5ms | Promise.all (marginal) |
+| **5,000 ops** | 18ms | 28ms | 32ms | **Separate Pools (+40%)** |
+| **10,000 ops** | 35ms | 45ms | 52ms | **Separate Pools (+37%)** |
+| **Memory (10K)** | 88 MB | 1,142 MB | 278 MB | **Separate Pools (13x better)** |
 
 ### When to Use
 
-**✅ Use OperationPool when:**
-- Bulk insert/update operations (>100 records)
-- High-throughput applications (APIs, data pipelines)
-- Batch processing jobs
-- Migration scripts
-- Data replication
+**✅ Automatic (no configuration needed):**
+- All operations benefit from Separate Pools
+- Default configuration optimized for S3
+- Zero contention between databases
+- Auto-retry with exponential backoff
+- Adaptive tuning available for custom scenarios
 
-**⚠️ Consider disabling when:**
-- Single record operations
-- Low-frequency requests
-- Development/testing (unless testing concurrency)
+**Customize parallelism for:**
+- **High-throughput APIs**: `parallelism: 200`
+- **Data pipelines**: `parallelism: 300-500`
+- **Single operations**: `parallelism: 10` (override default)
+- **Memory-constrained**: `parallelism: 25-50`
 
 ### Configuration Reference
 
+Separate Pools comes pre-configured with production-ready defaults. Override only what you need:
+
 ```javascript
-operationPool: {
-  enabled: true,                    // Enable/disable pool
-  concurrency: 50,                  // Or 'auto' for adaptive tuning
-  retries: 3,                       // Max retry attempts
-  retryDelay: 1000,                 // Initial retry delay (ms)
-  timeout: 30000,                   // Operation timeout (ms)
-  retryableErrors: [                // Errors to retry (empty = all)
-    'NetworkingError',
-    'TimeoutError',
-    'RequestTimeout',
-    'ServiceUnavailable',
-    'SlowDown',
-    'RequestLimitExceeded'
-  ],
-  autotune: {                       // Auto-tuning config (when concurrency='auto')
-    enabled: true,
-    targetLatency: 100,             // Target latency (ms)
-    minConcurrency: 10,             // Min concurrent operations
-    maxConcurrency: 200,            // Max concurrent operations
-    targetMemoryPercent: 0.7,       // Target memory usage (70%)
-    adjustmentInterval: 5000        // Check interval (ms)
-  },
-  monitoring: {
-    collectMetrics: true            // Enable detailed metrics
+// Minimal - uses all defaults (recommended)
+const db = new Database({
+  connectionString: 's3://bucket/database'
+})
+
+// Custom - override specific settings
+const db = new Database({
+  connectionString: 's3://bucket/database',
+  parallelism: 200,                 // Concurrency per database pool
+  operationsPool: {
+    retries: 3,                     // Max retry attempts
+    retryDelay: 1000,               // Initial retry delay (ms)
+    timeout: 30000,                 // Operation timeout (ms)
+    retryableErrors: [              // Errors to retry (empty = all)
+      'NetworkingError',
+      'TimeoutError',
+      'RequestTimeout',
+      'ServiceUnavailable',
+      'SlowDown',
+      'RequestLimitExceeded'
+    ],
+    autotune: {                     // Auto-tuning (optional)
+      enabled: true,
+      targetLatency: 100,           // Target latency (ms)
+      minConcurrency: 50,           // Min per database
+      maxConcurrency: 500,          // Max per database
+      targetMemoryPercent: 0.7,     // Target memory usage (70%)
+      adjustmentInterval: 5000      // Check interval (ms)
+    }
   }
-}
+})
 ```
 
 **Complete documentation**: [**docs/benchmarks/operation-pool.md**](./docs/benchmarks/operation-pool.md)

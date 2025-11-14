@@ -491,7 +491,7 @@ new MemoryClient({
   verbose: true,                 // Log operations (default: false)
 
   // Performance
-  parallelism: 10,               // Parallel operations (default: 10)
+  parallelism: 100,              // Parallel operations (default: 100 - Separate OperationsPool per Database)
 
   // Limits Enforcement
   enforceLimits: true,           // Enforce S3 limits (default: false)
