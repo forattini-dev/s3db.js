@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
-import { TasksPool } from '../../src/concerns/tasks-pool.js'
+import { TasksPool } from '../../src/tasks-pool.class.js'
 
 describe('TasksPool', () => {
   let pool
