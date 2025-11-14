@@ -6,6 +6,9 @@ config({
 });
 
 process.env.NODE_ENV = 'test';
+if (process.env.TEST_FORCE_MEMORY_CLIENT === undefined) {
+  process.env.TEST_FORCE_MEMORY_CLIENT = 'true';
+}
 if (process.env.S3DB_DISABLE_CRON === undefined) {
   process.env.S3DB_DISABLE_CRON = 'true';
 }

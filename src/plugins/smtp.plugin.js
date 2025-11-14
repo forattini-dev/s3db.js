@@ -1,5 +1,7 @@
 import { Plugin } from './plugin.class.js';
 import { SMTPConnectionManager } from './smtp/connection-manager.js';
+import { SMTPTemplateEngine, defaultHandlebarsHelpers } from './smtp/template-engine.js';
+import { WebhookReceiver } from './smtp/webhook-receiver.js';
 import {
   SMTPError,
   AuthenticationError,
@@ -114,6 +116,21 @@ export class SMTPPlugin extends Plugin {
 
     // Connection manager (lazy-init in initialize())
     this.connectionManager = null;
+
+    // Template engine
+    this.templateEngine = new SMTPTemplateEngine({
+      type: templateEngine,
+      templateDir: templateDir,
+      cacheTemplates: true,
+      helpers: defaultHandlebarsHelpers
+    });
+
+    // Webhook receiver for bounce/complaint/delivery notifications
+    this.webhookReceiver = new WebhookReceiver({
+      provider: options.webhookProvider || 'sendgrid',
+      webhookSecret: options.webhookSecret || null,
+      maxEventLogSize: options.webhookMaxEventLogSize || 1000
+    });
 
     // Email queue (pending retries)
     this._emailQueue = new Map();
@@ -320,15 +337,21 @@ export class SMTPPlugin extends Plugin {
    */
   _validateEmailOptions(options) {
     if (!options.from) {
-      throw new RecipientError('Email "from" address is required');
+      throw new RecipientError('Email "from" address is required', {
+        suggestion: 'Provide a valid sender email address'
+      });
     }
 
     if (!options.to) {
-      throw new RecipientError('Email "to" recipient(s) required');
+      throw new RecipientError('Email "to" recipient(s) required', {
+        suggestion: 'Provide at least one recipient email address'
+      });
     }
 
     if (!options.subject) {
-      throw new SMTPError('Email "subject" is required');
+      throw new SMTPError('Email "subject" is required', {
+        suggestion: 'Provide a subject line for the email'
+      });
     }
 
     if (!options.body && !options.html && !options.template) {
@@ -372,18 +395,17 @@ export class SMTPPlugin extends Plugin {
   }
 
   /**
-   * Render email template
+   * Render email template using template engine
    * @private
    */
   async _renderTemplate(templateName, templateData = {}) {
     try {
-      if (this.templateEngine === 'handlebars') {
-        return await this._renderHandlebarsTemplate(templateName, templateData);
-      } else if (typeof this.templateEngine === 'function') {
-        return await this.templateEngine(templateName, templateData);
-      } else {
-        throw new TemplateError(`Unknown template engine: ${this.templateEngine}`);
-      }
+      const result = await this.templateEngine.render(templateName, templateData);
+      return {
+        subject: result.subject,
+        body: result.body,
+        html: result.html
+      };
     } catch (err) {
       if (err instanceof TemplateError) throw err;
       throw new TemplateError(`Template rendering failed: ${err.message}`, {
@@ -394,27 +416,164 @@ export class SMTPPlugin extends Plugin {
   }
 
   /**
-   * Render Handlebars template
+   * Register a custom Handlebars helper
+   */
+  registerTemplateHelper(name, fn) {
+    this.templateEngine.registerHelper(name, fn);
+  }
+
+  /**
+   * Register a template partial
+   */
+  registerTemplatePartial(name, template) {
+    this.templateEngine.registerPartial(name, template);
+  }
+
+  /**
+   * Clear template cache
+   */
+  clearTemplateCache() {
+    this.templateEngine.clearCache();
+  }
+
+  /**
+   * Get template cache stats
+   */
+  getTemplateCacheStats() {
+    return this.templateEngine.getCacheStats();
+  }
+
+  /**
+   * Process webhook from email provider
+   *
+   * @param {Object} body - Request body
+   * @param {Object} headers - Request headers
+   * @returns {Promise<Object>} Webhook processing result
+   */
+  async processWebhook(body, headers = {}) {
+    try {
+      const result = await this.webhookReceiver.processWebhook(body, headers);
+      this.emit('webhook:processed', result);
+      return result;
+    } catch (err) {
+      this.emit('error', { event: 'webhook', error: err });
+      throw err;
+    }
+  }
+
+  /**
+   * Register webhook event handler
+   *
+   * @param {string} eventType - bounce, complaint, delivery, open, click
+   * @param {Function} handler - Async handler function
+   */
+  onWebhookEvent(eventType, handler) {
+    // Wrap handler to auto-update email status
+    const wrappedHandler = async (event) => {
+      // Auto-update email status based on event
+      await this._handleWebhookEvent(event);
+
+      // Call custom handler if provided
+      if (handler) {
+        return await handler(event);
+      }
+    };
+
+    this.webhookReceiver.on(eventType, wrappedHandler);
+  }
+
+  /**
+   * Handle webhook event and update email status
    * @private
    */
-  async _renderHandlebarsTemplate(templateName, templateData) {
+  async _handleWebhookEvent(event) {
     try {
-      const Handlebars = await import('handlebars');
+      const resource = await this.database.getResource(this.emailResource);
 
-      // For now, return simple implementation
-      // Full implementation would load from file/resource
-      const template = Handlebars.default.compile(`{{subject}}`);
-      const rendered = template(templateData);
+      // Find email by message ID
+      let emailId = null;
+      try {
+        // Try to find by message ID
+        const emails = await resource.query({ messageId: event.messageId });
+        if (emails.length > 0) {
+          emailId = emails[0].id;
+        }
+      } catch (err) {
+        // Message ID might not be indexed, try searching
+        const allEmails = await resource.list({ limit: 1000 });
+        const found = allEmails.find((e) => e.messageId === event.messageId);
+        if (found) {
+          emailId = found.id;
+        }
+      }
 
-      return {
-        body: rendered,
-        html: rendered
+      if (!emailId) {
+        console.warn(`Email not found for message ID: ${event.messageId}`);
+        return;
+      }
+
+      // Update status based on event type
+      const updates = {
+        updatedAt: Date.now()
       };
-    } catch (err) {
-      throw new TemplateError(`Handlebars template error: ${err.message}`, {
-        originalError: err
+
+      if (event.type === 'bounce') {
+        updates.status = event.bounceType === 'hard' ? 'failed' : 'pending';
+        updates.bounceType = event.bounceType;
+        updates.failedAt = Date.now();
+        updates.errorMessage = event.reason;
+      } else if (event.type === 'complaint') {
+        updates.status = 'complained';
+        updates.complaintType = event.complaintType;
+        updates.errorMessage = event.reason;
+        // Auto-unsubscribe on complaint
+        updates.metadata = { unsubscribed: true, reason: 'complaint' };
+      } else if (event.type === 'delivery') {
+        updates.status = 'sent';
+        updates.sentAt = Math.floor(event.timestamp * 1000);
+      } else if (event.type === 'open') {
+        updates.status = 'opened';
+        updates.openedAt = Math.floor(event.timestamp * 1000);
+        updates.metadata = { userAgent: event.userAgent, ip: event.ip };
+      } else if (event.type === 'click') {
+        updates.status = 'clicked';
+        updates.clickedAt = Math.floor(event.timestamp * 1000);
+        updates.metadata = { url: event.url, userAgent: event.userAgent, ip: event.ip };
+      }
+
+      // Update email record
+      await resource.update(emailId, updates);
+
+      this.emit('email:statusUpdated', {
+        emailId,
+        status: updates.status,
+        eventType: event.type,
+        timestamp: Date.now()
       });
+    } catch (err) {
+      console.error(`Error handling webhook event: ${err.message}`);
     }
+  }
+
+  /**
+   * Get webhook event log
+   */
+  getWebhookEventLog(limit = 100) {
+    return this.webhookReceiver.getEventLog(limit);
+  }
+
+  /**
+   * Clear webhook event log
+   */
+  clearWebhookEventLog() {
+    this.webhookReceiver.clearEventLog();
+  }
+
+  /**
+   * Get webhook handler count
+   */
+  getWebhookHandlerCount() {
+    return this.webhookReceiver.getHandlerCount();
   }
 
   /**

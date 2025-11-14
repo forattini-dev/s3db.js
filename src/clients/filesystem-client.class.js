@@ -33,7 +33,7 @@ export class FileSystemClient extends EventEmitter {
 
     // TaskManager for batch operations (FileSystemClient analog to OperationsPool)
     this.taskManager = new TaskManager({
-      concurrency: config.concurrency || 100,
+      concurrency: config.concurrency || 5,
       retries: config.retries ?? 3,
       retryDelay: config.retryDelay ?? 1000,
       timeout: config.timeout ?? 30000,

@@ -1064,7 +1064,38 @@ export class ApiPlugin extends Plugin {
 
       // Check Content-Length threshold
       const contentLength = c.res.headers.get('content-length');
-      if (contentLength && Number(contentLength) < threshold) {
+      let payloadSize = contentLength ? Number(contentLength) : null;
+
+      if ((!payloadSize || Number.isNaN(payloadSize)) && threshold > 0) {
+        try {
+          const clone = c.res.clone();
+          const body = clone.body;
+          if (body && typeof body.getReader === 'function') {
+            const reader = body.getReader();
+            let total = 0;
+            try {
+              while (total < threshold) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value) {
+                  total += value.byteLength;
+                }
+                if (total >= threshold) {
+                  total = threshold;
+                  break;
+                }
+              }
+            } finally {
+              reader.releaseLock?.();
+            }
+            payloadSize = total;
+          }
+        } catch {
+          payloadSize = null;
+        }
+      }
+
+      if (payloadSize !== null && payloadSize < threshold) {
         return;
       }
 

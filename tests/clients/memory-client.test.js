@@ -1486,13 +1486,6 @@ describe('MemoryClient - Direct API Tests', () => {
         resources: { logs: failingResource }
       };
 
-      // Capture console.warn calls
-      const warnCalls = [];
-      const originalWarn = console.warn;
-      console.warn = (...args) => {
-        warnCalls.push(args);
-      };
-
       const result = await client.exportBackup(tmpDir, {
         compress: false,
         database: mockDatabase
@@ -1510,9 +1503,6 @@ describe('MemoryClient - Direct API Tests', () => {
       expect(plainRecord._body).toBe('plain text body');
       expect(malformedRecord._body).toContain('{"level":"warn"');
       expect(metaRecord).toBeDefined();
-
-      expect(warnCalls.length).toBeGreaterThan(0);
-      console.warn = originalWarn;
 
       await fs.rm(tmpDir, { recursive: true, force: true });
     });

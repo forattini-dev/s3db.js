@@ -16,6 +16,11 @@ import { ProcessManager } from '#src/concerns/process-manager.js';
 import { S3Client } from '#src/clients/s3-client.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
 
+const forceMemoryClients = (() => {
+  const rawValue = String(process.env.TEST_FORCE_MEMORY_CLIENT ?? 'true').toLowerCase();
+  return !['false', '0', 'off', 'no'].includes(rawValue);
+})();
+
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -33,38 +38,67 @@ const s3Prefix = (testName = idGenerator(5)) => join('day=' + new Date().toISOSt
 const sqsName = (testName = idGenerator(5)) => ['day_' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + (++prefixCounter) + '-' + idGenerator(4)].join('-').replace(/-/g,'_')
 
 export function createClientForTest(testName, options = {}) {
-  if (!options.connectionString) {
-    const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
-    options.connectionString = baseConnection + `/${s3Prefix(testName)}`;
+  const {
+    forceMemoryClient,
+    ...restOptions
+  } = options;
+
+  const shouldUseMemory = (forceMemoryClient ?? forceMemoryClients) === true;
+  const finalOptions = { ...restOptions };
+
+  if (!finalOptions.connectionString) {
+    if (shouldUseMemory) {
+      const memoryBase = `memory://${s3Prefix(testName)}`;
+      finalOptions.connectionString = `${memoryBase}/${s3Prefix(testName)}`;
+    } else {
+      const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
+      finalOptions.connectionString = baseConnection + `/${s3Prefix(testName)}`;
+    }
   }
 
   // Detect protocol and create appropriate client
-  if (options.connectionString.startsWith('memory://')) {
+  if (finalOptions.connectionString.startsWith('memory://')) {
     // Extract bucket and path from memory:// URL
-    const url = new URL(options.connectionString);
+    const url = new URL(finalOptions.connectionString);
     const bucket = url.hostname || 'bucket';
     const keyPrefix = url.pathname.substring(1); // Remove leading /
 
     return new MemoryClient({
       bucket,
       keyPrefix,
-      verbose: options.verbose || false
+      verbose: finalOptions.verbose || false
     });
   }
 
-  return new S3Client(options);
-};
+  return new S3Client(finalOptions);
+}
 
 export function createDatabaseForTest(testName, options = {}) {
   if (!isString(testName)) {
     throw new Error('testName must be a string');
   }
 
+  const {
+    forceMemoryClient,
+    ...restOptions
+  } = options;
+
+  const shouldUseMemory = (forceMemoryClient ?? forceMemoryClients) === true;
+
+  if (
+    shouldUseMemory &&
+    !restOptions.client &&
+    !restOptions.connectionString &&
+    !restOptions.bucket
+  ) {
+    return createMemoryDatabaseForTest(testName, restOptions);
+  }
+
   const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
   const params = {
     connectionString: baseConnection + `/${s3Prefix(testName)}`,
     verbose: false,  // Ensure no initialization logs in tests
-    ...options,
+    ...restOptions,
   }
 
   // Use shared managers to prevent signal handler leaks in tests

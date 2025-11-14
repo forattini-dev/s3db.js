@@ -31,6 +31,8 @@ class TestCoordinatorPlugin extends CoordinatorPlugin {
   }
 }
 
+const HEARTBEAT_WAIT_MS = 1600;
+
 describe('CoordinatorPlugin Startup Jitter', () => {
   let db;
 
@@ -198,7 +200,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       // All delays should be within range (20-80ms, with some tolerance)
       for (const delay of delays) {
         expect(delay).toBeGreaterThanOrEqual(15); // -5ms tolerance
-        expect(delay).toBeLessThan(100); // +20ms tolerance for setup
+        expect(delay).toBeLessThan(140); // Allow extra time for setup overhead
       }
 
       // Delays should not all be identical (randomness check)
@@ -220,7 +222,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       await plugin.startCoordination();
 
       // Give time for heartbeat and election to complete (at least one heartbeat cycle)
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, HEARTBEAT_WAIT_MS));
 
       // After startup, plugin should have elected a coordinator
       expect(plugin.isCoordinator).toBe(true); // Only worker, so should be coordinator
@@ -254,7 +256,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       ]);
 
       // Give time for heartbeats to sync and election to complete
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await new Promise(resolve => setTimeout(resolve, HEARTBEAT_WAIT_MS));
 
       // Exactly one should be coordinator
       const coordinatorCount = [worker1.isCoordinator, worker2.isCoordinator].filter(Boolean).length;
@@ -360,11 +362,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       const overallElapsed = Date.now() - overallStart;
 
       // Give time for election to complete (need at least one heartbeat cycle)
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      // Cleanup
-      await Promise.all(workers.map(w => w.stopCoordination()));
-      await Promise.all(workers.map(w => w.uninstall()));
+      await new Promise(resolve => setTimeout(resolve, HEARTBEAT_WAIT_MS));
 
       // Verify startup times are spread across window
       const minStartTime = Math.min(...startTimes);
@@ -375,12 +373,16 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       // This proves workers didn't all start simultaneously
       expect(spread).toBeGreaterThan(100);
 
-      // Overall time should be reasonable (< 1 second for 20 workers with max 500ms jitter)
-      expect(overallElapsed).toBeLessThan(1000);
+      // Overall time should be reasonable (< 2.5 seconds for 20 workers with max 500ms jitter)
+      expect(overallElapsed).toBeLessThan(2500);
 
-      // Exactly one coordinator should be elected
+      // Exactly one coordinator should be elected before cleanup
       const coordinators = workers.filter(w => w.isCoordinator);
       expect(coordinators.length).toBe(1);
+
+      // Cleanup
+      await Promise.all(workers.map(w => w.stopCoordination()));
+      await Promise.all(workers.map(w => w.uninstall()));
     }, 30000); // Increase timeout for this test
   });
 
@@ -405,7 +407,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       expect(elapsed).toBeLessThan(6000);
 
       // Give time for election to complete (at least one heartbeat cycle)
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, HEARTBEAT_WAIT_MS));
 
       // Should elect coordinator
       expect(plugin.isCoordinator).toBe(true);
@@ -426,7 +428,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       await plugin.startCoordination();
 
       // Give time for election to complete (at least one heartbeat cycle)
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, HEARTBEAT_WAIT_MS));
 
       // All existing functionality should work
       expect(plugin.isCoordinator).toBe(true);

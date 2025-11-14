@@ -1,5 +1,5 @@
 export default {
-  maxWorkers: 2, // Limit to 2 workers (or use --runInBand for sequential execution)
+  maxWorkers: 6, // Allow 6 workers with reduced concurrency (5 per TaskManager)
   workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
   testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
   testEnvironment: 'node',

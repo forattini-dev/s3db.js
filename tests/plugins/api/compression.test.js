@@ -103,6 +103,19 @@ describe('API Plugin - Compression Middleware', () => {
       content: longContent
     });
 
+    await db.createResource({
+      name: 'tags',
+      attributes: {
+        id: 'string|optional',
+        name: 'string|required'
+      }
+    });
+
+    await db.resources.tags.insert({
+      id: 'tag-1',
+      name: 'test'
+    });
+
     // Create API plugin with compression enabled
     apiPlugin = new ApiPlugin({
       port,
@@ -212,19 +225,8 @@ describe('API Plugin - Compression Middleware', () => {
   });
 
   it('should NOT compress responses smaller than threshold', async () => {
-    // Create a tiny resource
-    await db.createResource({
-      name: 'tags',
-      attributes: {
-        id: 'string|optional',
-        name: 'string|required'
-      }
-    });
-
-    await db.resources.tags.insert({
-      id: 'tag-1',
-      name: 'test'
-    });
+    // Increase threshold so even medium responses stay uncompressed
+    apiPlugin.config.compression.threshold = 4096;
 
     const response = await rawHttpRequest(port, '/tags', {
       'accept-encoding': 'gzip, br'
