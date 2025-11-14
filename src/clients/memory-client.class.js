@@ -8,12 +8,12 @@
 import path from 'path';
 import EventEmitter from 'events';
 import { chunk } from 'lodash-es';
-import { PromisePool } from '@supercharge/promise-pool';
 
 import tryFn from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js';
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
+import { TaskManager } from '../task-manager.class.js';
 import { MemoryStorage } from './memory-storage.class.js';
 
 const pathPosix = path.posix;
@@ -29,7 +29,15 @@ export class MemoryClient extends EventEmitter {
     // Client configuration
     this.id = config.id || idGenerator(77);
     this.verbose = Boolean(config.verbose);
-    this.parallelism = config.parallelism || 10;
+
+    // TaskManager for batch operations (MemoryClient analog to OperationsPool)
+    this.taskManager = new TaskManager({
+      concurrency: config.concurrency || 10,
+      retries: config.retries ?? 3,
+      retryDelay: config.retryDelay ?? 1000,
+      timeout: config.timeout ?? 30000,
+      retryableErrors: config.retryableErrors || []
+    });
 
     // Storage configuration
     this.bucket = config.bucket || 's3db';
@@ -344,15 +352,15 @@ export class MemoryClient extends EventEmitter {
     const input = { Delete: { Objects: keys.map(key => ({ Key: key })) } };
 
     // Split into batches for parallel processing
-    const batches = chunk(fullKeys, this.parallelism);
+    const batches = chunk(fullKeys, this.taskManager.concurrency);
     const allResults = { Deleted: [], Errors: [] };
 
-    const { results } = await PromisePool
-      .withConcurrency(this.parallelism)
-      .for(batches)
-      .process(async (batch) => {
+    const { results } = await this.taskManager.process(
+      batches,
+      async (batch) => {
         return await this.storage.deleteMultiple(batch);
-      });
+      }
+    );
 
     // Merge results
     for (const result of results) {
@@ -543,14 +551,14 @@ export class MemoryClient extends EventEmitter {
    */
   async moveAllObjects({ prefixFrom, prefixTo }) {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
-    const { results, errors } = await PromisePool
-      .withConcurrency(this.parallelism)
-      .for(keys)
-      .process(async (key) => {
+    const { results, errors } = await this.taskManager.process(
+      keys,
+      async (key) => {
         const to = key.replace(prefixFrom, prefixTo);
         await this.moveObject({ from: key, to });
         return { from: key, to };
-      });
+      }
+    );
 
     this.emit('moveAllObjects', { results, errors });
 
