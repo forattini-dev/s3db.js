@@ -1,5 +1,5 @@
 export default {
-  maxWorkers: '50%', // Use 50% of CPU cores for parallel execution (was: 1 - too slow!)
+  maxWorkers: 4, // Limit to 4 workers to prevent resource contention (TaskManager uses high concurrency)
   workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
   testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
   testEnvironment: 'node',
