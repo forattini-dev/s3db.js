@@ -1,0 +1,299 @@
+═══════════════════════════════════════════════════════════════════════════════
+PUPPETEER PLUGIN - STORAGE CAPTURE IMPLEMENTATION SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+PROJECT FILES ANALYZED:
+  • src/plugins/puppeteer.plugin.js (1,356 lines) - Main plugin class
+  • src/plugins/puppeteer/cookie-manager.js (490 lines) - Cookie handling
+  • src/plugins/puppeteer/network-monitor.js (650+ lines) - Network tracking
+  • src/plugins/puppeteer/console-monitor.js (500+ lines) - Console tracking
+  • src/plugins/puppeteer/performance-manager.js (700+ lines) - Metrics
+  • Tests: puppeteer-cookies.test.js, puppeteer-proxy.test.js
+
+═══════════════════════════════════════════════════════════════════════════════
+CURRENT ARCHITECTURE SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+Main Entry: navigate(url, options)
+  └─ Returns Page object with captured data attached:
+     • page._userAgent
+     • page._viewport
+     • page._proxyId
+     • page._sessionId
+     • page._navigationSuccess
+     • page._screenshot (if enabled)
+     • + helper methods: humanClick(), humanType(), humanScroll()
+
+Manager Pattern (used for modularity):
+  ├─ CookieManager - Handles cookie farming, storage, and reputation
+  ├─ ProxyManager - Proxy pool, health checks, session binding
+  ├─ PerformanceManager - Core Web Vitals and performance metrics
+  ├─ NetworkMonitor - CDP-based network request tracking
+  └─ ConsoleMonitor - Browser console message tracking
+
+Key Insights:
+  1. ALL managers follow same initialization pattern:
+     - Created in onStart()
+     - Resources initialized in initialize() if persist=true
+     - Monitoring attached in navigate() after page.goto()
+  
+  2. Page lifecycle hooks in navigate():
+     - Line 936: page.goto(url)
+     - Line 951-955: Screenshot captured here (GOOD INSERTION POINT)
+     - Line 986-1027: page.close() overridden to save cookies
+  
+  3. Resource naming standardized:
+     - 'plg_puppeteer_' + <feature> + '_' + <type>
+     - Can be overridden via resourceNames option
+     - Support for namespacing
+
+═══════════════════════════════════════════════════════════════════════════════
+RECOMMENDED IMPLEMENTATION: StorageManager (NEW FILE)
+═══════════════════════════════════════════════════════════════════════════════
+
+CREATE: src/plugins/puppeteer/storage-manager.js
+
+Main Methods:
+  • captureStorage(page, sessionId, context)
+    └─ Returns: { localStorage, sessionStorage, indexedDB, timestamp, ... }
+  
+  • _captureLocalStorage(page)
+    └─ Evaluates: localStorage.key(i) + localStorage.getItem(key)
+  
+  • _captureSessionStorage(page)
+    └─ Evaluates: sessionStorage.key(i) + sessionStorage.getItem(key)
+  
+  • _captureIndexedDB(page)
+    └─ Evaluates: indexedDB.databases() + all stores + records
+  
+  • _persistStorageData(results)
+    └─ Inserts into S3DB resources
+
+RETURN STRUCTURE FROM captureStorage():
+  {
+    localStorage: { key: 'value', ... },
+    sessionStorage: { key: 'value', ... },
+    indexedDB: {
+      dbName: {
+        storeName: [ records ],
+        ...
+      }
+    },
+    timestamp: 1731611400000,
+    sessionId: 'session-123',
+    url: 'https://example.com',
+    domain: 'example.com'
+  }
+
+═══════════════════════════════════════════════════════════════════════════════
+CONFIGURATION OPTIONS (in puppeteer.plugin.js constructor)
+═══════════════════════════════════════════════════════════════════════════════
+
+NEW CONFIG OPTION (add ~line 203-210):
+  storage: {
+    enabled: false,                      // Enable storage capture
+    persist: false,                      // Save to S3DB
+    capture: {
+      localStorage: true,                // Capture window.localStorage
+      indexedDB: true,                   // Capture all indexedDB
+      sessionStorage: true               // Capture window.sessionStorage
+    },
+    compression: {
+      enabled: true,
+      threshold: 10240                   // Compress > 10KB
+    },
+    filters: {
+      excludeKeys: [],                   // ['__session', 'token']
+      maxItemSize: 1048576,              // 1MB per item
+      maxTotalSize: 10485760             // 10MB total
+    }
+  }
+
+NEW RESOURCE DESCRIPTORS (add ~line 280-284):
+  storage: {
+    defaultName: 'plg_puppeteer_storage_local',
+    indexedDB: { defaultName: 'plg_puppeteer_storage_indexeddb' },
+    sessionStorage: { defaultName: 'plg_puppeteer_storage_session' }
+  }
+
+═══════════════════════════════════════════════════════════════════════════════
+INTEGRATION POINTS IN puppeteer.plugin.js
+═══════════════════════════════════════════════════════════════════════════════
+
+1. ADD TO CONSTRUCTOR (lines 315-316):
+   this.storageManager = null;
+
+2. ADD INITIALIZATION (lines 392-398, after consoleMonitor):
+   if (this.config.storage.enabled) {
+     await this._initializeStorageManager();
+   }
+
+3. NEW METHOD (around line 567):
+   async _initializeStorageManager() {
+     const { StorageManager } = await import('./puppeteer/storage-manager.js');
+     this.storageManager = new StorageManager(this);
+     if (this.config.storage.persist) {
+       await this.storageManager.initialize();
+     }
+   }
+
+4. HOOK INTO navigate() (after line 955, after screenshot):
+   if (this.storageManager) {
+     page._storageData = await this.storageManager.captureStorage(
+       page, 
+       useSession
+     );
+   }
+
+5. ADD TO onStop() (lines 412-417):
+   // Already handles other managers, just consistent pattern
+
+═══════════════════════════════════════════════════════════════════════════════
+S3DB RESOURCES (created by StorageManager.initialize())
+═══════════════════════════════════════════════════════════════════════════════
+
+RESOURCE 1: plg_puppeteer_storage_local (localStorage)
+  Attributes:
+    • sessionId (string, required)
+    • url (string, required)
+    • domain (string, required)
+    • date (string, required) - YYYY-MM-DD for partitioning
+    • data (object, required) - { key: value, ... }
+    • itemCount (number) - Count of keys
+    • totalSize (number) - Bytes
+    • hasLargeValues (boolean)
+    • keys (array) - List of all keys
+  
+  Behavior: 'body-overflow' - Automatically handle overflow
+  Timestamps: true
+  Partitions:
+    ├─ byUrl { fields: { url } }
+    ├─ byDomain { fields: { domain } }
+    └─ byDate { fields: { date } }
+
+RESOURCE 2: plg_puppeteer_storage_session (sessionStorage)
+  [Same as above]
+
+RESOURCE 3: plg_puppeteer_storage_indexeddb (IndexedDB)
+  Attributes:
+    • sessionId (string, required)
+    • url (string, required)
+    • domain (string, required)
+    • date (string, required)
+    • databaseName (string, required) - e.g., 'myapp_db'
+    • storeName (string, required) - e.g., 'users'
+    • data (array, required) - Records from the store
+    • recordCount (number) - Count of records
+    • dataSize (number) - Bytes
+    • keys (array) - List of key names
+  
+  Behavior: 'body-overflow'
+  Timestamps: true
+  Partitions:
+    ├─ byDomain { fields: { domain } }
+    ├─ byDatabase { fields: { databaseName } }
+    └─ byDate { fields: { date } }
+
+═══════════════════════════════════════════════════════════════════════════════
+USAGE EXAMPLES
+═══════════════════════════════════════════════════════════════════════════════
+
+EXAMPLE 1: Basic Auto-Capture
+  const plugin = new PuppeteerPlugin({
+    storage: { enabled: true, persist: true }
+  });
+  
+  const page = await plugin.navigate('https://example.com');
+  console.log(page._storageData.localStorage);
+  await page.close();
+
+EXAMPLE 2: With Session Persistence
+  await plugin.withSession('user-123', async (page) => {
+    const storage = page._storageData;
+    const user = JSON.parse(storage.localStorage.user);
+    console.log('Logged in as:', user.name);
+  }, {
+    url: 'https://example.com/dashboard'
+  });
+
+EXAMPLE 3: Manual Capture
+  const page = await plugin.navigate('https://example.com');
+  await page.click('button');
+  await page.waitForTimeout(1000);
+  
+  const updated = await plugin.storageManager.captureStorage(page, sessionId);
+  await page.close();
+
+═══════════════════════════════════════════════════════════════════════════════
+KEY ADVANTAGES OF THIS APPROACH
+═══════════════════════════════════════════════════════════════════════════════
+
+1. CONSISTENCY: Follows existing NetworkMonitor/ConsoleMonitor pattern
+2. MODULARITY: Independent manager, easy to test and extend
+3. ALWAYS CAPTURED: Automatic during navigate() like screenshot
+4. OPTIONAL: Can be enabled/disabled via config
+5. PERSISTENT: Optional S3DB storage with partitioning
+6. FILTERED: Supports excluding keys, size limits
+7. COMPRESSED: Large payloads auto-compressed
+8. ERROR-SAFE: Storage capture errors don't fail page navigation
+9. OBSERVABLE: Events emitted for failures/success
+10. CONFIGURABLE: All three storage APIs independently toggleable
+
+═══════════════════════════════════════════════════════════════════════════════
+TESTING APPROACH
+═══════════════════════════════════════════════════════════════════════════════
+
+Unit Tests for StorageManager:
+  • Test localStorage capture
+  • Test sessionStorage capture
+  • Test indexedDB capture
+  • Test filtering and size limits
+  • Test resource creation
+  • Test persistence to S3DB
+
+Integration Tests with PuppeteerPlugin:
+  • Test auto-capture in navigate()
+  • Test page._storageData availability
+  • Test withSession storage capture
+  • Test storage disabled scenario
+
+Mock Strategy:
+  plugin.storageManager.captureStorage = jest.fn()
+    .mockResolvedValue({
+      localStorage: { test: 'value' },
+      indexedDB: {},
+      sessionStorage: {}
+    });
+
+═══════════════════════════════════════════════════════════════════════════════
+FILE STRUCTURE AFTER IMPLEMENTATION
+═══════════════════════════════════════════════════════════════════════════════
+
+src/plugins/puppeteer/
+  ├─ storage-manager.js (NEW - ~300-400 lines)
+  ├─ console-monitor.js
+  ├─ cookie-manager.js
+  ├─ network-monitor.js
+  ├─ performance-manager.js
+  ├─ proxy-manager.js
+  ├─ stealth-manager.js
+  └─ (other existing files)
+
+Modified:
+  └─ puppeteer.plugin.js (+~50-100 lines for StorageManager integration)
+
+Tests:
+  └─ tests/plugins/puppeteer-storage.test.js (NEW)
+
+═══════════════════════════════════════════════════════════════════════════════
+ESTIMATED IMPLEMENTATION TIME
+═══════════════════════════════════════════════════════════════════════════════
+
+New StorageManager file:        3-4 hours
+Integration in puppeteer.plugin: 1-2 hours
+Unit tests:                      2-3 hours
+Documentation/examples:          1-2 hours
+                                 ─────────
+TOTAL:                          7-11 hours
+
+═══════════════════════════════════════════════════════════════════════════════

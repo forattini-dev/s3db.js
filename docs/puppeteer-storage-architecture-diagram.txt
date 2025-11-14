@@ -1,0 +1,427 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         PUPPETEER PLUGIN STORAGE CAPTURE - ARCHITECTURE DIAGRAM              ║
+║                                                                               ║
+║                                                                               ║
+║ PLUGIN INITIALIZATION FLOW                                                   ║
+║ ══════════════════════════════════════════════════════════════════════════   ║
+║                                                                               ║
+║  new PuppeteerPlugin({                                                       ║
+║    storage: {                                                                ║
+║      enabled: true,                                                          ║
+║      persist: true,                                                          ║
+║      capture: {                                                              ║
+║        localStorage: true,         ←─ Configuration                          ║
+║        indexedDB: true,                                                      ║
+║        sessionStorage: true                                                  ║
+║      }                                                                        ║
+║    }                                                                          ║
+║  })                                                                           ║
+║       │                                                                       ║
+║       ├──→ constructor()                                                      ║
+║       │       ├─ Set config.storage with defaults                            ║
+║       │       ├─ Initialize resource descriptors                             ║
+║       │       └─ this.storageManager = null                                  ║
+║       │                                                                       ║
+║       └──→ await db.usePlugin(plugin)                                        ║
+║            └──→ onStart()                                                     ║
+║                ├─ await _importDependencies()                                ║
+║                ├─ await _initializeCookieManager()                           ║
+║                ├─ await _initializeProxyManager()                            ║
+║                ├─ await _initializePerformanceManager()                      ║
+║                ├─ await _initializeNetworkMonitor()                          ║
+║                ├─ await _initializeConsoleMonitor()                          ║
+║                ├─ await _initializeStorageManager()    ←─ NEW!               ║
+║                │   │                                                          ║
+║                │   └──→ StorageManager created                               ║
+║                │       │                                                      ║
+║                │       └──→ await initialize()                                ║
+║                │           ├─ createResource(plg_puppeteer_storage_local)    ║
+║                │           ├─ createResource(plg_puppeteer_storage_session)  ║
+║                │           └─ createResource(plg_puppeteer_storage_indexeddb)║
+║                │                                                              ║
+║                └─ await _warmupBrowserPool()                                 ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         PAGE NAVIGATION FLOW - WITH STORAGE CAPTURE                          ║
+║                                                                               ║
+║                                                                               ║
+║  const page = await puppeteer.navigate(url, options)                         ║
+║  {                                                                            ║
+║    1. Get browser from pool                                                  ║
+║       ├─ Pool manager                                                        ║
+║       └─ Create new page                                                     ║
+║                                                                               ║
+║    2. Setup page environment                                                 ║
+║       ├─ Set viewport (randomized)                                           ║
+║       ├─ Set user agent (randomized)                                         ║
+║       ├─ Setup resource blocking                                             ║
+║       └─ Setup ghost cursor                                                  ║
+║                                                                               ║
+║    3. Load session data                                                      ║
+║       ├─ CookieManager.loadSession(page)                                     ║
+║       └─ Set cookies, UA, viewport                                           ║
+║                                                                               ║
+║    4. Navigate to URL                                                        ║
+║       └─ await page.goto(url)   ← Page DOM loaded                            ║
+║                                                                               ║
+║    5. POST-NAVIGATION HOOKS (NEW INSERTION POINT)                            ║
+║       ├─ Screenshot (if enabled)     ← line 951-955                          ║
+║       │   page._screenshot = buffer                                          ║
+║       │                                                                       ║
+║       ├─ STORAGE CAPTURE (if enabled)  ←─ NEW!                              ║
+║       │   │                                                                   ║
+║       │   ├─ page._storageData =                                             ║
+║       │   │   await StorageManager.captureStorage(page, sessionId)           ║
+║       │   │                                                                   ║
+║       │   ├─ Execution inside Puppeteer context:                             ║
+║       │   │   │                                                               ║
+║       │   │   ├─ _captureLocalStorage(page)                                  ║
+║       │   │   │  └─ page.evaluate(() => {                                    ║
+║       │   │   │     const items = {};                                        ║
+║       │   │   │     for (let i=0; i<localStorage.length; i++) {              ║
+║       │   │   │       const key = localStorage.key(i);                       ║
+║       │   │   │       items[key] = localStorage.getItem(key);                ║
+║       │   │   │     }                                                        ║
+║       │   │   │     return items;                                            ║
+║       │   │   │   })                                                         ║
+║       │   │   │                                                               ║
+║       │   │   ├─ _captureSessionStorage(page)                                ║
+║       │   │   │  └─ [Similar to localStorage]                                ║
+║       │   │   │                                                               ║
+║       │   │   └─ _captureIndexedDB(page)                                     ║
+║       │   │      └─ page.evaluate(async () => {                              ║
+║       │   │         const databases = await indexedDB.databases();           ║
+║       │   │         for (const db of databases) {                            ║
+║       │   │           const idb = await indexedDB.open(db.name);             ║
+║       │   │           for (const storeName of objectStoreNames) {            ║
+║       │   │             const records = await store.getAll();                ║
+║       │   │           }                                                      ║
+║       │   │         }                                                        ║
+║       │   │       })                                                         ║
+║       │   │                                                                   ║
+║       │   └─ Persist if enabled                                              ║
+║       │      └─ StorageManager._persistStorageData(results)                  ║
+║       │         └─ Insert into S3DB resources                                ║
+║       │            ├─ localStorageResource.insert(...)                       ║
+║       │            ├─ sessionStorageResource.insert(...)                     ║
+║       │            └─ indexedDBResource.insert(...)                          ║
+║       │                                                                       ║
+║       └─ Attach helper methods                                               ║
+║           └─ page.humanClick(), page.humanType(), etc.                       ║
+║                                                                               ║
+║    6. Return page with attached data                                         ║
+║       └─ page._storageData =                                                 ║
+║          {                                                                    ║
+║            localStorage: { key: value, ... },                                ║
+║            sessionStorage: { key: value, ... },                              ║
+║            indexedDB: {                                                      ║
+║              databaseName: {                                                 ║
+║                storeName: [ records ]                                        ║
+║              }                                                                ║
+║            },                                                                ║
+║            timestamp: 1731611400000,                                         ║
+║            sessionId: 'session-123',                                         ║
+║            url: 'https://example.com',                                       ║
+║            domain: 'example.com'                                             ║
+║          }                                                                    ║
+║  }                                                                            ║
+║                                                                               ║
+║  // Use page (perform actions)                                               ║
+║  await page.click('button');                                                 ║
+║                                                                               ║
+║  // Close page                                                               ║
+║  await page.close()  ← Saves cookies, cleans up                              ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         DATA FLOW - FROM PAGE TO S3DB STORAGE                               ║
+║                                                                               ║
+║                                                                               ║
+║  Browser Page                          StorageManager                  S3DB   ║
+║  ════════════════════════════════════════════════════════════════════════════ ║
+║                                                                               ║
+║    page.goto(url)                                                            ║
+║         │                                                                     ║
+║         ├─ DOM loaded                                                        ║
+║         │   ├─ localStorage populated                                        ║
+║         │   ├─ sessionStorage populated                                      ║
+║         │   └─ indexedDB initialized                                         ║
+║         │                                                                     ║
+║         └─ page.evaluate(captureLocalStorage)                                ║
+║            │                                                                  ║
+║            └─ Returns: { key1: value1, key2: value2, ... }                   ║
+║                  │                                                            ║
+║                  └─ captureStorage(page)                                      ║
+║                     ├─ _captureLocalStorage(page)                            ║
+║                     ├─ _captureSessionStorage(page)                          ║
+║                     ├─ _captureIndexedDB(page)                               ║
+║                     │                                                         ║
+║                     └─ Returns: {                                            ║
+║                        localStorage: {...},                                  ║
+║                        sessionStorage: {...},                                ║
+║                        indexedDB: {...},                                     ║
+║                        timestamp,                                            ║
+║                        sessionId,                                            ║
+║                        url,                                                  ║
+║                        domain                                                ║
+║                     }                                                         ║
+║                     │                                                         ║
+║                     ├─ Attach to page                                        ║
+║                     │  page._storageData = results                           ║
+║                     │                                                         ║
+║                     └─ _persistStorageData(results)                          ║
+║                        │                                                      ║
+║                        ├─ Validate data size                                 ║
+║                        ├─ Apply filters                                      ║
+║                        │  └─ excludeKeys, maxItemSize, maxTotalSize          ║
+║                        │                                                      ║
+║                        └─ Insert into resources                              ║
+║                           │                                                   ║
+║                           ├─ localStorageResource.insert({                   ║
+║                           │    sessionId,                                    ║
+║                           │    url,                                          ║
+║                           │    domain,                                       ║
+║                           │    date,                                         ║
+║                           │    data: {...},                                  ║
+║                           │    itemCount: 42,                                ║
+║                           │    totalSize: 8192                               ║
+║                           │  })                                              ║
+║                           │   └─ S3DB creates:                               ║
+║                           │      ├─ Object in S3                            ║
+║                           │      ├─ Metadata with partitions                ║
+║                           │      └─ Timestamp                                ║
+║                           │                                                   ║
+║                           ├─ sessionStorageResource.insert(...)              ║
+║                           │   └─ plg_puppeteer_storage_session               ║
+║                           │                                                   ║
+║                           └─ indexedDBResource.insert(...)                   ║
+║                               └─ plg_puppeteer_storage_indexeddb             ║
+║                                  (one record per store)                      ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         MANAGER PATTERN - CONSISTENT WITH EXISTING PLUGINS                   ║
+║                                                                               ║
+║                                                                               ║
+║  ┌─────────────────────────────────────────────────────────────────────────┐ ║
+║  │ PuppeteerPlugin (puppeteer.plugin.js)                                  │ ║
+║  │                                                                          │ ║
+║  │  ├─ constructor(options)                                               │ ║
+║  │  │  └─ this.storageManager = null     ←─ Add this                      │ ║
+║  │  │                                                                       │ ║
+║  │  ├─ async onStart()                                                     │ ║
+║  │  │  ├─ await _initializeCookieManager()                                │ ║
+║  │  │  ├─ await _initializeProxyManager()                                 │ ║
+║  │  │  ├─ await _initializeNetworkMonitor()                               │ ║
+║  │  │  ├─ await _initializeConsoleMonitor()                               │ ║
+║  │  │  ├─ await _initializeStorageManager()  ←─ Add this                  │ ║
+║  │  │  └─ ...                                                              │ ║
+║  │  │                                                                       │ ║
+║  │  ├─ async navigate(url, options)                                       │ ║
+║  │  │  ├─ ... setup page ...                                              │ ║
+║  │  │  ├─ await page.goto(url)                                            │ ║
+║  │  │  ├─ // Post-navigation                                              │ ║
+║  │  │  ├─ if (this.storageManager) {                                      │ ║
+║  │  │  │    page._storageData = await this.storageManager.captureStorage()│ ║
+║  │  │  │  }  ←─ Add this                                                  │ ║
+║  │  │  └─ return page                                                      │ ║
+║  │  │                                                                       │ ║
+║  │  └─ async _initializeStorageManager()  ←─ Add this method               │ ║
+║  │     └─ this.storageManager = new StorageManager(this)                  │ ║
+║  │        await this.storageManager.initialize()                          │ ║
+║  │                                                                          │ ║
+║  └──────────────────────────────────────────────────────────────────────────┘ ║
+║           │                                                                   ║
+║           │ creates                                                           ║
+║           ├─────────────────────────────────────────────────────────────────  ║
+║           │                                                                   ║
+║           └──▶ ┌──────────────────────────────────────────────────────────┐ ║
+║                │ StorageManager (NEW: storage-manager.js)                │ ║
+║                │                                                           │ ║
+║                ├─ constructor(plugin)                                      │ ║
+║                │  └─ this.config = plugin.config.storage                  │ ║
+║                │     this.localStorageResource = null                     │ ║
+║                │     this.sessionStorageResource = null                   │ ║
+║                │     this.indexedDBResource = null                        │ ║
+║                │                                                           │ ║
+║                ├─ async initialize()                                       │ ║
+║                │  ├─ if (!config.persist) return                          │ ║
+║                │  ├─ await _createLocalStorageResource()                  │ ║
+║                │  ├─ await _createSessionStorageResource()                │ ║
+║                │  └─ await _createIndexedDBResource()                     │ ║
+║                │                                                           │ ║
+║                ├─ async captureStorage(page, sessionId)                   │ ║
+║                │  ├─ await _captureLocalStorage(page)                     │ ║
+║                │  ├─ await _captureSessionStorage(page)                   │ ║
+║                │  ├─ await _captureIndexedDB(page)                        │ ║
+║                │  ├─ await _persistStorageData(results)                   │ ║
+║                │  └─ return results                                       │ ║
+║                │                                                           │ ║
+║                ├─ async _captureLocalStorage(page)                        │ ║
+║                │  └─ page.evaluate(() => { /* browser context */ })       │ ║
+║                │                                                           │ ║
+║                ├─ async _captureSessionStorage(page)                      │ ║
+║                │  └─ page.evaluate(() => { /* browser context */ })       │ ║
+║                │                                                           │ ║
+║                ├─ async _captureIndexedDB(page)                           │ ║
+║                │  └─ page.evaluate(async () => { /* browser context */ }) │ ║
+║                │                                                           │ ║
+║                └─ async _persistStorageData(results)                      │ ║
+║                   ├─ localStorageResource.insert(...)                     │ ║
+║                   ├─ sessionStorageResource.insert(...)                   │ ║
+║                   └─ indexedDBResource.insert(...)                        │ ║
+║                │                                                           │ ║
+║                └──────────────────────────────────────────────────────────┘ ║
+║                                                                               ║
+║                                                                               ║
+║  PATTERN CONSISTENCY:                                                        ║
+║  ════════════════════════════════════════════════════════════════════════    ║
+║                                                                               ║
+║  ✓ StorageManager follows same pattern as:                                   ║
+║    - CookieManager (puppeteer/cookie-manager.js)                             ║
+║    - NetworkMonitor (puppeteer/network-monitor.js)                           ║
+║    - ConsoleMonitor (puppeteer/console-monitor.js)                           ║
+║    - PerformanceManager (puppeteer/performance-manager.js)                   ║
+║                                                                               ║
+║  ✓ Initialization: onStart() → _initializeStorageManager()                   ║
+║  ✓ Resource creation: StorageManager.initialize()                            ║
+║  ✓ Data capture: navigate() → page._storageData                              ║
+║  ✓ Event emission: plugin.emit('puppeteer.storageCaptureFailed', ...)       ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         S3DB RESOURCE SCHEMA - THREE RESOURCES CREATED                       ║
+║                                                                               ║
+║                                                                               ║
+║  RESOURCE 1: plg_puppeteer_storage_local (localStorage)                      ║
+║  ═══════════════════════════════════════════════════════════════════════     ║
+║                                                                               ║
+║  Attributes:                                                                 ║
+║    ├─ sessionId: string|required       Session identifier                    ║
+║    ├─ url: string|required              Page URL                             ║
+║    ├─ domain: string|required           Extracted domain                     ║
+║    ├─ date: string|required             YYYY-MM-DD format                    ║
+║    │                                    (for partitioning)                   ║
+║    ├─ data: object|required             { key: value, ... }                  ║
+║    ├─ itemCount: number                 Number of keys                       ║
+║    ├─ totalSize: number                 Total bytes                          ║
+║    ├─ hasLargeValues: boolean           If any values > 1MB                  ║
+║    ├─ keys: array                       List of all keys                     ║
+║    ├─ createdAt: timestamp (auto)       S3DB timestamp                       ║
+║    └─ updatedAt: timestamp (auto)       S3DB timestamp                       ║
+║                                                                               ║
+║  Behavior: 'body-overflow'  (auto-handle S3 metadata limit)                  ║
+║  Partitions:                                                                 ║
+║    ├─ byUrl         { fields: { url } }                                      ║
+║    ├─ byDomain      { fields: { domain } }                                   ║
+║    └─ byDate        { fields: { date } }                                     ║
+║                                                                               ║
+║  Query Examples:                                                             ║
+║    ├─ Get all localStorage for a session:                                    ║
+║    │  resource.query({ sessionId: 'session-123' })                           ║
+║    │                                                                          ║
+║    ├─ Get localStorage from today:                                           ║
+║    │  resource.listPartition('byDate', { date: '2024-11-14' })               ║
+║    │                                                                          ║
+║    └─ Get localStorage by domain:                                            ║
+║       resource.listPartition('byDomain', { domain: 'example.com' })          ║
+║                                                                               ║
+║                                                                               ║
+║  RESOURCE 2: plg_puppeteer_storage_session (sessionStorage)                  ║
+║  ═══════════════════════════════════════════════════════════════════════     ║
+║                                                                               ║
+║  [Same structure as localStorage]                                            ║
+║                                                                               ║
+║                                                                               ║
+║  RESOURCE 3: plg_puppeteer_storage_indexeddb (IndexedDB)                     ║
+║  ═══════════════════════════════════════════════════════════════════════     ║
+║                                                                               ║
+║  Attributes:                                                                 ║
+║    ├─ sessionId: string|required       Session identifier                    ║
+║    ├─ url: string|required              Page URL                             ║
+║    ├─ domain: string|required           Extracted domain                     ║
+║    ├─ date: string|required             YYYY-MM-DD format                    ║
+║    ├─ databaseName: string|required     IndexedDB database name              ║
+║    │                                    (e.g., 'myapp_db')                   ║
+║    ├─ storeName: string|required        Object store name                    ║
+║    │                                    (e.g., 'users', 'cache')             ║
+║    ├─ data: array|required              All records from store               ║
+║    ├─ recordCount: number               Number of records                    ║
+║    ├─ dataSize: number                  Total bytes                          ║
+║    ├─ keys: array                       List of primary keys                 ║
+║    ├─ createdAt: timestamp (auto)       S3DB timestamp                       ║
+║    └─ updatedAt: timestamp (auto)       S3DB timestamp                       ║
+║                                                                               ║
+║  Behavior: 'body-overflow'  (auto-handle S3 metadata limit)                  ║
+║  Partitions:                                                                 ║
+║    ├─ byDomain        { fields: { domain } }                                 ║
+║    ├─ byDatabase      { fields: { databaseName } }                           ║
+║    └─ byDate          { fields: { date } }                                   ║
+║                                                                               ║
+║  Query Examples:                                                             ║
+║    ├─ Get all IndexedDB stores for a session:                                ║
+║    │  resource.query({ sessionId: 'session-123' })                           ║
+║    │                                                                          ║
+║    ├─ Get IndexedDB from specific database:                                  ║
+║    │  resource.listPartition('byDatabase',                                   ║
+║    │    { databaseName: 'myapp_db' })                                        ║
+║    │                                                                          ║
+║    └─ Get IndexedDB by domain:                                               ║
+║       resource.listPartition('byDomain',                                     ║
+║         { domain: 'example.com' })                                           ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         RETURNED DATA STRUCTURE FROM captureStorage()                        ║
+║                                                                               ║
+║                                                                               ║
+║  {                                                                            ║
+║    localStorage: {                                                           ║
+║      "auth_token": "eyJhbGc...",                                             ║
+║      "user_id": "123",                                                       ║
+║      "preferences": "{\"theme\": \"dark\"}",                                 ║
+║      "session_id": "abc123xyz"                                               ║
+║    },                                                                         ║
+║                                                                               ║
+║    sessionStorage: {                                                         ║
+║      "temp_data": "some_value",                                              ║
+║      "form_state": "{\"field1\": \"value1\"}"                                ║
+║    },                                                                         ║
+║                                                                               ║
+║    indexedDB: {                                                              ║
+║      "myapp_db": {                                                           ║
+║        "users": [                                                            ║
+║          { id: 1, name: "John", email: "john@example.com" },                ║
+║          { id: 2, name: "Jane", email: "jane@example.com" }                 ║
+║        ],                                                                     ║
+║        "cache": [                                                            ║
+║          { key: "page:1", value: "html content", timestamp: 1731611400 }    ║
+║        ]                                                                      ║
+║      },                                                                       ║
+║      "analytics_db": {                                                       ║
+║        "events": [                                                           ║
+║          { id: "evt_1", type: "click", timestamp: 1731611300 },             ║
+║          { id: "evt_2", type: "view", timestamp: 1731611350 }               ║
+║        ]                                                                      ║
+║      }                                                                        ║
+║    },                                                                         ║
+║                                                                               ║
+║    timestamp: 1731611400000,                                                 ║
+║    sessionId: "session-123",                                                 ║
+║    url: "https://example.com/dashboard",                                     ║
+║    domain: "example.com"                                                     ║
+║  }                                                                            ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
