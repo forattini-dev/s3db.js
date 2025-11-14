@@ -60,11 +60,17 @@ const result = await smtpPlugin.sendEmail({
    - [Level 5: Production Setup](#level-5-production-setup)
 5. [📊 Configuration Reference](#-configuration-reference)
 6. [📚 Configuration Examples](#-configuration-examples)
-7. [🔧 API Reference](#-api-reference)
-8. [✅ Best Practices](#-best-practices)
-9. [🚨 Error Handling](#-error-handling)
-10. [🔗 See Also](#-see-also)
-11. [❓ FAQ](#-faq)
+7. [📬 Server Mode & Storage Architecture](#-server-mode--storage-architecture)
+   - [Server Mode Overview](#server-mode-overview)
+   - [Server Mode Configuration](#server-mode-configuration)
+   - [Storage Architecture](#server-mode-storage-architecture)
+   - [Use Cases](#server-mode-use-cases)
+   - [Storage Optimization](#storage-optimization)
+8. [🔧 API Reference](#-api-reference)
+9. [✅ Best Practices](#-best-practices)
+10. [🚨 Error Handling](#-error-handling)
+11. [🔗 See Also](#-see-also)
+12. [❓ FAQ](#-faq)
 
 ---
 
@@ -549,6 +555,275 @@ new SMTPPlugin({
   rateLimit: 10,  // Conservative for testing
   verbose: true   // Debug logging
 })
+```
+
+---
+
+## 📬 Server Mode & Storage Architecture
+
+### Server Mode Overview
+
+The SMTP Plugin supports two operating modes:
+
+1. **Relay Mode** (default) - Send emails via external SMTP providers
+2. **Server Mode** - Run an in-process SMTP server to RECEIVE emails from other applications
+
+In Server Mode, you can:
+- ✅ Receive emails from external applications
+- ✅ Process emails with custom validation
+- ✅ Store emails in S3DB with full metadata
+- ✅ Trigger webhooks when emails arrive
+- ✅ Integrate with legacy systems via SMTP
+- ✅ Implement custom spam filters
+
+### Enabling Server Mode
+
+```javascript
+const plugin = new SMTPPlugin({
+  mode: 'server',                    // Enable server mode
+  serverPort: 25,                    // SMTP port (requires sudo)
+  serverHost: '0.0.0.0',            // Listen on all interfaces
+  serverAuth: {
+    username: 'postmaster',
+    password: 'secure-password'
+  },
+  emailResource: 'received_emails',  // Where to store emails
+  verbose: true,
+
+  // Custom validation callbacks
+  onMailFrom: async (address) => {
+    // Validate sender - return true to accept
+    return address.includes('@authorized-domain.com');
+  },
+
+  onRcptTo: async (address) => {
+    // Validate recipient - return true to accept
+    const user = await db.resources.users.get(address);
+    return user?.enabled || false;
+  },
+
+  onData: async (stream) => {
+    // Process email before storing - return true to accept
+    return true;
+  }
+});
+```
+
+### Server Mode Configuration
+
+```javascript
+const plugin = new SMTPPlugin({
+  mode: 'server',
+
+  // Network & Authentication
+  serverPort: 25,                          // SMTP port
+  serverHost: '0.0.0.0',                  // Bind address
+  serverSecure: false,                     // TLS enabled
+
+  // Authentication
+  serverAuth: {
+    username: 'postmaster',
+    password: 'password',
+    // Or multiple users:
+    // credentials: [
+    //   { username: 'admin', password: 'pass1' },
+    //   { username: 'noreply', password: 'pass2' }
+    // ]
+  },
+
+  // Limits
+  serverMaxConnections: 50,                // Concurrent connections
+  serverMaxMessageSize: 25 * 1024 * 1024,  // Max 25MB per email
+  serverMaxRecipients: 100,                // Recipients per email
+
+  // Storage
+  emailResource: 'received_emails',
+
+  // Logging
+  verbose: true
+});
+```
+
+### Server Mode Storage Architecture
+
+Emails received in Server Mode are stored in S3DB using a 4-resource pattern:
+
+```
+S3DB Resources:
+├─ emails               (main email records)
+├─ email_attachments   (file blobs)
+├─ email_recipients    (CC/BCC details)
+└─ email_headers       (raw SMTP headers)
+```
+
+**Main Resource: `emails`**
+
+Stores complete email with metadata:
+
+```javascript
+{
+  // Identification
+  messageId: '<abc123@gmail.com>',        // Message-ID header
+
+  // Sender
+  from: 'john@example.com',
+  fromName: 'John Doe',
+  replyTo: 'reply@example.com',
+
+  // Recipients
+  to: 'postmaster@yourdomain.com',        // Primary recipient
+  cc: ['cc@example.com'],                 // CC recipients
+  bcc: ['secret@example.com'],            // BCC recipients
+
+  // Content
+  subject: 'Proposal for Q4',
+  bodyText: 'Hi, here\'s the proposal...',
+  bodyHtml: '<p>Hi, here\'s the proposal...</p>',
+
+  // Metadata
+  contentType: 'multipart/mixed',
+  charset: 'UTF-8',
+  attachmentCount: 2,
+  attachmentTotalSize: 1024000,
+  attachmentIds: ['att-456', 'att-789'],
+
+  // Reception Info
+  receivedAt: '2024-11-14T10:30:15Z',
+  receivedFrom: '192.168.1.1',
+  receivedVia: 'smtp.domain.com:25',
+
+  // Status
+  status: 'stored',
+  processedAt: '2024-11-14T10:30:16Z',
+
+  // Organization
+  folder: 'inbox',                        // inbox, sent, trash, etc.
+  labels: ['work', 'important'],
+  starred: false,
+  read: false
+}
+```
+
+**Attachments: `email_attachments`**
+
+Stores files with efficient blob storage:
+
+```javascript
+{
+  emailId: 'msg-123456',
+  filename: 'proposal.pdf',
+  mimeType: 'application/pdf',
+  size: 512000,
+  content: 'JVBERi0xLjQKJ...',            // Base64 encoded
+  contentHash: 'sha256:abc123def456...',  // For deduplication
+  inline: false,
+  uploadedAt: '2024-11-14T10:30:15Z'
+}
+```
+
+**Recipients: `email_recipients`**
+
+Stores CC/BCC recipient details:
+
+```javascript
+{
+  emailId: 'msg-123456',
+  email: 'recipient@example.com',
+  name: 'Jane Doe',
+  type: 'cc'  // 'to', 'cc', or 'bcc'
+}
+```
+
+**Headers: `email_headers`**
+
+Stores raw SMTP headers for audit trail:
+
+```javascript
+{
+  emailId: 'msg-123456',
+  rawHeaders: 'Subject: Proposal...\nFrom: john@...\nTo: postmaster@...',
+  parsed: {
+    'Subject': 'Proposal for Q4',
+    'From': 'john@example.com',
+    'To': 'postmaster@yourdomain.com',
+    'Date': '2024-11-14T10:30:00Z',
+    'Message-ID': '<abc123@gmail.com>'
+  }
+}
+```
+
+### Server Mode Use Cases
+
+1. **Email Gateway** - Receive emails from external systems
+2. **Notification Collector** - Systems send alerts via SMTP
+3. **Virtual Mailbox** - Custom email inboxes in S3DB
+4. **Legacy Integration** - Old apps that use SMTP
+
+### Server Mode vs Relay Mode
+
+| Feature | Relay Mode | Server Mode |
+|---------|-----------|------------|
+| Send emails | ✅ Yes | ❌ No |
+| Receive emails | ❌ No | ✅ Yes |
+| External provider | ✅ Required | ❌ Not needed |
+| Complexity | Low | High |
+| Custom auth | Simple | Full control |
+| Ideal for | Transactional | Inbox systems |
+
+### Storage Optimization
+
+**Content Deduplication:**
+```javascript
+// Calculate hash to avoid duplicate attachments
+const hash = crypto.createHash('sha256').update(content).digest('hex');
+// Only store if contentHash not already in system
+```
+
+**Compression:**
+```javascript
+// Compress files > 1MB for storage efficiency
+if (size > 1024 * 1024) {
+  content = gzip(content);  // 50-70% size reduction
+  isCompressed = true;
+}
+```
+
+**TTL Cleanup:**
+```javascript
+// Auto-delete old emails (e.g., 90 days)
+const plugin = new TTLPlugin({
+  resources: {
+    emails: { ttl: 90 * 24 * 60 * 60 * 1000 }  // 90 days
+  }
+});
+```
+
+### Testing Server Mode
+
+Using a SMTP client like nodemailer:
+
+```javascript
+import nodemailer from 'nodemailer';
+
+const transporter = nodemailer.createTransport({
+  host: 'localhost',
+  port: 25,
+  secure: false,
+  auth: {
+    user: 'postmaster',
+    pass: 'password'
+  }
+});
+
+const result = await transporter.sendMail({
+  from: 'sender@example.com',
+  to: 'postmaster@yourdomain.com',
+  subject: 'Test',
+  text: 'Hello Server Mode!',
+  html: '<p>Hello <strong>Server Mode</strong>!</p>'
+});
+
+console.log('✅ Email received:', result.messageId);
 ```
 
 ---
