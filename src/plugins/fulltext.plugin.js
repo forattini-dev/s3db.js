@@ -74,7 +74,7 @@
  * });
  *
  * // Search articles
- * const fulltextPlugin = db.plugins.FullTextPlugin;
+ * const fulltextPlugin = db.pluginRegistry.FullTextPlugin;
  * const results = await fulltextPlugin.searchRecords('articles', 'S3DB database');
  *
  * console.log(results);
@@ -91,7 +91,7 @@
  * ### Search with Options
  *
  * ```javascript
- * const fulltextPlugin = db.plugins.FullTextPlugin;
+ * const fulltextPlugin = db.pluginRegistry.FullTextPlugin;
  *
  * // Exact match search
  * const exact = await fulltextPlugin.searchRecords('articles', 'database', {
@@ -138,7 +138,7 @@
  * ### Index Management
  *
  * ```javascript
- * const fulltextPlugin = db.plugins.FullTextPlugin;
+ * const fulltextPlugin = db.pluginRegistry.FullTextPlugin;
  *
  * // Rebuild index for a resource
  * await fulltextPlugin.rebuildIndex('articles');
@@ -218,7 +218,7 @@
  * }));
  *
  * // Rebuild indexes to include new field
- * const fulltextPlugin = db.plugins.FullTextPlugin;
+ * const fulltextPlugin = db.pluginRegistry.FullTextPlugin;
  * await fulltextPlugin.rebuildAllIndexes();
  * ```
  *
@@ -286,7 +286,7 @@
  *
  * ```javascript
  * // Check if fields are configured
- * const plugin = db.plugins.FullTextPlugin;
+ * const plugin = db.pluginRegistry.FullTextPlugin;
  * console.log(plugin.config.fields);  // Should include the fields you're searching
  *
  * // Check index statistics
@@ -673,10 +673,10 @@ export class FullTextPlugin extends Plugin {
 
   installIndexingHooks() {
     // Register plugin with database
-    if (!this.database.plugins) {
-      this.database.plugins = {};
+    if (!this.database.pluginRegistry) {
+      this.database.pluginRegistry = {};
     }
-    this.database.plugins.fulltext = this;
+    this.database.pluginRegistry.fulltext = this;
 
     for (const resource of Object.values(this.database.resources)) {
       if (this.isInternalResource(resource.name)) continue;
@@ -690,8 +690,8 @@ export class FullTextPlugin extends Plugin {
       this.database._previousCreateResourceForFullText = this.database.createResource;
       this.database.createResource = async function (...args) {
         const resource = await this._previousCreateResourceForFullText(...args);
-      if (this.plugins?.fulltext && !this.plugins.fulltext.isInternalResource(resource.name)) {
-        this.plugins.fulltext.installResourceHooks(resource);
+      if (this.pluginRegistry?.fulltext && !this.pluginRegistry.fulltext.isInternalResource(resource.name)) {
+        this.pluginRegistry.fulltext.installResourceHooks(resource);
       }
         return resource;
       };

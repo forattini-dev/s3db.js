@@ -179,7 +179,7 @@ export class CookieFarmPlugin extends Plugin {
    */
   _findPuppeteerDependency() {
     const registries = [
-      this.database?.plugins,
+      this.database?.pluginRegistry,
       this.database?.pluginRegistry,
       Array.isArray(this.database?.pluginList) ? this.database.pluginList : null
     ].filter(Boolean);

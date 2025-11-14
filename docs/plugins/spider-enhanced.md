@@ -775,6 +775,279 @@ await spider.destroy();
 
 ---
 
+## 📄 Content Analysis & Structure
+
+SpiderPlugin includes **intelligent content detection** that automatically distinguishes actual article content from navigation, sidebars, and boilerplate. This is critical for SEO analysis and content quality metrics.
+
+### How Content Detection Works
+
+The content analyzer uses a **priority-based selector strategy** to find main content containers. It progressively moves through increasingly specific and fuzzy selectors until it finds a match:
+
+#### Container Detection Priority List
+
+The plugin searches for content containers in this exact order:
+
+```javascript
+// 1. SEMANTIC HTML (BEST) - ⭐⭐⭐
+<main>                              // Pure semantic
+<article>                           // Article semantic
+<div role="main">                   // ARIA landmark
+
+// 2. MICRODATA - ⭐⭐
+[itemtype*="Article"]               // Schema.org Article markup
+
+// 3. WORDPRESS PATTERNS - ⭐⭐
+<div class="post-content">          // WordPress standard
+<div class="entry-content">         // WordPress alternative
+<div class="the-content">           // WordPress function output
+<article class="post">              // Common blog pattern
+
+// 4. COMMON PATTERNS - ⭐
+<div class="article-content">
+<div class="article">
+<div class="content">
+<div class="main-content">
+<div class="container">             // Bootstrap pattern
+
+// 5. FUZZY MATCHING - ⭐
+div[class*="content"]               // Any class containing "content"
+div[class*="article"]               // Any class containing "article"
+div[class*="main"]                  // Any class containing "main"
+```
+
+**Why Priority Matters**: Semantic HTML is reliable across different sites, while class names vary. Starting with semantic ensures consistent, high-quality detection.
+
+### Content Metrics Structure
+
+When SEO analysis is enabled, each page includes detailed `contentMetrics`:
+
+```javascript
+{
+  // Basic counts
+  totalWordCount: 5432,              // All words in body (nav, sidebar, footer, etc.)
+  mainContentWordCount: 3200,        // Only words from detected content container
+  characterCount: 24500,             // Total characters in main content
+
+  // Quality assessment
+  quality: "comprehensive",          // "short" (<300), "medium" (300-1000), "comprehensive" (1000+)
+  contentRatio: 0.589,              // mainContent / total (0-1 scale)
+
+  // Detection details
+  detectedContentContainers: [
+    {
+      selector: "main",
+      wordCount: 3200,
+      matchType: "semantic"          // semantic | aria | microdata | non-semantic
+    },
+    {
+      selector: "div.post-content",
+      wordCount: 3200,
+      matchType: "non-semantic"
+    }
+  ],
+
+  // Actionable suggestions
+  suggestions: [
+    "Excellent content ratio - main content dominates the page",
+    "Content length is good - consider expanding for better ranking potential"
+  ]
+}
+```
+
+### Content Ratio Assessment
+
+The **contentRatio** metric (main content / total content) is a key indicator of page quality from an SEO perspective:
+
+| Ratio | Quality | Interpretation | SEO Impact |
+|-------|---------|-----------------|-----------|
+| < 30% | 🔴 POOR | Too much navigation, sidebars, boilerplate | Low; page bloated with noise |
+| 30-50% | 🟡 MODERATE | Some optimization possible | Medium; acceptable but improvable |
+| 50-70% | 🟢 GOOD | Good balance | Good; content-focused |
+| 70%+ | 🟢 EXCELLENT | Main content dominates | Excellent; user-focused page |
+
+**Example**: A page with 5000 total words but only 1500 main content words has a ratio of 0.3 (30%) - indicating excessive navigation and footer content that dilutes the page's focus.
+
+### Content Length Recommendations
+
+Based on `mainContentWordCount`, the plugin provides specific suggestions:
+
+```javascript
+// Content too short - critical for SEO
+< 300 words →
+  "Content is too short - aim for 300+ words for basic SEO coverage"
+  Status: 🔴 CRITICAL
+
+// Acceptable medium-length content
+300-1000 words →
+  "Content length is good (medium) - consider expanding to 1000+ words
+   for better ranking potential"
+  Status: 🟡 GOOD
+
+// Optimal comprehensive content
+1000+ words →
+  (No warning - optimal for most topics)
+  Status: 🟢 EXCELLENT
+```
+
+### Fallback Estimation Method
+
+If no content container is found via selectors, the plugin estimates main content by summing words from semantic content elements:
+
+```javascript
+// Fallback counts words in these elements
+1. <p> tags              (paragraphs)
+2. <h1-h6> tags         (headers)
+3. <li> tags            (list items)
+4. <blockquote> tags    (quotes)
+5. <table> tags         (tables)
+
+// Minimum: 30% of total word count
+// This ensures pages without explicit containers still get analyzed
+```
+
+### Structure Recommendations
+
+The analyzer provides recommendations based on container detection:
+
+```javascript
+// If NO containers detected
+"Use semantic HTML: wrap content in <main>, <article>,
+ or <div role=\"main\">"
+
+// If non-semantic container found
+"Consider replacing 'div.post-content' with semantic <main>
+ or <article> tag for better SEO and accessibility"
+
+// Best practices always included
+✅ Use <main> for primary content
+✅ Use <article> for blog posts/articles
+✅ Use <div role="main"> as ARIA fallback
+✅ Avoid generic <div class="container">
+```
+
+### Integration with SEO Analysis
+
+Content metrics are included in the complete `onPageSEO` analysis:
+
+```javascript
+const results = await spider.getResults();
+const seo = await spider.getSEOAnalysis();
+
+// Structure:
+{
+  url: "https://example.com/article",
+  metaTags: { /* ... */ },
+  openGraph: { /* ... */ },
+  onPageSEO: {
+    title: { /* ... */ },
+    h1: { /* ... */ },
+    headingStructure: { /* ... */ },
+    paragraphs: { /* ... */ },
+    contentMetrics: {
+      totalWordCount: 5432,
+      mainContentWordCount: 3200,
+      contentRatio: 0.589,
+      characterCount: 24500,
+      quality: "comprehensive",
+      detectedContentContainers: [ /* ... */ ],
+      suggestions: [ /* ... */ ]
+    },
+    recommendations: [
+      "Content is short - aim for 500+ words",
+      "Main content dominates (59%) - good focus"
+    ]
+  },
+  accessibility: { /* ... */ },
+  internalLinks: { /* ... */ },
+  keywordOptimization: { /* ... */ }
+}
+```
+
+### Example: Content Analysis Output
+
+```javascript
+// Analyzing a typical blog post
+const page = {
+  totalWordCount: 2850,
+  mainContentWordCount: 2100,    // 73.7% ratio
+  characterCount: 15400,
+  quality: "comprehensive",
+  contentRatio: 0.737,
+
+  detectedContentContainers: [
+    {
+      selector: "article",
+      wordCount: 2100,
+      matchType: "semantic"
+    }
+  ],
+
+  suggestions: [
+    "Excellent content ratio - main content dominates the page",
+    "Great content length for a blog post - well-optimized for SEO"
+  ]
+}
+
+// Analyzing a poorly structured page
+const page2 = {
+  totalWordCount: 8000,
+  mainContentWordCount: 1200,    // 15% ratio
+  characterCount: 7500,
+  quality: "medium",
+  contentRatio: 0.15,
+
+  detectedContentContainers: [
+    {
+      selector: "div[class*='content']",
+      wordCount: 1200,
+      matchType: "non-semantic"    // Fuzzy match
+    }
+  ],
+
+  suggestions: [
+    "Low content ratio (15%) - reduce navigation/sidebar/boilerplate",
+    "Content length is medium - consider expanding to 1000+ words"
+  ]
+}
+```
+
+### Performance Characteristics
+
+Content analysis is highly optimized:
+
+- **Analysis time per page**: < 100ms
+- **Memory overhead**: Minimal
+- **DOM queries**: ~15-20 selectors
+- **Regex operations**: Word splitting only (no complex patterns)
+
+This means enabling content analysis has negligible performance impact even on large crawls.
+
+### SEO Implications
+
+Understanding content metrics is crucial for SEO:
+
+```javascript
+// WORD COUNT MATTERS
+< 300 words    → Poor SEO, minimal ranking potential
+300-600 words  → Baseline, limited competitive potential
+600-1000 words → Good, competitive
+1000+ words    → Excellent, strong ranking potential
+2000+ words    → Very strong, authority content
+
+// CONTENT RATIO MATTERS
+High ratio (70%+)    → Page focused on value, good UX
+Low ratio (<30%)     → Page bloated with noise, poor UX
+                     → Affects Core Web Vitals, bounce rate, engagement
+
+// CONTAINER MATTERS
+Semantic HTML  → Search engines understand content clearly
+ARIA roles     → Good SEO with explicit landmarks
+Generic divs   → Engines must guess, ambiguous
+No container   → Confusion, missed content opportunities
+```
+
+---
+
 ## ✅ Best Practices
 
 ### 1. Use Appropriate Concurrency
@@ -998,6 +1271,82 @@ detector.signatures.custom = {
   }
 };
 ```
+
+### Content Analysis
+
+**Q: What does "content ratio" mean?**
+A: Content ratio (0-1 scale) = mainContentWordCount / totalWordCount. It measures what percentage of page is actual content vs navigation/boilerplate:
+- < 0.3 (30%): Too much navigation/footer
+- 0.3-0.5 (30-50%): Moderate
+- 0.5-0.7 (50-70%): Good
+- 0.7+ (70%+): Excellent
+
+**Q: How does the plugin detect main content?**
+A: It uses priority-based selector matching:
+1. Semantic HTML first (<main>, <article>, <div role="main">)
+2. Then Schema.org markup ([itemtype*="Article"])
+3. Then WordPress patterns (div.post-content, div.entry-content)
+4. Then common patterns (div.article, div.content)
+5. Finally fuzzy matching on class names (div[class*="content"])
+
+If none found, it estimates from <p>, <h1-h6>, <li>, <blockquote>, and <table> elements.
+
+**Q: Why is content ratio important for SEO?**
+A: Pages with low content ratio (< 30%) indicate bloated navigation, sidebars, and footers. This:
+- Dilutes page focus and keyword relevance
+- Increases bounce rate (users see boilerplate first)
+- Hurts Core Web Vitals metrics
+- Signals poor UX to search engines
+
+**Q: What's the minimum content length?**
+A: Generally:
+- < 300 words: Too short, poor SEO ranking potential
+- 300-600 words: Baseline minimum for competitive keywords
+- 600-1000 words: Good, competitive
+- 1000+ words: Excellent, authority content
+
+**Q: Can pages have multiple content containers?**
+A: Yes! The plugin detects all matching containers and reports them in `detectedContentContainers`. For example, a page might have both `<main>` (primary) and `<div class="sidebar-content">` (secondary). The highest-scoring container is used for analysis.
+
+**Q: How does the plugin handle content-heavy sites (docs, wikis)?**
+A: The priority system automatically favors semantic HTML and WordPress patterns, which these sites typically use:
+- Docs sites usually have proper <main> tags
+- Wikis typically use semantic article markup
+- All get high accuracy detection
+
+**Q: What if a page has no content container at all?**
+A: The plugin uses fallback estimation:
+1. Counts words in all paragraphs, headers, lists, quotes, tables
+2. Takes minimum 30% of total word count
+3. Reports in suggestions: "Use semantic HTML to wrap content in <main>, <article>, or <div role=\"main\">"
+
+**Q: Can I customize content detection selectors?**
+A: Currently, selectors are built-in and optimized. To customize, extend SEOAnalyzer:
+```javascript
+const analyzer = new SEOAnalyzer();
+// Modify selector priority list
+analyzer.containerSelectors = [
+  'div.custom-main',  // Your custom container first
+  'main',             // Then fallback to standard
+  // ... rest of selectors
+];
+```
+
+**Q: Does content analysis affect crawl performance?**
+A: Minimal impact:
+- DOM analysis: ~15-20 selector queries
+- Word counting: Simple regex split, no complex patterns
+- Total per-page overhead: < 100ms
+- Enabling it has negligible performance cost even on large crawls
+
+**Q: How are suggestions generated?**
+A: Based on:
+1. **Content length**: < 300 (critical), 300-1000 (good), 1000+ (excellent)
+2. **Content ratio**: < 30% (improve structure), 30-70% (optimize), 70%+ (excellent)
+3. **Container type**: Semantic (good), non-semantic (recommend upgrade)
+4. **Structure patterns**: Proper hierarchy, readable paragraphs, lists
+
+All are actionable and specific to the page's actual metrics.
 
 ### Performance
 

@@ -31,7 +31,7 @@ export class RouteContext {
     this.db = database;
     this.database = database;  // Alias
     this._currentResource = resource;
-    this.plugins = plugins;
+    this.pluginRegistry = plugins;
 
     // Create resources proxy for clean access
     this.resources = this._createResourcesProxy();

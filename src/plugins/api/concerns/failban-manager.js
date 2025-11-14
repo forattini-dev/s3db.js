@@ -188,7 +188,7 @@ export class FailbanManager {
     }
 
     // Apply TTL plugin to this resource
-    const ttlPlugin = this.database.plugins?.ttl || this.database.plugins?.TTLPlugin;
+    const ttlPlugin = this.database.pluginRegistry?.ttl || this.database.pluginRegistry?.TTLPlugin;
     if (ttlPlugin) {
       ttlPlugin.options.resources = ttlPlugin.options.resources || {};
       ttlPlugin.options.resources[resourceName] = {

@@ -384,7 +384,7 @@
  * await db.start();  // Must call start() to begin consuming
  *
  * // Check if consumers are running
- * const plugin = db.plugins.QueueConsumerPlugin;
+ * const plugin = db.pluginRegistry.QueueConsumerPlugin;
  * console.log(plugin.consumers);  // Should show active consumers
  *
  * // Check queue URL/name is correct

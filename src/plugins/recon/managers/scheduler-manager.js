@@ -34,8 +34,8 @@ export class SchedulerManager {
     }
 
     // Register cron job with SchedulerPlugin (if available)
-    if (this.plugin.database?.plugins?.scheduler) {
-      const scheduler = this.plugin.database.plugins.scheduler;
+    if (this.plugin.database?.pluginRegistry?.scheduler) {
+      const scheduler = this.plugin.database.pluginRegistry.scheduler;
       this.cronJobId = await scheduler.registerJob({
         name: `recon-sweep-${this.plugin.namespace || 'default'}`,
         cron: cronExpression,
@@ -68,8 +68,8 @@ export class SchedulerManager {
    * Stop the scheduler (unregister cron job)
    */
   async stop() {
-    if (this.cronJobId && this.plugin.database?.plugins?.scheduler) {
-      const scheduler = this.plugin.database.plugins.scheduler;
+    if (this.cronJobId && this.plugin.database?.pluginRegistry?.scheduler) {
+      const scheduler = this.plugin.database.pluginRegistry.scheduler;
       await scheduler.unregisterJob(this.cronJobId);
       this.cronJobId = null;
 

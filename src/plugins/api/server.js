@@ -103,8 +103,8 @@ export class ApiServer {
       });
     }
 
-    this.relationsPlugin = this.options.database?.plugins?.relation ||
-      this.options.database?.plugins?.RelationPlugin ||
+    this.relationsPlugin = this.options.database?.pluginRegistry?.relation ||
+      this.options.database?.pluginRegistry?.RelationPlugin ||
       null;
 
     const resolvedHost = (this.options.host || 'localhost') === '0.0.0.0'
@@ -344,8 +344,8 @@ export class ApiServer {
    */
   _registerMetricsPluginRoute() {
     // Find MetricsPlugin instance
-    const metricsPlugin = this.options.database?.plugins?.metrics ||
-                          this.options.database?.plugins?.MetricsPlugin;
+    const metricsPlugin = this.options.database?.pluginRegistry?.metrics ||
+                          this.options.database?.pluginRegistry?.MetricsPlugin;
 
     if (!metricsPlugin) {
       return; // No MetricsPlugin installed

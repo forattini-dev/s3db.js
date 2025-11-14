@@ -69,7 +69,7 @@
  * await users.update('u1', { name: 'Jane' });
  *
  * // Get metrics
- * const metricsPlugin = db.plugins.MetricsPlugin;
+ * const metricsPlugin = db.pluginRegistry.MetricsPlugin;
  * const stats = await metricsPlugin.getStats();
  *
  * console.log(stats);
@@ -90,7 +90,7 @@
  * ### Query Metrics
  *
  * ```javascript
- * const metricsPlugin = db.plugins.MetricsPlugin;
+ * const metricsPlugin = db.pluginRegistry.MetricsPlugin;
  *
  * // Get all metrics for last 24 hours
  * const allMetrics = await metricsPlugin.getMetrics({
@@ -114,7 +114,7 @@
  * ### Error Tracking
  *
  * ```javascript
- * const metricsPlugin = db.plugins.MetricsPlugin;
+ * const metricsPlugin = db.pluginRegistry.MetricsPlugin;
  *
  * // Get recent errors
  * const errors = await metricsPlugin.getErrorLogs({
@@ -144,7 +144,7 @@
  * ### Performance Monitoring
  *
  * ```javascript
- * const metricsPlugin = db.plugins.MetricsPlugin;
+ * const metricsPlugin = db.pluginRegistry.MetricsPlugin;
  *
  * // Get performance logs
  * const perfLogs = await metricsPlugin.getPerformanceLogs({
@@ -209,7 +209,7 @@
  * ### Cleanup Old Metrics
  *
  * ```javascript
- * const metricsPlugin = db.plugins.MetricsPlugin;
+ * const metricsPlugin = db.pluginRegistry.MetricsPlugin;
  *
  * // Clean up metrics older than retention period
  * await metricsPlugin.cleanupOldData();
@@ -347,7 +347,7 @@
  *
  * ```javascript
  * // Check if plugin is installed and started
- * console.log(db.plugins.MetricsPlugin);  // Should exist
+ * console.log(db.pluginRegistry.MetricsPlugin);  // Should exist
  * await db.start();  // Must call start() to activate plugin
  *
  * // Check if metrics resources exist
@@ -360,14 +360,14 @@
  *
  * ```javascript
  * // Check Prometheus configuration
- * const plugin = db.plugins.MetricsPlugin;
+ * const plugin = db.pluginRegistry.MetricsPlugin;
  * console.log(plugin.config.prometheus);
  *
  * // Ensure plugin is started
  * await db.start();
  *
  * // For integrated mode, ensure API Plugin is active
- * console.log(db.plugins.api);  // Should exist for integrated mode
+ * console.log(db.pluginRegistry.api);  // Should exist for integrated mode
  *
  * // For standalone mode, check if port is available
  * // Try accessing: http://localhost:9090/metrics
@@ -914,8 +914,8 @@ export class MetricsPlugin extends Plugin {
     this.database._createResource = this.database.createResource;
     this.database.createResource = async function (...args) {
       const resource = await this._createResource(...args);
-      if (this.plugins?.metrics && !this.plugins.metrics.isInternalResource(resource.name)) {
-        this.plugins.metrics.installResourceHooks(resource);
+      if (this.pluginRegistry?.metrics && !this.pluginRegistry.metrics.isInternalResource(resource.name)) {
+        this.pluginRegistry.metrics.installResourceHooks(resource);
       }
       return resource;
     };
@@ -1478,7 +1478,7 @@ export class MetricsPlugin extends Plugin {
     }
 
     const mode = this.config.prometheus.mode;
-    const apiPlugin = this.database.plugins?.api || this.database.plugins?.ApiPlugin;
+    const apiPlugin = this.database.pluginRegistry?.api || this.database.pluginRegistry?.ApiPlugin;
 
     // AUTO mode: detect API Plugin
     if (mode === 'auto') {
