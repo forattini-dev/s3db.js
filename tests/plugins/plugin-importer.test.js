@@ -419,7 +419,6 @@ describe('ImporterPlugin', () => {
         resource: 'test_users',
         format: 'json',
         batchSize: 10,
-        parallelism: 5
       });
 
       await database.usePlugin(plugin);
@@ -507,7 +506,6 @@ describe('ImporterPlugin', () => {
         resource: 'test_users',
         format: 'json',
         batchSize: 20,
-        parallelism: 10
       });
 
       await database.usePlugin(plugin);
@@ -659,7 +657,6 @@ describe('ImporterPlugin', () => {
         resource: 'test_users',
         format: 'jsonl',
         batchSize: 50,
-        parallelism: 5
       });
 
       await database.usePlugin(plugin);

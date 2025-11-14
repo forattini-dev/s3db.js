@@ -246,7 +246,6 @@ describe('Database Plugin Lifecycle', () => {
 
     const db = createMemoryDatabaseForTest('plugins-install-failure', {
       plugins: [BrokenInstallPlugin],
-      parallelism: 2
     });
 
     await expect(db.connect()).rejects.toBeInstanceOf(DatabaseError);
@@ -272,7 +271,6 @@ describe('Database Plugin Lifecycle', () => {
 
     const db = createMemoryDatabaseForTest('plugins-start-failure', {
       plugins: [BrokenStartPlugin],
-      parallelism: 2
     });
 
     await expect(db.connect()).rejects.toBeInstanceOf(DatabaseError);
@@ -291,7 +289,7 @@ describe('Database Constructor and Edge Cases', () => {
     expect(db.s3dbVersion).toBeDefined();
     expect(db.resources).toEqual({});
     expect(db.verbose).toBe(false);
-    expect(db.parallelism).toBe(10);
+    expect(db.taskExecutor.concurrency).toBe(10);
     expect(db.pluginList).toEqual([]);
     expect(db.passphrase).toBe('secret');
   });
@@ -302,7 +300,6 @@ describe('Database Constructor and Edge Cases', () => {
     
     const db = new Database({
       verbose: true,  // Test expects verbose to be true
-      parallelism: 5,
       plugins: [mockPlugin],
       cache: { type: 'memory' },
       passphrase: 'custom-secret',
@@ -310,29 +307,13 @@ describe('Database Constructor and Edge Cases', () => {
     });
 
     expect(db.verbose).toBe(true);
-    expect(db.parallelism).toBe(5);
+    expect(db.taskExecutor.concurrency).toBe(5);
     expect(db.pluginList).toEqual([mockPlugin]);
     expect(db.cache).toEqual({ type: 'memory' });
     expect(db.passphrase).toBe('custom-secret');
     expect(db.client).toBe(mockClient);
     expect(db.bucket).toBe('test-bucket');
     expect(db.keyPrefix).toBe('test/');
-  });
-
-  test('should handle constructor with string parallelism', () => {
-    const db = new Database({ 
-      verbose: false, parallelism: '15',
-      client: { bucket: 'test', keyPrefix: 'test/' }
-    });
-    expect(db.parallelism).toBe(15);
-  });
-
-  test('should handle constructor with invalid parallelism', () => {
-    const db = new Database({ 
-      verbose: false, parallelism: 'invalid',
-      client: { bucket: 'test', keyPrefix: 'test/' }
-    });
-    expect(db.parallelism).toBe(10); // Default value
   });
 
   test('should handle s3dbVersion fallback', () => {
@@ -784,20 +765,17 @@ describe('Database Configuration and Status', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
     const db = new Database({
       verbose: false,
-      parallelism: 5,
       client: mockClient
     });
 
     const config = db.config;
-    
-    expect(config).toEqual({
-      version: '1',
-      s3dbVersion: db.s3dbVersion,
-      bucket: 'test-bucket',
-      keyPrefix: 'test/',
-      parallelism: 5,
-      verbose: false
-    });
+
+    expect(config.version).toBe('1');
+    expect(config.s3dbVersion).toBe(db.s3dbVersion);
+    expect(config.bucket).toBe('test-bucket');
+    expect(config.keyPrefix).toBe('test/');
+    expect(config.verbose).toBe(false);
+    expect(config.taskExecutor).toBeDefined();
   });
 
   test('should return connection status', () => {

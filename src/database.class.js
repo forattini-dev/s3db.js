@@ -82,11 +82,16 @@ export class Database extends SafeEventEmitter {
 
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;
+    this._parallelism = this._normalizeParallelism(
+      options?.parallelism ?? options?.operationsPool?.concurrency,
+      10
+    );
 
     // ✨ Database-level options (root level)
     this.verbose = options.verbose ?? false;
     // Normalize operationsPool config with defaults
-    this.operationsPool = this._normalizeOperationsPool(options.operationsPool);
+    this.operationsPool = this._normalizeOperationsPool(options.operationsPool, this._parallelism);
+    this._parallelism = this.operationsPool?.concurrency ?? this._parallelism;
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry
@@ -240,7 +245,11 @@ export class Database extends SafeEventEmitter {
     }
 
     // Store connection string for CLI access
-    this.connectionString = connectionString;
+    const resolvedConnectionString = connectionString || this._inferConnectionStringFromClient(this.client);
+    this.connectionString = resolvedConnectionString;
+    if (!this.options.connectionString && resolvedConnectionString) {
+      this.options.connectionString = resolvedConnectionString;
+    }
 
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
@@ -248,6 +257,7 @@ export class Database extends SafeEventEmitter {
     // Register exit listener for cleanup
     this._registerExitListener();
   }
+
 
   /**
    * Register process exit listener for automatic cleanup
@@ -295,18 +305,54 @@ export class Database extends SafeEventEmitter {
   }
 
   /**
+   * Normalize a parallelism value into a positive integer
+   * @param {number|string} value
+   * @param {number} fallback
+   * @returns {number}
+   * @private
+   */
+  _normalizeParallelism(value, fallback = 10) {
+    if (value === undefined || value === null || value === '') {
+      return fallback;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return fallback;
+      }
+      if (trimmed.toLowerCase() === 'auto') {
+        return fallback;
+      }
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+      return fallback;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+
+    return fallback;
+  }
+
+  /**
    * Normalize OperationsPool configuration with defaults
    * @private
    */
-  _normalizeOperationsPool(config = {}) {
+  _normalizeOperationsPool(config = {}, defaultConcurrency = 10) {
     // If explicitly disabled, return minimal config
     if (config === false || config?.enabled === false) {
-      return { enabled: false };
+      return { enabled: false, concurrency: this._normalizeParallelism(undefined, defaultConcurrency) };
     }
+
+    const normalizedConcurrency = this._normalizeParallelism(config?.concurrency, defaultConcurrency);
 
     return {
       enabled: true, // ENABLED BY DEFAULT
-      concurrency: config?.concurrency ?? 100,
+      concurrency: normalizedConcurrency,
       retries: config?.retries ?? 3,
       retryDelay: config?.retryDelay ?? 1000,
       timeout: config?.timeout ?? 30000,
@@ -314,6 +360,43 @@ export class Database extends SafeEventEmitter {
       autotune: config?.autotune ?? null,
       monitoring: config?.monitoring ?? { collectMetrics: true },
     };
+  }
+
+  /**
+   * Try to derive a connection string from the current client when not provided
+   * @param {Object} client
+   * @returns {string|undefined}
+   * @private
+   */
+  _inferConnectionStringFromClient(client) {
+    if (!client) {
+      return undefined;
+    }
+
+    if (client && client.connectionString) {
+      return client.connectionString;
+    }
+
+    if (client instanceof MemoryClient) {
+      const bucket = encodeURIComponent(client.bucket || 's3db');
+      const encodedPrefix = client.keyPrefix
+        ? client.keyPrefix
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('/')
+        : '';
+      const prefixPath = encodedPrefix ? `/${encodedPrefix}` : '';
+      return `memory://${bucket}${prefixPath}`;
+    }
+
+    if (client instanceof FileSystemClient) {
+      if (client.basePath) {
+        return `file://${encodeURI(client.basePath)}`;
+      }
+    }
+
+    return undefined;
   }
 
   async connect() {
@@ -1663,7 +1746,7 @@ export class Database extends SafeEventEmitter {
       s3dbVersion: this.s3dbVersion,
       bucket: this.bucket,
       keyPrefix: this.keyPrefix,
-      operationsPool: this.operationsPool,
+      taskExecutor: this.taskExecutor,
       verbose: this.verbose
     };
   }

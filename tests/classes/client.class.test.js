@@ -99,8 +99,8 @@ describe('Client Class - Complete Journey', () => {
     expect(client.config.bucket).toBeDefined();
     expect(client.config.region).toBeDefined();
     expect(client.config.endpoint).toBeDefined();
-    expect(client.parallelism).toBeDefined();
-    expect(typeof client.parallelism).toBe('number');
+    expect(client.taskExecutorConfig).toBeDefined();
+    expect(typeof client.taskExecutorConfig.concurrency).toBe('number');
   });
 });
 

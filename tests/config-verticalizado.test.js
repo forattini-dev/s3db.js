@@ -35,7 +35,6 @@ describe('Verticalizado Configuration Architecture', () => {
         connectionString: `file://${getTestPath()}`,
         // Database options (root level)
         verbose: false,
-        parallelism: 5,
         strictValidation: true,
         // Client options (wrapper)
         clientOptions: {
@@ -48,7 +47,7 @@ describe('Verticalizado Configuration Architecture', () => {
       });
 
       expect(db.verbose).toBe(false);
-      expect(db.parallelism).toBe(5);
+      expect(db.taskExecutor.concurrency).toBe(5);
       expect(db.strictValidation).toBe(true);
 
       await db.connect();
@@ -167,11 +166,10 @@ describe('Verticalizado Configuration Architecture', () => {
     it('should support flat querystring params for database options', async () => {
       const db = new S3db({
         connectionString: `file://${getTestPath()}?verbose=false`,
-        parallelism: 10
       });
 
       expect(db.verbose).toBe(false);
-      expect(db.parallelism).toBe(10);
+      expect(db.taskExecutor.concurrency).toBe(10);
 
       await db.connect();
       await db.disconnect();

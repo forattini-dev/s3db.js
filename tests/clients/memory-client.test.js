@@ -1792,7 +1792,6 @@ describe('MemoryClient - Direct API Tests', () => {
         keyPrefix: 'tenant/',
         region: 'eu-west-1',
         verbose: false,
-        parallelism: 4,
         enforceLimits: true,
         metadataLimit: 128,
         maxObjectSize: 4096
