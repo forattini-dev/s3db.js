@@ -119,7 +119,7 @@
 
 > **Integrations:** [MCP Server](./docs/mcp.md) • [Model Context Protocol](./docs/mcp.md)
 
-> **Advanced:** [OperationPool Benchmark](./docs/benchmarks/operation-pool.md) • [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
+> **Advanced:** [Executor Pool Benchmark](./docs/benchmarks/executor-pool.md) • [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
 
 ---
 
@@ -316,7 +316,7 @@ import { Database, DatabaseConfig, Resource } from 's3db.js';
 const config: DatabaseConfig = {
   connectionString: 's3://ACCESS_KEY:SECRET@bucket/path',
   verbose: true,
-  operationsPool: { concurrency: 100 }  // Default - nested under operationsPool
+  executorPool: { concurrency: 100 }  // Default - nested under executorPool
 };
 
 const db = new Database(config);
@@ -362,7 +362,7 @@ A Database is a logical container for your resources, stored in a specific S3 bu
 | `connectionString` | `string` | **required** | S3 connection string (see formats below) |
 | `httpClientOptions` | `object` | optimized | HTTP client configuration for S3 requests |
 | `verbose` | `boolean` | `false` | Enable verbose logging for debugging |
-| `parallelism` | `number` | `100` | Concurrent operations for bulk operations (Separate OperationsPools per Database) |
+| `parallelism` | `number` | `100` | Concurrent operations for bulk operations (Separate Executor Pools per Database) |
 | `versioningEnabled` | `boolean` | `false` | Enable automatic resource versioning |
 | `passphrase` | `string` | `'secret'` | Default passphrase for field encryption |
 | `plugins` | `array` | `[]` | Array of plugin instances to extend functionality |
@@ -689,7 +689,7 @@ const db = new S3db({
   connectionString: 's3://bucket/databases/myapp',
   verbose: true,
   versioningEnabled: true,
-  operationsPool: {
+  executorPool: {
     concurrency: 100,  // Default concurrency (can increase for high-throughput)
     retries: 3,
     retryDelay: 1000
@@ -1358,11 +1358,11 @@ orders.useMiddleware('updated', async (ctx, next) => {
 
 ## ⚡ Performance & Concurrency
 
-s3db.js features **Separate OperationsPools** - a revolutionary architecture where each Database instance gets its own independent OperationsPool for maximum efficiency and zero contention.
+s3db.js features **Separate Executor Pools** - a revolutionary architecture where each Database instance gets its own independent executor pool for maximum efficiency and zero contention.
 
 ### Separate Pools Architecture (NEW!)
 
-Each database instance gets **its own OperationsPool**, enabling:
+Each database instance gets **its own executor pool**, enabling:
 
 - **🚀 40-50% faster** at medium scale (5,000+ operations)
 - **📈 13x less memory** at large scale (10,000+ operations)
@@ -1373,14 +1373,14 @@ Each database instance gets **its own OperationsPool**, enabling:
 
 ### Quick Start
 
-OperationPool is **enabled by default** with optimized settings:
+Executor pool is **enabled by default** with optimized settings:
 
 ```javascript
 import { Database } from 's3db.js'
 
 const db = new Database({
   connectionString: 's3://bucket/database'
-  // That's it! OperationsPool is automatically configured with:
+  // That's it! Executor pool is automatically configured with:
   // - Separate pool per database (zero contention)
   // - Concurrency: 100 (default)
   // - Auto-retry with exponential backoff
@@ -1400,7 +1400,7 @@ import { Database } from 's3db.js'
 
 const db = new Database({
   connectionString: 's3://bucket/database',
-  operationsPool: {
+  executorPool: {
     concurrency: 200,         // Increase for high-throughput scenarios
     // Or use auto-tuning:
     // concurrency: 'auto',   // Auto-tune based on system load
@@ -1495,10 +1495,10 @@ Benchmark results from comprehensive testing of 108 scenarios (see [docs/benchma
 - Adaptive tuning available for custom scenarios
 
 **Customize concurrency for:**
-- **High-throughput APIs**: `operationsPool: { concurrency: 200 }`
-- **Data pipelines**: `operationsPool: { concurrency: 300-500 }`
-- **Single/low-frequency ops**: `operationsPool: { concurrency: 10 }`
-- **Memory-constrained**: `operationsPool: { concurrency: 25-50 }`
+- **High-throughput APIs**: `executorPool: { concurrency: 200 }`
+- **Data pipelines**: `executorPool: { concurrency: 300-500 }`
+- **Single/low-frequency ops**: `executorPool: { concurrency: 10 }`
+- **Memory-constrained**: `executorPool: { concurrency: 25-50 }`
 
 ### Configuration Reference
 
@@ -1508,13 +1508,13 @@ Separate Pools comes pre-configured with production-ready defaults. Override onl
 // Minimal - uses all defaults (recommended)
 const db = new Database({
   connectionString: 's3://bucket/database'
-  // operationsPool uses defaults: { concurrency: 100 }
+  // executorPool uses defaults: { concurrency: 100 }
 })
 
 // Custom - override specific settings
 const db = new Database({
   connectionString: 's3://bucket/database',
-  operationsPool: {
+  executorPool: {
     concurrency: 200,               // Concurrency per database pool (default: 100)
     retries: 3,                     // Max retry attempts
     retryDelay: 1000,               // Initial retry delay (ms)
@@ -1539,7 +1539,7 @@ const db = new Database({
 })
 ```
 
-**Complete documentation**: [**docs/benchmarks/operation-pool.md**](./docs/benchmarks/operation-pool.md)
+**Complete documentation**: [**docs/benchmarks/executor-pool.md**](./docs/benchmarks/executor-pool.md)
 
 ---
 

@@ -20,6 +20,35 @@ declare module 's3db.js' {
     timeout?: number;
   }
 
+  /** Executor pool configuration for operation concurrency control */
+  export interface ExecutorPoolConfig {
+    /** Maximum concurrent operations (default: 100, or 'auto' for adaptive tuning) */
+    concurrency?: number | 'auto';
+    /** Maximum retry attempts for failed operations (default: 3) */
+    retries?: number;
+    /** Base retry delay in milliseconds (default: 1000) */
+    retryDelay?: number;
+    /** Operation timeout in milliseconds (default: 30000) */
+    timeout?: number;
+    /** List of error types that should trigger retry */
+    retryableErrors?: string[];
+    /** Adaptive tuning configuration for automatic concurrency adjustment */
+    autotune?: {
+      enabled?: boolean;
+      targetLatency?: number;
+      minConcurrency?: number;
+      maxConcurrency?: number;
+      targetMemoryPercent?: number;
+      adjustmentInterval?: number;
+    };
+    /** Monitoring and metrics configuration */
+    monitoring?: {
+      enabled?: boolean;
+      collectMetrics?: boolean;
+      sampleRate?: number;
+    };
+  }
+
   /** Main Database configuration */
   export interface DatabaseConfig {
     connectionString?: string;
@@ -32,6 +61,10 @@ declare module 's3db.js' {
     forcePathStyle?: boolean;
     verbose?: boolean;
     parallelism?: number | string;
+    /** Executor pool configuration (preferred over deprecated operationsPool) */
+    executorPool?: ExecutorPoolConfig;
+    /** @deprecated Use executorPool instead */
+    operationsPool?: ExecutorPoolConfig;
     passphrase?: string;
     versioningEnabled?: boolean;
     persistHooks?: boolean;
@@ -619,6 +652,10 @@ declare module 's3db.js' {
     options: DatabaseConfig;
     verbose: boolean;
     parallelism: number;
+    /** Executor pool for managing concurrent S3 operations */
+    executorPool: ExecutorPoolConfig;
+    /** @deprecated Use executorPool instead */
+    readonly operationsPool: ExecutorPoolConfig;
     plugins: Record<string, PluginInterface>;
     pluginList: PluginInterface[];
     cache: CacheConfig | boolean;
@@ -657,7 +694,11 @@ declare module 's3db.js' {
     detectDefinitionChanges(savedMetadata: any): DefinitionChangeEvent[];
     uploadMetadataFile(): Promise<void>;
     blankMetadataStructure(): any;
-    
+
+    // Executor pool management
+    /** Set executor pool concurrency at runtime */
+    setConcurrency(value: number | string): void;
+
     // Configuration
     get config(): {
       version: string;

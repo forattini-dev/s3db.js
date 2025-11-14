@@ -19,13 +19,13 @@ import { CronManager } from "./concerns/cron-manager.js";
 export class Database extends SafeEventEmitter {
   constructor(options) {
     // ✨ CLEAN CONFIG STRUCTURE (v16+)
-    // Database config at root level, pool config nested under operationsPool
+    // Database config at root level, pool config nested under executorPool
     //
     // Structure:
-    //   new S3db({
+    //   new Database({
     //     connectionString: 'file:///path?compression.enabled=true',
     //     verbose: false,              // Database option (root)
-    //     operationsPool: {            // Pool options (nested)
+    //     executorPool: {              // Executor pool options (nested)
     //       concurrency: 100,          // Parallelism for operations
     //       retries: 3,
     //       autotune: { ... }
@@ -82,17 +82,30 @@ export class Database extends SafeEventEmitter {
 
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;
+
+    // 🔄 Support both old (operationsPool) and new (executorPool) names
+    const executorPoolConfig = options?.executorPool ?? options?.operationsPool;
+
+    // 📝 Deprecation warning for old name
+    if (options?.operationsPool && !options?.executorPool) {
+      console.warn(
+        '⚠️  [deprecated] "operationsPool" is deprecated in s3db.js v16.x\n' +
+        '   Use "executorPool" instead.\n' +
+        '   Migration: https://s3db.js/docs/migration/v16-to-v17'
+      );
+    }
+
     this._parallelism = this._normalizeParallelism(
-      options?.parallelism ?? options?.operationsPool?.concurrency,
+      options?.parallelism ?? executorPoolConfig?.concurrency,
       10
     );
 
     // ✨ Database-level options (root level)
     this.verbose = options.verbose ?? false;
-    // Normalize operationsPool config with defaults
-    this.operationsPool = this._normalizeOperationsPool(options.operationsPool, this._parallelism);
-    this._parallelism = this.operationsPool?.concurrency ?? this._parallelism;
-    this.taskExecutor = this.operationsPool;
+    // Normalize executorPool config with defaults
+    this.executorPool = this._normalizeOperationsPool(executorPoolConfig, this._parallelism);
+    this._parallelism = this.executorPool?.concurrency ?? this._parallelism;
+    this.taskExecutor = this.executorPool;
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Internal alias for plugin registry
@@ -210,15 +223,15 @@ export class Database extends SafeEventEmitter {
           }, mergedClientOptions)); // ✨ Deep merge client options
         } else {
           // Use S3Client for s3://, http://, https:// protocols
-          // Merge client options first, then set operationsPool (takes precedence)
+          // Merge client options first, then set executorPool (takes precedence)
           const s3ClientOptions = this._deepMerge({
             verbose: this.verbose,
             connectionString: connectionString,
           }, mergedClientOptions);
-          // operationsPool from Database (normalized) takes precedence over any in clientOptions
-          s3ClientOptions.operationsPool = this._deepMerge(
-            s3ClientOptions.operationsPool || {},
-            this.operationsPool
+          // executorPool from Database (normalized) takes precedence over any in clientOptions
+          s3ClientOptions.executorPool = this._deepMerge(
+            s3ClientOptions.executorPool || {},
+            this.executorPool
           );
           this.client = new S3Client(s3ClientOptions);
         }
@@ -228,9 +241,9 @@ export class Database extends SafeEventEmitter {
           verbose: this.verbose,
           connectionString: connectionString,
         }, mergedClientOptions);
-        s3ClientOptions.operationsPool = this._deepMerge(
-          s3ClientOptions.operationsPool || {},
-          this.operationsPool
+        s3ClientOptions.executorPool = this._deepMerge(
+          s3ClientOptions.executorPool || {},
+          this.executorPool
         );
         this.client = new S3Client(s3ClientOptions);
       }
@@ -239,9 +252,9 @@ export class Database extends SafeEventEmitter {
       const s3ClientOptions = this._deepMerge({
         verbose: this.verbose,
       }, mergedClientOptions);
-      s3ClientOptions.operationsPool = this._deepMerge(
-        s3ClientOptions.operationsPool || {},
-        this.operationsPool
+      s3ClientOptions.executorPool = this._deepMerge(
+        s3ClientOptions.executorPool || {},
+        this.executorPool
       );
       this.client = new S3Client(s3ClientOptions);
     } else {
@@ -272,15 +285,36 @@ export class Database extends SafeEventEmitter {
   }
 
   /**
-   * Update operations pool concurrency at runtime
+   * Update executor pool concurrency at runtime
    * @param {number|string} value
    */
   set parallelism(value) {
     const normalized = this._normalizeParallelism(value, this._parallelism ?? 10);
     this._parallelism = normalized;
-    if (this.operationsPool) {
-      this.operationsPool.concurrency = normalized;
+    if (this.executorPool) {
+      this.executorPool.concurrency = normalized;
     }
+  }
+
+  /**
+   * Update executor pool concurrency at runtime (public API)
+   * @param {number|string} value - New concurrency value
+   */
+  setConcurrency(value) {
+    const normalized = this._normalizeParallelism(value, this._parallelism ?? 10);
+    this._parallelism = normalized;
+    if (this.executorPool) {
+      this.executorPool.concurrency = normalized;
+    }
+  }
+
+  /**
+   * Deprecated: Use db.executorPool instead
+   * @deprecated v16.x - Will be removed in v17.0
+   * @returns {Object} Executor pool (same as db.executorPool)
+   */
+  get operationsPool() {
+    return this.executorPool;
   }
 
 
@@ -747,7 +781,7 @@ export class Database extends SafeEventEmitter {
         }
       }
 
-      const concurrency = Math.max(1, Number.isFinite(this.operationsPool?.concurrency) ? this.operationsPool.concurrency : 5);
+      const concurrency = Math.max(1, Number.isFinite(this.executorPool?.concurrency) ? this.executorPool.concurrency : 5);
 
       const installResult = await PromisePool
         .withConcurrency(concurrency)
@@ -1799,7 +1833,7 @@ export class Database extends SafeEventEmitter {
           }
         }
         // Also stop plugins if they have a stop method (includes second removeAllListeners() call)
-        const stopConcurrency = Math.max(1, Number.isFinite(this.operationsPool?.concurrency) ? this.operationsPool.concurrency : 5);
+        const stopConcurrency = Math.max(1, Number.isFinite(this.executorPool?.concurrency) ? this.executorPool.concurrency : 5);
         await PromisePool
           .withConcurrency(stopConcurrency)
           .for(this.pluginList)

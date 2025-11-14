@@ -33,6 +33,7 @@ export class S3Client extends EventEmitter {
     connectionString,
     httpClientOptions = {},
     taskExecutor = false, // Disabled by default (tests can opt-in)
+    executorPool = null,  // New name (preferred), maps to taskExecutor
   }) {
     super();
     this.verbose = verbose;
@@ -49,8 +50,12 @@ export class S3Client extends EventEmitter {
     };
     this.client = AwsS3Client || this.createClient();
 
+    // 🔄 Support both old (taskExecutor) and new (executorPool) names
+    // executorPool is the new name, takes precedence over taskExecutor
+    const poolConfig = executorPool ?? taskExecutor ?? false;
+
     // Initialize TasksPool (ENABLED BY DEFAULT!)
-    this.taskExecutorConfig = this._normalizeTaskExecutorConfig(taskExecutor);
+    this.taskExecutorConfig = this._normalizeTaskExecutorConfig(poolConfig);
     this.taskExecutor = this.taskExecutorConfig.enabled ? this._createTasksPool() : null;
   }
 
