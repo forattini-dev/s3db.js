@@ -469,6 +469,21 @@ new SpiderPlugin({
     detectCMS: true            // WordPress, Shopify, etc.
   },
 
+  // Security analysis configuration
+  security: {
+    enabled: true,
+    analyzeSecurityHeaders: true,      // HTTP security headers
+    analyzeCSP: true,                  // Content Security Policy
+    analyzeCORS: true,                 // CORS configuration
+    captureConsoleLogs: true,          // Browser console logs
+    consoleLogLevels: ['error', 'warn'],  // Log levels to capture
+    maxConsoleLogLines: 100,           // Max console logs to store
+    analyzeTLS: true,                  // TLS/HTTPS verification
+    checkVulnerabilities: true,        // Security vulnerability detection
+    captureWebSockets: true,           // WebSocket detection
+    maxWebSocketMessages: 50           // Max WebSocket messages to capture
+  },
+
   // Performance metrics configuration
   performance: {
     enabled: true,
@@ -1900,6 +1915,97 @@ await db.usePlugin(seoSpider);
 await db.usePlugin(techSpider);
 ```
 
+### Security Analysis & WebSockets
+
+**Q: What security headers are analyzed?**
+A: The following critical security headers:
+- `X-Frame-Options` - Prevents clickjacking attacks
+- `X-Content-Type-Options` - Prevents MIME sniffing
+- `Strict-Transport-Security (HSTS)` - Forces HTTPS
+- `X-XSS-Protection` - XSS attack protection
+- `Referrer-Policy` - Controls referrer information
+- `Permissions-Policy` - Controls browser feature access
+
+**Q: What does CSP analysis detect?**
+A: Content Security Policy analysis includes:
+- Policy directives and their values
+- Unsafe patterns (unsafe-inline, unsafe-eval, wildcards)
+- CSP strength rating (strong/moderate/weak)
+- Specific recommendations for improvement
+
+**Q: How are WebSockets detected and captured?**
+A: WebSocket detection works by:
+1. Injecting WebSocket tracking code before page load
+2. Intercepting WebSocket constructor calls
+3. Capturing connection URLs and protocols
+4. Logging sent and received messages
+5. Tracking connection state changes
+
+Example output:
+```javascript
+websockets: {
+  present: true,
+  count: 2,
+  connections: [
+    {
+      url: 'wss://api.example.com/realtime',
+      protocols: ['chat'],
+      messageCount: 15,
+      readyState: 1,  // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+      messages: [
+        { type: 'sent', data: '{"action":"subscribe"}', timestamp: 1234567890 },
+        { type: 'received', data: '{"status":"connected"}', timestamp: 1234567891 }
+      ]
+    }
+  ]
+}
+```
+
+**Q: What's captured in console logs?**
+A: By default, captures `error` and `warn` level logs:
+- Log type (error, warn, info, debug, log)
+- Log message text
+- Source location (file:line)
+- Number of arguments
+- Timestamp
+
+**Q: How do I disable specific security checks?**
+A: Use configuration flags:
+```javascript
+new SpiderPlugin({
+  security: {
+    enabled: true,
+    analyzeSecurityHeaders: false,    // Skip headers
+    analyzeCSP: false,                // Skip CSP
+    analyzeCORS: false,               // Skip CORS
+    captureConsoleLogs: false,        // Skip console logs
+    analyzeTLS: false,                // Skip HTTPS check
+    checkVulnerabilities: false,      // Skip vuln detection
+    captureWebSockets: false          // Skip WebSocket capture
+  }
+});
+```
+
+**Q: Can I increase the WebSocket message capture limit?**
+A: Yes, use `maxWebSocketMessages` config:
+```javascript
+new SpiderPlugin({
+  security: {
+    captureWebSockets: true,
+    maxWebSocketMessages: 200  // Capture up to 200 messages per connection
+  }
+});
+```
+
+**Q: How is security score calculated?**
+A: Security score (0-100) is calculated from:
+- Security headers: 30 points (30% of score)
+- CSP strength: 20 points (strong=20, moderate=10, none=0)
+- CORS validation: 20 points (proper config=20, issues=10, none=0)
+- TLS/HTTPS: 15 points (HTTPS+HSTS=15, HTTPS=10)
+- Vulnerabilities: Negative points per issue
+- Console errors: Small penalty (max -5 points)
+
 ### Troubleshooting
 
 **Q: Getting "Chromium not found" error?**
@@ -1942,4 +2048,4 @@ const spider = new SpiderPlugin({
 
 **Last Updated**: 2025-11-14
 **Status**: Production Ready
-**Version**: 1.0.0 (with SEO & Tech Detection)
+**Version**: 1.1.0 (with SEO, Tech Detection, Security Analysis & WebSocket Detection)

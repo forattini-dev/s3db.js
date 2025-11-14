@@ -994,7 +994,7 @@ describe('Audit Plugin', () => {
     test('should handle update operations correctly', async () => {
       const userId = 'user-update-mock';
       const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: jest.fn().mockResolvedValue([]) });
-      mockedAuditPlugin.installEventListenersForResource(mockResource);
+      mockedAuditPlugin.setupResourceAuditing(mockResource);
       const updateData = { id: userId, name: 'John Smith', age: 31 };
       const beforeData = { id: userId, name: 'John Doe', age: 30 };
       const updateCall = mockResource.on.mock.calls.find(call => call[0] === 'updated');
@@ -1007,7 +1007,7 @@ describe('Audit Plugin', () => {
     test('should handle delete operations correctly', async () => {
       const userId = 'user-delete-mock';
       const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: jest.fn().mockResolvedValue([]) });
-      mockedAuditPlugin.installEventListenersForResource(mockResource);
+      mockedAuditPlugin.setupResourceAuditing(mockResource);
       const deleteData = { id: userId, name: 'John Doe', age: 30 };
       const deleteCall = mockResource.on.mock.calls.find(call => call[0] === 'deleted');
       if (deleteCall) { await deleteCall[1](deleteData); }
@@ -1041,7 +1041,7 @@ describe('Audit Plugin', () => {
         get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', department: 'IT', region: 'SP' }),
         deleteMany: jest.fn().mockResolvedValue([])
       });
-      mockedAuditPlugin.installEventListenersForResource(mockResource);
+      mockedAuditPlugin.setupResourceAuditing(mockResource);
       const updateData = { id: userId, name: 'John Doe', department: 'IT', region: 'SP' };
       const beforeData = { id: userId, name: 'John Doe', department: 'IT', region: 'SP' };
       const updateCall = mockResource.on.mock.calls.find(call => call[0] === 'updated');
@@ -1067,7 +1067,7 @@ describe('Audit Plugin', () => {
       const mockPlugin = new AuditPlugin({ enabled: true, includeData: true, includePartitions: true, maxDataSize: 100 });
       mockPlugin.auditResource = mockAuditResource;
       const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), deleteMany: jest.fn().mockResolvedValue([]) });
-      mockPlugin.installEventListenersForResource(mockResource);
+      mockPlugin.setupResourceAuditing(mockResource);
       const insertCall = mockResource.on.mock.calls.find(call => call[0] === 'inserted');
       if (insertCall) { await insertCall[1](largeData); }
       expect(mockAuditResource.insert).toHaveBeenCalled();
