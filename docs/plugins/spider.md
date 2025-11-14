@@ -1320,6 +1320,262 @@ processor: async (task, ctx, helpers) => {
 
 ---
 
+## 🎯 Activity System
+
+The Activity System allows you to **selectively execute specific analyses** on each crawled URL instead of running everything. Choose what to do on each target—screenshots, security headers, SEO analysis, tech fingerprinting, performance metrics, or custom combinations.
+
+### Why Use Activities?
+
+✅ **Performance** - Skip unnecessary analyses, crawl faster
+✅ **Cost Control** - Only capture what you need
+✅ **Flexibility** - Different URLs can have different analysis sets
+✅ **Composability** - Mix and match individual activities
+✅ **Presets** - Use pre-defined combinations for common use cases
+
+### Available Activities
+
+Activities are organized into **6 categories**:
+
+#### Visual (Screenshots)
+- `screenshot_full` - Full page screenshot (scrollable)
+- `screenshot_viewport` - Viewport-only screenshot (1920x1080)
+
+#### Security (4 Header Analysis + Real-time)
+- `security_headers` - HTTP security headers
+- `security_csp` - Content Security Policy analysis
+- `security_cors` - CORS configuration
+- `security_tls` - TLS/SSL verification
+- `security_console_logs` - Browser console logs
+- `security_websockets` - WebSocket connections
+- `security_captcha` - CAPTCHA detection
+- `security_vulnerabilities` - Vulnerability scanning
+
+#### SEO (7 Analyses)
+- `seo_meta_tags` - Meta tags extraction
+- `seo_opengraph` - OpenGraph tags
+- `seo_twitter_card` - Twitter Card tags
+- `seo_links_analysis` - Internal/external links
+- `seo_content_analysis` - Content analysis
+- `seo_accessibility` - WCAG accessibility
+- `seo_heading_structure` - Heading hierarchy
+
+#### Technology (7 Detection Types)
+- `tech_frameworks` - Frameworks (React, Vue, Angular, etc.)
+- `tech_analytics` - Analytics platforms
+- `tech_marketing` - Marketing pixels
+- `tech_cdn` - CDN providers
+- `tech_web_server` - Web servers
+- `tech_cms` - CMS platforms
+- `tech_libraries` - JavaScript libraries
+
+#### Performance (4 Metrics)
+- `performance_core_web_vitals` - LCP, FID, CLS
+- `performance_navigation_timing` - Page load timing
+- `performance_resource_timing` - Individual resource timing
+- `performance_memory` - Memory usage
+
+#### Assets (5 Types)
+- `assets_css` - CSS analysis
+- `assets_javascript` - JavaScript analysis
+- `assets_images` - Image analysis
+- `assets_videos` - Video analysis
+- `assets_audios` - Audio analysis
+
+### Activity Presets
+
+Use presets for quick, pre-configured activity combinations:
+
+```javascript
+// Minimal - only basic data (fast & lightweight)
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'minimal'
+  // Equivalent to: ['screenshot_viewport', 'tech_frameworks', 'seo_meta_tags']
+});
+
+// Basic - standard crawl with SEO and tech
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'basic'
+  // Equivalent to: screenshot_full, SEO (3 types), tech (3 types)
+});
+
+// Security - focused on security analysis
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'security'
+  // All security_* activities
+});
+
+// SEO Complete - all SEO-related activities
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'seo_complete'
+  // All seo_* activities
+});
+
+// Performance - all performance metrics
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'performance'
+  // All performance_* activities
+});
+
+// Full - all available activities (default)
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'full'
+  // Equivalent to default behavior
+});
+```
+
+### Custom Activity Lists
+
+Choose specific activities by name:
+
+```javascript
+// Security + SEO + Screenshots
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'screenshot_full',
+    'screenshot_viewport',
+    'security_headers',
+    'security_csp',
+    'security_cors',
+    'seo_meta_tags',
+    'seo_opengraph',
+    'seo_twitter_card'
+  ]
+});
+
+// Tech detection only
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'tech_frameworks',
+    'tech_analytics',
+    'tech_cdn',
+    'tech_web_server'
+  ]
+});
+
+// Screenshot + Core Web Vitals
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'screenshot_full',
+    'performance_core_web_vitals',
+    'performance_memory'
+  ]
+});
+```
+
+### Batch Enqueue with Default Activities
+
+Set default activities for all targets in a batch:
+
+```javascript
+// All targets use 'basic' preset
+const results = await spider.enqueueBatch(
+  [
+    { url: 'https://example.com' },
+    { url: 'https://example.com/about' },
+    { url: 'https://example.com/blog' }
+  ],
+  { activityPreset: 'basic' }
+);
+
+// Mixed: default preset + target-specific overrides
+const results = await spider.enqueueBatch(
+  [
+    { url: 'https://example.com', activityPreset: 'security' }, // Override
+    { url: 'https://example.com/about' }, // Use default
+    { url: 'https://example.com/blog', activities: ['screenshot_viewport'] } // Override
+  ],
+  { activityPreset: 'basic' } // Default for all
+);
+```
+
+### Activity API Methods
+
+Query available activities at runtime:
+
+```javascript
+// Get all activities
+const all = spider.getAvailableActivities();
+// Returns: [ { name: 'screenshot_full', label: 'Full Page Screenshot', ... }, ... ]
+
+// Get activities by category
+const security = spider.getActivitiesByCategory('security');
+// Returns: Array of all security_* activities
+
+// Get categories with nested activities
+const categories = spider.getActivityCategories();
+// Returns: { visual: { name: 'visual', label: '...', activities: [...] }, ... }
+
+// Get all presets
+const presets = spider.getActivityPresets();
+// Returns: { minimal: { ... }, basic: { ... }, ... }
+
+// Get specific preset
+const basicPreset = spider.getPresetByName('basic');
+// Returns: { name: 'basic', label: '...', activities: [...] }
+
+// Validate activity list
+const validation = spider.validateActivityList(['screenshot_full', 'seo_meta_tags']);
+// Returns: { valid: true, invalid: [] }
+
+const invalid = spider.validateActivityList(['screenshot_full', 'invalid_activity']);
+// Returns: { valid: false, invalid: ['invalid_activity'] }
+```
+
+### Activity Execution Logic
+
+During queue processing, **only requested activities are executed**:
+
+```javascript
+// This target will only run:
+// - Screenshot capture
+// - Tech detection
+// - SEO analysis
+// ❌ Security analysis will be SKIPPED (not in activities)
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: ['screenshot_full', 'tech_frameworks', 'seo_meta_tags']
+});
+
+// This target runs EVERYTHING (no activities specified = default to 'full' preset)
+await spider.enqueueTarget({
+  url: 'https://example.com'
+  // Same as: activities: [...all 40+ activities...]
+});
+```
+
+The processor checks `task.activities` and conditionally executes:
+
+```
+if task.activities is empty or includes visual_* activities
+  → Run screenshot capture
+
+if task.activities is empty or includes seo_* activities
+  → Run SEO analysis
+
+if task.activities is empty or includes security_* activities
+  → Run security analysis
+
+if task.activities is empty or includes technology_* activities
+  → Run tech fingerprinting
+
+if task.activities is empty or includes performance_* activities
+  → Run performance metrics collection
+
+if task.activities is empty or includes assets_* activities
+  → Run asset analysis
+```
+
+---
+
 ## 🔗 See Also
 
 ### Related Plugins
@@ -2128,6 +2384,279 @@ const page = await puppeteer.open(task.url, {
 
 // 3. Add timeout to specific operations
 await page.waitForSelector('.content', { timeout: 10000 });
+```
+
+---
+
+### Activities
+
+**Q: What is the Activity System and why should I use it?**
+
+A: The Activity System lets you **choose which analyses to run** on each crawled URL. Instead of always running everything (screenshots, security, SEO, tech detection, performance), you can:
+
+- Pick specific activities (e.g., only screenshots + tech detection)
+- Use presets for common combinations (minimal, basic, security, seo_complete, performance, full)
+- Optimize for speed: skip unnecessary analyses
+- Optimize for cost: only capture what you need
+
+```javascript
+// ❌ Without activities: ALWAYS runs everything
+await spider.enqueueTarget({ url: 'https://example.com' });
+// Executes: screenshot_full, security_*, seo_*, tech_*, performance_*, assets_*
+
+// ✅ With activities: only run what you need
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: ['screenshot_viewport', 'tech_frameworks', 'seo_meta_tags']
+});
+// Executes: screenshot_viewport, tech_frameworks, seo_meta_tags only
+// Skips: All other analyses
+```
+
+---
+
+**Q: What's the difference between `activities` and `activityPreset`?**
+
+A: Both control what executes, but used differently:
+
+| Feature | `activities` | `activityPreset` |
+|---------|------------|-----------------|
+| Type | Array of activity names | String (preset name) |
+| Values | `['screenshot_full', 'seo_meta_tags', ...]` | `'minimal'`, `'basic'`, `'security'`, etc. |
+| When to use | Custom combinations | Quick selections |
+| Flexibility | High (any combination) | Lower (predefined) |
+
+```javascript
+// Custom combination with activities
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: ['screenshot_full', 'security_headers', 'seo_opengraph']
+});
+
+// Quick selection with preset
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'security' // All security_* activities
+});
+
+// If you provide both, activities takes precedence
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'basic', // Ignored
+  activities: ['screenshot_viewport'] // Used instead
+});
+```
+
+---
+
+**Q: How many activities are available?**
+
+A: **40+ activities** organized into **6 categories**:
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Visual | 2 | screenshot_full, screenshot_viewport |
+| Security | 8 | security_headers, security_csp, security_cors, security_tls, security_console_logs, security_websockets, security_captcha, security_vulnerabilities |
+| SEO | 7 | seo_meta_tags, seo_opengraph, seo_twitter_card, seo_links_analysis, seo_content_analysis, seo_accessibility, seo_heading_structure |
+| Technology | 7 | tech_frameworks, tech_analytics, tech_marketing, tech_cdn, tech_web_server, tech_cms, tech_libraries |
+| Performance | 4 | performance_core_web_vitals, performance_navigation_timing, performance_resource_timing, performance_memory |
+| Assets | 5 | assets_css, assets_javascript, assets_images, assets_videos, assets_audios |
+
+Use `spider.getAvailableActivities()` to list all at runtime.
+
+---
+
+**Q: What are the activity presets and when should I use each?**
+
+A: Presets are pre-configured combinations for common use cases:
+
+| Preset | Best For | Activities |
+|--------|----------|-----------|
+| `minimal` | Speed (fast baseline) | screenshot_viewport, tech_frameworks, seo_meta_tags |
+| `basic` | General crawling | screenshot_full, SEO (3), tech (3) |
+| `security` | Security audits | All security_* activities |
+| `seo_complete` | SEO analysis | All seo_* activities |
+| `performance` | Performance testing | All performance_* activities |
+| `full` | Complete analysis (default) | All 40+ activities |
+
+```javascript
+// Fast lightweight crawl
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'minimal' // 3 activities
+});
+
+// Standard crawl
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'basic' // ~9 activities
+});
+
+// Security-focused
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'security' // 8 activities
+});
+
+// No preset = default to 'full' (all activities)
+await spider.enqueueTarget({
+  url: 'https://example.com'
+  // Same as activityPreset: 'full'
+});
+```
+
+---
+
+**Q: Can I set default activities for all targets in a batch?**
+
+A: **Yes!** Use the second parameter of `enqueueBatch()`:
+
+```javascript
+// All use 'basic' preset
+const results = await spider.enqueueBatch(
+  [
+    { url: 'https://example.com' },
+    { url: 'https://example.com/about' },
+    { url: 'https://example.com/blog' }
+  ],
+  { activityPreset: 'basic' } // Default for all
+);
+
+// Can also override per-target
+const results = await spider.enqueueBatch(
+  [
+    { url: 'https://example.com', activityPreset: 'security' }, // Override
+    { url: 'https://example.com/about' }, // Use default
+    { url: 'https://example.com/blog', activities: ['screenshot_viewport'] } // Override
+  ],
+  { activityPreset: 'basic' } // Default
+);
+```
+
+---
+
+**Q: How do I validate activity names before queueing?**
+
+A: Use `validateActivityList()` to check activity names:
+
+```javascript
+// Valid
+const validation = spider.validateActivityList([
+  'screenshot_full',
+  'seo_meta_tags',
+  'security_headers'
+]);
+// Result: { valid: true, invalid: [] }
+
+// Invalid
+const validation = spider.validateActivityList([
+  'screenshot_full',
+  'invalid_activity_name'
+]);
+// Result: { valid: false, invalid: ['invalid_activity_name'] }
+
+// Use in try-catch
+try {
+  const validation = spider.validateActivityList(userActivities);
+  if (!validation.valid) {
+    throw new Error(`Invalid activities: ${validation.invalid.join(', ')}`);
+  }
+  await spider.enqueueTarget({ url, activities: userActivities });
+} catch (error) {
+  console.error(error);
+}
+```
+
+---
+
+**Q: How do I list all available activities programmatically?**
+
+A: Use the activity query methods:
+
+```javascript
+// Get all activities
+const allActivities = spider.getAvailableActivities();
+allActivities.forEach(a => {
+  console.log(`${a.name}: ${a.label}`);
+});
+// Output:
+// screenshot_full: Full Page Screenshot
+// screenshot_viewport: Viewport Screenshot
+// ... 38 more
+
+// Get activities by category
+const securityActivities = spider.getActivitiesByCategory('security');
+// Returns: [ security_headers, security_csp, security_cors, ... ]
+
+// Get categories with nested activities
+const categories = spider.getActivityCategories();
+categories.security.activities.forEach(a => {
+  console.log(`${a.name}: ${a.label}`);
+});
+
+// Get presets
+const presets = spider.getActivityPresets();
+Object.keys(presets).forEach(name => {
+  console.log(`${name}: ${presets[name].label}`);
+});
+// Output:
+// minimal: Minimal Crawl
+// basic: Basic Crawl
+// security: Security Audit
+// ...
+```
+
+---
+
+**Q: Do activities affect performance or cost?**
+
+A: **Significantly!** Activities directly control what runs:
+
+```javascript
+// ✅ Fast (only 3 activities, ~5-10 seconds per URL)
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'minimal'
+});
+
+// ⚠️ Medium (basic analysis, ~15-30 seconds per URL)
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'basic'
+});
+
+// 🔴 Slow (comprehensive, ~60+ seconds per URL)
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'full'
+});
+```
+
+**Cost optimization:**
+- Screenshot only: ~1-2 sec, ~50KB per URL
+- Security analysis: ~5-10 sec, depends on findings
+- Full analysis: ~60+ sec, depends on content size
+
+---
+
+**Q: What happens if I don't specify activities?**
+
+A: Defaults to the `'full'` preset (all 40+ activities):
+
+```javascript
+// These are equivalent:
+await spider.enqueueTarget({ url: 'https://example.com' });
+
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'full'
+});
+
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: ['screenshot_full', 'screenshot_viewport', 'security_headers', ...]
+  // All 40+ activities
+});
 ```
 
 ---
