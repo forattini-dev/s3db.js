@@ -1,8 +1,8 @@
 # 🕷️ SpiderPlugin - Enhanced Web Crawler
 
-> **All-in-one web crawler suite with SEO analysis and technology fingerprinting.**
+> **All-in-one web crawler suite with SEO analysis, technology fingerprinting, security auditing, and visual capture.**
 >
-> Bundles Puppeteer (browser automation), S3Queue (distributed task queue), and TTL (automatic cleanup) with advanced capabilities for extracting SEO metadata, analyzing assets, and detecting technologies used on web pages.
+> Bundles Puppeteer (browser automation), S3Queue (distributed task queue), and TTL (automatic cleanup) with advanced capabilities for extracting SEO metadata, analyzing assets, detecting technologies, capturing screenshots, analyzing security headers, and monitoring real-time communication.
 >
 > **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [API ↓](#-api-reference) | [FAQ ↓](#-faq)
 
@@ -467,6 +467,16 @@ new SpiderPlugin({
     detectCDN: true,           // Cloudflare, CloudFront, etc.
     detectWebServer: true,     // Nginx, Apache, IIS, etc.
     detectCMS: true            // WordPress, Shopify, etc.
+  },
+
+  // Screenshot configuration
+  screenshot: {
+    enabled: true,                      // Enable screenshot capture
+    captureFullPage: true,              // Capture entire scrollable page
+    quality: 80,                        // Quality 0-100 (JPEG only)
+    format: 'jpeg',                     // 'jpeg' or 'png'
+    maxWidth: 1920,                     // Screenshot width
+    maxHeight: 1080                     // Screenshot height
   },
 
   // Security analysis configuration
@@ -1915,6 +1925,84 @@ await db.usePlugin(seoSpider);
 await db.usePlugin(techSpider);
 ```
 
+### Screenshots & Visual Capture
+
+**Q: How do I capture screenshots of crawled pages?**
+A: Enable screenshot capture in configuration:
+```javascript
+new SpiderPlugin({
+  screenshot: {
+    enabled: true,
+    captureFullPage: true,    // Full page or viewport
+    quality: 80,              // Quality 0-100 (JPEG only)
+    format: 'jpeg',           // 'jpeg' or 'png'
+    maxWidth: 1920,
+    maxHeight: 1080
+  }
+});
+
+// Access screenshots
+const screenshots = await spider.getScreenshots();
+screenshots.forEach(shot => {
+  console.log('URL:', shot.url);
+  console.log('Format:', shot.format);
+  console.log('Size:', shot.width, 'x', shot.height);
+  // shot.screenshot is base64-encoded image data
+});
+```
+
+**Q: Should I capture full page or viewport?**
+A: Choose based on your needs:
+- `captureFullPage: true` - Captures entire scrollable page (better for layout analysis)
+- `captureFullPage: false` - Captures viewport only (1920x1080)
+
+For most use cases, full page captures are more useful for analysis.
+
+**Q: What format should I use, JPEG or PNG?**
+A: Trade-offs:
+- **JPEG**: Smaller file size (with quality setting), best for photos/screenshots
+- **PNG**: Lossless compression, better for text/UI elements, larger files
+
+For web crawling, JPEG at quality 80 is a good balance.
+
+**Q: Can I adjust screenshot quality?**
+A: Yes, use the `quality` option (JPEG only, 0-100):
+```javascript
+new SpiderPlugin({
+  screenshot: {
+    format: 'jpeg',
+    quality: 95  // High quality, larger files
+    // or quality: 60  // Lower quality, smaller files
+  }
+});
+```
+
+**Q: How are screenshots stored?**
+A: Screenshots are stored as base64-encoded strings in S3:
+- Stored in `plg_spider_screenshots` resource
+- Each record includes: URL, format, quality, dimensions, timestamp
+- Retrieved via `getScreenshots()` method or direct resource queries
+
+**Q: Can I disable screenshots for specific URLs?**
+A: Currently, screenshot setting applies to all URLs. To skip specific URLs:
+```javascript
+// Option 1: Disable globally
+new SpiderPlugin({ screenshot: { enabled: false } });
+
+// Option 2: Disable per-target (future feature)
+// After implementation:
+// await spider.enqueueTarget({ url, skipScreenshot: true });
+```
+
+**Q: Are screenshots captured before or after JavaScript execution?**
+A: Screenshots are captured after page load completes (after `networkidle2`), so they include:
+- All rendered content
+- JavaScript-generated DOM
+- Applied CSS styles
+- Executed animations
+
+This gives you the final, rendered appearance of the page.
+
 ### Security Analysis & WebSockets
 
 **Q: What security headers are analyzed?**
@@ -2048,4 +2136,4 @@ const spider = new SpiderPlugin({
 
 **Last Updated**: 2025-11-14
 **Status**: Production Ready
-**Version**: 1.1.0 (with SEO, Tech Detection, Security Analysis & WebSocket Detection)
+**Version**: 1.2.0 (with SEO, Tech Detection, Security Analysis, WebSocket Detection & Screenshot Capture)

@@ -97,6 +97,17 @@ export class SpiderPlugin extends Plugin {
         ...options.techDetection
       },
 
+      // Screenshot configuration
+      screenshot: {
+        enabled: options.screenshot?.enabled !== false,
+        captureFullPage: options.screenshot?.captureFullPage !== false,
+        quality: options.screenshot?.quality || 80,
+        format: options.screenshot?.format || 'jpeg',
+        maxWidth: options.screenshot?.maxWidth || 1920,
+        maxHeight: options.screenshot?.maxHeight || 1080,
+        ...options.screenshot
+      },
+
       // Performance metrics
       performance: {
         enabled: true,
@@ -131,7 +142,8 @@ export class SpiderPlugin extends Plugin {
       ttlCohorts: `${this.config.resourcePrefix}_ttl_cohorts`,
       seoAnalysis: `${this.config.resourcePrefix}_seo_analysis`,
       techFingerprint: `${this.config.resourcePrefix}_tech_fingerprint`,
-      securityAnalysis: `${this.config.resourcePrefix}_security_analysis`
+      securityAnalysis: `${this.config.resourcePrefix}_security_analysis`,
+      screenshots: `${this.config.resourcePrefix}_screenshots`
     }
 
     // Plugin instances
@@ -247,6 +259,7 @@ export class SpiderPlugin extends Plugin {
           seoAnalysis: 'object',
           techFingerprint: 'object',
           performanceMetrics: 'object',
+          screenshot: 'string',
           error: 'string',
           createdAt: 'number',
           processingTime: 'number'
@@ -299,6 +312,22 @@ export class SpiderPlugin extends Plugin {
           vulnerabilities: 'array',
           securityScore: 'number',
           createdAt: 'number'
+        },
+        behavior: 'body-overflow',
+        timestamps: true
+      },
+      screenshots: {
+        name: this.resourceNames.screenshots,
+        attributes: {
+          targetId: 'string|required',
+          url: 'string|required',
+          screenshot: 'string',
+          screenshotMimeType: 'string',
+          width: 'number',
+          height: 'number',
+          format: 'string',
+          quality: 'number',
+          capturedAt: 'number'
         },
         behavior: 'body-overflow',
         timestamps: true
@@ -368,6 +397,33 @@ export class SpiderPlugin extends Plugin {
           securityAnalysis = await this.securityAnalyzer.analyze(page, task.url, html)
         }
 
+        // Screenshot Capture
+        let screenshotData = null
+        if (this.config.screenshot.enabled) {
+          try {
+            const screenshotBuffer = await page.screenshot({
+              fullPage: this.config.screenshot.captureFullPage,
+              type: this.config.screenshot.format,
+              quality: this.config.screenshot.format === 'jpeg' ? this.config.screenshot.quality : undefined
+            })
+
+            // Convert to base64 for storage
+            const screenshotBase64 = screenshotBuffer.toString('base64')
+            const mimeType = this.config.screenshot.format === 'jpeg' ? 'image/jpeg' : 'image/png'
+
+            screenshotData = {
+              screenshot: screenshotBase64,
+              screenshotMimeType: mimeType,
+              width: this.config.screenshot.maxWidth,
+              height: this.config.screenshot.maxHeight,
+              format: this.config.screenshot.format,
+              quality: this.config.screenshot.quality
+            }
+          } catch (error) {
+            console.error(`[SpiderPlugin] Failed to capture screenshot for ${task.url}:`, error)
+          }
+        }
+
         // Create result record
         const result = {
           targetId: task.id,
@@ -378,6 +434,7 @@ export class SpiderPlugin extends Plugin {
           techFingerprint,
           performanceMetrics,
           securityAnalysis,
+          screenshot: screenshotData ? screenshotData.screenshot : null,
           processingTime: Date.now() - startTime
         }
 
@@ -423,6 +480,19 @@ export class SpiderPlugin extends Plugin {
               targetId: task.id,
               url: task.url,
               ...securityAnalysis
+            })
+          })
+        }
+
+        // Store screenshot separately if available
+        if (screenshotData) {
+          const screenshotResource = await this.database.getResource(this.resourceNames.screenshots)
+          await tryFn(async () => {
+            return await screenshotResource.insert({
+              targetId: task.id,
+              url: task.url,
+              ...screenshotData,
+              capturedAt: Date.now()
             })
           })
         }
@@ -514,6 +584,17 @@ export class SpiderPlugin extends Plugin {
   async getTechFingerprints(query = {}) {
     const techResource = await this.database.getResource(this.resourceNames.techFingerprint)
     return await techResource.query(query)
+  }
+
+  /**
+   * Get screenshots
+   *
+   * @param {Object} [query] - Query parameters
+   * @returns {Promise<Array>} Array of screenshot records
+   */
+  async getScreenshots(query = {}) {
+    const screenshotResource = await this.database.getResource(this.resourceNames.screenshots)
+    return await screenshotResource.query(query)
   }
 
   /**
