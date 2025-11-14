@@ -577,6 +577,8 @@ export class SEOAnalyzer {
     for (const link of links) {
       const href = link.getAttribute('href')
       const anchorText = link.textContent.trim()
+      const rel = link.getAttribute('rel') || ''
+      const target = link.getAttribute('target') || ''
 
       // Skip hash/fragment links and javascript
       if (href.startsWith('#') || href.startsWith('javascript:')) {
@@ -584,6 +586,19 @@ export class SEOAnalyzer {
       }
 
       analysis.total++
+
+      // Extract rel attributes and target information
+      const relAttributes = rel.toLowerCase().split(/\s+/).filter(Boolean)
+      const linkReferral = {
+        nofollow: relAttributes.includes('nofollow'),
+        noopener: relAttributes.includes('noopener'),
+        noreferrer: relAttributes.includes('noreferrer'),
+        external: relAttributes.includes('external'),
+        ugc: relAttributes.includes('ugc'),
+        sponsored: relAttributes.includes('sponsored'),
+        target: target.toLowerCase() || null,
+        rel: rel.length > 0 ? rel : null
+      }
 
       try {
         const linkUrl = new URL(href, baseUrl)
@@ -596,7 +611,8 @@ export class SEOAnalyzer {
             text: anchorText,
             quality: this._evaluateAnchorQuality(anchorText),
             hostname: linkUrl.hostname,
-            isSubdomain: linkUrl.hostname !== baseDomain
+            isSubdomain: linkUrl.hostname !== baseDomain,
+            referral: linkReferral
           }
 
           // Separate same domain from subdomains
@@ -613,7 +629,8 @@ export class SEOAnalyzer {
             href: linkUrl.href,
             text: anchorText,
             domain: linkUrl.hostname,
-            quality: this._evaluateAnchorQuality(anchorText)
+            quality: this._evaluateAnchorQuality(anchorText),
+            referral: linkReferral
           })
           analysis.external.domains[linkUrl.hostname] = (analysis.external.domains[linkUrl.hostname] || 0) + 1
         }
@@ -626,7 +643,8 @@ export class SEOAnalyzer {
             text: anchorText,
             quality: this._evaluateAnchorQuality(anchorText),
             hostname: baseDomain,
-            isSubdomain: false
+            isSubdomain: false,
+            referral: linkReferral
           })
         }
       }
@@ -687,6 +705,33 @@ export class SEOAnalyzer {
 
     if (samedomainLinks.length < 5) {
       analysis.recommendations.push('Add more internal links to create topical clusters and improve SEO')
+    }
+
+    // Analyze referral attributes
+    const allLinks = [...samedomainLinks, ...subdomainLinks, ...externalLinks]
+    const referralStats = {
+      total: allLinks.length,
+      nofollow: allLinks.filter((l) => l.referral?.nofollow).length,
+      noopener: allLinks.filter((l) => l.referral?.noopener).length,
+      noreferrer: allLinks.filter((l) => l.referral?.noreferrer).length,
+      sponsored: allLinks.filter((l) => l.referral?.sponsored).length,
+      ugc: allLinks.filter((l) => l.referral?.ugc).length,
+      externalAttr: allLinks.filter((l) => l.referral?.external).length,
+      targetBlank: allLinks.filter((l) => l.referral?.target === '_blank').length,
+      hasRel: allLinks.filter((l) => l.referral?.rel).length,
+      followable: allLinks.filter((l) => !l.referral?.nofollow).length
+    }
+
+    analysis.referralAttributes = referralStats
+
+    // Referral recommendations
+    const externalNofollow = externalLinks.filter((l) => l.referral?.nofollow).length
+    const externalWithoutRel = externalLinks.filter((l) => !l.referral?.rel).length
+
+    if (externalWithoutRel > 0) {
+      analysis.recommendations.push(
+        `Add rel="noopener noreferrer" to ${externalWithoutRel} external links for security`
+      )
     }
 
     // External links recommendations

@@ -63,8 +63,8 @@ describe('ConnectionString Class - Complete Journey', () => {
 
   test('ConnectionString with query params', () => {
     const conn = new ConnectionString('https://user:pass@s3.amazonaws.com/bucket?foo=bar&baz=qux');
-    expect(conn.foo).toBe('bar');
-    expect(conn.baz).toBe('qux');
+    expect(conn.clientOptions.foo).toBe('bar');
+    expect(conn.clientOptions.baz).toBe('qux');
   });
 
   test('ConnectionString S3 defineS3 else branch (single segment)', () => {
