@@ -135,30 +135,38 @@ export class S3Client extends EventEmitter {
   }
 
   /**
-   * Execute batch of operations through the pool (if enabled)
-   * ALL operations in the batch go through this method!
+   * Execute batch of operations without re-enqueueing them into the OperationsPool.
+   *
+   * Each operation is still free to call `_executeOperation`, so the underlying S3
+   * commands remain throttled by the pool without causing recursive deadlocks.
+   *
    * @private
    */
   async _executeBatch(fns, options = {}) {
-    if (!this.operationsPool || options.bypassPool) {
-      // Pool disabled or explicitly bypassed - use Promise.allSettled
-      const settled = await Promise.allSettled(fns.map(fn => fn()));
-      const results = settled.map(s => s.status === 'fulfilled' ? s.value : null);
-      const errors = settled
-        .map((s, index) => s.status === 'rejected' ? { error: s.reason, index } : null)
-        .filter(Boolean);
-      return { results, errors };
-    }
+    const wrapped = fns.map((fn, index) =>
+      Promise.resolve()
+        .then(() => fn())
+        .then((value) => {
+          options.onItemComplete?.(value, index);
+          return value;
+        })
+        .catch((error) => {
+          options.onItemError?.(error, index);
+          throw error;
+        })
+    );
 
-    // Execute batch through pool - THIS IS THE MAGIC FOR BATCHES!
-    return await this.operationsPool.addBatch(fns, {
-      priority: options.priority ?? 0,
-      retries: options.retries,
-      timeout: options.timeout,
-      metadata: options.metadata || {},
-      onItemComplete: options.onItemComplete,
-      onItemError: options.onItemError,
-    });
+    const settled = await Promise.allSettled(wrapped);
+    const results = settled.map((state) =>
+      state.status === 'fulfilled' ? state.value : null
+    );
+    const errors = settled
+      .map((state, index) =>
+        state.status === 'rejected' ? { error: state.reason, index } : null
+      )
+      .filter(Boolean);
+
+    return { results, errors };
   }
 
   createClient() {
