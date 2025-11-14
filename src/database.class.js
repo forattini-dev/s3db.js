@@ -95,6 +95,7 @@ export class Database extends SafeEventEmitter {
     this.taskExecutor = this.operationsPool;
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
+    this.plugins = this.pluginRegistry; // Internal alias for plugin registry
     this.cache = options.cache;
     this.passphrase = options.passphrase ?? "secret";
     this.bcryptRounds = options.bcryptRounds ?? 10;
