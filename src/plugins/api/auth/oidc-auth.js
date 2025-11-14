@@ -74,6 +74,22 @@ import {
 } from '../concerns/oidc-errors.js';
 
 /**
+ * 🔧 Default HTTP headers for OIDC token endpoint requests
+ * Prevents HTTP/2 protocol errors with Azure AD and other IdPs
+ * @returns {Object} Default headers with Connection: close for HTTP/1.1 fallback
+ */
+function getOidcFetchHeaders(customHeaders = {}) {
+  return {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Connection': 'close',  // Force HTTP/1.1 (prevents HTTP/2 errors with Azure AD)
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    ...customHeaders  // Allow overrides
+  };
+}
+
+/**
  * Validate OIDC configuration at startup
  * @throws {Error} If configuration is invalid
  */
@@ -378,10 +394,9 @@ async function getOrCreateUser(usersResource, claims, config) {
 async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
   const response = await fetch(tokenEndpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+    headers: getOidcFetchHeaders({
       'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
-    },
+    }),
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken
@@ -752,22 +767,25 @@ const config = {
 
     try {
       const ep = await getEndpoints(c);
-      const tokenHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
       const tokenBody = new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken
       });
 
       // Confidential client: use Basic auth
+      const authHeader = clientSecret
+        ? `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
+        : null;
+
       if (clientSecret) {
-        tokenHeaders['Authorization'] = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+        // Authorization header
       } else {
         tokenBody.set('client_id', clientId);
       }
 
       const response = await fetch(ep.tokenEndpoint, {
         method: 'POST',
-        headers: tokenHeaders,
+        headers: getOidcFetchHeaders(authHeader ? { 'Authorization': authHeader } : {}),
         body: tokenBody
       });
 
@@ -1042,7 +1060,6 @@ const config = {
       // Retrieve PKCE data and nonce
       const codeVerifier = stateData.code_verifier || null;
       const ep = await getEndpoints(c);  // With context cache
-      const tokenHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
@@ -1051,15 +1068,17 @@ const config = {
       });
 
       // Confidential client: use Basic auth; Public client (no secret): send client_id in body
-      if (clientSecret) {
-        tokenHeaders['Authorization'] = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
-      } else {
+      const authHeader = clientSecret
+        ? `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
+        : null;
+
+      if (!clientSecret) {
         tokenBody.set('client_id', clientId);
       }
 
       const tokenResponse = await fetch(ep.tokenEndpoint, {
         method: 'POST',
-        headers: tokenHeaders,
+        headers: getOidcFetchHeaders(authHeader ? { 'Authorization': authHeader } : {}),
         body: tokenBody
       });
 
