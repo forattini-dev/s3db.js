@@ -105,6 +105,20 @@ export class SpiderPlugin extends Plugin {
         collectResourceTiming: true,
         collectMemory: true,
         ...options.performance
+      },
+
+      // Security analysis configuration
+      security: {
+        enabled: options.security?.enabled !== false,
+        analyzeSecurityHeaders: options.security?.analyzeSecurityHeaders !== false,
+        analyzeCSP: options.security?.analyzeCSP !== false,
+        analyzeCORS: options.security?.analyzeCORS !== false,
+        captureConsoleLogs: options.security?.captureConsoleLogs !== false,
+        consoleLogLevels: options.security?.consoleLogLevels || ['error', 'warn'],
+        maxConsoleLogLines: options.security?.maxConsoleLogLines || 100,
+        analyzeTLS: options.security?.analyzeTLS !== false,
+        checkVulnerabilities: options.security?.checkVulnerabilities !== false,
+        ...options.security
       }
     }
 
@@ -114,7 +128,8 @@ export class SpiderPlugin extends Plugin {
       results: `${this.config.resourcePrefix}_results`,
       ttlCohorts: `${this.config.resourcePrefix}_ttl_cohorts`,
       seoAnalysis: `${this.config.resourcePrefix}_seo_analysis`,
-      techFingerprint: `${this.config.resourcePrefix}_tech_fingerprint`
+      techFingerprint: `${this.config.resourcePrefix}_tech_fingerprint`,
+      securityAnalysis: `${this.config.resourcePrefix}_security_analysis`
     }
 
     // Plugin instances
@@ -173,12 +188,14 @@ export class SpiderPlugin extends Plugin {
         await this.ttlPlugin.initialize(this.database)
       }
 
-      // Load SEO analyzer and tech detector
+      // Load SEO analyzer, tech detector, and security analyzer
       const { SEOAnalyzer } = await import('./spider/seo-analyzer.js')
       const { TechDetector } = await import('./spider/tech-detector.js')
+      const { SecurityAnalyzer } = await import('./spider/security-analyzer.js')
 
       this.seoAnalyzer = new SEOAnalyzer(this.config.seo)
       this.techDetector = new TechDetector(this.config.techDetection)
+      this.securityAnalyzer = new SecurityAnalyzer(this.config.security)
 
       // Create resources
       await this._createResources()
@@ -265,6 +282,23 @@ export class SpiderPlugin extends Plugin {
         },
         behavior: 'body-overflow',
         timestamps: true
+      },
+      securityAnalysis: {
+        name: this.resourceNames.securityAnalysis,
+        attributes: {
+          targetId: 'string|required',
+          url: 'string|required',
+          securityHeaders: 'object',
+          csp: 'object',
+          cors: 'object',
+          consoleLogs: 'object',
+          tls: 'object',
+          vulnerabilities: 'array',
+          securityScore: 'number',
+          createdAt: 'number'
+        },
+        behavior: 'body-overflow',
+        timestamps: true
       }
     }
 
@@ -325,6 +359,12 @@ export class SpiderPlugin extends Plugin {
           performanceMetrics = await this.puppeteerPlugin.performanceManager.collectMetrics(page)
         }
 
+        // Security Analysis
+        let securityAnalysis = null
+        if (this.config.security.enabled) {
+          securityAnalysis = await this.securityAnalyzer.analyze(page, task.url, html)
+        }
+
         // Create result record
         const result = {
           targetId: task.id,
@@ -334,6 +374,7 @@ export class SpiderPlugin extends Plugin {
           seoAnalysis,
           techFingerprint,
           performanceMetrics,
+          securityAnalysis,
           processingTime: Date.now() - startTime
         }
 
@@ -367,6 +408,18 @@ export class SpiderPlugin extends Plugin {
               targetId: task.id,
               url: task.url,
               ...techFingerprint
+            })
+          })
+        }
+
+        // Store security analysis separately if available
+        if (securityAnalysis) {
+          const securityResource = await this.database.getResource(this.resourceNames.securityAnalysis)
+          await tryFn(async () => {
+            return await securityResource.insert({
+              targetId: task.id,
+              url: task.url,
+              ...securityAnalysis
             })
           })
         }

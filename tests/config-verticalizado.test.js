@@ -9,7 +9,7 @@
  */
 
 import { rm } from 'fs/promises';
-import S3db from '../src/index.js';
+import { createDatabaseForTest } from './config.js';
 
 describe('Verticalizado Configuration Architecture', () => {
   // Use unique path for each test to avoid storage registry collisions
@@ -31,10 +31,11 @@ describe('Verticalizado Configuration Architecture', () => {
 
   describe('Database Options vs Client Options', () => {
     it('should accept verticalizado config (v16+ clean structure)', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-clean-structure', {
         connectionString: `file://${getTestPath()}`,
         // Database options (root level)
         verbose: false,
+        parallelism: 5,
         strictValidation: true,
         // Client options (wrapper)
         clientOptions: {
@@ -69,7 +70,7 @@ describe('Verticalizado Configuration Architecture', () => {
       // QueryString has compression.threshold=50
       // clientOptions has compression.threshold=100
       // Querystring should win
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-merge-options', {
         connectionString: `file://${getTestPath()}?compression.enabled=true&compression.threshold=50&stats.enabled=true`,
         clientOptions: {
           compression: {
@@ -101,7 +102,7 @@ describe('Verticalizado Configuration Architecture', () => {
 
   describe('Querystring Parameters', () => {
     it('should parse nested querystring params (compression.enabled=true)', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-query-nested', {
         connectionString: `file://${getTestPath()}?compression.enabled=true&compression.threshold=100&compression.level=9&stats.enabled=true`,
         verbose: false
       });
@@ -123,7 +124,7 @@ describe('Verticalizado Configuration Architecture', () => {
     });
 
     it('should parse boolean querystring params correctly', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-query-boolean', {
         connectionString: `file://${getTestPath()}?stats.enabled=true&locking.enabled=false`,
         verbose: false
       });
@@ -146,7 +147,7 @@ describe('Verticalizado Configuration Architecture', () => {
     });
 
     it('should parse number querystring params correctly', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-query-number', {
         connectionString: `file://${getTestPath()}?compression.threshold=50&ttl.defaultTTL=3600000&stats.enabled=true`,
         verbose: false
       });
@@ -164,7 +165,7 @@ describe('Verticalizado Configuration Architecture', () => {
     });
 
     it('should support flat querystring params for database options', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-query-flat', {
         connectionString: `file://${getTestPath()}?verbose=false`,
       });
 
@@ -178,7 +179,7 @@ describe('Verticalizado Configuration Architecture', () => {
 
   describe('Config Priority', () => {
     it('should use clientOptions for client configuration', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-config-priority-client-options', {
         connectionString: `file://${getTestPath()}`,
         clientOptions: {
           compression: {
@@ -208,7 +209,7 @@ describe('Verticalizado Configuration Architecture', () => {
     });
 
     it('should prefer querystring over clientOptions', async () => {
-      const db = new S3db({
+      const db = await createDatabaseForTest('verticalizado-config-priority-querystring', {
         connectionString: `file://${getTestPath()}?compression.enabled=true&compression.threshold=50`,
         clientOptions: {
           compression: {

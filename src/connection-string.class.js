@@ -29,13 +29,6 @@ export class ConnectionString {
     //   ttl.defaultTTL=3600000 → { ttl: { defaultTTL: 3600000 } }
     //   verbose=true → { verbose: true }
     this.clientOptions = this._parseQueryParams(uri.searchParams);
-
-    // ⚠️ Backward compatibility: Set flat properties on root object
-    for (const [k, v] of uri.searchParams.entries()) {
-      if (!k.includes('.')) {
-        this[k] = v;
-      }
-    }
   }
 
   /**

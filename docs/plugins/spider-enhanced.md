@@ -1011,16 +1011,297 @@ const page2 = {
 }
 ```
 
+### Link Analysis & Strategy
+
+SpiderPlugin automatically analyzes all links on a page and categorizes them intelligently:
+
+#### Link Categories
+
+The plugin separates links into three categories for detailed analysis:
+
+```javascript
+{
+  // Links to same domain (same subdomain as current page)
+  sameDomain: {
+    count: 24,
+    links: [
+      {
+        href: "https://example.com/blog/article",
+        text: "Read our guide",
+        quality: "descriptive",
+        hostname: "example.com",
+        isSubdomain: false,
+        referral: {
+          nofollow: false,
+          noopener: false,
+          noreferrer: false,
+          sponsored: false,
+          ugc: false,
+          external: false,
+          target: null,
+          rel: null
+        }
+      },
+      // ... more links
+    ]
+  },
+
+  // Links to subdomains of same domain
+  subdomains: {
+    count: 3,
+    list: ["docs.example.com", "api.example.com"],
+    links: [
+      {
+        href: "https://docs.example.com/api",
+        text: "API Documentation",
+        quality: "descriptive",
+        hostname: "docs.example.com",
+        isSubdomain: true,
+        referral: {
+          nofollow: false,
+          noopener: false,
+          noreferrer: false,
+          sponsored: false,
+          ugc: false,
+          external: false,
+          target: null,
+          rel: null
+        }
+      }
+    ]
+  },
+
+  // Links to external websites
+  external: {
+    count: 12,
+    domains: {
+      "github.com": 3,
+      "stackoverflow.com": 2,
+      "npmjs.com": 1
+      // ... other domains
+    },
+    links: [
+      {
+        href: "https://github.com/project/repo",
+        text: "View on GitHub",
+        domain: "github.com",
+        quality: "descriptive",
+        referral: {
+          nofollow: false,
+          noopener: true,
+          noreferrer: true,
+          sponsored: false,
+          ugc: false,
+          external: false,
+          target: "_blank",
+          rel: "noopener noreferrer"
+        }
+      }
+    ]
+  },
+
+  // Referral attributes summary
+  referralAttributes: {
+    total: 36,
+    nofollow: 2,           // Links passing no page authority
+    noopener: 8,           // Security - prevent window.opener
+    noreferrer: 8,         // Privacy - hide referrer info
+    sponsored: 1,          // Sponsored/ad links
+    ugc: 3,                // User-generated content
+    externalAttr: 0,       // rel="external"
+    targetBlank: 8,        // Links opening in new tab
+    hasRel: 12,            // Links with rel attribute
+    followable: 34         // Links without nofollow
+  }
+}
+```
+
+#### Link Strategy Insights
+
+**Same Domain Links (Most Important)**
+- Links to content on the same domain/subdomain
+- Build topical authority and establish information hierarchy
+- Distribute page authority throughout site
+- Critical for SEO - shows related content structure
+
+**External Links (Trust & Authority)**
+- Links to external domains
+- Provide context and credibility
+- Show engagement with the wider web
+- Too few external links suggests isolated content
+
+**Subdomain Links (Ecosystem)**
+- Links to other subdomains of same domain
+- Separate properties: docs, blog, api, etc.
+- Useful for large site networks
+- Tracked separately for subdomain ecosystem analysis
+
+#### Referral Attributes Analysis
+
+Each link is analyzed for referral control attributes that affect SEO and security:
+
+```javascript
+referral: {
+  // SEO & Authority Control
+  nofollow: false,        // rel="nofollow" - Don't pass page authority
+  sponsored: false,       // rel="sponsored" - Mark paid/sponsored links
+  ugc: false,             // rel="ugc" - Mark user-generated content links
+  external: false,        // rel="external" - Mark external links
+
+  // Security & Privacy
+  noopener: true,         // rel="noopener" - Prevent window.opener access
+  noreferrer: true,       // rel="noreferrer" - Hide referrer info
+
+  // Navigation
+  target: "_blank",       // target="_blank" - Open in new tab/window
+  rel: "noopener noreferrer"  // Full rel attribute value
+}
+```
+
+**Referral Attributes Summary:**
+```javascript
+referralAttributes: {
+  total: 36,           // Total links analyzed
+  nofollow: 2,         // Links NOT passing authority (× 2 links)
+  noopener: 8,         // Security-protected links
+  noreferrer: 8,       // Privacy-protected links
+  sponsored: 1,        // Sponsored/paid links
+  ugc: 3,              // User-generated content links
+  externalAttr: 0,     // Marked as external
+  targetBlank: 8,      // Opens in new tab
+  hasRel: 12,          // Has rel attribute
+  followable: 34       // Passes authority (no nofollow)
+}
+```
+
+**What Each Attribute Means:**
+
+- **nofollow** - Don't pass PageRank/authority. Use for:
+  - Comments, forum posts (untrusted content)
+  - Paid links, sponsorships
+  - User-generated links
+  - Affiliate links (if not using `rel="sponsored"`)
+
+- **sponsored** - Marks paid/sponsored links (Google best practice):
+  - Replaces nofollow for ads
+  - More honest than nofollow
+  - Preferred for sponsored content
+
+- **ugc** - Marks user-generated content links:
+  - Comments, forum posts
+  - Reviews, testimonials
+  - User submissions
+  - Better than nofollow for UGC
+
+- **noopener** - Security protection:
+  - Prevents linked site from accessing `window.opener`
+  - Required for `target="_blank"` links
+  - Prevents malicious redirect attacks
+
+- **noreferrer** - Privacy protection:
+  - Hides referrer information
+  - Combined with noopener for full protection
+  - Shows as (direct) traffic in analytics
+
+**SEO Impact by Attribute:**
+
+| Attribute | Authority | Recommendation | Example Use |
+|-----------|-----------|-----------------|-------------|
+| None | ✅ Passes | Best for trusted links | Links to internal pages, partner sites |
+| nofollow | ❌ Blocks | Limited use (UGC, comments) | Forum posts, user comments |
+| sponsored | ❌ Blocks | Paid/sponsored links | Ads, sponsorships, affiliate |
+| ugc | ❌ Blocks | User content | Comments, reviews, forum posts |
+| noopener | - | Required for `_blank` | All external links in new tabs |
+| noreferrer | - | Privacy control | Sensitive link destinations |
+
+#### Anchor Text Quality
+
+Links are analyzed for anchor text quality:
+
+```javascript
+anchorTextQuality: {
+  total: 36,          // All anchor text instances
+  descriptive: 30,    // Good descriptive text
+  poor: 6,            // Generic/vague text
+  examples: [
+    "click here",     // Generic - bad for SEO
+    "more",           // Vague - doesn't describe content
+    "link"            // Too generic
+  ]
+}
+```
+
+**Good Anchor Text Examples:**
+- "Learn about SEO best practices"
+- "How to optimize images"
+- "View API documentation"
+- "Complete guide to accessibility"
+
+**Bad Anchor Text (Avoid):**
+- "Click here"
+- "Read more"
+- "More"
+- "Link"
+- Empty text
+
+**SEO Impact:**
+- Descriptive text helps search engines understand linked content
+- Poor anchor text wastes SEO potential
+- Descriptive text improves CTR and user experience
+
+#### Topical Clusters
+
+Internal links form topical clusters - groups of related content:
+
+```javascript
+topicalClusters: {
+  clusters: ["/blog", "/guides", "/tutorials"],
+  strength: [12, 8, 5],  // Number of links in each cluster
+  recommendation: "Strengthen cluster coverage"
+}
+```
+
+This shows:
+- Which content sections are linked together
+- Strength of each topic cluster
+- Opportunities to create better information architecture
+
+#### Broken Anchors (Orphaned Content)
+
+The analyzer detects broken anchor links (links to IDs that don't exist):
+
+```javascript
+orphaned: 2  // 2 anchor links point to non-existent IDs
+
+// Example problems:
+// <a href="#missing-section">Jump to section</a>  <!-- ID doesn't exist -->
+```
+
+This causes broken navigation and poor UX.
+
+#### Recommendations Generated
+
+Based on link analysis, the system provides recommendations:
+
+```javascript
+recommendations: [
+  "Use more descriptive anchor text - avoid 'click here'",
+  "Add links to authoritative external sources",
+  "Consider linking to related blog posts for topical clusters",
+  "Fix 2 broken anchor links to missing IDs"
+]
+```
+
 ### Performance Characteristics
 
-Content analysis is highly optimized:
+Content and link analysis is highly optimized:
 
 - **Analysis time per page**: < 100ms
 - **Memory overhead**: Minimal
-- **DOM queries**: ~15-20 selectors
+- **DOM queries**: ~15-20 selectors for content, ~1 for links
 - **Regex operations**: Word splitting only (no complex patterns)
 
-This means enabling content analysis has negligible performance impact even on large crawls.
+This means enabling full analysis has negligible performance impact even on large crawls.
 
 ### SEO Implications
 
@@ -1347,6 +1628,228 @@ A: Based on:
 4. **Structure patterns**: Proper hierarchy, readable paragraphs, lists
 
 All are actionable and specific to the page's actual metrics.
+
+### Internal Linking & Link Analysis
+
+**Q: What's the difference between sameDomain and subdomains?**
+A: `sameDomain` = links to the same hostname (e.g., example.com → example.com). `subdomains` = links to different subdomains of the same main domain (e.g., example.com → docs.example.com). This distinction helps analyze your site's network structure:
+- Strengthening sameDomain links builds content authority
+- Subdomains represent separate properties (blog, docs, api)
+
+**Q: How are external links counted?**
+A: All links to different main domains are counted as external. The `domains` object shows a frequency count:
+```javascript
+external: {
+  domains: {
+    "github.com": 3,      // 3 links to GitHub
+    "stackoverflow.com": 2 // 2 links to SO
+  }
+}
+```
+
+**Q: Why does link quality matter?**
+A: Anchor text quality signals:
+- **Descriptive text** ("Learn SEO tips") → Helps search engines understand target page content → Better SEO
+- **Generic text** ("Click here", "More") → Wasted SEO potential → Engines can't understand target → No ranking benefit
+
+Example impact:
+```javascript
+// ❌ Bad SEO value
+<a href="/seo-guide">click here</a>
+
+// ✅ Good SEO value
+<a href="/seo-guide">complete guide to SEO optimization</a>
+```
+
+**Q: What are topical clusters and why are they important?**
+A: Topical clusters are groups of related content linked together:
+- Example: /blog section with 12 internal links = strong cluster
+- Shows information architecture to search engines
+- Builds topical authority (signals expertise on topic)
+- Improves user navigation and discovery
+
+**Q: What does "orphaned content" mean?**
+A: Anchor links that point to non-existent IDs:
+```javascript
+<!-- Page has this link -->
+<a href="#missing-id">Jump to section</a>
+
+<!-- But no element with id="missing-id" exists -->
+<!-- This breaks navigation and is bad UX -->
+```
+
+**Q: Why should I have external links?**
+A: External links indicate:
+- Engagement with the wider web (not isolated content)
+- Respect for authoritative sources
+- Credibility and trust signals
+- Too few external links suggests thin content
+
+**Q: How do I improve internal linking strategy?**
+A: Focus on the three golden rules:
+1. **Link to sister pages** - Create topical clusters with descriptive anchor text
+2. **Use descriptive anchors** - Never "click here" or "read more"
+3. **Build pillar pages** - Create strong, comprehensive content hubs that gather and distribute authority
+
+**Q: Can I have too many links on a page?**
+A: More links is generally better for internal linking (distributes authority), but:
+- Avoid link spam or manipulation (100+ links to same destination)
+- Keep link density reasonable for readability
+- Focus on relevance and user experience
+- Each link should add value
+
+**Q: How is subdomain structure beneficial?**
+A: Separate subdomains help with:
+- **docs.example.com** - Separate documentation hub
+- **blog.example.com** - Separate blog with SEO focus
+- **api.example.com** - API reference and developer resources
+- Allows independent optimization while sharing domain authority
+
+**Q: Should external links open in new tabs?**
+A: Generally yes, for user experience:
+```html
+<!-- Opens in new tab, keeps your page open -->
+<a href="https://external.com" target="_blank" rel="noopener noreferrer">
+  External link
+</a>
+
+<!-- rel="noopener noreferrer" protects security and SEO -->
+```
+
+### Referral Attributes & SEO
+
+**Q: What's the difference between nofollow, sponsored, and ugc?**
+A: All three block PageRank passing, but signal different intentions to search engines:
+
+- **rel="nofollow"** (older, generic): Don't pass authority. Generic catch-all.
+- **rel="sponsored"** (preferred): Paid/advertising links. More honest and specific.
+- **rel="ugc"** (preferred): User-generated content. Forums, reviews, comments.
+
+Google prefers `sponsored` and `ugc` over `nofollow` because they're more honest about link intent.
+
+**Q: Should I use nofollow on comments and UGC?**
+A: Yes! Use the most specific rel attribute:
+```html
+<!-- User comment with link -->
+<a href="https://example.com" rel="ugc">Check this out</a>
+
+<!-- Sponsored/affiliate link -->
+<a href="https://product.com" rel="sponsored">Product recommendation</a>
+
+<!-- Generic untrusted link -->
+<a href="https://unknown.com" rel="nofollow">External reference</a>
+```
+
+This tells Google: "I link to these, but don't vouch for them" → No spam credit given to the linked site.
+
+**Q: When do I need rel="noopener noreferrer"?**
+A: Always use for external links opening in new tabs:
+
+```javascript
+// ❌ Vulnerable to attack
+<a href="https://external.com" target="_blank">
+  External link
+</a>
+
+// ✅ Secure
+<a href="https://external.com" target="_blank" rel="noopener noreferrer">
+  External link
+</a>
+
+// What noopener does:
+// - Prevents linked site accessing window.opener
+// - Blocks malicious page redirects
+// - Required for security best practices
+
+// What noreferrer does:
+// - Hides referrer information
+// - Shows as (direct) traffic in their analytics
+// - Privacy protection
+```
+
+**Q: What does "followable" mean in referralAttributes?**
+A: Links WITHOUT `rel="nofollow"` that pass PageRank:
+```javascript
+followable: 34  // 34 out of 36 links pass authority
+
+// Example:
+// Total links: 36
+// Links with nofollow: 2
+// Followable: 34 (36 - 2)
+
+// These 34 links contribute to page authority distribution
+```
+
+**Q: How much should I use nofollow?**
+A: Generally:
+- **Internal links**: Should have 0 nofollow (pass all authority)
+- **External trusted links**: Should have 0 nofollow (you vouch for them)
+- **Affiliate links**: Use `rel="sponsored"` (not nofollow)
+- **User comments/UGC**: Use `rel="ugc"` (prevents spam)
+- **Untrusted sources**: Use `rel="nofollow"` (generic safety)
+
+Too many nofollows = wasted linking potential and less SEO value.
+
+**Q: Does target="_blank" affect SEO?**
+A: No direct SEO impact, but:
+- **Usability**: Keep your page open (good UX)
+- **Analytics**: Referrer info (with noreferrer, shows as direct)
+- **Security**: MUST use `rel="noopener noreferrer"`
+
+Best practice:
+```html
+<!-- All external links in new tab with security -->
+<a href="https://external.com" target="_blank" rel="noopener noreferrer">
+  External link
+</a>
+
+<!-- Internal links same tab (expected behavior) -->
+<a href="/page">Internal link</a>
+```
+
+**Q: What's rel="external"?**
+A: Older HTML attribute marking external links. Modern practice:
+- Not standard
+- Doesn't affect SEO
+- Replaced by `rel="nofollow"`, `rel="sponsored"`, `rel="ugc"`
+
+Use the more specific attributes instead.
+
+**Q: Should I add rel attributes to all internal links?**
+A: No! Internal links should have NO rel attributes:
+
+```javascript
+// ✅ Correct - pass full authority internally
+<a href="/blog/post">Related blog post</a>
+
+// ❌ Wrong - why block internal authority?
+<a href="/blog/post" rel="nofollow">Related blog post</a>
+```
+
+Internal links distribute your site's authority. Never nofollow internal links.
+
+**Q: How do referral attributes affect page authority?**
+A: Authority distribution:
+
+```javascript
+// Scenario: Page with 10 links
+
+1. All followable (0 nofollow)
+   → Full authority distributed among 10 links
+
+2. 2 nofollow + 8 followable
+   → Authority distributed among 8 links only
+   → Other 2 links get NO authority
+
+// Formula (simplified):
+// Authority per link = Page authority / followable links
+//
+// Example: Page with 100 authority
+// - 10 followable links → 10 authority each
+// - 5 followable links → 20 authority each
+```
+
+Using nofollow strategically reduces wasted authority on unreliable links!
 
 ### Performance
 
