@@ -14,7 +14,7 @@ import tryFn from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js';
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
-import { TaskManager } from '../task-manager.class.js';
+import { TasksRunner } from '../tasks-runner.class.js';
 import { FileSystemStorage } from './filesystem-storage.class.js';
 
 const pathPosix = path.posix;
@@ -31,14 +31,14 @@ export class FileSystemClient extends EventEmitter {
     this.id = config.id || idGenerator(77);
     this.verbose = Boolean(config.verbose);
 
-    // TaskManager for batch operations (FileSystemClient analog to OperationsPool)
+    // TasksRunner for batch operations (FileSystemClient analog to TasksPool)
     // Accepts either a pre-instantiated TaskExecutor or configuration object
     if (config.taskExecutor) {
       // Use provided TaskExecutor (satisfies Strategy pattern)
       this.taskManager = config.taskExecutor;
     } else {
-      // Create new TaskManager instance with configuration
-      this.taskManager = new TaskManager({
+      // Create new TasksRunner instance with configuration
+      this.taskManager = new TasksRunner({
         concurrency: config.concurrency || 5,
         retries: config.retries ?? 3,
         retryDelay: config.retryDelay ?? 1000,

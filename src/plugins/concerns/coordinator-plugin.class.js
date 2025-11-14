@@ -633,6 +633,7 @@ export class CoordinatorPlugin extends Plugin {
       await this._executeColdStart();
     } else {
       // Skip cold start - immediate election
+      await this.publishHeartbeat();
       await this.ensureCoordinator();
       this.isCoordinator = await this.checkIsCoordinator();
 

@@ -20,81 +20,27 @@ export function buildMockActions() {
   };
 
   const actions = {
-    testAction: async (...args) => {
+    testAction: jest.fn(async (...args) => {
       calls.testAction.push(args);
       return { success: true };
-    },
-    longRunningAction: async (...args) => {
+    }),
+    longRunningAction: jest.fn(async (...args) => {
       calls.longRunningAction.push(args);
       await new Promise(resolve => setTimeout(resolve, 50)); // Simulate work
       return { done: true };
-    },
-    failingAction: async (...args) => {
+    }),
+    failingAction: jest.fn(async (...args) => {
       calls.failingAction.push(args);
       throw new Error('Action failed');
-    },
-    timeoutAction: async (...args) => {
+    }),
+    timeoutAction: jest.fn(async (...args) => {
       calls.timeoutAction.push(args);
       // Simulate timeout - never resolves
       return new Promise(() => {});
-    },
-    // Expose calls for assertions
-    _calls: calls,
+    })
   };
 
-  // Add helper methods for assertions (Jest-compatible API)
-  for (const actionName of Object.keys(calls)) {
-    const action = actions[actionName];
-
-    // Check if function was called
-    action.toHaveBeenCalled = () => {
-      if (calls[actionName].length === 0) {
-        throw new Error(`Expected ${actionName} to have been called, but it was not called.`);
-      }
-      return true;
-    };
-
-    // Check if function was called with specific arguments
-    action.toHaveBeenCalledWith = (...expectedArgs) => {
-      const matchingCall = calls[actionName].find(actualArgs => {
-        if (actualArgs.length !== expectedArgs.length) return false;
-        return expectedArgs.every((expected, idx) => {
-          const actual = actualArgs[idx];
-          // Handle expect.objectContaining and expect.any
-          if (expected && typeof expected === 'object' && expected.asymmetricMatch) {
-            return expected.asymmetricMatch(actual);
-          }
-          return JSON.stringify(actual) === JSON.stringify(expected);
-        });
-      });
-
-      if (!matchingCall) {
-        throw new Error(
-          `Expected ${actionName} to have been called with ${JSON.stringify(expectedArgs)}, ` +
-          `but it was called with ${JSON.stringify(calls[actionName])}`
-        );
-      }
-      return true;
-    };
-
-    // Check if function was called N times
-    action.toHaveBeenCalledTimes = (expectedCount) => {
-      const actualCount = calls[actionName].length;
-      if (actualCount !== expectedCount) {
-        throw new Error(
-          `Expected ${actionName} to have been called ${expectedCount} times, ` +
-          `but it was called ${actualCount} times.`
-        );
-      }
-      return true;
-    };
-
-    // Get call count
-    action.mock = {
-      calls: calls[actionName],
-      get callCount() { return calls[actionName].length; }
-    };
-  }
+  actions._calls = calls;
 
   return actions;
 }
@@ -153,52 +99,7 @@ export function createTestPlugin(mockActions = buildMockActions(), overrides = {
   // Create hook functions with tracking and assertion methods
   const hooks = {};
   for (const hookName of ['onJobStart', 'onJobComplete', 'onJobError']) {
-    const hookFn = (...args) => hookCalls[hookName].push(args);
-
-    // Add assertion methods (Jest-compatible API)
-    hookFn.toHaveBeenCalled = () => {
-      if (hookCalls[hookName].length === 0) {
-        throw new Error(`Expected ${hookName} to have been called, but it was not called.`);
-      }
-      return true;
-    };
-
-    hookFn.toHaveBeenCalledWith = (...expectedArgs) => {
-      const matchingCall = hookCalls[hookName].find(actualArgs => {
-        if (actualArgs.length !== expectedArgs.length) return false;
-        return expectedArgs.every((expected, idx) => {
-          const actual = actualArgs[idx];
-          if (expected && typeof expected === 'object' && expected.asymmetricMatch) {
-            return expected.asymmetricMatch(actual);
-          }
-          return JSON.stringify(actual) === JSON.stringify(expected);
-        });
-      });
-
-      if (!matchingCall) {
-        throw new Error(
-          `Expected ${hookName} to have been called with ${JSON.stringify(expectedArgs)}, ` +
-          `but it was called with ${JSON.stringify(hookCalls[hookName])}`
-        );
-      }
-      return true;
-    };
-
-    hookFn.toHaveBeenCalledTimes = (expectedCount) => {
-      const actualCount = hookCalls[hookName].length;
-      if (actualCount !== expectedCount) {
-        throw new Error(
-          `Expected ${hookName} to have been called ${expectedCount} times, ` +
-          `but it was called ${actualCount} times.`
-        );
-      }
-      return true;
-    };
-
-    hookFn.mock = {
-      calls: hookCalls[hookName],
-      get callCount() { return hookCalls[hookName].length; }
-    };
+    const hookFn = jest.fn((...args) => hookCalls[hookName].push(args));
 
     hooks[hookName] = overrides[hookName] || hookFn;
   }

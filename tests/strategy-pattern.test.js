@@ -2,31 +2,31 @@
  * Strategy Pattern Tests - Verify TaskManager and OperationsPool implement TaskExecutor interface
  */
 
-import { TaskManager } from '../src/task-manager.class.js'
-import { OperationsPool } from '../src/concerns/operations-pool.js'
+import { TasksRunner } from '../src/tasks-runner.class.js'
+import { TasksPool } from '../src/concerns/tasks-pool.js'
 import { TaskExecutor } from '../src/concurrency/index.js'
 
 describe('TaskExecutor Strategy Pattern', () => {
   describe('Interface Implementation', () => {
-    test('TaskManager implements TaskExecutor interface', () => {
-      const manager = new TaskManager()
+    test('TasksRunner implements TaskExecutor interface', () => {
+      const runner = new TasksRunner()
 
       // Verify all required methods exist
-      expect(typeof manager.enqueue).toBe('function')
-      expect(typeof manager.process).toBe('function')
-      expect(typeof manager.setConcurrency).toBe('function')
-      expect(typeof manager.getConcurrency).toBe('function')
-      expect(typeof manager.pause).toBe('function')
-      expect(typeof manager.resume).toBe('function')
-      expect(typeof manager.stop).toBe('function')
-      expect(typeof manager.destroy).toBe('function')
-      expect(typeof manager.getStats).toBe('function')
+      expect(typeof runner.enqueue).toBe('function')
+      expect(typeof runner.process).toBe('function')
+      expect(typeof runner.setConcurrency).toBe('function')
+      expect(typeof runner.getConcurrency).toBe('function')
+      expect(typeof runner.pause).toBe('function')
+      expect(typeof runner.resume).toBe('function')
+      expect(typeof runner.stop).toBe('function')
+      expect(typeof runner.destroy).toBe('function')
+      expect(typeof runner.getStats).toBe('function')
 
-      manager.destroy()
+      runner.destroy()
     })
 
-    test('OperationsPool implements TaskExecutor interface', () => {
-      const pool = new OperationsPool()
+    test('TasksPool implements TaskExecutor interface', () => {
+      const pool = new TasksPool()
 
       // Verify all required methods exist
       expect(typeof pool.enqueue).toBe('function')
@@ -44,111 +44,111 @@ describe('TaskExecutor Strategy Pattern', () => {
   })
 
   describe('Interchangeability - Basic Operations', () => {
-    test('TaskManager and OperationsPool both execute single tasks', async () => {
-      const manager = new TaskManager({ concurrency: 2 })
-      const pool = new OperationsPool({ concurrency: 2 })
+    test('TasksRunner and TasksPool both execute single tasks', async () => {
+      const runner = new TasksRunner({ concurrency: 2 })
+      const pool = new TasksPool({ concurrency: 2 })
 
-      let managerResult = null
+      let runnerResult = null
       let poolResult = null
 
-      // TaskManager enqueue
-      managerResult = await manager.enqueue(async () => {
-        return 'manager-executed'
+      // TasksRunner enqueue
+      runnerResult = await runner.enqueue(async () => {
+        return 'runner-executed'
       })
 
-      // OperationsPool enqueue
+      // TasksPool enqueue
       poolResult = await pool.enqueue(async () => {
         return 'pool-executed'
       })
 
-      expect(managerResult).toBe('manager-executed')
+      expect(runnerResult).toBe('runner-executed')
       expect(poolResult).toBe('pool-executed')
 
-      manager.destroy()
+      runner.destroy()
       pool.stop()
     })
 
-    test('TaskManager and OperationsPool both process batches', async () => {
-      const manager = new TaskManager({ concurrency: 2 })
-      const pool = new OperationsPool({ concurrency: 2 })
+    test('TasksRunner and TasksPool both process batches', async () => {
+      const runner = new TasksRunner({ concurrency: 2 })
+      const pool = new TasksPool({ concurrency: 2 })
 
       const items = [1, 2, 3]
 
-      // TaskManager batch processing
-      const managerResult = await manager.process(items, async (item) => {
+      // TasksRunner batch processing
+      const runnerResult = await runner.process(items, async (item) => {
         return item * 2
       })
 
-      // OperationsPool batch processing
+      // TasksPool batch processing
       const poolResult = await pool.addBatch(
         items.map(item => async () => item * 2)
       )
 
-      expect(managerResult.results).toEqual([2, 4, 6])
+      expect(runnerResult.results).toEqual([2, 4, 6])
       expect(poolResult.results).toEqual([2, 4, 6])
 
-      manager.destroy()
+      runner.destroy()
       pool.stop()
     })
   })
 
   describe('Interchangeability - Concurrency Management', () => {
     test('Both implementations support getting/setting concurrency', () => {
-      const manager = new TaskManager({ concurrency: 3 })
-      const pool = new OperationsPool({ concurrency: 3 })
+      const runner = new TasksRunner({ concurrency: 3 })
+      const pool = new TasksPool({ concurrency: 3 })
 
-      expect(manager.getConcurrency()).toBe(3)
+      expect(runner.getConcurrency()).toBe(3)
       expect(pool.getConcurrency()).toBe(3)
 
-      manager.setConcurrency(5)
+      runner.setConcurrency(5)
       pool.setConcurrency(5)
 
-      expect(manager.getConcurrency()).toBe(5)
+      expect(runner.getConcurrency()).toBe(5)
       expect(pool.getConcurrency()).toBe(5)
 
-      manager.destroy()
+      runner.destroy()
       pool.stop()
     })
 
     test('Both implementations throw on invalid concurrency', () => {
-      const manager = new TaskManager()
-      const pool = new OperationsPool()
+      const runner = new TasksRunner()
+      const pool = new TasksPool()
 
-      expect(() => manager.setConcurrency(0)).toThrow()
+      expect(() => runner.setConcurrency(0)).toThrow()
       expect(() => pool.setConcurrency(0)).toThrow()
 
-      manager.destroy()
+      runner.destroy()
       pool.stop()
     })
   })
 
   describe('Interchangeability - Lifecycle Control', () => {
     test('Both implementations support pause/resume', async () => {
-      const manager = new TaskManager({ concurrency: 1 })
-      const pool = new OperationsPool({ concurrency: 1 })
+      const runner = new TasksRunner({ concurrency: 1 })
+      const pool = new TasksPool({ concurrency: 1 })
 
-      // TaskManager pause/resume
-      manager.pause()
-      expect(manager.paused).toBe(true)
-      manager.resume()
-      expect(manager.paused).toBe(false)
+      // TasksRunner pause/resume
+      runner.pause()
+      expect(runner.paused).toBe(true)
+      runner.resume()
+      expect(runner.paused).toBe(false)
 
-      // OperationsPool pause/resume
+      // TasksPool pause/resume
       pool.pause()
       expect(pool.paused).toBe(true)
       pool.resume()
       expect(pool.paused).toBe(false)
 
-      manager.destroy()
+      runner.destroy()
       pool.stop()
     })
 
     test('Both implementations support stop', async () => {
-      const manager = new TaskManager()
-      const pool = new OperationsPool()
+      const runner = new TasksRunner()
+      const pool = new TasksPool()
 
-      manager.stop()
-      expect(manager.stopped).toBe(true)
+      runner.stop()
+      expect(runner.stopped).toBe(true)
 
       pool.stop()
       expect(pool.stopped).toBe(true)
@@ -157,50 +157,50 @@ describe('TaskExecutor Strategy Pattern', () => {
 
   describe('Interchangeability - Statistics', () => {
     test('Both implementations provide statistics', async () => {
-      const manager = new TaskManager({ concurrency: 2 })
-      const pool = new OperationsPool({ concurrency: 2 })
+      const runner = new TasksRunner({ concurrency: 2 })
+      const pool = new TasksPool({ concurrency: 2 })
 
       // Execute some tasks
-      await manager.enqueue(async () => 'test')
+      await runner.enqueue(async () => 'test')
       await pool.enqueue(async () => 'test')
 
-      const managerStats = manager.getStats()
+      const runnerStats = runner.getStats()
       const poolStats = pool.getStats()
 
       // Both should have core stat fields
-      expect(managerStats).toHaveProperty('queueSize')
-      expect(managerStats).toHaveProperty('activeCount')
-      expect(managerStats).toHaveProperty('processedCount')
-      expect(managerStats).toHaveProperty('errorCount')
+      expect(runnerStats).toHaveProperty('queueSize')
+      expect(runnerStats).toHaveProperty('activeCount')
+      expect(runnerStats).toHaveProperty('processedCount')
+      expect(runnerStats).toHaveProperty('errorCount')
 
       expect(poolStats).toHaveProperty('queueSize')
       expect(poolStats).toHaveProperty('activeCount')
       expect(poolStats).toHaveProperty('processedCount')
       expect(poolStats).toHaveProperty('errorCount')
 
-      manager.destroy()
+      runner.destroy()
       pool.stop()
     })
   })
 
   describe('Client Integration - MemoryClient with TaskExecutor', () => {
-    test('MemoryClient can use TaskManager via taskExecutor config', async () => {
+    test('MemoryClient can use TasksRunner via taskExecutor config', async () => {
       const { MemoryClient } = await import('../src/clients/memory-client.class.js')
 
-      const customTaskManager = new TaskManager({ concurrency: 3 })
+      const customRunner = new TasksRunner({ concurrency: 3 })
       const client = new MemoryClient({
-        taskExecutor: customTaskManager,
+        taskExecutor: customRunner,
         bucket: 'test-bucket'
       })
 
       // Verify the client uses the provided executor
-      expect(client.taskManager).toBe(customTaskManager)
+      expect(client.taskManager).toBe(customRunner)
       expect(client.taskManager.getConcurrency()).toBe(3)
 
-      customTaskManager.destroy()
+      customRunner.destroy()
     })
 
-    test('MemoryClient creates default TaskManager when not provided', async () => {
+    test('MemoryClient creates default TasksRunner when not provided', async () => {
       const { MemoryClient } = await import('../src/clients/memory-client.class.js')
 
       const client = new MemoryClient({
@@ -208,8 +208,8 @@ describe('TaskExecutor Strategy Pattern', () => {
         concurrency: 4
       })
 
-      // Verify default TaskManager was created with config
-      expect(client.taskManager).toBeInstanceOf(TaskManager)
+      // Verify default TasksRunner was created with config
+      expect(client.taskManager).toBeInstanceOf(TasksRunner)
       expect(client.taskManager.getConcurrency()).toBe(4)
 
       client.taskManager.destroy()
@@ -217,23 +217,23 @@ describe('TaskExecutor Strategy Pattern', () => {
   })
 
   describe('Client Integration - FileSystemClient with TaskExecutor', () => {
-    test('FileSystemClient can use TaskManager via taskExecutor config', async () => {
+    test('FileSystemClient can use TasksRunner via taskExecutor config', async () => {
       const { FileSystemClient } = await import('../src/clients/filesystem-client.class.js')
 
-      const customTaskManager = new TaskManager({ concurrency: 3 })
+      const customRunner = new TasksRunner({ concurrency: 3 })
       const client = new FileSystemClient({
-        taskExecutor: customTaskManager,
+        taskExecutor: customRunner,
         basePath: './test-fs'
       })
 
       // Verify the client uses the provided executor
-      expect(client.taskManager).toBe(customTaskManager)
+      expect(client.taskManager).toBe(customRunner)
       expect(client.taskManager.getConcurrency()).toBe(3)
 
-      customTaskManager.destroy()
+      customRunner.destroy()
     })
 
-    test('FileSystemClient creates default TaskManager when not provided', async () => {
+    test('FileSystemClient creates default TasksRunner when not provided', async () => {
       const { FileSystemClient } = await import('../src/clients/filesystem-client.class.js')
 
       const client = new FileSystemClient({
@@ -241,8 +241,8 @@ describe('TaskExecutor Strategy Pattern', () => {
         concurrency: 4
       })
 
-      // Verify default TaskManager was created with config
-      expect(client.taskManager).toBeInstanceOf(TaskManager)
+      // Verify default TasksRunner was created with config
+      expect(client.taskManager).toBeInstanceOf(TasksRunner)
       expect(client.taskManager.getConcurrency()).toBe(4)
 
       client.taskManager.destroy()

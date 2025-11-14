@@ -29,6 +29,12 @@ Organized examples by category to help you get started quickly.
 - [e23-costs-plugin.js](./e23-costs-plugin.js) - AWS cost tracking
 - [e24-backup-plugin.js](./e24-backup-plugin.js) - Automatic backup
 
+### 📧 Email (SMTP Plugin)
+- [e50-smtp-relay.js](./e50-smtp-relay.js) - Email sending via 4 providers (SendGrid, AWS SES, Mailgun, Postmark)
+- [e51-smtp-server.js](./e51-smtp-server.js) - In-process SMTP server (receive emails from external systems)
+- [e52-smtp-templates.js](./e52-smtp-templates.js) - Handlebars templating with custom helpers and partials
+- [e53-smtp-webhooks.js](./e53-smtp-webhooks.js) - Webhook processing (bounce, complaint, delivery, open, click events)
+
 ### 🌊 Streams
 - [e12-streams-read.js](./e12-streams-read.js) - Read resources as stream
 - [e13-streams-write.js](./e13-streams-write.js) - Write via stream
@@ -297,9 +303,10 @@ node docs/examples/e64-authorization-complete.js
 | 42 | `e42-rag-basic.js` | RAG basic |
 | 43 | `e43-rag-advanced.js` | RAG advanced |
 | 44 | `e44-orphaned-partitions.js` | Partition recovery |
-| 50 | `e50-update-methods.js` | update/patch/replace |
-| 51 | `e51-batch-operations.js` | Batch operations |
-| 52 | `e52-concurrent-writes.js` | Concurrent writes |
+| 50 | `e50-smtp-relay.js` | SMTP relay mode |
+| 51 | `e51-smtp-server.js` | SMTP server mode |
+| 52 | `e52-smtp-templates.js` | SMTP templating |
+| 53 | `e53-smtp-webhooks.js` | SMTP webhooks |
 | **60** | **`e60-oauth2-sso-server.js`** | **SSO Server** |
 | **61** | **`e61-oauth2-resource-server.js`** | **Resource Server** |
 | **62** | **`e62-azure-ad-integration.js`** | **Azure AD Integration** |
