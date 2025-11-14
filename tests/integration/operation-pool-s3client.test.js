@@ -1,53 +1,53 @@
 import { describe, test, expect } from '@jest/globals'
 import { S3Client } from '../../src/clients/s3-client.class.js'
 
-describe('OperationPool in S3Client', () => {
+describe('TasksPool in S3Client', () => {
   let client
 
   afterEach(async () => {
-    if (client && client.operationPool) {
+    if (client && client.taskExecutor) {
       await client.drainPool()
       client.stopPool()
     }
   })
 
-  test('should work without OperationPool by default', () => {
+  test('should work without TasksPool by default', () => {
     client = new S3Client({
       connectionString: 'memory://test-no-pool/db'
     })
 
-    expect(client.operationPool).toBeNull()
-    expect(client.operationPoolConfig.enabled).toBe(false)
+    expect(client.taskExecutor).toBeNull()
+    expect(client.taskExecutorConfig.enabled).toBe(false)
   })
 
-  test('should enable OperationPool when configured', () => {
+  test('should enable TasksPool when configured', () => {
     client = new S3Client({
       connectionString: 'memory://test-with-pool/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 25
       }
     })
 
-    expect(client.operationPool).not.toBeNull()
-    expect(client.operationPoolConfig.enabled).toBe(true)
-    expect(client.operationPoolConfig.concurrency).toBe(25)
+    expect(client.taskExecutor).not.toBeNull()
+    expect(client.taskExecutorConfig.enabled).toBe(true)
+    expect(client.taskExecutorConfig.concurrency).toBe(25)
   })
 
   test('should work with explicit disabled config', () => {
     client = new S3Client({
       connectionString: 'memory://test-disabled/db',
-      operationPool: false
+      taskExecutor: false
     })
 
-    expect(client.operationPool).toBeNull()
-    expect(client.operationPoolConfig.enabled).toBe(false)
+    expect(client.taskExecutor).toBeNull()
+    expect(client.taskExecutorConfig.enabled).toBe(false)
   })
 
   test('should provide pool statistics methods', () => {
     client = new S3Client({
       connectionString: 'memory://test-stats/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 10
       }
@@ -82,21 +82,21 @@ describe('OperationPool in S3Client', () => {
   test('should handle auto concurrency', () => {
     client = new S3Client({
       connectionString: 'memory://test-auto/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 'auto'
       }
     })
 
-    expect(client.operationPool).not.toBeNull()
-    expect(client.operationPool.autotune).not.toBeNull()
-    expect(client.operationPool.concurrency).toBeGreaterThan(0)
+    expect(client.taskExecutor).not.toBeNull()
+    expect(client.taskExecutor.autotune).not.toBeNull()
+    expect(client.taskExecutor.concurrency).toBeGreaterThan(0)
   })
 
   test('should handle manual concurrency with autotune', () => {
     client = new S3Client({
       connectionString: 'memory://test-manual-tune/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 50,
         autotune: {
@@ -108,15 +108,15 @@ describe('OperationPool in S3Client', () => {
       }
     })
 
-    expect(client.operationPool).not.toBeNull()
-    expect(client.operationPool.autotune).not.toBeNull()
-    expect(client.operationPool.concurrency).toBe(50)
+    expect(client.taskExecutor).not.toBeNull()
+    expect(client.taskExecutor.autotune).not.toBeNull()
+    expect(client.taskExecutor.concurrency).toBe(50)
   })
 
   test('should forward pool events to client', (done) => {
     client = new S3Client({
       connectionString: 'memory://test-events/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 5
       }
@@ -138,7 +138,7 @@ describe('OperationPool in S3Client', () => {
     })
 
     // Enqueue a simple operation
-    client.operationPool.enqueue(async () => {
+    client.taskExecutor.enqueue(async () => {
       return 'test result'
     })
   })
@@ -146,7 +146,7 @@ describe('OperationPool in S3Client', () => {
   test('should configure retry and timeout options', () => {
     client = new S3Client({
       connectionString: 'memory://test-retry/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 10,
         retries: 5,
@@ -156,16 +156,16 @@ describe('OperationPool in S3Client', () => {
       }
     })
 
-    expect(client.operationPoolConfig.retries).toBe(5)
-    expect(client.operationPoolConfig.retryDelay).toBe(500)
-    expect(client.operationPoolConfig.timeout).toBe(10000)
-    expect(client.operationPoolConfig.retryableErrors).toEqual(['NetworkError', 'TimeoutError'])
+    expect(client.taskExecutorConfig.retries).toBe(5)
+    expect(client.taskExecutorConfig.retryDelay).toBe(500)
+    expect(client.taskExecutorConfig.timeout).toBe(10000)
+    expect(client.taskExecutorConfig.retryableErrors).toEqual(['NetworkError', 'TimeoutError'])
   })
 
   test('should execute operations through pool', async () => {
     client = new S3Client({
       connectionString: 'memory://test-execute/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 5
       }
@@ -188,7 +188,7 @@ describe('OperationPool in S3Client', () => {
   test('should bypass pool when bypassPool option is true', async () => {
     client = new S3Client({
       connectionString: 'memory://test-bypass/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 5
       }
@@ -210,7 +210,7 @@ describe('OperationPool in S3Client', () => {
   test('should handle priority options', async () => {
     client = new S3Client({
       connectionString: 'memory://test-priority/db',
-      operationPool: {
+      taskExecutor: {
         enabled: true,
         concurrency: 1 // Low concurrency to test priority
       }

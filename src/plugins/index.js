@@ -34,6 +34,7 @@
  * - ApiPlugin: hono, @hono/node-server, jose, bcrypt
  * - IdentityPlugin: hono, jose, bcrypt, nodemailer
  * - PuppeteerPlugin: puppeteer, puppeteer-extra, user-agents
+ * - SpiderPlugin: puppeteer, puppeteer-extra, user-agents (bundles Puppeteer + S3Queue + TTL)
  * - ReplicatorPlugin: pg, @google-cloud/bigquery, @libsql/client, etc.
  * - CloudInventoryPlugin: @aws-sdk/*, @google-cloud/*, @azure/*
  * - QueueConsumerPlugin: amqplib, @aws-sdk/client-sqs
@@ -91,6 +92,7 @@ export const lazyLoadPlugin = async (pluginName) => {
 
     // Browser automation (puppeteer, puppeteer-extra)
     PuppeteerPlugin: () => import('./puppeteer.plugin.js').then(m => m.PuppeteerPlugin),
+    SpiderPlugin: () => import('./spider.plugin.js').then(m => m.SpiderPlugin),
     CookieFarmPlugin: () => import('./cookie-farm.plugin.js').then(m => m.CookieFarmPlugin),
     CookieFarmSuitePlugin: () => import('./cookie-farm-suite.plugin.js').then(m => m.CookieFarmSuitePlugin),
     ReconPlugin: () => import('./recon.plugin.js').then(m => m.ReconPlugin),
@@ -139,6 +141,7 @@ export const loadCookieFarmSuitePlugin = () => lazyLoadPlugin('CookieFarmSuitePl
 export const loadGeoPlugin = () => lazyLoadPlugin('GeoPlugin');
 export const loadMLPlugin = () => lazyLoadPlugin('MLPlugin');
 export const loadPuppeteerPlugin = () => lazyLoadPlugin('PuppeteerPlugin');
+export const loadSpiderPlugin = () => lazyLoadPlugin('SpiderPlugin');
 export const loadCloudInventoryPlugin = () => lazyLoadPlugin('CloudInventoryPlugin');
 export const loadReplicatorPlugin = () => lazyLoadPlugin('ReplicatorPlugin');
 export const loadReconPlugin = () => lazyLoadPlugin('ReconPlugin');
@@ -176,6 +179,7 @@ export { BackupPlugin } from './backup.plugin.js';
 export { CloudInventoryPlugin } from './cloud-inventory.plugin.js';
 export { KubernetesInventoryPlugin } from './kubernetes-inventory.plugin.js';
 export { PuppeteerPlugin } from './puppeteer.plugin.js';
+export { SpiderPlugin } from './spider.plugin.js';
 export { CookieFarmPlugin } from './cookie-farm.plugin.js';
 export { CookieFarmSuitePlugin } from './cookie-farm-suite.plugin.js';
 export { ReconPlugin } from './recon.plugin.js';

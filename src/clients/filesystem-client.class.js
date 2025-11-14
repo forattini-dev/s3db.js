@@ -56,6 +56,8 @@ export class FileSystemClient extends EventEmitter {
 
     // Normalize basePath to absolute path
     this.basePath = path.resolve(this.basePath);
+    const encodedBasePath = encodeURI(this.basePath);
+    this.connectionString = `file://${encodedBasePath}`;
 
     // Get or create shared storage for this basePath
     // This allows multiple FileSystemClient instances to share the same data (simulating S3 persistence)
