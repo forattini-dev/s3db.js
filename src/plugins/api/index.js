@@ -372,12 +372,21 @@ export class ApiPlugin extends Plugin {
       },
 
       // Legacy CSP config (DEPRECATED - use security.contentSecurityPolicy)
-      csp: {
-        enabled: options.csp?.enabled || false,
-        directives: options.csp?.directives || {},
-        reportOnly: options.csp?.reportOnly || false,
-        reportUri: options.csp?.reportUri || null
-      },
+      csp: (() => {
+        if (options.csp) {
+          console.warn(
+            '[ApiPlugin] DEPRECATED: The "csp" option is deprecated. ' +
+            'Use "security.contentSecurityPolicy" instead: { security: { contentSecurityPolicy: { enabled: true, directives: {...} } } }. ' +
+            'This will be removed in v17.0.'
+          );
+        }
+        return {
+          enabled: options.csp?.enabled || false,
+          directives: options.csp?.directives || {},
+          reportOnly: options.csp?.reportOnly || false,
+          reportUri: options.csp?.reportUri || null
+        };
+      })(),
 
       // Custom global middlewares
       middlewares: options.middlewares || [],

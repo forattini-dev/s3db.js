@@ -597,6 +597,15 @@ export class MetricsPlugin extends Plugin {
 
     const resourceNamesOption = resourceNames || {};
     const legacyResourceOption = resources || {};
+
+    if (Object.keys(legacyResourceOption).length > 0) {
+      console.warn(
+        '[MetricsPlugin] DEPRECATED: The "resources" option is deprecated. ' +
+        'Use "resourceNames" instead: { resourceNames: { metrics: "...", errors: "...", performance: "..." } }. ' +
+        'This will be removed in v17.0.'
+      );
+    }
+
     const resourceOverrides = {
       metrics: resourceNamesOption.metrics ?? legacyResourceOption.metrics,
       errors: resourceNamesOption.errors ?? legacyResourceOption.errors,
