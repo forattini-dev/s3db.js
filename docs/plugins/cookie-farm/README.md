@@ -2232,7 +2232,7 @@ suite.setProcessor(async (job, context, { cookieFarm }) => {
 
 ### Related Plugins
 - **[Puppeteer Plugin](../puppeteer/README.md)** – Browser automation, pooling, proxy configuration, anti-bot detection
-- **[Spider Plugin](../spider.md)** – Web crawling suite combining Puppeteer with S3 queue and TTL for production scraping
+- **[Spider Plugin](../spider/)** – Web crawling suite combining Puppeteer with S3 queue and TTL for production scraping
 
 ### Supporting Plugins
 - [S3 Queue Plugin](../s3-queue/) – Queue infrastructure, worker pool, retry logic, DLQ handling

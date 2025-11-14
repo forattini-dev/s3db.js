@@ -57,7 +57,7 @@ Plugin documentation quality is indicated with badges:
 | **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
 | **[🔄 Replicator](./replicator/)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator/) |
 | **[🔒 S3Queue](./s3-queue/)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue/) |
-| **[🕷️ Spider Suite](./spider.md)** | Crawling bundle (Puppeteer + S3 queue + TTL) | Web scraping pipelines, sitemap refresh, link audits | [→](./spider.md) |
+| **[🕷️ Spider Suite](./spider/)** | Crawling bundle (Puppeteer + S3 queue + TTL) | Web scraping pipelines, sitemap refresh, link audits | [→](./spider/README.md) |
 | **[🍪 Cookie Farm Suite](./cookie-farm/README.md)** | Persona farming bundle (Cookie Farm + Puppeteer + Queue) | Anti-bot personas, warmup workflows, session rotation | [→](./cookie-farm/README.md) |
 | **[🎭 Puppeteer](./puppeteer/README.md)** | Headless browser automation with anti-detection & pooling | Scraping, testing, cookie farming | [→](./puppeteer/README.md) |
 | **[⏰ Scheduler](./scheduler/)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler/) |
