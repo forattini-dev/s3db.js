@@ -1,6 +1,6 @@
 # 📧 SMTP Plugin
 
-> **Enterprise-grade email delivery with support for 4 major providers plus in-process SMTP server. Sends emails, processes webhooks, and tracks delivery status in S3DB.**
+> **Enterprise-grade email delivery with 3 operating modes: relay via email providers (SendGrid, AWS SES, Mailgun, Postmark), relay via custom SMTP server, or run as an SMTP server that clients connect to. Processes webhooks, templates, and tracks delivery status in S3DB.**
 >
 > **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
 
@@ -8,7 +8,7 @@
 
 ## ⚡ TLDR
 
-**Multi-provider email sending (SendGrid, AWS SES, Mailgun, Postmark) with automatic retry, templates, webhooks, and S3DB storage.**
+**Three ways to send emails: (1) Via email providers (SendGrid/SES/Mailgun/Postmark), (2) Via custom SMTP relay server, or (3) As an in-process SMTP server. Automatic retry, templates, webhooks, and S3DB storage.**
 
 **1 line to get started:**
 ```javascript
@@ -43,13 +43,13 @@ const result = await smtpPlugin.sendEmail({
 ```
 
 **Key features:**
-- ✅ **4 Email Providers** - SendGrid, AWS SES, Mailgun, Postmark
-- ✅ **Webhook Processing** - Bounce, complaint, delivery, open, click events
+- ✅ **3 Operating Modes** - Provider relay (SendGrid/SES/Mailgun/Postmark), custom SMTP relay, in-process SMTP server
+- ✅ **Webhook Processing** - Bounce, complaint, delivery, open, click events (provider relay mode)
 - ✅ **Handlebars Templates** - Custom helpers, partials, caching
 - ✅ **Automatic Retry** - Exponential backoff with jitter
 - ✅ **Rate Limiting** - Token bucket algorithm with backpressure
 - ✅ **S3DB Integration** - Email status tracking and querying
-- ✅ **Server Mode** - Receive incoming emails from external systems
+- ✅ **SMTP Server Mode** - Receive incoming connections from SMTP clients
 
 ---
 
@@ -143,9 +143,18 @@ pnpm install mailparser smtp-server
 
 ## Usage Journey
 
+**Choose your operating mode:**
+- **Level 1-4:** Relay Mode (sending emails via provider or custom SMTP)
+- **Server Mode:** Running SMTP server that receives incoming emails from SMTP clients
+
 ### Level 1: Basic Email Sending
 
-Start with simple email sending via an external provider.
+Start with simple email sending. Pick any relay option:
+- **Option A:** Use external provider (SendGrid, AWS SES, Mailgun, Postmark)
+- **Option B:** Use custom SMTP relay server
+- **Option C:** Later: Run Server Mode to receive emails
+
+Example with SendGrid:
 
 ```javascript
 import { SMTPPlugin } from 's3db.js/plugins';
@@ -217,9 +226,9 @@ console.log('Templated email sent:', result.id);
 
 ---
 
-### Level 3: Webhook Processing
+### Level 3: Webhook Processing (Provider Relay Mode Only)
 
-Handle provider events (bounce, complaint, delivery, open, click).
+Handle provider events (bounce, complaint, delivery, open, click). **Note:** Webhooks are only available when using provider relay mode (SendGrid, AWS SES, Mailgun, Postmark). Custom SMTP relay and Server mode don't support webhooks.
 
 ```javascript
 // Register handlers for webhook events
@@ -469,10 +478,10 @@ new SMTPPlugin({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `mode` | string | `'relay'` | Operating mode: `'relay'` (send via provider) or `'server'` (listen for incoming) |
-| `driver` | string | `'sendgrid'` | Email driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark' |
+| `mode` | string | `'relay'` | Operating mode: `'relay'` (send via provider/custom server) or `'server'` (listen for incoming) |
+| `driver` | string | `'sendgrid'` | Email driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark', or 'smtp' (custom SMTP server) |
 | `from` | string | — | Sender email address (required for relay mode) |
-| `config` | object | — | Provider-specific configuration object |
+| `config` | object | — | Driver-specific configuration (varies by driver: API keys for providers, host/port/auth for SMTP) |
 | `maxRetries` | number | `3` | Maximum retry attempts for failed emails |
 | `retryDelay` | number | `1000` | Initial retry delay in milliseconds |
 | `retryMultiplier` | number | `1.5` | Exponential backoff multiplier for retries |
@@ -589,29 +598,63 @@ new SMTPPlugin({
 
 ---
 
+### Use Case 5: Custom SMTP Relay (Self-Hosted)
+
+Relay through your own SMTP server instead of using a third-party provider.
+
+```javascript
+new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',                              // Use custom SMTP relay
+  from: 'noreply@yourdomain.com',
+  config: {
+    host: 'mail.yourdomain.com',              // SMTP server host
+    port: 587,                                  // SMTP port (25, 465, 587, 2525)
+    secure: true,                               // Use TLS/SSL
+    auth: {
+      user: process.env.SMTP_USER,            // SMTP username
+      pass: process.env.SMTP_PASSWORD         // SMTP password
+    }
+  },
+  emailResource: 'emails',
+  rateLimit: 300
+})
+```
+
+**Why this configuration:**
+- Full control over email routing
+- Works with any SMTP server (Postfix, Exim, Exchange, etc.)
+- No vendor lock-in or API keys needed
+- Ideal for on-premise deployments
+
+---
+
 ## 📬 Server Mode & Storage Architecture
 
 ### Server Mode Overview
 
-The SMTP Plugin supports two operating modes:
+The SMTP Plugin supports three operating modes:
 
-1. **Relay Mode** (default) - Send emails via external SMTP providers
-2. **Server Mode** - Run an in-process SMTP server to RECEIVE emails from other applications
+1. **Provider Relay Mode** - Send emails via SendGrid, AWS SES, Mailgun, or Postmark
+2. **Custom SMTP Relay Mode** - Send emails through your own SMTP server
+3. **Server Mode** - Run an in-process SMTP server that SMTP clients connect to
 
-In Server Mode, you can:
-- ✅ Receive emails from external applications
-- ✅ Process emails with custom validation
-- ✅ Store emails in S3DB with full metadata
-- ✅ Trigger webhooks when emails arrive
-- ✅ Integrate with legacy systems via SMTP
-- ✅ Implement custom spam filters
+In Server Mode:
+- ✅ Run an SMTP server that SMTP clients connect to
+- ✅ Receive emails from external applications (SMTP clients, mail clients, etc.)
+- ✅ Process emails with custom validation via callbacks
+- ✅ Store received emails in S3DB with full metadata
+- ✅ Trigger webhooks/events when emails arrive
+- ✅ Integrate with legacy systems via SMTP protocol
+- ✅ Implement custom spam/virus filters
+- ✅ Act as a mail gateway for your network
 
 ### Enabling Server Mode
 
 ```javascript
 const plugin = new SMTPPlugin({
   mode: 'server',                    // Enable server mode
-  serverPort: 25,                    // SMTP port (requires sudo)
+  serverPort: 25,                    // SMTP port (port 25 requires sudo, use 2525 for unprivileged)
   serverHost: '0.0.0.0',            // Listen on all interfaces
   serverAuth: {
     username: 'postmaster',
@@ -637,6 +680,22 @@ const plugin = new SMTPPlugin({
     return true;
   }
 });
+
+await db.usePlugin(plugin);
+
+// Now SMTP clients can connect like this:
+// > telnet localhost 25
+// 220 server.example.com SMTP
+// > EHLO client.example.com
+// 250 Hello client.example.com
+// > MAIL FROM: <sender@example.com>
+// 250 OK
+// > RCPT TO: <receiver@yourdomain.com>
+// 250 OK
+// > DATA
+// > ... email content ...
+// > .
+// 250 Message accepted
 ```
 
 ### Server Mode Configuration
@@ -1242,6 +1301,36 @@ const plugin = new SMTPPlugin({
 
 ---
 
+**Q: What's the difference between the three operating modes?**
+
+A: Three modes for different use cases:
+
+1. **Provider Relay Mode** (SendGrid/SES/Mailgun/Postmark):
+   - ✅ Best for: Most applications, transactional emails
+   - ✅ Webhooks: Yes (bounce, complaint, delivery, open, click)
+   - ✅ Features: Best-in-class delivery tracking, analytics
+   - ❌ Requires: API credentials
+
+2. **Custom SMTP Relay Mode** (custom SMTP server):
+   - ✅ Best for: On-premise, self-hosted email servers
+   - ✅ Features: Full control, no vendor lock-in
+   - ❌ Webhooks: No (no provider events)
+   - ❌ Delivery tracking: Limited to SMTP responses
+
+3. **Server Mode** (receiving emails):
+   - ✅ Best for: Email gateways, mail servers, legacy system integration
+   - ✅ SMTP clients can connect to your app
+   - ✅ Store emails in S3DB with full validation
+   - ❌ Not for sending emails via providers
+
+**Which should I choose?**
+- Starting out? → Provider Relay (easiest)
+- Self-hosted infrastructure? → Custom SMTP Relay
+- Need to receive emails? → Server Mode
+- Hybrid? → Combine both Relay (sending) and Server (receiving)
+
+---
+
 ### Advanced
 
 **Q: How do I implement custom email validation?**
@@ -1336,6 +1425,75 @@ for (let user of users) {
   );
 }
 ```
+
+---
+
+**Q: How do I relay emails through my own SMTP server?**
+
+A: Use Custom SMTP Relay Mode with driver: 'smtp':
+
+```javascript
+const plugin = new SMTPPlugin({
+  mode: 'relay',
+  driver: 'smtp',                    // Custom SMTP server
+  from: 'app@yourdomain.com',
+  config: {
+    host: 'mail.yourdomain.com',    // Your mail server
+    port: 587,                        // TLS port (or 465 for SMTPS, 25 for plain)
+    secure: true,                     // Use TLS
+    auth: {
+      user: 'your-smtp-user',
+      pass: 'your-smtp-password'
+    }
+  }
+});
+
+// Send emails through your own server
+await plugin.sendEmail({
+  to: 'recipient@example.com',
+  subject: 'Email via custom SMTP',
+  body: 'Content'
+});
+```
+
+Works with any SMTP server (Postfix, Exim, Microsoft Exchange, etc.).
+
+---
+
+**Q: How do SMTP clients connect to Server Mode?**
+
+A: Server Mode runs an SMTP server. SMTP clients (mail clients, apps, etc.) connect to it on the configured port:
+
+```javascript
+// Start Server Mode in your app
+const plugin = new SMTPPlugin({
+  mode: 'server',
+  serverPort: 25,                    // Listen on port 25 (or 2525, etc.)
+  serverHost: '0.0.0.0',            // Listen on all interfaces
+  serverAuth: {
+    username: 'postmaster',
+    password: process.env.SMTP_PASSWORD
+  },
+  emailResource: 'received_emails'
+});
+
+await db.usePlugin(plugin);
+```
+
+Now SMTP clients can connect to your app:
+
+```bash
+# Using telnet to test
+telnet localhost 25
+
+# Using mail client settings:
+# Host: your-app-domain.com
+# Port: 25 (or 2525)
+# Auth: postmaster / password
+# Email will be received and stored in S3DB
+```
+
+Outlook, Gmail apps, scripts (nodemailer, Python smtplib, etc.) can all send to your SMTP server.
 
 ---
 
