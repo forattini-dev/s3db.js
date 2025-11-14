@@ -22,7 +22,7 @@ import { idGenerator } from "../concerns/id.js";
 import { metadataEncode, metadataDecode } from "../concerns/metadata-encoding.js";
 import { ConnectionString } from "../connection-string.class.js";
 import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "../errors.js";
-import { OperationsPool } from "../concerns/operations-pool.js";
+import { TasksPool } from "../concerns/tasks-pool.js";
 import { AdaptiveTuning } from "../concerns/adaptive-tuning.js";
 
 export class S3Client extends EventEmitter {
@@ -109,7 +109,7 @@ export class S3Client extends EventEmitter {
       poolConfig.autotune = tuner;
     }
 
-    const pool = new OperationsPool(poolConfig);
+    const pool = new TasksPool(poolConfig);
 
     // Forward pool events to client
     pool.on('pool:taskStarted', (task) => this.emit('pool:taskStarted', task));

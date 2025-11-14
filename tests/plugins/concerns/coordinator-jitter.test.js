@@ -37,8 +37,9 @@ describe('CoordinatorPlugin Startup Jitter', () => {
   let db;
 
   beforeEach(async () => {
+    const uniquePath = `memory://test-coordinator-jitter/${Date.now()}-${Math.random()}`;
     db = new Database({
-      connectionString: 'memory://test-coordinator-jitter/db'
+      connectionString: uniquePath
     });
     await db.connect();
   });

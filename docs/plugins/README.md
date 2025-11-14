@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Extend your database with powerful plugins</strong><br>
-  <em>23 production-ready plugins • Zero core modifications • Infinite possibilities</em>
+  <em>24 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
 
 ---
@@ -62,6 +62,7 @@ Plugin documentation quality is indicated with badges:
 | **[🎭 Puppeteer](./puppeteer/README.md)** | Headless browser automation with anti-detection & pooling | Scraping, testing, cookie farming | [→](./puppeteer/README.md) |
 | **[⏰ Scheduler](./scheduler/)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler/) |
 | **[🤖 State Machine](./state-machine/)** | Finite state machine workflows | Business processes, automation | [→](./state-machine/) |
+| **[📧 SMTP](./smtp.md)** | Enterprise email delivery with 4 providers & webhooks | Transactional email, notifications, email server mode | [→](./smtp.md) |
 | **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
 | **[⏳ TTL](./ttl/)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl/) |
 | **[🎯 Vector](./vector/)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector/) |
