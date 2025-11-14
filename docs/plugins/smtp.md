@@ -1,6 +1,8 @@
 # 📧 SMTP Plugin
 
-> **Enterprise-grade email delivery with 3 operating modes: relay via email providers (SendGrid, AWS SES, Mailgun, Postmark), relay via custom SMTP server, or run as an SMTP server that clients connect to. Processes webhooks, templates, and tracks delivery status in S3DB.**
+> **Enterprise-grade email delivery with relay and server modes. Send emails via external SMTP, store delivery status in S3DB, process webhooks (SendGrid, AWS SES, Mailgun, Postmark), and run as in-process SMTP server to receive emails from SMTP clients.**
+>
+> **⚠️ Note:** This documentation describes planned architecture. Current implementation supports relay mode with provider webhooks and server mode. Multi-relay and custom SMTP drivers coming in future releases.
 >
 > **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
 
@@ -113,6 +115,22 @@ const result = await smtpPlugin.sendEmail({
 console.log(`Email sent with ID: ${result.id}`);
 await db.disconnect();
 ```
+
+---
+
+## 📋 Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Relay Mode** | ✅ Implemented | Send emails via SMTP (nodemailer) |
+| **Provider Webhooks** | ✅ Implemented | SendGrid, AWS SES, Mailgun, Postmark |
+| **Server Mode** | ✅ Implemented | In-process SMTP server, receive emails |
+| **Templates (Handlebars)** | ✅ Implemented | YAML front matter, custom helpers |
+| **Rate Limiting** | ✅ Implemented | Per-second token bucket |
+| **Automatic Retry** | ✅ Implemented | Exponential backoff with jitter |
+| **Custom SMTP Relay** | 🚧 Planned | driver: 'smtp' with config object |
+| **Multi-Relay** | 🚧 Planned | Failover, load balancing, domain routing |
+| **Driver/Config Pattern** | 🚧 Planned | Standardized `{ driver, config }` format |
 
 ---
 
@@ -474,12 +492,14 @@ new SMTPPlugin({
 })
 ```
 
-**Detailed Options Table:**
+**⚠️ Note:** Current implementation uses direct SMTP configuration (host, port, auth). The `driver`/`config` pattern below is **planned** for future releases. See [Current Configuration](#current-relay-mode-configuration) below for actual usage today.
+
+**Detailed Options Table (Planned Format):**
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `mode` | string | `'relay'` | Operating mode: `'relay'` (send via provider/custom server) or `'server'` (listen for incoming) |
-| `driver` | string | `'sendgrid'` | Email driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark', or 'smtp' (custom SMTP server) |
+| `mode` | string | `'relay'` | Operating mode: `'relay'` (send via SMTP) or `'server'` (listen for incoming) |
+| `driver` | string | — | **[Planned]** Email driver: 'sendgrid', 'aws-ses', 'mailgun', 'postmark', or 'smtp' |
 | `from` | string | — | Sender email address (required for relay mode) |
 | `config` | object | — | Driver-specific configuration (varies by driver: API keys for providers, host/port/auth for SMTP) |
 | `maxRetries` | number | `3` | Maximum retry attempts for failed emails |
@@ -491,6 +511,57 @@ new SMTPPlugin({
 | `templateCacheEnabled` | boolean | `true` | Enable template compilation caching |
 | `serverPort` | number | `25` | SMTP server port (for server mode) |
 | `verbose` | boolean | `false` | Enable verbose logging |
+
+---
+
+## Current Relay Mode Configuration
+
+**How to configure relay mode TODAY** (until planned `driver`/`config` pattern is implemented):
+
+```javascript
+new SMTPPlugin({
+  mode: 'relay',                               // Send mode
+  host: 'smtp.sendgrid.net',                   // SMTP server host
+  port: 587,                                    // SMTP port (465 for TLS, 587 for STARTTLS)
+  secure: false,                                // false for STARTTLS, true for implicit TLS
+  auth: {
+    user: 'apikey',                            // Username
+    pass: process.env.SENDGRID_API_KEY         // Password or API key
+  },
+
+  // Optional webhook handling
+  webhookProvider: 'sendgrid',                 // For webhook processing
+  webhookSecret: process.env.SENDGRID_WEBHOOK_SECRET,
+
+  // Optional rate limiting
+  rateLimit: {
+    maxPerSecond: 100,                         // Emails per second
+    maxQueueDepth: 10000                       // Queue limit
+  },
+
+  // Optional retry policy
+  retryPolicy: {
+    maxAttempts: 5,
+    initialDelay: 1000,
+    maxDelay: 60000,
+    multiplier: 2,
+    jitter: 0.1
+  },
+
+  emailResource: 'emails',                     // S3DB resource name
+  verbose: false
+})
+```
+
+**Common SMTP Server Configurations:**
+
+| Service | Host | Port | Secure | Auth |
+|---------|------|------|--------|------|
+| **SendGrid** | smtp.sendgrid.net | 587 | false | user: 'apikey', pass: API_KEY |
+| **AWS SES** | email-smtp.us-east-1.amazonaws.com | 587 | false | user: SMTP_USER, pass: SMTP_PASSWORD |
+| **Gmail** | smtp.gmail.com | 587 | false | user: email, pass: app_password |
+| **Mailgun** | smtp.mailgun.org | 587 | false | user: postmaster@domain, pass: API_KEY |
+| **Postmark** | smtp.postmarkapp.com | 587 | false | user: server_token, pass: server_token |
 
 ---
 
@@ -600,6 +671,8 @@ new SMTPPlugin({
 
 ### Use Case 5: Custom SMTP Relay (Self-Hosted)
 
+**🚧 Planned Feature** - Currently implement via direct SMTP configuration until custom driver support is available.
+
 Relay through your own SMTP server instead of using a third-party provider.
 
 ```javascript
@@ -630,6 +703,8 @@ new SMTPPlugin({
 ---
 
 ### Use Case 6: Multi-Relay (Dynamic Routing)
+
+**🚧 Planned Feature** - Coming in future releases. For now, instantiate multiple plugin instances.
 
 Route emails through different SMTP relays based on domain, volume, or other logic.
 
