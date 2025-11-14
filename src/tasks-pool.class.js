@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import { cpus } from 'os'
 import { setTimeout as delay } from 'timers/promises'
 import { nanoid } from 'nanoid'
-import { TaskExecutor } from '../concurrency/task-executor.interface.js'
+import { TaskExecutor } from './concurrency/task-executor.interface.js'
 
 const scheduleDrain =
   typeof queueMicrotask === 'function'
@@ -439,7 +439,7 @@ export class TasksPool extends EventEmitter {
     return (
       !this.paused &&
       !this.stopped &&
-      this.active.size < this.concurrency &&
+      this.active.size < this.effectiveConcurrency &&
       this.queue.length > 0
     )
   }
@@ -803,10 +803,22 @@ export class TasksPool extends EventEmitter {
    * @param {number} n - New concurrency limit (must be >= 1)
    */
   setConcurrency (n) {
-    if (n < 1) {
+    if (n === 'auto') {
+      this.autoConcurrency = true
+      this._configuredConcurrency = 'auto'
+      this._effectiveConcurrency = this._defaultAutoConcurrency()
+      this.processNext()
+      return
+    }
+
+    if (typeof n !== 'number' || n < 1) {
       throw new Error('Concurrency must be >= 1')
     }
-    this.concurrency = n
+
+    const normalized = this._normalizeConcurrency(n)
+    this.autoConcurrency = false
+    this._configuredConcurrency = normalized
+    this._effectiveConcurrency = normalized
     this.processNext()
   }
 
@@ -829,6 +841,7 @@ export class TasksPool extends EventEmitter {
       queueSize: this.queue.length,
       activeCount: this.active.size,
       concurrency: this.concurrency,
+      effectiveConcurrency: this.effectiveConcurrency,
       paused: this.paused,
       stopped: this.stopped,
       rolling: this.getRollingMetrics()
@@ -958,7 +971,7 @@ export class TasksPool extends EventEmitter {
   _computeRetryDelay (task, attempt, error) {
     const base = this.retryDelay * Math.pow(2, attempt)
     const saturation =
-      (this.queue.length + this.active.size) / Math.max(1, this.concurrency)
+      (this.queue.length + this.active.size) / Math.max(1, this.effectiveConcurrency)
 
     if (saturation >= this.retryStrategy.pressureSkipThreshold) {
       return null

@@ -98,7 +98,13 @@ export class PerformanceMonitor {
           `  Performance: ${snapshot.performance.avgExecution.toFixed(0)}ms avg, ${snapshot.performance.p95Execution.toFixed(0)}ms p95`
         )
       }
-      console.log(`  Concurrency: ${snapshot.taskQueue.concurrency}`)
+      const configured = snapshot.taskQueue.concurrency
+      const effective = snapshot.taskQueue.effectiveConcurrency
+      const concurrencyLabel =
+        configured && effective && configured !== effective
+          ? `${configured} (effective ${effective})`
+          : configured ?? effective ?? 'n/a'
+      console.log(`  Concurrency: ${concurrencyLabel}`)
       console.log(`  Memory: ${(snapshot.system.memoryUsage.heapUsed / 1024 / 1024).toFixed(0)}MB`)
     }
 
@@ -125,7 +131,14 @@ export class PerformanceMonitor {
         totalProcessed: last.taskQueue.processedCount - first.taskQueue.processedCount,
         totalErrors: last.taskQueue.errorCount - first.taskQueue.errorCount,
         avgQueueSize: this._avg(this.snapshots.map((s) => s.taskQueue?.queueSize || 0)),
-        avgConcurrency: this._avg(this.snapshots.map((s) => s.taskQueue?.concurrency || 0))
+        avgConcurrency: this._avg(
+          this.snapshots.map(
+            (s) =>
+              s.taskQueue?.effectiveConcurrency ??
+              s.taskQueue?.concurrency ??
+              0
+          )
+        )
       }
     }
 

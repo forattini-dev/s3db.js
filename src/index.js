@@ -62,7 +62,7 @@ export { CronManager, getCronManager, resetCronManager, createCronManager, inter
 // =============================================================================
 
 export { TaskExecutor } from './concurrency/index.js'
-export { TasksPool } from './concerns/tasks-pool.js'
+export { TasksPool } from './tasks-pool.class.js'
 export { AdaptiveTuning } from './concerns/adaptive-tuning.js'
 export { TasksRunner } from './tasks-runner.class.js'
 export { Benchmark, benchmark } from './concerns/benchmark.js'

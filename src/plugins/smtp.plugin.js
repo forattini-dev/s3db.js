@@ -139,6 +139,7 @@ export class SMTPPlugin extends Plugin {
     // Rate limit tracking
     this._rateLimitTokens = this.rateLimit.maxPerSecond;
     this._lastRateLimitRefill = Date.now();
+    this._rateLimitCarry = 0;
 
     // Database reference (set by database on plugin install)
     this.database = null;
@@ -587,10 +588,16 @@ export class SMTPPlugin extends Plugin {
     const tokensToAdd = elapsed * this.rateLimit.maxPerSecond;
 
     if (tokensToAdd > 0) {
-      this._rateLimitTokens = Math.min(
-        this.rateLimit.maxPerSecond,
-        this._rateLimitTokens + tokensToAdd
-      );
+      const accumulated = this._rateLimitCarry + tokensToAdd;
+      const wholeTokens = Math.floor(accumulated);
+      this._rateLimitCarry = accumulated - wholeTokens;
+
+      if (wholeTokens > 0) {
+        this._rateLimitTokens = Math.min(
+          this.rateLimit.maxPerSecond,
+          this._rateLimitTokens + wholeTokens
+        );
+      }
       this._lastRateLimitRefill = now;
     }
 

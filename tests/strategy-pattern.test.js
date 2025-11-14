@@ -3,7 +3,7 @@
  */
 
 import { TasksRunner } from '../src/tasks-runner.class.js'
-import { TasksPool } from '../src/concerns/tasks-pool.js'
+import { TasksPool } from '../src/tasks-pool.class.js'
 import { TaskExecutor } from '../src/concurrency/index.js'
 
 describe('TaskExecutor Strategy Pattern', () => {
