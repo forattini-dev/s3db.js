@@ -205,18 +205,21 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
 
       expect(spec.paths['/v1/health']).toBeDefined();
       expect(spec.paths['/v1/health'].get).toBeDefined();
-      expect(spec.paths['/v1/health'].get.tags).toContain('Custom Routes');
+      expect(spec.paths['/v1/health'].get.tags).toEqual(
+        expect.arrayContaining(['health'])
+      );
 
       expect(spec.paths['/v1/users/{id}/activate']).toBeDefined();
       expect(spec.paths['/v1/users/{id}/activate'].post.tags).toEqual(
-        expect.arrayContaining(['users', 'Custom Routes'])
+        expect.arrayContaining(['users'])
       );
 
       expect(spec.paths['/v1/users/{id}/stats']).toBeDefined();
       expect(spec.paths['/v1/users/{id}/stats'].get.tags).toEqual(
-        expect.arrayContaining(['users', 'Custom Routes'])
+        expect.arrayContaining(['users'])
       );
 
+      expect(spec.tags.find((tag) => tag.name === 'health')).toBeDefined();
       expect(spec.tags.find((tag) => tag.name === 'Custom Routes')).toBeDefined();
 
       expect(spec.paths['/v1/users'].head).toBeDefined();

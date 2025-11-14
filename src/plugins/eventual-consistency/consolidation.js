@@ -9,6 +9,7 @@ import { idGenerator } from "../../concerns/id.js";
 import { getCohortInfo, createSyntheticSetTransaction, ensureCohortHour } from "./utils.js";
 import { PluginError } from '../../errors.js';
 import { getCronManager } from "../../concerns/cron-manager.js";
+import { get as lodashGet, set as lodashSet } from 'lodash-es';
 
 /**
  * Start consolidation timer for a handler
@@ -416,7 +417,6 @@ export async function consolidateRecord(
 
     // Consolidate each fieldPath group separately
     const consolidatedValues = {};
-    const lodash = await import('lodash-es');
 
     // Get current record to extract existing values for nested paths
     const [currentRecordOk, currentRecordErr, currentRecord] = await tryFn(() =>
@@ -437,7 +437,7 @@ export async function consolidateRecord(
         // No applied transactions yet - use value from record (first consolidation)
         // This happens when there's an initial value in the record before any consolidation
         if (currentRecordOk && currentRecord) {
-          const recordValue = lodash.get(currentRecord, fieldPath, 0);
+          const recordValue = lodashGet(currentRecord, fieldPath, 0);
           if (typeof recordValue === 'number') {
             pathCurrentValue = recordValue;
           }
@@ -483,7 +483,7 @@ export async function consolidateRecord(
       // Create a minimal record object with just our field
       const minimalRecord = { id: originalId };
       for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
-        lodash.set(minimalRecord, fieldPath, value);
+        lodashSet(minimalRecord, fieldPath, value);
       }
 
       // Try to update (will fail, handled below)
@@ -496,7 +496,7 @@ export async function consolidateRecord(
     } else {
       // Record exists - apply all consolidated values using lodash.set
       for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
-        lodash.set(record, fieldPath, value);
+        lodashSet(record, fieldPath, value);
       }
 
       // Update the original record with all changes
@@ -510,7 +510,7 @@ export async function consolidateRecord(
     }
 
     const consolidatedValue = consolidatedValues[config.field] ||
-                             (record ? lodash.get(record, config.field, 0) : 0);
+                             (record ? lodashGet(record, config.field, 0) : 0);
 
     // Debug log removed - was polluting test output
 

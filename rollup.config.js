@@ -158,6 +158,12 @@ export default {
     '@aws-sdk/client-waf',
     '@aws-sdk/client-wafv2',
 
+    // Peer dependencies - SMTP plugin (user installs - optional)
+    'nodemailer',
+    'mailparser',
+    'smtp-server',
+    'handlebars',
+
     // Peer dependencies - Other plugins (user installs - optional)
     '@google-cloud/bigquery',
     '@google-cloud/compute',

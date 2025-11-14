@@ -48,7 +48,7 @@ export class TaskManager extends EventEmitter {
    * Create TaskManager instance
    *
    * @param {Object} options - Configuration options
-   * @param {number} [options.concurrency=100] - Max concurrent tasks
+   * @param {number} [options.concurrency=5] - Max concurrent tasks
    * @param {number} [options.retries=3] - Max retry attempts
    * @param {number} [options.retryDelay=1000] - Base retry delay (ms)
    * @param {number} [options.timeout=30000] - Per-task timeout (ms)
@@ -57,7 +57,7 @@ export class TaskManager extends EventEmitter {
   constructor (options = {}) {
     super()
 
-    this.concurrency = options.concurrency || 100
+    this.concurrency = options.concurrency || 5
     this.retries = options.retries ?? 3
     this.retryDelay = options.retryDelay || 1000
     this.timeout = options.timeout ?? 30000

@@ -1,4 +1,4 @@
-import { ConnectionError, AuthenticationError } from './errors.js';
+import { ConnectionError, AuthenticationError, SMTPError, RateLimitError } from './errors.js';
 
 /**
  * SMTPConnectionManager - Manages both relay and server mode connections
@@ -297,6 +297,3 @@ export class SMTPConnectionManager {
     };
   }
 }
-
-// Import errors for use in this module
-import { SMTPError, RateLimitError } from './errors.js';

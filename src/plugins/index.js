@@ -56,6 +56,7 @@ export * from './state-machine.plugin.js'
 export * from './ttl.plugin.js'
 export * from './vector.plugin.js'
 export * from './ml.plugin.js'
+export * from './smtp.plugin.js'
 
 // NOTE: QueueConsumerPlugin removed from direct exports because it requires
 // peer dependencies (amqplib, @aws-sdk/client-sqs) via consumers/index.js.
@@ -103,6 +104,9 @@ export const lazyLoadPlugin = async (pluginName) => {
     // Backup (no external deps, but lazy to keep core small)
     BackupPlugin: () => import('./backup.plugin.js').then(m => m.BackupPlugin),
 
+    // SMTP (nodemailer, mailparser, smtp-server - optional)
+    SMTPPlugin: () => import('./smtp.plugin.js').then(m => m.SMTPPlugin),
+
     // Replicator (pg, @google-cloud/bigquery, @libsql/client, etc.)
     ReplicatorPlugin: () => import('./replicator.plugin.js').then(m => m.ReplicatorPlugin),
 
@@ -139,6 +143,7 @@ export const loadCloudInventoryPlugin = () => lazyLoadPlugin('CloudInventoryPlug
 export const loadReplicatorPlugin = () => lazyLoadPlugin('ReplicatorPlugin');
 export const loadReconPlugin = () => lazyLoadPlugin('ReconPlugin');
 export const loadKubernetesInventoryPlugin = () => lazyLoadPlugin('KubernetesInventoryPlugin');
+export const loadSMTPPlugin = () => lazyLoadPlugin('SMTPPlugin');
 export const loadQueueConsumerPlugin = () => lazyLoadPlugin('QueueConsumerPlugin');
 
 /**

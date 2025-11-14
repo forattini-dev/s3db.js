@@ -32,7 +32,8 @@ export class S3Client extends EventEmitter {
     AwsS3Client,
     connectionString,
     httpClientOptions = {},
-    operationsPool = { concurrency: 100 }, // Default concurrency: 100 (Separate OperationsPools per Database)
+    operationsPool = false, // Disabled by default (tests can opt-in)
+    operationPool
   }) {
     super();
     this.verbose = verbose;
@@ -48,9 +49,14 @@ export class S3Client extends EventEmitter {
     };
     this.client = AwsS3Client || this.createClient();
 
+    const poolOptions = typeof operationPool !== 'undefined' ? operationPool : operationsPool;
+
     // Initialize OperationsPool (ENABLED BY DEFAULT!)
-    this.operationsPoolConfig = this._normalizeOperationsPoolConfig(operationsPool);
+    this.operationsPoolConfig = this._normalizeOperationsPoolConfig(poolOptions);
     this.operationsPool = this.operationsPoolConfig.enabled ? this._createOperationsPool() : null;
+    // Legacy aliases (operationPool*)
+    this.operationPoolConfig = this.operationsPoolConfig;
+    this.operationPool = this.operationsPool;
   }
 
   /**
@@ -92,7 +98,7 @@ export class S3Client extends EventEmitter {
 
     // Handle 'auto' concurrency
     if (poolConfig.concurrency === 'auto') {
-      const tuner = new AdaptiveTuning(this.operationsPoolConfig.autotune);
+      const tuner = new AdaptiveTuning(this.operationsPoolConfig.autotune || {});
       poolConfig.concurrency = tuner.currentConcurrency;
       poolConfig.autotune = tuner;
     } else if (this.operationsPoolConfig.autotune) {
@@ -167,6 +173,37 @@ export class S3Client extends EventEmitter {
       .filter(Boolean);
 
     return { results, errors };
+  }
+
+  /**
+   * OperationsPool helpers exposed for monitoring/tests
+   */
+  getQueueStats() {
+    return this.operationsPool ? this.operationsPool.getStats() : null;
+  }
+
+  getAggregateMetrics(since = 0) {
+    return this.operationsPool ? this.operationsPool.getAggregateMetrics(since) : null;
+  }
+
+  async pausePool() {
+    if (!this.operationsPool) return null;
+    return this.operationsPool.pause();
+  }
+
+  resumePool() {
+    if (!this.operationsPool) return null;
+    this.operationsPool.resume();
+  }
+
+  async drainPool() {
+    if (!this.operationsPool) return null;
+    return this.operationsPool.drain();
+  }
+
+  stopPool() {
+    if (!this.operationsPool) return;
+    this.operationsPool.stop();
   }
 
   createClient() {
