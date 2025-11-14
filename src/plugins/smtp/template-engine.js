@@ -20,6 +20,8 @@ export class SMTPTemplateEngine {
 
     // Template cache
     this._templateCache = new Map();
+    this._pendingAsyncHelpers = [];
+    this._asyncPlaceholderIndex = 0;
   }
 
   /**
@@ -60,7 +62,7 @@ export class SMTPTemplateEngine {
 
       // Register custom helpers
       for (const [name, fn] of Object.entries(this.helpers)) {
-        hbs.registerHelper(name, fn);
+        hbs.registerHelper(name, this._wrapHelper(fn));
       }
 
       // Register partials
@@ -81,7 +83,7 @@ export class SMTPTemplateEngine {
         // Compile template
         try {
           template = hbs.compile(templateSource, {
-            strict: true,
+            strict: false,
             noEscape: false,
             preventIndent: false
           });
@@ -104,18 +106,33 @@ export class SMTPTemplateEngine {
       // Render template with data
       try {
         const rendered = template(data);
+        const finalOutput = await this._resolveAsyncPlaceholders(rendered);
 
         // Parse rendered output (subject, body, html)
-        return this._parseRenderedOutput(rendered);
+        return this._parseRenderedOutput(finalOutput);
       } catch (err) {
+        if (typeof err?.message === 'string' && err.message.toLowerCase().includes('parse error')) {
+          throw new TemplateError(`Handlebars compilation error: ${err.message}`, {
+            originalError: err,
+            template: templateName
+          });
+        }
         throw new TemplateError(`Handlebars render error: ${err.message}`, {
           originalError: err,
           template: templateName,
           suggestion: 'Check that all template variables are provided in data'
         });
+      } finally {
+        this._pendingAsyncHelpers = [];
       }
     } catch (err) {
       if (err instanceof TemplateError) throw err;
+      if (typeof err?.message === 'string' && err.message.toLowerCase().includes('parse error')) {
+        throw new TemplateError(`Handlebars compilation error: ${err.message}`, {
+          originalError: err,
+          template: templateName
+        });
+      }
       if (err.code === 'MODULE_NOT_FOUND') {
         throw new TemplateError('Handlebars library not installed', {
           suggestion: 'npm install handlebars'
@@ -255,7 +272,6 @@ export class SMTPTemplateEngine {
       const match = line.match(/^(\w+):\s*(.+)$/);
       if (match) {
         const [, key, value] = match;
-        // Simple value parsing (no nested objects)
         if (value === 'true') result[key] = true;
         else if (value === 'false') result[key] = false;
         else if (!isNaN(value)) result[key] = Number(value);
@@ -264,6 +280,54 @@ export class SMTPTemplateEngine {
     }
 
     return result;
+  }
+
+  /**
+   * Wrap helper to support async return values
+   * @private
+   */
+  _wrapHelper(fn) {
+    return (...args) => {
+      try {
+        const result = fn(...args);
+        if (result && typeof result.then === 'function') {
+          const placeholder = `__S3DB_TMPL_ASYNC_${this._asyncPlaceholderIndex++}__`;
+          this._pendingAsyncHelpers.push({
+            placeholder,
+            promise: Promise.resolve(result)
+          });
+          return placeholder;
+        }
+        return result;
+      } catch (err) {
+        throw err;
+      }
+    };
+  }
+
+  /**
+   * Resolve async helper placeholders in rendered output
+   * @private
+   */
+  async _resolveAsyncPlaceholders(rendered) {
+    if (typeof rendered !== 'string' || this._pendingAsyncHelpers.length === 0) {
+      return rendered;
+    }
+
+    let finalOutput = rendered;
+    for (const { placeholder, promise } of this._pendingAsyncHelpers) {
+      try {
+        const value = await promise;
+        const replacement = value == null ? '' : String(value);
+        finalOutput = finalOutput.split(placeholder).join(replacement);
+      } catch (err) {
+        throw new TemplateError(`Async helper error: ${err.message}`, {
+          originalError: err
+        });
+      }
+    }
+
+    return finalOutput;
   }
 
   /**
@@ -314,7 +378,11 @@ export class SMTPTemplateEngine {
 
       if (this.type === 'handlebars') {
         const Handlebars = await import('handlebars');
-        Handlebars.default.compile(source);
+        const compiled = Handlebars.default.compile(source, {
+          strict: false
+        });
+        // Execute once to catch runtime errors (e.g., syntax issues)
+        compiled({});
         return true;
       }
 
