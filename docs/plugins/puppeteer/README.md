@@ -1551,47 +1551,12 @@ console.log(stats);
 
 ### Detection Methods
 
-#### `detectWebRTC(page): Promise<Object>`
+See [Detection Guide](./guides/detection.md) for complete documentation on WebRTC and streaming detection:
 
-Detect WebRTC peer connections, ICE candidates, and extracted IP addresses.
-
-```javascript
-const result = await plugin.detectWebRTC(page);
-// { webrtcDetected: true, webrtcInfo: { detectedIPs, connectionState, ... } }
-```
-
----
-
-#### `detectMediaStreams(page): Promise<Object>`
-
-Detect audio/video elements, canvas, permissions (microphone, camera, display capture).
-
-```javascript
-const result = await plugin.detectMediaStreams(page);
-// { streamsDetected: true, streamsInfo: { audioElements, videoElements, permissions, ... } }
-```
-
----
-
-#### `detectStreamingProtocols(page): Promise<Object>`
-
-Detect streaming protocols (HLS, DASH, RTMP) and manifest URLs.
-
-```javascript
-const result = await plugin.detectStreamingProtocols(page);
-// { streamingProtocolsDetected: true, protocolsInfo: { hls, dash, m3u8Files, ... } }
-```
-
----
-
-#### `detectWebRTCAndStreams(page): Promise<Object>`
-
-Comprehensive detection combining WebRTC, streams, and protocols in one call.
-
-```javascript
-const result = await plugin.detectWebRTCAndStreams(page);
-// { webrtc, streams, protocols, summary: { webrtcActive, streamsPresent, ... } }
-```
+- `detectWebRTC(page)` - Detect peer connections and ICE candidates
+- `detectMediaStreams(page)` - Detect audio/video elements and permissions
+- `detectStreamingProtocols(page)` - Detect HLS, DASH, and other streaming protocols
+- `detectWebRTCAndStreams(page)` - Comprehensive one-call detection
 
 ---
 
