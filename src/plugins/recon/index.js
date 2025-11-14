@@ -633,101 +633,6 @@ export class ReconPlugin extends Plugin {
     return await this.uptimeBehavior.loadStatus(host);
   }
 
-  // ============================================================================
-  // BACKWARD COMPATIBILITY METHODS
-  // These methods maintain compatibility with the original monolithic API
-  // ============================================================================
-
-  /**
-   * Legacy method: runDiagnostics (alias for scan)
-   * @deprecated Use scan() instead
-   */
-  async runDiagnostics(target, options = {}) {
-    return this.scan(target, options);
-  }
-
-  /**
-   * Legacy method: generateClientReport
-   * @deprecated Use generateMarkdownReport() instead
-   */
-  async generateClientReport(host, format = 'markdown') {
-    const reports = await this.getReportsByHost(host, { limit: 1 });
-
-    if (reports.length === 0) {
-      return format === 'json' ? '{}' : '# No reports found';
-    }
-
-    const report = reports[0];
-
-    if (format === 'json') {
-      return this.generateJSONReport(report);
-    }
-
-    return this.generateMarkdownReport(report);
-  }
-
-  /**
-   * Legacy method: _runWebDiscovery (now part of stages)
-   * @deprecated Access via stages.webDiscovery.execute() instead
-   */
-  async _runWebDiscovery(target, config) {
-    return this.stages.webDiscovery.execute(target, config);
-  }
-
-  /**
-   * Legacy method: _emitDiffAlerts
-   * @deprecated Use compareReports() and handle alerts manually
-   */
-  async _emitDiffAlerts(host, report, diffs) {
-    for (const diff of diffs) {
-      if (diff.severity === 'critical' || diff.severity === 'high') {
-        this.emit('recon:alert', {
-          host,
-          severity: diff.severity,
-          change: diff.change,
-          timestamp: report.timestamp
-        });
-      }
-    }
-  }
-
-  /**
-   * Legacy method: _applyRateLimit
-   * @deprecated Rate limiting is now handled automatically
-   */
-  async _applyRateLimit(stageName) {
-    if (!this.config.rateLimit?.enabled) {
-      return;
-    }
-
-    const delay = this.config.rateLimit.delayBetweenStages || 1000;
-
-    this.emit('recon:rate-limit-delay', {
-      stage: stageName,
-      delayMs: delay
-    });
-
-    await new Promise(resolve => setTimeout(resolve, delay));
-  }
-
-  /**
-   * Legacy method: _getResource (proxy to database)
-   * @deprecated Access via database.getResource() directly
-   */
-  async _getResource(resourceName) {
-    if (!this.database) {
-      return null;
-    }
-
-    const fullName = `plg_recon_${resourceName}`;
-
-    try {
-      return await this.database.getResource(fullName);
-    } catch (error) {
-      return null;
-    }
-  }
-
   /**
    * Lifecycle hook: onStop
    * Cleanup all spawned processes when plugin stops
@@ -748,20 +653,20 @@ export class ReconPlugin extends Plugin {
 
   /**
    * Legacy hook: afterInstall
-   * Registers legacy alias database.plugins.network
+   * Registers legacy alias database.pluginRegistry.network
    */
   afterInstall() {
     super.afterInstall();
 
     // Register legacy alias
     if (this.database) {
-      this.database.plugins.network = this;
+      this.database.pluginRegistry.network = this;
     }
   }
 
   /**
    * Legacy hook: afterUninstall
-   * Removes legacy alias database.plugins.network
+   * Removes legacy alias database.pluginRegistry.network
    */
   afterUninstall() {
     super.afterUninstall();
@@ -770,8 +675,8 @@ export class ReconPlugin extends Plugin {
     this.processManager.cleanup({ silent: true }).catch(() => {});
 
     // Remove legacy alias
-    if (this.database && this.database.plugins.network === this) {
-      delete this.database.plugins.network;
+    if (this.database && this.database.pluginRegistry.network === this) {
+      delete this.database.pluginRegistry.network;
     }
   }
 }

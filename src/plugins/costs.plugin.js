@@ -289,7 +289,7 @@
  *
  * ```javascript
  * // Ensure plugin is installed and started
- * console.log(db.plugins.CostsPlugin);  // Should exist
+ * console.log(db.pluginRegistry.CostsPlugin);  // Should exist
  * await db.start();  // Must call start() to activate plugin
  *
  * // Check client costs object
@@ -514,7 +514,7 @@
  * const costs = db.client.costs;
  *
  * // From plugin instance (same object)
- * const costsPlugin = db.plugins.CostsPlugin;
+ * const costsPlugin = db.pluginRegistry.CostsPlugin;
  * const costs2 = costsPlugin.costs;  // Same as db.client.costs
  * ```
  *

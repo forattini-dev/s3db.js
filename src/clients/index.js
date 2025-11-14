@@ -12,6 +12,3 @@ export { MemoryClient } from './memory-client.class.js';
 export { MemoryStorage } from './memory-storage.class.js';
 export { FileSystemClient } from './filesystem-client.class.js';
 export { FileSystemStorage } from './filesystem-storage.class.js';
-
-// Default export is S3Client for backward compatibility
-export { S3Client as default } from './s3-client.class.js';

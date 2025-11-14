@@ -59,7 +59,7 @@
  * await users.delete('u1');
  *
  * // Query audit logs
- * const auditPlugin = db.plugins.AuditPlugin;
+ * const auditPlugin = db.pluginRegistry.AuditPlugin;
  * const logs = await auditPlugin.getAuditLogs({
  *   resourceName: 'users',
  *   recordId: 'u1'
@@ -76,7 +76,7 @@
  * ### Querying Audit Logs
  *
  * ```javascript
- * const auditPlugin = db.plugins.AuditPlugin;
+ * const auditPlugin = db.pluginRegistry.AuditPlugin;
  *
  * // Get all changes to a specific resource
  * const userChanges = await auditPlugin.getAuditLogs({
@@ -255,7 +255,7 @@
  *
  * ```javascript
  * // Check if plugin is installed
- * console.log(db.plugins.AuditPlugin);  // Should exist
+ * console.log(db.pluginRegistry.AuditPlugin);  // Should exist
  *
  * // Check if audit resource exists
  * console.log(db.resources.plg_audits);  // Should exist

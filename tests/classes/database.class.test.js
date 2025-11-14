@@ -297,12 +297,13 @@ describe('Database Constructor and Edge Cases', () => {
   test('should handle constructor with all options', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
     const mockPlugin = { install: jest.fn(), start: jest.fn() };
-    
+
     const db = new Database({
       verbose: true,  // Test expects verbose to be true
       plugins: [mockPlugin],
       cache: { type: 'memory' },
       passphrase: 'custom-secret',
+      operationsPool: { concurrency: 5 },
       client: mockClient
     });
 

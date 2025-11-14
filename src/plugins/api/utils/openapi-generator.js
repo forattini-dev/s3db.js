@@ -1615,7 +1615,7 @@ For detailed information about each endpoint, see the sections below.`;
   const resources = database.resources;
 
   // Detect RelationPlugin
-  const relationsPlugin = database.plugins?.relation || database.plugins?.RelationPlugin || null;
+  const relationsPlugin = database.pluginRegistry?.relation || database.pluginRegistry?.RelationPlugin || null;
 
   for (const [name, resource] of Object.entries(resources)) {
     const rawConfig = resourceConfigs[name];
@@ -2029,7 +2029,7 @@ For detailed information about each endpoint, see the sections below.`;
   });
 
   // Add Prometheus metrics endpoint if MetricsPlugin is active
-  const metricsPlugin = database.plugins?.metrics || database.plugins?.MetricsPlugin;
+  const metricsPlugin = database.pluginRegistry?.metrics || database.pluginRegistry?.MetricsPlugin;
   if (metricsPlugin && metricsPlugin.config?.prometheus?.enabled) {
     const metricsPath = metricsPlugin.config.prometheus.path || '/metrics';
     const isIntegrated = metricsPlugin.config.prometheus.mode !== 'standalone';

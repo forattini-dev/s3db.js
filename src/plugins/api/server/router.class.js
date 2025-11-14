@@ -427,7 +427,7 @@ export class Router {
       return;
     }
 
-    const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
+    const identityPlugin = this.database?.pluginRegistry?.identity || this.database?.pluginRegistry?.Identity;
     if (identityPlugin) {
       if (this.verbose) {
         console.warn('[API Router] IdentityPlugin detected. Skipping built-in auth routes.');
@@ -680,7 +680,7 @@ export class Router {
 
     const context = {
       database: this.database,
-      plugins: this.database?.plugins || {}
+      plugins: this.database?.pluginRegistry || {}
     };
 
     mountCustomRoutes(app, this.routes, context, this.verbose, {

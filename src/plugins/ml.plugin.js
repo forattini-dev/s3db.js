@@ -449,64 +449,9 @@ export class MLPlugin extends Plugin {
       });
     }
 
-    // Keep legacy methods for backward compatibility
-    // Add predict() method to Resource prototype
-    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'predict')) {
-      Resource.prototype.predict = async function(input, targetAttribute) {
-        const mlPlugin = this.database?._mlPlugin;
-        if (!mlPlugin) {
-          throw new MLError('MLPlugin is not installed on this database instance', {
-            pluginName: 'MLPlugin',
-            operation: 'Resource.predict',
-            statusCode: 400,
-            retriable: false,
-            suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.predict().' 
-          });
-        }
-
-        return await mlPlugin._resourcePredict(this.name, input, targetAttribute);
-      };
-    }
-
-    // Add trainModel() method to Resource prototype
-    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'trainModel')) {
-      Resource.prototype.trainModel = async function(targetAttribute, options = {}) {
-        const mlPlugin = this.database?._mlPlugin;
-        if (!mlPlugin) {
-          throw new MLError('MLPlugin is not installed on this database instance', {
-            pluginName: 'MLPlugin',
-            operation: 'Resource.trainModel',
-            statusCode: 400,
-            retriable: false,
-            suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.trainModel().' 
-          });
-        }
-
-        return await mlPlugin._resourceTrainModel(this.name, targetAttribute, options);
-      };
-    }
-
-    // Add listModels() method to Resource prototype
-    if (!Object.prototype.hasOwnProperty.call(Resource.prototype, 'listModels')) {
-      Resource.prototype.listModels = function() {
-        const mlPlugin = this.database?._mlPlugin;
-        if (!mlPlugin) {
-          throw new MLError('MLPlugin is not installed on this database instance', {
-            pluginName: 'MLPlugin',
-            operation: 'Resource.listModels',
-            statusCode: 400,
-            retriable: false,
-            suggestion: 'Install MLPlugin via db.usePlugin(new MLPlugin(...)) before calling resource.listModels().'
-          });
-        }
-
-        return mlPlugin._resourceListModels(this.name);
-      };
-    }
-
-    if (this.config.verbose) {
-      console.log('[MLPlugin] Injected ML namespace (resource.ml.*) into Resource prototype');
-    }
+    // ML functionality is now accessed via the ml namespace
+    // Example: resource.ml.predict(...) instead of resource.predict(...)
+    // This eliminates prototype pollution and makes the API more explicit
   }
 
   /**

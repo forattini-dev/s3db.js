@@ -629,7 +629,7 @@ export class ApiPlugin extends Plugin {
   _findExistingUsersResource() {
     const candidates = new Set([this.usersResourceName]);
 
-    const identityPlugin = this.database?.plugins?.identity || this.database?.plugins?.Identity;
+    const identityPlugin = this.database?.pluginRegistry?.identity || this.database?.pluginRegistry?.Identity;
     if (identityPlugin) {
       const identityNames = [
         identityPlugin.usersResource?.name,
@@ -1422,19 +1422,6 @@ export {
   HttpInternalServerError,
   HttpNotImplementedError,
   HttpServiceUnavailableError,
-  // Backward compatibility aliases (without Http prefix)
-  BadRequestError,
-  ValidationError,
-  UnauthorizedError,
-  ForbiddenError,
-  NotFoundError,
-  MethodNotAllowedError,
-  ConflictError,
-  UnprocessableEntityError,
-  TooManyRequestsError,
-  InternalServerError,
-  NotImplementedError,
-  ServiceUnavailableError,
   // Utilities
   HTTP_ERRORS,
   createHttpError

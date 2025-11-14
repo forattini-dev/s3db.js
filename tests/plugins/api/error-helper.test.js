@@ -17,13 +17,13 @@ import {
 } from '@jest/globals';
 import {
   ApiPlugin,
-  ValidationError,
-  NotFoundError,
-  UnauthorizedError,
-  ForbiddenError,
-  ConflictError,
-  TooManyRequestsError,
-  InternalServerError,
+  HttpValidationError,
+  HttpNotFoundError,
+  HttpUnauthorizedError,
+  HttpForbiddenError,
+  HttpConflictError,
+  HttpTooManyRequestsError,
+  HttpInternalServerError,
   createHttpError
 } from '../../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../../config.js';
@@ -190,7 +190,7 @@ describe('API Plugin - Error Helper Middleware', () => {
 
 describe('API Plugin - Standard Error Classes', () => {
   it('should create ValidationError with correct properties', () => {
-    const err = new ValidationError('Invalid email format', { field: 'email' });
+    const err = new HttpValidationError('Invalid email format', { field: 'email' });
 
     expect(err.name).toBe('HttpValidationError'); // Aliases use Http prefix internally
     expect(err.code).toBe('VALIDATION_ERROR');
@@ -201,7 +201,7 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should create NotFoundError with correct properties', () => {
-    const err = new NotFoundError('User not found', { id: 'user-123' });
+    const err = new HttpNotFoundError('User not found', { id: 'user-123' });
 
     expect(err.name).toBe('HttpNotFoundError'); // Aliases use Http prefix internally
     expect(err.code).toBe('NOT_FOUND');
@@ -211,7 +211,7 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should create UnauthorizedError with correct properties', () => {
-    const err = new UnauthorizedError('Token expired');
+    const err = new HttpUnauthorizedError('Token expired');
 
     expect(err.name).toBe('HttpUnauthorizedError'); // Aliases use Http prefix internally
     expect(err.code).toBe('UNAUTHORIZED');
@@ -220,7 +220,7 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should create ForbiddenError with correct properties', () => {
-    const err = new ForbiddenError('Admin access required', {
+    const err = new HttpForbiddenError('Admin access required', {
       required: ['admin'],
       current: ['user']
     });
@@ -232,7 +232,7 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should create ConflictError with correct properties', () => {
-    const err = new ConflictError('Email already exists');
+    const err = new HttpConflictError('Email already exists');
 
     expect(err.name).toBe('HttpConflictError'); // Aliases use Http prefix internally
     expect(err.code).toBe('CONFLICT');
@@ -240,7 +240,7 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should create TooManyRequestsError with correct properties', () => {
-    const err = new TooManyRequestsError('Rate limit exceeded', {
+    const err = new HttpTooManyRequestsError('Rate limit exceeded', {
       limit: 100,
       retryAfter: 60
     });
@@ -252,7 +252,7 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should create InternalServerError with correct properties', () => {
-    const err = new InternalServerError('Database connection failed');
+    const err = new HttpInternalServerError('Database connection failed');
 
     expect(err.name).toBe('HttpInternalServerError'); // Aliases use Http prefix internally
     expect(err.code).toBe('INTERNAL_SERVER_ERROR');
@@ -260,19 +260,19 @@ describe('API Plugin - Standard Error Classes', () => {
   });
 
   it('should use default messages when not provided', () => {
-    const validationErr = new ValidationError();
+    const validationErr = new HttpValidationError();
     expect(validationErr.message).toBe('Validation failed');
 
-    const notFoundErr = new NotFoundError();
+    const notFoundErr = new HttpNotFoundError();
     expect(notFoundErr.message).toBe('Not found');
 
-    const unauthorizedErr = new UnauthorizedError();
+    const unauthorizedErr = new HttpUnauthorizedError();
     expect(unauthorizedErr.message).toBe('Unauthorized');
   });
 
   it('should create errors via createHttpError helper', () => {
     const err404 = createHttpError(404, 'Resource not found', { id: '123' });
-    expect(err404).toBeInstanceOf(NotFoundError);
+    expect(err404).toBeInstanceOf(HttpNotFoundError);
     expect(err404.status).toBe(404);
     expect(err404.message).toBe('Resource not found');
 
@@ -280,12 +280,12 @@ describe('API Plugin - Standard Error Classes', () => {
     expect(err400.status).toBe(400);
 
     const err500 = createHttpError(500, 'Internal error');
-    expect(err500).toBeInstanceOf(InternalServerError);
+    expect(err500).toBeInstanceOf(HttpInternalServerError);
   });
 
-  it('should fallback to InternalServerError for unknown status codes', () => {
+  it('should fallback to HttpInternalServerError for unknown status codes', () => {
     const err = createHttpError(999, 'Unknown error');
-    expect(err).toBeInstanceOf(InternalServerError);
+    expect(err).toBeInstanceOf(HttpInternalServerError);
     expect(err.status).toBe(500);
   });
 });

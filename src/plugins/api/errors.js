@@ -305,20 +305,6 @@ export function createHttpError(status, message, details = null) {
   return new ErrorClass(message, details);
 }
 
-// Backward compatibility aliases (without Http prefix)
-export const BadRequestError = HttpBadRequestError;
-export const ValidationError = HttpValidationError;
-export const UnauthorizedError = HttpUnauthorizedError;
-export const ForbiddenError = HttpForbiddenError;
-export const NotFoundError = HttpNotFoundError;
-export const MethodNotAllowedError = HttpMethodNotAllowedError;
-export const ConflictError = HttpConflictError;
-export const UnprocessableEntityError = HttpUnprocessableEntityError;
-export const TooManyRequestsError = HttpTooManyRequestsError;
-export const InternalServerError = HttpInternalServerError;
-export const NotImplementedError = HttpNotImplementedError;
-export const ServiceUnavailableError = HttpServiceUnavailableError;
-
 export default {
   HttpBadRequestError,
   HttpValidationError,

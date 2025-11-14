@@ -92,6 +92,7 @@ export class Database extends SafeEventEmitter {
     // Normalize operationsPool config with defaults
     this.operationsPool = this._normalizeOperationsPool(options.operationsPool, this._parallelism);
     this._parallelism = this.operationsPool?.concurrency ?? this._parallelism;
+    this.taskExecutor = this.operationsPool;
     this.pluginList = options.plugins ?? [];
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry; // Alias for plugin registry
@@ -187,8 +188,12 @@ export class Database extends SafeEventEmitter {
         const url = new URL(connectionString);
         if (url.protocol === 'memory:') {
           // Use MemoryClient for memory:// protocol
-          const bucket = url.hostname || 'test-bucket';
-          const keyPrefix = url.pathname ? url.pathname.substring(1) : ''; // Remove leading slash
+          const bucketHost = url.hostname || 'test-bucket';
+          const [okBucket, errBucket, decodedBucket] = tryFn(() => decodeURIComponent(bucketHost));
+          const bucket = okBucket ? decodedBucket : bucketHost;
+          const rawPrefix = url.pathname ? url.pathname.substring(1) : ''; // Remove leading slash
+          const [okPrefix, errPrefix, decodedPrefix] = tryFn(() => decodeURIComponent(rawPrefix));
+          const keyPrefix = okPrefix ? decodedPrefix : rawPrefix;
 
           this.client = new MemoryClient(this._deepMerge({
             bucket,
@@ -256,6 +261,26 @@ export class Database extends SafeEventEmitter {
 
     // Register exit listener for cleanup
     this._registerExitListener();
+  }
+
+  /**
+   * Expose normalized parallelism value
+   * @returns {number}
+   */
+  get parallelism() {
+    return this._parallelism ?? 10;
+  }
+
+  /**
+   * Update operations pool concurrency at runtime
+   * @param {number|string} value
+   */
+  set parallelism(value) {
+    const normalized = this._normalizeParallelism(value, this._parallelism ?? 10);
+    this._parallelism = normalized;
+    if (this.operationsPool) {
+      this.operationsPool.concurrency = normalized;
+    }
   }
 
 
