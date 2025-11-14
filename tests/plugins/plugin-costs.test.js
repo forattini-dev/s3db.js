@@ -1,8 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 
-import Database from '#src/database.class.js';
 import { CostsPlugin } from '#src/plugins/costs.plugin.js';
-import { createDatabaseForTest, createClientForTest } from '#tests/config.js';
+import { createMemoryDatabaseForTest } from '#tests/config.js';
 
 describe('Costs Plugin', () => {
   let database;
@@ -10,7 +9,7 @@ describe('Costs Plugin', () => {
   let costsPlugin;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('suite=plugins/costs');
+    database = createMemoryDatabaseForTest('suite=plugins/costs');
     await database.connect();
     client = database.client;
 
@@ -319,14 +318,12 @@ describe('Costs Plugin', () => {
     });
 
     test('should handle cost tracking with multiple clients', async () => {
-      const client2 = createClientForTest(`suite=plugins/costs-client2`);
-
-      const database2 = new Database({ verbose: false, client: client2 });
+      const database2 = createMemoryDatabaseForTest('suite=plugins/costs-client2');
       await database2.connect();
+      const client2 = database2.client;
 
       const costsPlugin2 = new CostsPlugin();
-      await costsPlugin2.install(database2);
-      await costsPlugin2.start();
+      await database2.usePlugin(costsPlugin2);
 
       await client2.putObject({
         key: 'test-costs-client2.txt',
@@ -340,6 +337,8 @@ describe('Costs Plugin', () => {
 
       // Original client should be unaffected
       expect(client.costs.total).toBe(0);
+
+      await database2.disconnect();
     });
   });
 
@@ -600,7 +599,7 @@ describe('Costs Plugin', () => {
 
     test('should apply free tier when enabled', async () => {
       // Create new database with plugin configured for free tier
-      const database2 = createDatabaseForTest('suite=plugins/costs-freetier');
+      const database2 = createMemoryDatabaseForTest('suite=plugins/costs-freetier');
       await database2.connect();
       const client2 = database2.client;
 
@@ -622,7 +621,7 @@ describe('Costs Plugin', () => {
 
     test('should charge for data transfer beyond free tier', async () => {
       // Create new database with plugin configured for free tier
-      const database2 = createDatabaseForTest('suite=plugins/costs-freetier2');
+      const database2 = createMemoryDatabaseForTest('suite=plugins/costs-freetier2');
       await database2.connect();
       const client2 = database2.client;
 

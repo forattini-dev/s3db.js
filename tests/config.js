@@ -204,11 +204,35 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
     verbose: options.verbose || false
   });
 
-  const database = new Database({
+  const params = {
     client: memoryClient,
     verbose: false,  // Ensure no initialization logs in tests
     ...options
-  });
+  };
+
+  if (!params.processManager) {
+    params.processManager = testProcessManager;
+  }
+
+  if (!params.cronManager) {
+    params.cronManager = testCronManager;
+  }
+
+  const database = new Database(params);
+
+  if (typeof global !== 'undefined') {
+    global._testDatabases = global._testDatabases || new Set();
+    global._testDatabases.add(database);
+
+    const originalDisconnect = database.disconnect.bind(database);
+    database.disconnect = async function() {
+      try {
+        await originalDisconnect();
+      } finally {
+        global._testDatabases?.delete(database);
+      }
+    };
+  }
 
   return database;
 }
