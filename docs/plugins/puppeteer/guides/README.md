@@ -4,6 +4,14 @@ Advanced guides for optimizing and extending PuppeteerPlugin performance, monito
 
 ## 📚 Available Guides
 
+### Detection & Analysis
+- **[detection.md](./detection.md)** - WebRTC and streaming detection
+  - Detect WebRTC peer connections and ICE candidates
+  - Detect audio/video elements and media permissions
+  - Detect streaming protocols (HLS, DASH, RTMP)
+  - Comprehensive one-call detection
+  - Extract manifest URLs and IP addresses
+
 ### Performance Optimization
 - **[performance.md](./performance.md)** - Core Web Vitals, resource timing, Lighthouse-style scoring
   - Core Web Vitals (LCP, FID, CLS, TTFB, FCP, INP)
@@ -43,6 +51,7 @@ Advanced guides for optimizing and extending PuppeteerPlugin performance, monito
 
 | Guide | When to Use |
 |-------|-----------|
+| **Detection** | Analyzing WebRTC, media streams, and streaming protocols |
 | **Performance** | Measuring, analyzing, and optimizing page load times |
 | **Network Monitoring** | Debugging network issues, analyzing requests, detecting problems |
 | **Partitions** | Understanding data storage patterns and optimization |
