@@ -677,20 +677,28 @@ const config = {
    * @param {string} name - Cookie name
    * @param {Object} options - Cookie options
    */
-  async function deleteSessionCookie(c, name, options = {}) {
+  async function deleteSessionCookie(c, name, options = {}, contextOptions = {}) {
     const path = options.path || '/';
     const domain = options.domain || config.cookieDomain;
-    const cookieJar = getCookie(c);
+    const cookieJar = contextOptions.cookieJar || getCookie(c) || {};
+    const skipSessionDestroy = contextOptions.skipSessionDestroy || false;
+    const sessionId = contextOptions.sessionId !== undefined
+      ? contextOptions.sessionId
+      : getChunkedCookie(c, name, cookieJar);
 
     // If using session store, destroy session data
-    if (sessionStore) {
-      const sessionId = getChunkedCookie(c, name, cookieJar);
+    if (sessionStore && !skipSessionDestroy) {
       if (sessionId) {
         try {
           await sessionStore.destroy(sessionId);
         } catch (err) {
           console.error('[OIDC] Session store destroy error:', err.message);
         }
+      } else if (contextOptions.logMissing !== false) {
+        console.warn('[OIDC] Session cookie missing during deletion', {
+          cookieName: name,
+          cookies: Object.keys(cookieJar)
+        });
       }
     }
 
@@ -720,11 +728,30 @@ const config = {
    */
   async function regenerateSession(c, sessionData) {
     const cookieName = config.cookieName || 'oidc_session';
+    const cookieJar = getCookie(c) || {};
+    const previousSessionToken = getChunkedCookie(c, cookieName, cookieJar);
+
+    if (sessionStore) {
+      if (previousSessionToken) {
+        try {
+          await sessionStore.destroy(previousSessionToken);
+        } catch (err) {
+          console.error('[OIDC] Session store destroy error during regeneration:', err.message);
+        }
+      } else {
+        console.warn('[OIDC] regenerateSession - prior session cookie not found before rotation');
+      }
+    }
 
     // 1. Delete old session
     await deleteSessionCookie(c, cookieName, {
       path: '/',
       domain: config.cookieDomain
+    }, {
+      cookieJar,
+      skipSessionDestroy: !!sessionStore,
+      sessionId: previousSessionToken,
+      logMissing: !sessionStore
     });
 
     // 2. Clear request cache (WeakMap)
@@ -1598,3 +1625,18 @@ const config = {
 }
 
 export default createOIDCHandler;
+
+export function createOidcUtils(config, dependencies = {}) {
+  const noopApp = dependencies.app || {
+    get: () => {}
+  };
+
+  const handler = createOIDCHandler(
+    config,
+    noopApp,
+    dependencies.usersResource || null,
+    dependencies.events || null
+  );
+
+  return handler.utils;
+}

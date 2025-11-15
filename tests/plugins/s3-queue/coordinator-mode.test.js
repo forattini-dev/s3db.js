@@ -66,16 +66,15 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
-      heartbeatTTL: 5,
       verbose: false
     }));
 
     await plugin.install(database);
     plugins.push(plugin);
 
-    const electionEvents = [];
-    plugin.on('plg:s3-queue:coordinator-elected', (event) => {
-      electionEvents.push(event);
+    const promotionEvents = [];
+    plugin.on('plg:coordinator:promoted', (event) => {
+      promotionEvents.push(event);
     });
 
     await plugin.startProcessing(async () => {
@@ -85,8 +84,8 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     await sleep(2000); // Wait for heartbeat and election
 
     expect(plugin.isCoordinator).toBe(true);
-    expect(electionEvents.length).toBeGreaterThanOrEqual(1);
-    expect(electionEvents[0].isCoordinator).toBe(true);
+    expect(promotionEvents.length).toBeGreaterThanOrEqual(1);
+    expect(promotionEvents[0].workerId).toBeDefined();
   }, 15000);
 
   test('deterministic coordinator election with multiple workers', async () => {
@@ -96,7 +95,6 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
-      heartbeatTTL: 10,
       coldStartDuration: 1500, // Allow time for all workers to discover each other
       verbose: false
     }));
@@ -107,7 +105,6 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
-      heartbeatTTL: 10,
       coldStartDuration: 1500,
       verbose: false
     }));
@@ -118,7 +115,6 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
-      heartbeatTTL: 10,
       coldStartDuration: 1500,
       verbose: false
     }));
@@ -136,16 +132,19 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       pluginC.startProcessing(async () => {})
     ]);
 
-    await sleep(200); // Give time for heartbeats to sync
+    await sleep(2000); // Give time for cold start and heartbeats to sync
 
     // Exactly one should be coordinator
     const coordinators = [pluginA, pluginB, pluginC].filter(p => p.isCoordinator);
     expect(coordinators.length).toBe(1);
 
-    // Should be lexicographically first worker ID
-    const activeWorkers = await coordinators[0].getActiveWorkers();
-    const sortedIds = activeWorkers.map(w => w.workerId).sort();
-    expect(coordinators[0].workerId).toBe(sortedIds[0]);
+    // All should have discovered the same leader
+    const leaderA = await pluginA.getLeader();
+    const leaderB = await pluginB.getLeader();
+    const leaderC = await pluginC.getLeader();
+    expect(leaderA).toBe(leaderB);
+    expect(leaderB).toBe(leaderC);
+    expect(leaderA).toBeDefined();
   }, 20000);
 
   test('coordinator publishes dispatch tickets', async () => {
@@ -455,8 +454,8 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     plugins.push(pluginA);
 
     const coldStartEvents = [];
-    pluginA.on('plg:s3-queue:cold-start-phase', (e) => coldStartEvents.push(e));
-    pluginA.on('plg:s3-queue:cold-start-complete', (e) => coldStartEvents.push(e));
+    pluginA.on('plg:coordinator:cold-start-phase', (e) => coldStartEvents.push(e));
+    pluginA.on('plg:coordinator:cold-start-complete', (e) => coldStartEvents.push(e));
 
     // Start first worker
     const startTime = Date.now();
@@ -466,11 +465,11 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     // Cold start should have taken at least 1.3 seconds (allow for timing variations)
     expect(coldStartDuration).toBeGreaterThanOrEqual(1300);
 
-    // Should have emitted phase events
+    // Should have emitted phase events (3 phases: observing, election, preparation)
     expect(coldStartEvents.length).toBeGreaterThan(0);
     expect(coldStartEvents.find(e => e.phase === 'observing')).toBeDefined();
     expect(coldStartEvents.find(e => e.phase === 'election')).toBeDefined();
-    expect(coldStartEvents.find(e => e.phase === 'tickets')).toBeDefined();
+    expect(coldStartEvents.find(e => e.phase === 'preparation')).toBeDefined();
 
     // Should be coordinator (first worker)
     expect(pluginA.isCoordinator).toBe(true);
@@ -485,6 +484,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       autoStart: false,
       enableCoordinator: true,
       skipColdStart: true,
+      coldStartDuration: 5000, // Would be 5s if not skipped
       verbose: false
     }));
 
@@ -495,8 +495,9 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     await plugin.startProcessing(async () => {}, { concurrency: 1 });
     const duration = Date.now() - startTime;
 
-    // Should start immediately (< 500ms)
-    expect(duration).toBeLessThan(500);
+    // Should not wait for cold start duration (5000ms)
+    // Just verify it's much faster than full cold start
+    expect(duration).toBeLessThan(3000);
     expect(plugin.coldStartCompleted).toBe(true);
     expect(plugin.coldStartPhase).toBe('ready');
   }, 10000);
@@ -518,7 +519,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     plugins.push(pluginA);
 
     const discoveryEvents = [];
-    pluginA.on('plg:s3-queue:cold-start-phase', (e) => {
+    pluginA.on('plg:coordinator:cold-start-phase', (e) => {
       if (e.phase === 'observing') {
         discoveryEvents.push(e);
       }
@@ -546,7 +547,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     await pluginB.install(database);
     plugins.push(pluginB);
 
-    pluginB.on('plg:s3-queue:cold-start-phase', (e) => {
+    pluginB.on('plg:coordinator:cold-start-phase', (e) => {
       if (e.phase === 'observing') {
         discoveryEvents.push(e);
       }

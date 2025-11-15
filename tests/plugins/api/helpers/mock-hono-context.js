@@ -13,6 +13,7 @@ export function createMockHonoContext(initialCookies = {}) {
   });
 
   const setCookieHeaders = [];
+  const setCookieRecords = [];
   const contextStore = new Map();
 
   const buildCookieHeader = () => {
@@ -87,6 +88,13 @@ export function createMockHonoContext(initialCookies = {}) {
         }
       });
 
+      setCookieRecords.push({
+        header: value,
+        name: cookieName,
+        value: decodedValue,
+        options: { ...options }
+      });
+
       if (options.maxAge === 0) {
         delete cookies[cookieName];
         return;
@@ -120,7 +128,8 @@ export function createMockHonoContext(initialCookies = {}) {
       contextStore.set(key, value);
     },
     _cookies: cookies,
-    _setCookieHeaders: setCookieHeaders
+    _setCookieHeaders: setCookieHeaders,
+    _setCookieRecords: setCookieRecords
   };
 
   return context;
