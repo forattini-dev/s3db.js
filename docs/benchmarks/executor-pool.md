@@ -596,9 +596,9 @@ const pool = new ExecutorPool({
 
 ## Migration Guide
 
-### Opting In
+### Configuration
 
-ExecutorPool is **opt-in** in v16.3.0 to ensure backward compatibility.
+ExecutorPool is configurable to suit your needs.
 
 **Enable globally:**
 
@@ -666,13 +666,9 @@ await resource.insert(data, {
    - Week 2: 50% traffic
    - Week 3: 100% traffic
 
-### Breaking Changes
+### Backward Compatibility
 
-**None.** ExecutorPool is fully backward compatible when disabled (default in v16.3.0).
-
-**Future (v17.0.0):**
-- ExecutorPool will be **enabled by default**
-- Opt-out via `{ executorPool: false }`
+ExecutorPool is fully backward compatible. Configuration is optional and has sensible defaults.
 
 ---
 
@@ -856,11 +852,13 @@ for (let i = 0; i < items.length; i += BATCH_SIZE) {
 
 ---
 
-## Future Enhancements
+## Advanced Features
 
-### Planned Features
+### Extensibility
 
-🚀 **Circuit Breaker** (v16.4.0)
+The executor pool is designed for extensibility:
+
+**Circuit Breaker Pattern:**
 ```javascript
 const pool = new ExecutorPool({
   circuitBreaker: {
@@ -872,7 +870,7 @@ const pool = new ExecutorPool({
 })
 ```
 
-🚀 **Distributed Coordination** (v17.0.0)
+**Distributed Coordination:**
 ```javascript
 // Multiple instances share concurrency limit
 const pool = new ExecutorPool({
@@ -882,7 +880,7 @@ const pool = new ExecutorPool({
 })
 ```
 
-🚀 **Advanced Metrics** (v16.4.0)
+**Detailed Metrics:**
 ```javascript
 const metrics = pool.getDetailedMetrics()
 // {
@@ -893,7 +891,7 @@ const metrics = pool.getDetailedMetrics()
 // }
 ```
 
-🚀 **Operation Deduplication** (v17.0.0)
+**Operation Deduplication:**
 ```javascript
 // Deduplicate identical operations
 const pool = new ExecutorPool({
@@ -937,7 +935,4 @@ The **ExecutorPool** is a fundamental architectural improvement that:
 
 ---
 
-**Document Version:** 1.0.0
-**Last Updated:** 2025-11-13
-**s3db.js Version:** 16.3.0+
 **Author:** s3db.js Core Team

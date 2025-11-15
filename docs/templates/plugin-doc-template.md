@@ -789,6 +789,5 @@ Use this to verify your documentation is complete:
 
 ---
 
-**Documentation Template Version:** 1.0.0
 **Standard Reference:** [../plugin-docs-standard.md](../plugin-docs-standard.md)
 **Gold Standard Example:** [../plugins/puppeteer.md](../plugins/puppeteer.md)
