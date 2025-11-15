@@ -137,6 +137,9 @@ export class Database extends SafeEventEmitter {
       exitOnSignal
     });
 
+    // Initialize global coordinator services (lazy instantiation, one per namespace)
+    this._globalCoordinators = new Map();
+
     // Initialize hooks system
     this._initHooks();
 
@@ -878,6 +881,56 @@ export class Database extends SafeEventEmitter {
     }
 
     return snapshot;
+  }
+
+  /**
+   * Get or create a GlobalCoordinatorService for the given namespace
+   * Lazy instantiation: service is created on first request
+   * @param {string} namespace - Namespace for coordination
+   * @returns {Promise<GlobalCoordinatorService>}
+   */
+  async getGlobalCoordinator(namespace) {
+    if (!namespace) {
+      throw new Error('Database.getGlobalCoordinator: namespace is required');
+    }
+
+    // Return existing service if already created
+    if (this._globalCoordinators.has(namespace)) {
+      return this._globalCoordinators.get(namespace);
+    }
+
+    // Lazy instantiation: create service on first request
+    try {
+      const { GlobalCoordinatorService } = await import('./plugins/concerns/global-coordinator-service.class.js');
+
+      const service = new GlobalCoordinatorService({
+        namespace,
+        database: this,
+        config: {
+          heartbeatInterval: 5000,
+          heartbeatJitter: 1000,
+          leaseTimeout: 15000,
+          workerTimeout: 20000,
+          diagnosticsEnabled: this.verbose
+        }
+      });
+
+      // Start the service if database is connected
+      if (this.isConnected()) {
+        await service.start();
+      }
+
+      // Store and return
+      this._globalCoordinators.set(namespace, service);
+      return service;
+
+    } catch (err) {
+      throw new DatabaseError('Failed to initialize global coordinator service', {
+        operation: 'getGlobalCoordinator',
+        namespace,
+        cause: err?.message
+      });
+    }
   }
 
   async usePlugin(plugin, name = null) {
@@ -1823,6 +1876,18 @@ export class Database extends SafeEventEmitter {
 
     // Silently ignore all errors during disconnect
     await tryFn(async () => {
+      // 0. Stop global coordinator services
+      if (this._globalCoordinators && this._globalCoordinators.size > 0) {
+        for (const [namespace, service] of this._globalCoordinators) {
+          await tryFn(async () => {
+            if (service && typeof service.stop === 'function') {
+              await service.stop();
+            }
+          });
+        }
+        this._globalCoordinators.clear();
+      }
+
       // 1. Defense in depth: Clean up plugins (Layer 1 - immediate cleanup)
       if (this.pluginList && this.pluginList.length > 0) {
         // MEMORY: First pass - immediate listener cleanup for failsafe

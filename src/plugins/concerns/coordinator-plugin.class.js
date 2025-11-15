@@ -17,6 +17,7 @@
  *
  * Configuration Options:
  * - enableCoordinator: Enable/disable coordination (default: true)
+ * - coordinationMode: 'per-plugin' (default) or 'global' (shared coordinator service)
  * - heartbeatInterval: Heartbeat frequency in ms (default: 5000)
  * - heartbeatTTL: Heartbeat TTL multiplier (default: 3, means 15s TTL)
  * - epochDuration: Coordinator epoch duration in ms (default: 300000 = 5min)
@@ -25,6 +26,12 @@
  * - coordinatorWorkInterval: Coordinator work frequency in ms (default: null = disabled)
  * - startupJitterMin: Minimum startup jitter delay in ms (default: 0)
  * - startupJitterMax: Maximum startup jitter delay in ms (default: 5000)
+ * - globalCoordinator: Global coordinator config (only used when coordinationMode='global')
+ *   - heartbeatInterval: Heartbeat frequency in ms (default: 5000)
+ *   - heartbeatJitter: Random jitter in ms (default: 1000)
+ *   - leaseTimeout: Leader lease TTL in ms (default: 15000)
+ *   - workerTimeout: Worker heartbeat TTL in ms (default: 20000)
+ *   - diagnosticsEnabled: Enable verbose logging (default: false)
  *
  * Startup Jitter:
  * Prevents thundering herd when multiple workers start simultaneously (e.g., full pod restart).
@@ -96,6 +103,10 @@ export class CoordinatorPlugin extends Plugin {
     // Coordinator state
     this.isCoordinator = false;
     this.currentCoordinatorId = null;
+
+    // Global coordinator service (if using global mode)
+    this.globalCoordinatorService = null;
+    this.globalCoordinationMode = config.coordinationMode === 'global';
 
     // Coordination handles
     this.heartbeatHandle = null;
@@ -606,6 +617,18 @@ export class CoordinatorPlugin extends Plugin {
       return;
     }
 
+    // Try global coordination mode if configured
+    if (this.globalCoordinationMode) {
+      await this._initializeGlobalCoordination();
+      // If global coordination started successfully, return
+      if (this.globalCoordinatorService) {
+        return;
+      }
+      // Otherwise fall back to per-plugin mode with warning
+      console.warn(`[${this.constructor.name}] Global coordinator unavailable, falling back to per-plugin mode`);
+      this.globalCoordinationMode = false;
+    }
+
     // Prevent double initialization
     if (this.heartbeatHandle) {
       if (this.config.verbose) {
@@ -823,6 +846,83 @@ export class CoordinatorPlugin extends Plugin {
       }
     } else if (handle.type === 'manual' && handle.timer) {
       clearInterval(handle.timer);
+    }
+  }
+
+  /**
+   * Initialize global coordination mode
+   * Attempts to get the global coordinator service and subscribe to it
+   * Falls back to per-plugin mode if unavailable
+   * @private
+   */
+  async _initializeGlobalCoordination() {
+    try {
+      if (!this.database) {
+        if (this.config.verbose) {
+          console.log(`[${this.constructor.name}] No database available for global coordination`);
+        }
+        return;
+      }
+
+      // Get or create global coordinator service
+      const namespace = this.namespace || 'default';
+      this.globalCoordinatorService = await this.database.getGlobalCoordinator(namespace);
+
+      // Subscribe plugin to global coordinator events
+      this.globalCoordinatorService.subscribePlugin(
+        this.instanceName || this.constructor.name.toLowerCase(),
+        this
+      );
+
+      // Register handler for leader change notifications
+      this.globalCoordinatorService.on('leader:changed', async (event) => {
+        await this._handleGlobalLeaderChange(event);
+      });
+
+      if (this.config.verbose) {
+        console.log(`[${this.constructor.name}] Global coordination initialized for namespace '${namespace}'`);
+      }
+
+    } catch (err) {
+      if (this.config.verbose) {
+        console.warn(`[${this.constructor.name}] Failed to initialize global coordination:`, err?.message);
+      }
+      this.globalCoordinatorService = null;
+    }
+  }
+
+  /**
+   * Handle leader change notification from global coordinator
+   * @private
+   */
+  async _handleGlobalLeaderChange(event) {
+    const wasCoordinator = this.isCoordinator;
+    const isNowCoordinator = event.newLeader === this.workerId;
+
+    // Update coordinator state
+    this.isCoordinator = isNowCoordinator;
+    this.currentCoordinatorId = event.newLeader;
+
+    if (this.config.verbose) {
+      console.log(`[${this.constructor.name}] Leader changed to ${event.newLeader} (epoch: ${event.epoch})`);
+    }
+
+    // Notify subclass about leadership change
+    if (!wasCoordinator && isNowCoordinator) {
+      // Became coordinator
+      await this.onBecomeCoordinator();
+      // Start coordinator work if configured
+      if (this.coordinatorConfig.coordinatorWorkInterval) {
+        this._startCoordinatorWork();
+      }
+    } else if (wasCoordinator && !isNowCoordinator) {
+      // Stopped being coordinator
+      await this.onStopBeingCoordinator();
+      // Stop coordinator work
+      if (this.coordinatorWorkHandle) {
+        this._stopLoopHandle(this.coordinatorWorkHandle);
+        this.coordinatorWorkHandle = null;
+      }
     }
   }
 
