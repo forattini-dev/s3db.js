@@ -15,21 +15,101 @@ describe('Cookie Chunking', () => {
   let mockContext;
 
   beforeEach(() => {
-    // Mock Hono context
     const cookies = {};
+    const setCookieHeaders = [];
+
+    const buildCookieHeader = () => {
+      const parts = Object.entries(cookies)
+        .map(([cookieName, data]) => `${cookieName}=${encodeURIComponent(data.value ?? '')}`);
+      return parts.join('; ');
+    };
+
     mockContext = {
-      cookie: (name, value, options) => {
-        // Simulate deletion when maxAge is 0
-        if (options && options.maxAge === 0) {
-          delete cookies[name];
-        } else {
-          cookies[name] = { value, options };
+      header: (name, value) => {
+        if (typeof name !== 'string' || name.toLowerCase() !== 'set-cookie') {
+          return;
         }
+
+        setCookieHeaders.push(value);
+
+        const segments = value.split(';').map((segment) => segment.trim()).filter(Boolean);
+        if (segments.length === 0) {
+          return;
+        }
+
+        const [pair, ...attributes] = segments;
+        const [cookieNameRaw, encodedValue = ''] = pair.split('=');
+        const cookieName = cookieNameRaw.trim();
+
+        let decodedValue = encodedValue;
+        try {
+          decodedValue = encodedValue ? decodeURIComponent(encodedValue) : '';
+        } catch (err) {
+          // Fall back to raw value if decoding fails
+        }
+
+        const options = {};
+        attributes.forEach((attribute) => {
+          const [attrNameRaw, ...rest] = attribute.split('=');
+          const attrName = attrNameRaw.toLowerCase();
+          const attrValue = rest.length > 0 ? rest.join('=').trim() : undefined;
+
+          switch (attrName) {
+            case 'max-age':
+              options.maxAge = attrValue !== undefined ? parseInt(attrValue, 10) : undefined;
+              break;
+            case 'path':
+              options.path = attrValue;
+              break;
+            case 'domain':
+              options.domain = attrValue;
+              break;
+            case 'samesite':
+              options.sameSite = attrValue;
+              break;
+            case 'secure':
+              options.secure = true;
+              break;
+            case 'httponly':
+              options.httpOnly = true;
+              break;
+            case 'expires':
+              options.expires = attrValue;
+              break;
+            case 'priority':
+              options.priority = attrValue;
+              break;
+            case 'partitioned':
+              options.partitioned = true;
+              break;
+            default:
+              break;
+          }
+        });
+
+        if (options.maxAge === 0) {
+          delete cookies[cookieName];
+          return;
+        }
+
+        cookies[cookieName] = { value: decodedValue, options };
       },
       req: {
+        raw: {
+          headers: {
+            get: (headerName) => {
+              if (!headerName || headerName.toLowerCase() !== 'cookie') {
+                return null;
+              }
+              const header = buildCookieHeader();
+              return header || null;
+            }
+          }
+        },
         cookie: (name) => cookies[name]?.value || null
       },
-      _cookies: cookies  // For test inspection
+      _cookies: cookies,
+      _setCookieHeaders: setCookieHeaders
     };
   });
 
@@ -98,6 +178,25 @@ describe('Cookie Chunking', () => {
 
       expect(mockContext._cookies.test.options).toMatchObject(options);
     });
+
+    test('only deletes stale chunk indexes', () => {
+      // Simulate existing 4-chunk cookie in request
+      for (let i = 0; i < 4; i++) {
+        mockContext._cookies[`session.${i}`] = { value: `old-${i}` };
+      }
+      mockContext._cookies['session.__chunks'] = { value: '4' };
+      mockContext._setCookieHeaders.length = 0;
+
+      const newValue = 'x'.repeat(7000); // Should produce 2 chunks
+      setChunkedCookie(mockContext, 'session', newValue, {});
+
+      const deletionHeaders = mockContext._setCookieHeaders.filter(
+        (header) => header.includes('Max-Age=0') && header.includes('session.')
+      );
+      expect(deletionHeaders).toHaveLength(2);
+      expect(deletionHeaders.some((header) => header.includes('session.2'))).toBe(true);
+      expect(deletionHeaders.some((header) => header.includes('session.3'))).toBe(true);
+    });
   });
 
   describe('getChunkedCookie', () => {
@@ -145,6 +244,14 @@ describe('Cookie Chunking', () => {
       const retrieved = getChunkedCookie(mockContext, 'test');
       expect(retrieved).toBeNull();
     });
+
+    test('reassembles chunked cookies when metadata is missing', () => {
+      mockContext._cookies['session.0'] = { value: 'abc' };
+      mockContext._cookies['session.1'] = { value: '123' };
+
+      const retrieved = getChunkedCookie(mockContext, 'session');
+      expect(retrieved).toBe('abc123');
+    });
   });
 
   describe('deleteChunkedCookie', () => {
@@ -174,6 +281,16 @@ describe('Cookie Chunking', () => {
       for (let i = 0; i < 10; i++) {
         expect(mockContext._cookies[`session.${i}`]).toBeUndefined();
       }
+
+      const deletions = mockContext._setCookieHeaders.filter((header) => header.includes('Max-Age=0'));
+      // Metadata + three chunks
+      expect(deletions.length).toBe(4);
+    });
+
+    test('no-ops when no matching cookies exist', () => {
+      mockContext._setCookieHeaders.length = 0;
+      deleteChunkedCookie(mockContext, 'ghost', {});
+      expect(mockContext._setCookieHeaders).toHaveLength(0);
     });
   });
 

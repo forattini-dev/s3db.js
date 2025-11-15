@@ -1,4 +1,4 @@
-import { getCookie, setCookie } from 'hono/cookie';
+import { generateCookie, getCookie, setCookie } from 'hono/cookie';
 
 /**
  * Cookie Chunking Utilities
@@ -23,6 +23,113 @@ const MAX_COOKIE_SIZE = 4000;
  * Maximum number of chunks to prevent abuse
  */
 const MAX_CHUNKS = 10;
+const CHUNK_SUFFIX_PATTERN = /^\d+$/;
+
+function getEncodedLength(value) {
+  return encodeURIComponent(value).length;
+}
+
+function getCookieJar(context) {
+  try {
+    const cookies = getCookie(context);
+    if (cookies && typeof cookies === 'object' && !Array.isArray(cookies)) {
+      return cookies;
+    }
+  } catch (err) {
+    console.warn('[Cookie Chunking] Failed to read cookies from request:', err.message);
+  }
+  return {};
+}
+
+function getChunkEntriesFromJar(cookieJar, baseName) {
+  const prefix = `${baseName}.`;
+  return Object.entries(cookieJar)
+    .map(([cookieName, cookieValue]) => {
+      if (!cookieName.startsWith(prefix)) {
+        return null;
+      }
+      const suffix = cookieName.slice(prefix.length);
+      if (!CHUNK_SUFFIX_PATTERN.test(suffix)) {
+        return null;
+      }
+      return {
+        name: cookieName,
+        value: cookieValue,
+        index: parseInt(suffix, 10)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+function calculateChunkSize(name, options) {
+  const sampleCookie = generateCookie(`${name}.0`, '', options);
+  const overhead = Buffer.byteLength(sampleCookie);
+  const chunkSize = MAX_COOKIE_SIZE - overhead;
+  if (chunkSize <= 0) {
+    throw new Error(
+      `[Cookie Chunking] Cookie "${name}" cannot fit any data (overhead ${overhead} bytes). ` +
+      'Reduce cookie attributes or move session data to an external store.'
+    );
+  }
+  return chunkSize;
+}
+
+function splitValueIntoChunks(name, value, chunkSize) {
+  const chunks = [];
+  let currentChunk = '';
+  let currentLength = 0;
+
+  for (const char of value) {
+    const charLength = getEncodedLength(char);
+
+    if (charLength > chunkSize) {
+      throw new Error(
+        `[Cookie Chunking] Unable to chunk value for "${name}". ` +
+        'Reduce cookie attributes or session payload size.'
+      );
+    }
+
+    if (currentChunk && currentLength + charLength > chunkSize) {
+      chunks.push(currentChunk);
+      currentChunk = '';
+      currentLength = 0;
+    }
+
+    currentChunk += char;
+    currentLength += charLength;
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
+function reassembleChunksFromJar(context, name, expectedCount = null) {
+  const chunkEntries = getChunkEntriesFromJar(getCookieJar(context), name);
+  if (chunkEntries.length === 0) {
+    return null;
+  }
+
+  const targetLength = expectedCount ?? chunkEntries.length;
+  if (expectedCount !== null && chunkEntries.length < expectedCount) {
+    console.warn(
+      `[Cookie Chunking] Missing chunks for "${name}" (expected ${expectedCount}, found ${chunkEntries.length})`
+    );
+    return null;
+  }
+
+  for (let i = 0; i < targetLength; i++) {
+    if (!chunkEntries[i] || chunkEntries[i].index !== i) {
+      console.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
+      return null;
+    }
+  }
+
+  return chunkEntries.slice(0, targetLength).map((entry) => entry.value).join('');
+}
 
 /**
  * Set a cookie with automatic chunking if value exceeds size limit
@@ -51,12 +158,11 @@ export function setChunkedCookie(context, name, value, options = {}) {
     return;
   }
 
-  // Calculate chunk size (reserve space for cookie name and metadata)
-  const cookieNameLength = name.length + 10; // ".0" suffix + metadata
-  const chunkSize = MAX_COOKIE_SIZE - cookieNameLength;
+  const chunkSize = calculateChunkSize(name, options);
+  const encodedLength = getEncodedLength(value);
 
   // If value fits in single cookie, use standard cookie
-  if (value.length <= chunkSize) {
+  if (encodedLength <= chunkSize) {
     // Clean up any existing chunks
     deleteChunkedCookie(context, name, options);
     // Set single cookie
@@ -64,11 +170,8 @@ export function setChunkedCookie(context, name, value, options = {}) {
     return;
   }
 
-  // Split into chunks
-  const chunks = [];
-  for (let i = 0; i < value.length; i += chunkSize) {
-    chunks.push(value.slice(i, i + chunkSize));
-  }
+  const chunks = splitValueIntoChunks(name, value, chunkSize);
+  const requestCookies = getCookieJar(context);
 
   // Safety check
   if (chunks.length > MAX_CHUNKS) {
@@ -89,18 +192,24 @@ export function setChunkedCookie(context, name, value, options = {}) {
     // Metadata cookie can have same expiry
   });
 
-  // Delete any old chunks beyond current count
-  // (e.g., if previous session had 5 chunks, now has 3)
-  for (let i = chunks.length; i < MAX_CHUNKS; i++) {
-    try {
-      setCookie(context, `${name}.${i}`, '', {
-        ...options,
-        maxAge: 0, // Delete
-      });
-    } catch (err) {
-      // Ignore errors deleting non-existent cookies
-    }
+  // Remove legacy single-cookie session if present
+  if (Object.prototype.hasOwnProperty.call(requestCookies, name)) {
+    setCookie(context, name, '', {
+      ...options,
+      maxAge: 0,
+    });
   }
+
+  // Delete only the chunk cookies that previously existed beyond the new length
+  const existingChunks = getChunkEntriesFromJar(requestCookies, name);
+  existingChunks.forEach(({ name: chunkName, index }) => {
+    if (index >= chunks.length) {
+      setCookie(context, chunkName, '', {
+        ...options,
+        maxAge: 0,
+      });
+    }
+  });
 }
 
 /**
@@ -125,6 +234,10 @@ export function getChunkedCookie(context, name) {
 
   // No metadata - try single cookie
   if (!chunkCountStr) {
+    const fallback = reassembleChunksFromJar(context, name);
+    if (fallback) {
+      return fallback;
+    }
     return getCookie(context, name) || null;
   }
 
@@ -132,7 +245,7 @@ export function getChunkedCookie(context, name) {
   const chunkCount = parseInt(chunkCountStr, 10);
   if (isNaN(chunkCount) || chunkCount <= 0 || chunkCount > MAX_CHUNKS) {
     console.warn(`[Cookie Chunking] Invalid chunk count for "${name}": ${chunkCountStr}`);
-    return null;
+    return reassembleChunksFromJar(context, name);
   }
 
   // Reassemble chunks
@@ -141,7 +254,7 @@ export function getChunkedCookie(context, name) {
     const chunk = getCookie(context, `${name}.${i}`);
     if (!chunk) {
       console.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
-      return null;
+      return reassembleChunksFromJar(context, name, chunkCount);
     }
     chunks.push(chunk);
   }
@@ -162,25 +275,31 @@ export function getChunkedCookie(context, name) {
  * deleteChunkedCookie(c, 'session', { domain: '.example.com', path: '/' });
  */
 export function deleteChunkedCookie(context, name, options = {}) {
-  // Delete main cookie
-  setCookie(context, name, '', {
-    ...options,
-    maxAge: 0,
+  const cookieJar = getCookieJar(context);
+  const namesToDelete = new Set();
+
+  if (Object.prototype.hasOwnProperty.call(cookieJar, name)) {
+    namesToDelete.add(name);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(cookieJar, `${name}.__chunks`)) {
+    namesToDelete.add(`${name}.__chunks`);
+  }
+
+  getChunkEntriesFromJar(cookieJar, name).forEach(({ name: chunkName }) => {
+    namesToDelete.add(chunkName);
   });
 
-  // Delete metadata cookie
-  setCookie(context, `${name}.__chunks`, '', {
-    ...options,
-    maxAge: 0,
-  });
+  if (namesToDelete.size === 0) {
+    return;
+  }
 
-  // Delete all possible chunk cookies
-  for (let i = 0; i < MAX_CHUNKS; i++) {
-    setCookie(context, `${name}.${i}`, '', {
+  namesToDelete.forEach((cookieName) => {
+    setCookie(context, cookieName, '', {
       ...options,
       maxAge: 0,
     });
-  }
+  });
 }
 
 /**
