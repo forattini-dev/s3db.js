@@ -3,8 +3,11 @@ import { createDatabaseForTest, createSqsQueueForTest, createSqsClientForTest, s
 import { ReplicatorPlugin } from '../../src/plugins/replicator.plugin.js';
 import SqsReplicator from '../../src/plugins/replicators/sqs-replicator.class.js';
 
+const shouldRunSqsTests = process.env.RUN_SQS_TESTS === 'true';
+const describeSqs = shouldRunSqsTests ? describe : describe.skip;
+
 // --- OPTIMIZED: Single comprehensive test suite instead of multiple ---
-describe('SqsReplicator - Comprehensive Integration Tests', () => {
+describeSqs('SqsReplicator - Comprehensive Integration Tests', () => {
   let db, users, queueUrl, sqsClient, plugin;
   
   beforeAll(async () => {

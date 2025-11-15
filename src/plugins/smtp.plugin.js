@@ -804,6 +804,7 @@ export class SMTPPlugin extends Plugin {
    */
   getStatus() {
     const status = {
+      name: this.constructor.name || 'SMTPPlugin',
       mode: this.mode,
       queuedEmails: this._queuedCount,
       rateLimitTokens: Math.floor(this._rateLimitTokens)

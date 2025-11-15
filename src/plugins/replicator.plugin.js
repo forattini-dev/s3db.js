@@ -217,7 +217,8 @@ export class ReplicatorPlugin extends Plugin {
 
   _resolveLogResourceName() {
     return resolveResourceName('replicator', this._logResourceDescriptor, {
-      namespace: this.namespace
+      namespace: this.namespace,
+      applyNamespaceToOverrides: true
     });
   }
 

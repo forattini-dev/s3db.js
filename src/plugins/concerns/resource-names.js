@@ -66,11 +66,12 @@ export function resolveResourceName(pluginKey, { defaultName, override, suffix }
     // 🎯 If override is provided, respect the exact name unless namespacing is requested
     const sanitized = sanitizeName(override);
 
+    const ensured = ensurePlgPrefix(sanitized);
+
     if (!applyOverrideNamespace) {
-      return sanitized;
+      return ensured;
     }
 
-    const ensured = ensurePlgPrefix(sanitized);
     return applyNamespace(ensured, namespace);
   }
 

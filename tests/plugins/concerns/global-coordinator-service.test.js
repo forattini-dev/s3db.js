@@ -5,7 +5,6 @@
  * in the same namespace, reducing S3 API calls by N× (where N = number of plugins).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Database } from '../../../src/database.class.js';
 import { GlobalCoordinatorService } from '../../../src/plugins/concerns/global-coordinator-service.class.js';
 
@@ -15,7 +14,7 @@ describe('GlobalCoordinatorService', () => {
 
   beforeEach(async () => {
     db = new Database({
-      connection: 'memory://test/db',
+      connectionString: 'memory://test/coordinator/db',
       verbose: false
     });
     await db.connect();

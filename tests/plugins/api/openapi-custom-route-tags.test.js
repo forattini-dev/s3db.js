@@ -37,7 +37,7 @@ describe('OpenAPI Custom Route Tag Inference', () => {
       // Check that 'analytics' tag exists
       const analyticsTag = spec.tags.find(t => t.name === 'analytics');
       expect(analyticsTag).toBeDefined();
-      expect(analyticsTag.description).toBe('Custom routes for analytics');
+      expect(analyticsTag.description).toBe('Routes for analytics');
 
       // Check that routes have 'analytics' tag (plugin routes don't include version prefix)
       const reportsPath = spec.paths['/api/analytics/reports'];

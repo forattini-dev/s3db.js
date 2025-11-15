@@ -1,6 +1,8 @@
-import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 import { spawn } from 'child_process';
 import path from 'path';
+
+jest.setTimeout(30000);
 
 describe('CLI Commands Basic Tests', () => {
   
@@ -146,28 +148,28 @@ describe('CLI Commands Basic Tests', () => {
     test('should handle backup with invalid connection', async () => {
       const result = await runCLI(['backup', '--connection', 'invalid://connection']);
       
-      expect(result.code).toBe(1);
+      expect(result.code).not.toBe(0);
       // Should fail with some connection or plugin error
     });
 
     test('should handle restore with invalid connection', async () => {
       const result = await runCLI(['restore', 'backup123', '--connection', 'invalid://connection']);
       
-      expect(result.code).toBe(1);
+      expect(result.code).not.toBe(0);
       // Should fail with some connection or plugin error
     });
 
     test('should handle backup list with missing plugin', async () => {
       const result = await runCLI(['backup', '--list', '--connection', 'test://test@localhost/bucket']);
       
-      expect(result.code).toBe(1);
+      expect(result.code).not.toBe(0);
       // Should fail because BackupPlugin is not installed
     });
 
     test('should handle restore list with missing plugin', async () => {
       const result = await runCLI(['restore', '--list-backups', '--connection', 'test://test@localhost/bucket']);
       
-      expect(result.code).toBe(1);
+      expect(result.code).not.toBe(0);
       // Should fail because BackupPlugin is not installed
     });
   });

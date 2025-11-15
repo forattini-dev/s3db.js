@@ -162,7 +162,7 @@ export class TasksRunner extends EventEmitter {
     this.timeout = options.timeout ?? 30000
     this.retryableErrors = options.retryableErrors || []
 
-    this.queue = new PriorityTaskQueue()
+    this._queue = new PriorityTaskQueue()
     this.active = new Map()
     this.paused = false
     this.stopped = false
@@ -178,6 +178,10 @@ export class TasksRunner extends EventEmitter {
 
     this.processedItems = []
     this.taskMetrics = new Map()
+  }
+
+  get queue () {
+    return this._queue.heap
   }
 
   /**
@@ -260,7 +264,7 @@ export class TasksRunner extends EventEmitter {
     task.reject = reject
 
     this._insertByPriority(task)
-    this.stats.queueSize = this.queue.length
+    this.stats.queueSize = this._queue.length
 
     this.processNext()
 
@@ -322,15 +326,16 @@ export class TasksRunner extends EventEmitter {
     for await (const item of iterable) {
       if (this.stopped) break
 
+      const currentIndex = index
       const promise = this.enqueue(
         async () => {
-          return await processor(item, index, this)
+          return await processor(item, currentIndex, this)
         },
         {
           priority: options.priority,
           retries: options.retries,
           timeout: options.timeout,
-          metadata: { item, index }
+          metadata: { item, index: currentIndex }
         }
       )
         .then((result) => {
@@ -339,7 +344,7 @@ export class TasksRunner extends EventEmitter {
           reportProgress(item)
         })
         .catch((error) => {
-          errors.push({ item, error, index })
+          errors.push({ item, error, index: currentIndex })
           options.onItemError?.(item, error)
           reportProgress(item)
         })
@@ -414,9 +419,9 @@ export class TasksRunner extends EventEmitter {
    * @private
    */
   processNext () {
-    while (!this.paused && !this.stopped && this.active.size < this.concurrency && this.queue.length > 0) {
-      const task = this.queue.dequeue()
-      this.stats.queueSize = this.queue.length
+    while (!this.paused && !this.stopped && this.active.size < this.concurrency && this._queue.length > 0) {
+      const task = this._queue.dequeue()
+      this.stats.queueSize = this._queue.length
 
       const taskPromise = this._executeTaskWithRetry(task)
 
@@ -444,7 +449,7 @@ export class TasksRunner extends EventEmitter {
           this._notifyActiveWaiters()
           this.processNext()
 
-          if (this.active.size === 0 && this.queue.length === 0) {
+          if (this.active.size === 0 && this._queue.length === 0) {
             this.emit('drained')
           }
         })
@@ -524,7 +529,7 @@ export class TasksRunner extends EventEmitter {
    * @private
    */
   _insertByPriority (task) {
-    this.queue.enqueue(task)
+    this._queue.enqueue(task)
   }
 
   /**
@@ -601,10 +606,11 @@ export class TasksRunner extends EventEmitter {
   stop () {
     this.stopped = true
 
-    this.queue.flush((task) => {
+    this._queue.flush((task) => {
+      task.promise?.catch(() => {})
       task.reject(new Error('Task cancelled by stop()'))
     })
-    this.stats.queueSize = this.queue.length
+    this.stats.queueSize = this._queue.length
     this.emit('stopped')
   }
 
@@ -614,7 +620,7 @@ export class TasksRunner extends EventEmitter {
    * @returns {Promise<void>}
    */
   async drain () {
-    while (this.queue.length > 0 || this.active.size > 0) {
+    while (this._queue.length > 0 || this.active.size > 0) {
       await this._waitForActive()
     }
     this.emit('drained')
@@ -649,7 +655,7 @@ export class TasksRunner extends EventEmitter {
   getStats () {
     return {
       ...this.stats,
-      queueSize: this.queue.length,
+      queueSize: this._queue.length,
       activeCount: this.active.size
     }
   }
@@ -660,13 +666,13 @@ export class TasksRunner extends EventEmitter {
    * @returns {Object} Progress information
    */
   getProgress () {
-    const total = this.stats.processedCount + this.stats.errorCount + this.queue.length + this.active.size
+    const total = this.stats.processedCount + this.stats.errorCount + this._queue.length + this.active.size
     const completed = this.stats.processedCount + this.stats.errorCount
 
     return {
       total,
       completed,
-      pending: this.queue.length,
+      pending: this._queue.length,
       active: this.active.size,
       percentage: total > 0 ? ((completed / total) * 100).toFixed(2) : 0
     }
@@ -676,7 +682,7 @@ export class TasksRunner extends EventEmitter {
    * Reset manager (clear state)
    */
   reset () {
-    this.queue = new PriorityTaskQueue()
+    this._queue = new PriorityTaskQueue()
     this.active.clear()
     this.paused = false
     this.stopped = false

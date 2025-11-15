@@ -149,6 +149,8 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     try {
       this.isRunning = false;
+      this.isLeader = false;
+      this.currentLeaderId = null;
 
       // Clear timers
       if (this.heartbeatTimer) {
@@ -293,17 +295,21 @@ export class GlobalCoordinatorService extends EventEmitter {
       // Step 3: Check if leader lease expired
       const now = Date.now();
       let newLeaderId = state?.leaderId;
+      let newEpoch = state?.epoch ?? this.currentEpoch ?? 0;
       let needsNewElection = !state || (state.leaseEnd && now >= state.leaseEnd);
 
       if (needsNewElection) {
         // Step 4: Conduct election
-        newLeaderId = await this._conductElection();
+        const electionResult = await this._conductElection(newEpoch);
+        newLeaderId = electionResult?.leaderId || null;
+        newEpoch = electionResult?.epoch ?? newEpoch + 1;
         this.metrics.electionCount++;
       }
 
       // Step 5: Update local state
       this.currentLeaderId = newLeaderId;
-      this.currentEpoch = state?.epoch || 1;
+      this.currentEpoch = newEpoch || 1;
+      this.isLeader = newLeaderId === this.workerId;
       this.metrics.heartbeatCount++;
       this.metrics.lastHeartbeatTime = Date.now();
 
@@ -326,12 +332,12 @@ export class GlobalCoordinatorService extends EventEmitter {
    * @private
    * @returns {Promise<string|null>} Elected leader ID
    */
-  async _conductElection() {
+  async _conductElection(previousEpoch = 0) {
     try {
       // Get active workers
       const workers = await this.getActiveWorkers();
       if (workers.length === 0) {
-        return null;
+        return { leaderId: null, epoch: previousEpoch };
       }
 
       // Elect lexicographically first worker
@@ -341,10 +347,11 @@ export class GlobalCoordinatorService extends EventEmitter {
       const now = Date.now();
       const leaseEnd = now + this.config.leaseTimeout;
 
+      const epoch = previousEpoch + 1;
       const newState = {
         leaderId: elected,
         leaderPod: this._getWorkerPod(elected),
-        epoch: (this.currentEpoch || 0) + 1,
+        epoch,
         leaseStart: now,
         leaseEnd,
         electedBy: this.workerId,
@@ -367,11 +374,11 @@ export class GlobalCoordinatorService extends EventEmitter {
         return null;
       }
 
-      return elected;
+      return { leaderId: elected, epoch };
 
     } catch (err) {
       this._logError('Election failed', err);
-      return null;
+      return { leaderId: null, epoch: previousEpoch };
     }
   }
 
@@ -401,6 +408,8 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     if (!ok) {
       this._logError('Failed to register worker heartbeat', err);
+    } else {
+      this.metrics.workerRegistrations++;
     }
   }
 
@@ -550,7 +559,7 @@ export class GlobalCoordinatorService extends EventEmitter {
       throw new Error('GlobalCoordinatorService: database client not available');
     }
     if (!this._pluginStorage) {
-      this._pluginStorage = new PluginStorage(this.database.client, 'global-coordinator');
+      this._pluginStorage = new CoordinatorPluginStorage(this.database.client, 'global-coordinator');
     }
     return this._pluginStorage;
   }
@@ -642,6 +651,40 @@ export class GlobalCoordinatorService extends EventEmitter {
     if (this.config.diagnosticsEnabled) {
       console.error(`[coordinator:global] [${this.namespace}] ${msg}:`, err?.message || err);
     }
+  }
+}
+
+class CoordinatorPluginStorage extends PluginStorage {
+  constructor(client, pluginSlug = 'global-coordinator') {
+    super(client, pluginSlug);
+  }
+
+  async list(prefix = '', options = {}) {
+    const { limit } = options;
+    const fullPrefix = prefix || '';
+
+    const [ok, err, result] = await tryFn(() =>
+      this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
+    );
+
+    if (!ok) {
+      throw err;
+    }
+
+    const keys = result.Contents?.map(item => item.Key) || [];
+    return this._removeKeyPrefix(keys);
+  }
+
+  async listWithPrefix(prefix = '', options = {}) {
+    const keys = await this.list(prefix, options);
+    if (!keys || keys.length === 0) {
+      return [];
+    }
+
+    const results = await this.batchGet(keys);
+    return results
+      .filter(item => item.ok && item.data != null)
+      .map(item => item.data);
   }
 }
 

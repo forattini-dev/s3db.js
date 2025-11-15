@@ -680,10 +680,11 @@ const config = {
   async function deleteSessionCookie(c, name, options = {}) {
     const path = options.path || '/';
     const domain = options.domain || config.cookieDomain;
+    const cookieJar = getCookie(c);
 
     // If using session store, destroy session data
     if (sessionStore) {
-      const sessionId = getChunkedCookie(c, name);
+      const sessionId = getChunkedCookie(c, name, cookieJar);
       if (sessionId) {
         try {
           await sessionStore.destroy(sessionId);
@@ -694,12 +695,12 @@ const config = {
     }
 
     // Always delete host-only cookie (includes all chunks)
-    deleteChunkedCookie(c, name, { path });
+    deleteChunkedCookie(c, name, { path }, cookieJar);
 
     // Also delete domain-scoped cookie if configured
     // This fixes cross-subdomain logout issues
     if (domain) {
-      deleteChunkedCookie(c, name, { path, domain });
+      deleteChunkedCookie(c, name, { path, domain }, cookieJar);
     }
   }
 
