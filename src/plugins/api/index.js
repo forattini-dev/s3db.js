@@ -62,8 +62,6 @@ function normalizeAuthConfig(authOptions = {}) {
       strategy: 'any',
       priorities: {},
       resource: 'users',
-      usernameField: 'email',
-      passwordField: 'password',
       driver: null
     };
   }
@@ -75,8 +73,6 @@ function normalizeAuthConfig(authOptions = {}) {
     strategy: authOptions.strategy || 'any',
     priorities: authOptions.priorities || {},
     resource: authOptions.resource,
-    usernameField: authOptions.usernameField || 'email',
-    passwordField: authOptions.passwordField || 'password',
     createResource: authOptions.createResource !== false
   };
 

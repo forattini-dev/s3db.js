@@ -61,17 +61,18 @@ async function main() {
     port: 3100,
     verbose: true,
 
-    // JWT Authentication driver
+    // JWT Authentication driver (driver-level field configuration)
     auth: {
-      driver: 'jwt', // Choose JWT driver
-      resource: 'users', // Resource that manages authentication
-      usernameField: 'email', // Field for username (default: 'email')
-      passwordField: 'password', // Field for password (default: 'password')
-      config: {
-        jwtSecret: 'my-super-secret-jwt-key-256-bits', // Required for JWT
-        jwtExpiresIn: '7d', // Token expiration (default: 7d)
-        allowRegistration: true // Enable /auth/register (default: true)
-      }
+      driver: {
+        driver: 'jwt', // Choose JWT driver
+        config: {
+          jwtSecret: 'my-super-secret-jwt-key-256-bits', // Required for JWT
+          jwtExpiresIn: '7d', // Token expiration (default: 7d)
+          usernameField: 'id', // 🎯 Field for username lookup (at driver level)
+          passwordField: 'apiToken' // 🎯 Field for password/token (at driver level)
+        }
+      },
+      resource: 'users' // Resource that manages authentication
     },
 
     // Resource configuration

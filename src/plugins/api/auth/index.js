@@ -54,6 +54,8 @@ export function createAuthMiddleware(options = {}) {
       middleware: jwtAuth({
         secret: jwtConfig.secret,
         usersResource,
+        usernameField: jwtConfig.usernameField,
+        passwordField: jwtConfig.passwordField,
         optional: true // Check all methods before rejecting
       })
     });
@@ -75,8 +77,10 @@ export function createAuthMiddleware(options = {}) {
       name: 'basic',
       middleware: basicAuth({
         realm: basicConfig.realm || 'API Access',
-        usersResource,
+        authResource: usersResource,
         passphrase: basicConfig.passphrase || 'secret',
+        usernameField: basicConfig.usernameField,
+        passwordField: basicConfig.passwordField,
         optional: true // Check all methods before rejecting
       })
     });

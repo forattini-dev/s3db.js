@@ -94,6 +94,27 @@ curl -H "Authorization: Bearer eyJhbGc..." http://localhost:3000/api/orders
 curl http://localhost:3000/api/orders?token=eyJhbGc...
 ```
 
+### Custom Username/Password Fields for JWT (Driver-Level Configuration)
+
+**⭐ NEW:** JWT also supports custom field configuration at the driver level:
+
+```javascript
+// ✅ NEW PATTERN (v16+): Driver-level configuration for JWT
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    drivers: [{
+      driver: 'jwt',
+      config: {
+        jwtSecret: process.env.JWT_SECRET,
+        usernameField: 'id',        // 🎯 Field to lookup user (default: 'userId')
+        passwordField: 'apiToken'   // 🎯 Field for password comparison (default: 'apiToken')
+      }
+    }],
+    resource: 'users'
+  }
+}));
+```
+
 ### Access User in Routes
 
 ```javascript
@@ -192,14 +213,34 @@ await db.resources.users.insert({
 return { apiToken: user.apiToken };
 ```
 
-### Custom Username/Password Fields
+### Custom Username/Password Fields (Driver-Level Configuration)
+
+**⭐ NEW:** Field configuration is now at the driver level for better clarity:
 
 ```javascript
-// Example: Use 'username' and 'password' fields
+// ✅ NEW PATTERN (v16+): Driver-level configuration
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    drivers: [{
+      driver: 'basic',
+      config: {
+        realm: 'API Access',
+        usernameField: 'id',        // 🎯 Custom username field
+        passwordField: 'apiToken'   // 🎯 Custom password field
+      }
+    }],
+    resource: 'users'
+  }
+}));
+```
+
+**Before (Legacy Pattern):**
+```javascript
+// ❌ OLD PATTERN (still supported for compatibility): Global configuration
 basic: {
   usernameField: 'username',
   passwordField: 'password',
-  hashPassword: true  // If passwords are hashed (bcrypt, argon2)
+  hashPassword: true
 }
 ```
 

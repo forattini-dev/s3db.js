@@ -106,10 +106,20 @@ export function verifyToken(token, secret) {
  * @param {string} options.secret - JWT secret key
  * @param {Object} options.usersResource - Users resource for user lookup
  * @param {boolean} options.optional - If true, allows requests without auth
+ * @param {string} options.usernameField - Field to use for username lookup (default: 'userId')
+ * @param {string} options.passwordField - Field to use for password (default: 'apiToken')
+ * @param {string} options.cookieName - Cookie name for token fallback
  * @returns {Function} Hono middleware
  */
 export function jwtAuth(options = {}) {
-  const { secret, usersResource, optional = false, cookieName = null } = options;
+  const {
+    secret,
+    usersResource,
+    optional = false,
+    cookieName = null,
+    usernameField = 'userId',
+    passwordField = 'apiToken'
+  } = options;
 
   if (!secret) {
     throw new Error('JWT secret is required');
@@ -126,9 +136,10 @@ export function jwtAuth(options = {}) {
           if (token) {
             const payload = verifyToken(token, secret);
             if (payload) {
-              if (usersResource && payload.userId) {
+              const userIdValue = payload[usernameField];
+              if (usersResource && userIdValue) {
                 try {
-                  const user = await usersResource.get(payload.userId);
+                  const user = await usersResource.get(userIdValue);
                   if (user && user.active !== false) {
                     c.set('user', user);
                     c.set('authMethod', 'jwt-cookie');
@@ -169,9 +180,10 @@ export function jwtAuth(options = {}) {
     }
 
     // Optionally load user from database
-    if (usersResource && payload.userId) {
+    const userIdValue = payload[usernameField];
+    if (usersResource && userIdValue) {
       try {
-        const user = await usersResource.get(payload.userId);
+        const user = await usersResource.get(userIdValue);
 
         if (!user) {
           const response = unauthorized('User not found');
