@@ -41,6 +41,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { PluginStorage } from '../../concerns/plugin-storage.js';
 import { tryFn } from '../../concerns/try-fn.js';
 
 // Monotonic counter for unique service IDs
@@ -94,6 +95,7 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     // Storage helper (will be initialized in initialize())
     this.storage = null;
+    this._pluginStorage = null;
   }
 
   // ==================== LIFECYCLE ====================
@@ -547,7 +549,10 @@ export class GlobalCoordinatorService extends EventEmitter {
     if (!this.database || !this.database.client) {
       throw new Error('GlobalCoordinatorService: database client not available');
     }
-    return this.database.client;
+    if (!this._pluginStorage) {
+      this._pluginStorage = new PluginStorage(this.database.client, 'global-coordinator');
+    }
+    return this._pluginStorage;
   }
 
   /**

@@ -4,11 +4,6 @@ import { setTimeout as delay } from 'timers/promises'
 import { nanoid } from 'nanoid'
 import { TaskExecutor } from './concurrency/task-executor.interface.js'
 
-const scheduleDrain =
-  typeof queueMicrotask === 'function'
-    ? queueMicrotask
-    : (fn) => setTimeout(fn, 0)
-
 const INTERNAL_DEFER = '__taskExecutorInternalDefer'
 
 /**
@@ -42,8 +37,8 @@ export class TasksPool extends EventEmitter {
    * @param {boolean} [options.autoTuning.enabled=false] - Enable adaptive tuning
    * @param {Object} [options.monitoring] - Monitoring configuration
    * @param {boolean} [options.monitoring.enabled=true] - Enable metrics collection
-   * @param {boolean} [options.monitoring.collectMetrics=true] - Collect detailed task metrics
-   * @param {number} [options.monitoring.sampleRate=1] - Fraction (0-1) of tasks to persist detailed metrics
+   * @param {boolean} [options.monitoring.collectMetrics=false] - Collect detailed task metrics
+   * @param {number} [options.monitoring.sampleRate=0] - Fraction (0-1) of tasks to persist detailed metrics
    */
   constructor (options = {}) {
     super()
@@ -90,7 +85,9 @@ export class TasksPool extends EventEmitter {
     this.active = new Map()
     this.paused = false
     this.stopped = false
-    this._processScheduled = false
+    this._drainInProgress = false
+    this._pendingDrain = false
+    this._activeWaiters = []
 
     // Statistics
     this.stats = {
@@ -105,15 +102,17 @@ export class TasksPool extends EventEmitter {
     // Metrics collection (optional)
     this.monitoring = {
       enabled: options.monitoring?.enabled ?? true,
-      collectMetrics: options.monitoring?.collectMetrics ?? true,
-      sampleRate: this._normalizeSampleRate(options.monitoring?.sampleRate),
+      collectMetrics: options.monitoring?.collectMetrics ?? false,
+      sampleRate: this._normalizeSampleRate(options.monitoring?.sampleRate ?? 0),
       mode: options.monitoring?.mode || 'balanced', // 'light' | 'balanced' | 'full'
       sampleInterval: options.monitoring?.sampleInterval ?? 100,
       rollingWindowMs: options.monitoring?.rollingWindowMs ?? 1000
     }
     this.taskMetrics = new Map()
     this.memorySampler =
-      this.monitoring.collectMetrics && this.monitoring.mode !== 'light'
+      this.monitoring.collectMetrics &&
+      this.monitoring.sampleRate > 0 &&
+      this.monitoring.mode !== 'light'
         ? new MemorySampler(this.monitoring.sampleInterval)
         : null
     this.rollingWindow = this.monitoring.enabled
@@ -179,6 +178,9 @@ export class TasksPool extends EventEmitter {
    */
   _shouldSampleMetrics () {
     if (!this.monitoring.collectMetrics) {
+      return false
+    }
+    if (this.monitoring.sampleRate <= 0) {
       return false
     }
     if (this.monitoring.sampleRate >= 1) {
@@ -370,17 +372,21 @@ export class TasksPool extends EventEmitter {
    */
   processNext () {
     if (this.paused || this.stopped || this.queue.length === 0) {
-      return
-    }
-    if (this._processScheduled) {
+      this._pendingDrain = false
       return
     }
 
-    this._processScheduled = true
-    scheduleDrain(() => {
-      this._processScheduled = false
+    if (this._drainInProgress) {
+      this._pendingDrain = true
+      return
+    }
+
+    this._drainInProgress = true
+    do {
+      this._pendingDrain = false
       this._drainQueue()
-    })
+    } while (this._pendingDrain && !this.paused && !this.stopped && this.queue.length > 0)
+    this._drainInProgress = false
   }
 
   /**
@@ -388,9 +394,6 @@ export class TasksPool extends EventEmitter {
    * @private
    */
   _drainQueue () {
-    const maxPerTick = this.effectiveConcurrency * 2 || 16
-    let processed = 0
-
     while (this._canProcessNext()) {
       const task = this.queue.dequeue()
       if (!task) break
@@ -417,17 +420,13 @@ export class TasksPool extends EventEmitter {
           this.emit('pool:taskError', task, error)
         })
         .finally(() => {
+          this._notifyActiveWaiters()
           this.processNext()
 
           if (this.active.size === 0 && this.queue.length === 0) {
             this.emit('pool:drained')
           }
         })
-      processed++
-      if (processed >= maxPerTick) {
-        this.processNext()
-        break
-      }
     }
   }
 
@@ -728,7 +727,9 @@ export class TasksPool extends EventEmitter {
    */
   async pause () {
     this.paused = true
-    await this._waitForActive()
+    while (this.active.size > 0) {
+      await this._waitForActive()
+    }
     this.emit('pool:paused')
   }
 
@@ -791,7 +792,20 @@ export class TasksPool extends EventEmitter {
    */
   async _waitForActive () {
     if (this.active.size === 0) return
-    await Promise.race(Array.from(this.active.keys()))
+    await new Promise((resolve) => {
+      this._activeWaiters.push(resolve)
+    })
+  }
+
+  _notifyActiveWaiters () {
+    if (this._activeWaiters.length === 0) {
+      return
+    }
+    const waiters = this._activeWaiters
+    this._activeWaiters = []
+    for (const resolve of waiters) {
+      resolve()
+    }
   }
 
   /**
