@@ -49,17 +49,14 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
   });
 
   describe('1. Plugin Initialization with Global Coordination', () => {
-    it('should initialize plugin with global coordination mode', async () => {
+    it('should initialize plugin with global coordination (default)', async () => {
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 1000,
-          heartbeatJitter: 200,
-          leaseTimeout: 3000,
-          workerTimeout: 5000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 1000,
+        heartbeatJitter: 200,
+        leaseTimeout: 3000,
+        workerTimeout: 5000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,
@@ -67,7 +64,8 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
         onError: () => {}
       });
 
-      expect(queuePlugin.globalCoordinationMode).toBe(true);
+      // All plugins now use global coordination by default
+      expect(queuePlugin.enableCoordinator).toBe(true);
     });
   });
 
@@ -104,14 +102,11 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should elect a leader and maintain heartbeat', async () => {
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 500,
-          heartbeatJitter: 100,
-          leaseTimeout: 1500,
-          workerTimeout: 3000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 500,
+        heartbeatJitter: 100,
+        leaseTimeout: 1500,
+        workerTimeout: 3000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,
@@ -136,14 +131,11 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should track heartbeat metrics', async () => {
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 300,
-          heartbeatJitter: 100,
-          leaseTimeout: 1000,
-          workerTimeout: 2000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 300,
+        heartbeatJitter: 100,
+        leaseTimeout: 1000,
+        workerTimeout: 2000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,
@@ -171,14 +163,11 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should register and track active workers', async () => {
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 500,
-          heartbeatJitter: 100,
-          leaseTimeout: 1500,
-          workerTimeout: 3000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 500,
+        heartbeatJitter: 100,
+        leaseTimeout: 1500,
+        workerTimeout: 3000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,
@@ -249,14 +238,11 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
 
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 500,
-          heartbeatJitter: 100,
-          leaseTimeout: 1500,
-          workerTimeout: 3000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 500,
+        heartbeatJitter: 100,
+        leaseTimeout: 1500,
+        workerTimeout: 3000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,
@@ -298,14 +284,11 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should start and stop coordinator cleanly', async () => {
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 500,
-          heartbeatJitter: 100,
-          leaseTimeout: 1500,
-          workerTimeout: 3000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 500,
+        heartbeatJitter: 100,
+        leaseTimeout: 1500,
+        workerTimeout: 3000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,
@@ -436,14 +419,11 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should track all key metrics', async () => {
       const queuePlugin = new S3QueuePlugin({
         resource: 'emails',
-        coordinationMode: 'global',
-        globalCoordinator: {
-          heartbeatInterval: 300,
-          heartbeatJitter: 100,
-          leaseTimeout: 1000,
-          workerTimeout: 2000,
-          diagnosticsEnabled: false
-        },
+        enableCoordinator: true,
+        heartbeatInterval: 300,
+        heartbeatJitter: 100,
+        leaseTimeout: 1000,
+        workerTimeout: 2000,
         visibilityTimeout: 30000,
         pollInterval: 500,
         autoStart: false,

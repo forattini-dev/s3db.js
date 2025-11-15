@@ -133,6 +133,8 @@ Get up and running in less than 5 minutes!
 npm install s3db.js
 ```
 
+> Need deeper telemetry? Pass `taskExecutorMonitoring` alongside `executorPool`. It merges into the pool's monitoring block, making it easy to enable verbose stats/heap tracking for any database instance without touching individual resources.
+
 ### 2. Connect to your S3 database
 
 ```javascript
@@ -693,6 +695,11 @@ const db = new S3db({
     concurrency: 100,  // Default concurrency (can increase for high-throughput)
     retries: 3,
     retryDelay: 1000
+  },
+  taskExecutorMonitoring: {
+    enabled: true,
+    collectMetrics: true,
+    sampleRate: 0.2
   },
   plugins: [
     new CachePlugin({ ttl: 300000 }),
@@ -1535,6 +1542,12 @@ const db = new Database({
       targetMemoryPercent: 0.7,     // Target memory usage (70%)
       adjustmentInterval: 5000      // Check interval (ms)
     }
+  },
+  taskExecutorMonitoring: {
+    enabled: true,
+    collectMetrics: true,
+    sampleRate: 1,
+    mode: 'balanced'
   }
 })
 ```
