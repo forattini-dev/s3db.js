@@ -3,12 +3,13 @@
  * @group api
  */
 
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import {
   setChunkedCookie,
   getChunkedCookie,
   deleteChunkedCookie,
-  isChunkedCookie
+  isChunkedCookie,
+  CookieChunkOverflowError
 } from '../../../src/plugins/api/concerns/cookie-chunking.js';
 
 describe('Cookie Chunking', () => {
@@ -147,11 +148,36 @@ describe('Cookie Chunking', () => {
     });
 
     test('throws error for extremely large values', () => {
-      // Create value that would need > 10 chunks
       const hugeValue = 'x'.repeat(50000);
-      expect(() => {
+      let thrownError;
+
+      try {
         setChunkedCookie(mockContext, 'huge', hugeValue, {});
-      }).toThrow(/too large/);
+      } catch (err) {
+        thrownError = err;
+      }
+
+      expect(thrownError).toBeInstanceOf(CookieChunkOverflowError);
+      expect(thrownError.details.cookieName).toBe('huge');
+      expect(thrownError.details.chunkCount).toBeGreaterThan(10);
+      expect(thrownError.details.payloadBytes).toBeGreaterThan(0);
+    });
+
+    test('invokes overflow handler when provided', () => {
+      const hugeValue = 'x'.repeat(50000);
+      const handler = jest.fn(() => true);
+
+      expect(() => {
+        setChunkedCookie(mockContext, 'huge', hugeValue, {}, { onOverflow: handler });
+      }).not.toThrow();
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cookieName: 'huge',
+          chunkLimit: 10,
+          value: hugeValue
+        })
+      );
     });
 
     test('deletes cookie for empty value', () => {
