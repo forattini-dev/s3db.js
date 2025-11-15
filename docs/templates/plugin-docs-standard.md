@@ -1,7 +1,5 @@
 # Plugin Documentation Standard
 
-**Version:** 1.0.0
-**Last Updated:** 2025-11-06
 **Gold Standard:** [PuppeteerPlugin](./plugins/puppeteer.md) (1,850+ lines, 80+ FAQ entries)
 
 ---
@@ -899,7 +897,3 @@ Both templates include:
 - Must update both templates when standard changes
 - Validate changes against gold standard (puppeteer.md)
 - Update existing docs incrementally (no forced migration)
-
-**Last Updated:** 2025-11-06
-**Maintainer:** @forattini-dev
-**Version:** 1.0.0

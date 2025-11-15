@@ -96,10 +96,10 @@ curl http://localhost:3000/api/orders?token=eyJhbGc...
 
 ### Custom Username/Password Fields for JWT (Driver-Level Configuration)
 
-**⭐ NEW:** JWT also supports custom field configuration at the driver level:
+JWT also supports custom field configuration at the driver level:
 
 ```javascript
-// ✅ NEW PATTERN (v16+): Driver-level configuration for JWT
+// ✅ PATTERN: Driver-level configuration for JWT
 await db.usePlugin(new ApiPlugin({
   auth: {
     drivers: [{
@@ -215,10 +215,10 @@ return { apiToken: user.apiToken };
 
 ### Custom Username/Password Fields (Driver-Level Configuration)
 
-**⭐ NEW:** Field configuration is now at the driver level for better clarity:
+Field configuration is at the driver level for better clarity:
 
 ```javascript
-// ✅ NEW PATTERN (v16+): Driver-level configuration
+// ✅ PATTERN: Driver-level configuration
 await db.usePlugin(new ApiPlugin({
   auth: {
     drivers: [{
@@ -232,16 +232,6 @@ await db.usePlugin(new ApiPlugin({
     resource: 'users'
   }
 }));
-```
-
-**Before (Legacy Pattern):**
-```javascript
-// ❌ OLD PATTERN (still supported for compatibility): Global configuration
-basic: {
-  usernameField: 'username',
-  passwordField: 'password',
-  hashPassword: true
-}
 ```
 
 ### Security Notes

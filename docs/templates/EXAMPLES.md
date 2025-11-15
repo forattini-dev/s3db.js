@@ -898,8 +898,3 @@ Once documentation is complete:
 3. **Link from main README** - Ensure discoverability
 4. **Announce** - Share in changelog, release notes, or documentation updates
 
----
-
-**Template Version:** 1.0.0
-**Last Updated:** 2025-11-06
-**Maintainer:** s3db.js Documentation Team

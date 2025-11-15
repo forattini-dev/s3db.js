@@ -385,6 +385,5 @@ A: {Diagnostic steps and solution}
 
 ---
 
-**Template Version:** 1.0.0 (Minimal)
 **Standard:** [../plugin-docs-standard.md](../plugin-docs-standard.md)
 **Full Template:** [./plugin-doc-template.md](./plugin-doc-template.md)
