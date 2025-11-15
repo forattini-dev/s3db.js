@@ -123,6 +123,20 @@ export class CoordinatorPlugin extends Plugin {
   // ==================== PUBLIC API ====================
 
   /**
+   * Get coordinator configuration (for testing)
+   */
+  get coordinatorConfig() {
+    return this._coordinatorConfig;
+  }
+
+  /**
+   * Get enableCoordinator flag (for testing)
+   */
+  get enableCoordinator() {
+    return this._coordinatorConfig.enableCoordinator;
+  }
+
+  /**
    * Start coordination (called by plugin system)
    */
   async startCoordination() {
