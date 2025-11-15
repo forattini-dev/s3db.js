@@ -544,10 +544,10 @@ export class GlobalCoordinatorService extends EventEmitter {
    * @private
    */
   _getStorage() {
-    if (!this.database || !this.database._client) {
+    if (!this.database || !this.database.client) {
       throw new Error('GlobalCoordinatorService: database client not available');
     }
-    return this.database._client;
+    return this.database.client;
   }
 
   /**
