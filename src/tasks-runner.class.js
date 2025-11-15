@@ -2,6 +2,102 @@ import { EventEmitter } from 'events'
 import { nanoid } from 'nanoid'
 import { TaskExecutor } from './concurrency/task-executor.interface.js' // eslint-disable-line no-unused-vars
 
+class PriorityTaskQueue {
+  constructor () {
+    this.heap = []
+    this.counter = 0
+  }
+
+  get length () {
+    return this.heap.length
+  }
+
+  enqueue (task) {
+    const node = {
+      task,
+      priority: task.priority || 0,
+      order: this.counter++
+    }
+    this.heap.push(node)
+    this._bubbleUp(this.heap.length - 1)
+  }
+
+  dequeue () {
+    if (this.heap.length === 0) {
+      return null
+    }
+    const topNode = this.heap[0]
+    const lastNode = this.heap.pop()
+    if (this.heap.length > 0 && lastNode) {
+      this.heap[0] = lastNode
+      this._bubbleDown(0)
+    }
+    return topNode.task
+  }
+
+  flush (callback) {
+    if (typeof callback === 'function') {
+      for (const node of this.heap) {
+        callback(node.task)
+      }
+    }
+    this.clear()
+  }
+
+  clear () {
+    this.heap.length = 0
+  }
+
+  _bubbleUp (index) {
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2)
+      if (this._isHigherPriority(this.heap[parentIndex], this.heap[index])) {
+        break
+      }
+      this._swap(index, parentIndex)
+      index = parentIndex
+    }
+  }
+
+  _bubbleDown (index) {
+    const length = this.heap.length
+    while (true) {
+      const left = index * 2 + 1
+      const right = index * 2 + 2
+      let largest = index
+
+      if (left < length && this._isHigherPriority(this.heap[left], this.heap[largest])) {
+        largest = left
+      }
+
+      if (right < length && this._isHigherPriority(this.heap[right], this.heap[largest])) {
+        largest = right
+      }
+
+      if (largest === index) {
+        break
+      }
+
+      this._swap(index, largest)
+      index = largest
+    }
+  }
+
+  _isHigherPriority (nodeA, nodeB) {
+    if (!nodeB) return true
+    if (nodeA.priority === nodeB.priority) {
+      return nodeA.order < nodeB.order
+    }
+    return nodeA.priority > nodeB.priority
+  }
+
+  _swap (i, j) {
+    const tmp = this.heap[i]
+    this.heap[i] = this.heap[j]
+    this.heap[j] = tmp
+  }
+}
+
 /**
  * TasksRunner - Temporary batch processor for custom workflows
  *
@@ -66,10 +162,11 @@ export class TasksRunner extends EventEmitter {
     this.timeout = options.timeout ?? 30000
     this.retryableErrors = options.retryableErrors || []
 
-    this.queue = []
+    this.queue = new PriorityTaskQueue()
     this.active = new Map()
     this.paused = false
     this.stopped = false
+    this._activeWaiters = []
 
     this.stats = {
       queueSize: 0,
@@ -112,44 +209,15 @@ export class TasksRunner extends EventEmitter {
    * )
    */
   async process (items, processor, options = {}) {
-    const results = []
-    const errors = []
+    const iterableOptions = {
+      ...options,
+      totalCount:
+        typeof items?.length === 'number' && Number.isFinite(items.length)
+          ? items.length
+          : options.totalCount
+    }
 
-    const promises = items.map((item, index) => {
-      return this.enqueue(
-        async () => {
-          return await processor(item, index, this)
-        },
-        {
-          priority: options.priority,
-          retries: options.retries,
-          timeout: options.timeout,
-          metadata: { item, index }
-        }
-      )
-        .then((result) => {
-          results.push(result)
-          options.onItemComplete?.(item, result)
-          options.onProgress?.(item, {
-            processedCount: results.length + errors.length,
-            totalCount: items.length,
-            percentage: (((results.length + errors.length) / items.length) * 100).toFixed(2)
-          })
-        })
-        .catch((error) => {
-          errors.push({ item, error, index })
-          options.onItemError?.(item, error)
-          options.onProgress?.(item, {
-            processedCount: results.length + errors.length,
-            totalCount: items.length,
-            percentage: (((results.length + errors.length) / items.length) * 100).toFixed(2)
-          })
-        })
-    })
-
-    await Promise.all(promises)
-
-    return { results, errors }
+    return await this.processIterable(items, processor, iterableOptions)
   }
 
   /**
@@ -208,6 +276,10 @@ export class TasksRunner extends EventEmitter {
    * @param {Iterable|AsyncIterable} iterable - Iterable or async generator
    * @param {Function} processor - async (item, index, manager) => result
    * @param {Object} [options={}] - Processing options
+   * @param {Function} [options.onItemComplete] - Item completion callback (item, result)
+   * @param {Function} [options.onItemError] - Item error callback (item, error)
+   * @param {Function} [options.onProgress] - Progress callback (item, stats)
+   * @param {number} [options.totalCount] - Known total item count for progress stats
    * @returns {Promise<{results: Array, errors: Array}>}
    *
    * @example
@@ -227,6 +299,25 @@ export class TasksRunner extends EventEmitter {
     const errors = []
 
     let index = 0
+    let processedCount = 0
+    const totalCount =
+      typeof options.totalCount === 'number' && options.totalCount >= 0
+        ? options.totalCount
+        : null
+
+    const reportProgress = (item) => {
+      processedCount++
+      if (!options.onProgress) return
+      const percentage =
+        totalCount != null && totalCount > 0
+          ? ((processedCount / totalCount) * 100).toFixed(2)
+          : null
+      options.onProgress(item, {
+        processedCount,
+        totalCount,
+        percentage
+      })
+    }
 
     for await (const item of iterable) {
       if (this.stopped) break
@@ -245,10 +336,12 @@ export class TasksRunner extends EventEmitter {
         .then((result) => {
           results.push(result)
           options.onItemComplete?.(item, result)
+          reportProgress(item)
         })
         .catch((error) => {
           errors.push({ item, error, index })
           options.onItemError?.(item, error)
+          reportProgress(item)
         })
 
       index++
@@ -285,8 +378,11 @@ export class TasksRunner extends EventEmitter {
   async processCorresponding (items, processor, options = {}) {
     const results = Array(items.length).fill(TasksRunner.notRun)
 
-    const promises = items.map((item, index) => {
-      return this.enqueue(
+    for (let index = 0; index < items.length; index++) {
+      if (this.stopped) break
+      const item = items[index]
+
+      this.enqueue(
         async () => {
           return await processor(item, index, this)
         },
@@ -304,9 +400,11 @@ export class TasksRunner extends EventEmitter {
           results[index] = TasksRunner.failed
           options.onItemError?.(item, error)
         })
-    })
 
-    await Promise.all(promises)
+      await this._waitForSlot()
+    }
+
+    await this.drain()
 
     return results
   }
@@ -317,7 +415,7 @@ export class TasksRunner extends EventEmitter {
    */
   processNext () {
     while (!this.paused && !this.stopped && this.active.size < this.concurrency && this.queue.length > 0) {
-      const task = this.queue.shift()
+      const task = this.queue.dequeue()
       this.stats.queueSize = this.queue.length
 
       const taskPromise = this._executeTaskWithRetry(task)
@@ -343,6 +441,7 @@ export class TasksRunner extends EventEmitter {
           this.emit('taskError', task, error)
         })
         .finally(() => {
+          this._notifyActiveWaiters()
           this.processNext()
 
           if (this.active.size === 0 && this.queue.length === 0) {
@@ -425,12 +524,7 @@ export class TasksRunner extends EventEmitter {
    * @private
    */
   _insertByPriority (task) {
-    const index = this.queue.findIndex((t) => t.priority < task.priority)
-    if (index === -1) {
-      this.queue.push(task)
-    } else {
-      this.queue.splice(index, 0, task)
-    }
+    this.queue.enqueue(task)
   }
 
   /**
@@ -449,7 +543,20 @@ export class TasksRunner extends EventEmitter {
    */
   async _waitForActive () {
     if (this.active.size === 0) return
-    await Promise.race(Array.from(this.active.keys()))
+    await new Promise((resolve) => {
+      this._activeWaiters.push(resolve)
+    })
+  }
+
+  _notifyActiveWaiters () {
+    if (this._activeWaiters.length === 0) {
+      return
+    }
+    const waiters = this._activeWaiters
+    this._activeWaiters = []
+    for (const resolve of waiters) {
+      resolve()
+    }
   }
 
   /**
@@ -470,7 +577,9 @@ export class TasksRunner extends EventEmitter {
    */
   async pause () {
     this.paused = true
-    await this._waitForActive()
+    while (this.active.size > 0) {
+      await this._waitForActive()
+    }
     this.emit('paused')
   }
 
@@ -492,12 +601,10 @@ export class TasksRunner extends EventEmitter {
   stop () {
     this.stopped = true
 
-    this.queue.forEach((task) => {
+    this.queue.flush((task) => {
       task.reject(new Error('Task cancelled by stop()'))
     })
-
-    this.queue = []
-    this.stats.queueSize = 0
+    this.stats.queueSize = this.queue.length
     this.emit('stopped')
   }
 
@@ -569,12 +676,13 @@ export class TasksRunner extends EventEmitter {
    * Reset manager (clear state)
    */
   reset () {
-    this.queue = []
+    this.queue = new PriorityTaskQueue()
     this.active.clear()
     this.paused = false
     this.stopped = false
     this.processedItems = []
     this.taskMetrics.clear()
+    this._activeWaiters = []
 
     this.stats = {
       queueSize: 0,

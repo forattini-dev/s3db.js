@@ -25,6 +25,18 @@ const MAX_COOKIE_SIZE = 4000;
 const MAX_CHUNKS = 10;
 const CHUNK_SUFFIX_PATTERN = /^\d+$/;
 
+export class CookieChunkOverflowError extends Error {
+  constructor({ cookieName, chunkCount, chunkLimit, payloadBytes }) {
+    super(
+      `Cookie "${cookieName}" requires ${chunkCount} chunks (limit ${chunkLimit}). ` +
+      `Payload size: ${payloadBytes} bytes.`
+    );
+    this.name = 'CookieChunkOverflowError';
+    this.code = 'COOKIE_CHUNK_OVERFLOW';
+    this.details = { cookieName, chunkCount, chunkLimit, payloadBytes };
+  }
+}
+
 function getEncodedLength(value) {
   return encodeURIComponent(value).length;
 }
@@ -107,8 +119,8 @@ function splitValueIntoChunks(name, value, chunkSize) {
   return chunks;
 }
 
-function reassembleChunksFromJar(context, name, expectedCount = null) {
-  const chunkEntries = getChunkEntriesFromJar(getCookieJar(context), name);
+function reassembleChunksFromJar(context, name, expectedCount = null, cookieJar = null) {
+  const chunkEntries = getChunkEntriesFromJar(cookieJar || getCookieJar(context), name);
   if (chunkEntries.length === 0) {
     return null;
   }
@@ -151,7 +163,7 @@ function reassembleChunksFromJar(context, name, expectedCount = null) {
  * setChunkedCookie(c, 'session', largeTokenString, { httpOnly: true });
  * // Results in: session.__chunks, session.0, session.1, session.2, ...
  */
-export function setChunkedCookie(context, name, value, options = {}) {
+export function setChunkedCookie(context, name, value, options = {}, chunkingOptions = {}) {
   if (!value) {
     // Empty value - delete cookie
     deleteChunkedCookie(context, name, options);
@@ -160,25 +172,40 @@ export function setChunkedCookie(context, name, value, options = {}) {
 
   const chunkSize = calculateChunkSize(name, options);
   const encodedLength = getEncodedLength(value);
+  const requestCookies = getCookieJar(context);
 
   // If value fits in single cookie, use standard cookie
   if (encodedLength <= chunkSize) {
     // Clean up any existing chunks
-    deleteChunkedCookie(context, name, options);
+    deleteChunkedCookie(context, name, options, requestCookies);
     // Set single cookie
     setCookie(context, name, value, options);
     return;
   }
 
   const chunks = splitValueIntoChunks(name, value, chunkSize);
-  const requestCookies = getCookieJar(context);
 
   // Safety check
   if (chunks.length > MAX_CHUNKS) {
-    throw new Error(
-      `Cookie "${name}" value too large (${chunks.length} chunks, max ${MAX_CHUNKS}). ` +
-      `Consider using session store (Redis) to reduce cookie size.`
-    );
+    const overflowDetails = {
+      cookieName: name,
+      chunkCount: chunks.length,
+      chunkLimit: MAX_CHUNKS,
+      payloadBytes: Buffer.byteLength(value, 'utf8')
+    };
+    const error = new CookieChunkOverflowError(overflowDetails);
+    console.error('[Cookie Chunking] Chunk overflow', overflowDetails);
+    if (typeof chunkingOptions.onOverflow === 'function') {
+      try {
+        const handled = chunkingOptions.onOverflow({ ...overflowDetails, value });
+        if (handled === true) {
+          return;
+        }
+      } catch (hookErr) {
+        console.error('[Cookie Chunking] Overflow handler error', hookErr);
+      }
+    }
+    throw error;
   }
 
   // Set chunk cookies
@@ -274,19 +301,19 @@ export function getChunkedCookie(context, name) {
  * @example
  * deleteChunkedCookie(c, 'session', { domain: '.example.com', path: '/' });
  */
-export function deleteChunkedCookie(context, name, options = {}) {
-  const cookieJar = getCookieJar(context);
+export function deleteChunkedCookie(context, name, options = {}, cookieJar = null) {
+  const jar = cookieJar || getCookieJar(context);
   const namesToDelete = new Set();
 
-  if (Object.prototype.hasOwnProperty.call(cookieJar, name)) {
+  if (Object.prototype.hasOwnProperty.call(jar, name)) {
     namesToDelete.add(name);
   }
 
-  if (Object.prototype.hasOwnProperty.call(cookieJar, `${name}.__chunks`)) {
+  if (Object.prototype.hasOwnProperty.call(jar, `${name}.__chunks`)) {
     namesToDelete.add(`${name}.__chunks`);
   }
 
-  getChunkEntriesFromJar(cookieJar, name).forEach(({ name: chunkName }) => {
+  getChunkEntriesFromJar(jar, name).forEach(({ name: chunkName }) => {
     namesToDelete.add(chunkName);
   });
 
