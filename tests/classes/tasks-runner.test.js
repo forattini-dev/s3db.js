@@ -4,15 +4,20 @@ import { TasksRunner } from '../../src/tasks-runner.class.js'
 describe('TasksRunner', () => {
   let runner
 
-  beforeEach(() => {
-    runner = new TasksRunner({ concurrency: 2, retries: 2, retryDelay: 10, timeout: 1000 })
-  })
+beforeEach(() => {
+  runner = new TasksRunner({ concurrency: 2, retries: 2, retryDelay: 10, timeout: 1000 })
+})
 
-  afterEach(() => {
-    if (runner) {
-      runner.destroy()
+afterEach(async () => {
+  if (runner) {
+    try {
+      await runner.drain()
+    } catch (err) {
+      // Ignore drain errors during cleanup
     }
-  })
+    runner.destroy()
+  }
+})
 
   // Helper: sleep function
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))

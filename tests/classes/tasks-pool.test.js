@@ -537,27 +537,38 @@ describe('TasksPool', () => {
     })
 
     test('should provide aggregate metrics', async () => {
+      const metricsPool = new TasksPool({
+        concurrency: 2,
+        monitoring: {
+          enabled: true,
+          collectMetrics: true,
+          sampleRate: 1
+        }
+      })
+
       await Promise.all([
-        pool.enqueue(async () => {
+        metricsPool.enqueue(async () => {
           await sleep(10)
           return 1
         }),
-        pool.enqueue(async () => {
+        metricsPool.enqueue(async () => {
           await sleep(20)
           return 2
         }),
-        pool.enqueue(async () => {
+        metricsPool.enqueue(async () => {
           await sleep(15)
           return 3
         })
       ])
 
-      const metrics = pool.getAggregateMetrics()
+      const metrics = metricsPool.getAggregateMetrics()
 
       expect(metrics).not.toBeNull()
       expect(metrics.count).toBe(3)
       expect(metrics.avgExecution).toBeGreaterThan(0)
       expect(metrics.p95Execution).toBeGreaterThan(0)
+
+      metricsPool.stop()
     })
   })
 
@@ -771,22 +782,40 @@ describe('TasksPool', () => {
 
   describe('Metrics Collection', () => {
     test('should collect task metrics', async () => {
-      await pool.enqueue(async () => {
+      const metricsPool = new TasksPool({
+        concurrency: 2,
+        monitoring: {
+          enabled: true,
+          collectMetrics: true,
+          sampleRate: 1
+        }
+      })
+
+      await metricsPool.enqueue(async () => {
         await sleep(10)
         return 'test'
       })
 
-      const metrics = pool.taskMetrics
+      const metrics = metricsPool.taskMetrics
       expect(metrics.size).toBeGreaterThan(0)
 
       const task = Array.from(metrics.values())[0]
       expect(task.timings.queueWait).toBeGreaterThanOrEqual(0)
       expect(task.timings.execution).toBeGreaterThan(0)
       expect(task.timings.total).toBeGreaterThan(0)
+
+      metricsPool.stop()
     })
 
     test('should limit metrics collection to 1000 tasks', async () => {
-      const largePool = new TasksPool({ concurrency: 100 })
+      const largePool = new TasksPool({
+        concurrency: 100,
+        monitoring: {
+          enabled: true,
+          collectMetrics: true,
+          sampleRate: 1
+        }
+      })
 
       const promises = []
       for (let i = 0; i < 1100; i++) {

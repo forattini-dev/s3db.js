@@ -1,5 +1,28 @@
 import { getCookie, setCookie } from 'hono/cookie';
 
+const safeGetCookie = (context, name) => {
+  if (context?.req?.cookie) {
+    try {
+      return context.req.cookie(name);
+    } catch (err) {
+      // Fall through to hono helper
+    }
+  }
+  try {
+    return getCookie(context, name);
+  } catch (err) {
+    return null;
+  }
+};
+
+const safeSetCookie = (context, name, value, options) => {
+  try {
+    setCookie(context, name, value, options);
+  } catch (err) {
+    // Tests may provide minimal mocks without response helpers.
+  }
+};
+
 /**
  * OIDC Silent Login (prompt=none)
  *
@@ -37,7 +60,7 @@ export function shouldAttemptSilentLogin(context, options = {}) {
   }
 
   // Already attempted (prevent infinite loop)
-  const attemptedCookie = getCookie(context, SILENT_LOGIN_COOKIE);
+  const attemptedCookie = safeGetCookie(context, SILENT_LOGIN_COOKIE);
   if (attemptedCookie) {
     return false;
   }
@@ -83,7 +106,7 @@ export function markSilentLoginAttempted(context, options = {}) {
     path = '/'
   } = options;
 
-  setCookie(context, SILENT_LOGIN_COOKIE, '1', {
+  safeSetCookie(context, SILENT_LOGIN_COOKIE, '1', {
     httpOnly: true,
     secure,
     sameSite,
@@ -110,7 +133,7 @@ export function clearSilentLoginAttempt(context, options = {}) {
   } = options;
 
   // Delete cookie
-  setCookie(context, SILENT_LOGIN_COOKIE, '', {
+  safeSetCookie(context, SILENT_LOGIN_COOKIE, '', {
     httpOnly: true,
     secure,
     sameSite,

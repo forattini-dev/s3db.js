@@ -255,8 +255,8 @@ export function setChunkedCookie(context, name, value, options = {}, chunkingOpt
  *   const data = await decodeSession(session);
  * }
  */
-export function getChunkedCookie(context, name) {
-  const cookieJar = getCookieJar(context);
+export function getChunkedCookie(context, name, cookieJarOverride = null) {
+  const cookieJar = cookieJarOverride || getCookieJar(context);
   const chunkCountStr = cookieJar[`${name}.__chunks`];
 
   // No metadata - try single cookie

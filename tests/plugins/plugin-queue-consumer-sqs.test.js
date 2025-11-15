@@ -8,6 +8,9 @@ import {
 
 import { createReplicator } from '#src/plugins/replicators/index.js';
 
+const shouldRunSqsTests = process.env.RUN_SQS_TESTS === 'true';
+const describeSqs = shouldRunSqsTests ? describe : describe.skip;
+
 // Helper: Wait for a record to appear in a resource (for async replicator)
 async function waitForRecord(resource, id, timeout = 1000) {
   const start = Date.now();
@@ -23,7 +26,7 @@ async function waitForRecord(resource, id, timeout = 1000) {
   throw new Error(`Record ${id} not found in resource ${resource.name} after ${timeout}ms`);
 }
 
-describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', () => {
+describeSqs('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', () => {
   let database, users, plugin, queueUrl, sqsClient;
 
   beforeAll(async () => {
@@ -193,7 +196,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
   });
 });
 
-describe('QueueConsumerPlugin (real SQS integration)', () => {
+describeSqs('QueueConsumerPlugin (real SQS integration)', () => {
   let database, users, plugin, queueUrl, sqsClient;
 
   beforeAll(async () => {
@@ -254,7 +257,7 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
   });
 });
 
-describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => {
+describeSqs('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => {
   let database, users, orders, plugin, queueUrl, sqsClient;
 
   beforeAll(async () => {
@@ -335,7 +338,7 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
   });
 });
 
-describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
+describeSqs('QueueConsumerPlugin (SQS driver, batch insert)', () => {
   let database, users, plugin, queueUrl, sqsClient;
 
   beforeAll(async () => {
@@ -401,7 +404,7 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
   });
 });
 
-describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
+describeSqs('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
   let database, users, orders, plugin, queueUrlUsers, queueUrlOrders, sqsClientUsers, sqsClientOrders;
 
   beforeAll(async () => {
@@ -495,7 +498,7 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
   });
 });
 
-describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
+describeSqs('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
   let dbSource, dbTarget, usersSource, usersTarget, replicator, consumer, queueUrl, sqsClient;
 
   beforeAll(async () => {

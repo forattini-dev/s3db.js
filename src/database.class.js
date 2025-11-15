@@ -104,6 +104,12 @@ export class Database extends SafeEventEmitter {
     this.verbose = options.verbose ?? false;
     // Normalize executorPool config with defaults
     this.executorPool = this._normalizeOperationsPool(executorPoolConfig, this._parallelism);
+    if (options?.taskExecutorMonitoring) {
+      this.executorPool.monitoring = this._deepMerge(
+        this.executorPool.monitoring || {},
+        options.taskExecutorMonitoring
+      );
+    }
     this._parallelism = this.executorPool?.concurrency ?? this._parallelism;
     this.taskExecutor = this.executorPool;
     this.pluginList = options.plugins ?? [];
@@ -889,10 +895,12 @@ export class Database extends SafeEventEmitter {
    * @param {string} namespace - Namespace for coordination
    * @returns {Promise<GlobalCoordinatorService>}
    */
-  async getGlobalCoordinator(namespace) {
+  async getGlobalCoordinator(namespace, options = {}) {
     if (!namespace) {
       throw new Error('Database.getGlobalCoordinator: namespace is required');
     }
+
+    const { autoStart = false } = options;
 
     // Return existing service if already created
     if (this._globalCoordinators.has(namespace)) {
@@ -916,7 +924,7 @@ export class Database extends SafeEventEmitter {
       });
 
       // Start the service if database is connected
-      if (this.isConnected()) {
+      if (autoStart && this.isConnected()) {
         await service.start();
       }
 
