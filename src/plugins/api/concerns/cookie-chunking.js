@@ -256,32 +256,32 @@ export function setChunkedCookie(context, name, value, options = {}, chunkingOpt
  * }
  */
 export function getChunkedCookie(context, name) {
-  // Try to get metadata cookie
-  const chunkCountStr = getCookie(context, `${name}.__chunks`);
+  const cookieJar = getCookieJar(context);
+  const chunkCountStr = cookieJar[`${name}.__chunks`];
 
   // No metadata - try single cookie
   if (!chunkCountStr) {
-    const fallback = reassembleChunksFromJar(context, name);
+    const fallback = reassembleChunksFromJar(context, name, null, cookieJar);
     if (fallback) {
       return fallback;
     }
-    return getCookie(context, name) || null;
+    return cookieJar[name] || null;
   }
 
   // Parse chunk count
   const chunkCount = parseInt(chunkCountStr, 10);
   if (isNaN(chunkCount) || chunkCount <= 0 || chunkCount > MAX_CHUNKS) {
     console.warn(`[Cookie Chunking] Invalid chunk count for "${name}": ${chunkCountStr}`);
-    return reassembleChunksFromJar(context, name);
+    return reassembleChunksFromJar(context, name, null, cookieJar);
   }
 
   // Reassemble chunks
   const chunks = [];
   for (let i = 0; i < chunkCount; i++) {
-    const chunk = getCookie(context, `${name}.${i}`);
+    const chunk = cookieJar[`${name}.${i}`];
     if (!chunk) {
       console.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
-      return reassembleChunksFromJar(context, name, chunkCount);
+      return reassembleChunksFromJar(context, name, chunkCount, cookieJar);
     }
     chunks.push(chunk);
   }
@@ -290,9 +290,10 @@ export function getChunkedCookie(context, name) {
 }
 
 /**
- * Delete a chunked cookie (all chunks and metadata)
+ * Delete a chunked cookie (all chunks and metadata seen on the request)
  *
- * Deletes the main cookie, metadata cookie, and all possible chunk cookies.
+ * Deletes the main cookie, metadata cookie, and each chunk that was actually
+ * sent with the current request, minimizing redundant Set-Cookie headers.
  *
  * @param {Object} context - Hono context (c)
  * @param {string} name - Cookie name
