@@ -215,7 +215,7 @@ await db.uploadMetadataFile();
 
 **Location**: `src/plugins/concerns/global-coordinator-service.class.js`
 
-**Purpose**: Shared distributed coordination for multiple plugins in the same namespace, reducing S3 API calls by ~90% (10× reduction for 10+ plugins).
+**Philosophy**: All plugins use shared `GlobalCoordinatorService` for leader election. No per-plugin mode, no fallbacks - just one elegant way.
 
 **Key Features**:
 - Lazy instantiation: One coordinator per namespace, cached on Database
@@ -223,67 +223,73 @@ await db.uploadMetadataFile();
 - Deterministic leader election: Lexicographically first worker ID
 - Event-driven plugin subscriptions with leader change notifications
 - Automatic worker timeout detection and cleanup
-- Epoch-based leadership with automatic renewal at 20% TTL
-- Graceful fallback to per-plugin mode if global service unavailable
+- Single heartbeat loop replaces N independent loops (10× fewer API calls)
 
 **Performance Impact**:
-- **API Calls**: 7,200/hour → 720/hour (10× reduction)
+- **API Calls**: 7,200/hour → 720/hour (10× reduction for 10 plugins)
 - **Monthly Cost**: $0.35 → $0.04 (90% savings)
 - **Startup Convergence**: 15-25s → 3-4s (75% faster)
+- **Code Complexity**: Reduced 46% (939 → 503 lines in CoordinatorPlugin)
 
 **Quick Start**:
 ```javascript
-// Enable global mode in plugins
+// All plugins automatically use global coordination
 const queuePlugin = new S3QueuePlugin({
   resource: 'emails',
-  coordinationMode: 'global',        // Enable global mode
-  globalCoordinator: {               // Configure heartbeat
-    heartbeatInterval: 5000,
-    heartbeatJitter: 1000,
-    leaseTimeout: 15000,
-    workerTimeout: 20000
-  },
+  enableCoordinator: true,              // Enable coordination
+  heartbeatInterval: 5000,              // Shared heartbeat interval
+  leaseTimeout: 15000,                  // Leader lease TTL
+  workerTimeout: 20000,                 // Worker discovery timeout
   // ... rest of config
 });
 
 const ttlPlugin = new TTLPlugin({
   resource: 'cache_entries',
-  coordinationMode: 'global',        // Same namespace
-  globalCoordinator: {
-    heartbeatInterval: 5000
-  },
-  // ... rest of config
+  enableCoordinator: true,
+  // ... config
 });
 
 await database.usePlugin(queuePlugin, 'queue');
 await database.usePlugin(ttlPlugin, 'ttl');
 
-// Access global coordinator for monitoring
+// Both share ONE coordinator service in 'default' namespace
 const coordinator = await database.getGlobalCoordinator('default');
 const metrics = coordinator.getMetrics();
-console.log('Heartbeats:', metrics.heartbeatCount);
-console.log('Leader:', await coordinator.getLeader());
+console.log('Single heartbeat:', metrics.heartbeatCount);  // Both plugins share this
 ```
 
-**Configuration Options**:
+**Configuration**:
 ```javascript
 {
-  coordinationMode: 'global',         // 'per-plugin' (default) or 'global'
-  globalCoordinator: {
-    heartbeatInterval: 5000,           // Heartbeat frequency (ms)
-    heartbeatJitter: 1000,             // Random jitter 0-N (ms)
-    leaseTimeout: 15000,               // Leader lease TTL (ms)
-    workerTimeout: 20000,              // Worker heartbeat TTL (ms)
-    diagnosticsEnabled: false          // Verbose logging
-  }
+  enableCoordinator: true,              // Enable/disable coordination
+  startupJitterMin: 0,                  // Min startup delay (ms)
+  startupJitterMax: 5000,               // Max startup delay (0-5s random)
+  coldStartDuration: 0,                 // Worker discovery period (ms)
+  coordinatorWorkInterval: null,        // Work frequency (ms), null = disabled
+
+  // GlobalCoordinatorService parameters (used by all plugins in namespace)
+  heartbeatInterval: 5000,              // Heartbeat frequency (ms)
+  heartbeatJitter: 1000,                // Random jitter per beat (ms)
+  leaseTimeout: 15000,                  // Leader lease duration (ms)
+  workerTimeout: 20000                  // Worker registration TTL (ms)
 }
 ```
 
 **Plugin Integration**:
-- `S3QueuePlugin`, `SchedulerPlugin`, `TTLPlugin` automatically support global mode through inheritance
-- No additional code changes required in plugins
-- Plugins automatically subscribe to leader change events
-- Leadership transitions trigger `onBecomeCoordinator` / `onStopBeingCoordinator` hooks
+All plugins extending `CoordinatorPlugin` automatically get:
+- `S3QueuePlugin` ✅ Global coordination included
+- `SchedulerPlugin` ✅ Global coordination included
+- `TTLPlugin` ✅ Global coordination included
+- `EventualConsistencyPlugin` ✅ Global coordination included
+
+No code changes needed - plugins just implement:
+```javascript
+class MyPlugin extends CoordinatorPlugin {
+  async onBecomeCoordinator() { /* ... */ }
+  async onStopBeingCoordinator() { /* ... */ }
+  async coordinatorWork() { /* ... */ }
+}
+```
 
 **Storage Structure**:
 ```
@@ -295,80 +301,61 @@ plg_coordinator_global/<namespace>/
 
 **Accessing the Coordinator**:
 ```javascript
-// Get coordinator for namespace
 const coordinator = await database.getGlobalCoordinator('default');
 
-// Check if running
+// Check status
 console.log('Running:', coordinator.isRunning);
-
-// Get current leader
-const leader = await coordinator.getLeader();
-console.log('Current leader:', leader);
-
-// Get active workers
-const workers = await coordinator.getActiveWorkers();
-console.log('Workers:', workers.map(w => w.workerId));
+console.log('Leader:', await coordinator.getLeader());
+console.log('Workers:', await coordinator.getActiveWorkers());
 
 // Monitor metrics
 const metrics = coordinator.getMetrics();
-console.log('Metrics:', {
-  heartbeatCount: metrics.heartbeatCount,
-  electionCount: metrics.electionCount,
-  leaderChanges: metrics.leaderChanges,
-  workerRegistrations: metrics.workerRegistrations
-});
+console.log('Heartbeats:', metrics.heartbeatCount);  // Should increase steadily
+console.log('Elections:', metrics.electionCount);    // Should be low
+console.log('Leader changes:', metrics.leaderChanges); // Should be rare
 
-// Listen to leadership changes
+// Listen for leadership changes
 coordinator.on('leader:changed', ({ previousLeader, newLeader, epoch }) => {
-  console.log(`Leader changed: ${previousLeader} → ${newLeader} (epoch: ${epoch})`);
+  console.log(`Leader: ${previousLeader} → ${newLeader} (epoch: ${epoch})`);
 });
+```
+
+**Startup Jitter (Thundering Herd Prevention)**:
+Random delay before coordination starts prevents all pods hitting S3 simultaneously:
+```javascript
+// Example: 100 workers starting with 5s jitter
+// They spread startup load over 5 seconds instead of all at once
+const jitterMs = startupJitterMin + Math.random() * (startupJitterMax - startupJitterMin);
 ```
 
 **Namespace Isolation**:
 ```javascript
-// Different namespaces maintain independent election state
+// Different namespaces = independent coordinators
 const prodCoordinator = await database.getGlobalCoordinator('production');
 const stagingCoordinator = await database.getGlobalCoordinator('staging');
 
-// Each namespace has its own leader
-console.log('Prod leader:', await prodCoordinator.getLeader());
-console.log('Staging leader:', await stagingCoordinator.getLeader());
+// Each namespace has own leader election
+console.log('Prod:', await prodCoordinator.getLeader());
+console.log('Staging:', await stagingCoordinator.getLeader());
 ```
 
-**Migration from Per-Plugin Mode**:
-```javascript
-// Before (per-plugin mode - N independent loops)
-const plugin = new S3QueuePlugin({
-  resource: 'emails',
-  // ... no coordinationMode specified (defaults to 'per-plugin')
-});
+**Design Benefits**:
+1. **One way to coordinate** - No options, no fallbacks
+2. **Simpler code** - CoordinatorPlugin is thin wrapper (503 lines)
+3. **Better performance** - Shared heartbeat = 10× fewer API calls
+4. **Event-driven** - No polling, reactive to leader changes
+5. **Single source of truth** - All plugins agree on leadership
 
-// After (global mode - 1 shared loop)
-const plugin = new S3QueuePlugin({
-  resource: 'emails',
-  coordinationMode: 'global',
-  globalCoordinator: {
-    heartbeatInterval: 5000,
-    heartbeatJitter: 1000,
-    leaseTimeout: 15000,
-    workerTimeout: 20000
-  }
-});
-
-// Backward compatible: existing code works unchanged
-// Opt-in: only enabled when coordinationMode: 'global' is set
-```
-
-**Troubleshooting**:
-- Check if coordinator is running: `coordinator.isRunning`
-- Verify database connected before plugins: `await database.connect()` first
-- Enable diagnostics for debugging: `diagnosticsEnabled: true` in config
-- Check logs for `[coordinator:global]` messages
-- See `docs/troubleshooting/global-coordinator.md` for 10+ common issues
+**Debugging**:
+- Enable verbose logs: `verbose: true` in plugin config
+- Check coordinator metrics via `coordinator.getMetrics()`
+- Monitor S3 storage: `plg_coordinator_global/<namespace>/`
+- See [Coordinator Design](docs/architecture/COORDINATOR-DESIGN.md) for detailed guide
 
 **Documentation**:
-- [Migration Guide](docs/migration-guides/global-coordinator-mode.md) - How to enable
-- [Troubleshooting Guide](docs/troubleshooting/global-coordinator.md) - How to debug
+- [Design Guide](docs/architecture/COORDINATOR-DESIGN.md) - Architecture & rationale
+- [Troubleshooting](docs/troubleshooting/global-coordinator.md) - Common issues
+- [Migration Guide](docs/migration-guides/global-coordinator-mode.md) - Implementation steps
 - [Example](docs/examples/e100-global-coordinator-multi-plugin.js) - Working code
 
 ### Utilities
