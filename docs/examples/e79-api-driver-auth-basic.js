@@ -61,17 +61,18 @@ async function main() {
     port: 3101,
     verbose: true,
 
-    // Basic Authentication driver
+    // Basic Authentication driver (driver-level field configuration)
     auth: {
-      driver: 'basic', // Choose Basic Auth driver
-      resource: 'accounts', // Resource that manages authentication
-      usernameField: 'username', // Custom username field
-      passwordField: 'secret', // Custom password field
-      config: {
-        realm: 'Product Management API', // Custom auth realm
-        passphrase: 'encryption-key', // For password encryption
-        allowRegistration: true // Enable /auth/register
-      }
+      driver: {
+        driver: 'basic', // Choose Basic Auth driver
+        config: {
+          realm: 'Product Management API', // Custom auth realm
+          passphrase: 'encryption-key', // For password encryption
+          usernameField: 'username', // 🎯 Custom username field (at driver level)
+          passwordField: 'secret' // 🎯 Custom password field (at driver level)
+        }
+      },
+      resource: 'accounts' // Resource that manages authentication
     },
 
     // Resource configuration

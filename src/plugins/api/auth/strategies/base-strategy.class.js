@@ -53,7 +53,16 @@ export class BaseAuthStrategy {
       } else if (driverName === 'basic') {
         configs.basic = {
           realm: driverConfig.realm || 'API Access',
-          passphrase: driverConfig.passphrase || 'secret'
+          passphrase: driverConfig.passphrase || 'secret',
+          usernameField: driverConfig.usernameField || 'email',
+          passwordField: driverConfig.passwordField || 'password'
+        };
+      } else if (driverName === 'jwt') {
+        configs.jwt = {
+          secret: driverConfig.jwtSecret || driverConfig.secret,
+          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d',
+          usernameField: driverConfig.usernameField || 'userId',
+          passwordField: driverConfig.passwordField || 'apiToken'
         };
       } else if (driverName === 'oauth2') {
         configs.oauth2 = driverConfig;
