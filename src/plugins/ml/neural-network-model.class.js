@@ -119,7 +119,7 @@ export class NeuralNetworkModel extends BaseModel {
       metrics: this.config.modelConfig.metrics
     });
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[MLPlugin] ${this.config.name} - Built custom neural network:`);
       this.logger.info(`  - Hidden layers: ${this.config.modelConfig.layers.length}`);
       this.logger.info(`  - Total parameters:`, this._countParameters());
@@ -238,7 +238,7 @@ export class NeuralNetworkModel extends BaseModel {
       onEpochEnd: async (epoch, logs) => {
         const monitorValue = logs[monitor] || logs.loss;
 
-        if (this.config.verbose && epoch % 10 === 0) {
+        if (this.config.logLevel && epoch % 10 === 0) {
           this.logger.info(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: ${monitor}=${monitorValue.toFixed(4)}`);
         }
 
@@ -254,7 +254,7 @@ export class NeuralNetworkModel extends BaseModel {
           patienceCounter++;
 
           if (patienceCounter >= patience) {
-            if (this.config.verbose) {
+            if (this.config.logLevel) {
               this.logger.info(`[MLPlugin] ${this.config.name} - Early stopping at epoch ${epoch}`);
             }
             this.model.stopTraining = true;
@@ -268,7 +268,7 @@ export class NeuralNetworkModel extends BaseModel {
       epochs: this.config.modelConfig.epochs,
       batchSize: this.config.modelConfig.batchSize,
       validationSplit: this.config.modelConfig.validationSplit,
-      verbose: this.config.verbose ? 1 : 0,
+      verbose: (this.config.logLevel === 'debug' || this.config.logLevel === 'trace') ? 1 : 0,
       callbacks
     });
 

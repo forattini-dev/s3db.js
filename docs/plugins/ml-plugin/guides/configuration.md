@@ -88,7 +88,7 @@ new MLPlugin({
   },
 
   // Performance
-  verbose: false,
+  logLevel: 'silent',
   logLevel: 'info'
 })
 ```
@@ -625,7 +625,7 @@ const config = {
     }
   },
 
-  verbose: process.env.ML_VERBOSE === 'true'
+  logLevel: process.env.ML_VERBOSE === 'true' ? 'debug' : 'info'
 };
 
 const mlPlugin = new MLPlugin(config);

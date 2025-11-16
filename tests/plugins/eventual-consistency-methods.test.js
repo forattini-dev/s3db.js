@@ -28,7 +28,7 @@ describe("EventualConsistencyPlugin Methods", () => {
 
     // Add plugin
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         wallets: ['balance']
       },
@@ -160,7 +160,7 @@ describe("EventualConsistencyPlugin Methods", () => {
     it("should immediately update in sync mode", async () => {
       // Create new plugin in sync mode
       const syncPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           accounts: ['credits']
         },
@@ -326,7 +326,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       const brazilPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           brazil_accounts: ['balance']
         },
@@ -382,7 +382,7 @@ describe("EventualConsistencyPlugin Methods", () => {
 
     it("should respect custom consolidationConcurrency", async () => {
       const customPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           custom_resource: ['value']
         },
@@ -414,7 +414,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       const pointsPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           points: ['score']
         },
@@ -498,7 +498,7 @@ describe("EventualConsistencyPlugin Methods", () => {
     it("should work in sync mode", async () => {
       // Create new plugin in sync mode
       const syncPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           counters: ['count']
         },

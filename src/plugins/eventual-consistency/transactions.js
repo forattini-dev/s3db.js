@@ -16,7 +16,7 @@ import { getCohortInfo } from "./utils.js";
  */
 export async function createTransaction(handler, data, config) {
   const now = new Date();
-  const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+  const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.logLevel);
 
   // Check for late arrivals (transaction older than watermark)
   const watermarkMs = config.consolidationWindow * 60 * 60 * 1000;
@@ -28,7 +28,7 @@ export async function createTransaction(handler, data, config) {
     const hoursLate = Math.floor((now.getTime() - cohortHourDate.getTime()) / (60 * 60 * 1000));
 
     if (config.lateArrivalStrategy === 'ignore') {
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] Late arrival ignored: transaction for ${cohortInfo.hour} ` +
           // `is ${hoursLate}h late (watermark: ${config.consolidationWindow}h)`
         // );
@@ -62,7 +62,7 @@ export async function createTransaction(handler, data, config) {
   if (config.batchTransactions) {
     handler.pendingTransactions.set(transaction.id, transaction);
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
         // `Transaction batched: ${data.operation} ${data.value} for ${data.originalId} ` +
         // `(batch: ${handler.pendingTransactions.size}/${config.batchSize})`
@@ -76,7 +76,7 @@ export async function createTransaction(handler, data, config) {
   } else {
     await handler.transactionResource.insert(transaction);
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
         // `Transaction created: ${data.operation} ${data.value} for ${data.originalId} ` +
         // `(cohort: ${cohortInfo.hour}, applied: false)`

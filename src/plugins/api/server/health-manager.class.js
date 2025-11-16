@@ -12,10 +12,10 @@
 import * as formatter from '../../shared/response-formatter.js';
 
 export class HealthManager {
-  constructor({ database, healthConfig, verbose, logger }) {
+  constructor({ database, healthConfig, logLevel, logger }) {
     this.database = database;
     this.healthConfig = healthConfig || {};
-    this.verbose = verbose;
+    this.logLevel = logLevel;
     this.logger = logger; // Pino logger from APIPlugin
   }
 

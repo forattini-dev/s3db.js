@@ -789,7 +789,7 @@ const backupPlugin = new BackupPlugin({
 | `encryption` | `object` | `null` | Encryption configuration |
 | `verification` | `boolean` | `true` | Verify backup integrity |
 | `tempDir` | `string` | `os.tmpdir()/s3db/backups` | Temporary working directory |
-| `verbose` | `boolean` | `false` | Enable detailed logging |
+| `logLevel` | `boolean` | `false` | Enable detailed logging |
 
 ### Retention Policies (GFS)
 
@@ -942,7 +942,7 @@ new BackupPlugin({
   encryption?: object,
   verification?: boolean,
   tempDir?: string,
-  verbose?: boolean,
+  logLevel?: string,
   onBackupStart?: (type: string, context: object) => Promise<void>,
   onBackupComplete?: (type: string, stats: object) => Promise<void>,
   onBackupError?: (type: string, context: object) => Promise<void>
@@ -1526,7 +1526,7 @@ const backupPlugin = new BackupPlugin({
     permissions: 0o644
   },
   verification: true,  // Always verify backups
-  verbose: true        // Enable detailed logging
+  logLevel: 'debug'        // Enable detailed logging
 });
 
 // ✅ Check backup status before restore
@@ -1886,7 +1886,7 @@ A: Check:
 1. Write permissions on destination
 2. Sufficient disk space
 3. Correct credentials (S3)
-4. Use `verbose: true` for logs
+4. Use `logLevel: 'debug'` for logs
 
 **Q: Restore is failing?**
 A: Check:

@@ -970,5 +970,5 @@ const deletedData = JSON.parse(logs[0].oldData);
 ### Troubleshooting
 
 **Q: Logs are not being created?**
-A: Check if the `plg_audits` resource was created correctly and if there are errors in the console (enable `verbose: true`).
+A: Check if the `plg_audits` resource was created correctly and if there are errors in the console (enable `logLevel: 'debug'`).
 

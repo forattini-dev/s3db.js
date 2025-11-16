@@ -24,7 +24,7 @@ describe('StateMachinePlugin - State Transitions', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - State Transitions', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();

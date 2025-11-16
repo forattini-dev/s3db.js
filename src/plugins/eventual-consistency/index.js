@@ -37,7 +37,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
     const timezoneAutoDetected = !opts.cohort?.timezone;
 
     // Create shared configuration
-    this.config = createConfig({ ...opts, verbose: this.verbose }, detectedTimezone);
+    this.config = createConfig({ ...opts, logLevel: this.logLevel }, detectedTimezone);
 
     // Create field handlers map
     this.fieldHandlers = new Map(); // Map<resourceName, Map<fieldName, handler>>
@@ -116,7 +116,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
         () => this.workerLoop()
       );
 
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.info(`[EventualConsistency] Coordinator mode started (workerId: ${this.workerId})`);
       }
     }
@@ -146,7 +146,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
    * @returns {Object} Cohort information
    */
   getCohortInfo(date) {
-    return getCohortInfo(date, this.config.cohort.timezone, this.config.verbose);
+    return getCohortInfo(date, this.config.cohort.timezone, this.config.logLevel);
   }
 
   /**
@@ -652,7 +652,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
       plugin: {
         name: 'EventualConsistencyPlugin',
         initialized: this.database !== null && this.database !== undefined,
-        verbose: this.config.verbose || false,
+        logLevel: this.config.logLevel || 'info',
         timezone: this.config.cohort?.timezone || 'UTC',
         consolidation: {
           mode: this.config.consolidation?.mode || 'timer',
@@ -785,7 +785,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
    * @override
    */
   async onBecomeCoordinator() {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[EventualConsistency] 🎖️  Became coordinator (workerId: ${this.workerId})`);
     }
 
@@ -802,7 +802,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
    * @override
    */
   async onStopBeingCoordinator() {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[EventualConsistency] No longer coordinator (workerId: ${this.workerId})`);
     }
 
@@ -841,7 +841,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
       return; // Coordinator mode disabled
     }
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[EventualConsistency] Coordinator work executing (workerId: ${this.workerId})`);
     }
 
@@ -866,18 +866,18 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
             tickets: tickets.length
           });
 
-          if (this.config.verbose && tickets.length > 0) {
+          if (this.config.logLevel && tickets.length > 0) {
             this.logger.info(`[EventualConsistency] Created ${tickets.length} tickets for ${resourceName}.${fieldName}`);
           }
         } catch (err) {
-          if (this.config.verbose) {
+          if (this.config.logLevel) {
             this.logger.error(`[EventualConsistency] Error creating tickets for ${resourceName}.${fieldName}:`, err);
           }
         }
       }
     }
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[EventualConsistency] Coordinator work complete: ${totalTickets} total tickets created`);
     }
 
@@ -900,7 +900,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
       return; // Coordinator mode disabled
     }
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[EventualConsistency] Worker loop executing (workerId: ${this.workerId})`);
     }
 
@@ -926,7 +926,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
 
           totalClaimed += claimed.length;
 
-          if (this.config.verbose) {
+          if (this.config.logLevel) {
             this.logger.info(`[EventualConsistency] Claimed ${claimed.length} tickets for ${resourceName}.${fieldName}`);
           }
 
@@ -947,16 +947,16 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
                 errors: result.errors
               });
 
-              if (this.config.verbose && result.recordsProcessed > 0) {
+              if (this.config.logLevel && result.recordsProcessed > 0) {
                 this.logger.info(`[EventualConsistency] Processed ticket ${ticket.id}: ${result.recordsProcessed} records, ${result.transactionsApplied} transactions`);
               }
 
-              if (this.config.verbose && result.errors.length > 0) {
+              if (this.config.logLevel && result.errors.length > 0) {
                 this.logger.error(`[EventualConsistency] Errors processing ticket ${ticket.id}:`, result.errors);
               }
             } catch (err) {
               totalErrors++;
-              if (this.config.verbose) {
+              if (this.config.logLevel) {
                 this.logger.error(`[EventualConsistency] Failed to process ticket ${ticket.id}:`, err);
               }
               results.push({
@@ -970,14 +970,14 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
             }
           }
         } catch (err) {
-          if (this.config.verbose) {
+          if (this.config.logLevel) {
             this.logger.error(`[EventualConsistency] Error in worker loop for ${resourceName}.${fieldName}:`, err);
           }
         }
       }
     }
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[EventualConsistency] Worker loop complete: claimed ${totalClaimed} tickets, processed ${totalProcessed} records, ${totalErrors} errors`);
     }
 

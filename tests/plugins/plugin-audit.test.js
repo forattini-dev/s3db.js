@@ -36,7 +36,7 @@ describe('Audit Plugin', () => {
     client = database.client;
 
     auditPlugin = new AuditPlugin({
-      verbose: false,
+      logLevel: 'silent',
       enabled: true,
       includeData: true,
       includePartitions: true,
@@ -130,7 +130,7 @@ describe('Audit Plugin', () => {
       // Create isolated database instance for this test
       const isolatedClient = createClientForTest(`plugin-audit-disabled`);
 
-      const isolatedDatabase = new Database({ verbose: false, client: isolatedClient });
+      const isolatedDatabase = new Database({ logLevel: 'silent', client: isolatedClient });
 
 
     });
@@ -139,7 +139,7 @@ describe('Audit Plugin', () => {
       // Create isolated database instance for this test
       const isolatedClient = createClientForTest(`suite=plugins/audit-existing`);
 
-      const isolatedDatabase = new Database({ verbose: false, client: isolatedClient });
+      const isolatedDatabase = new Database({ logLevel: 'silent', client: isolatedClient });
 
       // First setup
       const firstPlugin = new AuditPlugin();
@@ -154,7 +154,7 @@ describe('Audit Plugin', () => {
       // Create a fresh database without audit plugin
       const freshClient = createClientForTest(`suite=plugins/audit-no-audit`);
 
-      const freshDatabase = new Database({ verbose: false, client: freshClient });
+      const freshDatabase = new Database({ logLevel: 'silent', client: freshClient });
 
       const freshUsers = await freshDatabase.createResource({
         name: 'users',
@@ -247,7 +247,7 @@ describe('Audit Plugin', () => {
       await isolatedDatabase.connect();
 
       const pluginWithoutPartitions = new AuditPlugin({
-      verbose: false,
+      logLevel: 'silent',
         enabled: true,
         includeData: true,
         includePartitions: false
@@ -305,7 +305,7 @@ describe('Audit Plugin', () => {
       await isolatedDatabase.connect();
 
       const pluginWithoutData = new AuditPlugin({
-      verbose: false,
+      logLevel: 'silent',
         enabled: true,
         includeData: false
       });
@@ -1083,7 +1083,7 @@ describe('Audit Plugin', () => {
       const isolatedDatabase = new Database({ client: isolatedClient });
 
       const pluginWithoutData = new AuditPlugin({
-      verbose: false,
+      logLevel: 'silent',
         enabled: true,
         includeData: false
       });
@@ -1127,7 +1127,7 @@ describe('Audit Plugin', () => {
       const isolatedDatabase = new Database({ client: isolatedClient });
 
       const pluginWithoutPartitions = new AuditPlugin({
-      verbose: false,
+      logLevel: 'silent',
         enabled: true,
         includeData: true,
         includePartitions: false

@@ -2,8 +2,8 @@
  * Strategy Pattern Tests - Verify TaskManager and OperationsPool implement TaskExecutor interface
  */
 
-import { TasksRunner } from '../src/tasks-runner.class.js'
-import { TasksPool } from '../src/tasks-pool.class.js'
+import { TasksRunner } from '../src/tasks/tasks-runner.class.js'
+import { TasksPool } from '../src/tasks/tasks-pool.class.js'
 import { TaskExecutor } from '../src/concurrency/index.js'
 
 describe('TaskExecutor Strategy Pattern', () => {

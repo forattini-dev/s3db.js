@@ -35,7 +35,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - Combined features
     const executedTriggers = [];
 
     stateMachinePlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       enableEventTriggers: true,
       persistTransitions: false,
       stateMachines: {

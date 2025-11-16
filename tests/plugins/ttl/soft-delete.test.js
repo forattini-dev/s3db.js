@@ -22,7 +22,7 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 1,

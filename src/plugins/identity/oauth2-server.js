@@ -888,7 +888,7 @@ export class OAuth2Server {
 
     const [ok, err, clients] = await tryFn(() => this.clientResource.query({ clientId }));
     if (!ok) {
-      if (err && this.identityPlugin?.config?.verbose) {
+      if (err && (this.identityPlugin?.config?.logLevel === 'debug' || this.identityPlugin?.config?.logLevel === 'trace')) {
         this.logger.error('[Identity Plugin] Failed to query clients resource:', err.message);
       }
       return null;
@@ -931,7 +931,7 @@ export class OAuth2Server {
             break;
           }
         } catch (error) {
-          if (this.identityPlugin?.config?.verbose) {
+          if (this.identityPlugin?.config?.logLevel === 'debug' || this.identityPlugin?.config?.logLevel === 'trace') {
             this.logger.error('[Identity Plugin] Failed to verify client secret hash:', error.message);
           }
         }

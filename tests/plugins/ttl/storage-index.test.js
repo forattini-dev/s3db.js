@@ -22,7 +22,7 @@ describe('TTLPlugin v2 - Plugin Storage & Expiration Index', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 60,

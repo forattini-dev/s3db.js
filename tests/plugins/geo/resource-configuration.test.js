@@ -15,7 +15,7 @@ describe('Geo Plugin - Resource configuration', () => {
     });
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           lonField: 'longitude',
           precision: 5
@@ -35,7 +35,7 @@ describe('Geo Plugin - Resource configuration', () => {
     });
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           precision: 5
@@ -52,7 +52,7 @@ describe('Geo Plugin - Resource configuration', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',
@@ -72,7 +72,7 @@ describe('Geo Plugin - Resource configuration', () => {
 
   test('warns when resource is not found', async () => {
     const plugin = new GeoPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       resources: {
         nonexistent: {
           latField: 'latitude',
@@ -98,7 +98,7 @@ describe('Geo Plugin - Resource configuration', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -119,7 +119,7 @@ describe('Geo Plugin - Resource configuration', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

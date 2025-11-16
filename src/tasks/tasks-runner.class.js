@@ -1,41 +1,10 @@
 import { EventEmitter } from 'events'
 import { nanoid } from 'nanoid'
-import { TaskExecutor } from './concurrency/task-executor.interface.js' // eslint-disable-line no-unused-vars
-import { AdaptiveTuning } from './concerns/adaptive-tuning.js'
+import { TaskExecutor } from '../concurrency/task-executor.interface.js' // eslint-disable-line no-unused-vars
+import { AdaptiveTuning } from '../concerns/adaptive-tuning.js'
+import { FifoTaskQueue } from './concerns/fifo-task-queue.js'
 import { extractLengthHint, deriveSignature } from './concerns/task-signature.js'
 import { SignatureStats } from './concerns/signature-stats.js'
-
-class FifoTaskQueue {
-  constructor () {
-    this.queue = []
-  }
-
-  get length () {
-    return this.queue.length
-  }
-
-  enqueue (task) {
-    this.queue.push(task)
-  }
-
-  dequeue () {
-    if (this.queue.length === 0) return null
-    return this.queue.shift()
-  }
-
-  flush (callback) {
-    if (typeof callback === 'function') {
-      for (const task of this.queue) {
-        callback(task)
-      }
-    }
-    this.clear()
-  }
-
-  clear () {
-    this.queue.length = 0
-  }
-}
 
 class PriorityTaskQueue {
   constructor () {
@@ -281,7 +250,7 @@ export class TasksRunner extends EventEmitter {
     if (!this.bareMode && autoTuningRequested) {
       this.autoTuningConfig = options.autoTuning
       this.tuner = tunerInstance || new AdaptiveTuning(options.autoTuning)
-     const tunedConcurrency = this.tuner.getConcurrency()
+      const tunedConcurrency = this.tuner.getConcurrency()
       if (typeof tunedConcurrency === 'number' && tunedConcurrency > 0) {
         this.setConcurrency(tunedConcurrency)
         this._lastTunedConcurrency = tunedConcurrency
@@ -290,10 +259,13 @@ export class TasksRunner extends EventEmitter {
   }
 
   get queue () {
-    if (this._queue instanceof FifoTaskQueue) {
-      return this._queue.queue
+    if (typeof this._queue?.toArray === 'function') {
+      return this._queue.toArray()
     }
-    return this._queue.heap
+    if (Array.isArray(this._queue?.heap)) {
+      return this._queue.heap
+    }
+    return []
   }
 
   /**

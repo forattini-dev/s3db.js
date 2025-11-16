@@ -32,7 +32,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false
       });
@@ -60,7 +60,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })
@@ -91,7 +91,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })
@@ -124,7 +124,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false
       });
@@ -147,14 +147,14 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       const plugin = new S3QueuePlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
         resource: 'tasks',
         autoStart: false,
         pollInterval: 50,
         maxAttempts: 1,
         visibilityTimeout: 500,
         deadLetterResource: 'dead_tasks',
-        verbose: false
+        logLevel: 'silent'
       });
 
       await plugin.install(database);
@@ -201,7 +201,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await plugin.install(database);
@@ -231,7 +231,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: false,
+        logLevel: 'silent',
         onMessage: async (task) => ({ done: true })
       });
 
@@ -263,7 +263,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
-        verbose: false,
+        logLevel: 'silent',
         onMessage: async (task) => ({ done: true })
       });
 

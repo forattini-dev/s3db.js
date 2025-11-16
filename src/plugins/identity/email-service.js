@@ -45,7 +45,7 @@ export class EmailService {
         customFooter: options.templates?.customFooter || null
       },
 
-      verbose: options.verbose || false
+      logLevel: options.logLevel || 'info'
     };
 
     this.transporter = null;
@@ -75,7 +75,7 @@ export class EmailService {
       });
 
       // Verify connection
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         await this.transporter.verify();
         this.logger.info('[EmailService] SMTP connection verified');
       }
@@ -107,7 +107,7 @@ export class EmailService {
    */
   async sendEmail(options) {
     if (!this.config.enabled) {
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.info('[EmailService] Email service disabled, skipping send');
       }
       return { success: false, reason: 'disabled' };
@@ -140,7 +140,7 @@ export class EmailService {
         replyTo: replyTo || this.config.replyTo
       });
 
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.info('[EmailService] Email sent successfully:', info.messageId);
       }
 

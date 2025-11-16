@@ -114,7 +114,7 @@ class S3dbReplicator extends BaseReplicator {
           connectionString: this.connectionString,
           region: this.region,
           keyPrefix: this.keyPrefix,
-          verbose: this.config.verbose || false
+          logLevel: this.config.logLevel || 'info'
         };
         this.targetDatabase = new S3db(targetConfig);
         await this.targetDatabase.connect();

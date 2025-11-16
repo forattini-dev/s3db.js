@@ -14,13 +14,13 @@ describe('CLI Backup & Restore Commands', () => {
     
     // Setup backup plugin (new driver API)
     backupPlugin = new BackupPlugin({
-      verbose: false,
+      logLevel: 'silent',
       driver: 'filesystem',
       config: {
         path: '/tmp/s3db/backups/{date}/'
       },
       compression: 'gzip',
-      verbose: false
+      logLevel: 'silent'
     });
     
     await database.usePlugin(backupPlugin);

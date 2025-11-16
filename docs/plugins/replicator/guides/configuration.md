@@ -28,7 +28,7 @@ new ReplicatorPlugin({
   timeout: 30000,
 
   // Logging
-  verbose: false,
+  logLevel: 'silent',
   persistReplicatorLog: false,
   replicatorLogResource: 'plg_replicator_logs',
   logErrors: true,
@@ -53,7 +53,7 @@ new ReplicatorPlugin({
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable all replication |
-| `verbose` | boolean | `false` | Log all replication attempts |
+| `logLevel` | boolean | `false` | Log all replication attempts |
 | `persistReplicatorLog` | boolean | `false` | Store logs in database |
 | `replicatorLogResource` | string | `'plg_replicator_logs'` | Log resource name |
 | `logErrors` | boolean | `true` | Log failed operations |
@@ -89,7 +89,7 @@ new ReplicatorPlugin({
 ```javascript
 new ReplicatorPlugin({
   // Console logging
-  verbose: true,  // Detailed logs for every operation
+  logLevel: 'debug',  // Detailed logs for every operation
 
   // Database logging
   persistReplicatorLog: true,  // Store in database
@@ -623,7 +623,7 @@ new ReplicatorPlugin({
 - ✅ Test all replicators work
 - ✅ Configure `maxRetries` appropriately
 - ✅ Enable `persistReplicatorLog` for debugging
-- ✅ Set `verbose: false` (only enable in dev)
+- ✅ Set `logLevel: 'silent'` (only enable in dev)
 - ✅ Configure appropriate `replicatorConcurrency`
 - ✅ Test schema sync if using SQL databases
 - ✅ Setup monitoring on replication errors

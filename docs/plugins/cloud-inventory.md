@@ -271,7 +271,7 @@ const plugin = new CloudInventoryPlugin({
     changes: 'plg_cloud_inventory_changes',
     clouds: 'plg_cloud_inventory_clouds'
   },
-  verbose: true,
+  logLevel: 'debug',
   scheduled: {
     enabled: true,
     cron: '0 0 * * *', // Global daily sync
@@ -325,7 +325,7 @@ await plugin.syncAll(); // Trigger a manual crawl (+ auto-export if configured)
 | `terraform.filters.cloudId` | `string` | Filter by specific cloud ID. |
 | `terraform.terraformVersion` | `string` | Terraform version in state. Default `'1.5.0'`. |
 | `terraform.serial` | `number` | State serial number. Default `1`. |
-| `verbose` | `boolean` | When `true`, emits informational logs to `console`. Default `false`. |
+| `logLevel` | `boolean` | When `true`, emits informational logs to `console`. Default `false`. |
 | `scheduled.enabled` | `boolean` | Enable a global cron job that triggers `syncAll()`. |
 | `scheduled.cron` | `string` | Cron expression used for the global job (required when `enabled` is true). |
 | `scheduled.timezone` | `string` | Optional cron timezone (e.g., `"UTC"`). |
@@ -2031,7 +2031,7 @@ config: {
 
 **Q: How do I debug discovery issues?**
 
-**A:** Enable verbose logging and events:
+**A:** Enable debug logging and events:
 
 ```javascript
 emitEvents: true,  // Enable event emission

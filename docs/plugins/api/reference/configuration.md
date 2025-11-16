@@ -9,7 +9,7 @@ This section is the single source of truth for all ApiPlugin options. Other guid
 - port: number = 3000
 - host: string = '0.0.0.0'
 - basePath: string = '' (normalized; affects all routes, including /docs and /openapi.json)
-- verbose: boolean = false (gates console output across the plugin)
+- logLevel: string = false (controls log level output across the plugin)
 - startupBanner: boolean = true
 - versionPrefix: boolean | string = false
 - maxBodySize: number = 10_485_760 (10MB)
@@ -57,8 +57,8 @@ Driver‑specific (exemplos)
 - JWT: { secret: string; expiresIn?: string }
 - API Key: { headerName?: string }
 - Basic: { realm?: string; passphrase?: string; adminUser?: { enabled: boolean; username: string; password: string; scopes?: string[] } }
-- OAuth2 (RS): { issuer?: string; jwksUri?: string; audience?: string; algorithms?: string[]; cacheTTL?: number; clockTolerance?: number; validateScopes?: boolean; fetchUserInfo?: boolean; introspection?: { enabled?: boolean; endpoint?: string; clientId?: string; clientSecret?: string; useDiscovery?: boolean }; verbose?: boolean }
-- OIDC (RP): { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes?: string[]; cookieSecret: string; cookieName?: string; cookieDomain?: string; cookieMaxAge?: number; loginPath?: string; callbackPath?: string; logoutPath?: string; postLoginRedirect?: string; postLogoutRedirect?: string; idpLogout?: boolean; autoCreateUser?: boolean; autoRefreshTokens?: boolean; refreshThreshold?: number; externalUrl?: string; cookieSecure?: boolean; cookieSameSite?: 'Strict'|'Lax'|'None'; rollingDuration?: number; absoluteDuration?: number; discovery?: { enabled?: boolean }; pkce?: { enabled?: boolean; method?: 'S256' }; verbose?: boolean }
+- OAuth2 (RS): { issuer?: string; jwksUri?: string; audience?: string; algorithms?: string[]; cacheTTL?: number; clockTolerance?: number; validateScopes?: boolean; fetchUserInfo?: boolean; introspection?: { enabled?: boolean; endpoint?: string; clientId?: string; clientSecret?: string; useDiscovery?: boolean }; logLevel?: string }
+- OIDC (RP): { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes?: string[]; cookieSecret: string; cookieName?: string; cookieDomain?: string; cookieMaxAge?: number; loginPath?: string; callbackPath?: string; logoutPath?: string; postLoginRedirect?: string; postLogoutRedirect?: string; idpLogout?: boolean; autoCreateUser?: boolean; autoRefreshTokens?: boolean; refreshThreshold?: number; externalUrl?: string; cookieSecure?: boolean; cookieSameSite?: 'Strict'|'Lax'|'None'; rollingDuration?: number; absoluteDuration?: number; discovery?: { enabled?: boolean }; pkce?: { enabled?: boolean; method?: 'S256' }; logLevel?: string }
 
 ## CORS
 
@@ -99,7 +99,7 @@ rateLimit: {
 - logging.enabled: boolean = false
 - logging.format: string = ':verb :url => :status (:elapsed ms, :res[content-length])'
 - logging.colorize: boolean = true
-- logging.verbose: boolean = false
+- logging.logLevel: boolean = false
 - logging.filter?: ({ context, method, path, status, duration, requestId }) => boolean
 - logging.excludePaths?: string[]
 
@@ -724,7 +724,7 @@ The OIDC driver received significant enhancements. See **[OIDC Enhancements Guid
 | `cookieMaxAge` | number | `86400000` (24h) | Cookie max age in milliseconds |
 | `rollingDuration` | number | `86400000` (24h) | Idle timeout - session expires after this period of inactivity |
 | `absoluteDuration` | number | `604800000` (7d) | Maximum session duration regardless of activity |
-| `verbose` | boolean | `false` | Enable debug logging for OIDC operations |
+| `logLevel` | boolean | `false` | Enable debug logging for OIDC operations |
 
 ### Quick Example
 
@@ -753,7 +753,7 @@ auth: {
     absoluteDuration: 604800000,   // 7 days max session
 
     // Debug
-    verbose: process.env.NODE_ENV !== 'production',
+    logLevel: process.env.NODE_ENV !== 'production' ? 'debug' : 'info',
   }
 }
 ```

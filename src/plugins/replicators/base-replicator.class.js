@@ -19,7 +19,7 @@ export class BaseReplicator extends EventEmitter {
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = config.verbose ? 'debug' : 'info';
+      const logLevel = config.logLevel ? 'debug' : 'info';
       this.logger = createLogger({ name: this.name, level: logLevel });
     }
   }

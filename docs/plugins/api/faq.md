@@ -255,10 +255,10 @@ config: {
 - GitHub doesn't support refresh tokens in OAuth Apps
 - Use GitHub Apps instead
 
-**Enable verbose logging:**
+**Enable debug logging:**
 ```javascript
 config: {
-  verbose: true  // See token exchange details
+  logLevel: 'debug'  // See token exchange details
 }
 ```
 
@@ -491,7 +491,7 @@ config: {
   refreshThreshold: 300000,     // 5 min (default)
   rollingDuration: 86400000,    // 24 hours (increase if needed)
   absoluteDuration: 604800000,  // 7 days (increase if needed)
-  verbose: true,                // Enable logging
+  logLevel: 'debug',                // Enable logging
 }
 ```
 
@@ -502,7 +502,7 @@ config: {
 ```javascript
 config: {
   externalUrl: 'https://api.example.com',  // Set if behind reverse proxy
-  verbose: true,                           // Check logs
+  logLevel: 'debug',                           // Check logs
 }
 ```
 

@@ -259,7 +259,7 @@ setInterval(() => {
 
 ### Development/Debugging
 
-Enable verbose events for development:
+Set log level to debug events for development:
 
 ```javascript
 if (process.env.NODE_ENV === 'development') {
@@ -293,7 +293,7 @@ if (process.env.NODE_ENV === 'development') {
 ```javascript
 const vectorPlugin = new VectorPlugin({
   emitEvents: true,       // Enable monitoring
-  verboseEvents: false,   // Disable verbose (performance)
+  verboseEvents: false,   // Set log level to silent (performance)
   eventThrottle: 1000     // Throttle to reduce overhead
 });
 ```

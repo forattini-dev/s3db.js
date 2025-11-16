@@ -31,7 +31,7 @@ export async function cleanupStaleLocks(lockResource, config) {
 
   // If another container is already cleaning, skip
   if (!lockAcquired) {
-    if (config.verbose) {
+    if (config.logLevel) {
     }
     return;
   }
@@ -49,7 +49,7 @@ export async function cleanupStaleLocks(lockResource, config) {
 
     if (staleLocks.length === 0) return;
 
-    if (config.verbose) {
+    if (config.logLevel) {
     }
 
     // Delete stale locks using PromisePool
@@ -61,10 +61,10 @@ export async function cleanupStaleLocks(lockResource, config) {
         return deleted;
       });
 
-    if (errors && errors.length > 0 && config.verbose) {
+    if (errors && errors.length > 0 && config.logLevel) {
     }
   } catch (error) {
-    if (config.verbose) {
+    if (config.logLevel) {
     }
   } finally {
     // Always release cleanup lock

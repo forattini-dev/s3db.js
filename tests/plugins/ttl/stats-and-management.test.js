@@ -59,7 +59,7 @@ describe('TTLPlugin v2 - Stats and Monitoring', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         test_resource: {
           ttl: 1,
@@ -128,7 +128,7 @@ describe('TTLPlugin v2 - Manual Cleanup', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 1,
@@ -194,7 +194,7 @@ describe('TTLPlugin v2 - Multiple Granularities', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         short_lived: { ttl: 300, onExpire: 'hard-delete' },
         medium_lived: { ttl: 7200, onExpire: 'hard-delete' },
@@ -251,7 +251,7 @@ describe('TTLPlugin v2 - Interval Management', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         test_data: {
           ttl: 60,

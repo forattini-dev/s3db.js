@@ -105,7 +105,7 @@ export function createConfig(options, detectedTimezone) {
     autoCheckpoint: checkpoints.auto !== false,
 
     // Debug
-    verbose: options.verbose || false
+    logLevel: options.logLevel || 'info'
   };
 }
 
@@ -144,7 +144,7 @@ export function validateResourcesConfig(resources) {
  */
 export function logConfigWarnings(config) {
   // Warn about batching in distributed environments
-  if (config.batchTransactions && !config.verbose) {
+  if (config.batchTransactions && !config.logLevel) {
     // this.logger.warn(
     //   `[EventualConsistency] WARNING: batch.enabled is true. ` +
     //   `This stores transactions in memory and will lose data if container crashes. ` +
@@ -153,7 +153,7 @@ export function logConfigWarnings(config) {
   }
 
   // Warn if checkpoints are disabled in high-volume scenarios
-  if (!config.enableCheckpoints && !config.verbose) {
+  if (!config.enableCheckpoints && !config.logLevel) {
     // this.logger.warn(
     //   `[EventualConsistency] INFO: checkpoints.enabled is false. ` +
     //   `Checkpoints improve performance in high-volume scenarios by creating snapshots. ` +
@@ -169,7 +169,7 @@ export function logConfigWarnings(config) {
  * @param {boolean} timezoneAutoDetected - Whether timezone was auto-detected
  */
 export function logInitialization(config, fieldHandlers, timezoneAutoDetected) {
-  if (!config.verbose) return;
+  if (!config.logLevel) return;
 
   const totalFields = Array.from(fieldHandlers.values())
     .reduce((sum, handlers) => sum + handlers.size, 0);

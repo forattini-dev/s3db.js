@@ -10,7 +10,7 @@ describe('SafeEventEmitter', () => {
   let emitter;
 
   beforeEach(() => {
-    emitter = new SafeEventEmitter({ verbose: false, autoCleanup: false });
+    emitter = new SafeEventEmitter({ logLevel: 'silent', autoCleanup: false });
   });
 
   afterEach(() => {
@@ -175,7 +175,7 @@ describe('SafeEventEmitter', () => {
 
   describe('Factory Function', () => {
     it('should create emitter via factory function', () => {
-      const created = createSafeEventEmitter({ verbose: false });
+      const created = createSafeEventEmitter({ logLevel: 'silent' });
       const handler = jest.fn();
 
       created.on('test', handler);
@@ -191,7 +191,7 @@ describe('SafeEventEmitter', () => {
   describe('Max Listeners', () => {
     it('should respect maxListeners option', () => {
       const limited = new SafeEventEmitter({
-        verbose: false,
+        logLevel: 'silent',
         autoCleanup: false,
         maxListeners: 2
       });
@@ -211,7 +211,7 @@ describe('SafeEventEmitter', () => {
     it('should work as base class', () => {
       class MyService extends SafeEventEmitter {
         constructor() {
-          super({ verbose: false, autoCleanup: false });
+          super({ logLevel: 'silent', autoCleanup: false });
           this.data = [];
         }
 

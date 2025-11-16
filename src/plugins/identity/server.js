@@ -155,7 +155,7 @@ export class IdentityServer {
     this.options = {
       port: options.port || 4000,
       host: options.host || '0.0.0.0',
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       issuer: options.issuer,
       oauth2Server: options.oauth2Server,
       sessionManager: options.sessionManager || null,
@@ -194,7 +194,7 @@ export class IdentityServer {
         c.header('X-Ban-Status', 'blacklisted');
         c.header('X-Ban-Reason', 'IP is permanently blacklisted');
 
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.info(`[Failban] Blocked blacklisted IP: ${ip}`);
         }
 
@@ -213,7 +213,7 @@ export class IdentityServer {
           c.header('X-Ban-Reason', countryBlock.reason);
           c.header('X-Country-Code', countryBlock.country);
 
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             this.logger.info(`[Failban] Blocked country ${countryBlock.country} for IP: ${ip}`);
           }
 
@@ -239,7 +239,7 @@ export class IdentityServer {
           c.header('X-Ban-Reason', ban.reason);
           c.header('X-Ban-Expires', ban.expiresAt);
 
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             this.logger.info(`[Failban] Blocked banned IP: ${ip} (expires in ${retryAfter}s)`);
           }
 
@@ -257,7 +257,7 @@ export class IdentityServer {
       await next();
     });
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('[Identity Server] Failban middleware enabled (global ban check)');
     }
   }
@@ -294,7 +294,7 @@ export class IdentityServer {
     // Request ID middleware
     this.app.use('*', async (c, next) => {
       c.set('requestId', idGenerator());
-      c.set('verbose', this.options.verbose);
+      c.set('logLevel', this.options.logLevel);
       await next();
     });
 
@@ -445,7 +445,7 @@ export class IdentityServer {
     // Token revocation endpoint
     this.app.post('/oauth/revoke', wrap(oauth2Server.revokeHandler));
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('[Identity Server] Mounted OAuth2/OIDC routes:');
       this.logger.info('[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)');
       this.logger.info('[Identity Server]   GET  /.well-known/jwks.json (JWKS)');
@@ -467,7 +467,7 @@ export class IdentityServer {
     const { sessionManager, identityPlugin } = this.options;
 
     if (!sessionManager || !identityPlugin) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info('[Identity Server] SessionManager or IdentityPlugin not provided, skipping UI routes');
       }
       return;
@@ -480,7 +480,7 @@ export class IdentityServer {
       // Register all UI routes (login, register, logout)
       registerUIRoutes(this.app, identityPlugin);
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info('[Identity Server] Mounted UI routes:');
         this.logger.info('[Identity Server]   GET  /login (Login Form)');
         this.logger.info('[Identity Server]   POST /login (Process Login)');

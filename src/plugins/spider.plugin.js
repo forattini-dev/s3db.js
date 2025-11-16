@@ -48,13 +48,13 @@ export class SpiderPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info'
+      const logLevel = this.logLevel || 'info'
       this.logger = createLogger({ name: 'SpiderPlugin', level: logLevel })
     }
 
     // Configuration
     this.config = {
-      verbose: this.verbose,
+      logLevel: this.logLevel,
 
       // Namespacing
       namespace: this.namespace,
@@ -209,7 +209,7 @@ export class SpiderPlugin extends Plugin {
       this.puppeteerPlugin = new PuppeteerPlugin({
         ...this.config.puppeteer,
         namespace: this.namespace,
-        verbose: this.verbose
+        logLevel: this.logLevel
       })
       await this.puppeteerPlugin.initialize(this.database)
 
@@ -218,7 +218,7 @@ export class SpiderPlugin extends Plugin {
         ...this.config.queue,
         namespace: this.namespace,
         resource: this.resourceNames.targets,
-        verbose: this.verbose
+        logLevel: this.logLevel
       })
       await this.queuePlugin.initialize(this.database)
 
@@ -231,7 +231,7 @@ export class SpiderPlugin extends Plugin {
               ttl: this.config.ttl.queue.ttl
             }
           ],
-          verbose: this.verbose
+          logLevel: this.logLevel
         })
         await this.ttlPlugin.initialize(this.database)
       }

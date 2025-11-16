@@ -30,7 +30,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' }
     });
@@ -55,7 +55,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' }
     });
@@ -80,10 +80,10 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -108,7 +108,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] }
     });
 
@@ -129,7 +129,7 @@ describe('EventualConsistencyPlugin - Additional Edge Cases', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] }
     });
 

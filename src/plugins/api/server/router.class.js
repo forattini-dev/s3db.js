@@ -22,7 +22,7 @@ import { createContextInjectionMiddleware } from '../middlewares/context-injecti
 import { applyBasePath } from '../utils/base-path.js';
 
 export class Router {
-  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, logger, Hono, apiTitle, apiDescription, docsEnabled, rootRoute }) {
+  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, logLevel, logger, Hono, apiTitle, apiDescription, docsEnabled, rootRoute }) {
     this.database = database;
     this.resources = resources || {};
     this.routes = routes || {};
@@ -34,7 +34,7 @@ export class Router {
     this.metrics = metrics;
     this.relationsPlugin = relationsPlugin;
     this.authMiddleware = authMiddleware;
-    this.verbose = verbose;
+    this.logLevel = logLevel;
     this.logger = logger; // Pino logger instance from APIPlugin
     this.Hono = Hono;
     this.apiTitle = apiTitle || 's3db.js API';
@@ -402,7 +402,7 @@ export class Router {
           version
         };
 
-        mountCustomRoutes(resourceApp, resource.config.routes, routeContext, this.verbose);
+        mountCustomRoutes(resourceApp, resource.config.routes, routeContext, this.logLevel);
       }
     }
   }
@@ -665,7 +665,7 @@ export class Router {
       plugins: this.database?.pluginRegistry || {}
     };
 
-    mountCustomRoutes(app, this.routes, context, this.verbose, {
+    mountCustomRoutes(app, this.routes, context, this.logLevel, {
       pathPrefix: this.basePath
     });
 

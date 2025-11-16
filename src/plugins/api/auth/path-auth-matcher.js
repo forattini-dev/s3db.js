@@ -176,7 +176,7 @@ export function createPathBasedAuthMiddleware(options = {}) {
 
     // Rule says auth required but no methods = error in config
     if (rule.methods.length === 0 && rule.required) {
-      if (c.get('verbose')) {
+      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error(`[Path Auth] Invalid rule: path "${rule.path}" requires auth but has no methods`);
       }
       if (unauthorizedHandler) {
@@ -194,7 +194,7 @@ export function createPathBasedAuthMiddleware(options = {}) {
       .filter(m => m.middleware);
 
     if (allowedMiddlewares.length === 0) {
-      if (c.get('verbose')) {
+      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error(`[Path Auth] No middlewares found for methods: ${rule.methods.join(', ')}`);
       }
       if (unauthorizedHandler) {

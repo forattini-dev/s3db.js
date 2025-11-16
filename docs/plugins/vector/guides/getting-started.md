@@ -42,7 +42,7 @@ const vectorPlugin = new VectorPlugin({
   storageThreshold: 1500,      // Warn if vectors exceed 1.5KB (metadata limit)
   autoDetectVectorField: true, // Auto-detect embedding:XXX fields
   emitEvents: true,            // Enable monitoring events
-  verboseEvents: false         // Disable verbose logs in production
+  verboseEvents: false         // Set log level to silent logs in production
 });
 
 await vectorPlugin.install(db);

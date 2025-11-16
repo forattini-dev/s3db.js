@@ -9,7 +9,7 @@
  *
  * class MyService extends SafeEventEmitter {
  *   constructor() {
- *     super({ verbose: true });
+ *     super({ logLevel: 'debug' });
  *   }
  * }
  *
@@ -26,7 +26,7 @@ export class SafeEventEmitter extends EventEmitter {
     super();
 
     this.options = {
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       autoCleanup: options.autoCleanup !== false, // Default: true
       maxListeners: options.maxListeners || 0 // 0 = unlimited
     };
@@ -35,8 +35,8 @@ export class SafeEventEmitter extends EventEmitter {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.options.verbose ? 'debug' : 'info';
-      this.logger = createLogger({ name: 'SafeEventEmitter', level: logLevel });
+      // Use logLevel from options
+      this.logger = createLogger({ name: 'SafeEventEmitter', level: this.options.logLevel });
     }
 
     // Track if signal handlers are setup

@@ -21,7 +21,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
     });
     await db.connect();
     puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
       namespace: null, // Disable namespace to use exact resource name
       cookies: {
         enabled: true,
@@ -364,7 +364,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
   describe('Error Handling', () => {
     it('should throw error when farming is disabled', async () => {
       const disabledPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         cookies: {
           enabled: true,
           farming: {
@@ -387,7 +387,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
 
     it('should throw error when getting best cookie with farming disabled', async () => {
       const disabledPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         cookies: {
           enabled: true,
           farming: {

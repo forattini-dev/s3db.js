@@ -349,7 +349,7 @@ console.log('Staging:', await stagingCoordinator.getLeader());
 5. **Single source of truth** - All plugins agree on leadership
 
 **Debugging**:
-- Enable verbose logs: `verbose: true` in plugin config
+- Enable verbose logs: `logLevel: 'debug'` in plugin config
 - Check coordinator metrics via `coordinator.getMetrics()`
 - Monitor S3 storage: `plg_coordinator_global/<namespace>/`
 - See [Coordinator Design](docs/architecture/COORDINATOR-DESIGN.md) for detailed guide
@@ -511,10 +511,10 @@ pnpm test:js                # JavaScript only
 pnpm test:plugins           # Plugin tests (May require S3-compatible backend)
 pnpm run test:coverage      # Enforces ≥90% global coverage and generates reports
 
-# Plugin Verbosity (Tests & Dev)
-- Always pass `verbose: false` when instantiating plugins in tests unless the
-  test intentionally checks logging behavior. The base `Plugin` normalizes
-  options via `normalizePluginOptions`, keeping verbose mode opt-in per plugin.
+# Plugin Log Levels (Tests & Dev)
+- Use `logLevel: 'silent'` when instantiating plugins in tests to suppress logs,
+  or `logLevel: 'debug'` when debugging. The base `Plugin` normalizes options via
+  `normalizePluginOptions`, defaulting to 'info' level.
 
 # CLI
 s3db list                           # List resources

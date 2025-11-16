@@ -28,7 +28,7 @@ export class PuppeteerPlugin extends Plugin {
 
     // Default configuration
     this.config = {
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       // Browser Pool
       pool: {
         enabled: true,
@@ -249,7 +249,7 @@ export class PuppeteerPlugin extends Plugin {
       ...options
     };
 
-    this.config.verbose = this.verbose;
+    // Removed: this.config.logLevel = this.verbose;
 
     const resourceNamesOption = options.resourceNames || {};
     this._resourceDescriptors = {

@@ -23,9 +23,9 @@ describe('EventualConsistencyPlugin - Setup Coverage', () => {
   it('should handle deferred setup when resource created later', async () => {
     // Create plugin BEFORE resource exists
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

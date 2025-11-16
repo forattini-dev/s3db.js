@@ -76,7 +76,7 @@ export class RegressionModel extends BaseModel {
       metrics: ['mse', 'mae']
     });
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[MLPlugin] ${this.config.name} - Built regression model (polynomial degree: ${polynomial})`);
       this.model.summary();
     }

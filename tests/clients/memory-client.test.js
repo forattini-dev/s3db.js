@@ -126,7 +126,7 @@ describe('MemoryClient - Snapshot/Restore', () => {
 
   beforeEach(async () => {
     memoryClient = new MemoryClient({ bucket: 'test-snapshot' });
-    database = new Database({ verbose: false, client: memoryClient });
+    database = new Database({ logLevel: 'silent', client: memoryClient });
     await database.connect();
   });
 
@@ -190,7 +190,7 @@ describe('MemoryClient - Persistence', () => {
       bucket: 'test-persist',
       persistPath: `${tempPath}/snapshot.json`
     });
-    database = new Database({ verbose: false, client: memoryClient });
+    database = new Database({ logLevel: 'silent', client: memoryClient });
     await database.connect();
   });
 
@@ -510,7 +510,7 @@ describe('MemoryClient - Direct API Tests', () => {
   beforeEach(() => {
     client = new MemoryClient({
       bucket: 'test-direct-api',
-      verbose: false
+      logLevel: 'silent'
     });
   });
 
@@ -936,7 +936,7 @@ describe('MemoryClient - Direct API Tests', () => {
     it('should log operations when verbose is enabled', async () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-verbose',
-        verbose: false
+        logLevel: 'silent'
       });
 
       // Should log without throwing
@@ -953,7 +953,7 @@ describe('MemoryClient - Direct API Tests', () => {
     it('should log batch operations when verbose is enabled', async () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-verbose-batch',
-        verbose: false
+        logLevel: 'silent'
       });
 
       await verboseClient.putObject({ key: 'b1', metadata: {} });
@@ -971,7 +971,7 @@ describe('MemoryClient - Direct API Tests', () => {
     it('should handle errors in batch delete operations', async () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-batch-error',
-        verbose: false
+        logLevel: 'silent'
       });
 
       await verboseClient.putObject({ key: 'item1', metadata: {} });
@@ -1000,7 +1000,7 @@ describe('MemoryClient - Direct API Tests', () => {
     it('should log list operations when verbose is enabled', async () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-verbose-list',
-        verbose: false
+        logLevel: 'silent'
       });
 
       await verboseClient.putObject({ key: 'item1', metadata: {} });
@@ -1015,7 +1015,7 @@ describe('MemoryClient - Direct API Tests', () => {
     it('should log snapshot operations when verbose is enabled', async () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-verbose-snapshot',
-        verbose: false
+        logLevel: 'silent'
       });
 
       await verboseClient.putObject({ key: 'snap1', metadata: {} });
@@ -1032,7 +1032,7 @@ describe('MemoryClient - Direct API Tests', () => {
     it('should log clear operation when verbose is enabled', async () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-verbose-clear',
-        verbose: false
+        logLevel: 'silent'
       });
 
       await verboseClient.putObject({ key: 'clear1', metadata: {} });
@@ -1053,7 +1053,7 @@ describe('MemoryClient - Direct API Tests', () => {
       const verboseClient = new MemoryClient({
         bucket: 'test-verbose-save',
         persistPath: tmpPath,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await verboseClient.putObject({ key: 'save1', metadata: {} });
@@ -1814,7 +1814,7 @@ describe('MemoryClient - Direct API Tests', () => {
         bucket: 'custom-bucket',
         keyPrefix: 'tenant/',
         region: 'eu-west-1',
-        verbose: false,
+        logLevel: 'silent',
         enforceLimits: true,
         metadataLimit: 128,
         maxObjectSize: 4096

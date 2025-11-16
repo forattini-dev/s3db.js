@@ -23,12 +23,12 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async' },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -440,7 +440,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       });
 
       const statsPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           stats: ['views', 'likes']
         },

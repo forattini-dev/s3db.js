@@ -32,7 +32,7 @@ describe('CRUD Performance Benchmarks', () => {
     clearValidatorCache();
 
     db = new Database({
-      verbose: false, client: new MemoryClient({ bucket: 'perf-test', keyPrefix: 'perf/' }),
+      logLevel: 'silent', client: new MemoryClient({ bucket: 'perf-test', keyPrefix: 'perf/' }),
       deferMetadataWrites: true
     });
     await db.connect();

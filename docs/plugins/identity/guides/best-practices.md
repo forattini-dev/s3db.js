@@ -933,10 +933,10 @@ const allowed = client.redirectUris.includes(requestedUri);
 console.log('Redirect URI allowed:', allowed);
 ```
 
-**5. Enable verbose logging:**
+**5. Enable debug logging:**
 ```javascript
 await db.usePlugin(new IdentityPlugin({
-  verbose: true
+  logLevel: 'debug'
 }));
 ```
 </details>

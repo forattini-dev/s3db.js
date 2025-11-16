@@ -25,7 +25,7 @@ export function addHelperMethods(resource, plugin, config) {
 
     // Create transaction inline
     const now = new Date();
-    const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+    const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.logLevel);
 
     const transaction = {
       id: idGenerator(),
@@ -60,7 +60,7 @@ export function addHelperMethods(resource, plugin, config) {
 
     // Create transaction inline
     const now = new Date();
-    const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+    const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.logLevel);
 
     const transaction = {
       id: idGenerator(),
@@ -103,7 +103,7 @@ export function addHelperMethods(resource, plugin, config) {
 
     // Create transaction inline
     const now = new Date();
-    const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+    const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.logLevel);
 
     const transaction = {
       id: idGenerator(),

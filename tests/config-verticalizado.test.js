@@ -34,7 +34,7 @@ describe('Verticalizado Configuration Architecture', () => {
       const db = await createDatabaseForTest('verticalizado-clean-structure', {
         connectionString: `file://${getTestPath()}`,
         // Database options (root level)
-        verbose: false,
+        logLevel: 'silent',
         parallelism: 5,
         strictValidation: true,
         // Client options (wrapper)
@@ -104,7 +104,7 @@ describe('Verticalizado Configuration Architecture', () => {
     it('should parse nested querystring params (compression.enabled=true)', async () => {
       const db = await createDatabaseForTest('verticalizado-query-nested', {
         connectionString: `file://${getTestPath()}?compression.enabled=true&compression.threshold=100&compression.level=9&stats.enabled=true`,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -126,7 +126,7 @@ describe('Verticalizado Configuration Architecture', () => {
     it('should parse boolean querystring params correctly', async () => {
       const db = await createDatabaseForTest('verticalizado-query-boolean', {
         connectionString: `file://${getTestPath()}?stats.enabled=true&locking.enabled=false`,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -149,7 +149,7 @@ describe('Verticalizado Configuration Architecture', () => {
     it('should parse number querystring params correctly', async () => {
       const db = await createDatabaseForTest('verticalizado-query-number', {
         connectionString: `file://${getTestPath()}?compression.threshold=50&ttl.defaultTTL=3600000&stats.enabled=true`,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();

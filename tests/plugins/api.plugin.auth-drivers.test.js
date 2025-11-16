@@ -42,7 +42,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
     beforeAll(async () => {
       // Create database
       db = createDatabaseForTest('api-jwt-auth', {
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -76,9 +76,9 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
 
       // Configure API with JWT driver
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         auth: {
           driver: 'jwt',
           resource: 'users',
@@ -250,7 +250,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
     beforeAll(async () => {
       // Create database
       db = createDatabaseForTest('api-basic-auth', {
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -283,9 +283,9 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
 
       // Configure API with Basic Auth driver
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         auth: {
           driver: 'basic',
           resource: 'accounts',
@@ -436,7 +436,7 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
     beforeAll(async () => {
       // Create database
       db = createDatabaseForTest('api-custom-fields', {
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -457,9 +457,9 @@ describe.skip('API Plugin - Driver-Based Authentication', () => {
 
       // Configure API with custom fields
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         auth: {
           driver: 'jwt',
           resource: 'members',
@@ -538,7 +538,7 @@ describe.skip('API Plugin - Custom Routes', () => {
     beforeAll(async () => {
       // Create database
       db = createDatabaseForTest('api-custom-routes-plugin', {
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -558,9 +558,9 @@ describe.skip('API Plugin - Custom Routes', () => {
 
       // Configure API with plugin-level custom routes
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         routes: {
           'GET /custom/health': async (c) => {
             const context = c.get('customRouteContext');
@@ -657,7 +657,7 @@ describe.skip('API Plugin - Custom Routes', () => {
     beforeAll(async () => {
       // Create database
       db = createDatabaseForTest('api-custom-routes-resource', {
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db.connect();
@@ -677,9 +677,9 @@ describe.skip('API Plugin - Custom Routes', () => {
 
       // Configure API with resource-level custom routes
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         resources: {
           users: {
             auth: false,

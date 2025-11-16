@@ -141,7 +141,7 @@ Verify configuration before deploying to production:
 ```javascript
 // ✅ Good: Test with short TTL in development
 const ttlPlugin = new TTLPlugin({
-  verbose: true,  // Enable logging
+  logLevel: 'debug',  // Enable logging
   resources: {
     test_data: {
       ttl: 60,                 // 1 minute for testing
@@ -714,7 +714,7 @@ A: Check:
 1. Callback operations slow? → Parallelize
 2. Archive resource slow? → Check resource performance
 3. S3 throttled? → Reduce batch size, stagger schedules
-4. Verbose logging enabled? → Disable for production
+4. Debug logging enabled? → Disable for production
 
 **Q: How do I measure cleanup performance?**
 
@@ -735,7 +735,7 @@ A: Check:
 1. Is plugin initialized? `await db.usePlugin(ttlPlugin)`
 2. Is database connected? `await db.connect()`
 3. Coordinator elected? Check logs for `coordinator-elected` event
-4. Any errors? Enable `verbose: true`
+4. Any errors? Enable `logLevel: 'debug'`
 
 **Q: Some records not expiring. Why?**
 
@@ -832,7 +832,7 @@ const stats = ttlPlugin.getStats();
 A: Use short TTL in development:
 ```javascript
 new TTLPlugin({
-  verbose: true,
+  logLevel: 'debug',
   resources: {
     test: { ttl: 30, onExpire: 'soft-delete' }  // 30 seconds
   }

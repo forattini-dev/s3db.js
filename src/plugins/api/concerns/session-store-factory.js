@@ -78,7 +78,7 @@ export async function createSessionStore(storeConfig, database) {
  *
  * @param {Object} config - Configuration
  * @param {string} config.resourceName - Resource name (default: 'oidc_sessions')
- * @param {boolean} config.verbose - Enable debug logging
+ * @param {boolean} config.logLevel - Enable debug logging
  * @param {Database} database - s3db.js database instance
  * @returns {ResourceSessionStore}
  * @throws {Error} If resource not found or database not provided
@@ -105,7 +105,7 @@ function createS3DBSessionStore(config, database) {
   const resource = database.resources[resourceName];
 
   return new ResourceSessionStore(resource, {
-    verbose: config.verbose || false
+    logLevel: config.logLevel || 'info'
   });
 }
 
@@ -117,7 +117,7 @@ function createS3DBSessionStore(config, database) {
  * @param {string} config.url - Redis URL (alternative to client)
  * @param {string} config.prefix - Key prefix (default: 'session:')
  * @param {Object} config.serializer - Custom serializer (default: JSON)
- * @param {boolean} config.verbose - Enable debug logging
+ * @param {boolean} config.logLevel - Enable debug logging
  * @returns {Promise<RedisStore>}
  * @throws {Error} If redis not installed
  */
@@ -151,7 +151,7 @@ async function createRedisSessionStore(config) {
       client: config.client,
       prefix: config.prefix || 'session:',
       serializer: config.serializer || JSON,
-      verbose: config.verbose || false
+      logLevel: config.logLevel || 'info'
     });
   } catch (err) {
     if (err.message?.includes('not installed')) {
@@ -169,12 +169,12 @@ async function createRedisSessionStore(config) {
  *
  * @param {Object} config - Configuration
  * @param {number} config.maxSessions - Maximum sessions before LRU eviction (default: 10000)
- * @param {boolean} config.verbose - Enable debug logging
+ * @param {boolean} config.logLevel - Enable debug logging
  * @returns {MemoryStore}
  */
 function createMemorySessionStore(config) {
   return new MemoryStore({
     maxSessions: config.maxSessions || 10000,
-    verbose: config.verbose || false
+    logLevel: config.logLevel || 'info'
   });
 }

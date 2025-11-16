@@ -105,7 +105,7 @@ async function main() {
     port: 4000,
     issuer: 'http://localhost:4000',
     supportedScopes: ['openid', 'profile', 'email'],
-    verbose: true  // Enable debug logs
+    logLevel: 'debug'  // Enable debug logs
   }));
 
   console.log('✅ SSO Server running!');

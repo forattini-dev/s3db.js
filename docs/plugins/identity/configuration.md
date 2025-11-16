@@ -19,7 +19,7 @@ Complete configuration reference for the Identity Plugin. All options with descr
 | `port` | number | `4000` | Port to listen on |
 | `host` | string | `'0.0.0.0'` | Host to bind to |
 | `issuer` | string | **required** | Issuer URL (MUST match public URL) |
-| `verbose` | boolean | `false` | Enable verbose logging |
+| `logLevel` | boolean | `false` | Enable debug logging |
 | `userResource` | string | `'users'` | Name of users resource |
 | `resourceNames` | object | auto-generated | Override internal resource names (`oauthKeys`, `authCodes`, `sessions`, `passwordResetTokens`, `mfaDevices`) |
 
@@ -29,7 +29,7 @@ const identityPlugin = new IdentityPlugin({
   port: 4000,
   host: '0.0.0.0',
   issuer: 'http://localhost:4000',
-  verbose: true,
+  logLevel: 'debug',
   userResource: 'users',
   resourceNames: {
     oauthKeys: 'plg_identity_oauth_keys_primary',

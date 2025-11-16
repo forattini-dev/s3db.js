@@ -31,7 +31,7 @@ export class ResourceSessionStore extends SessionStore {
    *
    * @param {Resource} resource - An s3db.js resource (e.g., db.resources.oidc_sessions)
    * @param {Object} options - Configuration options
-   * @param {boolean} options.verbose - Enable debug logging
+   * @param {boolean} options.logLevel - Enable debug logging
    *
    * @throws {Error} If resource is not provided or invalid
    *
@@ -45,13 +45,13 @@ export class ResourceSessionStore extends SessionStore {
 
     super();
     this.resource = resource;
-    this.verbose = options.verbose || false;
+    this.logLevel = options.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'ResourceSessionStore', level: logLevel });
     }
 

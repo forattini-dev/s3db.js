@@ -23,7 +23,7 @@ describe('CachePlugin - skipCache option', () => {
 
     users = await database.createResource(USERS_CONFIG);
 
-    cachePlugin = new CachePlugin({ verbose: false, driver: 'memory' });
+    cachePlugin = new CachePlugin({ logLevel: 'silent', driver: 'memory' });
     await cachePlugin.install(database);
   });
 

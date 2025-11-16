@@ -944,7 +944,7 @@ A: Check:
 A: Verify that the action name is correct and registered in `actions: {}`.
 
 **Q: How to debug guards?**
-A: Enable `verbose: true` and see guard error logs.
+A: Enable `logLevel: 'debug'` and see guard error logs.
 
 ### Concurrency and Locks
 

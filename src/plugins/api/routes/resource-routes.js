@@ -213,7 +213,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
           return c.json(formatter.noContent(), 204);
         }));
 
-        if (config.verbose || resource.database?.verbose) {
+        if (config.logLevel || resource.database?.logger.level === 'debug') {
           logger.info(`[API Plugin] Registered custom route for ${resourceName}: ${method} ${path}`);
         }
       } catch (error) {

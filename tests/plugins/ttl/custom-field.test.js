@@ -22,7 +22,7 @@ describe('TTLPlugin v2 - Custom Field Support', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         subscriptions: {
           ttl: 1,

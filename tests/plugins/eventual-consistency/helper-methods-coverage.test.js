@@ -30,7 +30,7 @@ describe('EventualConsistencyPlugin - Helper Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] }
     });
 
@@ -51,7 +51,7 @@ describe('EventualConsistencyPlugin - Helper Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] }
     });
 

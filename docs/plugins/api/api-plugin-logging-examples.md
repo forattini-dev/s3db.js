@@ -18,7 +18,7 @@ This document shows real logging outputs from the API Plugin in different scenar
 
 ## 🚀 Startup Logs (Verbose Mode)
 
-When `verbose: true`, you get detailed initialization logs:
+When `logLevel: 'debug'`, you get detailed initialization logs:
 
 ```bash
 $ node my-api.js
@@ -73,7 +73,7 @@ $ node my-api.js
 
 ## 🔇 Startup Logs (Minimal Mode)
 
-When `verbose: false` (default), you only see the startup banner:
+When `logLevel: 'silent'` (default), you only see the startup banner:
 
 ```bash
 $ node my-api.js
@@ -152,13 +152,13 @@ DELETE /users/abc123 204 (34 ms)
 
 ## 🎯 Event Logs
 
-When `events.enabled: true` and `events.verbose: true`:
+When `events.enabled: true` and `events.logLevel: 'debug'`:
 
 ```javascript
 new ApiPlugin({
   events: {
     enabled: true,
-    verbose: true
+    logLevel: 'debug'
   }
 })
 ```
@@ -203,13 +203,13 @@ apiPlugin.on('resource:insert', (data) => {
 
 ## 📊 Metrics Logs
 
-When `metrics.enabled: true` and `metrics.verbose: true`:
+When `metrics.enabled: true` and `metrics.logLevel: 'debug'`:
 
 ```javascript
 new ApiPlugin({
   metrics: {
     enabled: true,
-    verbose: true,
+    logLevel: 'debug',
     resetInterval: 60000  // Reset every 60s
   }
 })
@@ -337,7 +337,7 @@ GET /api/v1/notfound => 404 (8 ms, 78 bytes)
 }
 ```
 
-### Internal Errors (with verbose)
+### Internal Errors (with debug mode)
 
 ```bash
 [API Server] Error in request handler:
@@ -394,7 +394,7 @@ const jsonLogger = async (c, next) => {
 };
 
 new ApiPlugin({
-  verbose: false,
+  logLevel: 'silent',
   startupBanner: false,
   middlewares: [jsonLogger]
 })
@@ -424,7 +424,7 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  verbose: false,           // No startup details
+  logLevel: 'silent',           // No startup details
   startupBanner: false,     // No banner
   logging: { enabled: false }, // No request logs
   events: { enabled: false },  // No event logs
@@ -438,15 +438,15 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  verbose: true,            // ✓ All startup details
+  logLevel: 'debug',            // ✓ All startup details
   logging: { enabled: true }, // ✓ Request logs
   events: {
     enabled: true,
-    verbose: true           // ✓ Event details
+    logLevel: 'debug'           // ✓ Event details
   },
   metrics: {
     enabled: true,
-    verbose: true           // ✓ Metrics details
+    logLevel: 'debug'           // ✓ Metrics details
   }
 })
 ```
@@ -457,11 +457,11 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  verbose: false,           // ✗ No startup spam
+  logLevel: 'silent',           // ✗ No startup spam
   startupBanner: true,      // ✓ Quick summary
   logging: { enabled: true }, // ✓ Request logs (custom JSON)
-  events: { enabled: true, verbose: false }, // ✓ Events, no verbose
-  metrics: { enabled: true, verbose: false }, // ✓ Metrics, no verbose
+  events: { enabled: true, logLevel: 'silent' }, // ✓ Events, no debug output
+  metrics: { enabled: true, logLevel: 'silent' }, // ✓ Metrics, no debug output
   middlewares: [jsonLogger] // ✓ Structured logging
 })
 ```
@@ -478,7 +478,7 @@ new ApiPlugin({
 const isProduction = process.env.NODE_ENV === 'production';
 
 new ApiPlugin({
-  verbose: !isProduction,
+  logLevel: !isProduction ? 'debug' : 'info',
   logging: {
     enabled: true,
     format: isProduction

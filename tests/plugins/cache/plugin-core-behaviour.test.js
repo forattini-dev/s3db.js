@@ -30,18 +30,18 @@ describe('CachePlugin core behaviour', () => {
     const drivers = [
       {
         name: 'memory',
-        setup: () => new CachePlugin({ verbose: false, driver: 'memory' }),
+        setup: () => new CachePlugin({ logLevel: 'silent', driver: 'memory' }),
         expected: MemoryCache
       },
       {
         name: 'filesystem',
-        setup: () => new CachePlugin({ verbose: false, driver: 'filesystem', config: { directory: tempDir } }),
+        setup: () => new CachePlugin({ logLevel: 'silent', driver: 'filesystem', config: { directory: tempDir } }),
         expected: FilesystemCache
       },
       {
         name: 'partition-aware',
         setup: () => new CachePlugin({
-      verbose: false,driver: 'filesystem',
+      logLevel: 'silent',driver: 'filesystem',
           partitionAware: true,
           trackUsage: true,
           config: { directory: tempDir }
@@ -70,7 +70,7 @@ describe('CachePlugin core behaviour', () => {
   });
 
   test('reports errors for unknown resources on warmCache', async () => {
-    const plugin = new CachePlugin({ verbose: false, driver: 'memory' });
+    const plugin = new CachePlugin({ logLevel: 'silent', driver: 'memory' });
     await plugin.install(database);
 
     await expect(plugin.warmCache('missing-resource')).rejects.toThrow(/Resource not found/i);
@@ -80,7 +80,7 @@ describe('CachePlugin core behaviour', () => {
     const tempDir = await createTemporaryPathForTest('cache-plugin-analysis');
 
     const plugin = new CachePlugin({
-      verbose: false,driver: 'filesystem',
+      logLevel: 'silent',driver: 'filesystem',
       partitionAware: true,
       trackUsage: true,
       config: { directory: tempDir }
@@ -96,18 +96,18 @@ describe('CachePlugin core behaviour', () => {
   });
 
   test('rejects install when database is missing', async () => {
-    const plugin = new CachePlugin({ verbose: false, driver: 'memory' });
+    const plugin = new CachePlugin({ logLevel: 'silent', driver: 'memory' });
     await expect(plugin.install(null)).rejects.toThrow();
   });
 
   test('allows installing the same plugin multiple times on one database', async () => {
-    const plugin = new CachePlugin({ verbose: false, driver: 'memory' });
+    const plugin = new CachePlugin({ logLevel: 'silent', driver: 'memory' });
     await plugin.install(database);
     await expect(plugin.install(database)).resolves.not.toThrow();
   });
 
   test('exposes resource cache namespace helpers', async () => {
-    const plugin = new CachePlugin({ verbose: false, driver: 'memory' });
+    const plugin = new CachePlugin({ logLevel: 'silent', driver: 'memory' });
     await plugin.install(database);
 
     const resource = await database.createResource({ ...RESOURCE_CONFIG, name: 'users_namespace' });

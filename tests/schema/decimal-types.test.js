@@ -189,7 +189,7 @@ describe('Schema Integration', () => {
   beforeAll(async () => {
     database = createDatabaseForTest('schema/decimal-types', {
       passphrase: 'test-secret',
-      verbose: false
+      logLevel: 'silent'
     });
     await database.connect();
   });

@@ -165,7 +165,7 @@ const getReplicatorConfig = (env = process.env.NODE_ENV) => {
   // Staging - safe replication
   if (env === 'staging') {
     return {
-      verbose: true,
+      logLevel: 'debug',
       persistReplicatorLog: true,
       replicators: [{
         driver: 's3db',
@@ -178,7 +178,7 @@ const getReplicatorConfig = (env = process.env.NODE_ENV) => {
   // Production - full replication with monitoring
   if (env === 'production') {
     return {
-      verbose: false,
+      logLevel: 'silent',
       persistReplicatorLog: true,
       maxRetries: 5,
       replicators: [
@@ -382,7 +382,7 @@ setInterval(retryFailed, 60000);
 ```javascript
 const plugin = new ReplicatorPlugin({
   persistReplicatorLog: true,  // Store in database
-  verbose: false
+  logLevel: 'silent'
 });
 
 await db.usePlugin(plugin);
@@ -700,10 +700,10 @@ Also use `shouldReplicate` to filter unnecessary records.
 <details>
 <summary><strong>Q: Replication is slow. How do I debug?</strong></summary>
 
-1. **Enable verbose logging:**
+1. **Enable debug logging:**
    ```javascript
    new ReplicatorPlugin({
-     verbose: true,
+     logLevel: 'debug',
      persistReplicatorLog: true
    })
    ```
@@ -777,7 +777,7 @@ curl -X POST https://api.example.com/webhook \
 - ✅ Test all replicators work
 - ✅ Verify transforms handle edge cases
 - ✅ Enable `persistReplicatorLog` for debugging
-- ✅ Set `verbose: false` (disable verbose logs)
+- ✅ Set `logLevel: 'silent'` (set log level to silent logs)
 - ✅ Configure appropriate `maxRetries`
 - ✅ Set `batchSize` based on data volume
 - ✅ Test schema sync if using SQL

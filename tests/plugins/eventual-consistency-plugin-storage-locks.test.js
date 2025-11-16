@@ -38,10 +38,10 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
-        verbose: false
+        logLevel: 'silent'
       });
 
       await database.usePlugin(plugin);
@@ -85,10 +85,10 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
-        verbose: false
+        logLevel: 'silent'
       });
 
       await database.usePlugin(plugin);
@@ -135,7 +135,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -173,7 +173,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -227,7 +227,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -287,7 +287,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -340,11 +340,11 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         transactionRetention: 0, // Delete immediately
-        verbose: false
+        logLevel: 'silent'
       });
 
       await database.usePlugin(plugin);
@@ -393,7 +393,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' }
       });
@@ -450,7 +450,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks'] },
         consolidation: { mode: 'sync' },
         lockTimeout: 30 // 30 seconds
@@ -492,7 +492,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       });
 
       plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: ['clicks', 'views'] },
         consolidation: { mode: 'sync' }
       });

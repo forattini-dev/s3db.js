@@ -78,7 +78,7 @@ export class ClassificationModel extends BaseModel {
       metrics: ['accuracy']
     });
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[MLPlugin] ${this.config.name} - Built classification model (${numClasses} classes, ${isBinary ? 'binary' : 'multi-class'})`);
       this.model.summary();
     }
@@ -102,7 +102,7 @@ export class ClassificationModel extends BaseModel {
       this.indexToClass[idx] = cls;
     });
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[MLPlugin] ${this.config.name} - Detected ${this.classes.length} classes:`, this.classes);
     }
 

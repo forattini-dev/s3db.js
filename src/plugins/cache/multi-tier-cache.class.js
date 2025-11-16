@@ -18,6 +18,7 @@
  */
 import { Cache } from "./cache.class.js";
 import { CacheError } from "../cache.errors.js";
+import { createLogger } from '../../concerns/logger.js';
 
 export class MultiTierCache extends Cache {
   constructor({
@@ -25,7 +26,7 @@ export class MultiTierCache extends Cache {
     promoteOnHit = true,
     strategy = 'write-through', // 'write-through' | 'lazy-promotion'
     fallbackOnError = true,
-    verbose = false
+    logLevel = 'info'
   }) {
     super();
 
@@ -48,8 +49,14 @@ export class MultiTierCache extends Cache {
       promoteOnHit,
       strategy,
       fallbackOnError,
-      verbose
+      logLevel
     };
+
+    // Initialize logger
+    this.logger = createLogger({
+      name: 'MultiTierCache',
+      level: logLevel
+    });
 
     // Statistics per tier
     this.stats = {
@@ -70,7 +77,7 @@ export class MultiTierCache extends Cache {
    * @private
    */
   _log(...args) {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info('[MultiTierCache]', ...args);
     }
   }

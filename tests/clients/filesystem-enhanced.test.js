@@ -44,7 +44,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should compress large data automatically', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         compression: {
           enabled: true,
@@ -74,7 +74,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should NOT compress small data', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         compression: {
           enabled: true,
@@ -98,7 +98,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should decompress data correctly on read', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         compression: {
           enabled: true,
@@ -123,7 +123,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should track compression ratio', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         compression: {
           enabled: true,
@@ -166,7 +166,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should auto-expire records after TTL', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         ttl: {
           enabled: true,
@@ -201,7 +201,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should support custom TTL per record', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         ttl: {
           enabled: true,
@@ -231,7 +231,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should not expire records when TTL disabled', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         ttl: { enabled: false }
       });
@@ -271,7 +271,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should prevent concurrent write corruption', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         locking: {
           enabled: true,
@@ -305,7 +305,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should timeout if lock held too long', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         locking: {
           enabled: true,
@@ -342,7 +342,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should create backup files on update', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         backup: {
           enabled: true,
@@ -374,7 +374,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should delete backup files on record deletion', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         backup: {
           enabled: true,
@@ -424,7 +424,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should log operations to journal file', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         journal: {
           enabled: true,
@@ -464,7 +464,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should use custom journal filename', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         journal: {
           enabled: true,
@@ -503,7 +503,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should track operation counts', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         stats: { enabled: true }
       });
@@ -529,7 +529,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should return null when stats disabled', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         stats: { enabled: false }
       });
@@ -542,7 +542,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should include feature flags in stats', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         compression: { enabled: true },
         ttl: { enabled: true },
@@ -582,7 +582,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should stop cleanup jobs on destroy', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         ttl: {
           enabled: true,
@@ -619,7 +619,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should work with all features enabled', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         compression: {
           enabled: true,
@@ -685,7 +685,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should support flat config (old style)', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         // Old flat style
         enableCompression: true,
@@ -709,7 +709,7 @@ describe.skip('FileSystemClient - Enhanced Features [TODO: features not fully im
 
     it('should prefer verticalizado config over flat', async () => {
       db = new S3db({
-        verbose: false,
+        logLevel: 'silent',
         connectionString: `file://${testPath}`,
         // Both styles (verticalizado should win)
         compression: {

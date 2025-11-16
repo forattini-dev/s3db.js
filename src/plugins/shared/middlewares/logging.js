@@ -19,13 +19,13 @@
  * Create logging middleware
  * @param {Object} config - Logging configuration
  * @param {string} config.format - Log format string with tokens
- * @param {boolean} config.verbose - Enable verbose logging
+ * @param {boolean} config.logLevel - Enable verbose logging
  * @returns {Function} Hono middleware
  */
 export function createLoggingMiddleware(config = {}) {
   const {
     format = ':method :path :status :response-time ms',
-    verbose = false
+    logLevel = 'info'
   } = config;
 
   return async (c, next) => {

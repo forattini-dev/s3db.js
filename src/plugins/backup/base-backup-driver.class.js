@@ -1,4 +1,5 @@
 import { BackupError } from '../backup.errors.js';
+import { createLogger } from '../../concerns/logger.js';
 
 /**
  * BaseBackupDriver - Abstract base class for backup drivers
@@ -11,9 +12,14 @@ export default class BaseBackupDriver {
     this.config = {
       compression: 'gzip',
       encryption: null,
-      verbose: false,
+      logLevel: 'info',
       ...config
     };
+
+    this.logger = createLogger({
+      name: 'BackupDriver',
+      level: this.config.logLevel
+    });
   }
 
   /**
@@ -138,11 +144,11 @@ export default class BaseBackupDriver {
   }
 
   /**
-   * Log message if verbose mode is enabled
+   * Log message at info level
    * @param {string} message - Message to log
    */
   log(message) {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[${this.getType()}BackupDriver] ${message}`);
     }
   }

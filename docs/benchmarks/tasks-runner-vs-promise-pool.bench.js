@@ -5,8 +5,8 @@
  *   node docs/benchmarks/tasks-runner-vs-promise-pool.bench.js
  */
 
-import { TasksRunner } from '../../src/tasks-runner.class.js'
-import { TasksPool } from '../../src/tasks-pool.class.js'
+import { TasksRunner } from '../../src/tasks/tasks-runner.class.js'
+import { TasksPool } from '../../src/tasks/tasks-pool.class.js'
 import { Benchmark } from '../../src/concerns/benchmark.js'
 import { PerformanceMonitor } from '../../src/concerns/performance-monitor.js'
 import { PromisePool } from '@supercharge/promise-pool'

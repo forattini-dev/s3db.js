@@ -10,7 +10,7 @@ describe('ProcessManager', () => {
   let pm;
 
   beforeEach(() => {
-    pm = new ProcessManager({ verbose: false, exitOnSignal: false });
+    pm = new ProcessManager({ logLevel: 'silent', exitOnSignal: false });
   });
 
   afterEach(async () => {

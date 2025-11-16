@@ -41,12 +41,12 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
 
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -169,12 +169,12 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
 
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         metrics: fieldNames
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 

@@ -119,7 +119,7 @@ export class CronManager {
     const explicitDisabled = typeof options.disabled === 'boolean' ? options.disabled : undefined;
     const isDisabled = explicitDisabled !== undefined ? explicitDisabled : envDisabled;
     this.options = {
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       shutdownTimeout: options.shutdownTimeout || 30000,
       exitOnSignal: options.exitOnSignal !== false,
       disabled: isDisabled,
@@ -129,7 +129,7 @@ export class CronManager {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.options.verbose ? 'debug' : 'info';
+      const logLevel = this.options.logLevel;
       this.logger = createLogger({ name: 'CronManager', level: logLevel });
     }
 

@@ -110,7 +110,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
           session = { id: sessionId };
         }
       } catch (err) {
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[SessionTracking] Failed to decrypt cookie:', err.message);
         }
         // Will create new session below
@@ -139,7 +139,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
             Object.assign(sessionData, enriched);
           }
         } catch (enrichErr) {
-          if (c.get('verbose')) {
+          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.error('[SessionTracking] enrichSession failed:', enrichErr.message);
           }
         }
@@ -150,7 +150,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
         try {
           session = await sessionsResource.insert(sessionData);
         } catch (insertErr) {
-          if (c.get('verbose')) {
+          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.error('[SessionTracking] Failed to insert session:', insertErr.message);
           }
           session = sessionData; // Use in-memory fallback
@@ -170,7 +170,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
 
       // Fire-and-forget update (don't block request)
       sessionsResource.update(sessionId, updates).catch((updateErr) => {
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[SessionTracking] Failed to update session:', updateErr.message);
         }
       });
@@ -191,7 +191,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
         sameSite: cookieSameSite
       });
     } catch (encryptErr) {
-      if (c.get('verbose')) {
+      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error('[SessionTracking] Failed to encrypt session ID:', encryptErr.message);
       }
     }

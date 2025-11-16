@@ -36,7 +36,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
     // 1. Setup Identity Provider (Authorization Server)
     // ========================================
     identityDb = new Database({
-      verbose: false, client: new MemoryClient(),
+      logLevel: 'silent', client: new MemoryClient(),
       bucketName: 'identity-test',
       encryptionKey: 'test-identity-key'
     });
@@ -45,7 +45,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
 
     // Create IdentityPlugin
     identityPlugin = new IdentityPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port: IDENTITY_PORT,
       issuer: IDENTITY_URL,
       supportedScopes: ['openid', 'profile', 'email', 'orders:read', 'orders:write', 'products:read', 'products:write'],
@@ -53,7 +53,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
       accessTokenExpiry: '15m',
       idTokenExpiry: '15m',
       refreshTokenExpiry: '7d',
-      verbose: false
+      logLevel: 'silent'
     });
 
     await identityDb.usePlugin(identityPlugin);
@@ -88,7 +88,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
     // 2. Setup Orders Resource Server
     // ========================================
     ordersDb = new Database({
-      verbose: false,
+      logLevel: 'silent',
       client: new MemoryClient(),
       bucketName: 'orders-test',
       encryptionKey: 'test-orders-key'
@@ -109,9 +109,9 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
 
     // Create ApiPlugin with OIDC driver pointing to Identity Provider
     ordersPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port: ORDERS_PORT,
-      verbose: false,
+      logLevel: 'silent',
       auth: {
         drivers: [
           {
@@ -138,7 +138,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
     // 3. Setup Products Resource Server
     // ========================================
     productsDb = new Database({
-      verbose: false,
+      logLevel: 'silent',
       client: new MemoryClient(),
       bucketName: 'products-test',
       encryptionKey: 'test-products-key'
@@ -159,9 +159,9 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
 
     // Create ApiPlugin with OIDC driver (public GET, protected POST)
     productsPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port: PRODUCTS_PORT,
-      verbose: false,
+      logLevel: 'silent',
       auth: {
         drivers: [
           {

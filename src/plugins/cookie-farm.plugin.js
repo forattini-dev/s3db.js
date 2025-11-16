@@ -35,7 +35,7 @@ export class CookieFarmPlugin extends Plugin {
 
     // Default configuration
     this.config = {
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       // Persona generation
       generation: {
         count: 10, // Initial personas to generate
@@ -121,7 +121,7 @@ export class CookieFarmPlugin extends Plugin {
       ...opts
     };
 
-    this.config.verbose = this.verbose;
+    // Removed: this.config.logLevel = this.verbose;
 
     this._storageResourceDescriptor = {
       defaultName: 'plg_cookie_farm_personas',

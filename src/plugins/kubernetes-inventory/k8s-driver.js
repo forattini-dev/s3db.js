@@ -80,7 +80,7 @@ export class KubernetesDriver {
 
     // Logger
     this.logger = options.logger || (() => {});
-    this.verbose = options.verbose ?? false;
+    this.logLevel = options.logLevel || 'info';
 
     // Metadata
     this.tags = options.tags || {};
@@ -860,7 +860,7 @@ export class KubernetesDriver {
       this.logger(level, message, { driver: 'kubernetes', clusterId: this.clusterId, ...meta });
     }
 
-    if (this.verbose && level !== 'debug') {
+    if ((this.logLevel === 'debug' || this.logLevel === 'trace') && level !== 'debug') {
       this.logger.info(`[${level.toUpperCase()}] [k8s:${this.clusterId}] ${message}`);
     }
   }

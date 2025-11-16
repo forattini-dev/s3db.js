@@ -162,7 +162,7 @@ export class TTLPlugin extends CoordinatorPlugin {
 
     // CoordinatorPlugin expects this.config for logging toggles
     this.config = {
-      verbose: Boolean(this.options.verbose),
+      logLevel: this.options.logLevel,
       ...this.options
     };
 

@@ -103,7 +103,7 @@ export class KubernetesInventoryPlugin extends Plugin {
     if (options.logger && typeof options.logger !== 'function') {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'KubernetesInventoryPlugin', level: logLevel });
     }
 
@@ -152,7 +152,7 @@ export class KubernetesInventoryPlugin extends Plugin {
       },
       resourceNames: this.internalResourceNames,
       logger: typeof logger === 'function' ? logger : null,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       scheduled: normalizeSchedule(scheduled),
       lock: {
         ttl: lock?.ttl ?? DEFAULT_LOCK.ttl,
@@ -584,7 +584,7 @@ export class KubernetesInventoryPlugin extends Plugin {
       const driver = new KubernetesDriver({
         ...clusterDef,
         logger: this.config.logger,
-        verbose: this.config.verbose,
+        logLevel: this.config.logLevel,
       });
 
       await driver.initialize();

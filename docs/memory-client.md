@@ -148,7 +148,7 @@ import { Database, MemoryClient } from 's3db.js';
 const client = new MemoryClient({
   bucket: 'my-bucket',
   keyPrefix: 'databases/app',
-  verbose: true
+  logLevel: 'debug'
 });
 
 const db = new Database({ client });
@@ -488,7 +488,7 @@ new MemoryClient({
   bucket: 'my-bucket',           // Bucket name (default: 's3db')
   keyPrefix: 'databases/app',    // Key prefix (default: '')
   region: 'us-east-1',           // Region (default: 'us-east-1')
-  verbose: true,                 // Log operations (default: false)
+  logLevel: 'debug',                 // Log operations (default: false)
 
   // Performance
   parallelism: 100,              // Parallel operations (default: 100 - Separate OperationsPool per Database)
@@ -627,11 +627,11 @@ import { Database, MemoryClient } from 's3db.js';
 
 // Instant startup, no waiting for Docker
 const db = new Database({
-  client: new MemoryClient({ verbose: true })
+  client: new MemoryClient({ logLevel: 'debug' })
 });
 
 // Iterate rapidly with hot reload
-// See exactly what's happening with verbose logs
+// See exactly what's happening with debug logs
 ```
 
 ### 5. Demo/Prototype

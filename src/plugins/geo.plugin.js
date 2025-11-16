@@ -83,7 +83,7 @@ export class GeoPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'GeoPlugin', level: logLevel });
     }
 
@@ -356,7 +356,7 @@ export class GeoPlugin extends Plugin {
           fieldName = `_geohash_zoom${optimalZoom}`;
           precision = optimalZoom;
 
-          if (plugin.verbose) {
+          if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
             this.logger.info(
               `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
               `for ${radius}km radius query`
@@ -396,7 +396,7 @@ export class GeoPlugin extends Plugin {
           // Flatten results
           allRecords = partitionResults.flat();
 
-          if (plugin.verbose) {
+          if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
             this.logger.info(
               `[GeoPlugin] findNearby searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
               `found ${allRecords.length} candidates`
@@ -470,7 +470,7 @@ export class GeoPlugin extends Plugin {
           partitionName = `byGeohashZoom${optimalZoom}`;
           precision = optimalZoom;
 
-          if (plugin.verbose) {
+          if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
             this.logger.info(
               `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
               `for ${approximateRadius.toFixed(1)}km bounding box`
@@ -509,7 +509,7 @@ export class GeoPlugin extends Plugin {
           // Flatten results
           allRecords = partitionResults.flat();
 
-          if (plugin.verbose) {
+          if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
             this.logger.info(
               `[GeoPlugin] findInBounds searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
               `found ${allRecords.length} candidates`

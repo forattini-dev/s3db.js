@@ -52,12 +52,12 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     ];
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         metrics: fieldNames
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false, // Disable logs for cleaner output
+      logLevel: 'silent', // Disable logs for cleaner output
       analytics: { enabled: true }
     });
     await database.usePlugin(plugin);
@@ -113,12 +113,12 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     ];
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         metrics: fieldNames
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -201,12 +201,12 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     ];
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         metrics: fieldNames
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false,
+      logLevel: 'silent',
       analytics: { enabled: true }
     });
     await database.usePlugin(plugin);

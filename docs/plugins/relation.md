@@ -169,7 +169,7 @@ const relationPlugin = new RelationPlugin({
 
   cache: true,      // Enable partition cache (default)
   preventN1: true,  // Enable N+1 prevention (default)
-  verbose: false    // Debug logging
+  logLevel: 'silent'    // Debug logging
 });
 
 await db.usePlugin(relationPlugin);
@@ -316,7 +316,7 @@ The **RelationPlugin** brings ORM-like relationship capabilities to S3DB, enabli
 ❌ **DON'T**: Use multi-field partitions for simple lookups
 ✅ **DO**: Use eager loading for bulk operations
 ❌ **DON'T**: Use lazy loading in loops (N+1 problem)
-✅ **DO**: Monitor with `verbose: true`
+✅ **DO**: Monitor with `logLevel: 'debug'`
 ✅ **DO**: Check stats with `getStats()`
 
 ---
@@ -332,7 +332,7 @@ new RelationPlugin({
   preventN1: true,    // Enable N+1 prevention
   batchSize: 100,     // Max records per batch
   parallelism: 10,    // Max concurrent S3 queries
-  verbose: false      // Debug logging
+  logLevel: 'silent'      // Debug logging
 })
 ```
 
@@ -343,7 +343,7 @@ new RelationPlugin({
 | `preventN1` | boolean | `true` | Enable N+1 query prevention |
 | `batchSize` | number | `100` | Max records per batch load |
 | `parallelism` | number | `10` | Max concurrent S3 queries |
-| `verbose` | boolean | `false` | Enable debug logging |
+| `logLevel` | boolean | `false` | Enable debug logging |
 
 ### Relation Configuration
 
@@ -730,7 +730,7 @@ for (const user of users) {
 #### 5. Monitor with Verbose Mode
 
 ```javascript
-const plugin = new RelationPlugin({ verbose: true });
+const plugin = new RelationPlugin({ logLevel: 'debug' });
 
 // Shows:
 // [RelationPlugin] Loading hasMany 'posts' for user 'u1'
@@ -898,7 +898,7 @@ partitions: {
 ### Slow Relation Loading
 
 **Debug:**
-1. Enable verbose: `new RelationPlugin({ verbose: true })`
+1. Set log level to debug: `new RelationPlugin({ logLevel: 'debug' })`
 2. Check stats: `plugin.getStats()`
 3. Verify partitions exist
 
@@ -1186,9 +1186,9 @@ A: Relations still work but use full scans (slower). Plugin warns: "No partition
 A: Yes, but single-field partitions on foreign keys are faster for simple lookups. Multi-field partitions useful for range queries.
 
 **Q: How to check partition usage?**
-A: Enable verbose mode:
+A: Enable debug mode:
 ```javascript
-new RelationPlugin({ verbose: true })
+new RelationPlugin({ logLevel: 'debug' })
 // Logs: "[RelationPlugin] ✅ Using partition 'byAuthor' (O(1))"
 ```
 
@@ -1365,7 +1365,7 @@ partitions: {
 
 **Q: Relations loading slowly?**
 A:
-1. Enable verbose: `new RelationPlugin({ verbose: true })`
+1. Set log level to debug: `new RelationPlugin({ logLevel: 'debug' })`
 2. Check `getStats()` for cache hits
 3. Verify partitions exist
 4. Use eager loading instead of lazy in loops

@@ -95,7 +95,7 @@ describe('TfStatePlugin - Installation', () => {
 
   test('should create plugin with custom configuration', () => {
     const plugin = createPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       driver: 's3',
       resources: {
         resources: 'custom_resources',
@@ -106,7 +106,7 @@ describe('TfStatePlugin - Installation', () => {
         enabled: false,
       },
       autoSync: true,
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       filters: {
         types: ['aws_instance'],
         exclude: ['data.*'],

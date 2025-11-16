@@ -31,7 +31,7 @@ describe('MemoryStore', () => {
   let store;
 
   beforeEach(() => {
-    store = new MemoryStore({ maxSessions: 100, verbose: false });
+    store = new MemoryStore({ maxSessions: 100, logLevel: 'silent' });
   });
 
   afterEach(async () => {
@@ -233,7 +233,7 @@ describe('RedisStore', () => {
     store = new RedisStore({
       client: mockRedis,
       prefix: 'test:session:',
-      verbose: false
+      logLevel: 'silent'
     });
   });
 

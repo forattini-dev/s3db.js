@@ -61,12 +61,12 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('single worker becomes coordinator immediately', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -90,33 +90,33 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('deterministic coordinator election with multiple workers', async () => {
     const pluginA = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
       coldStartDuration: 1500, // Allow time for all workers to discover each other
-      verbose: false
+      logLevel: 'silent'
     }));
 
     const pluginB = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
       coldStartDuration: 1500,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     const pluginC = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 1000,
       coldStartDuration: 1500,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await pluginA.install(database);
@@ -149,14 +149,14 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('coordinator publishes dispatch tickets', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 500,
       dispatchInterval: 200,
       ticketBatchSize: 3,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -190,7 +190,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('workers claim messages via dispatch tickets', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -198,7 +198,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       dispatchInterval: 100,
       ticketBatchSize: 5,
       visibilityTimeout: 5000,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -224,11 +224,11 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('lock renewal rejected after message completion', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 10000,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -263,11 +263,11 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('lock renewal rejected for wrong token', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 10000,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -303,7 +303,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('coordinator recovers stalled tickets from dead worker', async () => {
     const pluginA = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
@@ -311,7 +311,7 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
       heartbeatTTL: 2, // Very short TTL for testing
       dispatchInterval: 200,
       ticketBatchSize: 10,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await pluginA.install(database);
@@ -351,14 +351,14 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   // The epochDuration minimum prevents testing this behavior in reasonable time.
   test.skip('coordinator transitions when worker joins/leaves', async () => {
     const pluginA = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 500,
       heartbeatTTL: 3,
       epochDuration: 3000, // Short epoch for testing transitions
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await pluginA.install(database);
@@ -377,14 +377,14 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
     // Add a second worker with lexicographically earlier ID
     const pluginB = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 500,
       heartbeatTTL: 3,
       epochDuration: 3000, // Short epoch for testing transitions
-      verbose: false
+      logLevel: 'silent'
     }));
 
     // Force an earlier worker ID
@@ -410,13 +410,13 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   // TODO: Add a test mode flag that allows shorter epochs for testing.
   test.skip('epoch renewal extends coordinator leadership', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       heartbeatInterval: 500,
       epochDuration: 2000, // Short epoch for testing
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -441,13 +441,13 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   test('cold start observes environment before processing', async () => {
     // First worker starts
     const pluginA = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       coldStartDuration: 1500, // 1.5 seconds
       heartbeatInterval: 500,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await pluginA.install(database);
@@ -479,13 +479,13 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
 
   test('cold start can be skipped for testing', async () => {
     const plugin = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       skipColdStart: true,
       coldStartDuration: 5000, // Would be 5s if not skipped
-      verbose: false
+      logLevel: 'silent'
     }));
 
     await plugin.install(database);
@@ -505,13 +505,13 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
   test('multiple workers discover each other during cold start', async () => {
     // Start first worker
     const pluginA = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       coldStartDuration: 2000,
       heartbeatInterval: 500,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     pluginA.workerId = 'worker-aaa';
@@ -534,13 +534,13 @@ describe('S3QueuePlugin - Coordinator Mode', () => {
     await sleep(300);
 
     const pluginB = new S3QueuePlugin(withNoJitter({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       enableCoordinator: true,
       coldStartDuration: 2000,
       heartbeatInterval: 500,
-      verbose: false
+      logLevel: 'silent'
     }));
 
     pluginB.workerId = 'worker-bbb';

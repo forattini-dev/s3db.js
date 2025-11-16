@@ -229,7 +229,7 @@ export class ApiPlugin extends Plugin {
 
         const baseConfig = {
           format: DEFAULT_LOG_FORMAT,
-          verbose: false,
+          logLevel: 'info',
           colorize: true,
           filter: null,
           excludePaths: []
@@ -255,7 +255,7 @@ export class ApiPlugin extends Plugin {
         return {
           enabled: options.logging.enabled !== false, // Enabled by default when object is provided
           format: options.logging.format || DEFAULT_LOG_FORMAT,
-          verbose: options.logging.verbose || false,
+          logLevel: options.logging.logLevel || 'info',
           colorize: options.logging.colorize !== false,
           filter: typeof options.logging.filter === 'function' ? options.logging.filter : null,
           excludePaths: normalizeExclude(options.logging.excludePaths)
@@ -388,11 +388,11 @@ export class ApiPlugin extends Plugin {
     }
 
     const normalized = {};
-    const verbose = this.options?.verbose;
+    const logLevel = this.options?.logLevel || 'info';
 
     const addResourceConfig = (name, config = {}) => {
       if (typeof name !== 'string' || !name.trim()) {
-        if (verbose) {
+        if (logLevel === 'debug' || logLevel === 'trace') {
           this.logger.warn({ name }, 'Ignoring resource config with invalid name');
         }
         return;
@@ -409,7 +409,7 @@ export class ApiPlugin extends Plugin {
           const { name, ...config } = entry;
           addResourceConfig(name, config);
         } else {
-          if (verbose) {
+          if (logLevel === 'debug' || logLevel === 'trace') {
             this.logger.warn({ entry }, 'Ignoring invalid resource config entry (expected string or object with name)');
           }
         }
@@ -426,7 +426,7 @@ export class ApiPlugin extends Plugin {
         } else if (typeof config === 'object') {
           addResourceConfig(name, config);
         } else {
-          if (verbose) {
+          if (logLevel === 'debug' || logLevel === 'trace') {
             this.logger.warn('[API Plugin] Coercing resource config to empty object for', name);
           }
           addResourceConfig(name);
@@ -435,7 +435,7 @@ export class ApiPlugin extends Plugin {
       return normalized;
     }
 
-    if (verbose) {
+    if (logLevel === 'debug' || logLevel === 'trace') {
       this.logger.warn({ type: typeof resources }, 'Invalid resources configuration. Expected object or array, received');
     }
 
@@ -448,11 +448,11 @@ export class ApiPlugin extends Plugin {
     }
 
     const normalized = [];
-    const verbose = this.options?.verbose;
+    const logLevel = this.options?.logLevel || 'info';
 
     rules.forEach((rawRule, index) => {
       if (!rawRule || typeof rawRule !== 'object') {
-        if (verbose) {
+        if (logLevel === 'debug' || logLevel === 'trace') {
           this.logger.warn({ rawRule }, 'Ignoring rateLimit rule (expected object)');
         }
         return;
@@ -460,7 +460,7 @@ export class ApiPlugin extends Plugin {
 
       let pattern = rawRule.path || rawRule.pattern;
       if (typeof pattern !== 'string' || !pattern.trim()) {
-        if (verbose) {
+        if (logLevel === 'debug' || logLevel === 'trace') {
           this.logger.warn({ index: index }, 'rateLimit.rules[] missing path/pattern');
         }
         return;
@@ -501,7 +501,7 @@ export class ApiPlugin extends Plugin {
    * Install plugin
    */
   async onInstall() {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info('Installing...');
     }
 
@@ -509,7 +509,7 @@ export class ApiPlugin extends Plugin {
     try {
       await this._validateDependencies();
     } catch (err) {
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.error({ error: err.message }, 'Dependency validation failed');
       }
       throw err;
@@ -525,7 +525,7 @@ export class ApiPlugin extends Plugin {
     // Setup middlewares
     await this._setupMiddlewares();
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info('Installed successfully');
     }
   }
@@ -545,7 +545,7 @@ export class ApiPlugin extends Plugin {
       }
       this.usersResource = existingResource;
       this.config.auth.resource = existingResource.name;
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.info({ resourceName: existingResource.name }, 'Using existing resource for authentication');
       }
       return;
@@ -554,7 +554,7 @@ export class ApiPlugin extends Plugin {
     if (existingResource) {
       this.usersResource = existingResource;
       this.config.auth.resource = existingResource.name;
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.info({ resourceName: existingResource.name }, 'Reusing existing resource for authentication');
       }
       return;
@@ -599,7 +599,7 @@ export class ApiPlugin extends Plugin {
 
     this.usersResource = resource;
     this.config.auth.resource = resource.name;
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       const authType = hasExternalAuth ? 'external auth (OIDC/OAuth2)' : 'local auth';
       const passwordNote = hasExternalAuth ? ' (password optional - managed externally)' : ' (password required)';
       this.logger.info({ usersResourceName: this.usersResourceName, authType: authType, passwordNote: passwordNote }, 'Created resource for');
@@ -640,7 +640,7 @@ export class ApiPlugin extends Plugin {
     // Add request ID middleware
     middlewares.push(async (c, next) => {
       c.set('requestId', idGenerator());
-      c.set('verbose', this.config.verbose);
+      c.set('logLevel', this.config.logLevel);
       await next();
     });
 
@@ -1098,7 +1098,7 @@ export class ApiPlugin extends Plugin {
         }
       } catch (err) {
         // Compression failed, log and continue with uncompressed response
-        if (this.config.verbose) {
+        if (this.config.logLevel) {
           this.logger.error({ error: err.message }, 'Compression error');
         }
       }
@@ -1220,7 +1220,7 @@ export class ApiPlugin extends Plugin {
    * Start plugin
    */
   async onStart() {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info('Starting server...');
     }
 
@@ -1246,7 +1246,7 @@ export class ApiPlugin extends Plugin {
       static: this.config.static,
       health: this.config.health,
       maxBodySize: this.config.maxBodySize,
-      verbose: this.config.verbose,
+      logLevel: this.config.logLevel,
       auth: this.config.auth,
       docsEnabled: this.config.docs.enabled,
       docsUI: this.config.docs.ui,
@@ -1271,7 +1271,7 @@ export class ApiPlugin extends Plugin {
    * Stop plugin
    */
   async onStop() {
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info('Stopping server...');
     }
 
@@ -1309,12 +1309,12 @@ export class ApiPlugin extends Plugin {
     // Optionally delete users resource
     if (purgeData && this.usersResource) {
       const [ok] = await tryFn(() => this.database.deleteResource(this.usersResourceName));
-      if (ok && this.config.verbose) {
+      if (ok && this.config.logLevel) {
         this.logger.info({ usersResourceName: this.usersResourceName }, 'Deleted resource');
       }
     }
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info('Uninstalled successfully');
     }
   }

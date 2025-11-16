@@ -78,7 +78,7 @@ import { S3Client } from 's3db.js';
 
 const client = new S3Client({
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@BUCKET/prefix',
-  verbose: false,
+  logLevel: 'silent',
   parallelism: 100,  // Separate OperationsPool per database (default)
   httpClientOptions: {
     keepAlive: true,
@@ -95,7 +95,7 @@ const client = new S3Client({
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `connectionString` | string | **required** | S3 connection string with credentials and bucket |
-| `verbose` | boolean | `false` | Enable detailed logging |
+| `logLevel` | boolean | `false` | Enable detailed logging |
 | `id` | string | auto-generated | Client instance ID (77 chars) |
 | `parallelism` | number | `100` | Concurrent operations for bulk methods (Separate OperationsPool per Database) |
 | `httpClientOptions` | object | see below | HTTP agent configuration |

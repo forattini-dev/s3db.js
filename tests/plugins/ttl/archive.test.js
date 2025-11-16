@@ -35,7 +35,7 @@ describe('TTLPlugin v2 - Archive Strategy', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         orders: {
           ttl: 1,

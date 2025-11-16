@@ -448,7 +448,7 @@ const replicatorPlugin = new ReplicatorPlugin({
   maxRetries: 3,                    // Retry 3 times
   retryBackoffMs: 1000,            // Start with 1s delay
   persistReplicatorLog: true,       // Store logs in database
-  verbose: true,                   // Debug logging
+  logLevel: 'debug',                   // Debug logging
 
   replicators: [{
     driver: 'postgresql',

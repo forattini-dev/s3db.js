@@ -15,7 +15,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
 
   beforeEach(async () => {
     db = new Database({
-      verbose: false, connectionString: 'memory://k8s-inventory-test/databases/test'
+      logLevel: 'silent', connectionString: 'memory://k8s-inventory-test/databases/test'
     });
   });
 
@@ -29,7 +29,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
     it('should require at least one cluster', () => {
       expect(() => {
         new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
           clusters: []
         });
       }).not.toThrow();
@@ -39,7 +39,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
 
     it('should auto-generate cluster IDs', () => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [
           { name: 'Cluster 1' },
           { name: 'Cluster 2' }
@@ -52,7 +52,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
 
     it('should normalize cluster definitions', () => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [
           {
             id: 'test',
@@ -71,7 +71,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
 
     it('should detect duplicate cluster IDs', async () => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [
           { id: 'test', name: 'Test 1' },
           { id: 'test', name: 'Test 2' } // Duplicate!
@@ -84,7 +84,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
 
     it('should normalize discovery options', () => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         discovery: {
           select: ['core.*'],
@@ -109,7 +109,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
       });
 
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test', name: 'Test' }],
         discovery: { runOnInstall: false } // Don't auto-discover
       });
@@ -129,7 +129,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
       await db.disconnect();
 
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         resourceNames: {
           snapshots: 'my_snapshots',
@@ -153,7 +153,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
   describe('Filtering', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -229,7 +229,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
   describe('Resource Key Generation', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -274,7 +274,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
   describe('Digest Computation', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -315,7 +315,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
   describe('Summary Extraction', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -348,7 +348,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
   describe('Diff Computation', () => {
     beforeEach(() => {
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         discovery: { runOnInstall: false }
       });
@@ -413,7 +413,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
       });
 
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test' }],
         resourceNames: {
           snapshots: 'custom_snapshots',
@@ -440,7 +440,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
       });
 
       const plugin1 = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test1' }],
         resourceNames: {
           snapshots: 'prod_snapshots',
@@ -452,7 +452,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
       });
 
       const plugin2 = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [{ id: 'test2' }],
         resourceNames: {
           snapshots: 'staging_snapshots',
@@ -488,7 +488,7 @@ describe.skip('KubernetesInventoryPlugin', () => {
       });
 
       plugin = new KubernetesInventoryPlugin({
-      verbose: false,
+      logLevel: 'silent',
         clusters: [
           { id: 'cluster-a', name: 'Cluster A' },
           { id: 'cluster-b', name: 'Cluster B' }

@@ -111,7 +111,7 @@ export class CloudInventoryPlugin extends Plugin {
       },
       resourceNames: this.internalResourceNames,
       logger: typeof logger === 'function' ? logger : null,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       scheduled: normalizeSchedule(scheduled),
       lock: {
         ttl: lock?.ttl ?? DEFAULT_LOCK.ttl,
@@ -1173,7 +1173,7 @@ export class CloudInventoryPlugin extends Plugin {
       return;
     }
 
-    const shouldLog = this.verbose || level === 'error' || level === 'warn';
+    const shouldLog = (this.logLevel === 'debug' || this.logLevel === 'trace') || level === 'error' || level === 'warn';
     if (shouldLog && typeof console[level] === 'function') {
       console[level](`[CloudInventoryPlugin] ${message}`, meta);
     }

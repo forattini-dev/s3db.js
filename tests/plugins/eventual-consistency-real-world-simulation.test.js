@@ -42,12 +42,12 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency for all counters (like mrt-shortner)
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -107,12 +107,12 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -161,11 +161,11 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'urls',
       field: 'clicks',
       consolidation: { mode: 'sync', auto: false },
-      verbose: false // Disable logs for performance
+      logLevel: 'silent' // Disable logs for performance
     });
     await database.usePlugin(plugin);
 
@@ -211,12 +211,12 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency in ASYNC mode with short interval
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: true, interval: 1 }, // 1 second interval for fast testing
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
     await plugin.start();
@@ -276,12 +276,12 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 

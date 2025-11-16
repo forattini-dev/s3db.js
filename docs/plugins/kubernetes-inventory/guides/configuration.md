@@ -136,7 +136,7 @@ new KubernetesInventoryPlugin({
   },
 
   // Logging
-  verbose: false,                              // Enable detailed logging
+  logLevel: 'silent',                              // Enable detailed logging
   logLevel: 'info',                           // 'debug', 'info', 'warn', 'error'
   logFormat: 'json',                          // 'json' or 'text'
 
@@ -182,7 +182,7 @@ new KubernetesInventoryPlugin({
     snapshots: 3600000,      // Keep 1 hour only
     versions: 3600000
   },
-  verbose: true              // Detailed logging for debugging
+  logLevel: 'debug'              // Detailed logging for debugging
 })
 ```
 
@@ -318,7 +318,7 @@ new KubernetesInventoryPlugin({
     snapshots: 86400000,      // 1 day
     versions: 604800000       // 7 days
   },
-  verbose: process.env.DEBUG === 'true'
+  logLevel: process.env.DEBUG === 'true' ? 'debug' : 'info'
 })
 ```
 
@@ -1002,7 +1002,7 @@ discovery: {
 ### Debug Mode
 
 ```javascript
-verbose: true,
+logLevel: 'debug',
 logLevel: 'debug',
 logFormat: 'text'
 ```
@@ -1010,7 +1010,7 @@ logFormat: 'text'
 ### Production Logging
 
 ```javascript
-verbose: false,
+logLevel: 'silent',
 logLevel: 'info',
 logFormat: 'json'
 ```
@@ -1018,7 +1018,7 @@ logFormat: 'json'
 ### Structured Logging (Audit)
 
 ```javascript
-verbose: false,
+logLevel: 'silent',
 logLevel: 'debug',
 logFormat: 'json'
 // Output suitable for ELK, DataDog, Splunk
@@ -1076,7 +1076,7 @@ const config = {
     changes: parseInt(process.env.K8S_TTL_CHANGES || '2592000000')
   },
 
-  verbose: process.env.K8S_VERBOSE === 'true'
+  logLevel: process.env.K8S_VERBOSE === 'true' ? 'debug' : 'info'
 };
 
 const plugin = new KubernetesInventoryPlugin(config);

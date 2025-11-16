@@ -21,7 +21,7 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
     });
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         temp_files: {
           ttl: 1,

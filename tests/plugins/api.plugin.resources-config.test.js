@@ -42,7 +42,7 @@ describe('API Plugin - resource configuration', () => {
     port = 3300 + Math.floor(Math.random() * 1000);
     const testName = `api-plugin-resources-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    db = createMemoryDatabaseForTest(testName, { verbose: false });
+    db = createMemoryDatabaseForTest(testName, { logLevel: 'silent' });
     await db.connect();
 
     await db.createResource({
@@ -75,10 +75,10 @@ describe('API Plugin - resource configuration', () => {
 
   it('exposes plugin resources when configured via array syntax', async () => {
     apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: false },
       logging: { enabled: false },
       resources: ['plg_internal_records']
@@ -98,10 +98,10 @@ describe('API Plugin - resource configuration', () => {
 
   it('skips plugin resources when explicitly disabled in config', async () => {
     apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: false },
       logging: { enabled: false },
       resources: {
@@ -132,10 +132,10 @@ describe('API Plugin - resource configuration', () => {
     });
 
     apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: false },
       logging: { enabled: false },
       versionPrefix: false,

@@ -333,7 +333,7 @@ import { Database, DatabaseConfig, Resource } from 's3db.js';
 // Type-safe configuration
 const config: DatabaseConfig = {
   connectionString: 's3://ACCESS_KEY:SECRET@bucket/path',
-  verbose: true,
+  logLevel: 'debug',
   executorPool: { concurrency: 100 }  // Default - nested under executorPool
 };
 
@@ -379,7 +379,7 @@ A Database is a logical container for your resources, stored in a specific S3 bu
 |-----------|------|---------|-------------|
 | `connectionString` | `string` | **required** | S3 connection string (see formats below) |
 | `httpClientOptions` | `object` | optimized | HTTP client configuration for S3 requests |
-| `verbose` | `boolean` | `false` | Enable verbose logging for debugging |
+| `logLevel` | `boolean` | `false` | Enable debug logging for debugging |
 | `parallelism` | `number` | `100` | Concurrent operations for bulk operations (Separate Executor Pools per Database) |
 | `versioningEnabled` | `boolean` | `false` | Enable automatic resource versioning |
 | `passphrase` | `string` | `'secret'` | Default passphrase for field encryption |
@@ -535,7 +535,7 @@ const db2 = new S3db({
     keyPrefix: 'tests/',              // Optional prefix for all keys
     enforceLimits: true,               // Enforce S3 2KB metadata limit
     persistPath: './test-data.json',  // Optional: persist to disk
-    verbose: false                     // Disable logging
+    logLevel: 'silent'                     // Disable logging
   })
 });
 
@@ -705,7 +705,7 @@ await db.connect();
 // With plugins and options
 const db = new S3db({
   connectionString: 's3://bucket/databases/myapp',
-  verbose: true,
+  logLevel: 'debug',
   versioningEnabled: true,
   executorPool: {
     concurrency: 100,  // Default concurrency (can increase for high-throughput)
@@ -2304,10 +2304,10 @@ Common issues and solutions:
 4. Check network connectivity
 
 ```javascript
-// Enable verbose logging
+// Enable debug logging
 const db = new S3db({
   connectionString: '...',
-  verbose: true
+  logLevel: 'debug'
 });
 ```
 </details>

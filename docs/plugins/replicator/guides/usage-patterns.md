@@ -287,7 +287,7 @@ const order = await orders.insert({ userId: user.id, total: 249.99 });
 ```javascript
 const replicatorPlugin = new ReplicatorPlugin({
   // Enable logging and persistence
-  verbose: false,                   // Set to true in development
+  logLevel: 'silent',                   // Set to true in development
   persistReplicatorLog: true,       // Store in database
   logErrors: true,
   maxRetries: 3,
@@ -490,7 +490,7 @@ await users.insert({ email: 'vip@example.com', tier: 'vip', lifetime_value: 5000
 
 ```javascript
 const replicatorPlugin = new ReplicatorPlugin({
-  verbose: false,
+  logLevel: 'silent',
   persistReplicatorLog: true,
   maxRetries: 3,
   replicatorConcurrency: 10,

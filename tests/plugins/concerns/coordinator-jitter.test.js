@@ -123,7 +123,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       const plugin = new TestCoordinatorPlugin({
         startupJitterMin: 50,
         startupJitterMax: 100,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -142,7 +142,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       const plugin = new TestCoordinatorPlugin({
         startupJitterMax: 0,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -162,7 +162,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         startupJitterMin: 100,
         startupJitterMax: 100,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -187,7 +187,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
           startupJitterMin: 20,
           startupJitterMax: 80,
           skipColdStart: true,
-          verbose: false
+          logLevel: 'silent'
         });
         await plugin.install(db);
 
@@ -221,7 +221,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         startupJitterMax: 100,
         heartbeatInterval: 500,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -245,7 +245,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         startupJitterMax: 20,
         heartbeatInterval: 500,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await worker1.install(db);
 
@@ -254,7 +254,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         startupJitterMax: 100,
         heartbeatInterval: 500,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await worker2.install(db);
 
@@ -288,7 +288,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         startupJitterMin: 100,
         startupJitterMax: 200,
         heartbeatInterval: 1000,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -310,7 +310,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
       const plugin = new TestCoordinatorPlugin({
         startupJitterMin: 50,
         startupJitterMax: 100,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -353,7 +353,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
           startupJitterMax: 500, // 0-500ms window
           heartbeatInterval: 500,
           skipColdStart: true,
-          verbose: false
+          logLevel: 'silent'
         });
         await worker.install(db);
         workers.push(worker);
@@ -402,7 +402,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         // No jitter config specified, use defaults
         heartbeatInterval: 500,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 
@@ -433,7 +433,7 @@ describe('CoordinatorPlugin Startup Jitter', () => {
         startupJitterMax: 100,
         heartbeatInterval: 500,
         skipColdStart: true,
-        verbose: false
+        logLevel: 'silent'
       });
       await plugin.install(db);
 

@@ -36,12 +36,12 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
 
     // Add EventualConsistency plugin for clicks field
     const clicksPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(clicksPlugin);
@@ -187,12 +187,12 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     });
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: true },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

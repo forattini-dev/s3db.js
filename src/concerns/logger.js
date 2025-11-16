@@ -70,12 +70,14 @@ export function createLogger(options = {}) {
     finalTransport = createDefaultTransport();
   }
 
+  // Normalize bindings (allow null/undefined)
+  const normalizedBindings = bindings && typeof bindings === 'object' ? bindings : {};
+
   // Build Pino config
   const config = {
     level,
     redact: redactRules,
     transport: finalTransport || undefined, // Only include if provided
-    bindings: name ? { ...bindings, name } : bindings,
     // Custom error serializer - uses toJson() if available
     serializers: {
       err: serializeError,
@@ -84,7 +86,16 @@ export function createLogger(options = {}) {
   };
 
   // Create logger with custom error serialization
-  const logger = pino(config);
+  let logger = pino({
+    ...config,
+    name
+  });
+
+  // Apply default bindings via child logger so we don't lose pid/hostname base fields
+  const baseBindings = name ? { ...normalizedBindings, name } : normalizedBindings;
+  if (baseBindings && Object.keys(baseBindings).length > 0) {
+    logger = logger.child(baseBindings);
+  }
 
   // Store max payload bytes for later reference (if needed by serializers)
   logger._maxPayloadBytes = maxPayloadBytes;

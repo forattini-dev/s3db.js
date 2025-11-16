@@ -12,7 +12,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -47,7 +47,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',
@@ -87,7 +87,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -115,7 +115,7 @@ describe('Geo Plugin - findNearby()', () => {
     });
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -149,7 +149,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -184,7 +184,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',
@@ -221,7 +221,7 @@ describe('Geo Plugin - findNearby()', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',

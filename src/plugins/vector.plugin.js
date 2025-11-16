@@ -26,7 +26,7 @@ export class VectorPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose || options.verboseEvents ? 'debug' : 'info';
+      const logLevel = (this.logLevel === 'debug' || this.logLevel === 'trace' || options.logLevelEvents) ? 'debug' : 'info';
       this.logger = createLogger({ name: 'VectorPlugin', level: logLevel });
     }
 
@@ -51,7 +51,7 @@ export class VectorPlugin extends Plugin {
       emitEvents,
       verboseEvents,
       eventThrottle,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       ...rest
     };
 
@@ -709,7 +709,7 @@ export class VectorPlugin extends Plugin {
               processedRecords++;
 
               // Emit progress event (throttled)
-              if (this.config.verboseEvents && processedRecords % 100 === 0) {
+              if (this.config.logLevelEvents && processedRecords % 100 === 0) {
                 const progressData = {
                   resource: resource.name,
                   processed: processedRecords,
@@ -726,7 +726,7 @@ export class VectorPlugin extends Plugin {
               // Skip records with dimension mismatch
               dimensionMismatches++;
 
-              if (this.config.verboseEvents) {
+              if (this.config.logLevelEvents) {
                 const mismatchData = {
                   resource: resource.name,
                   recordIndex: index,
@@ -763,7 +763,7 @@ export class VectorPlugin extends Plugin {
         });
 
         // Emit performance metrics
-        if (this.config.verboseEvents) {
+        if (this.config.logLevelEvents) {
           const perfData = {
             operation: 'search',
             resource: resource.name,
@@ -930,7 +930,7 @@ export class VectorPlugin extends Plugin {
         const result = kmeans(vectors, k, {
           ...kmeansOptions,
           distanceFn,
-          onIteration: this.config.verboseEvents ? (iteration, inertia, converged) => {
+          onIteration: this.config.logLevelEvents ? (iteration, inertia, converged) => {
             this._emitEvent('vector:cluster-iteration', {
               resource: resource.name,
               k,
@@ -978,7 +978,7 @@ export class VectorPlugin extends Plugin {
         });
 
         // Emit performance metrics
-        if (this.config.verboseEvents) {
+        if (this.config.logLevelEvents) {
           const perfData = {
             operation: 'clustering',
             resource: resource.name,

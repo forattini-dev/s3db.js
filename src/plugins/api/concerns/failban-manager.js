@@ -43,7 +43,7 @@ export class FailbanManager {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = options.verbose ? 'debug' : 'info';
+      const logLevel = options.logLevel ? 'debug' : 'info';
       this.logger = createLogger({ name: 'FailbanManager', level: logLevel });
     }
 
@@ -70,7 +70,7 @@ export class FailbanManager {
       whitelist: options.whitelist || ['127.0.0.1', '::1'],
       blacklist: options.blacklist || [],
       persistViolations: options.persistViolations !== false,
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       geo: {
         enabled: options.geo?.enabled || false,
         databasePath: options.geo?.databasePath || null,
@@ -108,7 +108,7 @@ export class FailbanManager {
    */
   async initialize() {
     if (!this.options.enabled) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info('Disabled, skipping initialization');
       }
       return;
@@ -137,7 +137,7 @@ export class FailbanManager {
     // Setup cleanup timer for memory cache
     this._setupCleanupTimer();
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('Initialized');
       this.logger.info({ maxViolations: this.options.maxViolations }, 'Max violations');
       this.logger.info({ violationWindow: this.options.violationWindow }, 'Violation window (ms)');
@@ -205,11 +205,11 @@ export class FailbanManager {
         field: 'expiresAt'
       };
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info({ resourceName }, 'TTL configured for bans resource');
       }
     } else {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn('TTLPlugin not found - bans will not auto-expire from DB');
       }
     }
@@ -278,11 +278,11 @@ export class FailbanManager {
         }
       }
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info({ count: this.memoryCache.size }, 'Loaded active bans into cache');
       }
     } catch (err) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.error({ error: err.message }, 'Failed to load bans');
       }
     }
@@ -315,7 +315,7 @@ export class FailbanManager {
           }
         }
 
-        if (this.options.verbose && cleaned > 0) {
+        if (this.options.logLevel && cleaned > 0) {
           this.logger.info({ cleaned }, 'Cleaned expired bans from cache');
         }
       },
@@ -329,7 +329,7 @@ export class FailbanManager {
    */
   async _initializeGeoIP() {
     if (!this.options.geo.databasePath) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn('GeoIP enabled but no databasePath provided');
       }
       return;
@@ -344,11 +344,11 @@ export class FailbanManager {
 
       this.geoReader = await Reader.open(this.options.geo.databasePath);
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info({ databasePath: this.options.geo.databasePath }, 'GeoIP database loaded');
       }
     } catch (err) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.error({ error: err.message }, 'Failed to initialize GeoIP');
         this.logger.warn('GeoIP features will be disabled');
       }
@@ -383,7 +383,7 @@ export class FailbanManager {
 
       return countryCode;
     } catch (err) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.debug({ ip, error: err.message }, 'GeoIP lookup failed');
       }
       return null;
@@ -532,7 +532,7 @@ export class FailbanManager {
           userAgent: metadata.userAgent
         });
       } catch (err) {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.error({ error: err.message }, 'Failed to persist violation');
         }
       }
@@ -559,7 +559,7 @@ export class FailbanManager {
         });
         violationCount = violations.length;
       } catch (err) {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.error({ error: err.message }, 'Failed to count violations');
         }
         return;
@@ -577,7 +577,7 @@ export class FailbanManager {
   async ban(ip, reason, metadata = {}) {
     if (!this.options.enabled) return;
     if (this.isWhitelisted(ip)) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn({ ip }, 'Cannot ban whitelisted IP');
       }
       return;
@@ -616,11 +616,11 @@ export class FailbanManager {
         duration: this.options.banDuration
       });
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info({ ip, reason, expiresAt: expiresAt.toISOString() }, 'IP banned');
       }
     } catch (err) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.error({ error: err.message }, 'Failed to ban IP');
       }
     }
@@ -642,13 +642,13 @@ export class FailbanManager {
         unbannedAt: new Date().toISOString()
       });
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info({ ip }, 'IP unbanned');
       }
 
       return true;
     } catch (err) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.error({ error: err.message }, 'Failed to unban IP');
       }
       return false;
@@ -667,7 +667,7 @@ export class FailbanManager {
 
       return bans.filter(ban => new Date(ban.expiresAt).getTime() > now);
     } catch (err) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.error({ error: err.message }, 'Failed to list bans');
       }
       return [];
@@ -686,7 +686,7 @@ export class FailbanManager {
         const violations = await this.violationsResource.list({ limit: 10000 });
         totalViolations = violations.length;
       } catch (err) {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.error({ error: err.message }, 'Failed to count violations');
         }
       }
@@ -731,7 +731,7 @@ export class FailbanManager {
       this.geoReader = null;
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('Cleaned up');
     }
   }

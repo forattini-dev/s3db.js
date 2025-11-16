@@ -16,7 +16,7 @@ describe('CronManager', () => {
 
   beforeEach(() => {
     cronManager = new CronManager({
-      verbose: false,
+      logLevel: 'silent',
       autoCleanup: false,
       exitOnSignal: false,
       disabled: false,
@@ -223,23 +223,23 @@ describe('CronManager', () => {
     });
 
     it('should return singleton instance', () => {
-      const manager1 = getCronManager({ verbose: false, disabled: false });
-      const manager2 = getCronManager({ verbose: false, disabled: false });
+      const manager1 = getCronManager({ logLevel: 'silent', disabled: false });
+      const manager2 = getCronManager({ logLevel: 'silent', disabled: false });
 
       expect(manager1).toBe(manager2);
     });
 
     it('should reset singleton', () => {
-      const manager1 = getCronManager({ verbose: false, disabled: false });
+      const manager1 = getCronManager({ logLevel: 'silent', disabled: false });
       resetCronManager();
-      const manager2 = getCronManager({ verbose: false, disabled: false });
+      const manager2 = getCronManager({ logLevel: 'silent', disabled: false });
 
       expect(manager1).not.toBe(manager2);
     });
 
     it('should create non-singleton instances', () => {
-      const manager1 = createCronManager({ verbose: false, exitOnSignal: false, disabled: false });
-      const manager2 = createCronManager({ verbose: false, exitOnSignal: false, disabled: false });
+      const manager1 = createCronManager({ logLevel: 'silent', exitOnSignal: false, disabled: false });
+      const manager2 = createCronManager({ logLevel: 'silent', exitOnSignal: false, disabled: false });
 
       expect(manager1).not.toBe(manager2);
 
@@ -376,7 +376,7 @@ describe('CronManager', () => {
 
   describe('Signal Handlers', () => {
     it('should setup signal handlers on construction', () => {
-      const manager = new CronManager({ verbose: false, exitOnSignal: false, disabled: false });
+      const manager = new CronManager({ logLevel: 'silent', exitOnSignal: false, disabled: false });
 
       expect(manager._signalHandlersSetup).toBe(true);
 
@@ -384,7 +384,7 @@ describe('CronManager', () => {
     });
 
     it('should remove signal handlers', () => {
-      const manager = new CronManager({ verbose: false, exitOnSignal: false });
+      const manager = new CronManager({ logLevel: 'silent', exitOnSignal: false });
 
       manager.removeSignalHandlers();
 

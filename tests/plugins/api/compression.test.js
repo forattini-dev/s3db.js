@@ -80,7 +80,7 @@ describe('API Plugin - Compression Middleware', () => {
     port = 3800 + Math.floor(Math.random() * 1000);
     const testName = `compression-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    db = createMemoryDatabaseForTest(testName, { verbose: false });
+    db = createMemoryDatabaseForTest(testName, { logLevel: 'silent' });
     await db.connect();
 
     // Create a resource with some data
@@ -120,7 +120,7 @@ describe('API Plugin - Compression Middleware', () => {
     apiPlugin = new ApiPlugin({
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: false },
       logging: { enabled: false },
       compression: {

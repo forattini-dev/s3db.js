@@ -71,7 +71,7 @@
  *
  * 3. **Monitor performance** (verbose mode):
  *    ```javascript
- *    const plugin = new TfStatePlugin({ verbose: true });
+ *    const plugin = new TfStatePlugin({ logLevel: 'debug' });
  *    // Logs partition usage, batch processing, deduplication
  *    ```
  *
@@ -125,7 +125,7 @@
  *     enabled: true,
  *     lookback: 50
  *   },
- *   verbose: true
+ *   logLevel: 'debug'
  * });
  *
  * await database.usePlugin(plugin);
@@ -272,7 +272,7 @@ export class TfStatePlugin extends Plugin {
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = config.verbose ? 'debug' : 'info';
+      const logLevel = config.logLevel ? 'debug' : 'info';
       this.logger = createLogger({ name: 'TfStatePlugin', level: logLevel });
     }
 
@@ -324,7 +324,7 @@ export class TfStatePlugin extends Plugin {
     this.autoSync = config.autoSync || false;
     this.watchPaths = config.watchPaths || [];
     this.filters = config.filters || {};
-    this.verbose = config.verbose || false;
+    this.logLevel = config.logLevel || 'info';
 
     // Supported Tfstate versions
     this.supportedVersions = [3, 4];

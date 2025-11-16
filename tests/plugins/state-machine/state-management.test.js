@@ -24,7 +24,7 @@ describe('StateMachinePlugin - State Management', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - State Management', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();
@@ -86,7 +86,7 @@ describe('StateMachinePlugin - State Management', () => {
 
   it('should execute entry action when initializing entity', async () => {
     const entryPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',

@@ -36,12 +36,12 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false // Enable verbose logging
+      logLevel: 'silent' // Enable verbose logging
     });
     await database.usePlugin(ecPlugin);
 
@@ -99,12 +99,12 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(ecPlugin);
 
@@ -147,12 +147,12 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(ecPlugin);
 
@@ -210,12 +210,12 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(ecPlugin);
 

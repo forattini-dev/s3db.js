@@ -13,14 +13,15 @@ import { generateOpenAPISpec } from './openapi-generator.js';
 import { createHash } from 'crypto';
 
 export class OpenAPIGeneratorCached {
-  constructor({ database, options }) {
+  constructor({ database, options, logger = null }) {
     this.database = database;
     this.options = options;
+    this.logger = logger;
 
     this.cache = null;
     this.cacheKey = null;
 
-    if (options.verbose) {
+    if (this.logger && options.logLevel) {
       this.logger.info('[OpenAPIGenerator] Caching enabled');
     }
   }
@@ -34,14 +35,14 @@ export class OpenAPIGeneratorCached {
     const currentKey = this.generateCacheKey();
 
     if (this.cacheKey === currentKey && this.cache) {
-      if (this.options.verbose) {
+      if (this.logger && this.options.logLevel) {
         this.logger.info('[OpenAPIGenerator] Cache HIT (0ms)');
       }
       return this.cache;
     }
 
     // Cache miss - regenerate
-    if (this.options.verbose) {
+    if (this.logger && this.options.logLevel) {
       const reason = !this.cache ? 'initial' : 'invalidated';
       this.logger.info(`[OpenAPIGenerator] Cache MISS (${reason})`);
     }
@@ -50,7 +51,7 @@ export class OpenAPIGeneratorCached {
     this.cache = generateOpenAPISpec(this.database, this.options);
     this.cacheKey = currentKey;
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       const duration = Date.now() - startTime;
       this.logger.info(`[OpenAPIGenerator] Generated spec in ${duration}ms`);
     }
@@ -116,7 +117,7 @@ export class OpenAPIGeneratorCached {
     this.cache = null;
     this.cacheKey = null;
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('[OpenAPIGenerator] Cache manually invalidated');
     }
   }

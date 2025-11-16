@@ -42,10 +42,10 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
     };
 
     stateMachinePlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       enableEventTriggers: true,
       persistTransitions: true,
-      verbose: false,
+      logLevel: 'silent',
       actions: {
         testAction: async () => {
           triggerFired = true;
@@ -102,7 +102,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
     const actionCalls = [];
 
     stateMachinePlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       enableEventTriggers: true,
       persistTransitions: true,  // Need to persist to track triggerCounts
       actions: {
@@ -166,7 +166,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - maxTriggers and o
     const events = [];
 
     stateMachinePlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       enableEventTriggers: true,
       persistTransitions: true,  // Need to persist to track triggerCounts
       actions: {

@@ -501,7 +501,7 @@ export class FullTextPlugin extends Plugin {
     this.config = {
       minWordLength: opts.minWordLength || 3,
       maxResults: opts.maxResults || 100,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       ...opts
     };
     this.indexes = new Map(); // In-memory index for simplicity

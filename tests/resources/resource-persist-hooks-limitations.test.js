@@ -7,7 +7,7 @@ describe("Resource Hook Persistence - Limitations", () => {
   beforeEach(async () => {
     db = await createDatabaseForTest("suite=resources/persist-hooks-limitations", {
       persistHooks: true,
-      verbose: false
+      logLevel: 'silent'
     });
     await db.connect();
   });
@@ -71,7 +71,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-restore", {
       persistHooks: true,
       connectionString,
-      verbose: false
+      logLevel: 'silent'
     });
     await newDb.connect();
 
@@ -126,7 +126,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-self-contained", {
       persistHooks: true,
       connectionString,
-      verbose: false
+      logLevel: 'silent'
     });
     await newDb.connect();
 
@@ -196,7 +196,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-closure", {
       persistHooks: true,
       connectionString,
-      verbose: false
+      logLevel: 'silent'
     });
     await newDb.connect();
 
@@ -256,7 +256,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-demo", {
       persistHooks: true,
       connectionString,
-      verbose: false
+      logLevel: 'silent'
     });
     await newDb.connect();
 

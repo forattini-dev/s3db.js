@@ -24,7 +24,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();
@@ -121,7 +121,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
 
   it('should release lock even when transition fails', async () => {
     const failingPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',
@@ -168,7 +168,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
 
   it('should respect lockTimeout configuration', async () => {
     const shortTimeoutPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',
@@ -213,7 +213,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
 
   it('should use workerId in lock acquisition', async () => {
     const worker1Plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',
@@ -244,7 +244,7 @@ describe('StateMachinePlugin - Distributed Locks & Concurrency Control', () => {
 
   it('should handle lock TTL expiration', async () => {
     const ttlPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',
