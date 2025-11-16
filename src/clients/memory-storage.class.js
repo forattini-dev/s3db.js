@@ -11,6 +11,7 @@ import { Readable } from 'stream';
 
 import tryFn from '../concerns/try-fn.js';
 import { MetadataLimitError, ResourceError, ValidationError } from '../errors.js';
+import { createLogger } from '../concerns/logger.js';
 
 export class MemoryStorage {
   constructor(config = {}) {
@@ -28,6 +29,14 @@ export class MemoryStorage {
     this.persistPath = config.persistPath;
     this.autoPersist = Boolean(config.autoPersist);
     this.verbose = Boolean(config.verbose);
+
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'MemoryStorage', level: logLevel });
+    }
   }
 
   /**
@@ -248,9 +257,8 @@ export class MemoryStorage {
 
     this.objects.set(key, objectData);
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] PUT ${key} (${size} bytes, etag: ${etag})`);
-    }
+    // 🪵 Debug: PUT operation
+    this.logger.debug({ key, size, etag }, `PUT ${key} (${size} bytes, etag: ${etag})`);
 
     // Auto-persist if enabled
     /* c8 ignore next -- persistence optional */
@@ -286,9 +294,8 @@ export class MemoryStorage {
       throw error;
     }
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] GET ${key} (${obj.size} bytes)`);
-    }
+    // 🪵 Debug: GET operation
+    this.logger.debug({ key, size: obj.size }, `GET ${key} (${obj.size} bytes)`);
 
     // Convert Buffer to Readable stream (same as real S3 Client)
     const bodyStream = Readable.from(obj.body);
@@ -348,9 +355,8 @@ export class MemoryStorage {
       throw error;
     }
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] HEAD ${key}`);
-    }
+    // 🪵 Debug: HEAD operation
+    this.logger.debug({ key }, `HEAD ${key}`);
 
     return {
       Metadata: { ...obj.metadata },
@@ -395,9 +401,8 @@ export class MemoryStorage {
       contentEncoding: source.contentEncoding
     });
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] COPY ${from} → ${to}`);
-    }
+    // 🪵 Debug: COPY operation
+    this.logger.debug({ from, to }, `COPY ${from} → ${to}`);
 
     const destination = this.objects.get(to);
     return {
@@ -425,9 +430,8 @@ export class MemoryStorage {
     const existed = this.objects.has(key);
     this.objects.delete(key);
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] DELETE ${key} (existed: ${existed})`);
-    }
+    // 🪵 Debug: DELETE operation
+    this.logger.debug({ key, existed }, `DELETE ${key} (existed: ${existed})`);
 
     // Auto-persist if enabled
     /* c8 ignore next -- persistence optional */
@@ -461,9 +465,8 @@ export class MemoryStorage {
       }
     }
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] DELETE BATCH (${deleted.length} deleted, ${errors.length} errors)`);
-    }
+    // 🪵 Debug: DELETE BATCH operation
+    this.logger.debug({ deletedCount: deleted.length, errorCount: errors.length }, `DELETE BATCH (${deleted.length} deleted, ${errors.length} errors)`);
 
     return { Deleted: deleted, Errors: errors };
   }
@@ -525,9 +528,8 @@ export class MemoryStorage {
       ? this._encodeContinuationToken(lastKeyInPage)
       : null;
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes, truncated=${Boolean(nextContinuationToken)})`);
-    }
+    // 🪵 Debug: LIST operation
+    this.logger.debug({ prefix, objectCount: contents.length, prefixCount: commonPrefixes.size, truncated: Boolean(nextContinuationToken) }, `LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes, truncated=${Boolean(nextContinuationToken)})`);
 
     return {
       Contents: contents,
@@ -597,9 +599,8 @@ export class MemoryStorage {
       });
     }
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] Restored snapshot with ${this.objects.size} objects`);
-    }
+    // 🪵 Debug: snapshot restored
+    this.logger.debug({ objectCount: this.objects.size }, `Restored snapshot with ${this.objects.size} objects`);
   }
 
   /**
@@ -631,9 +632,8 @@ export class MemoryStorage {
       });
     }
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] Saved ${this.objects.size} objects to ${path}`);
-    }
+    // 🪵 Debug: saved to disk
+    this.logger.debug({ objectCount: this.objects.size, path }, `Saved ${this.objects.size} objects to ${path}`);
 
     return path;
   }
@@ -667,9 +667,8 @@ export class MemoryStorage {
     const snapshot = JSON.parse(json);
     this.restore(snapshot);
 
-    if (this.verbose) {
-      console.log(`[MemoryStorage] Loaded ${this.objects.size} objects from ${path}`);
-    }
+    // 🪵 Debug: loaded from disk
+    this.logger.debug({ objectCount: this.objects.size, path }, `Loaded ${this.objects.size} objects from ${path}`);
 
     return snapshot;
   }
@@ -711,9 +710,8 @@ export class MemoryStorage {
    */
   clear() {
     this.objects.clear();
-    if (this.verbose) {
-      console.log('[MemoryStorage] Cleared all objects');
-    }
+    // 🪵 Debug: cleared all objects
+    this.logger.debug('Cleared all objects');
   }
 }
 

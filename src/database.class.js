@@ -15,6 +15,7 @@ import { streamToString } from "./stream/index.js";
 import { ProcessManager } from "./concerns/process-manager.js";
 import { SafeEventEmitter } from "./concerns/safe-event-emitter.js";
 import { CronManager } from "./concerns/cron-manager.js";
+import { createLogger, getLoggerOptionsFromEnv } from "./concerns/logger.js";
 
 export class Database extends SafeEventEmitter {
   constructor(options) {
@@ -86,15 +87,6 @@ export class Database extends SafeEventEmitter {
     // 🔄 Support both old (operationsPool) and new (executorPool) names
     const executorPoolConfig = options?.executorPool ?? options?.operationsPool;
 
-    // 📝 Deprecation warning for old name
-    if (options?.operationsPool && !options?.executorPool) {
-      console.warn(
-        '⚠️  [deprecated] "operationsPool" is deprecated in s3db.js v16.x\n' +
-        '   Use "executorPool" instead.\n' +
-        '   Migration: https://s3db.js/docs/migration/v16-to-v17'
-      );
-    }
-
     this._parallelism = this._normalizeParallelism(
       options?.parallelism ?? executorPoolConfig?.concurrency,
       10
@@ -102,6 +94,33 @@ export class Database extends SafeEventEmitter {
 
     // ✨ Database-level options (root level)
     this.verbose = options.verbose ?? false;
+
+    // 🪵 Logger initialization (Pino-based, replaces verbose flag)
+    // Precedence: custom logger > loggerOptions > env vars > defaults
+    if (options.logger) {
+      // User provided custom Pino logger instance
+      this.logger = options.logger;
+    } else {
+      // Create logger from options (with env var overrides)
+      const loggerConfig = getLoggerOptionsFromEnv(options.loggerOptions || {});
+      this.logger = createLogger({
+        name: 'Database',
+        ...loggerConfig
+      });
+    }
+
+    // Store child level overrides for later use when creating child loggers
+    this._childLoggerLevels = options.loggerOptions?.childLevels || {};
+
+    // 📝 Deprecation warning for old name (after logger initialization)
+    if (options?.operationsPool && !options?.executorPool) {
+      this.logger.warn(
+        '⚠️  "operationsPool" is deprecated in s3db.js v16.x. ' +
+        'Use "executorPool" instead. ' +
+        'Migration: https://s3db.js/docs/migration/v16-to-v17'
+      );
+    }
+
     // Normalize executorPool config with defaults
     this.executorPool = this._normalizeOperationsPool(executorPoolConfig, this._parallelism);
     if (options?.taskExecutorMonitoring) {
@@ -217,19 +236,21 @@ export class Database extends SafeEventEmitter {
           const [okPrefix, errPrefix, decodedPrefix] = tryFn(() => decodeURIComponent(rawPrefix));
           const keyPrefix = okPrefix ? decodedPrefix : rawPrefix;
 
-          this.client = new MemoryClient(this._deepMerge({
+          const memoryOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
             bucket,
             keyPrefix,
             verbose: this.verbose,
-          }, mergedClientOptions)); // ✨ Deep merge client options
+          }, mergedClientOptions));
+          this.client = new MemoryClient(memoryOptions); // ✨ Deep merge client options
         } else if (url.protocol === 'file:') {
           // Use FileSystemClient for file:// protocol
-          this.client = new FileSystemClient(this._deepMerge({
+          const filesystemOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
             basePath: connStr.basePath,
             bucket: connStr.bucket,
             keyPrefix: connStr.keyPrefix,
             verbose: this.verbose,
-          }, mergedClientOptions)); // ✨ Deep merge client options
+          }, mergedClientOptions));
+          this.client = new FileSystemClient(filesystemOptions); // ✨ Deep merge client options
         } else {
           // Use S3Client for s3://, http://, https:// protocols
           // Merge client options first, then set executorPool (takes precedence)
@@ -373,6 +394,24 @@ export class Database extends SafeEventEmitter {
   }
 
   /**
+   * Apply database-level task executor monitoring defaults
+   * @param {Object} config
+   * @returns {Object}
+   * @private
+   */
+  _applyTaskExecutorMonitoring(config = {}) {
+    if (!this.options?.taskExecutorMonitoring) {
+      return config;
+    }
+    const merged = { ...config };
+    merged.taskExecutorMonitoring = this._deepMerge(
+      this.options.taskExecutorMonitoring,
+      merged.taskExecutorMonitoring || {}
+    );
+    return merged;
+  }
+
+  /**
    * Normalize a parallelism value into a positive integer
    * @param {number|string} value
    * @param {number} fallback
@@ -467,7 +506,56 @@ export class Database extends SafeEventEmitter {
     return undefined;
   }
 
+  /**
+   * Get a child logger with specific context bindings
+   * Child loggers are created ONCE and cached to avoid performance overhead
+   *
+   * @param {string} name - Logger name (e.g., 'Resource:users', 'Plugin:S3Queue')
+   * @param {Object} [bindings={}] - Additional context to bind to logger
+   * @returns {Object} Pino child logger instance
+   *
+   * @example
+   * // In Resource constructor
+   * this.logger = db.getChildLogger(`Resource:${name}`, { resource: name });
+   *
+   * // In Plugin initialize()
+   * this.logger = db.getChildLogger(`Plugin:${this.name}`, { plugin: this.name });
+   */
+  getChildLogger(name, bindings = {}) {
+    // Create child logger with context
+    const childLogger = this.logger.child({
+      name,
+      ...bindings
+    });
+
+    // Apply per-component log level if configured
+    const levelOverride = this._childLoggerLevels[name];
+    if (levelOverride) {
+      childLogger.level = levelOverride;
+    }
+
+    return childLogger;
+  }
+
+  /**
+   * Set log level for a specific child logger by name
+   * Useful for runtime adjustment of verbosity per component
+   *
+   * @param {string} name - Child logger name (e.g., 'Plugin:S3Queue')
+   * @param {string} level - Log level (trace, debug, info, warn, error)
+   * @returns {void}
+   *
+   * @example
+   * // Enable debug logging for S3Queue plugin
+   * db.setChildLevel('Plugin:S3Queue', 'debug');
+   */
+  setChildLevel(name, level) {
+    this._childLoggerLevels[name] = level;
+  }
+
   async connect() {
+    this.logger.debug({ databaseId: this.id }, 'connecting to database');
+
     // Re-register exit listener if it was cleaned up
     this._registerExitListener();
 
@@ -589,6 +677,12 @@ export class Database extends SafeEventEmitter {
         metadata: this.savedMetadata
       });
     }
+
+    this.logger.info({
+      databaseId: this.id,
+      resourceCount: Object.keys(this.resources).length,
+      pluginCount: Object.keys(this.pluginRegistry).length
+    }, 'database connected');
 
     this.emit("db:connected", new Date());
   }
@@ -713,11 +807,8 @@ export class Database extends SafeEventEmitter {
             }));
 
             if (!ok) {
-              if (this.verbose) {
-                if (this.verbose) {
-                  console.warn(`Failed to serialize hook for event '${event}':`, err.message);
-                }
-              }
+              // 🪵 Warn about hook serialization failure
+              this.logger.warn({ event, error: err.message }, `failed to serialize hook for event '${event}'`);
               return null;
             }
             return data;
@@ -752,11 +843,8 @@ export class Database extends SafeEventEmitter {
             });
 
             if (!ok || fn === null) {
-              if (this.verbose) {
-                if (this.verbose) {
-                  console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err?.message || 'Invalid function');
-                }
-              }
+              // 🪵 Warn about hook deserialization failure
+              this.logger.warn({ event, hookName: hook.name, error: err?.message || 'Invalid function' }, `failed to deserialize hook '${hook.name}' for event '${event}'`);
               return null;
             }
             return fn;
@@ -960,6 +1048,11 @@ export class Database extends SafeEventEmitter {
       plugin.cronManager = this.cronManager;
     }
 
+    // 🪵 Pass logger to plugin (creates child logger with plugin context)
+    if (!plugin.logger && this.logger) {
+      plugin.logger = this.getChildLogger(`Plugin:${pluginName}`, { plugin: pluginName });
+    }
+
     // Register the plugin
     this.plugins[pluginName] = plugin;
 
@@ -1041,11 +1134,8 @@ export class Database extends SafeEventEmitter {
           })
           .catch(err => {
             // Log error but don't throw (avoid unhandled rejection)
-            if (this.verbose) {
-              if (this.verbose) {
-                console.error('[Database] Metadata upload failed:', err.message);
-              }
-            }
+            // 🪵 Error logging for metadata upload failure
+            this.logger.error({ error: err.message }, 'metadata upload failed');
             this._metadataUploadPending = false;
           });
       }
@@ -1497,17 +1587,13 @@ export class Database extends SafeEventEmitter {
         contentType: 'application/json'
       });
 
-      if (this.verbose) {
-        if (this.verbose) {
-          console.warn(`S3DB: Created backup of corrupted s3db.json as ${backupKey}`);
-        }
-      }
+      // 🪵 Info log: backup created
+      this.logger.info({ backupKey }, `created backup of corrupted s3db.json as ${backupKey}`);
     });
 
-    if (!ok && this.verbose) {
-      if (this.verbose) {
-        console.warn(`S3DB: Failed to create backup: ${err.message}`);
-      }
+    if (!ok) {
+      // 🪵 Warn log: backup creation failed
+      this.logger.warn({ error: err.message }, `failed to create backup: ${err.message}`);
     }
   }
 
@@ -1516,11 +1602,10 @@ export class Database extends SafeEventEmitter {
    */
   async _uploadHealedMetadata(metadata, healingLog) {
     const [ok, err] = await tryFn(async () => {
-      if (this.verbose && healingLog.length > 0) {
-        if (this.verbose) {
-          console.warn('S3DB Self-Healing Operations:');
-          healingLog.forEach(log => console.warn(`  - ${log}`));
-        }
+      // 🪵 Warn log: self-healing operations
+      if (healingLog.length > 0) {
+        this.logger.warn({ healingOperations: healingLog }, 'S3DB self-healing operations');
+        healingLog.forEach(log => this.logger.warn(`  - ${log}`));
       }
 
       // Update lastUpdated timestamp
@@ -1534,19 +1619,13 @@ export class Database extends SafeEventEmitter {
 
       this.emit('db:metadata-healed', { healingLog, metadata });
 
-      if (this.verbose) {
-        if (this.verbose) {
-          console.warn('S3DB: Successfully uploaded healed metadata');
-        }
-      }
+      // 🪵 Info log: healed metadata uploaded
+      this.logger.info('successfully uploaded healed metadata');
     });
 
     if (!ok) {
-      if (this.verbose) {
-        if (this.verbose) {
-          console.error(`S3DB: Failed to upload healed metadata: ${err.message}`);
-        }
-      }
+      // 🪵 Error log: healed metadata upload failed
+      this.logger.error({ error: err.message }, `failed to upload healed metadata: ${err.message}`);
       throw err;
     }
   }
@@ -1876,6 +1955,8 @@ export class Database extends SafeEventEmitter {
   }
 
   async disconnect() {
+    this.logger.debug({ databaseId: this.id }, 'disconnecting from database');
+
     // Flush any pending metadata uploads before disconnect
     await this.flushMetadata();
 

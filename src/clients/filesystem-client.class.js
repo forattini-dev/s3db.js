@@ -16,6 +16,7 @@ import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
 import { TasksRunner } from '../tasks-runner.class.js';
 import { FileSystemStorage } from './filesystem-storage.class.js';
+import { createLogger } from '../concerns/logger.js';
 
 const pathPosix = path.posix;
 
@@ -31,6 +32,17 @@ export class FileSystemClient extends EventEmitter {
     this.id = config.id || idGenerator(77);
     this.verbose = Boolean(config.verbose);
 
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'FileSystemClient', level: logLevel });
+    }
+    this.taskExecutorMonitoring = config.taskExecutorMonitoring
+      ? { ...config.taskExecutorMonitoring }
+      : null;
+
     // TasksRunner for batch operations (FileSystemClient analog to TasksPool)
     // Accepts either a pre-instantiated TaskExecutor or configuration object
     if (config.taskExecutor) {
@@ -43,7 +55,8 @@ export class FileSystemClient extends EventEmitter {
         retries: config.retries ?? 3,
         retryDelay: config.retryDelay ?? 1000,
         timeout: config.timeout ?? 30000,
-        retryableErrors: config.retryableErrors || []
+        retryableErrors: config.retryableErrors || [],
+        monitoring: this.taskExecutorMonitoring || undefined
       });
     }
 
@@ -91,9 +104,33 @@ export class FileSystemClient extends EventEmitter {
       forcePathStyle: true
     };
 
-    if (this.verbose) {
-      console.log(`[FileSystemClient] Initialized (id: ${this.id}, basePath: ${this.basePath}, bucket: ${this.bucket})`);
+    // 🪵 Debug: initialization
+    this.logger.debug({ id: this.id, basePath: this.basePath, bucket: this.bucket }, `Initialized (id: ${this.id}, basePath: ${this.basePath}, bucket: ${this.bucket})`);
+  }
+
+  /**
+   * Get queue statistics for monitoring
+   *
+   * @returns {Object|null}
+   */
+  getQueueStats() {
+    if (this.taskManager && typeof this.taskManager.getStats === 'function') {
+      return this.taskManager.getStats();
     }
+    return null;
+  }
+
+  /**
+   * Get aggregate metrics for monitoring
+   *
+   * @param {number} [since=0]
+   * @returns {Object|null}
+   */
+  getAggregateMetrics(since = 0) {
+    if (this.taskManager && typeof this.taskManager.getAggregateMetrics === 'function') {
+      return this.taskManager.getAggregateMetrics(since);
+    }
+    return null;
   }
 
   /**

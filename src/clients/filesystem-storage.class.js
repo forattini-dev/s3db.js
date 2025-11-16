@@ -25,6 +25,7 @@ import tryFn from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { MetadataLimitError, ResourceError, ValidationError } from '../errors.js';
 import { getCronManager } from '../concerns/cron-manager.js';
+import { createLogger } from '../concerns/logger.js';
 
 export class FileSystemStorage {
   constructor(config = {}) {
@@ -85,6 +86,14 @@ export class FileSystemStorage {
       totalUncompressed: 0
     };
 
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'FileSystemStorage', level: logLevel });
+    }
+
     this.cronManager = getCronManager();
     this.cleanupJobName = null;
 
@@ -93,17 +102,16 @@ export class FileSystemStorage {
       this._initCleanup();
     }
 
-    if (this.verbose) {
-      const features = [];
-      if (this.enableCompression) features.push(`compression:${this.compressionThreshold}b`);
-      if (this.enableTTL) features.push(`ttl:${this.defaultTTL}ms`);
-      if (this.enableLocking) features.push('locking');
-      if (this.enableBackup) features.push('backup');
-      if (this.enableJournal) features.push('journal');
-      if (this.enableStats) features.push('stats');
+    // 🪵 Debug: initialization
+    const features = [];
+    if (this.enableCompression) features.push(`compression:${this.compressionThreshold}b`);
+    if (this.enableTTL) features.push(`ttl:${this.defaultTTL}ms`);
+    if (this.enableLocking) features.push('locking');
+    if (this.enableBackup) features.push('backup');
+    if (this.enableJournal) features.push('journal');
+    if (this.enableStats) features.push('stats');
 
-      console.log(`[FileSystemStorage] Initialized (basePath: ${this.basePath}${features.length ? ', features: ' + features.join(', ') : ''})`);
-    }
+    this.logger.debug({ basePath: this.basePath, features }, `Initialized (basePath: ${this.basePath}${features.length ? ', features: ' + features.join(', ') : ''})`);
   }
 
   /**
@@ -353,9 +361,8 @@ export class FileSystemStorage {
       this.cleanupInterval,
       () => {
         this._runCleanup().catch(err => {
-          if (this.verbose) {
-            console.warn('[FileSystemStorage] Cleanup error:', err.message);
-          }
+          // 🪵 Warn: cleanup error
+          this.logger.warn({ error: err.message }, 'Cleanup error');
         });
       },
       this.cleanupJobName
@@ -388,8 +395,9 @@ export class FileSystemStorage {
       }
     }
 
-    if (this.verbose && cleaned > 0) {
-      console.log(`[FileSystemStorage] Cleanup: removed ${cleaned} expired objects`);
+    // 🪵 Debug: cleanup completed
+    if (cleaned > 0) {
+      this.logger.debug({ cleaned }, `Cleanup: removed ${cleaned} expired objects`);
     }
   }
 
@@ -504,9 +512,8 @@ export class FileSystemStorage {
       return zlib.gunzipSync(buffer);
     } catch (error) {
       // If decompression fails, return original buffer
-      if (this.verbose) {
-        console.warn('[FileSystemStorage] Decompression failed, returning raw buffer');
-      }
+      // 🪵 Warn: decompression failed
+      this.logger.warn({ error: error.message }, 'Decompression failed, returning raw buffer');
       return buffer;
     }
   }
@@ -765,19 +772,19 @@ export class FileSystemStorage {
         this.stats.puts++;
       }
 
-      if (this.verbose) {
-        const info = [
-          `${size} bytes`,
-          `etag: ${etag}`
-        ];
-        if (compressionResult.compressed) {
-          info.push(`compressed: ${compressionResult.originalSize}→${size} (${compressionResult.compressionRatio}x)`);
-        }
-        if (expiresAt) {
-          info.push(`ttl: ${effectiveTTL}ms`);
-        }
-        console.log(`[FileSystemStorage] PUT ${key} (${info.join(', ')})`);
+      // 🪵 Debug: PUT operation
+      const info = [
+        `${size} bytes`,
+        `etag: ${etag}`
+      ];
+      if (compressionResult.compressed) {
+        info.push(`compressed: ${compressionResult.originalSize}→${size} (${compressionResult.compressionRatio}x)`);
       }
+      if (expiresAt) {
+        info.push(`ttl: ${effectiveTTL}ms`);
+      }
+      this.logger.debug({ key, size, etag, compressed: compressionResult.compressed, ttl: effectiveTTL }, `PUT ${key} (${info.join(', ')})`);
+
 
       return {
         ETag: this._formatEtag(etag),
@@ -829,13 +836,12 @@ export class FileSystemStorage {
       this.stats.gets++;
     }
 
-    if (this.verbose) {
-      const info = [`${metaData.size} bytes`];
-      if (metaData.compressed) {
-        info.push(`decompressed: ${metaData.size}→${finalBuffer.length}`);
-      }
-      console.log(`[FileSystemStorage] GET ${key} (${info.join(', ')})`);
+    // 🪵 Debug: GET operation
+    const info = [`${metaData.size} bytes`];
+    if (metaData.compressed) {
+      info.push(`decompressed: ${metaData.size}→${finalBuffer.length}`);
     }
+    this.logger.debug({ key, size: metaData.size, compressed: metaData.compressed }, `GET ${key} (${info.join(', ')})`);
 
     // Convert Buffer to Readable stream (same as MemoryStorage)
     const bodyStream = Readable.from(finalBuffer);
@@ -885,9 +891,8 @@ export class FileSystemStorage {
       throw this._mapFilesystemError(err, { key, path: metaPath, operation: 'head' });
     }
 
-    if (this.verbose) {
-      console.log(`[FileSystemStorage] HEAD ${key}`);
-    }
+    // 🪵 Debug: HEAD operation
+    this.logger.debug({ key }, `HEAD ${key}`);
 
     return {
       Metadata: { ...metaData.metadata },
@@ -950,9 +955,8 @@ export class FileSystemStorage {
 
     await this._writeMetadata(to, destMeta);
 
-    if (this.verbose) {
-      console.log(`[FileSystemStorage] COPY ${from} → ${to}`);
-    }
+    // 🪵 Debug: COPY operation
+    this.logger.debug({ from, to }, `COPY ${from} → ${to}`);
 
     return {
       CopyObjectResult: {
@@ -992,9 +996,8 @@ export class FileSystemStorage {
       this.stats.deletes++;
     }
 
-    if (this.verbose) {
-      console.log(`[FileSystemStorage] DELETE ${key}`);
-    }
+    // 🪵 Debug: DELETE operation
+    this.logger.debug({ key }, `DELETE ${key}`);
 
     return {
       DeleteMarker: false,
@@ -1022,9 +1025,8 @@ export class FileSystemStorage {
       }
     }
 
-    if (this.verbose) {
-      console.log(`[FileSystemStorage] DELETE BATCH (${deleted.length} deleted, ${errors.length} errors)`);
-    }
+    // 🪵 Debug: DELETE BATCH
+    this.logger.debug({ deletedCount: deleted.length, errorCount: errors.length }, `DELETE BATCH (${deleted.length} deleted, ${errors.length} errors)`);
 
     return { Deleted: deleted, Errors: errors };
   }
@@ -1143,9 +1145,8 @@ export class FileSystemStorage {
       ? this._encodeContinuationToken(lastKeyInPage)
       : null;
 
-    if (this.verbose) {
-      console.log(`[FileSystemStorage] LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes, truncated=${Boolean(nextContinuationToken)})`);
-    }
+    // 🪵 Debug: LIST operation
+    this.logger.debug({ prefix, objectCount: contents.length, prefixCount: commonPrefixes.size, truncated: Boolean(nextContinuationToken) }, `LIST prefix="${prefix}" (${contents.length} objects, ${commonPrefixes.size} prefixes, truncated=${Boolean(nextContinuationToken)})`);
 
     return {
       Contents: contents,
@@ -1186,9 +1187,8 @@ export class FileSystemStorage {
     await tryFn(() => rm(this.basePath, { recursive: true, force: true }));
     await this._ensureDirectory(this.basePath);
 
-    if (this.verbose) {
-      console.log(`[FileSystemStorage] Cleared all objects from ${this.basePath}`);
-    }
+    // 🪵 Debug: CLEAR operation
+    this.logger.debug({ basePath: this.basePath }, `Cleared all objects from ${this.basePath}`);
   }
 
   /**
@@ -1200,9 +1200,8 @@ export class FileSystemStorage {
       this.cleanupJobName = null;
     }
 
-    if (this.verbose) {
-      console.log('[FileSystemStorage] Destroyed (cleanup stopped)');
-    }
+    // 🪵 Debug: destroyed
+    this.logger.debug('Destroyed (cleanup stopped)');
   }
 }
 

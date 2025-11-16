@@ -15,6 +15,7 @@ import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
 import { TasksRunner } from '../tasks-runner.class.js';
 import { MemoryStorage } from './memory-storage.class.js';
+import { createLogger } from '../concerns/logger.js';
 
 const pathPosix = path.posix;
 
@@ -30,6 +31,14 @@ export class MemoryClient extends EventEmitter {
     this.id = config.id || idGenerator(77);
     this.verbose = Boolean(config.verbose);
 
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'MemoryClient', level: logLevel });
+    }
+
     // Normalize execution config (mirrors S3Client taskExecutorConfig)
     this.taskExecutorConfig = {
       enabled: true,
@@ -39,6 +48,9 @@ export class MemoryClient extends EventEmitter {
       timeout: config.timeout ?? 30000,
       retryableErrors: config.retryableErrors || []
     };
+    this.taskExecutorMonitoring = config.taskExecutorMonitoring
+      ? { ...config.taskExecutorMonitoring }
+      : null;
 
     // TasksRunner for batch operations (MemoryClient analog to TasksPool)
     // Accepts either a pre-instantiated TaskExecutor or configuration object
@@ -47,7 +59,10 @@ export class MemoryClient extends EventEmitter {
       this.taskManager = config.taskExecutor;
     } else {
       // Create new TasksRunner instance with configuration
-      this.taskManager = new TasksRunner({ ...this.taskExecutorConfig });
+      this.taskManager = new TasksRunner({
+        ...this.taskExecutorConfig,
+        monitoring: this.taskExecutorMonitoring || undefined
+      });
     }
 
     // Storage configuration
@@ -92,9 +107,33 @@ export class MemoryClient extends EventEmitter {
       forcePathStyle: true
     };
 
-    if (this.verbose) {
-      console.log(`[MemoryClient] Initialized (id: ${this.id}, bucket: ${this.bucket})`);
+    // 🪵 Debug: initialization
+    this.logger.debug({ id: this.id, bucket: this.bucket }, `Initialized (id: ${this.id}, bucket: ${this.bucket})`);
+  }
+
+  /**
+   * Get queue statistics for monitoring tools
+   *
+   * @returns {Object|null}
+   */
+  getQueueStats() {
+    if (this.taskManager && typeof this.taskManager.getStats === 'function') {
+      return this.taskManager.getStats();
     }
+    return null;
+  }
+
+  /**
+   * Get aggregate metrics for monitoring tools
+   *
+   * @param {number} [since=0]
+   * @returns {Object|null}
+   */
+  getAggregateMetrics(since = 0) {
+    if (this.taskManager && typeof this.taskManager.getAggregateMetrics === 'function') {
+      return this.taskManager.getAggregateMetrics(since);
+    }
+    return null;
   }
 
   /**
@@ -688,9 +727,8 @@ export class MemoryClient extends EventEmitter {
           try {
             record = await resource.get(recordId);
           } catch {
-            if (this.verbose) {
-              console.warn(`Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
-            }
+            // 🪵 Warn: failed record retrieval
+            this.logger.warn({ recordId, resourceName }, `Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
             record = null;
           }
         }
@@ -847,9 +885,8 @@ export class MemoryClient extends EventEmitter {
             });
           } catch (error) {
             // Resource might already exist, that's ok
-            if (this.verbose) {
-              console.warn(`Failed to create resource ${resourceName} during import: ${error.message}`);
-            }
+            // 🪵 Warn: resource creation failed during import
+            this.logger.warn({ resourceName, error: error.message }, `Failed to create resource ${resourceName} during import: ${error.message}`);
           }
         }
       }

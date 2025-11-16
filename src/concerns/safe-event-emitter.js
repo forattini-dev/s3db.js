@@ -19,6 +19,7 @@
  */
 
 import EventEmitter from 'events';
+import { createLogger } from './logger.js';
 
 export class SafeEventEmitter extends EventEmitter {
   constructor(options = {}) {
@@ -29,6 +30,14 @@ export class SafeEventEmitter extends EventEmitter {
       autoCleanup: options.autoCleanup !== false, // Default: true
       maxListeners: options.maxListeners || 0 // 0 = unlimited
     };
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.options.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'SafeEventEmitter', level: logLevel });
+    }
 
     // Track if signal handlers are setup
     this._signalHandlersSetup = false;
@@ -44,9 +53,8 @@ export class SafeEventEmitter extends EventEmitter {
       this._setupSignalHandlers();
     }
 
-    if (this.options.verbose) {
-      // console.log(`[SafeEventEmitter] Initialized with auto-cleanup: ${this.options.autoCleanup}`);
-    }
+    // 🪵 Debug: initialization
+    this.logger.debug({ autoCleanup: this.options.autoCleanup }, `Initialized with auto-cleanup: ${this.options.autoCleanup}`);
   }
 
   /**
@@ -66,9 +74,8 @@ export class SafeEventEmitter extends EventEmitter {
 
     this._signalHandlersSetup = true;
 
-    if (this.options.verbose) {
-      // console.log('[SafeEventEmitter] Signal handlers registered (SIGTERM, SIGINT, beforeExit)');
-    }
+    // 🪵 Debug: signal handlers registered
+    this.logger.debug('Signal handlers registered (SIGTERM, SIGINT, beforeExit)');
   }
 
   /**
@@ -78,9 +85,8 @@ export class SafeEventEmitter extends EventEmitter {
   _handleCleanup(signal) {
     if (this._isDestroyed) return;
 
-    if (this.options.verbose) {
-      // console.log(`[SafeEventEmitter] Received ${signal}, cleaning up listeners...`);
-    }
+    // 🪵 Debug: cleanup signal received
+    this.logger.debug({ signal }, `Received ${signal}, cleaning up listeners...`);
 
     this.destroy();
   }
@@ -90,9 +96,8 @@ export class SafeEventEmitter extends EventEmitter {
    */
   on(eventName, listener) {
     if (this._isDestroyed) {
-      if (this.options.verbose) {
-        console.warn(`[SafeEventEmitter] Cannot add listener for '${eventName}' - emitter is destroyed`);
-      }
+      // 🪵 Warn: cannot add listener
+      this.logger.warn({ eventName }, `Cannot add listener for '${eventName}' - emitter is destroyed`);
       return this;
     }
 
@@ -104,9 +109,8 @@ export class SafeEventEmitter extends EventEmitter {
    */
   once(eventName, listener) {
     if (this._isDestroyed) {
-      if (this.options.verbose) {
-        console.warn(`[SafeEventEmitter] Cannot add once listener for '${eventName}' - emitter is destroyed`);
-      }
+      // 🪵 Warn: cannot add once listener
+      this.logger.warn({ eventName }, `Cannot add once listener for '${eventName}' - emitter is destroyed`);
       return this;
     }
 
@@ -118,9 +122,8 @@ export class SafeEventEmitter extends EventEmitter {
    */
   emit(eventName, ...args) {
     if (this._isDestroyed) {
-      if (this.options.verbose) {
-        console.warn(`[SafeEventEmitter] Cannot emit '${eventName}' - emitter is destroyed`);
-      }
+      // 🪵 Warn: cannot emit on destroyed emitter
+      this.logger.warn({ eventName }, `Cannot emit '${eventName}' - emitter is destroyed`);
       return false;
     }
 
@@ -160,9 +163,8 @@ export class SafeEventEmitter extends EventEmitter {
 
     const totalListeners = this.getTotalListenerCount();
 
-    if (this.options.verbose) {
-      // console.log(`[SafeEventEmitter] Destroying emitter (${totalListeners} listeners)...`);
-    }
+    // 🪵 Debug: destroying emitter
+    this.logger.debug({ totalListeners }, `Destroying emitter (${totalListeners} listeners)...`);
 
     // Remove all listeners
     this.removeAllListeners();
@@ -177,9 +179,8 @@ export class SafeEventEmitter extends EventEmitter {
 
     this._isDestroyed = true;
 
-    if (this.options.verbose) {
-      // console.log('[SafeEventEmitter] Destroyed');
-    }
+    // 🪵 Debug: destroyed
+    this.logger.debug('Destroyed');
   }
 
   /**
@@ -200,9 +201,8 @@ export class SafeEventEmitter extends EventEmitter {
       process.removeListener('beforeExit', this._boundCleanupHandler);
       this._signalHandlersSetup = false;
 
-      if (this.options.verbose) {
-        // console.log('[SafeEventEmitter] Signal handlers removed');
-      }
+      // 🪵 Debug: signal handlers removed
+      this.logger.debug('Signal handlers removed');
     }
   }
 }

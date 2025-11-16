@@ -1,4 +1,8 @@
 import { randomFillSync } from 'node:crypto';
+import { createLogger } from './logger.js';
+
+// Module-level logger for ID generation
+const logger = createLogger({ name: 'IdGenerator', level: 'info' });
 
 // Fallback URL alphabet taken from nanoid's source. Using it keeps generated IDs stable
 // even while we await the official nanoid implementation to load.
@@ -71,7 +75,7 @@ const nanoidReadyPromise = import('nanoid')
   .catch((error) => {
     nanoidInitializationError = error;
     if (typeof process !== 'undefined' && process?.env?.S3DB_DEBUG) {
-      console.warn('[s3db] Failed to dynamically import "nanoid". Using fallback implementation.', error);
+      logger.warn({ error: error.message }, 'Failed to dynamically import "nanoid". Using fallback implementation.');
     }
   });
 
