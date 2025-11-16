@@ -20,6 +20,7 @@ import { createS3Handler, validateS3Config } from '../utils/static-s3.js';
 import { createFailbanAdminRoutes } from '../middlewares/failban.js';
 import { createContextInjectionMiddleware } from '../middlewares/context-injection.js';
 import { applyBasePath } from '../utils/base-path.js';
+import { createLogger } from '../../../concerns/logger.js';
 
 export class Router {
   constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, logLevel, logger, Hono, apiTitle, apiDescription, docsEnabled, rootRoute }) {
@@ -35,7 +36,17 @@ export class Router {
     this.relationsPlugin = relationsPlugin;
     this.authMiddleware = authMiddleware;
     this.logLevel = logLevel;
-    this.logger = logger; // Pino logger instance from APIPlugin
+
+    // Logger with fallback
+    if (logger) {
+      this.logger = logger;
+    } else {
+      this.logger = createLogger({
+        name: 'Router',
+        level: logLevel || 'info'
+      });
+    }
+
     this.Hono = Hono;
     this.apiTitle = apiTitle || 's3db.js API';
     this.apiDescription = apiDescription || 'Auto-generated REST API for s3db.js resources';
@@ -418,13 +429,6 @@ export class Router {
     if (!drivers || (Array.isArray(drivers) && drivers.length === 0)) {
       // 🪵 Warn: auth not configured
       this.logger?.warn('Auth not configured or empty drivers; skipping built-in auth routes');
-      return;
-    }
-
-    const identityPlugin = this.database?.pluginRegistry?.identity || this.database?.pluginRegistry?.Identity;
-    if (identityPlugin) {
-      // 🪵 Warn: IdentityPlugin detected
-      this.logger?.warn('IdentityPlugin detected. Skipping built-in auth routes.');
       return;
     }
 

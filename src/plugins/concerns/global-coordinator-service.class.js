@@ -96,6 +96,12 @@ export class GlobalCoordinatorService extends EventEmitter {
     // Storage helper (will be initialized in initialize())
     this.storage = null;
     this._pluginStorage = null;
+
+    // Logger
+    this.logger = database.getChildLogger(`GlobalCoordinator:${namespace}`, {
+      namespace,
+      serviceId: this.serviceId
+    });
   }
 
   // ==================== LIFECYCLE ====================

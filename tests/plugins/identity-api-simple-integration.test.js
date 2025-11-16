@@ -24,7 +24,8 @@ describe('Identity Plugin Integration Features', () => {
         clients: { name: 'clients' }
       },
       failban: { enabled: false },  // Disable failban to avoid CronManager dependency
-      session: { enableCleanup: false }  // Disable session cleanup
+      session: { enableCleanup: false },  // Disable session cleanup
+      onboarding: { enabled: false }  // Disable onboarding for tests
     });
 
     await db.usePlugin(identityPlugin, 'identity');

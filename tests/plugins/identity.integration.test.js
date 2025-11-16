@@ -56,6 +56,7 @@ describe('IdentityPlugin integration metadata & tokens', () => {
       issuer: 'http://127.0.0.1:4444',
       logLevel: 'error',
       session: { enableCleanup: false },
+      onboarding: { enabled: false },
       supportedScopes: ['openid', 'profile', 'email', 'offline_access', 'orders:read'],
       resources: {
         users: { name: 'users' },

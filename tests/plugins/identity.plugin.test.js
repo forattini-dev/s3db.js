@@ -53,6 +53,7 @@ describe.skip('IdentityPlugin - OAuth2/OIDC Authorization Server', () => {
       accessTokenExpiry: '15m',
       idTokenExpiry: '15m',
       refreshTokenExpiry: '7d',
+      onboarding: { enabled: false },
       logLevel: 'silent'
     });
 

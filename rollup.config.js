@@ -187,6 +187,7 @@ export default {
     '@xenova/transformers',
     'amqplib',
     'bcrypt',
+    'enquirer',
     'express',
     'hono',
     'ioredis',

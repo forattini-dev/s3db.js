@@ -12,91 +12,36 @@ Learn how to integrate the Identity Plugin with Resource Servers, client applica
 
 ---
 
-## S3DB API Plugin Integration (Identity Mode)
+## S3DB API Plugin Integration (standard OIDC)
 
 > Looking for the API-side configuration? See [`docs/plugins/api/guides/identity.md`](../api/guides/identity.md).
 
-The ApiPlugin can now delegate authentication completely to the Identity plugin. Identity publishes metadata so the API knows which issuer, JWKS, and resources to use.
-
-### 1. Expose integration metadata
-
-- In-process: `db.pluginRegistry.identity.integration`
-- HTTPS: `GET https://auth.example.com/.well-known/s3db-identity.json`
-
-Each response contains versioned fields (`version`, `issuedAt`, `cacheTtl`) plus:
-
-| Field | Description |
-|-------|-------------|
-| `issuer`, `authorizationUrl`, `tokenUrl`, `userinfoUrl`, `jwksUrl`, `introspectionUrl` | Standard OIDC endpoints |
-| `supportedScopes`, `supportedGrantTypes`, `supportedResponseTypes` | Capabilities |
-| `resources.users/tenants/clients` | Canonical resource names |
-| `clientRegistration.url` | Where ApiPlugin can auto-register a confidential client |
-
-### 2. Enable identity mode in ApiPlugin
+Configure the API plugin exactly as you would for any other OIDC provider:
 
 ```javascript
 await db.usePlugin(new ApiPlugin({
   port: 3000,
-  identityIntegration: {
-    enabled: true,
-    url: 'https://auth.example.com',     // optional when running in same DB
-    autoProvision: true,                 // POST /oauth/register if no client provided
-    client: {
-      clientId: process.env.API_CLIENT_ID,
-      clientSecret: process.env.API_CLIENT_SECRET,
-      redirectUri: 'https://api.example.com/auth/callback'
-    },
-    require: true                        // fail fast if Identity unreachable
+  auth: {
+    drivers: [
+      {
+        driver: 'oidc',
+        config: {
+          issuer: 'https://auth.example.com',
+          clientId: process.env.OIDC_CLIENT_ID,
+          clientSecret: process.env.OIDC_CLIENT_SECRET,
+          redirectUri: 'https://api.example.com/auth/callback',
+          cookieSecret: process.env.COOKIE_SECRET,
+          scopes: ['openid', 'profile', 'email']
+        }
+      }
+    ]
   }
 }));
 ```
 
-When `autoProvision` is true, the API uses `clientRegistration.url` to create a confidential client and stores the credentials encrypted inside the database. Subsequent boots reuse the stored credentials and validate them via a lightweight `client_credentials` call before accepting traffic.
+The API plugin consumes Identity’s discovery document (`/.well-known/openid-configuration`) and JWKS just like it would for Keycloak, Azure AD, Google, etc. No extra configuration or plugin-to-plugin wiring is required.
 
-### 3. Remote deployments
-
-If Identity runs in a different cluster, set `identityIntegration.url`. ApiPlugin downloads `.well-known/s3db-identity.json`, caches it for `cacheTtl` seconds, and only refreshes when the TTL or ETag expires. If Identity goes down temporarily, the API continues using cached metadata (unless `requireFreshMetadata` is set).
-
-### 4. Health and metrics
-
-- `/health` now includes an `identity` block with status + timestamps.
-- Prometheus metrics track metadata fetch latency, JWKS refresh results, and token exchange failures so you can alert just like you would with Keycloak or Azure AD.
-
-### 5. Service accounts in route handlers
-
-Identity stamps service-account tokens with a `service_account` claim:
-
-```json
-{
-  "token_use": "service",
-  "service_account": {
-    "client_id": "orders-worker",
-    "name": "Orders Worker",
-    "scopes": ["orders:read"],
-    "aud": ["https://api.example.com"]
-  }
-}
-```
-
-In ApiPlugin routes you can now do:
-
-```javascript
-api.addRoute({
-  path: '/admin/jobs',
-  method: 'POST',
-  auth: ['oidc'],
-  handler: async (c, ctx) => {
-    if (ctx.identity.isServiceAccount()) {
-      ctx.assertScope('jobs:dispatch'); // service-account-specific checks
-    } else {
-      ctx.assertRole('admin');
-    }
-    // ...
-  }
-});
-```
-
-User tokens (`token_use: "user"`) keep carrying `sub`, `email`, `tenantId`, etc., so existing guards keep working.
+Service-account tokens issued by Identity include `token_use: "service"` and a `service_account` claim, so the API plugin’s identity helpers (`ctx.identity.isServiceAccount()`, `ctx.identity.getUser()`, etc.) work out of the box.
 
 ---
 

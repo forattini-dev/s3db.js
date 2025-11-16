@@ -10,13 +10,23 @@
  */
 
 import * as formatter from '../../shared/response-formatter.js';
+import { createLogger } from '../../../concerns/logger.js';
 
 export class HealthManager {
   constructor({ database, healthConfig, logLevel, logger }) {
     this.database = database;
     this.healthConfig = healthConfig || {};
     this.logLevel = logLevel;
-    this.logger = logger; // Pino logger from APIPlugin
+
+    // Logger with fallback
+    if (logger) {
+      this.logger = logger;
+    } else {
+      this.logger = createLogger({
+        name: 'HealthManager',
+        level: logLevel || 'info'
+      });
+    }
   }
 
   /**

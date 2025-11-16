@@ -7,9 +7,9 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // ✅ REST API + Auth + Docs + Metrics running
 ```
 
-**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Native IdentityPlugin integration • Row-level security • Rate limiting • Swagger UI • Production metrics
+**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Row-level security • Rate limiting • Swagger UI • Production metrics
 
-**Works with:** IdentityPlugin (self-hosted) • Azure AD • Google • Keycloak • Auth0 • Okta • Any OIDC provider
+**Works with:** Any OIDC provider (IdentityPlugin, Keycloak, Azure AD, AWS Cognito, etc.)
 
 ---
 
