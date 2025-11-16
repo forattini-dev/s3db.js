@@ -45,6 +45,10 @@ async function loadPinoHttp() {
 /**
  * Create pino-http middleware adapted for Hono
  *
+ * Dynamically detects if pino-http is installed:
+ * - If installed: Uses full pino-http with all features
+ * - If not installed: Falls back to simple logging middleware
+ *
  * @param {Object} options - Middleware options
  * @param {Object} options.logger - Pino logger instance
  * @param {boolean} [options.autoLogging=true] - Enable automatic request/response logging
@@ -69,20 +73,24 @@ export async function createPinoLoggerMiddleware(options = {}) {
   // Load pino-http lazily
   const pinoHttpModule = await loadPinoHttp();
 
-  // Check if pino-http is available
+  // If pino-http is NOT available, use simple fallback middleware
   if (!pinoHttpModule) {
-    logger.warn(
-      'pino-http is not installed. HTTP request logging is disabled. ' +
-      'Install with: npm install pino-http'
+    logger.debug(
+      'pino-http not installed - using simple HTTP logging middleware. ' +
+      'For enhanced features, install: npm install pino-http'
     );
 
-    // Return no-op middleware
-    return async (c, next) => {
-      c.set('logger', logger);
-      c.set('reqLogger', logger);
-      await next();
-    };
+    return createSimpleHttpLoggerMiddleware({
+      logger,
+      autoLogging,
+      customLogLevel,
+      ignorePaths,
+      customProps
+    });
   }
+
+  // pino-http IS available - use full-featured middleware
+  logger.debug('pino-http detected - using enhanced HTTP logging');
 
   // Create pino-http instance
   const httpLogger = pinoHttpModule({
@@ -97,7 +105,7 @@ export async function createPinoLoggerMiddleware(options = {}) {
     }
   });
 
-  // Return Hono-compatible middleware
+  // Return Hono-compatible middleware with pino-http
   return async (c, next) => {
     const path = c.req.path;
 
@@ -137,6 +145,113 @@ export async function createPinoLoggerMiddleware(options = {}) {
     } catch (err) {
       // Log error
       req.log.error({ err }, 'request error');
+      throw err; // Re-throw for error handler
+    }
+  };
+}
+
+/**
+ * Create simple HTTP logger middleware (fallback when pino-http not installed)
+ *
+ * Provides basic HTTP logging without pino-http dependency:
+ * - Request logging (method, URL, headers)
+ * - Response logging (status code, duration)
+ * - Error logging
+ *
+ * @param {Object} options - Middleware options
+ * @param {Object} options.logger - Pino logger instance
+ * @param {boolean} [options.autoLogging=true] - Enable automatic logging
+ * @param {Function} [options.customLogLevel] - Custom log level function
+ * @param {Array<string>} [options.ignorePaths=[]] - Paths to skip
+ * @param {Object} [options.customProps] - Additional properties
+ * @returns {Function} Hono middleware function
+ */
+function createSimpleHttpLoggerMiddleware(options) {
+  const {
+    logger,
+    autoLogging = true,
+    customLogLevel = defaultLogLevel,
+    ignorePaths = [],
+    customProps = null
+  } = options;
+
+  return async (c, next) => {
+    const path = c.req.path;
+
+    // Skip logging for ignored paths
+    if (ignorePaths.some(ignorePath => path.startsWith(ignorePath))) {
+      // Still attach logger to context
+      c.set('logger', logger);
+      c.set('reqLogger', logger);
+      return next();
+    }
+
+    // Attach logger to context
+    c.set('logger', logger);
+    c.set('reqLogger', logger);
+
+    if (!autoLogging) {
+      return next();
+    }
+
+    const startTime = Date.now();
+    const method = c.req.method;
+    const url = c.req.url;
+
+    // Log request
+    logger.info({
+      req: {
+        method,
+        url: path,
+        headers: {
+          'user-agent': c.req.header('user-agent'),
+          'content-type': c.req.header('content-type')
+        }
+      },
+      ...(customProps ? customProps(c.req.raw, c.res) : {})
+    }, 'request started');
+
+    try {
+      await next();
+
+      // Log response
+      const duration = Date.now() - startTime;
+      const statusCode = c.res.status || 200;
+
+      // Determine log level based on status code
+      const level = customLogLevel(
+        { method, url },
+        { statusCode },
+        null
+      );
+
+      logger[level]({
+        req: {
+          method,
+          url: path
+        },
+        res: {
+          statusCode,
+          headers: {
+            'content-type': c.res.headers.get('content-type')
+          }
+        },
+        responseTime: duration
+      }, 'request completed');
+
+    } catch (err) {
+      // Log error
+      const duration = Date.now() - startTime;
+
+      logger.error({
+        req: {
+          method,
+          url: path
+        },
+        err: errSerializer(err),
+        responseTime: duration
+      }, 'request error');
+
       throw err; // Re-throw for error handler
     }
   };

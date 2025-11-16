@@ -21,12 +21,12 @@ npm install hono
 
 ### HTTP Request Logging
 
-**pino-http** - Automatic HTTP request/response logging
+**pino-http** - Enhanced HTTP request/response logging (optional)
 ```bash
 npm install pino-http
 ```
 
-**Why it's optional:** Not all applications need detailed HTTP logging. Development/debugging environments may want it, while simple APIs might not.
+**Why it's optional:** The API Plugin includes a built-in simple HTTP logger that works without any dependencies. Install `pino-http` for enhanced features and better performance.
 
 **Package size:** ~20KB
 
@@ -42,14 +42,21 @@ const api = new APIPlugin({
 });
 ```
 
-**Features:**
-- Automatic request/response logging
-- Request ID correlation
-- Custom log levels per HTTP status
-- Error serialization with `toJSON()`
-- Path filtering
+**Features Comparison:**
 
-**Graceful degradation:** If `pino-http` is not installed and `httpLogger.enabled` is `true`, the API Plugin will log a warning and continue without HTTP logging.
+| Feature | With pino-http | Without (built-in) |
+|---------|---------------|-------------------|
+| Request/Response logging | ✅ Full | ✅ Basic |
+| Request ID correlation | ✅ Automatic | ✅ Manual |
+| Custom serializers | ✅ Yes | ✅ Basic |
+| Error serialization | ✅ toJSON() | ✅ toJSON() |
+| Path filtering | ✅ Yes | ✅ Yes |
+| Performance | ⚡ Optimized | ⚡ Good |
+| Installation required | ❌ Optional | ✅ Built-in |
+
+**Smart Detection:** The middleware automatically detects if `pino-http` is installed:
+- **If installed:** Uses full-featured pino-http
+- **If NOT installed:** Falls back to simple built-in logger (no warnings, no errors)
 
 ---
 
