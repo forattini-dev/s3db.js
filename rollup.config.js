@@ -194,6 +194,9 @@ export default {
     'node-cron',
     'nodemailer',
     'pg',
+    'pino',
+    'pino-http',
+    'pino-pretty',
     'uuid',
 
     // Peer dependencies - Puppeteer ecosystem (user installs - optional)

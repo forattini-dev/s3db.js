@@ -1,2 +1,9 @@
 onlyBuiltDependencies:
+  - '@tensorflow/tfjs-node'
+  - bcrypt
+  - core-js
+  - esbuild
+  - protobufjs
   - puppeteer
+  - sharp
+  - unrs-resolver

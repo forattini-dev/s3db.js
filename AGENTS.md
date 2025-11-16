@@ -43,6 +43,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 - Prefer camelCase for variables/functions, PascalCase for classes/plugins.
 - Plugins export a `*Plugin` class and expose drivers/utilities via `index.js`.
 - Format with Prettier defaults (via editor) and keep imports sorted semantically.
+- Avoid inline/block comments scattered through code. When documentation is necessary, use JSDoc blocks placed immediately before the class, function, method, or constant being described.
 
 ## Testing Guidelines
 - Jest for JS; TypeScript compile check via `pnpm run test:ts`.

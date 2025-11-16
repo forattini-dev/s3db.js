@@ -380,6 +380,7 @@ notifications/spec.md
 - Single-file implementations until proven insufficient
 - Avoid frameworks without clear justification
 - Choose boring, proven patterns
+- Prefer JSDoc blocks for documentation (placed immediately before the class/function/method/constant) instead of scattering inline comments throughout code.
 
 ### Complexity Triggers
 Only add complexity with:
