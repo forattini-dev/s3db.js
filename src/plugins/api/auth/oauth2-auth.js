@@ -7,15 +7,30 @@
  * Use this driver when your application acts as a Resource Server
  * consuming tokens from an external Authorization Server (SSO).
  *
+ * Config options:
+ * - resource: Resource name (default: 'plg_api_oauth2_users')
+ * - createResource: Auto-create resource (default: true)
+ * - userMapping: Map token claims to user fields (default: { id: 'sub', email: 'email', username: 'preferred_username' })
+ * - issuer: OAuth2 issuer URL (required)
+ * - jwksUri: JWKS endpoint (optional, auto-discovered)
+ * - audience: Expected audience claim (optional)
+ * - algorithms: Allowed algorithms (default: ['RS256', 'ES256'])
+ * - cacheTTL: JWKS cache duration (default: 1 hour)
+ * - fetchUserInfo: Fetch user from database (default: true)
+ *
  * @example
  * {
  *   driver: 'oauth2',
  *   config: {
- *     issuer: 'http://localhost:4000',
- *     jwksUri: 'http://localhost:4000/.well-known/jwks.json',
+ *     resource: 'users',
+ *     userMapping: {
+ *       id: 'sub',
+ *       email: 'email',
+ *       username: 'preferred_username'
+ *     },
+ *     issuer: 'https://auth.example.com',
  *     audience: 'my-api',
- *     algorithms: ['RS256'],
- *     cacheTTL: 3600000  // 1 hour
+ *     algorithms: ['RS256']
  *   }
  * }
  */
@@ -23,7 +38,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createLogger } from '../../../concerns/logger.js';
 import { applyProviderPreset } from './providers.js';
-
+import { OAuth2ResourceManager } from './resource-manager.js';
 
 // Module-level logger
 const logger = createLogger({ name: 'OAuth2Auth', level: 'info' });
@@ -31,12 +46,12 @@ const logger = createLogger({ name: 'OAuth2Auth', level: 'info' });
 const jwksCache = new Map();
 
 /**
- * Create OAuth2 authentication handler
- * @param {Object} config - OAuth2 configuration
- * @param {Object} usersResource - s3db.js users resource
- * @returns {Function} Hono middleware
+ * Create OAuth2 authentication handler (NEW API)
+ * @param {Object} inputConfig - OAuth2 configuration
+ * @param {Database} database - s3db.js database instance
+ * @returns {Promise<Function>} Hono middleware
  */
-export function createOAuth2Handler(inputConfig, usersResource) {
+export async function createOAuth2Handler(inputConfig, database) {
   const config = applyProviderPreset('oauth2', inputConfig || {});
   const {
     issuer,
@@ -47,13 +62,28 @@ export function createOAuth2Handler(inputConfig, usersResource) {
     clockTolerance = 60, // 60 seconds tolerance for exp/nbf
     validateScopes = true,
     fetchUserInfo = true,
-    introspection = null, // { enabled, endpoint?, clientId, clientSecret, useDiscovery? }
-    verbose = false
+    userMapping = {
+      id: 'sub',
+      email: 'email',
+      username: 'preferred_username',
+      role: 'role'
+    },
+    introspection = null // { enabled, endpoint?, clientId, clientSecret, useDiscovery? }
   } = config;
 
   if (!issuer) {
-    throw new Error('[OAuth2 Auth] Missing required config: issuer');
+    throw new Error('OAuth2 driver: issuer is required');
   }
+
+  if (!database) {
+    throw new Error('OAuth2 driver: database is required');
+  }
+
+  // Get or create resource
+  const manager = new OAuth2ResourceManager(database, 'oauth2', config);
+  const authResource = await manager.getOrCreateResource();
+
+  logger.debug(`OAuth2 driver initialized with resource: ${authResource.name}, issuer: ${issuer}`);
 
   // Resolve JWKS URI via discovery (OAuth2/OIDC) or fallback to default path
   const resolveJwksUri = async () => {
@@ -114,25 +144,25 @@ export function createOAuth2Handler(inputConfig, usersResource) {
       const jwks = await getJWKS();
       const verifyOptions = { issuer, algorithms, clockTolerance, ...(audience ? { audience } : {}) };
       const { payload } = await jwtVerify(token, jwks, verifyOptions);
-      
-      // Extract user info from token claims
-      const userId = payload.sub; // Subject (user ID)
-      const email = payload.email || null;
-      const username = payload.preferred_username || payload.username || email;
+
+      // Extract user info from token claims using userMapping
+      const userId = payload[userMapping.id] || payload.sub; // Subject (user ID)
+      const email = payload[userMapping.email] || payload.email || null;
+      const username = payload[userMapping.username] || payload.preferred_username || payload.username || email;
       const scopes = payload.scope ? payload.scope.split(' ') : (payload.scopes || []);
-      const role = payload.role || 'user';
+      const role = payload[userMapping.role] || payload.role || 'user';
 
       // Optionally fetch full user info from database
       let user = null;
 
-      if (fetchUserInfo && userId && usersResource) {
+      if (fetchUserInfo && userId && authResource) {
         try {
           // Try to find user by ID
-          user = await usersResource.get(userId).catch(() => null);
+          user = await authResource.get(userId).catch(() => null);
 
           // If not found by ID, try by email
           if (!user && email) {
-            const users = await usersResource.query({ email }, { limit: 1 });
+            const users = await authResource.query({ email }, { limit: 1 });
             user = users[0] || null;
           }
         } catch (err) {
@@ -214,11 +244,11 @@ export function createOAuth2Handler(inputConfig, usersResource) {
         const role = data.role || data.roles || 'user';
 
         let user = null;
-        if (fetchUserInfo && usersResource && userId) {
+        if (fetchUserInfo && authResource && userId) {
           try {
-            user = await usersResource.get(userId).catch(() => null);
+            user = await authResource.get(userId).catch(() => null);
             if (!user && email) {
-              const res = await usersResource.query({ email }, { limit: 1 });
+              const res = await authResource.query({ email }, { limit: 1 });
               user = res[0] || null;
             }
           } catch {}
