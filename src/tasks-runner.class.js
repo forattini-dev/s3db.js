@@ -213,11 +213,13 @@ export class TasksRunner extends EventEmitter {
 
     this.features = {
       profile,
-      emitEvents: options.features?.emitEvents ?? true,
-      trackProcessedItems: options.features?.trackProcessedItems ?? profile !== 'light',
+      emitEvents: options.features?.emitEvents ?? profile !== 'bare',
+      trackProcessedItems:
+        options.features?.trackProcessedItems ?? (profile !== 'light' && profile !== 'bare'),
       signatureInsights: options.features?.signatureInsights ?? true
     }
-    this.lightMode = this.features.profile === 'light'
+    this.lightMode = this.features.profile === 'light' || this.features.profile === 'bare'
+    this.bareMode = this.features.profile === 'bare'
 
     this.concurrency = options.concurrency || 5
     this.retries = requestedRetries
@@ -241,7 +243,7 @@ export class TasksRunner extends EventEmitter {
 
     this.processedItems = this.features.trackProcessedItems ? [] : null
     this.taskMetrics = new Map()
-    const monitoringEnabled = monitoringRequested
+    const monitoringEnabled = !this.bareMode && monitoringRequested
     const collectMetricsRequested = options.monitoring?.collectMetrics ?? false
     const collectMetrics =
       monitoringEnabled && (collectMetricsRequested || monitoringMode === 'detailed')
@@ -276,7 +278,7 @@ export class TasksRunner extends EventEmitter {
     this._lastTunedConcurrency = null
 
     const tunerInstance = options.autoTuning?.instance
-    if (autoTuningRequested) {
+    if (!this.bareMode && autoTuningRequested) {
       this.autoTuningConfig = options.autoTuning
       this.tuner = tunerInstance || new AdaptiveTuning(options.autoTuning)
      const tunedConcurrency = this.tuner.getConcurrency()
@@ -587,6 +589,10 @@ export class TasksRunner extends EventEmitter {
     if (this.paused || this.stopped) {
       return
     }
+    if (this.bareMode) {
+      this._processBareQueue()
+      return
+    }
 
     while (this._queue.length > 0 && this._activeLightTasks < this.concurrency) {
       const task = this._queue.dequeue()
@@ -624,6 +630,33 @@ export class TasksRunner extends EventEmitter {
             this._safeEmit('drained')
           } else {
             this._processLightQueue()
+          }
+        })
+    }
+  }
+
+  _processBareQueue () {
+    while (this._queue.length > 0 && this._activeLightTasks < this.concurrency) {
+      const task = this._queue.dequeue()
+      if (!task) break
+
+      this._activeLightTasks++
+      const taskPromise = this._executeBareTask(task)
+
+      taskPromise
+        .then((result) => {
+          task.resolve(result)
+        })
+        .catch((error) => {
+          task.reject(error)
+        })
+        .finally(() => {
+          this._activeLightTasks--
+          this._notifyActiveWaiters()
+          if (this._activeLightTasks === 0 && this._queue.length === 0) {
+            this._safeEmit('drained')
+          } else {
+            this._processBareQueue()
           }
         })
     }
@@ -673,6 +706,10 @@ export class TasksRunner extends EventEmitter {
    * @private
    */
   async _executeTaskWithRetry (task) {
+    if (this.bareMode || (task.retries === 0 && !this._shouldEnforceTimeout(task.timeout))) {
+      return await this._runSingleAttempt(task)
+    }
+
     let lastError
 
     for (let attempt = 0; attempt <= task.retries; attempt++) {
@@ -680,7 +717,7 @@ export class TasksRunner extends EventEmitter {
       const attemptStartedAt = this.monitoring.enabled ? Date.now() : 0
 
       try {
-        const result = await this._executeWithTimeout(task.fn(), task.timeout, task)
+        const result = await this._runSingleAttempt(task)
         return result
       } catch (error) {
         lastError = error
@@ -709,6 +746,31 @@ export class TasksRunner extends EventEmitter {
     }
 
     throw lastError
+  }
+
+  async _runSingleAttempt (task) {
+    const operation = Promise.resolve().then(() => task.fn())
+    if (!this._shouldEnforceTimeout(task.timeout)) {
+      return await operation
+    }
+    return await this._executeWithTimeout(operation, task.timeout, task)
+  }
+
+  async _executeBareTask (task) {
+    return await this._runSingleAttempt(task)
+  }
+
+  _shouldEnforceTimeout (timeout) {
+    if (this.bareMode) {
+      return false
+    }
+    if (timeout == null) {
+      return false
+    }
+    if (!Number.isFinite(timeout)) {
+      return false
+    }
+    return timeout > 0
   }
 
   /**

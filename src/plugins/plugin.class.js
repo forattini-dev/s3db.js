@@ -32,11 +32,22 @@ export class Plugin extends EventEmitter {
 
     // 🪵 Logger initialization - will be set by database.usePlugin() or create standalone
     // Plugins should NEVER create logger.child() in hot paths (hooks, interceptors)
+    const logLevel = this.options.logLevel || 'info';
     if (options.logger) {
       this.logger = options.logger; // Custom logger passed in options
     } else {
       // Create minimal logger for standalone plugins (no database)
-      this.logger = createLogger({ name: `Plugin:${this.name}`, level: 'info' });
+      this.logger = createLogger({ name: `Plugin:${this.name}`, level: logLevel });
+    }
+
+    // 🚨 Deprecation warning for verbose option
+    if (options.verbose !== undefined) {
+      const suggestedLevel = options.verbose ? 'debug' : 'info';
+      this.logger.warn(
+        `DEPRECATED: 'verbose' option is deprecated. ` +
+        `Use 'logLevel: "${suggestedLevel}"' instead. ` +
+        `This will be removed in v17.0.`
+      );
     }
 
     if (options.namespace || options.instanceId) {

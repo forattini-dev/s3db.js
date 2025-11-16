@@ -386,6 +386,29 @@ async function main() {
 
     results.push(
       await runScenarioMultiple(
+        'TasksRunner (bare profile)',
+        (wl) =>
+          runTasksRunner(
+            'TasksRunner (bare profile)',
+            () =>
+              new TasksRunner({
+                concurrency: CONCURRENCY,
+                retries: 0,
+                timeout: 0,
+                features: {
+                  profile: 'bare',
+                  emitEvents: false,
+                  trackProcessedItems: false
+                }
+              }),
+            wl
+          ),
+        workload
+      )
+    )
+
+    results.push(
+      await runScenarioMultiple(
         'TasksRunner (monitoring enabled)',
         (wl) =>
           runTasksRunner(
@@ -418,6 +441,28 @@ async function main() {
               retries: 0,
               timeout: 60000,
               monitoring: { enabled: false }
+            },
+            wl
+          ),
+        workload
+      )
+    )
+
+    results.push(
+      await runScenarioMultiple(
+        'TasksPool (bare profile)',
+        (wl) =>
+          runTasksPool(
+            'TasksPool (bare profile)',
+            {
+              concurrency: CONCURRENCY,
+              retries: 0,
+              timeout: 0,
+              monitoring: { enabled: false },
+              features: {
+                profile: 'bare',
+                emitEvents: false
+              }
             },
             wl
           ),

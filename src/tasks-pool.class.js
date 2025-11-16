@@ -101,10 +101,11 @@ export class TasksPool extends EventEmitter {
 
     this.features = {
       profile,
-      emitEvents: options.features?.emitEvents ?? true,
+      emitEvents: options.features?.emitEvents ?? profile !== 'bare',
       signatureInsights: options.features?.signatureInsights ?? true
     }
-    this.lightMode = this.features.profile === 'light'
+    this.lightMode = this.features.profile === 'light' || this.features.profile === 'bare'
+    this.bareMode = this.features.profile === 'bare'
     const tunerInstance = options.autoTuning?.instance
     const autoTuningRequested = options.autoTuning?.enabled || tunerInstance
 
@@ -170,7 +171,7 @@ export class TasksPool extends EventEmitter {
     }
 
     // Metrics collection (optional)
-    const monitoringEnabled = monitoringRequested
+    const monitoringEnabled = !this.bareMode && monitoringRequested
     const collectMetricsRequested = options.monitoring?.collectMetrics ?? false
     const collectMetrics =
       monitoringEnabled && (collectMetricsRequested || monitoringMode === 'detailed')
@@ -209,7 +210,7 @@ export class TasksPool extends EventEmitter {
     // Auto-tuning (optional, initialized externally if needed)
     this.tuner = null
     this._lastTunedConcurrency = null
-    if (autoTuningRequested) {
+    if (!this.bareMode && autoTuningRequested) {
       this.autoTuningConfig = options.autoTuning
       this.tuner = tunerInstance || new AdaptiveTuning(options.autoTuning)
       const tuned = this.tuner.getConcurrency()
@@ -566,6 +567,10 @@ export class TasksPool extends EventEmitter {
     if (this.paused || this.stopped) {
       return
     }
+    if (this.bareMode) {
+      this._processBareQueue()
+      return
+    }
 
     while (this.queue.length > 0 && this._lightActiveTasks < this.effectiveConcurrency) {
       const task = this.queue.dequeue()
@@ -604,6 +609,35 @@ export class TasksPool extends EventEmitter {
     }
   }
 
+  _processBareQueue () {
+    while (this.queue.length > 0 && this._lightActiveTasks < this.effectiveConcurrency) {
+      const task = this.queue.dequeue()
+      if (!task) break
+
+      this._lightActiveTasks++
+      const taskPromise = this._executeBareTask(task)
+
+      taskPromise
+        .then((result) => {
+          task.resolve(result)
+          this._applyTunedConcurrency()
+        })
+        .catch((error) => {
+          task.reject(error)
+          this._applyTunedConcurrency()
+        })
+        .finally(() => {
+          this._lightActiveTasks--
+          this._notifyActiveWaiters()
+          if (this._lightActiveTasks === 0 && this.queue.length === 0) {
+            this._safeEmit('pool:drained')
+          } else {
+            this._processBareQueue()
+          }
+        })
+    }
+  }
+
   /**
    * Execute task with retry logic
    *
@@ -617,6 +651,10 @@ export class TasksPool extends EventEmitter {
    * @returns {Promise} Promise that resolves with result or rejects with final error
    */
   async _executeTaskWithRetry (task) {
+    if (this.bareMode || (task.retries === 0 && !this._shouldEnforceTimeout(task.timeout))) {
+      return await this._runSingleAttempt(task)
+    }
+
     let lastError
 
     for (let attempt = 0; attempt <= task.retries; attempt++) {
@@ -628,53 +666,17 @@ export class TasksPool extends EventEmitter {
         task.timings.queueWait = task.startedAt - task.createdAt
       }
 
-      // Capture pre-execution metrics
-      if (task.collectMetrics && this.memorySampler) {
-        task.performance.heapUsedBefore = this._readHeapUsage('before')
-      }
-
-      const attemptStartTime = Date.now()
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-      task.controller = controller
-      task.delayController = null
-
       try {
-        // Execute with timeout and abort support
-        const context = this._buildTaskContext(task, controller)
-        const executionPromise = Promise.resolve().then(() => task.fn(context))
-        const result = await this._executeWithTimeout(
-          executionPromise,
-          task.timeout,
-          task,
-          controller
-        )
-
-        // Record execution time
-        const attemptEndTime = Date.now()
-        task.timings.execution = attemptEndTime - attemptStartTime
-
-        // Capture post-execution metrics
-        if (task.collectMetrics && this.memorySampler) {
-          task.performance.heapUsedAfter = this._readHeapUsage('after')
-          task.performance.heapDelta = this._computeHeapDelta(
-            task.performance.heapUsedBefore,
-            task.performance.heapUsedAfter
-          )
-        }
-
-        task.controller = null
+        const result = await this._runSingleAttempt(task)
         return result
       } catch (error) {
         lastError = error
-
-        const attemptEndTime = Date.now()
-        const attemptDuration = attemptEndTime - attemptStartTime
 
         // Record failed attempt
         if (task.timings.failedAttempts) {
           task.timings.failedAttempts.push({
             attempt: attempt + 1,
-            duration: attemptDuration,
+            duration: task.timings.execution || 0,
             error: error.message
           })
         }
@@ -718,6 +720,46 @@ export class TasksPool extends EventEmitter {
     }
 
     throw lastError
+  }
+
+  async _runSingleAttempt (task) {
+    if (typeof task.startedAt !== 'number') {
+      task.startedAt = Date.now()
+      task.timings.queueWait = task.startedAt - task.createdAt
+    }
+
+    if (task.collectMetrics && this.memorySampler) {
+      task.performance.heapUsedBefore = this._readHeapUsage('before')
+    }
+
+    const controller =
+      this._shouldEnforceTimeout(task.timeout) && typeof AbortController !== 'undefined'
+        ? new AbortController()
+        : null
+    task.controller = controller || null
+    const attemptStartTime = Date.now()
+    const context = this._buildTaskContext(task, controller)
+    const executionPromise = Promise.resolve().then(() => task.fn(context))
+    const result = this._shouldEnforceTimeout(task.timeout)
+      ? await this._executeWithTimeout(executionPromise, task.timeout, task, controller)
+      : await executionPromise
+    const attemptEndTime = Date.now()
+    task.timings.execution = attemptEndTime - attemptStartTime
+
+    if (task.collectMetrics && this.memorySampler) {
+      task.performance.heapUsedAfter = this._readHeapUsage('after')
+      task.performance.heapDelta = this._computeHeapDelta(
+        task.performance.heapUsedBefore,
+        task.performance.heapUsedAfter
+      )
+    }
+
+    task.controller = null
+    return result
+  }
+
+  async _executeBareTask (task) {
+    return await this._runSingleAttempt(task)
   }
 
   /**
@@ -1174,6 +1216,19 @@ export class TasksPool extends EventEmitter {
       return null
     }
     return after - before
+  }
+
+  _shouldEnforceTimeout (timeout) {
+    if (this.bareMode) {
+      return false
+    }
+    if (timeout == null) {
+      return false
+    }
+    if (!Number.isFinite(timeout)) {
+      return false
+    }
+    return timeout > 0
   }
 
   _computeRetryDelay (task, attempt, error) {
