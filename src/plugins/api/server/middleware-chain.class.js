@@ -2,10 +2,10 @@
  * MiddlewareChain - Manages middleware application order
  *
  * Applies middlewares in correct order for security and performance:
- * 1. Compression (early for maximum benefit)
- * 2. Request tracking (for graceful shutdown)
- * 3. Failban (block banned IPs early)
- * 4. Request ID (before all logging)
+ * 1. Request tracking (for graceful shutdown)
+ * 2. Failban (block banned IPs early)
+ * 3. Request ID (before all logging)
+ * 4. Pino HTTP logger (automatic request/response logging)
  * 5. Error helper (adds c.error() method)
  * 6. CORS (before auth checks)
  * 7. Security headers
@@ -17,6 +17,7 @@
 
 import { idGenerator } from '../../../concerns/id.js';
 import { createRequestIdMiddleware } from '../middlewares/request-id.js';
+import { createPinoLoggerMiddleware } from '../middlewares/pino-logger.js';
 import { createSecurityHeadersMiddleware } from '../middlewares/security-headers.js';
 import { createSessionTrackingMiddleware } from '../middlewares/session-tracking.js';
 import { createFailbanMiddleware, setupFailbanViolationListener } from '../middlewares/failban.js';
@@ -36,6 +37,8 @@ export class MiddlewareChain {
     failban,
     events,
     verbose,
+    logger,
+    httpLogger, // pino-http configuration
     database,
     inFlightRequests,
     acceptingRequests,
@@ -51,6 +54,8 @@ export class MiddlewareChain {
     this.failban = failban;
     this.events = events;
     this.verbose = verbose;
+    this.logger = logger || { debug: () => {} }; // Optional Pino logger from APIPlugin, noop if not provided
+    this.httpLogger = httpLogger; // pino-http configuration
     this.database = database;
     this.inFlightRequests = inFlightRequests;
     this.acceptingRequests = acceptingRequests;
@@ -61,7 +66,7 @@ export class MiddlewareChain {
    * Apply all middlewares to Hono app in correct order
    * @param {Hono} app - Hono application instance
    */
-  apply(app) {
+  async apply(app) {
     // 1. Request tracking (must be first!)
     this.applyRequestTracking(app);
 
@@ -71,25 +76,28 @@ export class MiddlewareChain {
     // 3. Request ID
     this.applyRequestId(app);
 
-    // 4. Error helper (adds c.error() method)
+    // 4. Pino HTTP logger (automatic request/response logging)
+    await this.applyHttpLogger(app);
+
+    // 5. Error helper (adds c.error() method)
     this.applyErrorHelper(app);
 
-    // 5. CORS
+    // 6. CORS
     this.applyCors(app);
 
-    // 6. Security headers
+    // 7. Security headers
     this.applySecurity(app);
 
-    // 7. Session tracking
+    // 8. Session tracking
     this.applySessionTracking(app);
 
-    // 8. Custom middlewares (compression will be applied here via ApiPlugin)
+    // 9. Custom middlewares (compression will be applied here via ApiPlugin)
     this.applyCustomMiddlewares(app);
 
-    // 9. Template engine
+    // 10. Template engine
     this.applyTemplates(app);
 
-    // 10. Body size limits
+    // 11. Body size limits
     this.applyBodySizeLimits(app);
   }
 
@@ -167,9 +175,8 @@ export class MiddlewareChain {
       events: this.events
     });
 
-    if (this.verbose) {
-      console.log('[MiddlewareChain] Failban protection enabled');
-    }
+    // 🪵 Debug: failban protection enabled
+    this.logger.debug('Failban protection enabled');
   }
 
   /**
@@ -189,9 +196,35 @@ export class MiddlewareChain {
     const requestIdMiddleware = createRequestIdMiddleware(this.requestId);
     app.use('*', requestIdMiddleware);
 
-    if (this.verbose) {
-      console.log(`[MiddlewareChain] Request ID tracking enabled (header: ${this.requestId.headerName || 'X-Request-ID'})`);
+    // 🪵 Debug: request ID tracking enabled
+    const headerName = this.requestId.headerName || 'X-Request-ID';
+    this.logger.debug({ headerName }, `Request ID tracking enabled (header: ${headerName})`);
+  }
+
+  /**
+   * Apply pino-http logger middleware
+   * @private
+   */
+  async applyHttpLogger(app) {
+    if (!this.httpLogger?.enabled || !this.logger) {
+      return;
     }
+
+    const pinoMiddleware = await createPinoLoggerMiddleware({
+      logger: this.logger,
+      autoLogging: this.httpLogger.autoLogging !== false,
+      ignorePaths: this.httpLogger.ignorePaths || ['/health', '/metrics'],
+      customLogLevel: this.httpLogger.customLogLevel,
+      customProps: this.httpLogger.customProps
+    });
+
+    app.use('*', pinoMiddleware);
+
+    // 🪵 Debug: pino-http logger enabled
+    this.logger.debug({
+      autoLogging: this.httpLogger.autoLogging !== false,
+      ignorePaths: this.httpLogger.ignorePaths || ['/health', '/metrics']
+    }, 'Pino HTTP logger enabled');
   }
 
   /**
@@ -207,9 +240,8 @@ export class MiddlewareChain {
 
     app.use('*', errorMiddleware);
 
-    if (this.verbose) {
-      console.log('[MiddlewareChain] Error helper enabled (c.error() method available)');
-    }
+    // 🪵 Debug: error helper enabled
+    this.logger.debug('Error helper enabled (c.error() method available)');
   }
 
   /**
@@ -231,9 +263,10 @@ export class MiddlewareChain {
       maxAge: corsConfig.maxAge || 86400
     }));
 
-    if (this.verbose) {
-      console.log(`[MiddlewareChain] CORS enabled (maxAge: ${corsConfig.maxAge || 86400}s, origin: ${corsConfig.origin || '*'})`);
-    }
+    // 🪵 Debug: CORS enabled
+    const maxAge = corsConfig.maxAge || 86400;
+    const origin = corsConfig.origin || '*';
+    this.logger.debug({ maxAge, origin }, `CORS enabled (maxAge: ${maxAge}s, origin: ${origin})`);
   }
 
   /**
@@ -248,9 +281,8 @@ export class MiddlewareChain {
     const securityMiddleware = createSecurityHeadersMiddleware(this.security);
     app.use('*', securityMiddleware);
 
-    if (this.verbose) {
-      console.log('[MiddlewareChain] Security headers enabled');
-    }
+    // 🪵 Debug: security headers enabled
+    this.logger.debug('Security headers enabled');
   }
 
   /**
@@ -268,10 +300,9 @@ export class MiddlewareChain {
     );
     app.use('*', sessionMiddleware);
 
-    if (this.verbose) {
-      const resource = this.sessionTracking.resource ? ` (resource: ${this.sessionTracking.resource})` : ' (in-memory)';
-      console.log(`[MiddlewareChain] Session tracking enabled${resource}`);
-    }
+    // 🪵 Debug: session tracking enabled
+    const storageType = this.sessionTracking.resource ? this.sessionTracking.resource : 'in-memory';
+    this.logger.debug({ storageType }, `Session tracking enabled (${storageType})`);
   }
 
   /**
@@ -283,8 +314,9 @@ export class MiddlewareChain {
       app.use('*', middleware);
     });
 
-    if (this.verbose && this.middlewares.length > 0) {
-      console.log(`[MiddlewareChain] Applied ${this.middlewares.length} custom middleware(s)`);
+    // 🪵 Debug: applied custom middlewares
+    if (this.middlewares.length > 0) {
+      this.logger.debug({ count: this.middlewares.length }, `Applied ${this.middlewares.length} custom middleware(s)`);
     }
   }
 
@@ -300,9 +332,8 @@ export class MiddlewareChain {
     const templateMiddleware = setupTemplateEngine(this.templates);
     app.use('*', templateMiddleware);
 
-    if (this.verbose) {
-      console.log(`[MiddlewareChain] Template engine enabled: ${this.templates.engine}`);
-    }
+    // 🪵 Debug: template engine enabled
+    this.logger.debug({ engine: this.templates.engine }, `Template engine enabled: ${this.templates.engine}`);
   }
 
   /**
