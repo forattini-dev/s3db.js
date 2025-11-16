@@ -1,15 +1,35 @@
 /**
  * API Key Authentication - Simple API key authentication middleware
  *
- * Provides authentication using static API keys in headers
+ * Provides authentication using static API keys in headers or query params.
+ *
+ * Config options:
+ * - resource: Resource name (default: 'plg_api_apikey_users')
+ * - createResource: Auto-create resource (default: true)
+ * - keyField: Field containing API key (default: 'apiKey')
+ * - headerName: Header name (default: 'X-API-Key')
+ * - queryParam: Query param name (optional, e.g., 'api_key')
+ * - optional: Allow requests without auth (default: false)
+ *
+ * @example
+ * {
+ *   driver: 'apiKey',
+ *   config: {
+ *     resource: 'api_clients',
+ *     keyField: 'apiKey',
+ *     headerName: 'X-API-Key',
+ *     queryParam: 'api_key'
+ *   }
+ * }
  */
 
 import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
-
+import { APIKeyResourceManager } from './resource-manager.js';
 
 // Module-level logger
 const logger = createLogger({ name: 'ApiKeyAuth', level: 'info' });
+
 /**
  * Generate random API key
  * @param {number} length - Key length (default: 32)
@@ -28,36 +48,109 @@ export function generateApiKey(length = 32) {
 
 /**
  * Create API Key authentication middleware
- * @param {Object} options - API Key options
- * @param {string} options.headerName - Header name for API key (default: 'X-API-Key')
- * @param {Object} options.usersResource - Users resource for key validation
- * @param {boolean} options.optional - If true, allows requests without auth
- * @returns {Function} Hono middleware
+ * @param {Object} config - API Key configuration
+ * @param {Database} database - s3db.js database instance
+ * @returns {Promise<Function>} Hono middleware
  */
-export function apiKeyAuth(options = {}) {
+export async function createApiKeyHandler(config = {}, database) {
   const {
     headerName = 'X-API-Key',
-    usersResource,
+    queryParam = null,
+    keyField = 'apiKey',
     optional = false
-  } = options;
+  } = config;
 
-  if (!usersResource) {
-    throw new Error('usersResource is required for API key authentication');
+  if (!database) {
+    throw new Error('API Key driver: database is required');
   }
 
+  // Get or create resource
+  const manager = new APIKeyResourceManager(database, 'apikey', config);
+  const authResource = await manager.getOrCreateResource();
+
+  logger.debug(`API Key driver initialized with resource: ${authResource.name}, keyField: ${keyField}`);
+
   return async (c, next) => {
-    const apiKey = c.req.header(headerName);
+    // Try header first
+    let apiKey = c.req.header(headerName);
+
+    // Fallback to query param if configured
+    if (!apiKey && queryParam) {
+      apiKey = c.req.query(queryParam);
+    }
 
     if (!apiKey) {
       if (optional) {
         return await next();
       }
 
-      const response = unauthorized(`Missing ${headerName} header`);
+      const response = unauthorized(
+        queryParam
+          ? `Missing ${headerName} header or ${queryParam} query parameter`
+          : `Missing ${headerName} header`
+      );
       return c.json(response, response._status);
     }
 
-    // Query users by API key
+    // Query users by API key (using configured keyField)
+    try {
+      const users = await authResource.query({ [keyField]: apiKey }, { limit: 1 });
+
+      if (!users || users.length === 0) {
+        const response = unauthorized('Invalid API key');
+        return c.json(response, response._status);
+      }
+
+      const user = users[0];
+
+      if (user.active === false) {
+        const response = unauthorized('User account is inactive');
+        return c.json(response, response._status);
+      }
+
+      // Update lastUsedAt (non-blocking)
+      if (authResource.schema.attributes.lastUsedAt) {
+        authResource.patch(user.id, { lastUsedAt: new Date().toISOString() }).catch(() => {});
+      }
+
+      // Store user in context
+      c.set('user', user);
+      c.set('authMethod', 'apiKey');
+
+      await next();
+    } catch (err) {
+      logger.error({ error: err.message }, 'Error validating API key');
+      const response = unauthorized('Authentication error');
+      return c.json(response, response._status);
+    }
+  };
+}
+
+// Legacy export for backward compatibility
+export function apiKeyAuth(options = {}) {
+  logger.warn(
+    'DEPRECATED: apiKeyAuth(options) is deprecated. ' +
+    'Use createApiKeyHandler(config, database) instead. ' +
+    'This will be removed in v17.0.'
+  );
+
+  const { usersResource, ...config } = options;
+
+  if (!usersResource) {
+    throw new Error('usersResource is required for API key authentication');
+  }
+
+  return async (c, next) => {
+    const apiKey = c.req.header(config.headerName || 'X-API-Key');
+
+    if (!apiKey) {
+      if (config.optional) {
+        return await next();
+      }
+      const response = unauthorized(`Missing ${config.headerName || 'X-API-Key'} header`);
+      return c.json(response, response._status);
+    }
+
     try {
       const users = await usersResource.query({ apiKey });
 
@@ -73,7 +166,6 @@ export function apiKeyAuth(options = {}) {
         return c.json(response, response._status);
       }
 
-      // Store user in context
       c.set('user', user);
       c.set('authMethod', 'apiKey');
 
@@ -88,5 +180,6 @@ export function apiKeyAuth(options = {}) {
 
 export default {
   generateApiKey,
-  apiKeyAuth
+  createApiKeyHandler,
+  apiKeyAuth  // Legacy
 };
