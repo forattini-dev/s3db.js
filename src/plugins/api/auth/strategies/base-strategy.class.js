@@ -7,18 +7,16 @@
 import { createLogger } from '../../../../concerns/logger.js';
 
 export class BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, database, verbose, logger }) {
+  constructor({ drivers, authResource, oidcMiddleware, database, logLevel = 'info', logger }) {
     this.drivers = drivers || [];
     this.authResource = authResource;
     this.oidcMiddleware = oidcMiddleware;
     this.database = database;
-    this.verbose = verbose;
 
     // 🪵 Logger initialization
     if (logger) {
       this.logger = logger;
     } else {
-      const logLevel = verbose ? 'debug' : 'info';
       this.logger = createLogger({ name: 'AuthStrategy', level: logLevel });
     }
   }

@@ -729,7 +729,8 @@ export class ApiServer {
       pathRules,
       pathAuth,
       events: this.events,
-      verbose: this.options.verbose
+      logLevel: this.options.logLevel || 'info',
+      logger: this.logger
     });
 
     try {

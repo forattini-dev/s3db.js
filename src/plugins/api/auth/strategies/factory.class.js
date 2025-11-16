@@ -26,10 +26,11 @@ export class AuthStrategyFactory {
    * @param {Array} [config.pathRules] - Modern path rules (priority 1)
    * @param {Object} [config.pathAuth] - Legacy path auth config (priority 2)
    * @param {Object} [config.events] - Event emitter
-   * @param {boolean} [config.verbose] - Enable verbose logging
+   * @param {string} [config.logLevel] - Log level (default: 'info')
+   * @param {Object} [config.logger] - Custom logger instance
    * @returns {BaseAuthStrategy} Auth strategy instance
    */
-  static create({ drivers, authResource, oidcMiddleware, database, pathRules, pathAuth, events, verbose }) {
+  static create({ drivers, authResource, oidcMiddleware, database, pathRules, pathAuth, events, logLevel, logger }) {
     // Priority 1: PathRules (modern API)
     if (pathRules && pathRules.length > 0) {
       return new PathRulesAuthStrategy({
@@ -39,7 +40,8 @@ export class AuthStrategyFactory {
         database,
         pathRules,
         events,
-        verbose
+        logLevel,
+        logger
       });
     }
 
@@ -51,7 +53,8 @@ export class AuthStrategyFactory {
         oidcMiddleware,
         database,
         pathAuth,
-        verbose
+        logLevel,
+        logger
       });
     }
 
@@ -61,7 +64,8 @@ export class AuthStrategyFactory {
       authResource,
       oidcMiddleware,
       database,
-      verbose
+      logLevel,
+      logger
     });
   }
 }
