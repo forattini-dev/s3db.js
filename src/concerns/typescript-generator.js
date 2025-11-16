@@ -14,6 +14,11 @@
  * - Detects typos at compile time (user.emai → error!)
  */
 
+import { createLogger } from './logger.js';
+
+// Module-level logger for TypeScript generation
+const logger = createLogger({ name: 'TypeScriptGenerator', level: 'info' });
+
 import { writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 
@@ -279,7 +284,7 @@ export async function generateTypes(database, options = {}) {
 export async function printTypes(database, options = {}) {
   const types = await generateTypes(database, { ...options, outputPath: null });
   if (options && options.verbose) {
-    console.log(types);
+    logger.info({ types }, 'Generated TypeScript definitions');
   }
   return types;
 }

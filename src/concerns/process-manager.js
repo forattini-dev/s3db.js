@@ -24,6 +24,8 @@
  * await pm.shutdown();
  */
 
+import { createLogger } from './logger.js';
+
 export class ProcessManager {
   constructor(options = {}) {
     this.options = {
@@ -31,6 +33,15 @@ export class ProcessManager {
       shutdownTimeout: options.shutdownTimeout || 30000, // 30 seconds
       exitOnSignal: options.exitOnSignal !== false, // Default: true
     };
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      // Create standalone logger for process manager
+      const logLevel = this.options.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'ProcessManager', level: logLevel });
+    }
 
     // Track all managed resources
     this.intervals = new Map(); // name -> { id, fn, interval }
@@ -43,9 +54,8 @@ export class ProcessManager {
     this._boundSignalHandler = this._handleSignal.bind(this);
     this._setupSignalHandlers();
 
-    if (this.options.verbose) {
-      // console.log('[ProcessManager] Initialized with shutdown timeout:', this.options.shutdownTimeout, 'ms');
-    }
+    // 🪵 Debug log: initialization
+    this.logger.debug({ shutdownTimeout: this.options.shutdownTimeout }, 'ProcessManager initialized');
   }
 
   /**
@@ -61,9 +71,8 @@ export class ProcessManager {
     }
 
     if (this.intervals.has(name)) {
-      if (this.options.verbose) {
-        console.warn(`[ProcessManager] Interval '${name}' already exists, clearing previous`);
-      }
+      // 🪵 Warn: interval already exists
+      this.logger.warn({ name }, `interval '${name}' already exists, clearing previous`);
       this.clearInterval(name);
     }
 
@@ -92,9 +101,8 @@ export class ProcessManager {
     timerId = setTimeout(tick, interval);
     this.intervals.set(name, { id: timerId, fn, interval, precise: true });
 
-    if (this.options.verbose) {
-      // console.log(`[ProcessManager] Registered interval '${name}' (${interval}ms)`);
-    }
+    // 🪵 Debug: interval registered
+    this.logger.debug({ name, interval }, `registered interval '${name}' (${interval}ms)`);
 
     return timerId;
   }
@@ -113,9 +121,8 @@ export class ProcessManager {
       }
       this.intervals.delete(name);
 
-      if (this.options.verbose) {
-        // console.log(`[ProcessManager] Cleared interval '${name}'`);
-      }
+      // 🪵 Debug: interval cleared
+      this.logger.debug({ name }, `cleared interval '${name}'`);
     }
   }
 
@@ -132,9 +139,8 @@ export class ProcessManager {
     }
 
     if (this.timeouts.has(name)) {
-      if (this.options.verbose) {
-        console.warn(`[ProcessManager] Timeout '${name}' already exists, clearing previous`);
-      }
+      // 🪵 Warn: timeout already exists
+      this.logger.warn({ name }, `timeout '${name}' already exists, clearing previous`);
       this.clearTimeout(name);
     }
 
@@ -145,9 +151,8 @@ export class ProcessManager {
 
     this.timeouts.set(name, { id, fn, delay });
 
-    if (this.options.verbose) {
-      // console.log(`[ProcessManager] Registered timeout '${name}' (${delay}ms)`);
-    }
+    // 🪵 Debug: timeout registered
+    this.logger.debug({ name, delay }, `registered timeout '${name}' (${delay}ms)`);
 
     return id;
   }
@@ -162,9 +167,8 @@ export class ProcessManager {
       clearTimeout(entry.id);
       this.timeouts.delete(name);
 
-      if (this.options.verbose) {
-        // console.log(`[ProcessManager] Cleared timeout '${name}'`);
-      }
+      // 🪵 Debug: timeout cleared
+      this.logger.debug({ name }, `cleared timeout '${name}'`);
     }
   }
 
@@ -179,16 +183,14 @@ export class ProcessManager {
     }
 
     if (this.cleanups.has(name)) {
-      if (this.options.verbose) {
-        console.warn(`[ProcessManager] Cleanup '${name}' already registered, replacing`);
-      }
+      // 🪵 Warn: cleanup already registered
+      this.logger.warn({ name }, `cleanup '${name}' already registered, replacing`);
     }
 
     this.cleanups.set(name, cleanupFn);
 
-    if (this.options.verbose) {
-      // console.log(`[ProcessManager] Registered cleanup '${name}'`);
-    }
+    // 🪵 Debug: cleanup registered
+    this.logger.debug({ name }, `registered cleanup '${name}'`);
   }
 
   /**
@@ -197,9 +199,8 @@ export class ProcessManager {
    */
   unregisterCleanup(name) {
     if (this.cleanups.delete(name)) {
-      if (this.options.verbose) {
-        // console.log(`[ProcessManager] Unregistered cleanup '${name}'`);
-      }
+      // 🪵 Debug: cleanup unregistered
+      this.logger.debug({ name }, `unregistered cleanup '${name}'`);
     }
   }
 
@@ -214,23 +215,20 @@ export class ProcessManager {
     process.on('SIGTERM', this._boundSignalHandler);
     process.on('SIGINT', this._boundSignalHandler);
     process.on('uncaughtException', (err) => {
-      if (this.options.verbose) {
-        console.error('[ProcessManager] Uncaught exception:', err);
-      }
+      // 🪵 Error: uncaught exception
+      this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
       this._handleSignal('uncaughtException');
     });
     process.on('unhandledRejection', (reason, promise) => {
-      if (this.options.verbose) {
-        console.error('[ProcessManager] Unhandled rejection at:', promise, 'reason:', reason);
-      }
+      // 🪵 Error: unhandled rejection
+      this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
       this._handleSignal('unhandledRejection');
     });
 
     this._signalHandlersSetup = true;
 
-    if (this.options.verbose) {
-      // console.log('[ProcessManager] Signal handlers registered (SIGTERM, SIGINT, uncaughtException, unhandledRejection)');
-    }
+    // 🪵 Debug: signal handlers registered
+    this.logger.debug('signal handlers registered (SIGTERM, SIGINT, uncaughtException, unhandledRejection)');
   }
 
   /**
@@ -239,9 +237,8 @@ export class ProcessManager {
    */
   async _handleSignal(signal) {
     if (this.isShuttingDown) {
-      if (this.options.verbose) {
-        // console.log(`[ProcessManager] Shutdown already in progress, ignoring ${signal}`);
-      }
+      // 🪵 Debug: shutdown already in progress
+      this.logger.debug({ signal }, `shutdown already in progress, ignoring ${signal}`);
       return;
     }
 
@@ -254,9 +251,8 @@ export class ProcessManager {
         process.exit(0);
       }
     } catch (err) {
-      if (this.options.verbose) {
-        console.error('[ProcessManager] Error during shutdown:', err);
-      }
+      // 🪵 Error: shutdown failure
+      this.logger.error({ error: err.message, stack: err.stack }, 'error during shutdown');
       if (this.options.exitOnSignal) {
         process.exit(1);
       }
@@ -272,9 +268,8 @@ export class ProcessManager {
   async shutdown(options = {}) {
     // Prevent multiple shutdown calls
     if (this.isShuttingDown) {
-      if (this.options.verbose) {
-        // console.log('[ProcessManager] Shutdown already in progress, waiting for completion...');
-      }
+      // 🪵 Debug: shutdown already in progress
+      this.logger.debug('shutdown already in progress, waiting for completion...');
       return this.shutdownPromise;
     }
 
@@ -303,9 +298,8 @@ export class ProcessManager {
         } else {
           clearInterval(entry.id);
         }
-        if (this.options.verbose) {
-          // console.log(`[ProcessManager]   ✓ Cleared interval '${name}'`);
-        }
+        // 🪵 Debug: interval cleared during shutdown
+        this.logger.debug({ name }, `cleared interval '${name}'`);
       }
       this.intervals.clear();
     }
@@ -315,9 +309,8 @@ export class ProcessManager {
       // console.log(`[ProcessManager] Clearing ${this.timeouts.size} timeouts...`);
       for (const [name, entry] of this.timeouts.entries()) {
         clearTimeout(entry.id);
-        if (this.options.verbose) {
-          // console.log(`[ProcessManager]   ✓ Cleared timeout '${name}'`);
-        }
+        // 🪵 Debug: timeout cleared during shutdown
+        this.logger.debug({ name }, `cleared timeout '${name}'`);
       }
       this.timeouts.clear();
     }
@@ -337,13 +330,11 @@ export class ProcessManager {
             cleanupTimeout
           ]);
 
-          if (this.options.verbose) {
-            // console.log(`[ProcessManager]   ✓ Cleanup '${name}' completed`);
-          }
+          // 🪵 Debug: cleanup completed
+          this.logger.debug({ name }, `cleanup '${name}' completed`);
         } catch (err) {
-          if (this.options.verbose) {
-            console.error(`[ProcessManager]   ✗ Cleanup '${name}' failed:`, err.message);
-          }
+          // 🪵 Error: cleanup failed
+          this.logger.error({ name, error: err.message }, `cleanup '${name}' failed`);
         }
       });
 
@@ -381,9 +372,8 @@ export class ProcessManager {
     process.removeListener('SIGINT', this._boundSignalHandler);
     this._signalHandlersSetup = false;
 
-    if (this.options.verbose) {
-      // console.log('[ProcessManager] Signal handlers removed');
-    }
+    // 🪵 Debug: signal handlers removed
+    this.logger.debug('signal handlers removed');
   }
 }
 

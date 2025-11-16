@@ -1,9 +1,19 @@
 import EventEmitter from 'events';
+import { createLogger } from './logger.js';
 
 class AsyncEventEmitter extends EventEmitter {
-  constructor() {
+  constructor(options = {}) {
     super();
     this._asyncMode = true;
+    this.verbose = Boolean(options.verbose);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'AsyncEventEmitter', level: logLevel });
+    }
   }
 
   emit(event, ...args) {
@@ -25,9 +35,8 @@ class AsyncEventEmitter extends EventEmitter {
           if (event !== 'error') {
             this.emit('error', error);
           } else {
-            if (this && this.verbose) {
-              console.error('Error in error handler:', error);
-            }
+            // 🪵 Error: error in error handler
+            this.logger.error({ error: error.message, stack: error.stack }, 'Error in error handler');
           }
         }
       }

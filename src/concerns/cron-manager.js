@@ -30,6 +30,8 @@
  * ```
  */
 
+import { createLogger } from './logger.js';
+
 /**
  * Convert milliseconds to cron expression (best effort)
  */
@@ -123,15 +125,22 @@ export class CronManager {
       disabled: isDisabled,
     };
 
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.options.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'CronManager', level: logLevel });
+    }
+
     this.jobs = new Map(); // name -> { task, expression, options }
     this._cron = null;     // Lazy loaded node-cron
     this._destroyed = false;
     this._signalHandlersSetup = false;
     this.disabled = this.options.disabled;
 
-    if (this.options.verbose) {
-      // console.log('[CronManager] Initialized');
-    }
+    // 🪵 Debug log: initialization
+    this.logger.debug({ disabled: this.disabled }, 'CronManager initialized');
 
     if (!this.disabled) {
       this._setupSignalHandlers();
@@ -156,9 +165,8 @@ export class CronManager {
 
     this._signalHandlersSetup = true;
 
-    if (this.options.verbose) {
-      // console.log('[CronManager] Signal handlers registered');
-    }
+    // 🪵 Debug: signal handlers registered
+    this.logger.debug('Signal handlers registered');
   }
 
   /**
@@ -175,9 +183,8 @@ export class CronManager {
 
     this._signalHandlersSetup = false;
 
-    if (this.options.verbose) {
-      // console.log('[CronManager] Signal handlers removed');
-    }
+    // 🪵 Debug: signal handlers removed
+    this.logger.debug('Signal handlers removed');
   }
 
   /**
@@ -186,9 +193,8 @@ export class CronManager {
   _handleShutdown(signal) {
     if (this._destroyed) return;
 
-    if (this.options.verbose) {
-      // console.log(`[CronManager] Received ${signal}, shutting down...`);
-    }
+    // 🪵 Debug: shutdown signal received
+    this.logger.debug({ signal }, `Received ${signal}, shutting down...`);
 
     this.shutdown({ signal })
       .then(() => {
@@ -197,9 +203,8 @@ export class CronManager {
         }
       })
       .catch((error) => {
-        if (this.options.verbose) {
-          console.error('[CronManager] Shutdown error:', error);
-        }
+        // 🪵 Error: shutdown failure
+        this.logger.error({ error: error.message, stack: error.stack }, 'Shutdown error');
         if (this.options.exitOnSignal) {
           process.exit(1);
         }
@@ -210,9 +215,8 @@ export class CronManager {
    * Handle uncaught errors
    */
   _handleError(error) {
-    if (this.options.verbose) {
-      console.error('[CronManager] Uncaught error:', error);
-    }
+    // 🪵 Error: uncaught error
+    this.logger.error({ error: error.message, stack: error.stack }, 'Uncaught error');
     this.shutdown({ error })
       .then(() => {
         if (this.options.exitOnSignal) {
@@ -238,16 +242,14 @@ export class CronManager {
       const cronModule = await import('node-cron');
       this._cron = cronModule.default || cronModule;
 
-      if (this.options.verbose) {
-        // console.log('[CronManager] node-cron loaded');
-      }
+      // 🪵 Debug: node-cron loaded
+      this.logger.debug('node-cron loaded');
 
       return this._cron;
     } catch (error) {
       if (isTestEnv) {
-        if (this.options.verbose) {
-          console.warn('[CronManager] Falling back to in-memory cron stub for tests:', error.message);
-        }
+        // 🪵 Warn: falling back to cron stub
+        this.logger.warn({ error: error.message }, 'Falling back to in-memory cron stub for tests');
 
         this._cron = this._createTestCronStub();
         return this._cron;
@@ -289,16 +291,14 @@ export class CronManager {
    */
   async schedule(expression, fn, name, options = {}) {
     if (this._destroyed) {
-      if (this.options.verbose) {
-        console.warn(`[CronManager] Cannot schedule job '${name}' - manager is destroyed`);
-      }
+      // 🪵 Warn: cannot schedule on destroyed manager
+      this.logger.warn({ name }, `Cannot schedule job '${name}' - manager is destroyed`);
       return null;
     }
 
     if (this.disabled) {
-      if (this.options.verbose) {
-        // console.log(`[CronManager] Scheduling disabled - skipping job '${name}'`);
-      }
+      // 🪵 Debug: scheduling disabled
+      this.logger.debug({ name }, `Scheduling disabled - skipping job '${name}'`);
 
       return this._createStubTask(name, fn);
     }
@@ -317,9 +317,8 @@ export class CronManager {
         this.jobs.delete(name);
       }
 
-      if (this.options.verbose) {
-        // console.log(`[CronManager] Replaced existing job '${name}'`);
-      }
+      // 🪵 Debug: replaced existing job
+      this.logger.debug({ name }, `Replaced existing job '${name}'`);
     }
 
     const cron = await this._loadCron();
@@ -347,9 +346,8 @@ export class CronManager {
       createdAt: Date.now(),
     });
 
-    if (this.options.verbose) {
-      // console.log(`[CronManager] Scheduled job '${name}': ${expression}`);
-    }
+    // 🪵 Debug: job scheduled
+    this.logger.debug({ name, expression }, `Scheduled job '${name}': ${expression}`);
 
     return task;
   }
@@ -390,9 +388,8 @@ export class CronManager {
   stop(name) {
     const entry = this.jobs.get(name);
     if (!entry) {
-      if (this.options.verbose) {
-        console.warn(`[CronManager] Job '${name}' not found`);
-      }
+      // 🪵 Warn: job not found
+      this.logger.warn({ name }, `Job '${name}' not found`);
       return false;
     }
 
@@ -401,15 +398,13 @@ export class CronManager {
       entry.task?.destroy?.();
       this.jobs.delete(name);
 
-      if (this.options.verbose) {
-        // console.log(`[CronManager] Stopped job '${name}'`);
-      }
+      // 🪵 Debug: job stopped
+      this.logger.debug({ name }, `Stopped job '${name}'`);
 
       return true;
     } catch (error) {
-      if (this.options.verbose) {
-        console.error(`[CronManager] Error stopping job '${name}':`, error);
-      }
+      // 🪵 Error: job stop failure
+      this.logger.error({ name, error: error.message, stack: error.stack }, `Error stopping job '${name}'`);
       return false;
     }
   }
@@ -455,17 +450,15 @@ export class CronManager {
    */
   async shutdown(options = {}) {
     if (this._destroyed) {
-      if (this.options.verbose) {
-        // console.log('[CronManager] Already destroyed');
-      }
+      // 🪵 Debug: already destroyed
+      this.logger.debug('Already destroyed');
       return;
     }
 
     const timeout = options.timeout || this.options.shutdownTimeout;
 
-    if (this.options.verbose) {
-      // console.log(`[CronManager] Shutting down ${this.jobs.size} jobs...`);
-    }
+    // 🪵 Debug: shutting down jobs
+    this.logger.debug({ jobCount: this.jobs.size }, `Shutting down ${this.jobs.size} jobs...`);
 
     if (this.disabled) {
       this.jobs.clear();
@@ -494,9 +487,8 @@ export class CronManager {
       stopPromises.push(
         Promise.race([stopPromise, timeoutPromise])
           .catch(error => {
-            if (this.options.verbose) {
-              console.warn(`[CronManager] Error stopping job '${name}':`, error.message);
-            }
+            // 🪵 Warn: job stop error
+            this.logger.warn({ name, error: error.message }, `Error stopping job '${name}'`);
           })
       );
     }
@@ -506,9 +498,8 @@ export class CronManager {
     this.jobs.clear();
     this._destroyed = true;
 
-    if (this.options.verbose) {
-      // console.log('[CronManager] Shutdown complete');
-    }
+    // 🪵 Debug: shutdown complete
+    this.logger.debug('Shutdown complete');
   }
 
   _createStubTask(name, fn) {
@@ -520,9 +511,8 @@ export class CronManager {
         try {
           await fn?.(...args);
         } catch (error) {
-          if (this.options.verbose) {
-            console.error(`[CronManager] Stub task '${name}' execution error:`, error);
-          }
+          // 🪵 Error: stub task execution error
+          this.logger.error({ name, error: error.message, stack: error.stack }, `Stub task '${name}' execution error`);
         }
       }
     };
@@ -582,9 +572,8 @@ export class CronManager {
           try {
             await fn?.();
           } catch (err) {
-            if (this.options.verbose) {
-              console.warn('[CronManager] Test cron stub task error:', err?.message || err);
-            }
+            // 🪵 Warn: test cron stub error
+            this.logger.warn({ error: err?.message || String(err) }, 'Test cron stub task error');
           }
         };
 

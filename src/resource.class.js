@@ -13,6 +13,7 @@ import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 import { idGenerator as defaultIdGenerator, createCustomGenerator, getUrlAlphabet } from "./concerns/id.js";
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
 import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError, ValidationError } from "./errors.js";
+import { createLogger } from "./concerns/logger.js";
 
 
 export class Resource extends AsyncEventEmitter {
@@ -148,6 +149,21 @@ export class Resource extends AsyncEventEmitter {
     this.version = version;
     // Verbose follows explicit config, then client, then database (if provided during construction)
     this.verbose = Boolean(config.verbose ?? (config.client && config.client.verbose) ?? (config.database && config.database.verbose));
+
+    // 🪵 Logger initialization - create child logger from database if available
+    // Resources should NEVER create logger.child() in hot paths (insert/update/etc)
+    if (config.database && config.database.getChildLogger) {
+      // Get child logger from database with resource context
+      this.logger = config.database.getChildLogger(`Resource:${name}`, { resource: name });
+    } else if (config.database && config.database.logger) {
+      // Fallback: Database has logger but no getChildLogger helper
+      this.logger = config.database.logger.child({ resource: name });
+    } else {
+      // Standalone resource (no database) - create minimal logger
+      // This happens in tests or when Resources are created independently
+      this.logger = createLogger({ name: `Resource:${name}`, level: 'info' });
+    }
+
     this.behavior = behavior;
     this.observers = observers;
     this.passphrase = passphrase ?? 'secret';
@@ -1151,6 +1167,9 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async insert({ id, ...attributes }) {
+    // 🪵 Trace-level logging for detailed debugging
+    this.logger.trace({ id, attributeKeys: Object.keys(attributes) }, 'insert called');
+
     const providedId = id !== undefined && id !== null && String(id).trim() !== '';
     if (this.config.timestamps) {
       attributes.createdAt = new Date().toISOString();
@@ -1341,6 +1360,10 @@ export class Resource extends AsyncEventEmitter {
 
       // Emit insert event with standardized naming
       this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
+
+      // 🪵 Debug log: successful insert
+      this.logger.debug({ id: finalResult?.id || insertedObject?.id }, 'insert completed');
+
       return finalResult;
     } else {
       // Sync mode: execute all hooks including partition creation
@@ -1348,6 +1371,9 @@ export class Resource extends AsyncEventEmitter {
 
       // Emit insert event with standardized naming
       this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
+
+      // 🪵 Debug log: successful insert
+      this.logger.debug({ id: finalResult?.id || insertedObject?.id }, 'insert completed');
 
       // Return the final object
       return finalResult;
@@ -3976,10 +4002,8 @@ export class Resource extends AsyncEventEmitter {
         const result = await guardFn(context, resource);
         return result === true;  // Force boolean
       } catch (err) {
-        // Guard error = deny access (log only if verbose is enabled)
-        if (this.verbose || (this.database && this.database.verbose)) {
-          console.error(`Guard error for ${operation}:`, err);
-        }
+        // 🪵 Guard error = deny access
+        this.logger.error({ operation, error: err.message, stack: err.stack }, `guard error for ${operation}`);
         return false;
       }
     }

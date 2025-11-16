@@ -3,8 +3,47 @@ import { cpus } from 'os'
 import { setTimeout as delay } from 'timers/promises'
 import { nanoid } from 'nanoid'
 import { TaskExecutor } from './concurrency/task-executor.interface.js'
+import { AdaptiveTuning } from './concerns/adaptive-tuning.js'
+import { SignatureStats } from './concerns/signature-stats.js'
+import { deriveSignature } from './concerns/task-signature.js'
 
 const INTERNAL_DEFER = '__taskExecutorInternalDefer'
+
+class FifoTaskQueue {
+  constructor () {
+    this.queue = []
+  }
+
+  get length () {
+    return this.queue.length
+  }
+
+  enqueue (task) {
+    this.queue.push(task)
+  }
+
+  dequeue () {
+    if (this.queue.length === 0) return null
+    return this.queue.shift()
+  }
+
+  flush (callback) {
+    if (typeof callback === 'function') {
+      for (const task of this.queue) {
+        callback(task)
+      }
+    }
+    this.clear()
+  }
+
+  clear () {
+    this.queue.length = 0
+  }
+
+  setAgingMultiplier () {
+    // no-op for FIFO queues
+  }
+}
 
 /**
  * TasksPool - Global operation queue for controlling S3 operation concurrency
@@ -43,6 +82,32 @@ export class TasksPool extends EventEmitter {
   constructor (options = {}) {
     super()
 
+    const requestedRetries = options.retries ?? 3
+    const monitoringRequested = options.monitoring?.enabled ?? true
+    const requestedMonitoringMode = options.monitoring?.mode
+    const requestedProfile = options.features?.profile
+    const needsRichProfile = requestedRetries > 0
+    let profile = requestedProfile || (needsRichProfile ? 'balanced' : 'light')
+    const defaultMonitoringMode =
+      options.monitoring?.collectMetrics || requestedMonitoringMode === 'detailed'
+        ? 'detailed'
+        : 'passive'
+    const monitoringMode = monitoringRequested
+      ? requestedMonitoringMode || defaultMonitoringMode
+      : 'light'
+    if (profile === 'light' && monitoringRequested && monitoringMode !== 'passive') {
+      profile = 'balanced'
+    }
+
+    this.features = {
+      profile,
+      emitEvents: options.features?.emitEvents ?? true,
+      signatureInsights: options.features?.signatureInsights ?? true
+    }
+    this.lightMode = this.features.profile === 'light'
+    const tunerInstance = options.autoTuning?.instance
+    const autoTuningRequested = options.autoTuning?.enabled || tunerInstance
+
     // Normalize configuration
     const requestedConcurrency = options.concurrency ?? 10
     this.autoConcurrency = requestedConcurrency === 'auto'
@@ -52,7 +117,7 @@ export class TasksPool extends EventEmitter {
     this._effectiveConcurrency = this.autoConcurrency
       ? this._defaultAutoConcurrency()
       : this._configuredConcurrency
-    this.retries = options.retries ?? 3
+    this.retries = requestedRetries
     this.retryDelay = options.retryDelay || 1000
     this.timeout = options.timeout ?? 30000
     this.retryableErrors = options.retryableErrors || [
@@ -81,7 +146,7 @@ export class TasksPool extends EventEmitter {
     }
 
     // State
-    this.queue = new PriorityTaskQueue(this.priorityConfig)
+    this.queue = this.lightMode ? new FifoTaskQueue() : new PriorityTaskQueue(this.priorityConfig)
     this.active = new Map()
     this.paused = false
     this.stopped = false
@@ -98,15 +163,31 @@ export class TasksPool extends EventEmitter {
       retryCount: 0
     }
     this.rollingMetrics = new RollingMetrics(256)
+    this._lightActiveTasks = 0
+    this._monitoringState = {
+      lastExport: 0,
+      lastProcessed: 0
+    }
 
     // Metrics collection (optional)
+    const monitoringEnabled = monitoringRequested
+    const collectMetricsRequested = options.monitoring?.collectMetrics ?? false
+    const collectMetrics =
+      monitoringEnabled && (collectMetricsRequested || monitoringMode === 'detailed')
     this.monitoring = {
-      enabled: options.monitoring?.enabled ?? true,
-      collectMetrics: options.monitoring?.collectMetrics ?? false,
+      enabled: monitoringEnabled,
+      mode: monitoringMode,
+      collectMetrics,
       sampleRate: this._normalizeSampleRate(options.monitoring?.sampleRate ?? 0),
-      mode: options.monitoring?.mode || 'balanced', // 'light' | 'balanced' | 'full'
+      telemetryRate: this._normalizeSampleRate(
+        options.monitoring?.telemetrySampleRate ??
+          (collectMetrics || autoTuningRequested ? 1 : 0.2)
+      ),
       sampleInterval: options.monitoring?.sampleInterval ?? 100,
-      rollingWindowMs: options.monitoring?.rollingWindowMs ?? 1000
+      rollingWindowMs: options.monitoring?.rollingWindowMs ?? 1000,
+      reportInterval: options.monitoring?.reportInterval ?? 1000,
+      signatureSampleLimit: Math.max(1, options.monitoring?.signatureSampleLimit ?? 8),
+      exporter: typeof options.monitoring?.exporter === 'function' ? options.monitoring.exporter : null
     }
     this.taskMetrics = new Map()
     this.memorySampler =
@@ -115,15 +196,27 @@ export class TasksPool extends EventEmitter {
       this.monitoring.mode !== 'light'
         ? new MemorySampler(this.monitoring.sampleInterval)
         : null
-    this.rollingWindow = this.monitoring.enabled
+    this.rollingWindow = this.monitoring.collectMetrics
       ? new RollingWindow(this.monitoring.rollingWindowMs)
+      : null
+    this.signatureStats = this.features.signatureInsights
+      ? new SignatureStats({
+          alpha: options.monitoring?.signatureAlpha,
+          maxEntries: options.monitoring?.signatureMaxEntries
+        })
       : null
 
     // Auto-tuning (optional, initialized externally if needed)
     this.tuner = null
-    if (options.autoTuning?.enabled) {
-      // Tuner will be injected after construction to avoid circular dependency
+    this._lastTunedConcurrency = null
+    if (autoTuningRequested) {
       this.autoTuningConfig = options.autoTuning
+      this.tuner = tunerInstance || new AdaptiveTuning(options.autoTuning)
+      const tuned = this.tuner.getConcurrency()
+      if (typeof tuned === 'number' && tuned > 0) {
+        this.setConcurrency(tuned)
+        this._lastTunedConcurrency = tuned
+      }
     }
   }
 
@@ -189,6 +282,16 @@ export class TasksPool extends EventEmitter {
     return Math.random() < this.monitoring.sampleRate
   }
 
+  _shouldCaptureAttemptTimeline (taskCollectMetrics) {
+    if (taskCollectMetrics) {
+      return true
+    }
+    if (this.monitoring.collectMetrics || this.monitoring.mode === 'detailed') {
+      return true
+    }
+    return false
+  }
+
   /**
    * Set auto-tuning engine (injected after construction)
    * @param {AdaptiveTuning} tuner - Auto-tuning engine instance
@@ -198,6 +301,7 @@ export class TasksPool extends EventEmitter {
     if (this.autoConcurrency) {
       this._effectiveConcurrency = tuner.getConcurrency()
       this.processNext()
+      this._lastTunedConcurrency = this._effectiveConcurrency
     }
   }
 
@@ -214,6 +318,7 @@ export class TasksPool extends EventEmitter {
    * @param {number} [options.retries] - Override default retries
    * @param {number} [options.timeout] - Override default timeout
    * @param {Object} [options.metadata={}] - Metadata for monitoring
+   * @param {string} [options.signature] - Override auto-generated task signature
    * @returns {Promise} Promise that resolves with operation result
    *
    * @example
@@ -231,6 +336,10 @@ export class TasksPool extends EventEmitter {
     }
 
     const collectMetrics = this._shouldSampleMetrics()
+    const captureAttemptTimeline = this._shouldCaptureAttemptTimeline(collectMetrics)
+    const taskMetadata = {
+      ...(options.metadata || {})
+    }
 
     const task = {
       id: nanoid(),
@@ -238,7 +347,7 @@ export class TasksPool extends EventEmitter {
       priority: options.priority || 0,
       retries: options.retries ?? this.retries,
       timeout: options.timeout ?? this.timeout,
-      metadata: options.metadata || {},
+      metadata: taskMetadata,
       attemptCount: 0,
       createdAt: Date.now(),
       startedAt: null,
@@ -247,9 +356,10 @@ export class TasksPool extends EventEmitter {
       timings: {
         queueWait: null,
         execution: null,
-        retryDelays: [],
+        retryDelays: captureAttemptTimeline ? [] : null,
+        retryDelayTotal: 0,
         total: null,
-        failedAttempts: []
+        failedAttempts: captureAttemptTimeline ? [] : null
       },
       controller: null,
       performance: {
@@ -258,6 +368,7 @@ export class TasksPool extends EventEmitter {
         heapDelta: null
       }
     }
+    task.signature = deriveSignature(fn, taskMetadata, options.signature, task.priority)
 
     // Create deferred promise
     let resolve, reject
@@ -371,6 +482,11 @@ export class TasksPool extends EventEmitter {
    * @private
    */
   processNext () {
+    if (this.lightMode) {
+      this._processLightQueue()
+      return
+    }
+
     if (this.paused || this.stopped || this.queue.length === 0) {
       this._pendingDrain = false
       return
@@ -402,7 +518,7 @@ export class TasksPool extends EventEmitter {
       const taskPromise = this._executeTaskWithRetry(task)
       this.active.set(taskPromise, task)
       this.stats.activeCount = this.active.size
-      this.emit('pool:taskStarted', task)
+      this._safeEmit('pool:taskStarted', task)
 
       taskPromise
         .then((result) => {
@@ -410,21 +526,24 @@ export class TasksPool extends EventEmitter {
           this.stats.activeCount = this.active.size
           this.stats.processedCount++
           task.resolve(result)
-          this.emit('pool:taskCompleted', task, result)
+          this._safeEmit('pool:taskCompleted', task, result)
+          this._applyTunedConcurrency()
         })
         .catch((error) => {
           this.active.delete(taskPromise)
           this.stats.activeCount = this.active.size
           this.stats.errorCount++
           task.reject(error)
-          this.emit('pool:taskError', task, error)
+          this._safeEmit('pool:taskError', task, error)
+          this._applyTunedConcurrency()
         })
         .finally(() => {
+          this._maybeExportMonitoringSample('task')
           this._notifyActiveWaiters()
           this.processNext()
 
           if (this.active.size === 0 && this.queue.length === 0) {
-            this.emit('pool:drained')
+            this._safeEmit('pool:drained')
           }
         })
     }
@@ -438,9 +557,51 @@ export class TasksPool extends EventEmitter {
     return (
       !this.paused &&
       !this.stopped &&
-      this.active.size < this.effectiveConcurrency &&
-      this.queue.length > 0
+      this.queue.length > 0 &&
+      this._currentActiveCount() < this.effectiveConcurrency
     )
+  }
+
+  _processLightQueue () {
+    if (this.paused || this.stopped) {
+      return
+    }
+
+    while (this.queue.length > 0 && this._lightActiveTasks < this.effectiveConcurrency) {
+      const task = this.queue.dequeue()
+      if (!task) break
+
+      this.stats.queueSize = this.queue.length
+      this._lightActiveTasks++
+      this.stats.activeCount = this._lightActiveTasks
+      this._safeEmit('pool:taskStarted', task)
+
+      const taskPromise = this._executeTaskWithRetry(task)
+      taskPromise
+        .then((result) => {
+          this.stats.processedCount++
+          task.resolve(result)
+          this._safeEmit('pool:taskCompleted', task, result)
+          this._applyTunedConcurrency()
+        })
+        .catch((error) => {
+          this.stats.errorCount++
+          task.reject(error)
+          this._safeEmit('pool:taskError', task, error)
+          this._applyTunedConcurrency()
+        })
+        .finally(() => {
+          this._lightActiveTasks--
+          this.stats.activeCount = this._lightActiveTasks
+          this._notifyActiveWaiters()
+          this._maybeExportMonitoringSample('task')
+          if (this._lightActiveTasks === 0 && this.queue.length === 0) {
+            this._safeEmit('pool:drained')
+          } else {
+            this._processLightQueue()
+          }
+        })
+    }
   }
 
   /**
@@ -510,11 +671,13 @@ export class TasksPool extends EventEmitter {
         const attemptDuration = attemptEndTime - attemptStartTime
 
         // Record failed attempt
-        task.timings.failedAttempts.push({
-          attempt: attempt + 1,
-          duration: attemptDuration,
-          error: error.message
-        })
+        if (task.timings.failedAttempts) {
+          task.timings.failedAttempts.push({
+            attempt: attempt + 1,
+            duration: attemptDuration,
+            error: error.message
+          })
+        }
 
         // Check if retryable
         const isRetryable = this._isErrorRetryable(error)
@@ -522,7 +685,7 @@ export class TasksPool extends EventEmitter {
 
         if (isRetryable && hasRetriesLeft) {
           this.stats.retryCount++
-          this.emit('pool:taskRetry', task, attempt + 1)
+          this._safeEmit('pool:taskRetry', task, attempt + 1)
 
           // Adaptive backoff delay
           const delay = this._computeRetryDelay(task, attempt, error)
@@ -538,7 +701,11 @@ export class TasksPool extends EventEmitter {
           await this._sleep(delay, delayController?.signal)
 
           const delayEndTime = Date.now()
-          task.timings.retryDelays.push(delayEndTime - delayStartTime)
+          const retryDuration = delayEndTime - delayStartTime
+          if (task.timings.retryDelays) {
+            task.timings.retryDelays.push(retryDuration)
+          }
+          task.timings.retryDelayTotal = (task.timings.retryDelayTotal || 0) + retryDuration
           task.delayController = null
         } else {
           // No more retries or not retryable
@@ -636,21 +803,27 @@ export class TasksPool extends EventEmitter {
     task.timings.total = task.completedAt - task.createdAt
 
     // Calculate overhead (non-execution time)
-    const totalRetryDelay = task.timings.retryDelays.reduce((a, b) => a + b, 0)
+    const totalRetryDelay = task.timings.retryDelays
+      ? task.timings.retryDelays.reduce((a, b) => a + b, 0)
+      : task.timings.retryDelayTotal || 0
     task.timings.overhead = task.timings.total - (task.timings.execution || 0) - totalRetryDelay
 
     // Feed to auto-tuner if enabled
-    if (this.tuner) {
-      this.tuner.recordTaskMetrics({
-        id: task.id,
-        startTime: task.startedAt,
-        endTime: task.completedAt,
-        latency: task.timings.execution || 0,
-        queueWait: task.timings.queueWait,
-        success: !error,
-        retries: task.attemptCount - 1,
-        heapDelta: task.performance.heapDelta || 0
-      })
+    if (this.tuner?.recordTaskMetrics) {
+      try {
+        this.tuner.recordTaskMetrics({
+          id: task.id,
+          startTime: task.startedAt,
+          endTime: task.completedAt,
+          latency: task.timings.execution || 0,
+          queueWait: task.timings.queueWait,
+          success: !error,
+          retries: task.attemptCount - 1,
+          heapDelta: task.performance.heapDelta || 0
+        })
+      } catch (tunerError) {
+        this._safeEmit('tuner:error', tunerError)
+      }
     }
 
     // Persist metrics snapshot if requested
@@ -658,9 +831,17 @@ export class TasksPool extends EventEmitter {
       this._storeTaskMetrics(task, error)
     }
 
+    if (this.signatureStats) {
+      this.signatureStats.record(task.signature, {
+        queueWait: task.timings.queueWait || 0,
+        execution: task.timings.execution || 0,
+        success: !error
+      })
+    }
+
     // Emit metrics event
     if (this.monitoring.enabled) {
-      this.emit('pool:taskMetrics', {
+      this._safeEmit('pool:taskMetrics', {
         taskId: task.id,
         timings: task.timings,
         performance: task.performance,
@@ -678,8 +859,10 @@ export class TasksPool extends EventEmitter {
   _storeTaskMetrics (task, error) {
     const timingsSnapshot = {
       ...task.timings,
-      retryDelays: task.timings.retryDelays.slice(0),
-      failedAttempts: task.timings.failedAttempts.map((attempt) => ({ ...attempt }))
+      retryDelays: task.timings.retryDelays ? task.timings.retryDelays.slice(0) : [],
+      failedAttempts: task.timings.failedAttempts
+        ? task.timings.failedAttempts.map((attempt) => ({ ...attempt }))
+        : []
     }
 
     const performanceSnapshot = task.performance
@@ -730,7 +913,7 @@ export class TasksPool extends EventEmitter {
     while (this.active.size > 0) {
       await this._waitForActive()
     }
-    this.emit('pool:paused')
+    this._safeEmit('pool:paused')
   }
 
   /**
@@ -739,7 +922,7 @@ export class TasksPool extends EventEmitter {
   resume () {
     this.paused = false
     this.processNext()
-    this.emit('pool:resumed')
+    this._safeEmit('pool:resumed')
   }
 
   /**
@@ -766,7 +949,10 @@ export class TasksPool extends EventEmitter {
       }
     })
 
-    this.emit('pool:stopped')
+    this._safeEmit('pool:stopped')
+    if (this.tuner?.stop) {
+      this.tuner.stop()
+    }
   }
 
   /**
@@ -778,10 +964,11 @@ export class TasksPool extends EventEmitter {
    * @returns {Promise<void>}
    */
   async drain () {
-    while (this.queue.length > 0 || this.active.size > 0) {
+    while (this.queue.length > 0 || this._currentActiveCount() > 0) {
       await this._waitForActive()
     }
-    this.emit('pool:drained')
+    this._safeEmit('pool:drained')
+    this._maybeExportMonitoringSample('drain', true)
   }
 
   /**
@@ -791,7 +978,7 @@ export class TasksPool extends EventEmitter {
    * @returns {Promise<void>}
    */
   async _waitForActive () {
-    if (this.active.size === 0) return
+    if (this._currentActiveCount() === 0) return
     await new Promise((resolve) => {
       this._activeWaiters.push(resolve)
     })
@@ -853,7 +1040,7 @@ export class TasksPool extends EventEmitter {
     return {
       ...this.stats,
       queueSize: this.queue.length,
-      activeCount: this.active.size,
+      activeCount: this._currentActiveCount(),
       concurrency: this.concurrency,
       effectiveConcurrency: this.effectiveConcurrency,
       paused: this.paused,
@@ -877,6 +1064,13 @@ export class TasksPool extends EventEmitter {
       samples: this.rollingMetrics?.snapshot() || null,
       throughput: this.rollingWindow?.snapshot() || null
     }
+  }
+
+  getSignatureInsights (limit = 5) {
+    if (!this.signatureStats) {
+      return []
+    }
+    return this.signatureStats.snapshot(limit)
   }
 
   /**
@@ -1043,6 +1237,68 @@ export class TasksPool extends EventEmitter {
     const ratio = snapshot.avgQueueWait / Math.max(1, target)
     const multiplier = Math.min(4, Math.max(0.25, ratio || 1))
     this.queue.setAgingMultiplier(multiplier)
+  }
+
+  _safeEmit (event, ...args) {
+    if (!this.features.emitEvents) {
+      return
+    }
+    super.emit(event, ...args)
+  }
+
+  _currentActiveCount () {
+    return this.lightMode ? this._lightActiveTasks : this.active.size
+  }
+
+  _maybeExportMonitoringSample (stage, force = false) {
+    if (!this.monitoring.enabled || !this.monitoring.exporter) {
+      return
+    }
+    const now = Date.now()
+    if (!force && now - this._monitoringState.lastExport < this.monitoring.reportInterval) {
+      return
+    }
+    const completed = this.stats.processedCount + this.stats.errorCount
+    const deltaCompleted = completed - this._monitoringState.lastProcessed
+    const elapsed = Math.max(1, now - this._monitoringState.lastExport || this.monitoring.reportInterval)
+    const throughput = deltaCompleted > 0 ? (deltaCompleted / elapsed) * 1000 : 0
+    const snapshot = {
+      timestamp: now,
+      stage,
+      profile: this.features.profile,
+      queueSize: this.queue.length,
+      activeCount: this._currentActiveCount(),
+      processed: this.stats.processedCount,
+      errors: this.stats.errorCount,
+      retries: this.stats.retryCount,
+      throughput,
+      signatureInsights: this.signatureStats
+        ? this.signatureStats.snapshot(this.monitoring.signatureSampleLimit)
+        : []
+    }
+    this._monitoringState.lastExport = now
+    this._monitoringState.lastProcessed = completed
+    try {
+      this.monitoring.exporter(snapshot)
+    } catch {
+      // ignore exporter failures
+    }
+  }
+
+  _applyTunedConcurrency () {
+    if (!this.tuner) {
+      return
+    }
+    const tuned = this.tuner.getConcurrency()
+    if (
+      typeof tuned === 'number' &&
+      tuned > 0 &&
+      tuned !== this._lastTunedConcurrency &&
+      tuned !== this.effectiveConcurrency
+    ) {
+      this.setConcurrency(tuned)
+      this._lastTunedConcurrency = tuned
+    }
   }
 }
 
