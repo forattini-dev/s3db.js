@@ -1064,9 +1064,13 @@ await db.createResource({ name: 'users', ... });
 
 ### HTTP Request Logging (API Plugin)
 
-The API Plugin includes automatic HTTP request/response logging via **[pino-http](https://github.com/pinojs/pino-http)**:
+The API Plugin includes automatic HTTP request/response logging with smart detection:
 
-**Installation (optional):**
+**Smart Detection:**
+- **If `pino-http` is installed:** Uses full-featured pino-http with all bells and whistles
+- **If `pino-http` is NOT installed:** Falls back to simple built-in HTTP logging
+
+**Installation (optional, recommended):**
 ```bash
 npm install pino-http
 ```
@@ -1078,7 +1082,7 @@ import { APIPlugin } from 's3db.js/plugins';
 const api = new APIPlugin({
   port: 3000,
 
-  // Enable HTTP logging (requires pino-http)
+  // Enable HTTP logging (works with or without pino-http!)
   httpLogger: {
     enabled: true,
     autoLogging: true,              // Log all requests/responses
@@ -1100,7 +1104,18 @@ const api = new APIPlugin({
 });
 ```
 
-> **Note:** If `pino-http` is not installed and `httpLogger.enabled` is set to `true`, the API Plugin will skip HTTP logging gracefully without errors.
+**What you get:**
+
+| Feature | With pino-http | Without pino-http |
+|---------|---------------|-------------------|
+| Request logging | ✅ Full | ✅ Basic |
+| Response logging | ✅ Full | ✅ Basic |
+| Error logging | ✅ Full | ✅ Basic |
+| Request ID | ✅ Auto | ✅ Manual |
+| Custom serializers | ✅ Yes | ✅ Basic |
+| Performance overhead | ⚡ Minimal | ⚡ Minimal |
+
+**No installation required!** HTTP logging works out-of-the-box with basic features. Install `pino-http` for enhanced capabilities.
 
 **Automatic Logging Output:**
 ```json
