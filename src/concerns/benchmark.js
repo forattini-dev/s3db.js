@@ -7,6 +7,11 @@
  * - Percentile calculations (p50, p95, p99)
  * - Formatted reporting
  *
+ * 🪵 INTENTIONAL CONSOLE USAGE
+ * This file uses console.log for benchmark reporting and formatted
+ * performance output. These calls are NOT migrated to Pino logger as
+ * they are designed for direct terminal output with performance metrics.
+ *
  * @class Benchmark
  *
  * @example

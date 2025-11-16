@@ -25,6 +25,8 @@ AI guidance for working with s3db.js codebase.
 
 **CRITICAL:** All plugin peer dependencies use lazy loading to prevent "module not found" errors.
 
+**Commenting policy:** Do not add inline comments throughout code. If written documentation is required, use JSDoc blocks placed right before the relevant class, function, method, or constant.
+
 ### Why Lazy Loading?
 
 Before v14.1.6, importing s3db.js loaded ALL plugins and their dependencies (AWS SDK, GCP SDK, Azure SDK, puppeteer, etc.), causing errors if users hadn't installed them. Now dependencies are loaded only when used.

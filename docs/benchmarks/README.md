@@ -77,6 +77,7 @@ node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
 | **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
 | **Vector Clustering** | `vector-clustering.bench.js` | K-means clustering with open-source embeddings (100/1K/10K vectors) | ✅ Active |
+| **TasksRunner vs PromisePool** | `tasks-runner-vs-promise-pool.bench.js` | Concurrency runner comparison (TasksRunner vs @supercharge/promise-pool) | ✅ Active |
 
 ## 📊 Benchmark Format
 

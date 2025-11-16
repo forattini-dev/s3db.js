@@ -99,6 +99,7 @@
 - [🚀 Quick Start](#-quick-start)
 - [💾 Installation](#-installation)
 - [🗄️ Database](#️-database)
+- [🪵 Logging](#-logging)
 - [📋 Resources](#-resources)
 - [⚡ Performance & Concurrency](#-performance--concurrency)
 - [🔌 Plugins](#-plugins)
@@ -262,6 +263,21 @@ yarn add s3db.js
 
 Some features require additional dependencies to be installed manually:
 
+#### API Plugin Dependencies
+
+If you plan to use the API plugin, install these dependencies:
+
+```bash
+# Core API dependencies (required)
+npm install hono
+
+# HTTP logging (optional, recommended)
+npm install pino-http
+
+# Authentication (optional)
+npm install jose  # For JWT auth
+```
+
 #### Replicator Dependencies
 
 If you plan to use the replicator system with external services, install the corresponding dependencies:
@@ -277,7 +293,7 @@ npm install @google-cloud/bigquery
 npm install pg
 ```
 
-**Why manual installation?** These are marked as `peerDependencies` to keep the main package lightweight. Only install what you need!
+**Why manual installation?** These are marked as `peerDependencies` to keep the main package lightweight (~500KB). Only install what you need!
 
 #### 🛠️ Development Setup
 
@@ -774,6 +790,355 @@ httpClientOptions: {
 </details>
 
 **Complete documentation**: See above for all Database configuration options
+
+---
+
+## 🪵 Logging
+
+s3db.js uses **[Pino](https://getpino.io)** - a blazing-fast, low-overhead JSON logger (5-10x faster than console.*). The logging system is hierarchical: Database → Plugins → Resources automatically inherit log levels, with per-component override capabilities.
+
+### Quick Start - Automatic Inheritance
+
+All components (Database, Plugins, Resources) automatically inherit the global log level:
+
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  loggerOptions: {
+    level: 'warn'  // ← Database, Resources, and Plugins all inherit 'warn'
+  }
+});
+
+await db.usePlugin(new CachePlugin(), 'cache');  // Inherits 'warn'
+await db.usePlugin(new TTLPlugin(), 'ttl');      // Inherits 'warn'
+```
+
+### Format Presets
+
+s3db.js provides two built-in format presets for different environments:
+
+**JSON Format** (Production - Structured Logs):
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  loggerOptions: {
+    level: 'info',
+    format: 'json'  // ← Compact JSON for log aggregation
+  }
+});
+
+// Output: {"level":30,"time":1234567890,"msg":"User created","userId":"123"}
+```
+
+**Pretty Format** (Development - Human Readable):
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  loggerOptions: {
+    level: 'debug',
+    format: 'pretty'  // ← Colorized, readable output
+  }
+});
+
+// Output: [14:23:45.123] INFO: User created
+//           userId: "123"
+```
+
+**Auto-Detection** (Default):
+```javascript
+// Automatically chooses format based on:
+// - TTY detection (terminal vs piped)
+// - NODE_ENV (development vs production)
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  loggerOptions: {
+    level: 'info'
+    // format is auto-detected
+  }
+});
+```
+
+### Custom Error Serialization
+
+s3db.js errors automatically use `toJSON()` for structured logging:
+
+```javascript
+import { ValidationError } from 's3db.js';
+
+const error = new ValidationError('Invalid email', {
+  field: 'email',
+  value: 'invalid@',
+  statusCode: 422
+});
+
+// Logs include full error context automatically
+logger.error({ err: error }, 'Validation failed');
+
+// Output includes: name, message, code, statusCode, suggestion, stack, etc.
+```
+
+### Per-Component Override
+
+Fine-tune log levels for specific plugins or resources using `childLevels`:
+
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  loggerOptions: {
+    level: 'warn',  // ← Global default
+
+    childLevels: {
+      // Override specific plugins
+      'Plugin:cache': 'debug',      // Cache plugin in debug mode
+      'Plugin:ttl': 'trace',         // TTL plugin in trace mode
+      'Plugin:metrics': 'error',     // Metrics plugin only shows errors
+      'Plugin:s3-queue': 'info',     // S3Queue plugin in info mode
+
+      // Override specific resources
+      'Resource:users': 'debug',     // Users resource in debug
+      'Resource:logs': 'silent'      // Logs resource silenced
+    }
+  }
+});
+```
+
+**Result:**
+- Database → `warn`
+- CachePlugin → `debug` (override)
+- TTLPlugin → `trace` (override)
+- MetricsPlugin → `error` (override)
+- All other plugins → `warn` (inherited)
+
+### Custom Logger (No Inheritance)
+
+Plugins can use completely custom loggers that don't inherit from Database:
+
+```javascript
+import { createLogger } from 's3db.js/logger';
+
+// Create custom logger
+const customLogger = createLogger({
+  name: 'MyApp',
+  level: 'trace',
+  // Pino options
+  transport: {
+    target: 'pino-pretty',
+    options: { colorize: true }
+  }
+});
+
+// Plugin uses custom logger instead of inheriting
+const plugin = new CachePlugin({
+  logger: customLogger  // ← Ignores inheritance
+});
+
+await db.usePlugin(plugin, 'cache');
+```
+
+### Runtime Log Level Changes
+
+Change log levels on the fly for specific components:
+
+```javascript
+// Increase verbosity for debugging
+db.setChildLevel('Plugin:cache', 'debug');
+
+// Silence a noisy plugin
+db.setChildLevel('Plugin:ttl', 'silent');
+
+// Debug specific resource
+db.setChildLevel('Resource:clicks', 'trace');
+```
+
+**⚠️ Limitation:** `setChildLevel()` only affects **new child loggers**. Loggers already created maintain their previous level.
+
+### Environment Variables
+
+Override logging globally using environment variables:
+
+```bash
+# Set log level
+S3DB_LOG_LEVEL=debug node app.js
+
+# Set output format (using presets)
+S3DB_LOG_FORMAT=pretty node app.js  # Pretty format (colorized, human-readable)
+S3DB_LOG_FORMAT=json node app.js    # JSON format (structured logs for production)
+
+# Combined example
+S3DB_LOG_LEVEL=debug S3DB_LOG_FORMAT=pretty node app.js
+```
+
+**Legacy Support:** The old `S3DB_LOG_PRETTY` environment variable is still supported for backward compatibility:
+```bash
+S3DB_LOG_PRETTY=true node app.js   # Same as S3DB_LOG_FORMAT=pretty
+S3DB_LOG_PRETTY=false node app.js  # Same as S3DB_LOG_FORMAT=json
+```
+
+### Available Log Levels
+
+| Level | Use Case | When to Use |
+|-------|----------|-------------|
+| `silent` | No logs | Tests, silent components |
+| `fatal` | Critical errors | System unusable |
+| `error` | Errors | Failed operations |
+| `warn` | Warnings | Deprecations, fallbacks |
+| `info` | Information | **Default for production** |
+| `debug` | Debug | Development |
+| `trace` | Full trace | Deep debugging |
+
+### Practical Examples
+
+#### Production (Minimal Logs)
+
+```javascript
+const db = new Database({
+  connectionString: process.env.S3DB_CONNECTION,
+  loggerOptions: {
+    level: 'warn',
+    format: 'json',  // ← Structured logs for aggregation
+
+    childLevels: {
+      // Info-level logging only for critical plugins
+      'Plugin:metrics': 'info',
+      'Plugin:audit': 'info'
+    }
+  }
+});
+```
+
+#### Development (Verbose)
+
+```javascript
+const db = new Database({
+  connectionString: 'http://localhost:9000/bucket',
+  loggerOptions: {
+    level: 'debug',
+    format: 'pretty',  // ← Human-readable, colorized
+
+    childLevels: {
+      // Trace the specific plugin you're debugging
+      'Plugin:cache': 'trace',
+
+      // Silence noisy plugins
+      'Plugin:metrics': 'silent'
+    }
+  }
+});
+```
+
+#### Debug Specific Plugin
+
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/db',
+  loggerOptions: {
+    level: 'warn',
+    format: 'json',  // ← Production format
+
+    childLevels: {
+      // Debug ONLY the TTL plugin
+      'Plugin:ttl': 'trace'
+    }
+  }
+});
+```
+
+### Discovering Child Logger Names
+
+**Plugins:** Format is `Plugin:{name}`
+
+```javascript
+await db.usePlugin(new CachePlugin(), 'cache');
+// Child logger: 'Plugin:cache'
+
+await db.usePlugin(new TTLPlugin(), 'my-ttl');
+// Child logger: 'Plugin:my-ttl'
+```
+
+**Resources:** Format is `Resource:{name}`
+
+```javascript
+await db.createResource({ name: 'users', ... });
+// Child logger: 'Resource:users'
+```
+
+### HTTP Request Logging (API Plugin)
+
+The API Plugin includes automatic HTTP request/response logging via **[pino-http](https://github.com/pinojs/pino-http)**:
+
+**Installation (optional):**
+```bash
+npm install pino-http
+```
+
+**Usage:**
+```javascript
+import { APIPlugin } from 's3db.js/plugins';
+
+const api = new APIPlugin({
+  port: 3000,
+
+  // Enable HTTP logging (requires pino-http)
+  httpLogger: {
+    enabled: true,
+    autoLogging: true,              // Log all requests/responses
+    ignorePaths: ['/health'],       // Skip logging for these paths
+
+    // Custom log level based on status code
+    customLogLevel: (req, res, err) => {
+      if (err || res.statusCode >= 500) return 'error';
+      if (res.statusCode >= 400) return 'warn';
+      return 'info';
+    }
+  },
+
+  // Enable request ID tracking (recommended)
+  requestId: {
+    enabled: true,
+    headerName: 'X-Request-ID'
+  }
+});
+```
+
+> **Note:** If `pino-http` is not installed and `httpLogger.enabled` is set to `true`, the API Plugin will skip HTTP logging gracefully without errors.
+
+**Automatic Logging Output:**
+```json
+{
+  "level": 30,
+  "time": 1234567890,
+  "req": {
+    "id": "abc123",
+    "method": "POST",
+    "url": "/users",
+    "headers": { "user-agent": "...", "content-type": "application/json" }
+  },
+  "res": {
+    "statusCode": 201,
+    "headers": { "content-type": "application/json" }
+  },
+  "responseTime": 45,
+  "msg": "request completed"
+}
+```
+
+**Features:**
+- Request/response correlation with request IDs
+- Automatic status code-based log levels
+- Error serialization with `toJSON()`
+- Path filtering (e.g., skip `/health`, `/metrics`)
+- Zero configuration required
+
+### Tips & Best Practices
+
+1. **Production**: Use `format: 'json'` with `level: 'warn'` for structured logging
+2. **Development**: Use `format: 'pretty'` with `level: 'debug'` for readability
+3. **Debugging**: Use `childLevels` to isolate specific components
+4. **Performance**: Lower levels (`trace`, `debug`) have performance impact
+5. **Inheritance**: Components automatically inherit global level if not overridden
+6. **Error Logging**: Custom errors automatically use `toJSON()` for rich context
+7. **CI/CD**: Use `format: 'json'` in automated environments for parsing
+8. **HTTP Logging**: Enable `httpLogger` in API Plugin for automatic request tracking
 
 ---
 
@@ -1397,6 +1762,33 @@ const db = new Database({
 
 await db.connect()
 ```
+
+### Profiles, Monitoring & Auto-Tuning
+
+Executor pools (and the standalone `TasksRunner`/`TasksPool`) support lightweight vs full-featured schedulers, observability exports, and adaptive concurrency:
+
+```javascript
+const db = new Database({
+  connectionString: 's3://bucket/database',
+  executorPool: {
+    features: { profile: 'light', emitEvents: false }, // or 'balanced'
+    monitoring: {
+      enabled: true,
+      reportInterval: 1000,
+      exporter: (snapshot) => console.log('[executor]', snapshot)
+    },
+    autoTuning: {
+      enabled: true,
+      minConcurrency: 10,
+      maxConcurrency: 200,
+      targetLatency: 250,
+      adjustmentInterval: 5000
+    }
+  }
+})
+```
+
+Use the light profile for PromisePool-style throughput when you just need FIFO fan-out. Switch to balanced when you need retries, priority aging, rich metrics, or adaptive scaling. The same options apply to filesystem/memory clients via `taskExecutorMonitoring`, `autoTuning`, and `features.profile`.
 
 ### Adaptive Tuning (Optional)
 
