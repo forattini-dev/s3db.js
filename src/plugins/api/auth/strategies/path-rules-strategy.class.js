@@ -15,8 +15,8 @@ import { createBasicAuthHandler } from '../basic-auth.js';
 import { createOAuth2Handler } from '../oauth2-auth.js';
 
 export class PathRulesAuthStrategy extends BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, database, pathRules, events, verbose }) {
-    super({ drivers, authResource, oidcMiddleware, database, verbose });
+  constructor({ drivers, authResource, oidcMiddleware, database, pathRules, events, logLevel, logger }) {
+    super({ drivers, authResource, oidcMiddleware, database, logLevel, logger });
     this.pathRules = pathRules;
     this.events = events;
   }

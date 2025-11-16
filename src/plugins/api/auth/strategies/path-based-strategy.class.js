@@ -10,8 +10,8 @@ import { createAuthMiddleware } from '../index.js';
 import { findBestMatch } from '../../utils/path-matcher.js';
 
 export class PathBasedAuthStrategy extends BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, database, pathAuth, verbose }) {
-    super({ drivers, authResource, oidcMiddleware, database, verbose });
+  constructor({ drivers, authResource, oidcMiddleware, database, pathAuth, logLevel, logger }) {
+    super({ drivers, authResource, oidcMiddleware, database, logLevel, logger });
     this.pathAuth = pathAuth;
   }
 
