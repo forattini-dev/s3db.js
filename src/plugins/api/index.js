@@ -53,7 +53,7 @@ const PASTEL_COLORS = {
 
 const AUTH_DRIVER_KEYS = ['jwt', 'apiKey', 'basic', 'oidc', 'oauth2'];
 
-function normalizeAuthConfig(authOptions = {}) {
+function normalizeAuthConfig(authOptions = {}, logger = null) {
   if (!authOptions) {
     return {
       drivers: [],
@@ -61,7 +61,7 @@ function normalizeAuthConfig(authOptions = {}) {
       pathAuth: undefined,
       strategy: 'any',
       priorities: {},
-      resource: 'users',
+      resource: null, // Will be set per-driver or fallback to 'users'
       driver: null
     };
   }
@@ -72,9 +72,19 @@ function normalizeAuthConfig(authOptions = {}) {
     pathAuth: authOptions.pathAuth,
     strategy: authOptions.strategy || 'any',
     priorities: authOptions.priorities || {},
-    resource: authOptions.resource,
+    resource: authOptions.resource, // Legacy global resource (deprecated)
     createResource: authOptions.createResource !== false
   };
+
+  // 🚨 Deprecation warning for global auth.resource
+  if (authOptions.resource && logger) {
+    logger.warn(
+      'DEPRECATED: auth.resource is deprecated. ' +
+      'Use driver-specific resource instead: ' +
+      'drivers: [{ driver: "jwt", config: { resource: "users" } }]. ' +
+      'This will be removed in v17.0.'
+    );
+  }
 
   const seen = new Set();
 
@@ -83,9 +93,19 @@ function normalizeAuthConfig(authOptions = {}) {
     const driverName = String(name).trim();
     if (!driverName || seen.has(driverName)) return;
     seen.add(driverName);
+
+    // Apply global resource as fallback if driver doesn't specify one
+    const config = { ...driverConfig };
+    if (!config.resource && normalized.resource) {
+      config.resource = normalized.resource; // Fallback to global (deprecated)
+    }
+    if (!config.resource) {
+      config.resource = 'users'; // Ultimate fallback
+    }
+
     normalized.drivers.push({
       driver: driverName,
-      config: driverConfig || {}
+      config
     });
   };
 
@@ -150,7 +170,7 @@ export class ApiPlugin extends Plugin {
       defaultName: 'plg_api_users',
       override: resourceNamesOption.authUsers || options.auth?.resource
     };
-    const normalizedAuth = normalizeAuthConfig(options.auth);
+    const normalizedAuth = normalizeAuthConfig(options.auth, this.logger);
     normalizedAuth.registration = {
       enabled: options.auth?.registration?.enabled === true,
       allowedFields: Array.isArray(options.auth?.registration?.allowedFields)
@@ -173,7 +193,7 @@ export class ApiPlugin extends Plugin {
       // Server configuration
       port: options.port || 3000,
       host: options.host || '0.0.0.0',
-      verbose: options.verbose || false,
+      logLevel: this.logLevel, // Use normalized logLevel from Plugin base
       basePath: normalizeBasePath(options.basePath),
       startupBanner: options.startupBanner !== false,
 
@@ -399,7 +419,7 @@ export class ApiPlugin extends Plugin {
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024
     };
 
-    this.config.verbose = this.verbose;
+    // Note: logLevel is already set above in config, no need to reassign
     this.config.resources = this._normalizeResourcesConfig(this.options.resources);
 
     this.server = null;
