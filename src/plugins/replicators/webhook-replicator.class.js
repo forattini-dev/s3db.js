@@ -334,9 +334,10 @@ class WebhookReplicator extends BaseReplicator {
           ? this.retryDelay * Math.pow(2, attempt)
           : this.retryDelay;
 
-        if (this.config.verbose) {
-          console.log(`[WebhookReplicator] Retrying request (attempt ${attempt + 1}/${this.retries}) after ${delay}ms - Status: ${response.status}`);
-        }
+        this.logger.debug(
+          { attempt: attempt + 1, maxRetries: this.retries, delay, status: response.status },
+          'Retrying request after error status'
+        );
 
         await new Promise(resolve => setTimeout(resolve, delay));
         return this._makeRequest(payload, attempt + 1);
@@ -365,9 +366,10 @@ class WebhookReplicator extends BaseReplicator {
           ? this.retryDelay * Math.pow(2, attempt)
           : this.retryDelay;
 
-        if (this.config.verbose) {
-          console.log(`[WebhookReplicator] Retrying request (attempt ${attempt + 1}/${this.retries}) after ${delay}ms - Error: ${error.message}`);
-        }
+        this.logger.debug(
+          { attempt: attempt + 1, maxRetries: this.retries, delay, error: error.message },
+          'Retrying request after network error'
+        );
 
         await new Promise(resolve => setTimeout(resolve, delay));
         return this._makeRequest(payload, attempt + 1);
@@ -391,9 +393,7 @@ class WebhookReplicator extends BaseReplicator {
     if (!validation.isValid) {
       const error = new Error(`WebhookReplicator configuration is invalid: ${validation.errors.join(', ')}`);
 
-      if (this.config.verbose) {
-        console.error(`[WebhookReplicator] ${error.message}`);
-      }
+      this.logger.error({ errors: validation.errors }, error.message);
 
       this.emit('initialization_error', {
         replicator: this.name,
@@ -462,9 +462,7 @@ class WebhookReplicator extends BaseReplicator {
 
     if (ok) return result;
 
-    if (this.config.verbose) {
-      console.warn(`[WebhookReplicator] Replication failed for ${resource}: ${err.message}`);
-    }
+    this.logger.warn({ resource, error: err.message }, 'Replication failed');
 
     this.emit('plg:replicator:error', {
       replicator: this.name,
@@ -566,9 +564,7 @@ class WebhookReplicator extends BaseReplicator {
 
     if (ok) return result;
 
-    if (this.config.verbose) {
-      console.warn(`[WebhookReplicator] Batch replication failed for ${resource}: ${err.message}`);
-    }
+    this.logger.warn({ resource, error: err.message }, 'Batch replication failed');
 
     this.emit('batch_replicator_error', {
       replicator: this.name,
@@ -608,9 +604,7 @@ class WebhookReplicator extends BaseReplicator {
 
     if (ok) return true;
 
-    if (this.config.verbose) {
-      console.warn(`[WebhookReplicator] Connection test failed: ${err.message}`);
-    }
+    this.logger.warn({ error: err.message }, 'Connection test failed');
 
     this.emit('connection_error', {
       replicator: this.name,

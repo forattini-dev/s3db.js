@@ -146,9 +146,7 @@ class PostgresReplicator extends BaseReplicator {
 
     const [ok, err, sdk] = await tryFn(() => import('pg'));
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[PostgresReplicator] Failed to import pg SDK: ${err.message}`);
-      }
+      this.logger.warn({ error: err.message }, 'Failed to import pg SDK');
       this.emit('initialization_error', {
         replicator: this.name,
         error: err.message
@@ -218,9 +216,10 @@ class PostgresReplicator extends BaseReplicator {
       });
 
       if (!okRes) {
-        if (this.config.verbose) {
-          console.warn(`[PostgresReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
-        }
+        this.logger.warn(
+          { resourceName, error: errRes.message },
+          'Could not get resource for schema sync'
+        );
         continue;
       }
 
@@ -257,7 +256,7 @@ class PostgresReplicator extends BaseReplicator {
               docs: 'docs/plugins/replicator.md'
             });
           } else if (this.schemaSync.onMismatch === 'warn') {
-            console.warn(`[PostgresReplicator] ${message}`);
+            this.logger.warn({ tableName, error: errSync.message }, message);
           }
           // 'ignore' does nothing
         }
@@ -302,9 +301,7 @@ class PostgresReplicator extends BaseReplicator {
       // Create table
       const createSQL = generatePostgresCreateTable(tableName, attributes);
 
-      if (this.config.verbose) {
-        console.log(`[PostgresReplicator] Creating table ${tableName}:\n${createSQL}`);
-      }
+      this.logger.debug({ tableName, createSQL }, 'Creating table');
 
       await this.client.query(createSQL);
 
@@ -320,9 +317,7 @@ class PostgresReplicator extends BaseReplicator {
     // Table exists - check for schema changes
     if (this.schemaSync.strategy === 'drop-create') {
       // Drop and recreate table (DANGEROUS!)
-      if (this.config.verbose) {
-        console.warn(`[PostgresReplicator] Dropping and recreating table ${tableName}`);
-      }
+      this.logger.warn({ tableName }, 'Dropping and recreating table');
 
       await this.client.query(`DROP TABLE IF EXISTS ${tableName} CASCADE`);
       const createSQL = generatePostgresCreateTable(tableName, attributes);
@@ -342,9 +337,10 @@ class PostgresReplicator extends BaseReplicator {
       const alterStatements = generatePostgresAlterTable(tableName, attributes, existingSchema);
 
       if (alterStatements.length > 0) {
-        if (this.config.verbose) {
-          console.log(`[PostgresReplicator] Altering table ${tableName}:`, alterStatements);
-        }
+        this.logger.debug(
+            { tableName, alterStatements },
+            'Altering table'
+          );
 
         for (const stmt of alterStatements) {
           await this.client.query(stmt);
@@ -482,7 +478,10 @@ class PostgresReplicator extends BaseReplicator {
       
       // Log errors if any occurred
       if (errors.length > 0) {
-        console.warn(`[PostgresReplicator] Replication completed with errors for ${resourceName}:`, errors);
+        this.logger.warn(
+        { resourceName, errors },
+        'Replication completed with errors'
+      );
       }
       
       this.emit('plg:replicator:replicated', {
@@ -503,9 +502,7 @@ class PostgresReplicator extends BaseReplicator {
       };
     });
     if (ok) return result;
-    if (this.config.verbose) {
-      console.warn(`[PostgresReplicator] Replication failed for ${resourceName}: ${err.message}`);
-    }
+    this.logger.warn({ resourceName, error: err.message }, 'Replication failed');
     this.emit('plg:replicator:error', {
       replicator: this.name,
       resourceName,
@@ -534,15 +531,19 @@ class PostgresReplicator extends BaseReplicator {
     }, {
       concurrency: this.config.batchConcurrency,
       mapError: (error, record) => {
-        if (this.config.verbose) {
-          console.warn(`[PostgresReplicator] Batch replication failed for record ${record.id}: ${error.message}`);
-        }
+        this.logger.warn(
+            { recordId: record.id, error: error.message },
+            'Batch replication failed for record'
+          );
         return { id: record.id, error: error.message };
       }
     });
 
     if (errors.length > 0) {
-      console.warn(`[PostgresReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
+      this.logger.warn(
+      { resourceName, errorCount: errors.length, errors },
+      'Batch replication completed with errors'
+    );
     }
 
     return {
@@ -559,9 +560,7 @@ class PostgresReplicator extends BaseReplicator {
       return true;
     });
     if (ok) return true;
-    if (this.config.verbose) {
-      console.warn(`[PostgresReplicator] Connection test failed: ${err.message}`);
-    }
+    this.logger.warn({ error: err.message }, 'Connection test failed');
     this.emit('connection_error', { replicator: this.name, error: err.message });
     return false;
   }

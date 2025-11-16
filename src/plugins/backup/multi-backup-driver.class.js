@@ -79,7 +79,7 @@ export default class MultiBackupDriver extends BaseBackupDriver {
 
     // Legacy support for requireAll (DEPRECATED)
     if (this.config.requireAll !== undefined) {
-      console.warn(
+      this.logger.warn(
         '[MultiBackupDriver] DEPRECATED: The "requireAll" option is deprecated. ' +
         'Use "strategy" instead: strategy: "any" (instead of requireAll: false) or strategy: "all" (instead of requireAll: true). ' +
         'This will be removed in v17.0.'

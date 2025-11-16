@@ -13,8 +13,8 @@
  * Usage:
  * ```javascript
  * const metrics = await performanceManager.collectMetrics(page);
- * console.log(metrics.score); // 85/100
- * console.log(metrics.coreWebVitals.lcp); // 2.5s
+ * this.logger.info(metrics.score); // 85/100
+ * this.logger.info(metrics.coreWebVitals.lcp); // 2.5s
  * ```
  */
 export class PerformanceManager {

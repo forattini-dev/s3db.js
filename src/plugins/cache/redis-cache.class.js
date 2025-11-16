@@ -213,7 +213,7 @@ export class RedisCache extends Cache {
         if (this.config.enableStats) {
           this.stats.errors++;
         }
-        console.error('Redis connection error:', err);
+        this.logger.error('Redis connection error:', err);
       });
 
       this.client.on('close', () => {

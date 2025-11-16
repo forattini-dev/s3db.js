@@ -75,7 +75,7 @@
  *
  * await database.usePlugin(plugin);
  * const result = await plugin.import('./users.csv');
- * console.log(`Imported ${result.inserted} records in ${result.duration}ms`);
+ * this.logger.info(`Imported ${result.inserted} records in ${result.duration}ms`);
  * ```
  *
  * **Advanced JSON Import with Validation**:
@@ -102,7 +102,7 @@
  *   deduplicateBy: 'id', // Skip records with duplicate IDs
  *   continueOnError: true,
  *   onProgress: (progress) => {
- *     console.log(`Progress: ${progress.percent}% (${progress.processed}/${progress.total})`);
+ *     this.logger.info(`Progress: ${progress.percent}% (${progress.processed}/${progress.total})`);
  *   }
  * });
  *
@@ -164,18 +164,18 @@
  * **Import with Progress Tracking**:
  * ```javascript
  * plugin.on('progress', (progress) => {
- *   console.log(`${progress.percent}% - ${progress.processed}/${progress.total}`);
- *   console.log(`Speed: ${progress.recordsPerSecond} records/sec`);
+ *   this.logger.info(`${progress.percent}% - ${progress.processed}/${progress.total}`);
+ *   this.logger.info(`Speed: ${progress.recordsPerSecond} records/sec`);
  * });
  *
  * plugin.on('error', (error) => {
- *   console.error(`Row ${error.row}: ${error.message}`);
+ *   this.logger.error(`Row ${error.row}: ${error.message}`);
  * });
  *
  * plugin.on('complete', (result) => {
- *   console.log(`Imported ${result.inserted} records`);
- *   console.log(`Skipped ${result.skipped} duplicates`);
- *   console.log(`Errors: ${result.errors}`);
+ *   this.logger.info(`Imported ${result.inserted} records`);
+ *   this.logger.info(`Skipped ${result.skipped} duplicates`);
+ *   this.logger.info(`Errors: ${result.errors}`);
  * });
  *
  * await plugin.import('./large-dataset.csv');

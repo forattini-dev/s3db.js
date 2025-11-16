@@ -215,10 +215,10 @@ class BigqueryReplicator extends BaseReplicator {
           suggestion: 'Review your BigQuery replicator configuration. Ensure projectId, datasetId, and credentials are correctly set. See docs/plugins/replicator.md'
         }
       );
-      if (this.config.verbose) {
-        console.error(`[BigqueryReplicator] Configuration validation failed:`);
-        configValidation.errors.forEach(err => console.error(`  - ${err}`));
-      }
+      this.logger.error(
+        { errors: configValidation.errors },
+        'Configuration validation failed'
+      );
       this.emit('initialization_error', { replicator: this.name, error: error.message, errors: configValidation.errors });
       throw error;
     }
@@ -228,9 +228,7 @@ class BigqueryReplicator extends BaseReplicator {
 
     const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[BigqueryReplicator] Failed to import BigQuery SDK: ${err.message}`);
-      }
+      this.logger.warn({ error: err.message }, 'Failed to import BigQuery SDK');
       this.emit('initialization_error', { replicator: this.name, error: err.message });
       throw err;
     }
@@ -242,9 +240,10 @@ class BigqueryReplicator extends BaseReplicator {
     });
 
     // Test connection to BigQuery
-    if (this.config.verbose) {
-      console.log(`[BigqueryReplicator] Testing connection to BigQuery project '${this.projectId}', dataset '${this.datasetId}'...`);
-    }
+    this.logger.debug(
+      { projectId: this.projectId, datasetId: this.datasetId },
+      'Testing connection to BigQuery'
+    );
 
     const [connOk, connErr] = await tryFn(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
@@ -267,11 +266,10 @@ class BigqueryReplicator extends BaseReplicator {
         }
       );
 
-      if (this.config.verbose) {
-        console.error(`[BigqueryReplicator] Connection test failed:`);
-        console.error(`  Error: ${errorMessage}`);
-        console.error(`  Suggestion: ${suggestion}`);
-      }
+      this.logger.error(
+        { error: errorMessage, suggestion, projectId: this.projectId, datasetId: this.datasetId },
+        'Connection test failed'
+      );
 
       this.emit('connection_error', {
         replicator: this.name,
@@ -283,9 +281,7 @@ class BigqueryReplicator extends BaseReplicator {
       throw error;
     }
 
-    if (this.config.verbose) {
-      console.log(`[BigqueryReplicator] Connection successful!`);
-    }
+    this.logger.debug('Connection successful');
 
     // Sync schemas if enabled
     if (this.schemaSync.enabled) {
@@ -311,9 +307,10 @@ class BigqueryReplicator extends BaseReplicator {
       });
 
       if (!okRes) {
-        if (this.config.verbose) {
-          console.warn(`[BigQueryReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
-        }
+        this.logger.warn(
+          { resourceName, error: errRes.message },
+          'Could not get resource for schema sync'
+        );
         continue;
       }
 
@@ -351,7 +348,7 @@ class BigqueryReplicator extends BaseReplicator {
               docs: 'docs/plugins/replicator.md'
             });
           } else if (this.schemaSync.onMismatch === 'warn') {
-            console.warn(`[BigQueryReplicator] ${message}`);
+            this.logger.warn(`${message}`);
           }
         }
       }
@@ -401,9 +398,10 @@ class BigqueryReplicator extends BaseReplicator {
       // Create table with schema (including tracking fields based on mutability)
       const schema = generateBigQuerySchema(attributes, mutability);
 
-      if (this.config.verbose) {
-        console.log(`[BigQueryReplicator] Creating table ${tableName} with schema (mutability: ${mutability}):`, schema);
-      }
+      this.logger.debug(
+        { tableName, mutability, schema },
+        'Creating table with schema'
+      );
 
       const createOptions = { schema };
       if (normalizedTableOptions?.timePartitioning) {
@@ -427,9 +425,7 @@ class BigqueryReplicator extends BaseReplicator {
 
     // Table exists - check for schema changes
     if (this.schemaSync.strategy === 'drop-create') {
-      if (this.config.verbose) {
-        console.warn(`[BigQueryReplicator] Dropping and recreating table ${tableName}`);
-      }
+      this.logger.warn({ tableName }, 'Dropping and recreating table');
 
       await table.delete();
       const schema = generateBigQuerySchema(attributes, mutability);
@@ -457,9 +453,10 @@ class BigqueryReplicator extends BaseReplicator {
       const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema, mutability);
 
       if (newFields.length > 0) {
-        if (this.config.verbose) {
-          console.log(`[BigQueryReplicator] Adding ${newFields.length} field(s) to table ${tableName}:`, newFields);
-        }
+        this.logger.debug(
+          { tableName, fieldCount: newFields.length, newFields },
+          'Adding fields to table'
+        );
 
         // Get current schema
         const [metadata] = await table.getMetadata();
@@ -625,11 +622,10 @@ class BigqueryReplicator extends BaseReplicator {
             } catch (error) {
               // Extract detailed BigQuery error information
               const { errors, response } = error;
-              if (this.config.verbose) {
-                console.error('[BigqueryReplicator] BigQuery insert error details:');
-                if (errors) console.error(JSON.stringify(errors, null, 2));
-                if (response) console.error(JSON.stringify(response, null, 2));
-              }
+              this.logger.error(
+                { errors, response },
+                'BigQuery insert error details'
+              );
               throw error;
             }
           } else if (operation === 'update' && mutability === 'mutable') {
@@ -662,20 +658,18 @@ class BigqueryReplicator extends BaseReplicator {
                 lastError = error;
 
                 // Enhanced error logging for BigQuery update operations
-                if (this.config.verbose) {
-                  console.warn(`[BigqueryReplicator] Update attempt ${attempt} failed: ${error.message}`);
-                  if (error.errors) {
-                    console.error('[BigqueryReplicator] BigQuery update error details:');
-                    console.error('Errors:', JSON.stringify(error.errors, null, 2));
-                  }
-                }
+                this.logger.warn(
+                  { attempt, error: error.message, errors: error.errors },
+                  'Update attempt failed'
+                );
 
                 // If it's streaming buffer error and not the last attempt
                 if (error?.message?.includes('streaming buffer') && attempt < maxRetries) {
                   const delaySeconds = 30;
-                  if (this.config.verbose) {
-                    console.warn(`[BigqueryReplicator] Retrying in ${delaySeconds} seconds due to streaming buffer issue`);
-                  }
+                  this.logger.warn(
+                    { delaySeconds },
+                    'Retrying due to streaming buffer issue'
+                  );
                   await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
                   continue;
                 }
@@ -698,12 +692,10 @@ class BigqueryReplicator extends BaseReplicator {
               job = [deleteJob];
             } catch (error) {
               // Enhanced error logging for BigQuery delete operations
-              if (this.config.verbose) {
-                console.error('[BigqueryReplicator] BigQuery delete error details:');
-                console.error('Query:', query);
-                if (error.errors) console.error('Errors:', JSON.stringify(error.errors, null, 2));
-                if (error.response) console.error('Response:', JSON.stringify(error.response, null, 2));
-              }
+              this.logger.error(
+                { query, errors: error.errors, response: error.response },
+                'BigQuery delete error details'
+              );
               throw error;
             }
           } else {
@@ -754,7 +746,10 @@ class BigqueryReplicator extends BaseReplicator {
 
       // Log errors if any occurred
       if (errors.length > 0) {
-        console.warn(`[BigqueryReplicator] Replication completed with errors for ${resourceName}:`, errors);
+        this.logger.warn(
+          { resourceName, errors },
+          'Replication completed with errors'
+        );
       }
 
       this.emit('plg:replicator:replicated', {
@@ -778,9 +773,10 @@ class BigqueryReplicator extends BaseReplicator {
 
     if (ok) return result;
 
-    if (this.config.verbose) {
-      console.warn(`[BigqueryReplicator] Replication failed for ${resourceName}: ${err.message}`);
-    }
+    this.logger.warn(
+      { resourceName, error: err.message },
+      'Replication failed'
+    );
     this.emit('plg:replicator:error', {
       replicator: this.name,
       resourceName,
@@ -811,9 +807,10 @@ class BigqueryReplicator extends BaseReplicator {
       {
         concurrency: this.config.batchConcurrency,
         mapError: (error, record) => {
-          if (this.config.verbose) {
-            console.warn(`[BigqueryReplicator] Batch replication failed for record ${record.id}: ${error.message}`);
-          }
+          this.logger.warn(
+            { recordId: record.id, error: error.message },
+            'Batch replication failed for record'
+          );
           return { id: record.id, error: error.message };
         }
       }
@@ -821,7 +818,10 @@ class BigqueryReplicator extends BaseReplicator {
 
     // Log errors if any occurred during batch processing
     if (errors.length > 0) {
-      console.warn(`[BigqueryReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
+      this.logger.warn(
+        { resourceName, errorCount: errors.length, errors },
+        'Batch replication completed with errors'
+      );
     }
 
     return {
@@ -920,9 +920,7 @@ class BigqueryReplicator extends BaseReplicator {
       return true;
     });
     if (ok) return true;
-    if (this.config.verbose) {
-      console.warn(`[BigqueryReplicator] Connection test failed: ${err.message}`);
-    }
+    this.logger.warn({ error: err.message }, 'Connection test failed');
     this.emit('connection_error', { replicator: this.name, error: err.message });
     return false;
   }

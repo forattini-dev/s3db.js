@@ -18,6 +18,7 @@
  */
 
 import { SessionStore } from './session-store.js';
+import { createLogger } from '../../../concerns/logger.js';
 
 /**
  * Session Store backed by an s3db.js Resource
@@ -46,9 +47,16 @@ export class ResourceSessionStore extends SessionStore {
     this.resource = resource;
     this.verbose = options.verbose || false;
 
-    if (this.verbose) {
-      console.log(`[ResourceSessionStore] Initialized with resource: ${resource.name}`);
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'ResourceSessionStore', level: logLevel });
     }
+
+    // 🪵 Debug: initialized
+    this.logger.debug({ resourceName: resource.name }, `Initialized with resource: ${resource.name}`);
   }
 
   /**
@@ -61,9 +69,8 @@ export class ResourceSessionStore extends SessionStore {
     try {
       const session = await this.resource.get(sessionId);
 
-      if (this.verbose) {
-        console.log(`[ResourceSessionStore] Retrieved session: ${sessionId}`);
-      }
+      // 🪵 Debug: session retrieved
+      this.logger.debug({ sessionId }, `Retrieved session: ${sessionId}`);
 
       return session;
     } catch (err) {
@@ -98,9 +105,8 @@ export class ResourceSessionStore extends SessionStore {
         expiresAt  // Track expiration time for TTL plugin
       });
 
-      if (this.verbose) {
-        console.log(`[ResourceSessionStore] Updated session: ${sessionId}`);
-      }
+      // 🪵 Debug: session updated
+      this.logger.debug({ sessionId }, `Updated session: ${sessionId}`);
     } catch (err) {
       // If session doesn't exist, insert it
       if (
@@ -114,9 +120,8 @@ export class ResourceSessionStore extends SessionStore {
           expiresAt
         });
 
-        if (this.verbose) {
-          console.log(`[ResourceSessionStore] Created session: ${sessionId}`);
-        }
+        // 🪵 Debug: session created
+        this.logger.debug({ sessionId }, `Created session: ${sessionId}`);
       } else {
         throw err;
       }
@@ -133,9 +138,8 @@ export class ResourceSessionStore extends SessionStore {
     try {
       await this.resource.delete(sessionId);
 
-      if (this.verbose) {
-        console.log(`[ResourceSessionStore] Deleted session: ${sessionId}`);
-      }
+      // 🪵 Debug: session deleted
+      this.logger.debug({ sessionId }, `Deleted session: ${sessionId}`);
     } catch (err) {
       // Ignore "not found" errors (already deleted or never existed)
       if (
@@ -146,9 +150,8 @@ export class ResourceSessionStore extends SessionStore {
         throw err;
       }
 
-      if (this.verbose) {
-        console.log(`[ResourceSessionStore] Session not found (already deleted): ${sessionId}`);
-      }
+      // 🪵 Debug: session not found (already deleted)
+      this.logger.debug({ sessionId }, `Session not found (already deleted): ${sessionId}`);
     }
   }
 
@@ -166,9 +169,8 @@ export class ResourceSessionStore extends SessionStore {
       const expiresAt = new Date(Date.now() + ttl).toISOString();
       await this.resource.patch(sessionId, { expiresAt });
 
-      if (this.verbose) {
-        console.log(`[ResourceSessionStore] Touched session: ${sessionId}`);
-      }
+      // 🪵 Debug: session touched
+      this.logger.debug({ sessionId }, `Touched session: ${sessionId}`);
     }
   }
 
@@ -185,7 +187,8 @@ export class ResourceSessionStore extends SessionStore {
         totalSessions: list.total || 0
       };
     } catch (err) {
-      console.error('[ResourceSessionStore] Error getting stats:', err.message);
+      // 🪵 Error: getting stats failed
+      this.logger.error({ error: err.message }, `Error getting stats: ${err.message}`);
       return { error: err.message };
     }
   }
@@ -206,17 +209,18 @@ export class ResourceSessionStore extends SessionStore {
           deleted++;
         } catch (err) {
           // Continue even if one delete fails
-          console.warn(`Failed to delete session ${session.id}:`, err.message);
+          // 🪵 Warning: failed to delete session
+          this.logger.warn({ sessionId: session.id, error: err.message }, `Failed to delete session ${session.id}: ${err.message}`);
         }
       }
 
-      if (this.verbose) {
-        console.log(`[ResourceSessionStore] Cleared ${deleted} sessions`);
-      }
+      // 🪵 Debug: sessions cleared
+      this.logger.debug({ deleted }, `Cleared ${deleted} sessions`);
 
       return deleted;
     } catch (err) {
-      console.error('[ResourceSessionStore] Error clearing sessions:', err.message);
+      // 🪵 Error: clearing sessions failed
+      this.logger.error({ error: err.message }, `Error clearing sessions: ${err.message}`);
       return 0;
     }
   }

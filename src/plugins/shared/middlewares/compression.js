@@ -110,7 +110,7 @@ export function createCompressionMiddleware(config = {}) {
     } catch (err) {
       // Compression failed, log and continue with uncompressed response
       if (verbose) {
-        console.error('[Compression] Error:', err.message);
+        this.logger.error('[Compression] Error:', err.message);
       }
     }
   };

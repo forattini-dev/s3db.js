@@ -71,7 +71,7 @@ import { getCronManager } from "../concerns/cron-manager.js";
  *       await machine.sendNotification(context.customerEmail, 'order_confirmed');
  *     },
  *     onLeftConfirmed: async (context, event, machine) => {
- *       console.log('Left confirmed state');
+ *       this.logger.info('Left confirmed state');
  *     }
  *   },
  *   
@@ -427,9 +427,8 @@ export class StateMachinePlugin extends Plugin {
   async _executeAction(actionName, context, event, machineId, entityId) {
     const action = this.config.actions[actionName];
     if (!action) {
-      if (this.verbose) {
-        console.warn(`[StateMachinePlugin] Action '${actionName}' not found`);
-      }
+      // 🪵 Warning: action not found
+      this.logger.warn({ actionName, machineId, entityId }, `Action '${actionName}' not found`);
       return;
     }
 
@@ -464,9 +463,8 @@ export class StateMachinePlugin extends Plugin {
             state: currentState
           });
 
-          if (this.verbose) {
-            console.log(`[StateMachinePlugin] Action '${actionName}' succeeded after ${attempt + 1} attempts`);
-          }
+          // 🪵 Debug: action retry success
+          this.logger.debug({ actionName, machineId, entityId, attempts: attempt + 1 }, `Action '${actionName}' succeeded after ${attempt + 1} attempts`);
         }
 
         return result;
@@ -476,9 +474,8 @@ export class StateMachinePlugin extends Plugin {
 
         // If retries are disabled, use old behavior (emit error but don't throw)
         if (!retryEnabled) {
-          if (this.verbose) {
-            console.error(`[StateMachinePlugin] Action '${actionName}' failed:`, error.message);
-          }
+          // 🪵 Error: action failed (no retry)
+          this.logger.error({ actionName, machineId, entityId, error: error.message }, `Action '${actionName}' failed: ${error.message}`);
           this.emit('plg:state-machine:action-error', { actionName, error: error.message, machineId, entityId });
           return; // Don't throw, continue execution
         }
@@ -499,9 +496,8 @@ export class StateMachinePlugin extends Plugin {
             state: currentState
           });
 
-          if (this.verbose) {
-            console.error(`[StateMachinePlugin] Action '${actionName}' failed with non-retriable error:`, error.message);
-          }
+          // 🪵 Error: non-retriable action error
+          this.logger.error({ actionName, machineId, entityId, error: error.message, state: currentState }, `Action '${actionName}' failed with non-retriable error: ${error.message}`);
 
           throw error;
         }
@@ -517,9 +513,8 @@ export class StateMachinePlugin extends Plugin {
             state: currentState
           });
 
-          if (this.verbose) {
-            console.error(`[StateMachinePlugin] Action '${actionName}' failed after ${attempt + 1} attempts:`, error.message);
-          }
+          // 🪵 Error: retry exhausted
+          this.logger.error({ actionName, machineId, entityId, attempts: attempt + 1, error: error.message, state: currentState }, `Action '${actionName}' failed after ${attempt + 1} attempts: ${error.message}`);
 
           throw error;
         }
@@ -535,9 +530,8 @@ export class StateMachinePlugin extends Plugin {
           try {
             await retryConfig.onRetry(attempt, error, context);
           } catch (hookError) {
-            if (this.verbose) {
-              console.warn(`[StateMachinePlugin] onRetry hook failed:`, hookError.message);
-            }
+            // 🪵 Warning: onRetry hook failed
+            this.logger.warn({ hookError: hookError.message }, `onRetry hook failed: ${hookError.message}`);
           }
         }
 
@@ -551,9 +545,8 @@ export class StateMachinePlugin extends Plugin {
           state: currentState
         });
 
-        if (this.verbose) {
-          console.warn(`[StateMachinePlugin] Action '${actionName}' failed (attempt ${attempt + 1}/${maxAttempts + 1}), retrying in ${delay}ms:`, error.message);
-        }
+        // 🪵 Warning: action retry attempt
+        this.logger.warn({ actionName, machineId, entityId, attempt, maxAttempts, delay, error: error.message }, `Action '${actionName}' failed (attempt ${attempt + 1}/${maxAttempts + 1}), retrying in ${delay}ms: ${error.message}`);
 
         // Wait before retry
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -605,8 +598,9 @@ export class StateMachinePlugin extends Plugin {
         }
       }
 
-      if (!logOk && this.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to log transition after ${this.config.retryAttempts} attempts:`, lastLogErr.message);
+      if (!logOk) {
+        // 🪵 Warning: failed to log transition
+        this.logger.warn({ machineId, entityId, attempts: this.config.retryAttempts, error: lastLogErr.message }, `Failed to log transition after ${this.config.retryAttempts} attempts: ${lastLogErr.message}`);
       }
 
       // Update current state with upsert pattern
@@ -631,8 +625,9 @@ export class StateMachinePlugin extends Plugin {
           this.database.resources[this.config.stateResource].insert({ id: stateId, ...stateData })
         );
 
-        if (!insertOk && this.verbose) {
-          console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
+        if (!insertOk) {
+          // 🪵 Warning: failed to upsert state
+          this.logger.warn({ machineId, entityId, stateId, error: insertErr.message }, `Failed to upsert state: ${insertErr.message}`);
         }
       }
     }
@@ -677,8 +672,9 @@ export class StateMachinePlugin extends Plugin {
     const storage = this.getStorage();
     const [ok, err] = await tryFn(() => storage.releaseLock(lock));
 
-    if (!ok && this.verbose) {
-      console.warn(`[StateMachinePlugin] Failed to release lock '${lock?.name}':`, err.message);
+    if (!ok) {
+      // 🪵 Warning: failed to release lock
+      this.logger.warn({ lockName: lock?.name, error: err.message }, `Failed to release lock '${lock?.name}': ${err.message}`);
     }
   }
 
@@ -798,9 +794,8 @@ export class StateMachinePlugin extends Plugin {
     );
 
     if (!ok) {
-      if (this.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to get transition history:`, err.message);
-      }
+      // 🪵 Warning: failed to get transition history
+      this.logger.warn({ machineId, entityId, error: err.message }, `Failed to get transition history: ${err.message}`);
       return [];
     }
 
@@ -960,9 +955,8 @@ export class StateMachinePlugin extends Plugin {
     );
 
     if (!ok) {
-      if (this.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to query entities in state '${stateName}':`, err.message);
-      }
+      // 🪵 Warning: failed to query entities in state
+      this.logger.warn({ machineId, stateName, error: err.message }, `Failed to query entities in state '${stateName}': ${err.message}`);
       return [];
     }
 
@@ -1047,9 +1041,8 @@ export class StateMachinePlugin extends Plugin {
 
       await this.database.usePlugin(this.schedulerPlugin);
 
-      if (this.verbose) {
-        console.log(`[StateMachinePlugin] Installed SchedulerPlugin with ${Object.keys(cronJobs).length} cron triggers`);
-      }
+      // 🪵 Debug: installed SchedulerPlugin
+      this.logger.debug({ cronJobCount: Object.keys(cronJobs).length }, `Installed SchedulerPlugin with ${Object.keys(cronJobs).length} cron triggers`);
     }
   }
 
@@ -1130,9 +1123,8 @@ export class StateMachinePlugin extends Plugin {
               }));
             }
 
-            if (this.verbose) {
-              console.error(`[StateMachinePlugin] Trigger '${triggerName}' failed for entity ${entity.entityId}:`, error.message);
-            }
+            // 🪵 Error: trigger failed
+            this.logger.error({ triggerName, machineId, entityId: entity.entityId, error: error.message }, `Trigger '${triggerName}' failed for entity ${entity.entityId}: ${error.message}`);
           }
         }
 
@@ -1148,7 +1140,7 @@ export class StateMachinePlugin extends Plugin {
   async _setupDateTrigger(machineId, stateName, trigger, triggerName) {
     // Poll for entities approaching trigger date
     const cronManager = getCronManager();
-    const jobName = cronManager.scheduleInterval(
+    const task = await cronManager.scheduleInterval(
       this.config.triggerCheckInterval,
       async () => {
         const entities = await this._getEntitiesInState(machineId, stateName);
@@ -1196,15 +1188,15 @@ export class StateMachinePlugin extends Plugin {
             });
           }
         } catch (error) {
-            if (this.verbose) {
-              console.error(`[StateMachinePlugin] Date trigger '${triggerName}' failed:`, error.message);
-            }
+            // 🪵 Error: date trigger failed
+            this.logger.error({ triggerName, machineId, stateName, error: error.message }, `Date trigger '${triggerName}' failed: ${error.message}`);
           }
         }
       },
       `date-trigger-${machineId}-${stateName}-${triggerName}`
     );
 
+    const jobName = `date-trigger-${machineId}-${stateName}-${triggerName}`;
     this.triggerJobNames.push(jobName);
   }
 
@@ -1216,7 +1208,7 @@ export class StateMachinePlugin extends Plugin {
     const interval = trigger.interval || this.config.triggerCheckInterval;
 
     const cronManager = getCronManager();
-    const jobName = cronManager.scheduleInterval(
+    const task = await cronManager.scheduleInterval(
       interval,
       async () => {
         const entities = await this._getEntitiesInState(machineId, stateName);
@@ -1258,15 +1250,15 @@ export class StateMachinePlugin extends Plugin {
             });
           }
         } catch (error) {
-            if (this.verbose) {
-              console.error(`[StateMachinePlugin] Function trigger '${triggerName}' failed:`, error.message);
-            }
+            // 🪵 Error: function trigger failed
+            this.logger.error({ triggerName, machineId, stateName, error: error.message }, `Function trigger '${triggerName}' failed: ${error.message}`);
           }
         }
       },
       `function-trigger-${machineId}-${stateName}-${triggerName}`
     );
 
+    const jobName = `function-trigger-${machineId}-${stateName}-${triggerName}`;
     this.triggerJobNames.push(jobName);
   }
 
@@ -1361,8 +1353,9 @@ export class StateMachinePlugin extends Plugin {
                 const [ok] = await tryFn(() =>
                   resource.patch(entity.entityId, { [resourceConfig.stateField]: trigger.targetState })
                 );
-                if (!ok && this.verbose) {
-                  console.warn(`[StateMachinePlugin] Failed to update resource stateField for entity ${entity.entityId}`);
+                if (!ok) {
+                  // 🪵 Warning: failed to update resource stateField
+                  this.logger.warn({ machineId, entityId: entity.entityId, resourceName: stateResource }, `Failed to update resource stateField for entity ${entity.entityId}`);
                 }
               }
             }
@@ -1420,9 +1413,8 @@ export class StateMachinePlugin extends Plugin {
             targetState: trigger.targetState
           });
         } catch (error) {
-          if (this.verbose) {
-            console.error(`[StateMachinePlugin] Event trigger '${triggerName}' failed:`, error.message);
-          }
+          // 🪵 Error: event trigger failed
+          this.logger.error({ triggerName, machineId, stateName, error: error.message }, `Event trigger '${triggerName}' failed: ${error.message}`);
         }
       }
     };
@@ -1454,9 +1446,8 @@ export class StateMachinePlugin extends Plugin {
 
       eventSource.on(baseEvent, wrappedHandler);
 
-      if (this.verbose) {
-        console.log(`[StateMachinePlugin] Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}' (async-safe)`);
-      }
+      // 🪵 Debug: listening to resource event
+      this.logger.debug({ baseEvent, resourceName: eventSource.name, triggerName }, `Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}' (async-safe)`);
     } else {
       // Original behavior: listen to database or plugin events
       const staticEventName = typeof baseEventName === 'function' ? 'updated' : baseEventName;
@@ -1465,16 +1456,14 @@ export class StateMachinePlugin extends Plugin {
         const dbEventName = staticEventName.substring(3); // Remove 'db:' prefix
         this.database.on(dbEventName, eventHandler);
 
-        if (this.verbose) {
-          console.log(`[StateMachinePlugin] Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
-        }
+        // 🪵 Debug: listening to database event
+        this.logger.debug({ dbEventName, triggerName }, `Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
       } else {
         // Listen to plugin events
         this.on(staticEventName, eventHandler);
 
-        if (this.verbose) {
-          console.log(`[StateMachinePlugin] Listening to plugin event '${staticEventName}' for trigger '${triggerName}'`);
-        }
+        // 🪵 Debug: listening to plugin event
+        this.logger.debug({ staticEventName, triggerName }, `Listening to plugin event '${staticEventName}' for trigger '${triggerName}'`);
       }
     }
   }
@@ -1490,9 +1479,8 @@ export class StateMachinePlugin extends Plugin {
 
       // Skip if no resource is specified
       if (!resourceConfig.resource) {
-        if (this.verbose) {
-          console.log(`[StateMachinePlugin] Machine '${machineName}' has no resource configured, skipping attachment`);
-        }
+        // 🪵 Debug: machine has no resource configured
+        this.logger.debug({ machineName }, `Machine '${machineName}' has no resource configured, skipping attachment`);
         continue;
       }
 
@@ -1502,9 +1490,10 @@ export class StateMachinePlugin extends Plugin {
         // Resource specified as name
         resource = this.database.resources[resourceConfig.resource];
         if (!resource) {
-          console.warn(
-            `[StateMachinePlugin] Resource '${resourceConfig.resource}' not found for machine '${machineName}'. ` +
-            `Resource API will not be available.`
+          // 🪵 Warning: resource not found for machine
+          this.logger.warn(
+            { machineName, resourceName: resourceConfig.resource },
+            `Resource '${resourceConfig.resource}' not found for machine '${machineName}'. Resource API will not be available.`
           );
           continue;
         }
@@ -1538,16 +1527,14 @@ export class StateMachinePlugin extends Plugin {
       // Attach the proxy to the resource
       resource._attachStateMachine(machineProxy);
 
-      if (this.verbose) {
-        console.log(`[StateMachinePlugin] Attached machine '${machineName}' to resource '${resource.name}'`);
-      }
+      // 🪵 Debug: attached machine to resource
+      this.logger.debug({ machineName, resourceName: resource.name }, `Attached machine '${machineName}' to resource '${resource.name}'`);
     }
   }
 
   async start() {
-    if (this.verbose) {
-      console.log(`[StateMachinePlugin] Started with ${this.machines.size} state machines`);
-    }
+    // 🪵 Debug: started
+    this.logger.debug({ machineCount: this.machines.size }, `Started with ${this.machines.size} state machines`);
   }
 
   async stop() {

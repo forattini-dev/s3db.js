@@ -5,7 +5,11 @@
  */
 
 import { error as formatError } from './response-formatter.js';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'ErrorHandler', level: 'info' });
 /**
  * Map s3db.js errors to HTTP status codes
  */
@@ -90,7 +94,7 @@ export function errorHandler(err, c) {
   // Log only when verbose is enabled in context
   if (c && c.get && c.get('verbose')) {
     if (status >= 500) {
-      console.error('[API Plugin] Error:', {
+      logger.error('[API Plugin] Error:', {
         message: err.message,
         code,
         status,
@@ -98,7 +102,7 @@ export function errorHandler(err, c) {
         details
       });
     } else if (status >= 400 && status < 500) {
-      console.warn('[API Plugin] Client error:', {
+      logger.warn('[API Plugin] Client error:', {
         message: err.message,
         code,
         status,

@@ -78,9 +78,9 @@
  * 4. **Check stats regularly**:
  *    ```javascript
  *    const stats = plugin.getStats();
- *    console.log(`Partition cache hits: ${stats.partitionCacheHits}`);
- *    console.log(`Partition queries optimized: ${stats.partitionQueriesOptimized}`);
- *    console.log(`States processed: ${stats.statesProcessed}`);
+ *    this.logger.info(`Partition cache hits: ${stats.partitionCacheHits}`);
+ *    this.logger.info(`Partition queries optimized: ${stats.partitionQueriesOptimized}`);
+ *    this.logger.info(`States processed: ${stats.statesProcessed}`);
  *    ```
  *
  * 5. **Enable diff tracking** for infrastructure auditing:
@@ -139,8 +139,8 @@
  *   'environments/**\/*.tfstate',
  *   { parallelism: 10 }  // Process 10 files concurrently
  * );
- * console.log(`Processed ${result.filesProcessed} state files`);
- * console.log(`Total resources: ${result.totalResourcesInserted}`);
+ * this.logger.info(`Processed ${result.filesProcessed} state files`);
+ * this.logger.info(`Total resources: ${result.totalResourcesInserted}`);
  * ```
  *
  * === 💡 Usage Examples ===
@@ -148,7 +148,7 @@
  * **Import from local file**:
  * ```javascript
  * const result = await plugin.importState('./terraform.tfstate');
- * console.log(`Imported ${result.resourcesInserted} resources from serial ${result.serial}`);
+ * this.logger.info(`Imported ${result.resourcesInserted} resources from serial ${result.serial}`);
  * ```
  *
  * **Import from S3 (Terraform remote backend)**:
@@ -167,9 +167,9 @@
  * **Get diff between states**:
  * ```javascript
  * const diff = await plugin.compareStates('./terraform.tfstate', 5, 10);
- * console.log(`Added: ${diff.added.length}`);
- * console.log(`Modified: ${diff.modified.length}`);
- * console.log(`Deleted: ${diff.deleted.length}`);
+ * this.logger.info(`Added: ${diff.added.length}`);
+ * this.logger.info(`Modified: ${diff.modified.length}`);
+ * this.logger.info(`Deleted: ${diff.deleted.length}`);
  * ```
  *
  * **Export state to file**:
@@ -182,10 +182,10 @@
  * const timeline = await plugin.getDiffTimeline('./terraform.tfstate', {
  *   lookback: 30
  * });
- * console.log(`Total changes over ${timeline.totalDiffs} versions:`);
- * console.log(`- Added: ${timeline.summary.totalAdded}`);
- * console.log(`- Modified: ${timeline.summary.totalModified}`);
- * console.log(`- Deleted: ${timeline.summary.totalDeleted}`);
+ * this.logger.info(`Total changes over ${timeline.totalDiffs} versions:`);
+ * this.logger.info(`- Added: ${timeline.summary.totalAdded}`);
+ * this.logger.info(`- Modified: ${timeline.summary.totalModified}`);
+ * this.logger.info(`- Deleted: ${timeline.summary.totalDeleted}`);
  * ```
  *
  * === 🔧 Troubleshooting ===
@@ -226,7 +226,7 @@
  * // Get diff from 1 hour ago
  * const recentDiff = await plugin.compareStates('./terraform.tfstate', serial-5, serial);
  * if (recentDiff.modified.length > 0) {
- *   console.warn('Infrastructure drift detected!');
+ *   this.logger.warn('Infrastructure drift detected!');
  * }
  * ```
  *
@@ -237,7 +237,7 @@
  * const rdsChanges = timeline.diffs
  *   .map(d => d.changes.added.filter(r => r.type === 'aws_rds_cluster'))
  *   .flat();
- * console.log(`Added ${rdsChanges.length} RDS clusters over time`);
+ * this.logger.info(`Added ${rdsChanges.length} RDS clusters over time`);
  * ```
  */
 
@@ -250,6 +250,7 @@ import tryFn from '../../concerns/try-fn.js';
 import requirePluginDependency from '../concerns/plugin-dependencies.js';
 import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceNames } from '../concerns/resource-names.js';
+import { createLogger } from '../../concerns/logger.js';
 import {
   TfStateError,
   InvalidStateFileError,
@@ -266,6 +267,14 @@ import { FilesystemTfStateDriver } from './filesystem-driver.js';
 export class TfStatePlugin extends Plugin {
   constructor(config = {}) {
     super(config);
+
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = config.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'TfStatePlugin', level: logLevel });
+    }
 
     // Driver-based configuration
     this.driverType = config.driver || null;
@@ -364,15 +373,11 @@ export class TfStatePlugin extends Plugin {
    * @override
    */
   async onInstall() {
-    if (this.verbose) {
-      console.log('[TfStatePlugin] Installing...');
-    }
+    this.logger.debug('Installing...');
 
     // Initialize driver if using new config format
     if (this.driverType) {
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Initializing ${this.driverType} driver...`);
-      }
+      this.logger.debug({ driverType: this.driverType }, `Initializing ${this.driverType} driver...`);
 
       if (this.driverType === 's3') {
         this.driver = new S3TfStateDriver(this.driverConfig);
@@ -384,9 +389,7 @@ export class TfStatePlugin extends Plugin {
 
       await this.driver.initialize();
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Driver initialized successfully`);
-      }
+      this.logger.debug('Driver initialized successfully');
     }
 
     // Resource 0: Terraform Lineages (Master tracking resource)
@@ -555,11 +558,9 @@ export class TfStatePlugin extends Plugin {
       }
     }
 
-    if (this.verbose) {
-      const resourcesCreated = [this.lineagesName, this.stateFilesName, this.resourceName];
-      if (this.trackDiffs) resourcesCreated.push(this.diffsName);
-      console.log(`[TfStatePlugin] Created resources: ${resourcesCreated.join(', ')}`);
-    }
+    const resourcesCreated = [this.lineagesName, this.stateFilesName, this.resourceName];
+    if (this.trackDiffs) resourcesCreated.push(this.diffsName);
+    this.logger.debug({ resources: resourcesCreated }, `Created resources: ${resourcesCreated.join(', ')}`);
 
     if (this.autoSync && this.watchPaths.length > 0) {
       await this._setupFileWatchers();
@@ -584,9 +585,7 @@ export class TfStatePlugin extends Plugin {
    * @override
    */
   async onStart() {
-    if (this.verbose) {
-      console.log('[TfStatePlugin] Started');
-    }
+    this.logger.debug('Started');
   }
 
   /**
@@ -598,10 +597,7 @@ export class TfStatePlugin extends Plugin {
     if (this.cronTask) {
       this.cronTask.stop();
       this.cronTask = null;
-
-      if (this.verbose) {
-        console.log('[TfStatePlugin] Stopped cron monitoring');
-      }
+      this.logger.debug('Stopped cron monitoring');
     }
 
     for (const watcher of this.watchers) {
@@ -614,9 +610,7 @@ export class TfStatePlugin extends Plugin {
         }
       } catch (error) {
         // Ignore errors when closing watchers
-        if (this.verbose) {
-          console.warn('[TfStatePlugin] Error closing watcher:', error.message);
-        }
+        this.logger.debug({ error: error.message }, 'Error closing watcher');
       }
     }
     this.watchers = [];
@@ -625,15 +619,10 @@ export class TfStatePlugin extends Plugin {
     if (this.driver) {
       await this.driver.close();
       this.driver = null;
-
-      if (this.verbose) {
-        console.log('[TfStatePlugin] Driver closed');
-      }
+      this.logger.debug('Driver closed');
     }
 
-    if (this.verbose) {
-      console.log('[TfStatePlugin] Stopped');
-    }
+    this.logger.debug('Stopped');
   }
 
   /**
@@ -650,17 +639,13 @@ export class TfStatePlugin extends Plugin {
     const startTime = Date.now();
     const parallelism = options.parallelism || 5;
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Finding local files matching: ${pattern}`);
-    }
+    this.logger.debug({ pattern }, `Finding local files matching: ${pattern}`);
 
     try {
       // Find all matching files
       const matchingFiles = await this._findFilesGlob(pattern);
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Found ${matchingFiles.length} matching files`);
-      }
+      this.logger.debug({ count: matchingFiles.length }, `Found ${matchingFiles.length} matching files`);
 
       if (matchingFiles.length === 0) {
         return {
@@ -684,9 +669,7 @@ export class TfStatePlugin extends Plugin {
             const result = await this.importState(filePath);
             return { success: true, file: filePath, result };
           } catch (error) {
-            if (this.verbose) {
-              console.error(`[TfStatePlugin] Failed to import ${filePath}:`, error.message);
-            }
+            this.logger.error({ filePath, error: error.message }, `Failed to import ${filePath}`);
             return { success: false, file: filePath, error: error.message };
           }
         });
@@ -729,18 +712,14 @@ export class TfStatePlugin extends Plugin {
         duration
       };
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Glob import completed:`, consolidatedResult);
-      }
+      this.logger.debug({ consolidatedResult }, `Glob import completed:`);
 
       this.emit('globImportCompleted', consolidatedResult);
 
       return consolidatedResult;
     } catch (error) {
       this.stats.errors++;
-      if (this.verbose) {
-        console.error(`[TfStatePlugin] Glob import failed:`, error);
-      }
+      this.logger.error({ error: error }, `Glob import failed:`);
       throw error;
     }
   }
@@ -801,9 +780,7 @@ export class TfStatePlugin extends Plugin {
     const startTime = Date.now();
     const sourceFile = `s3://${bucket}/${key}`;
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Importing from S3: ${sourceFile}`);
-    }
+    this.logger.debug('Importing from S3: ${sourceFile}');
 
     try {
       // Use provided client or database client
@@ -861,9 +838,7 @@ export class TfStatePlugin extends Plugin {
         // Exact same state already imported, skip
         const existing = existingByHash[0];
 
-        if (this.verbose) {
-          console.log(`[TfStatePlugin] State already imported (SHA256 match), skipping`);
-        }
+        this.logger.debug('State already imported (SHA256 match), skipping');
 
         return {
           skipped: true,
@@ -950,18 +925,14 @@ export class TfStatePlugin extends Plugin {
         duration
       };
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] S3 import completed:`, result);
-      }
+      this.logger.debug({ result }, `S3 import completed:`);
 
       this.emit('stateImported', result);
 
       return result;
     } catch (error) {
       this.stats.errors++;
-      if (this.verbose) {
-        console.error(`[TfStatePlugin] S3 import failed:`, error);
-      }
+      this.logger.error({ error: error }, `S3 import failed:`);
       throw error;
     }
   }
@@ -978,9 +949,7 @@ export class TfStatePlugin extends Plugin {
     const client = options.client || this.database.client;
     const parallelism = options.parallelism || 5;
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Listing S3 objects: s3://${bucket}/${pattern}`);
-    }
+    this.logger.debug('Listing S3 objects: s3://${bucket}/${pattern}');
 
     try {
       // List all objects in the bucket
@@ -1009,9 +978,7 @@ export class TfStatePlugin extends Plugin {
         return this._matchesGlobPattern(obj.Key, pattern);
       });
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Found ${matchingObjects.length} matching files`);
-      }
+      this.logger.debug('Found ${matchingObjects.length} matching files');
 
       if (matchingObjects.length === 0) {
         return {
@@ -1035,9 +1002,7 @@ export class TfStatePlugin extends Plugin {
             const result = await this.importStateFromS3(bucket, obj.Key, options);
             return { success: true, key: obj.Key, result };
           } catch (error) {
-            if (this.verbose) {
-              console.error(`[TfStatePlugin] Failed to import ${obj.Key}:`, error.message);
-            }
+            this.logger.error({ error: error.message }, `Failed to import ${obj.Key}:`);
             return { success: false, key: obj.Key, error: error.message };
           }
         });
@@ -1074,18 +1039,14 @@ export class TfStatePlugin extends Plugin {
         duration
       };
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Glob import completed:`, consolidatedResult);
-      }
+      this.logger.debug({ consolidatedResult }, `Glob import completed:`);
 
       this.emit('globImportCompleted', consolidatedResult);
 
       return consolidatedResult;
     } catch (error) {
       this.stats.errors++;
-      if (this.verbose) {
-        console.error(`[TfStatePlugin] Glob import failed:`, error);
-      }
+      this.logger.error({ error: error }, `Glob import failed:`);
       throw error;
     }
   }
@@ -1160,9 +1121,7 @@ export class TfStatePlugin extends Plugin {
 
       await this.lineagesResource.update(lineageUuid, updates);
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Updated lineage: ${lineageUuid} (serial ${stateMeta.serial})`);
-      }
+      this.logger.debug('Updated lineage: ${lineageUuid} (serial ${stateMeta.serial})');
 
       return { ...existingLineage, ...updates };
     } else {
@@ -1179,9 +1138,7 @@ export class TfStatePlugin extends Plugin {
 
       await this.lineagesResource.insert(lineageRecord);
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Created new lineage: ${lineageUuid}`);
-      }
+      this.logger.debug('Created new lineage: ${lineageUuid}');
 
       return lineageRecord;
     }
@@ -1195,9 +1152,7 @@ export class TfStatePlugin extends Plugin {
   async importState(filePath) {
     const startTime = Date.now();
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Importing state from: ${filePath}`);
-    }
+    this.logger.debug('Importing state from: ${filePath}');
 
     // Read and parse state file
     const state = await this._readStateFile(filePath);
@@ -1215,9 +1170,7 @@ export class TfStatePlugin extends Plugin {
       // Exact same state already imported, skip
       const existing = existingByHash[0];
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] State already imported (SHA256 match), skipping`);
-      }
+      this.logger.debug('State already imported (SHA256 match), skipping');
 
       return {
         skipped: true,
@@ -1318,9 +1271,7 @@ export class TfStatePlugin extends Plugin {
       duration
     };
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Import completed:`, result);
-    }
+    this.logger.debug({ result }, `Import completed:`);
 
     this.emit('stateImported', result);
 
@@ -1430,9 +1381,7 @@ export class TfStatePlugin extends Plugin {
       } catch (error) {
         this.stats.errors++;
 
-        if (this.verbose) {
-          console.error(`[TfStatePlugin] Failed to extract resource:`, error);
-        }
+        this.logger.error({ error: error }, `Failed to extract resource:`);
 
         throw new ResourceExtractionError(resource.name || 'unknown', error);
       }
@@ -1595,17 +1544,14 @@ export class TfStatePlugin extends Plugin {
       partitionValues: { lineageId, serial: currentSerial - 1 }
     });
 
-    if (this.verbose) {
-      console.log(
-        `[TfStatePlugin] Diff calculation (lineage-based): found ${previousStateFiles.length} previous states for lineage=${lineageId}, serial=${currentSerial - 1}`
-      );
-    }
+    this.logger.debug(
+      { count: previousStateFiles.length, lineageId, serial: currentSerial - 1 },
+      `Diff calculation (lineage-based): found ${previousStateFiles.length} previous states for lineage=${lineageId}, serial=${currentSerial - 1}`
+    );
 
     if (previousStateFiles.length === 0) {
       // First state for this lineage, no diff
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] First state for lineage ${lineageId}, no previous state`);
-      }
+      this.logger.debug('First state for lineage ${lineageId}, no previous state');
       return {
         added: [],
         modified: [],
@@ -1623,11 +1569,10 @@ export class TfStatePlugin extends Plugin {
     const previousSerial = previousStateFile.serial;
     const previousStateFileId = previousStateFile.id;
 
-    if (this.verbose) {
-      console.log(
-        `[TfStatePlugin] Using previous state: serial ${previousSerial} (id: ${previousStateFileId})`
-      );
-    }
+    this.logger.debug(
+      { previousSerial, previousStateFileId },
+      `Using previous state: serial ${previousSerial} (id: ${previousStateFileId})`
+    );
 
     const [ok, err, diff] = await tryFn(async () => {
       return await this._computeDiff(previousSerial, currentSerial, lineageId);
@@ -1671,17 +1616,14 @@ export class TfStatePlugin extends Plugin {
       })
     ]);
 
-    if (this.verbose) {
-      console.log(
-        `[TfStatePlugin] Diff computation using lineage partition: ${oldResources.length} old + ${newResources.length} new resources`
-      );
-    }
+    this.logger.debug(
+      { oldCount: oldResources.length, newCount: newResources.length },
+      `Diff computation using lineage partition: ${oldResources.length} old + ${newResources.length} new resources`
+    );
 
     // Fallback removed - lineage-based partitions are always available
     if (oldResources.length === 0 && newResources.length === 0) {
-      if (this.verbose) {
-        console.log('[TfStatePlugin] No resources found for either serial');
-      }
+      this.logger.debug('No resources found for either serial');
       return {
         added: [],
         modified: [],
@@ -1788,9 +1730,7 @@ export class TfStatePlugin extends Plugin {
     });
 
     if (!ok) {
-      if (this.verbose) {
-        console.error(`[TfStatePlugin] Failed to save diff:`, err);
-      }
+      this.logger.error({ error: err }, `Failed to save diff:`);
       throw new TfStateError(`Failed to save diff: ${err.message}`, {
         originalError: err
       });
@@ -1831,9 +1771,7 @@ export class TfStatePlugin extends Plugin {
           return { success: true, result };
         } else {
           this.stats.errors++;
-          if (this.verbose) {
-            console.error(`[TfStatePlugin] Failed to insert resource ${resource.resourceAddress}:`, err);
-          }
+          this.logger.error({ error: err }, `Failed to insert resource ${resource.resourceAddress}:`);
           return { success: false, error: err };
         }
       });
@@ -1848,8 +1786,11 @@ export class TfStatePlugin extends Plugin {
       });
     }
 
-    if (this.verbose && resources.length > parallelism) {
-      console.log(`[TfStatePlugin] Batch inserted ${inserted.length}/${resources.length} resources (parallelism: ${parallelism})`);
+    if (resources.length > parallelism) {
+      this.logger.debug(
+        { inserted: inserted.length, total: resources.length, parallelism },
+        `Batch inserted ${inserted.length}/${resources.length} resources (parallelism: ${parallelism})`
+      );
     }
 
     return inserted;
@@ -1864,9 +1805,7 @@ export class TfStatePlugin extends Plugin {
       throw new TfStateError('Cannot setup monitoring without a driver');
     }
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Setting up cron monitoring: ${this.monitorCron}`);
-    }
+    this.logger.debug('Setting up cron monitoring: ${this.monitorCron}');
 
     // Validate plugin dependencies are installed
     await requirePluginDependency('tfstate-plugin');
@@ -1889,16 +1828,12 @@ export class TfStatePlugin extends Plugin {
         await this._monitorStateFiles();
       } catch (error) {
         this.stats.errors++;
-        if (this.verbose) {
-          console.error('[TfStatePlugin] Monitoring error:', error);
-        }
+        this.logger.error({ error: error.message }, 'Monitoring error');
         this.emit('monitoringError', { error: error.message });
       }
     });
 
-    if (this.verbose) {
-      console.log('[TfStatePlugin] Cron monitoring started');
-    }
+    this.logger.debug('Cron monitoring started');
 
     this.emit('monitoringStarted', { cron: this.monitorCron });
   }
@@ -1911,9 +1846,7 @@ export class TfStatePlugin extends Plugin {
   async _monitorStateFiles() {
     if (!this.driver) return;
 
-    if (this.verbose) {
-      console.log('[TfStatePlugin] Checking for state file changes...');
-    }
+    this.logger.debug('Checking for state file changes...');
 
     const startTime = Date.now();
 
@@ -1921,9 +1854,7 @@ export class TfStatePlugin extends Plugin {
       // List all state files matching selector
       const stateFiles = await this.driver.listStateFiles();
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Found ${stateFiles.length} state files`);
-      }
+      this.logger.debug('Found ${stateFiles.length} state files');
 
       // Process each state file
       let changedFiles = 0;
@@ -1972,9 +1903,7 @@ export class TfStatePlugin extends Plugin {
 
             if (duplicates.length > 0) {
               // Skip duplicate
-              if (this.verbose) {
-                console.log(`[TfStatePlugin] Skipped duplicate: ${fileMetadata.path}`);
-              }
+              this.logger.debug('Skipped duplicate: ${fileMetadata.path}');
               continue;
             }
 
@@ -2023,9 +1952,7 @@ export class TfStatePlugin extends Plugin {
             this.stats.resourcesInserted += inserted.length;
             this.stats.lastProcessedSerial = state.serial;
 
-            if (this.verbose) {
-              console.log(`[TfStatePlugin] Processed ${fileMetadata.path}: ${resources.totalExtracted || resources.length} resources`);
-            }
+            this.logger.debug('Processed ${fileMetadata.path}: ${resources.totalExtracted || resources.length} resources');
 
             this.emit('stateFileProcessed', {
               path: fileMetadata.path,
@@ -2036,9 +1963,7 @@ export class TfStatePlugin extends Plugin {
           }
         } catch (error) {
           this.stats.errors++;
-          if (this.verbose) {
-            console.error(`[TfStatePlugin] Failed to process ${fileMetadata.path}:`, error);
-          }
+          this.logger.error({ error: error }, `Failed to process ${fileMetadata.path}:`);
           this.emit('processingError', {
             path: fileMetadata.path,
             error: error.message
@@ -2055,18 +1980,14 @@ export class TfStatePlugin extends Plugin {
         duration
       };
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Monitoring completed:`, result);
-      }
+      this.logger.debug({ result }, `Monitoring completed:`);
 
       this.emit('monitoringCompleted', result);
 
       return result;
     } catch (error) {
       this.stats.errors++;
-      if (this.verbose) {
-        console.error('[TfStatePlugin] Monitoring failed:', error);
-      }
+      this.logger.error({ error: error.message }, 'Monitoring failed');
       throw error;
     }
   }
@@ -2085,15 +2006,13 @@ export class TfStatePlugin extends Plugin {
             if (event.eventType === 'change' && event.filename.endsWith('.tfstate')) {
               const filePath = `${path}/${event.filename}`;
 
-              if (this.verbose) {
-                console.log(`[TfStatePlugin] Detected change: ${filePath}`);
-              }
+              this.logger.debug('Detected change: ${filePath}');
 
               try {
                 await this.importState(filePath);
               } catch (error) {
                 this.stats.errors++;
-                console.error(`[TfStatePlugin] Auto-import failed:`, error);
+                this.logger.error(`[TfStatePlugin] Auto-import failed:`, error);
                 this.emit('importError', { filePath, error });
               }
             }
@@ -2102,9 +2021,7 @@ export class TfStatePlugin extends Plugin {
 
         this.watchers.push(watcher);
 
-        if (this.verbose) {
-          console.log(`[TfStatePlugin] Watching: ${path}`);
-        }
+        this.logger.debug('Watching: ${path}');
       } catch (error) {
         throw new FileWatchError(path, error);
       }
@@ -2177,9 +2094,7 @@ export class TfStatePlugin extends Plugin {
         partitionValues: { stateSerial: targetSerial }
       });
 
-      if (this.verbose) {
-        console.log(`[TfStatePlugin] Export using partition ${partitionName}: ${resources.length} resources`);
-      }
+      this.logger.debug({ partitionName, resourceCount: resources.length }, `Export using partition ${partitionName}: ${resources.length} resources`);
 
       // Filter by resource types if specified (query() doesn't support $in operator)
       if (resourceTypes && resourceTypes.length > 0) {
@@ -2187,9 +2102,7 @@ export class TfStatePlugin extends Plugin {
       }
     } else {
       // Fallback: Load all and filter (query() doesn't support $in operator)
-      if (this.verbose) {
-        console.log('[TfStatePlugin] No partition found for stateSerial, using full scan');
-      }
+      this.logger.debug('No partition found for stateSerial, using full scan');
       const allResources = await this.resource.list({ limit: 100000 });
       resources = allResources.filter(r => {
         if (r.stateSerial !== targetSerial) return false;
@@ -2200,9 +2113,7 @@ export class TfStatePlugin extends Plugin {
       });
     }
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Exporting ${resources.length} resources from serial ${targetSerial}`);
-    }
+    this.logger.debug({ resourceCount: resources.length, serial: targetSerial }, `Exporting ${resources.length} resources from serial ${targetSerial}`);
 
     // Group resources by type+name to reconstruct Terraform structure
     const resourceMap = new Map();
@@ -2257,13 +2168,10 @@ export class TfStatePlugin extends Plugin {
       resources: terraformResources
     };
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] Export complete:`, {
-        serial: targetSerial,
-        resourceCount: resources.length,
-        groupedResourceCount: terraformResources.length
-      });
-    }
+    this.logger.debug(
+      { serial: targetSerial, resourceCount: resources.length, groupedResourceCount: terraformResources.length },
+      'Export complete'
+    );
 
     this.emit('stateExported', { serial: targetSerial, resourceCount: resources.length });
 
@@ -2289,9 +2197,7 @@ export class TfStatePlugin extends Plugin {
     const { writeFileSync } = await import('fs');
     writeFileSync(filePath, JSON.stringify(state, null, 2));
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] State exported to file: ${filePath}`);
-    }
+    this.logger.debug('State exported to file: ${filePath}');
 
     return {
       filePath,
@@ -2330,9 +2236,7 @@ export class TfStatePlugin extends Plugin {
       contentType: 'application/json'
     });
 
-    if (this.verbose) {
-      console.log(`[TfStatePlugin] State exported to S3: s3://${bucket}/${key}`);
-    }
+    this.logger.debug('State exported to S3: s3://${bucket}/${key}');
 
     this.emit('stateExportedToS3', { bucket, key, serial: state.serial });
 
@@ -2406,8 +2310,8 @@ export class TfStatePlugin extends Plugin {
    *
    * @example
    * const timeline = await plugin.getDiffTimeline('terraform.tfstate', { lookback: 20 });
-   * console.log(timeline.summary); // Overall statistics
-   * console.log(timeline.diffs); // Chronological diff history
+   * this.logger.info(timeline.summary); // Overall statistics
+   * this.logger.info(timeline.diffs); // Chronological diff history
    */
   async getDiffTimeline(sourceFile, options = {}) {
     const diffs = await this.getDiffsWithLookback(sourceFile, {
@@ -2496,7 +2400,7 @@ export class TfStatePlugin extends Plugin {
    *
    * @example
    * const result = await plugin.triggerMonitoring();
-   * console.log(`Processed ${result.newFiles} new files`);
+   * this.logger.info(`Processed ${result.newFiles} new files`);
    */
   async triggerMonitoring() {
     if (!this.driver) {
@@ -2576,7 +2480,7 @@ export class TfStatePlugin extends Plugin {
    *
    * @example
    * const stats = await plugin.getStatsByProvider();
-   * console.log(`AWS resources: ${stats.aws}`);
+   * this.logger.info(`AWS resources: ${stats.aws}`);
    */
   async getStatsByProvider() {
     const allResources = await this.resource.list({ limit: 100000 });
@@ -2596,7 +2500,7 @@ export class TfStatePlugin extends Plugin {
    *
    * @example
    * const stats = await plugin.getStatsByType();
-   * console.log(`EC2 instances: ${stats.aws_instance}`);
+   * this.logger.info(`EC2 instances: ${stats.aws_instance}`);
    */
   async getStatsByType() {
     const allResources = await this.resource.list({ limit: 100000 });
@@ -2654,8 +2558,8 @@ export class TfStatePlugin extends Plugin {
    *
    * @example
    * const stats = await plugin.getStats();
-   * console.log(`Total: ${stats.totalResources} resources`);
-   * console.log(`Providers:`, stats.providers);
+   * this.logger.info(`Total: ${stats.totalResources} resources`);
+   * this.logger.info(`Providers:`, stats.providers);
    */
   async getStats() {
     // Get state files count

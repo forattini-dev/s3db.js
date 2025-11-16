@@ -72,7 +72,7 @@
  * const metricsPlugin = db.pluginRegistry.MetricsPlugin;
  * const stats = await metricsPlugin.getStats();
  *
- * console.log(stats);
+ * this.logger.info(stats);
  * // {
  * //   period: '24h',
  * //   totalOperations: 3,
@@ -121,7 +121,7 @@
  *   limit: 50
  * });
  *
- * console.log(errors);
+ * this.logger.info(errors);
  * // [
  * //   {
  * //     id: 'error-123...',
@@ -153,7 +153,7 @@
  *   limit: 100
  * });
  *
- * console.log(perfLogs);
+ * this.logger.info(perfLogs);
  * // [
  * //   {
  * //     id: 'perf-123...',
@@ -166,7 +166,7 @@
  *
  * // Identify slow operations
  * const slowOps = perfLogs.filter(log => log.duration > 100);
- * console.log(`Found ${slowOps.length} slow operations`);
+ * this.logger.info(`Found ${slowOps.length} slow operations`);
  * ```
  *
  * ### Prometheus Integration
@@ -198,7 +198,7 @@
  *
  * // Get Prometheus metrics manually
  * const prometheusMetrics = await metricsPlugin.getPrometheusMetrics();
- * console.log(prometheusMetrics);
+ * this.logger.info(prometheusMetrics);
  * // # HELP s3db_operations_total Total number of operations
  * // # TYPE s3db_operations_total counter
  * // s3db_operations_total{operation="insert",resource="users"} 15
@@ -217,7 +217,7 @@
  * // Schedule regular cleanup (e.g., daily)
  * setInterval(async () => {
  *   await metricsPlugin.cleanupOldData();
- *   console.log('Metrics cleanup completed');
+ *   this.logger.info('Metrics cleanup completed');
  * }, 24 * 60 * 60 * 1000);
  * ```
  *
@@ -272,7 +272,7 @@
  *   const errorRate = stats.totalErrors / stats.totalOperations;
  *
  *   if (errorRate > 0.05) {  // 5% error rate
- *     console.error(`High error rate detected: ${(errorRate * 100).toFixed(2)}%`);
+ *     this.logger.error(`High error rate detected: ${(errorRate * 100).toFixed(2)}%`);
  *     sendAlert({
  *       message: 'S3DB error rate exceeded threshold',
  *       errorRate,
@@ -300,7 +300,7 @@
  *
  *   for (const [op, opStats] of Object.entries(stats.operationsByType)) {
  *     if (opStats.avgTime > baseline[op] * 1.5) {  // 50% slower
- *       console.warn(`Performance degradation: ${op} is ${opStats.avgTime}ms (baseline: ${baseline[op]}ms)`);
+ *       this.logger.warn(`Performance degradation: ${op} is ${opStats.avgTime}ms (baseline: ${baseline[op]}ms)`);
  *     }
  *   }
  * }, 300000);  // Check every 5 minutes
@@ -347,13 +347,13 @@
  *
  * ```javascript
  * // Check if plugin is installed and started
- * console.log(db.pluginRegistry.MetricsPlugin);  // Should exist
+ * this.logger.info(db.pluginRegistry.MetricsPlugin);  // Should exist
  * await db.start();  // Must call start() to activate plugin
  *
  * // Check if metrics resources exist
- * console.log(db.resources.plg_metrics);  // Should exist
- * console.log(db.resources.plg_error_logs);
- * console.log(db.resources.plg_performance_logs);
+ * this.logger.info(db.resources.plg_metrics);  // Should exist
+ * this.logger.info(db.resources.plg_error_logs);
+ * this.logger.info(db.resources.plg_performance_logs);
  * ```
  *
  * ### Prometheus Endpoint Not Available
@@ -361,13 +361,13 @@
  * ```javascript
  * // Check Prometheus configuration
  * const plugin = db.pluginRegistry.MetricsPlugin;
- * console.log(plugin.config.prometheus);
+ * this.logger.info(plugin.config.prometheus);
  *
  * // Ensure plugin is started
  * await db.start();
  *
  * // For integrated mode, ensure API Plugin is active
- * console.log(db.pluginRegistry.api);  // Should exist for integrated mode
+ * this.logger.info(db.pluginRegistry.api);  // Should exist for integrated mode
  *
  * // For standalone mode, check if port is available
  * // Try accessing: http://localhost:9090/metrics
@@ -378,7 +378,7 @@
  * ```javascript
  * // Check metrics count
  * const allMetrics = await metricsPlugin.getMetrics();
- * console.log(`Total metrics: ${allMetrics.length}`);
+ * this.logger.info(`Total metrics: ${allMetrics.length}`);
  *
  * // Solution 1: Reduce retention
  * await db.use(new MetricsPlugin({
@@ -465,7 +465,7 @@
  *     const degradation = ((opStats.avgTime / performanceBaseline[op]) - 1) * 100;
  *
  *     if (degradation > 50) {  // 50% slower
- *       console.error(`Performance regression: ${op} is ${degradation.toFixed(1)}% slower`);
+ *       this.logger.error(`Performance regression: ${op} is ${degradation.toFixed(1)}% slower`);
  *       createIncident({
  *         title: `S3DB Performance Regression: ${op}`,
  *         description: `${op} operation is ${degradation.toFixed(1)}% slower than baseline`,
@@ -518,7 +518,7 @@
  *
  *   // Suggest optimizations
  *   if (report.breakdown.expensive > report.breakdown.cheap * 2) {
- *     console.warn('High write-to-read ratio detected. Consider caching to reduce costs.');
+ *     this.logger.warn('High write-to-read ratio detected. Consider caching to reduce costs.');
  *   }
  * }, 24 * 60 * 60 * 1000);  // Daily analysis
  * ```
@@ -578,10 +578,19 @@ import tryFn from "../concerns/try-fn.js";
 import { resolveResourceNames } from "./concerns/resource-names.js";
 import { PluginError } from '../errors.js';
 import { getCronManager } from "../concerns/cron-manager.js";
+import { createLogger } from '../concerns/logger.js';
 
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'MetricsPlugin', level: logLevel });
+    }
 
     const {
       resourceNames = {},
@@ -599,7 +608,7 @@ export class MetricsPlugin extends Plugin {
     const legacyResourceOption = resources || {};
 
     if (Object.keys(legacyResourceOption).length > 0) {
-      console.warn(
+      this.logger.warn(
         '[MetricsPlugin] DEPRECATED: The "resources" option is deprecated. ' +
         'Use "resourceNames" instead: { resourceNames: { metrics: "...", errors: "...", performance: "..." } }. ' +
         'This will be removed in v17.0.'
@@ -822,9 +831,7 @@ export class MetricsPlugin extends Plugin {
       this.metrics.pool.tasksRetried++;
     });
 
-    if (this.config.verbose) {
-      console.log('[MetricsPlugin] OperationPool event listeners registered');
-    }
+    this.logger.debug('OperationPool event listeners registered');
   }
 
   async stop() {
@@ -847,9 +854,7 @@ export class MetricsPlugin extends Plugin {
         try {
           this.flushTimer.stop();
         } catch (err) {
-          if (this.config.verbose) {
-            console.warn('[MetricsPlugin] Error stopping flush timer:', err?.message || err);
-          }
+          this.logger.warn({ error: err?.message || err }, `Error stopping flush timer: ${err?.message || err}`);
         }
       }
 
@@ -857,9 +862,7 @@ export class MetricsPlugin extends Plugin {
         try {
           this.flushTimer.destroy();
         } catch (err) {
-          if (this.config.verbose) {
-            console.warn('[MetricsPlugin] Error destroying flush timer:', err?.message || err);
-          }
+          this.logger.warn({ error: err?.message || err }, `Error destroying flush timer: ${err?.message || err}`);
         }
       }
 
@@ -878,9 +881,7 @@ export class MetricsPlugin extends Plugin {
     if (this.metricsServer) {
       await new Promise((resolve) => {
         this.metricsServer.close(() => {
-          if (this.config.verbose) {
-            console.log('[Metrics Plugin] Standalone metrics server stopped');
-          }
+          this.logger.debug('Standalone metrics server stopped');
           this.metricsServer = null;
           resolve();
         });
@@ -1137,9 +1138,7 @@ export class MetricsPlugin extends Plugin {
           this.flushTimer = task;
         }
       }).catch(error => {
-        if (this.config.verbose) {
-          console.warn('[MetricsPlugin] Failed to schedule flush timer:', error?.message || error);
-        }
+        this.logger.warn({ error: error?.message || error }, `Failed to schedule flush timer: ${error?.message || error}`);
         this.flushJobName = null;
         this.flushTimer = null;
       });
@@ -1518,7 +1517,7 @@ export class MetricsPlugin extends Plugin {
     }
 
     else {
-      console.warn(
+      this.logger.warn(
         `[Metrics Plugin] Unknown prometheus.mode="${mode}". Valid modes: auto, integrated, standalone`
       );
     }
@@ -1538,14 +1537,11 @@ export class MetricsPlugin extends Plugin {
     const port = apiPlugin.config?.port || 3000;
     const path = this.config.prometheus.path;
 
-    if (this.config.verbose) {
-      console.log(
-        `[Metrics Plugin] Prometheus metrics will be available at http://localhost:${port}${path} (integrated mode)`
-      );
-      console.log(
-        `[Metrics Plugin] Route registered by APIPlugin (public, no auth required)`
-      );
-    }
+    this.logger.debug(
+      { port, path, mode: 'integrated', auth: 'public' },
+      `Prometheus metrics will be available at http://localhost:${port}${path} (integrated mode)`
+    );
+    this.logger.debug('Route registered by APIPlugin (public, no auth required)');
   }
 
   /**
@@ -1582,11 +1578,10 @@ export class MetricsPlugin extends Plugin {
             : req.socket.remoteAddress;
 
           if (!clientIp || !isIpAllowed(clientIp, ipAllowlist)) {
-            if (this.config.verbose) {
-              console.warn(
-                `[Metrics Plugin] Blocked /metrics request from unauthorized IP: ${clientIp || 'unknown'}`
-              );
-            }
+            this.logger.warn(
+              { clientIp: clientIp || 'unknown', endpoint: '/metrics' },
+              `Blocked /metrics request from unauthorized IP: ${clientIp || 'unknown'}`
+            );
             res.writeHead(403, { 'Content-Type': 'text/plain' });
             res.end('Forbidden');
             return;
@@ -1601,7 +1596,7 @@ export class MetricsPlugin extends Plugin {
           });
           res.end(metrics);
         } catch (err) {
-          console.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
+          this.logger.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
           res.writeHead(500, { 'Content-Type': 'text/plain' });
           res.end('Internal Server Error');
         }
@@ -1616,19 +1611,16 @@ export class MetricsPlugin extends Plugin {
     });
 
     this.metricsServer.listen(port, '0.0.0.0', () => {
-      if (this.config.verbose) {
-        const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
-        console.log(
-          `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)${ipFilter}`
-        );
-      }
+      const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
+      this.logger.debug(
+        { port, path, mode: 'standalone', ipFilterEnabled: enforceIpAllowlist, ipRangesCount: ipAllowlist.length },
+        `Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)${ipFilter}`
+      );
     });
 
     // Handle server errors
     this.metricsServer.on('error', (err) => {
-      if (this.config.verbose) {
-        console.error('[Metrics Plugin] Standalone metrics server error:', err);
-      }
+      this.logger.error({ error: err.message, code: err.code }, `Standalone metrics server error: ${err.message}`);
     });
   }
 } 

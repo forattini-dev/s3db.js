@@ -28,7 +28,7 @@ export function startConsolidationTimer(handler, resourceName, fieldName, runCon
 
   if (config.verbose) {
     const nextRun = new Date(Date.now() + intervalMs);
-    // console.log(
+    // this.logger.info(
     //   `[EventualConsistency] ${resourceName}.${fieldName} - ` +
     //   `Consolidation timer started. Next run at ${nextRun.toISOString()} ` +
     //   `(every ${config.consolidationInterval}s)`

@@ -16,10 +16,19 @@ import { Plugin } from './plugin.class.js';
 import { cosineDistance, euclideanDistance, manhattanDistance, dotProduct, normalize } from './vector/distances.js';
 import { kmeans, findOptimalK } from './vector/kmeans.js';
 import { VectorError } from './vector/vector-error.js';
+import { createLogger } from '../concerns/logger.js';
 
 export class VectorPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose || options.verboseEvents ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'VectorPlugin', level: logLevel });
+    }
 
     const {
       dimensions = 1536,
@@ -138,10 +147,10 @@ export class VectorPlugin extends Plugin {
             });
           } else {
             // Just warn
-            console.warn(`⚠️  VectorPlugin: Resource '${resource.name}' has large vector fields (${totalVectorSize} bytes estimated)`);
-            console.warn(`   Current behavior: '${resource.behavior || 'default'}'`);
-            console.warn(`   Recommendation: Add behavior: 'body-overflow' or 'body-only' to resource configuration`);
-            console.warn(`   Large vectors will exceed S3 metadata limit (2047 bytes) and cause errors.`);
+            this.logger.warn(`⚠️  VectorPlugin: Resource '${resource.name}' has large vector fields (${totalVectorSize} bytes estimated)`);
+            this.logger.warn(`   Current behavior: '${resource.behavior || 'default'}'`);
+            this.logger.warn(`   Recommendation: Add behavior: 'body-overflow' or 'body-only' to resource configuration`);
+            this.logger.warn(`   Large vectors will exceed S3 metadata limit (2047 bytes) and cause errors.`);
           }
         }
       }
@@ -214,7 +223,7 @@ export class VectorPlugin extends Plugin {
         timestamp: Date.now()
       });
 
-      console.log(`✅ VectorPlugin: Created partition '${partitionName}' for optional embedding field '${vectorField.name}' in resource '${resource.name}'`);
+      this.logger.info(`✅ VectorPlugin: Created partition '${partitionName}' for optional embedding field '${vectorField.name}' in resource '${resource.name}'`);
 
       // Install hooks to maintain the partition
       this.installEmbeddingHooks(resource, vectorField.name, trackingFieldName);
@@ -685,10 +694,10 @@ export class VectorPlugin extends Plugin {
 
           this._emitEvent('vector:performance-warning', warning);
 
-          console.warn(`⚠️  VectorPlugin: Performing vectorSearch on ${totalRecords} records without partition filter`);
-          console.warn(`   Resource: '${resource.name}'`);
-          console.warn(`   Recommendation: Use partition parameter to reduce search space`);
-          console.warn(`   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'books' } })`);
+          this.logger.warn(`⚠️  VectorPlugin: Performing vectorSearch on ${totalRecords} records without partition filter`);
+          this.logger.warn(`   Resource: '${resource.name}'`);
+          this.logger.warn(`   Recommendation: Use partition parameter to reduce search space`);
+          this.logger.warn(`   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'books' } })`);
         }
 
         // Calculate distances
@@ -701,13 +710,15 @@ export class VectorPlugin extends Plugin {
 
               // Emit progress event (throttled)
               if (this.config.verboseEvents && processedRecords % 100 === 0) {
-                this._emitEvent('vector:search-progress', {
+                const progressData = {
                   resource: resource.name,
                   processed: processedRecords,
                   total: totalRecords,
                   progress: (processedRecords / totalRecords) * 100,
                   timestamp: Date.now()
-                }, `search-${resource.name}`);
+                };
+                this._emitEvent('vector:search-progress', progressData, `search-${resource.name}`);
+                this.logger.debug(progressData, `Search progress: ${processedRecords}/${totalRecords} (${progressData.progress.toFixed(1)}%)`);
               }
 
               return { record, distance };
@@ -716,13 +727,15 @@ export class VectorPlugin extends Plugin {
               dimensionMismatches++;
 
               if (this.config.verboseEvents) {
-                this._emitEvent('vector:dimension-mismatch', {
+                const mismatchData = {
                   resource: resource.name,
                   recordIndex: index,
                   expected: queryVector.length,
                   got: record[vectorField]?.length,
                   timestamp: Date.now()
-                });
+                };
+                this._emitEvent('vector:dimension-mismatch', mismatchData);
+                this.logger.debug(mismatchData, `Dimension mismatch at record ${index}: expected ${mismatchData.expected}, got ${mismatchData.got}`);
               }
 
               return null;
@@ -751,14 +764,16 @@ export class VectorPlugin extends Plugin {
 
         // Emit performance metrics
         if (this.config.verboseEvents) {
-          this._emitEvent('vector:performance', {
+          const perfData = {
             operation: 'search',
             resource: resource.name,
             duration,
             throughput: throughput.toFixed(2),
             recordsPerSecond: (processedRecords / (duration / 1000)).toFixed(2),
             timestamp: Date.now()
-          });
+          };
+          this._emitEvent('vector:performance', perfData);
+          this.logger.debug(perfData, `Search performance: ${duration}ms, ${perfData.throughput} MB/s, ${perfData.recordsPerSecond} rec/s`);
         }
 
         return results;
@@ -885,11 +900,11 @@ export class VectorPlugin extends Plugin {
 
           this._emitEvent('vector:performance-warning', warning);
 
-          console.warn(`⚠️  VectorPlugin: Performing clustering on ${allRecords.length} records without partition filter`);
-          console.warn(`   Resource: '${resource.name}'`);
-          console.warn(`   Records with vectors: ${recordsWithVectors.length}`);
-          console.warn(`   Recommendation: Use partition parameter to reduce clustering space`);
-          console.warn(`   Example: resource.cluster({ k: 5, partition: 'byCategory', partitionValues: { category: 'books' } })`);
+          this.logger.warn(`⚠️  VectorPlugin: Performing clustering on ${allRecords.length} records without partition filter`);
+          this.logger.warn(`   Resource: '${resource.name}'`);
+          this.logger.warn(`   Records with vectors: ${recordsWithVectors.length}`);
+          this.logger.warn(`   Recommendation: Use partition parameter to reduce clustering space`);
+          this.logger.warn(`   Example: resource.cluster({ k: 5, partition: 'byCategory', partitionValues: { category: 'books' } })`);
         }
 
         if (recordsWithVectors.length === 0) {
@@ -964,7 +979,7 @@ export class VectorPlugin extends Plugin {
 
         // Emit performance metrics
         if (this.config.verboseEvents) {
-          this._emitEvent('vector:performance', {
+          const perfData = {
             operation: 'clustering',
             resource: resource.name,
             k,
@@ -972,7 +987,9 @@ export class VectorPlugin extends Plugin {
             iterationsPerSecond: (result.iterations / (duration / 1000)).toFixed(2),
             vectorsPerSecond: (vectors.length / (duration / 1000)).toFixed(2),
             timestamp: Date.now()
-          });
+          };
+          this._emitEvent('vector:performance', perfData);
+          this.logger.debug(perfData, `Clustering performance (k=${k}): ${duration}ms, ${perfData.iterationsPerSecond} iter/s, ${perfData.vectorsPerSecond} vec/s`);
         }
 
         return {

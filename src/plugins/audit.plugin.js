@@ -65,7 +65,7 @@
  *   recordId: 'u1'
  * });
  *
- * console.log(logs);
+ * this.logger.info(logs);
  * // [
  * //   { operation: 'insert', recordId: 'u1', newData: '{"id":"u1",...}', timestamp: '...' },
  * //   { operation: 'update', recordId: 'u1', oldData: '...', newData: '...', timestamp: '...' },
@@ -109,7 +109,7 @@
  *   startDate: '2025-01-01'
  * });
  *
- * console.log(stats);
+ * this.logger.info(stats);
  * // {
  * //   total: 1523,
  * //   byOperation: { insert: 500, update: 1000, delete: 23 },
@@ -143,7 +143,7 @@
  * ```javascript
  * // Delete audit logs older than 90 days (default)
  * const deletedCount = await auditPlugin.cleanupOldAudits(90);
- * console.log(`Deleted ${deletedCount} old audit logs`);
+ * this.logger.info(`Deleted ${deletedCount} old audit logs`);
  *
  * // Custom retention period (30 days)
  * await auditPlugin.cleanupOldAudits(30);
@@ -191,7 +191,7 @@
  * // Schedule monthly cleanup (using cron or scheduler)
  * setInterval(async () => {
  *   const deleted = await auditPlugin.cleanupOldAudits(90);
- *   console.log(`Audit cleanup: removed ${deleted} records`);
+ *   this.logger.info(`Audit cleanup: removed ${deleted} records`);
  * }, 30 * 24 * 60 * 60 * 1000); // 30 days
  * ```
  *
@@ -255,10 +255,10 @@
  *
  * ```javascript
  * // Check if plugin is installed
- * console.log(db.pluginRegistry.AuditPlugin);  // Should exist
+ * this.logger.info(db.pluginRegistry.AuditPlugin);  // Should exist
  *
  * // Check if audit resource exists
- * console.log(db.resources.plg_audits);  // Should exist
+ * this.logger.info(db.resources.plg_audits);  // Should exist
  *
  * // Verify plugin started
  * await db.start();  // Must call start() to activate plugin
@@ -354,7 +354,7 @@
  * ```javascript
  * // Find when and who changed a specific record
  * const history = await auditPlugin.getRecordHistory('orders', 'order-123');
- * console.log(history.map(log => ({
+ * this.logger.info(history.map(log => ({
  *   timestamp: log.timestamp,
  *   user: log.userId,
  *   operation: log.operation,
@@ -429,6 +429,7 @@ import { Plugin } from "./plugin.class.js";
 import { getValidatedNamespace } from "./namespace.js";
 import tryFn from "../concerns/try-fn.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
+import { createLogger } from '../concerns/logger.js';
 
 export class AuditPlugin extends Plugin {
   constructor(options = {}) {
@@ -436,6 +437,14 @@ export class AuditPlugin extends Plugin {
 
     // Validate and set namespace (standardized)
     this.namespace = getValidatedNamespace(this.options, '');
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'AuditPlugin', level: logLevel });
+    }
 
     const {
       resourceNames = {},
@@ -650,9 +659,10 @@ export class AuditPlugin extends Plugin {
       await this.auditResource.insert(auditRecord);
     } catch (error) {
       // Silently fail to avoid breaking operations
-      if (this.verbose) {
-        console.warn('Audit logging failed:', error.message);
-      }
+      this.logger.warn(
+        { error: error.message, resourceName: auditData.resourceName, recordId: auditData.recordId },
+        `Audit logging failed: ${error.message}`
+      );
     }
   }
 

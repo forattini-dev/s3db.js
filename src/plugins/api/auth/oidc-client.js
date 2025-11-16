@@ -32,6 +32,7 @@
 
 import { createVerify, createPublicKey } from 'crypto';
 import { getCronManager } from '../../../concerns/cron-manager.js';
+import { createLogger } from '../../../concerns/logger.js';
 
 /**
  * Validate JWT claims
@@ -112,7 +113,8 @@ export class OIDCClient {
       clockTolerance = 60,
       autoRefreshJWKS = true,
       discoveryUri,
-      verbose = false
+      verbose = false,
+      logger
     } = options;
 
     if (!issuer) {
@@ -126,6 +128,14 @@ export class OIDCClient {
     this.jwksCacheTTL = jwksCacheTTL;
     this.clockTolerance = clockTolerance;
     this.autoRefreshJWKS = autoRefreshJWKS;
+
+    // 🪵 Logger initialization
+    if (logger) {
+      this.logger = logger;
+    } else {
+      const logLevel = verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'OIDCClient', level: logLevel });
+    }
 
     this.jwksCache = null;
     this.jwksCacheExpiry = null;
@@ -377,9 +387,8 @@ export class OIDCClient {
         try {
           await this.fetchJWKS(true);
         } catch (error) {
-          if (this.verbose) {
-            console.error('Failed to refresh JWKS:', error);
-          }
+          // 🪵 Error: JWKS refresh failed
+          this.logger.error({ error: error.message, stack: error.stack }, 'Failed to refresh JWKS');
         }
       },
       this.refreshJobName

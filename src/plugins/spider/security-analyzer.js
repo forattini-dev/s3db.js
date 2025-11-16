@@ -134,7 +134,7 @@ export class SecurityAnalyzer {
 
       return result
     } catch (error) {
-      console.error('[SecurityAnalyzer] Error during analysis:', error)
+      this.logger.error('[SecurityAnalyzer] Error during analysis:', error)
       return result
     }
   }
@@ -637,7 +637,7 @@ export class SecurityAnalyzer {
         connections: websockets
       } : null
     } catch (error) {
-      console.error('[SecurityAnalyzer] Error capturing WebSockets:', error)
+      this.logger.error('[SecurityAnalyzer] Error capturing WebSockets:', error)
       return null
     }
   }

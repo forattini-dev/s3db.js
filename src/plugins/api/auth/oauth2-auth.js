@@ -21,8 +21,12 @@
  */
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createLogger } from '../../../concerns/logger.js';
 import { applyProviderPreset } from './providers.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'OAuth2Auth', level: 'info' });
 // Cache for JWKS (avoids fetching on every request)
 const jwksCache = new Map();
 
@@ -174,7 +178,7 @@ export function createOAuth2Handler(inputConfig, usersResource) {
           }
         } catch (e) {
           if (verbose || c.get('verbose')) {
-            console.error('[OAuth2 Auth] Discovery for introspection failed:', e.message);
+            logger.error('[OAuth2 Auth] Discovery for introspection failed:', e.message);
           }
         }
       }
@@ -196,7 +200,7 @@ export function createOAuth2Handler(inputConfig, usersResource) {
         });
         if (!resp.ok) {
           if (verbose || c.get('verbose')) {
-            console.error('[OAuth2 Auth] Introspection failed:', resp.status);
+            logger.error('[OAuth2 Auth] Introspection failed:', resp.status);
           }
           return null;
         }
@@ -241,7 +245,7 @@ export function createOAuth2Handler(inputConfig, usersResource) {
         };
       } catch (e) {
         if (verbose || c.get('verbose')) {
-          console.error('[OAuth2 Auth] Introspection error:', e.message);
+          logger.error('[OAuth2 Auth] Introspection error:', e.message);
         }
         return null;
       }
@@ -255,7 +259,7 @@ export function createOAuth2Handler(inputConfig, usersResource) {
       }
     } catch (err) {
       if (verbose || c.get('verbose')) {
-        console.error('[OAuth2 Auth] Token verification failed:', err.message);
+        logger.error('[OAuth2 Auth] Token verification failed:', err.message);
       }
       // fallthrough to introspection
     }

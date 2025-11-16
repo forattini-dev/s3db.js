@@ -27,7 +27,11 @@
  */
 
 import { getCronManager } from '../../../concerns/cron-manager.js';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'MetricsCollector', level: 'info' });
 export class MetricsCollector {
   constructor(options = {}) {
     this.options = {
@@ -50,7 +54,7 @@ export class MetricsCollector {
         this.options.resetInterval,
         () => {
           if (this.options.verbose) {
-            console.log('[Metrics] Auto-resetting metrics');
+            logger.info('[Metrics] Auto-resetting metrics');
           }
           this.reset();
         },
@@ -135,7 +139,7 @@ export class MetricsCollector {
     }
 
     if (this.options.verbose) {
-      console.log(`[Metrics] Request: ${method} ${path} ${status} (${duration}ms)`);
+      logger.info(`[Metrics] Request: ${method} ${path} ${status} (${duration}ms)`);
     }
   }
 
@@ -166,7 +170,7 @@ export class MetricsCollector {
     }
 
     if (this.options.verbose) {
-      console.log(`[Metrics] Auth: ${method} ${success ? 'success' : 'failure'}`);
+      logger.info(`[Metrics] Auth: ${method} ${success ? 'success' : 'failure'}`);
     }
   }
 
@@ -191,7 +195,7 @@ export class MetricsCollector {
     metrics.byResource[resource][action]++;
 
     if (this.options.verbose) {
-      console.log(`[Metrics] Resource: ${resource} ${action}`);
+      logger.info(`[Metrics] Resource: ${resource} ${action}`);
     }
   }
 
@@ -211,7 +215,7 @@ export class MetricsCollector {
     }
 
     if (this.options.verbose) {
-      console.log(`[Metrics] User: ${action}`);
+      logger.info(`[Metrics] User: ${action}`);
     }
   }
 
@@ -228,7 +232,7 @@ export class MetricsCollector {
     metrics.byType[type] = (metrics.byType[type] || 0) + 1;
 
     if (this.options.verbose) {
-      console.log(`[Metrics] Error: ${type} - ${error}`);
+      logger.info(`[Metrics] Error: ${type} - ${error}`);
     }
   }
 

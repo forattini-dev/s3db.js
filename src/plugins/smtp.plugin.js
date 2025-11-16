@@ -610,7 +610,7 @@ export class SMTPPlugin extends Plugin {
       }
 
       if (!emailId) {
-        console.warn(`Email not found for message ID: ${event.messageId}`);
+        this.logger.warn(`Email not found for message ID: ${event.messageId}`);
         return;
       }
 
@@ -653,7 +653,7 @@ export class SMTPPlugin extends Plugin {
         timestamp: Date.now()
       });
     } catch (err) {
-      console.error(`Error handling webhook event: ${err.message}`);
+      this.logger.error(`Error handling webhook event: ${err.message}`);
     }
   }
 

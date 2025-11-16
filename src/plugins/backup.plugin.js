@@ -197,10 +197,9 @@ export class BackupPlugin extends Plugin {
     // Create backup metadata resource
     await this._createBackupMetadataResource();
 
-    if (this.verbose) {
-      const storageInfo = this.driver.getStorageInfo();
-      console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
-    }
+    // 🪵 Debug: initialized with driver
+    const storageInfo = this.driver.getStorageInfo();
+    this.logger.debug({ driverType: storageInfo.type, storageInfo }, `Initialized with driver: ${storageInfo.type}`);
 
     this.emit('db:plugin:initialized', {
       driver: this.driver.getType(),
@@ -230,8 +229,9 @@ export class BackupPlugin extends Plugin {
       timestamps: true
     }));
 
-    if (!ok && this.verbose) {
-      console.log(`[BackupPlugin] Backup metadata resource '${this.config.backupMetadataResource}' already exists`);
+    if (!ok) {
+      // 🪵 Debug: backup metadata resource exists
+      this.logger.debug({ resourceName: this.config.backupMetadataResource }, `Backup metadata resource '${this.config.backupMetadataResource}' already exists`);
     }
   }
 
@@ -449,7 +449,10 @@ export class BackupPlugin extends Plugin {
       compress: true, // Always use gzip for backups
       onProgress: this.verbose ? (stats) => {
         if (stats.recordCount % 10000 === 0) {
-          console.log(`[BackupPlugin] Exported ${stats.recordCount} records from '${stats.resourceName}'`);
+          this.logger.debug(
+            { recordCount: stats.recordCount, resourceName: stats.resourceName },
+            'Export progress'
+          );
         }
       } : null
     });
@@ -475,18 +478,16 @@ export class BackupPlugin extends Plugin {
         sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000);
       }
 
-      if (this.verbose) {
-        console.log(`[BackupPlugin] Incremental backup since ${sinceTimestamp.toISOString()}`);
-      }
+      // 🪵 Debug: incremental backup timestamp
+      this.logger.debug({ sinceTimestamp: sinceTimestamp.toISOString() }, `Incremental backup since ${sinceTimestamp.toISOString()}`);
     }
 
     // Export each resource using streaming
     for (const resourceName of resourceNames) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
-        if (this.verbose) {
-          console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
-        }
+        // 🪵 Warning: resource not found
+        this.logger.warn({ resourceName }, `Resource '${resourceName}' not found, skipping`);
         continue;
       }
 
@@ -502,16 +503,15 @@ export class BackupPlugin extends Plugin {
           definition: resource.config
         });
 
-        if (this.verbose) {
-          console.log(
-            `[BackupPlugin] Exported ${stats.recordCount} records from '${resourceName}' ` +
-            `(${(stats.bytesWritten / 1024 / 1024).toFixed(2)} MB compressed)`
-          );
-        }
+        // 🪵 Debug: exported resource
+        const sizeMB = (stats.bytesWritten / 1024 / 1024).toFixed(2);
+        this.logger.debug(
+          { resourceName, recordCount: stats.recordCount, sizeMB: parseFloat(sizeMB) },
+          `Exported ${stats.recordCount} records from '${resourceName}' (${sizeMB} MB compressed)`
+        );
       } catch (error) {
-        if (this.verbose) {
-          console.error(`[BackupPlugin] Error exporting '${resourceName}': ${error.message}`);
-        }
+        // 🪵 Error: export failed
+        this.logger.error({ resourceName, error: error.message }, `Error exporting '${resourceName}': ${error.message}`);
         throw error;
       }
     }
@@ -555,9 +555,8 @@ export class BackupPlugin extends Plugin {
     const metadataPath = path.join(tempDir, 's3db.json');
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
-    if (this.verbose) {
-      console.log(`[BackupPlugin] Generated s3db.json metadata`);
-    }
+    // 🪵 Debug: generated metadata
+    this.logger.debug({ metadataPath }, 'Generated s3db.json metadata');
   }
 
   async _createArchive(files, targetPath, compressionType) {
@@ -575,9 +574,8 @@ export class BackupPlugin extends Plugin {
       const [readOk, readErr, content] = await tryFn(() => readFile(filePath, 'utf8'));
 
       if (!readOk) {
-        if (this.verbose) {
-          console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
-        }
+        // 🪵 Warning: failed to read file
+        this.logger.warn({ filePath, error: readErr?.message }, `Failed to read ${filePath}: ${readErr?.message}`);
         continue;
       }
 
@@ -798,9 +796,8 @@ export class BackupPlugin extends Plugin {
         });
       }
 
-      if (this.verbose) {
-        console.log(`[BackupPlugin] Restoring ${archive.files.length} files from backup`);
-      }
+      // 🪵 Debug: restoring files
+      this.logger.debug({ fileCount: archive.files.length }, `Restoring ${archive.files.length} files from backup`);
 
       // Process each file in the archive
       for (const file of archive.files) {
@@ -808,9 +805,8 @@ export class BackupPlugin extends Plugin {
           const resourceData = JSON.parse(file.content);
 
           if (!resourceData.resourceName || !resourceData.definition) {
-            if (this.verbose) {
-              console.warn(`[BackupPlugin] Skipping invalid file: ${file.name}`);
-            }
+            // 🪵 Warning: invalid file
+            this.logger.warn({ fileName: file.name }, `Skipping invalid file: ${file.name}`);
             continue;
           }
 
@@ -825,18 +821,16 @@ export class BackupPlugin extends Plugin {
           let resource = this.database.resources[resourceName];
 
           if (!resource) {
-            if (this.verbose) {
-              console.log(`[BackupPlugin] Creating resource '${resourceName}'`);
-            }
+            // 🪵 Debug: creating resource
+            this.logger.debug({ resourceName }, `Creating resource '${resourceName}'`);
 
             const [createOk, createErr] = await tryFn(() =>
               this.database.createResource(resourceData.definition)
             );
 
             if (!createOk) {
-              if (this.verbose) {
-                console.warn(`[BackupPlugin] Failed to create resource '${resourceName}': ${createErr?.message}`);
-              }
+              // 🪵 Warning: failed to create resource
+              this.logger.warn({ resourceName, error: createErr?.message }, `Failed to create resource '${resourceName}': ${createErr?.message}`);
               continue;
             }
 
@@ -881,24 +875,21 @@ export class BackupPlugin extends Plugin {
               totalRecords: resourceData.records.length
             });
 
-            if (this.verbose) {
-              console.log(`[BackupPlugin] Restored ${insertedCount}/${resourceData.records.length} records to '${resourceName}'`);
-            }
+            // 🪵 Debug: restored records
+            this.logger.debug({ resourceName, insertedCount, totalRecords: resourceData.records.length }, `Restored ${insertedCount}/${resourceData.records.length} records to '${resourceName}'`);
           }
 
         } catch (fileError) {
-          if (this.verbose) {
-            console.warn(`[BackupPlugin] Error processing file ${file.name}: ${fileError.message}`);
-          }
+          // 🪵 Warning: file processing error
+          this.logger.warn({ fileName: file.name, error: fileError.message }, `Error processing file ${file.name}: ${fileError.message}`);
         }
       }
 
       return restoredResources;
 
     } catch (error) {
-      if (this.verbose) {
-        console.error(`[BackupPlugin] Error restoring backup: ${error.message}`);
-      }
+      // 🪵 Error: restore failed
+      this.logger.error({ error: error.message, stack: error.stack }, `Error restoring backup: ${error.message}`);
       throw this.createError(`Failed to restore backup: ${error.message}`, {
         operation: 'restore',
         statusCode: 500,
@@ -939,11 +930,10 @@ export class BackupPlugin extends Plugin {
       }));
       
       return combinedBackups;
-      
+
     } catch (error) {
-      if (this.verbose) {
-        console.log(`[BackupPlugin] Error listing backups: ${error.message}`);
-      }
+      // 🪵 Warning: error listing backups
+      this.logger.warn({ error: error.message }, `Error listing backups: ${error.message}`);
       return [];
     }
   }
@@ -1046,9 +1036,8 @@ export class BackupPlugin extends Plugin {
         return;
       }
 
-      if (this.verbose) {
-        console.log(`[BackupPlugin] Cleaning up ${backupsToDelete.length} old backups (keeping ${toKeep.size})`);
-      }
+      // 🪵 Debug: cleaning up old backups
+      this.logger.debug({ deleteCount: backupsToDelete.length, keepCount: toKeep.size }, `Cleaning up ${backupsToDelete.length} old backups (keeping ${toKeep.size})`);
 
       // Delete old backups
       for (const backup of backupsToDelete) {
@@ -1059,20 +1048,17 @@ export class BackupPlugin extends Plugin {
           // Delete metadata
           await this.database.resources[this.config.backupMetadataResource].delete(backup.id);
 
-          if (this.verbose) {
-            console.log(`[BackupPlugin] Deleted old backup: ${backup.id}`);
-          }
+          // 🪵 Debug: deleted old backup
+          this.logger.debug({ backupId: backup.id }, `Deleted old backup: ${backup.id}`);
         } catch (deleteError) {
-          if (this.verbose) {
-            console.warn(`[BackupPlugin] Failed to delete backup ${backup.id}: ${deleteError.message}`);
-          }
+          // 🪵 Warning: failed to delete backup
+          this.logger.warn({ backupId: backup.id, error: deleteError.message }, `Failed to delete backup ${backup.id}: ${deleteError.message}`);
         }
       }
 
     } catch (error) {
-      if (this.verbose) {
-        console.warn(`[BackupPlugin] Error during cleanup: ${error.message}`);
-      }
+      // 🪵 Warning: cleanup error
+      this.logger.warn({ error: error.message }, `Error during cleanup: ${error.message}`);
     }
   }
 
@@ -1083,10 +1069,9 @@ export class BackupPlugin extends Plugin {
   }
 
   async start() {
-    if (this.verbose) {
-      const storageInfo = this.driver.getStorageInfo();
-      console.log(`[BackupPlugin] Started with driver: ${storageInfo.type}`);
-    }
+    // 🪵 Debug: started
+    const storageInfo = this.driver.getStorageInfo();
+    this.logger.debug({ driverType: storageInfo.type }, `Started with driver: ${storageInfo.type}`);
   }
 
   async stop() {

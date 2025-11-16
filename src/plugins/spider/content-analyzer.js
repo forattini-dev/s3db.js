@@ -195,7 +195,7 @@ export async function analyzeIFrames(page) {
       categorized
     }
   } catch (error) {
-    console.error('[ContentAnalyzer] Error analyzing iframes:', error)
+    this.logger.error('[ContentAnalyzer] Error analyzing iframes:', error)
     return {
       present: false,
       count: 0,
@@ -323,7 +323,7 @@ export async function detectTrackingPixels(page) {
       trackingAttributes: trackingElements.trackingAttributes
     }
   } catch (error) {
-    console.error('[ContentAnalyzer] Error detecting tracking pixels:', error)
+    this.logger.error('[ContentAnalyzer] Error detecting tracking pixels:', error)
     return {
       present: false,
       detectedServices: [],

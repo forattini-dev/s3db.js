@@ -25,7 +25,7 @@ export async function captureLocalStorage(page) {
       return data
     })
   } catch (error) {
-    console.error('[StorageManager] Error capturing localStorage:', error.message)
+    this.logger.error('[StorageManager] Error capturing localStorage:', error.message)
     return {}
   }
 }
@@ -50,7 +50,7 @@ export async function captureSessionStorage(page) {
       return data
     })
   } catch (error) {
-    console.error('[StorageManager] Error capturing sessionStorage:', error.message)
+    this.logger.error('[StorageManager] Error capturing sessionStorage:', error.message)
     return {}
   }
 }
@@ -160,7 +160,7 @@ export async function captureIndexedDB(page) {
       return result
     })
   } catch (error) {
-    console.error('[StorageManager] Error capturing IndexedDB:', error.message)
+    this.logger.error('[StorageManager] Error capturing IndexedDB:', error.message)
     return {
       databases: [],
       present: false,

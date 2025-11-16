@@ -177,9 +177,10 @@ class PlanetScaleReplicator extends BaseReplicator {
       });
 
       if (!okRes) {
-        if (this.config.verbose) {
-          console.warn(`[PlanetScaleReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
-        }
+        this.logger.warn(
+          { resourceName, error: errRes.message },
+          'Could not get resource for schema sync'
+        );
         continue;
       }
 
@@ -214,7 +215,7 @@ class PlanetScaleReplicator extends BaseReplicator {
               docs: 'docs/plugins/replicator.md'
             });
           } else if (this.schemaSync.onMismatch === 'warn') {
-            console.warn(`[PlanetScaleReplicator] ${message}`);
+            this.logger.warn({ tableName, error: errSync.message }, message);
           }
         }
       }
@@ -257,9 +258,7 @@ class PlanetScaleReplicator extends BaseReplicator {
       // Create table
       const createSQL = generateMySQLCreateTable(tableName, attributes);
 
-      if (this.config.verbose) {
-        console.log(`[PlanetScaleReplicator] Creating table ${tableName}:\n${createSQL}`);
-      }
+      this.logger.debug({ tableName, createSQL }, 'Creating table');
 
       await this.connection.execute(createSQL);
 
@@ -274,9 +273,7 @@ class PlanetScaleReplicator extends BaseReplicator {
 
     // Table exists - check for schema changes
     if (this.schemaSync.strategy === 'drop-create') {
-      if (this.config.verbose) {
-        console.warn(`[PlanetScaleReplicator] Dropping and recreating table ${tableName}`);
-      }
+      this.logger.warn({ tableName }, 'Dropping and recreating table');
 
       await this.connection.execute(`DROP TABLE IF EXISTS ${tableName}`);
       const createSQL = generateMySQLCreateTable(tableName, attributes);
@@ -295,9 +292,10 @@ class PlanetScaleReplicator extends BaseReplicator {
       const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
 
       if (alterStatements.length > 0) {
-        if (this.config.verbose) {
-          console.log(`[PlanetScaleReplicator] Altering table ${tableName}:`, alterStatements);
-        }
+        this.logger.debug(
+            { tableName, alterStatements },
+            'Altering table'
+          );
 
         for (const stmt of alterStatements) {
           await this.connection.execute(stmt);

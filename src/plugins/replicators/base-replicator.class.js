@@ -1,6 +1,7 @@
 import EventEmitter from 'events';
 import { PromisePool } from '@supercharge/promise-pool';
 import { ReplicationError } from '../replicator.errors.js';
+import { createLogger } from '../../concerns/logger.js';
 
 /**
  * Base class for all replicator drivers
@@ -13,6 +14,14 @@ export class BaseReplicator extends EventEmitter {
     this.name = this.constructor.name;
     this.enabled = config.enabled !== false; // Default to enabled unless explicitly disabled
     this.batchConcurrency = Math.max(1, config.batchConcurrency ?? 5);
+
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = config.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: this.name, level: logLevel });
+    }
   }
 
   /**

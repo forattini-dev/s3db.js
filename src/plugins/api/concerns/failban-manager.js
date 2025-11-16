@@ -35,9 +35,18 @@ import { requirePluginDependency } from '../../concerns/plugin-dependencies.js';
 import tryFn from '../../../concerns/try-fn.js';
 import { resolveResourceNames } from '../../concerns/resource-names.js';
 import { getCronManager } from '../../../concerns/cron-manager.js';
+import { createLogger } from '../../../concerns/logger.js';
 
 export class FailbanManager {
   constructor(options = {}) {
+    // Initialize logger (accept from options or create)
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = options.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'FailbanManager', level: logLevel });
+    }
+
     this.namespace = options.namespace || null;
     const resourceOverrides = options.resourceNames || options.resources || {};
     this._resourceDescriptors = {
@@ -100,7 +109,7 @@ export class FailbanManager {
   async initialize() {
     if (!this.options.enabled) {
       if (this.options.verbose) {
-        console.log('[Failban] Disabled, skipping initialization');
+        this.logger.info('Disabled, skipping initialization');
       }
       return;
     }
@@ -129,17 +138,17 @@ export class FailbanManager {
     this._setupCleanupTimer();
 
     if (this.options.verbose) {
-      console.log('[Failban] Initialized');
-      console.log(`[Failban] Max violations: ${this.options.maxViolations}`);
-      console.log(`[Failban] Violation window: ${this.options.violationWindow}ms`);
-      console.log(`[Failban] Ban duration: ${this.options.banDuration}ms`);
-      console.log(`[Failban] Whitelist: ${this.options.whitelist.join(', ')}`);
+      this.logger.info('Initialized');
+      this.logger.info({ maxViolations: this.options.maxViolations }, 'Max violations');
+      this.logger.info({ violationWindow: this.options.violationWindow }, 'Violation window (ms)');
+      this.logger.info({ banDuration: this.options.banDuration }, 'Ban duration (ms)');
+      this.logger.info({ whitelist: this.options.whitelist.join(', ') }, 'Whitelist');
 
       if (this.options.geo.enabled) {
-        console.log(`[Failban] GeoIP enabled`);
-        console.log(`[Failban] Allowed countries: ${this.options.geo.allowedCountries.join(', ') || 'none'}`);
-        console.log(`[Failban] Blocked countries: ${this.options.geo.blockedCountries.join(', ') || 'none'}`);
-        console.log(`[Failban] Block unknown: ${this.options.geo.blockUnknown}`);
+        this.logger.info('GeoIP enabled');
+        this.logger.info({ allowedCountries: this.options.geo.allowedCountries.join(', ') || 'none' }, 'Allowed countries');
+        this.logger.info({ blockedCountries: this.options.geo.blockedCountries.join(', ') || 'none' }, 'Blocked countries');
+        this.logger.info({ blockUnknown: this.options.geo.blockUnknown }, 'Block unknown');
       }
     }
   }
@@ -197,11 +206,11 @@ export class FailbanManager {
       };
 
       if (this.options.verbose) {
-        console.log(`[Failban] TTL configured for bans resource (${resourceName})`);
+        this.logger.info({ resourceName }, 'TTL configured for bans resource');
       }
     } else {
       if (this.options.verbose) {
-        console.warn('[Failban] TTLPlugin not found - bans will not auto-expire from DB');
+        this.logger.warn('TTLPlugin not found - bans will not auto-expire from DB');
       }
     }
 
@@ -270,11 +279,11 @@ export class FailbanManager {
       }
 
       if (this.options.verbose) {
-        console.log(`[Failban] Loaded ${this.memoryCache.size} active bans into cache`);
+        this.logger.info({ count: this.memoryCache.size }, 'Loaded active bans into cache');
       }
     } catch (err) {
       if (this.options.verbose) {
-        console.error('[Failban] Failed to load bans:', err.message);
+        this.logger.error({ error: err.message }, 'Failed to load bans');
       }
     }
   }
@@ -307,7 +316,7 @@ export class FailbanManager {
         }
 
         if (this.options.verbose && cleaned > 0) {
-          console.log(`[Failban] Cleaned ${cleaned} expired bans from cache`);
+          this.logger.info({ cleaned }, 'Cleaned expired bans from cache');
         }
       },
       'failban-cleanup'
@@ -321,7 +330,7 @@ export class FailbanManager {
   async _initializeGeoIP() {
     if (!this.options.geo.databasePath) {
       if (this.options.verbose) {
-        console.warn('[Failban] GeoIP enabled but no databasePath provided');
+        this.logger.warn('GeoIP enabled but no databasePath provided');
       }
       return;
     }
@@ -336,12 +345,12 @@ export class FailbanManager {
       this.geoReader = await Reader.open(this.options.geo.databasePath);
 
       if (this.options.verbose) {
-        console.log(`[Failban] GeoIP database loaded from ${this.options.geo.databasePath}`);
+        this.logger.info({ databasePath: this.options.geo.databasePath }, 'GeoIP database loaded');
       }
     } catch (err) {
       if (this.options.verbose) {
-        console.error('[Failban] Failed to initialize GeoIP:', err.message);
-        console.warn('[Failban] GeoIP features will be disabled');
+        this.logger.error({ error: err.message }, 'Failed to initialize GeoIP');
+        this.logger.warn('GeoIP features will be disabled');
       }
       this.options.geo.enabled = false;
     }
@@ -375,7 +384,7 @@ export class FailbanManager {
       return countryCode;
     } catch (err) {
       if (this.options.verbose) {
-        console.log(`[Failban] GeoIP lookup failed for ${ip}: ${err.message}`);
+        this.logger.debug({ ip, error: err.message }, 'GeoIP lookup failed');
       }
       return null;
     }
@@ -524,7 +533,7 @@ export class FailbanManager {
         });
       } catch (err) {
         if (this.options.verbose) {
-          console.error('[Failban] Failed to persist violation:', err.message);
+          this.logger.error({ error: err.message }, 'Failed to persist violation');
         }
       }
     }
@@ -551,7 +560,7 @@ export class FailbanManager {
         violationCount = violations.length;
       } catch (err) {
         if (this.options.verbose) {
-          console.error('[Failban] Failed to count violations:', err.message);
+          this.logger.error({ error: err.message }, 'Failed to count violations');
         }
         return;
       }
@@ -569,7 +578,7 @@ export class FailbanManager {
     if (!this.options.enabled) return;
     if (this.isWhitelisted(ip)) {
       if (this.options.verbose) {
-        console.warn(`[Failban] Cannot ban whitelisted IP: ${ip}`);
+        this.logger.warn({ ip }, 'Cannot ban whitelisted IP');
       }
       return;
     }
@@ -608,11 +617,11 @@ export class FailbanManager {
       });
 
       if (this.options.verbose) {
-        console.log(`[Failban] Banned ${ip} for ${reason} until ${expiresAt.toISOString()}`);
+        this.logger.info({ ip, reason, expiresAt: expiresAt.toISOString() }, 'IP banned');
       }
     } catch (err) {
       if (this.options.verbose) {
-        console.error('[Failban] Failed to ban IP:', err.message);
+        this.logger.error({ error: err.message }, 'Failed to ban IP');
       }
     }
   }
@@ -634,13 +643,13 @@ export class FailbanManager {
       });
 
       if (this.options.verbose) {
-        console.log(`[Failban] Unbanned ${ip}`);
+        this.logger.info({ ip }, 'IP unbanned');
       }
 
       return true;
     } catch (err) {
       if (this.options.verbose) {
-        console.error('[Failban] Failed to unban IP:', err.message);
+        this.logger.error({ error: err.message }, 'Failed to unban IP');
       }
       return false;
     }
@@ -659,7 +668,7 @@ export class FailbanManager {
       return bans.filter(ban => new Date(ban.expiresAt).getTime() > now);
     } catch (err) {
       if (this.options.verbose) {
-        console.error('[Failban] Failed to list bans:', err.message);
+        this.logger.error({ error: err.message }, 'Failed to list bans');
       }
       return [];
     }
@@ -678,7 +687,7 @@ export class FailbanManager {
         totalViolations = violations.length;
       } catch (err) {
         if (this.options.verbose) {
-          console.error('[Failban] Failed to count violations:', err.message);
+          this.logger.error({ error: err.message }, 'Failed to count violations');
         }
       }
     }
@@ -723,7 +732,7 @@ export class FailbanManager {
     }
 
     if (this.options.verbose) {
-      console.log('[Failban] Cleaned up');
+      this.logger.info('Cleaned up');
     }
   }
 }

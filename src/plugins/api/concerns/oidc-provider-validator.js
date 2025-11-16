@@ -1,4 +1,9 @@
 /**
+import { createLogger } from '../../../concerns/logger.js';
+
+// Module-level logger
+const logger = createLogger({ name: 'OidcProviderValidator', level: 'info' });
+
  * OIDC Provider Compatibility Validation
  *
  * Validates provider capabilities against configuration to detect issues early.
@@ -189,8 +194,8 @@ export function logProviderCompatibility(result, options = {}) {
   const { verbose = false, throwOnError = false } = options;
 
   if (result.errors.length > 0) {
-    console.error('[OIDC] Provider compatibility ERRORS:');
-    result.errors.forEach(err => console.error(`  ❌ ${err}`));
+    logger.error('[OIDC] Provider compatibility ERRORS:');
+    result.errors.forEach(err => logger.error(`  ❌ ${err}`));
 
     if (throwOnError) {
       throw new Error(
@@ -200,12 +205,12 @@ export function logProviderCompatibility(result, options = {}) {
   }
 
   if (result.warnings.length > 0 && verbose) {
-    console.warn('[OIDC] Provider compatibility warnings:');
-    result.warnings.forEach(warn => console.warn(`  ⚠️  ${warn}`));
+    logger.warn('[OIDC] Provider compatibility warnings:');
+    result.warnings.forEach(warn => logger.warn(`  ⚠️  ${warn}`));
   }
 
   if (result.errors.length === 0 && result.warnings.length === 0 && verbose) {
-    console.log('[OIDC] ✅ Provider compatibility validated successfully');
+    logger.info('[OIDC] ✅ Provider compatibility validated successfully');
   }
 }
 

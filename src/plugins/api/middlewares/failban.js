@@ -1,4 +1,9 @@
 /**
+import { createLogger } from '../../../concerns/logger.js';
+
+// Module-level logger
+const logger = createLogger({ name: 'FailbanMiddleware', level: 'info' });
+
  * Failban Middleware
  *
  * Checks if IP is banned or blocked by country restrictions before processing request.
@@ -159,7 +164,7 @@ export function setupFailbanViolationListener(config = {}) {
   });
 
   if (plugin.options.verbose) {
-    console.log('[Failban] Violation listeners configured');
+    logger.info('[Failban] Violation listeners configured');
   }
 }
 

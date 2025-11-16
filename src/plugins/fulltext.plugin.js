@@ -77,7 +77,7 @@
  * const fulltextPlugin = db.pluginRegistry.FullTextPlugin;
  * const results = await fulltextPlugin.searchRecords('articles', 'S3DB database');
  *
- * console.log(results);
+ * this.logger.info(results);
  * // [
  * //   {
  * //     id: 'a1',
@@ -124,7 +124,7 @@
  * // Get only record IDs and scores (faster)
  * const idResults = await fulltextPlugin.search('articles', 'database');
  *
- * console.log(idResults);
+ * this.logger.info(idResults);
  * // [
  * //   { recordId: 'a1', score: 3 },
  * //   { recordId: 'a2', score: 2 },
@@ -151,7 +151,7 @@
  *
  * // Get index statistics
  * const stats = await fulltextPlugin.getIndexStats();
- * console.log(stats);
+ * this.logger.info(stats);
  * // {
  * //   totalIndexes: 1523,
  * //   totalWords: 245,
@@ -287,11 +287,11 @@
  * ```javascript
  * // Check if fields are configured
  * const plugin = db.pluginRegistry.FullTextPlugin;
- * console.log(plugin.config.fields);  // Should include the fields you're searching
+ * this.logger.info(plugin.config.fields);  // Should include the fields you're searching
  *
  * // Check index statistics
  * const stats = await plugin.getIndexStats();
- * console.log(stats.resources.articles);  // Should show indexed words
+ * this.logger.info(stats.resources.articles);  // Should show indexed words
  *
  * // Rebuild index if needed
  * await plugin.rebuildIndex('articles');
@@ -321,8 +321,8 @@
  * ```javascript
  * // Check index size
  * const stats = await plugin.getIndexStats();
- * console.log(`Total indexes: ${stats.totalIndexes}`);
- * console.log(`Total words: ${stats.totalWords}`);
+ * this.logger.info(`Total indexes: ${stats.totalIndexes}`);
+ * this.logger.info(`Total words: ${stats.totalWords}`);
  *
  * // Solution 1: Increase minWordLength
  * await db.use(new FullTextPlugin({
@@ -350,7 +350,7 @@
  * await plugin.saveIndexes();
  *
  * // Check if index resource exists
- * console.log(db.resources.plg_fulltext_indexes);  // Should exist
+ * this.logger.info(db.resources.plg_fulltext_indexes);  // Should exist
  * ```
  *
  * ## Real-World Use Cases
@@ -370,7 +370,7 @@
  *
  * // Display results with highlights
  * results.forEach(article => {
- *   console.log(`${article.title} (score: ${article._searchScore})`);
+ *   this.logger.info(`${article.title} (score: ${article._searchScore})`);
  * });
  * ```
  *

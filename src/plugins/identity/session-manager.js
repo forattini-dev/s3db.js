@@ -442,10 +442,10 @@ export class SessionManager {
         try {
           const count = await this.cleanupExpiredSessions();
           if (count > 0) {
-            console.log(`[SessionManager] Cleaned up ${count} expired sessions`);
+            this.logger.info(`[SessionManager] Cleaned up ${count} expired sessions`);
           }
         } catch (error) {
-          console.error('[SessionManager] Cleanup error:', error.message);
+          this.logger.error('[SessionManager] Cleanup error:', error.message);
         }
       },
       this.cleanupJobName

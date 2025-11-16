@@ -2,6 +2,7 @@ import { CoordinatorPlugin } from "./concerns/coordinator-plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { SchedulerError } from "./scheduler.errors.js";
+import { createLogger } from '../concerns/logger.js';
 
 /**
  * SchedulerPlugin - Cron-based Task Scheduling System
@@ -152,15 +153,23 @@ import { SchedulerError } from "./scheduler.errors.js";
  *   persistJobs: true,
  *   
  *   // Hooks
- *   onJobStart: (jobName, context) => console.log(`Starting job: ${jobName}`),
- *   onJobComplete: (jobName, result, duration) => console.log(`Job ${jobName} completed in ${duration}ms`),
- *   onJobError: (jobName, error) => console.error(`Job ${jobName} failed:`, error.message)
+ *   onJobStart: (jobName, context) => this.logger.info(`Starting job: ${jobName}`),
+ *   onJobComplete: (jobName, result, duration) => this.logger.info(`Job ${jobName} completed in ${duration}ms`),
+ *   onJobError: (jobName, error) => this.logger.error(`Job ${jobName} failed:`, error.message)
  * });
  */
 export class SchedulerPlugin extends CoordinatorPlugin {
   constructor(options = {}) {
     // Pass coordinator options to super (Scheduler doesn't need coordinator work interval since it uses timers)
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'SchedulerPlugin', level: logLevel });
+    }
 
     const {
       timezone = 'UTC',
@@ -336,9 +345,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
    * Only the coordinator should schedule and execute jobs
    */
   async onBecomeCoordinator() {
-    if (this.verbose) {
-      console.log('[SchedulerPlugin] Became coordinator - starting job scheduling');
-    }
+    // 🪵 Debug: became coordinator
+    this.logger.debug({ workerId: this.workerId }, 'Became coordinator - starting job scheduling');
 
     // Start job scheduling (only coordinator schedules jobs)
     await this._startScheduling();
@@ -354,9 +362,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
    * Job timers are cleared automatically in stop() method
    */
   async onStopBeingCoordinator() {
-    if (this.verbose) {
-      console.log('[SchedulerPlugin] No longer coordinator - job timers will be stopped automatically');
-    }
+    // 🪵 Debug: no longer coordinator
+    this.logger.debug({ workerId: this.workerId }, 'No longer coordinator - job timers will be stopped automatically');
 
     this.emit('plg:scheduler:coordinator-demoted', {
       workerId: this.workerId,
@@ -395,12 +402,11 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       const timer = setTimeout(() => {
         this._executeJob(jobName);
       }, delay);
-      
+
       this.timers.set(jobName, timer);
-      
-      if (this.verbose) {
-        console.log(`[SchedulerPlugin] Scheduled job '${jobName}' for ${nextRun.toISOString()}`);
-      }
+
+      // 🪵 Debug: scheduled job
+      this.logger.debug({ jobName, nextRun: nextRun.toISOString(), delayMs: delay }, `Scheduled job '${jobName}' for ${nextRun.toISOString()}`);
     }
   }
 
@@ -493,12 +499,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
           return tzDate;
         }
       } catch (error) {
-        if (this.verbose) {
-          console.warn('[SchedulerPlugin] Failed to apply timezone adjustment', {
-            timezone: config.timezone,
-            error: error.message
-          });
-        }
+        // 🪵 Warning: failed to apply timezone adjustment
+        this.logger.warn({ timezone: config.timezone, error: error.message }, 'Failed to apply timezone adjustment');
       }
     }
 
@@ -530,9 +532,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
 
     // If lock couldn't be acquired, another instance is executing this job
     if (!lock) {
-      if (this.verbose) {
-        console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
-      }
+      // 🪵 Debug: job already running on another instance
+      this.logger.debug({ jobName }, `Job '${jobName}' already running on another instance`);
       // Remove from activeJobs since we didn't acquire the lock
       this.activeJobs.delete(jobName);
       return;
@@ -610,9 +611,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
           attempt++;
 
           if (attempt <= job.retries) {
-            if (this.verbose) {
-              console.warn(`[SchedulerPlugin] Job '${jobName}' failed (attempt ${attempt + 1}):`, error.message);
-            }
+            // 🪵 Warning: job failed (retry)
+            this.logger.warn({ jobName, attempt: attempt + 1, totalAttempts: job.retries + 1, error: error.message }, `Job '${jobName}' failed (attempt ${attempt + 1}): ${error.message}`);
 
             // Wait before retry (exponential backoff with max delay, shorter in tests)
             const baseDelay = Math.min(Math.pow(2, attempt) * 1000, 5000); // Max 5 seconds
@@ -711,17 +711,19 @@ export class SchedulerPlugin extends CoordinatorPlugin {
         createdAt: new Date(startTime).toISOString().slice(0, 10)
       })
     );
-    
-    if (!ok && this.verbose) {
-      console.warn('[SchedulerPlugin] Failed to persist job execution:', err.message);
+
+    if (!ok) {
+      // 🪵 Warning: failed to persist job execution
+      this.logger.warn({ error: err.message }, `Failed to persist job execution: ${err.message}`);
     }
   }
 
   async _executeHook(hook, ...args) {
     if (typeof hook === 'function') {
       const [ok, err] = await tryFn(() => hook(...args));
-      if (!ok && this.verbose) {
-        console.warn('[SchedulerPlugin] Hook execution failed:', err.message);
+      if (!ok) {
+        // 🪵 Warning: hook execution failed
+        this.logger.warn({ error: err.message }, `Hook execution failed: ${err.message}`);
       }
     }
   }
@@ -866,9 +868,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     );
 
     if (!ok) {
-      if (this.verbose) {
-        console.warn(`[SchedulerPlugin] Failed to get job history:`, err.message);
-      }
+      // 🪵 Warning: failed to get job history
+      this.logger.warn({ error: err.message }, `Failed to get job history: ${err.message}`);
       return [];
     }
 
@@ -1000,9 +1001,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
   }
 
   async start() {
-    if (this.verbose) {
-      console.log(`[SchedulerPlugin] Started with ${this.jobs.size} jobs`);
-    }
+    // 🪵 Debug: started
+    this.logger.debug({ jobCount: this.jobs.size }, `Started with ${this.jobs.size} jobs`);
   }
 
   async stop() {
@@ -1014,9 +1014,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
 
     // For tests, don't wait for active jobs - they may be mocked
     if (!this._isTestEnvironment() && this.activeJobs.size > 0) {
-      if (this.verbose) {
-        console.log(`[SchedulerPlugin] Waiting for ${this.activeJobs.size} active jobs to complete...`);
-      }
+      // 🪵 Debug: waiting for active jobs
+      this.logger.debug({ activeJobCount: this.activeJobs.size }, `Waiting for ${this.activeJobs.size} active jobs to complete...`);
 
       // Wait up to 5 seconds for jobs to complete in production
       const timeout = 5000;
@@ -1027,7 +1026,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       }
 
       if (this.activeJobs.size > 0) {
-        console.warn(`[SchedulerPlugin] ${this.activeJobs.size} jobs still running after timeout`);
+        this.logger.warn(`[SchedulerPlugin] ${this.activeJobs.size} jobs still running after timeout`);
       }
     }
 

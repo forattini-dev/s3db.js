@@ -120,9 +120,9 @@ export class NeuralNetworkModel extends BaseModel {
     });
 
     if (this.config.verbose) {
-      console.log(`[MLPlugin] ${this.config.name} - Built custom neural network:`);
-      console.log(`  - Hidden layers: ${this.config.modelConfig.layers.length}`);
-      console.log(`  - Total parameters:`, this._countParameters());
+      this.logger.info(`[MLPlugin] ${this.config.name} - Built custom neural network:`);
+      this.logger.info(`  - Hidden layers: ${this.config.modelConfig.layers.length}`);
+      this.logger.info(`  - Total parameters:`, this._countParameters());
       this.model.summary();
     }
   }
@@ -239,7 +239,7 @@ export class NeuralNetworkModel extends BaseModel {
         const monitorValue = logs[monitor] || logs.loss;
 
         if (this.config.verbose && epoch % 10 === 0) {
-          console.log(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: ${monitor}=${monitorValue.toFixed(4)}`);
+          this.logger.info(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: ${monitor}=${monitorValue.toFixed(4)}`);
         }
 
         // Check for improvement
@@ -255,7 +255,7 @@ export class NeuralNetworkModel extends BaseModel {
 
           if (patienceCounter >= patience) {
             if (this.config.verbose) {
-              console.log(`[MLPlugin] ${this.config.name} - Early stopping at epoch ${epoch}`);
+              this.logger.info(`[MLPlugin] ${this.config.name} - Early stopping at epoch ${epoch}`);
             }
             this.model.stopTraining = true;
           }

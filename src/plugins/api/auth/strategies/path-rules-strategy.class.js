@@ -89,10 +89,9 @@ export class PathRulesAuthStrategy extends BaseAuthStrategy {
       }
     }
 
-    if (this.verbose) {
-      console.log(`[PathRulesAuthStrategy] Path-based auth with ${this.pathRules.length} rules`);
-      console.log(`[PathRulesAuthStrategy] Available auth methods: ${Object.keys(authMiddlewares).join(', ')}`);
-    }
+    // 🪵 Debug: path-based auth configuration
+    const availableMethods = Object.keys(authMiddlewares);
+    this.logger.debug({ ruleCount: this.pathRules.length, methods: availableMethods }, `Path-based auth with ${this.pathRules.length} rules, methods: ${availableMethods.join(', ')}`);
 
     // Create and return path-based auth middleware
     return createPathBasedAuthMiddleware({

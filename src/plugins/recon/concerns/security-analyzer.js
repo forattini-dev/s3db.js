@@ -7,7 +7,7 @@
  * Usage:
  *   const report = await plugin.scan('example.com', { behavior: 'aggressive' });
  *   const audit = SecurityAnalyzer.analyze(report);
- *   console.log(audit);
+ *   this.logger.info(audit);
  */
 
 export class SecurityAnalyzer {

@@ -50,6 +50,7 @@
 import crypto from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { createLogger } from '../../../concerns/logger.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { applyProviderPreset, applyProviderQuirks } from './providers.js';
 import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
@@ -72,6 +73,9 @@ import {
   generateErrorPage,
   generateErrorJSON
 } from '../concerns/oidc-errors.js';
+
+// Module-level logger for OIDC auth
+const logger = createLogger({ name: 'OidcAuth', level: 'info' });
 
 /**
  * 🔧 Default HTTP headers for OIDC token endpoint requests
@@ -130,7 +134,7 @@ export function validateOidcConfig(config) {
   // Validate UUID format for clientId (common for Azure AD/Entra)
   if (config.clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.clientId)) {
     if (config?.verbose) {
-      console.warn('[OIDC] clientId is not in UUID format (may be expected for some providers)');
+      logger.warn('[OIDC] clientId is not in UUID format (may be expected for some providers)');
     }
   }
 
@@ -305,7 +309,7 @@ async function getOrCreateUser(usersResource, claims, config) {
         }
       } catch (hookErr) {
         if (config?.verbose) {
-          console.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
+          logger.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
         }
       }
     }
@@ -378,7 +382,7 @@ async function getOrCreateUser(usersResource, claims, config) {
       }
     } catch (hookErr) {
       if (config?.verbose) {
-        console.error('[OIDC] beforeCreateUser hook failed:', hookErr);
+        logger.error('[OIDC] beforeCreateUser hook failed:', hookErr);
       }
       // Continue with default user data (don't block auth)
     }
@@ -560,7 +564,7 @@ const config = {
       }
     } catch (e) {
       if (config.verbose) {
-        console.warn('[OIDC] Discovery failed, using default endpoints:', e.message);
+        logger.warn('[OIDC] Discovery failed, using default endpoints:', e.message);
       }
     }
 
@@ -622,7 +626,7 @@ const config = {
       try {
         return await sessionStore.get(idOrJwt);
       } catch (err) {
-        console.error('[OIDC] Session store get error:', err.message);
+        logger.error('[OIDC] Session store get error:', err.message);
         return null;
       }
     } else {
@@ -692,10 +696,10 @@ const config = {
         try {
           await sessionStore.destroy(sessionId);
         } catch (err) {
-          console.error('[OIDC] Session store destroy error:', err.message);
+          logger.error('[OIDC] Session store destroy error:', err.message);
         }
       } else if (contextOptions.logMissing !== false) {
-        console.warn('[OIDC] Session cookie missing during deletion', {
+        logger.warn('[OIDC] Session cookie missing during deletion', {
           cookieName: name,
           cookies: Object.keys(cookieJar)
         });
@@ -736,10 +740,10 @@ const config = {
         try {
           await sessionStore.destroy(previousSessionToken);
         } catch (err) {
-          console.error('[OIDC] Session store destroy error during regeneration:', err.message);
+          logger.error('[OIDC] Session store destroy error during regeneration:', err.message);
         }
       } else {
-        console.warn('[OIDC] regenerateSession - prior session cookie not found before rotation');
+        logger.warn('[OIDC] regenerateSession - prior session cookie not found before rotation');
       }
     }
 
@@ -776,7 +780,7 @@ const config = {
     sessionCache.set(c, sessionData);
 
     if (c.get('verbose')) {
-      console.log('[OIDC] Session regenerated (new ID issued)');
+      logger.info('[OIDC] Session regenerated (new ID issued)');
     }
 
     return newSessionIdOrJwt;
@@ -820,7 +824,7 @@ const config = {
       if (!response.ok) {
         if (c.get('verbose')) {
           const error = await response.text();
-          console.warn('[OIDC] Token refresh failed:', error);
+          logger.warn('[OIDC] Token refresh failed:', error);
         }
         return null;
       }
@@ -830,7 +834,7 @@ const config = {
 
     } catch (err) {
       if (c.get('verbose')) {
-        console.warn('[OIDC] Token refresh error:', err.message);
+        logger.warn('[OIDC] Token refresh error:', err.message);
       }
       return null;
     }
@@ -972,7 +976,7 @@ const config = {
         codeChallenge = pair.challenge;
       } catch (e) {
         if (c.get('verbose')) {
-          console.warn('[OIDC] PKCE generation failed:', e.message);
+          logger.warn('[OIDC] PKCE generation failed:', e.message);
         }
       }
     }
@@ -1000,7 +1004,7 @@ const config = {
     });
 
     if (c.get('verbose')) {
-      console.log('[OIDC] Login - State cookie set:', {
+      logger.info('[OIDC] Login - State cookie set:', {
         cookieName: `${cookieName}_state`,
         sameSite: cookieSameSite,
         secure: cookieSecure,
@@ -1047,7 +1051,7 @@ const config = {
     // Debug logging
     if (c.get('verbose')) {
       const allCookies = c.req.header('cookie');
-      console.log('[OIDC] Callback - Request info:', {
+      logger.info('[OIDC] Callback - Request info:', {
         cookieName: `${cookieName}_state`,
         allCookiesHeader: allCookies,
         requestUrl: c.req.url,
@@ -1060,7 +1064,7 @@ const config = {
     const stateCookie = getCookie(c, `${cookieName}_state`);
     if (!stateCookie) {
       if (c.get('verbose')) {
-        console.error('[OIDC] Callback - State cookie missing!', {
+        logger.error('[OIDC] Callback - State cookie missing!', {
           expectedCookieName: `${cookieName}_state`,
           allCookies: c.req.header('cookie')
         });
@@ -1113,7 +1117,7 @@ const config = {
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
         if (c.get('verbose')) {
-          console.error('[OIDC] Token exchange failed:', error);
+          logger.error('[OIDC] Token exchange failed:', error);
         }
         return c.json({ error: 'Failed to exchange code for tokens' }, 500);
       }
@@ -1124,7 +1128,7 @@ const config = {
       const tokenValidation = validateTokenResponse(tokens, config);
       if (!tokenValidation.valid) {
         if (c.get('verbose')) {
-          console.error('[OIDC] Token response validation failed:', tokenValidation.errors);
+          logger.error('[OIDC] Token response validation failed:', tokenValidation.errors);
         }
         const errorType = getErrorType(tokenValidation.errors);
         const errorDetails = getErrorDetails(errorType, tokenValidation.errors);
@@ -1165,7 +1169,7 @@ const config = {
 
       if (!idTokenValidation.valid) {
         if (c.get('verbose')) {
-          console.error('[OIDC] ID token validation failed:', idTokenValidation.errors);
+          logger.error('[OIDC] ID token validation failed:', idTokenValidation.errors);
         }
         const errorType = getErrorType(idTokenValidation.errors);
         const errorDetails = getErrorDetails(errorType, idTokenValidation.errors);
@@ -1231,30 +1235,30 @@ const config = {
               });
             } catch (hookErr) {
               if (c.get('verbose')) {
-                console.error('[OIDC] onUserAuthenticated hook failed:', hookErr);
+                logger.error('[OIDC] onUserAuthenticated hook failed:', hookErr);
               }
               // Don't block authentication if hook fails
             }
           }
         } catch (err) {
           if (c.get('verbose')) {
-            console.error('[OIDC] Failed to create/update user:', err);
+            logger.error('[OIDC] Failed to create/update user:', err);
           }
           // Continue without user (will use token claims only)
         }
       }
 
       // 🚧 TEMPORARY DEBUG: Log token sizes
-      console.log('\n========== TOKEN SIZE DEBUG ==========');
-      console.log('access_token bytes:', Buffer.byteLength(tokens.access_token || '', 'utf8'));
-      console.log('id_token bytes:', Buffer.byteLength(tokens.id_token || '', 'utf8'));
-      console.log('refresh_token bytes:', Buffer.byteLength(tokens.refresh_token || '', 'utf8'));
-      console.log('TOTAL tokens bytes:',
+      logger.info('\n========== TOKEN SIZE DEBUG ==========');
+      logger.info('access_token bytes:', Buffer.byteLength(tokens.access_token || '', 'utf8'));
+      logger.info('id_token bytes:', Buffer.byteLength(tokens.id_token || '', 'utf8'));
+      logger.info('refresh_token bytes:', Buffer.byteLength(tokens.refresh_token || '', 'utf8'));
+      logger.info('TOTAL tokens bytes:',
         Buffer.byteLength(tokens.access_token || '', 'utf8') +
         Buffer.byteLength(tokens.id_token || '', 'utf8') +
         Buffer.byteLength(tokens.refresh_token || '', 'utf8')
       );
-      console.log('======================================\n');
+      logger.info('======================================\n');
 
       // Optional: set API token cookie (generic, opt-in)
       try {
@@ -1335,16 +1339,16 @@ const config = {
       const sessionJWT = await encodeSession(sessionData);
 
       // 🚧 TEMPORARY DEBUG: Log session cookie size
-      console.log('\n========== SESSION COOKIE SIZE ==========');
-      console.log('Session data (stringified) bytes:', Buffer.byteLength(JSON.stringify(sessionData), 'utf8'));
-      console.log('Session JWT bytes:', Buffer.byteLength(sessionJWT, 'utf8'));
-      console.log('Cookie name bytes:', Buffer.byteLength(cookieName, 'utf8'));
-      console.log('Cookie attributes ~bytes:', 60);  // Approximate (Max-Age, Path, HttpOnly, Secure, SameSite)
-      console.log('TOTAL cookie bytes (name + JWT + attributes):',
+      logger.info('\n========== SESSION COOKIE SIZE ==========');
+      logger.info('Session data (stringified) bytes:', Buffer.byteLength(JSON.stringify(sessionData), 'utf8'));
+      logger.info('Session JWT bytes:', Buffer.byteLength(sessionJWT, 'utf8'));
+      logger.info('Cookie name bytes:', Buffer.byteLength(cookieName, 'utf8'));
+      logger.info('Cookie attributes ~bytes:', 60);  // Approximate (Max-Age, Path, HttpOnly, Secure, SameSite)
+      logger.info('TOTAL cookie bytes (name + JWT + attributes):',
         Buffer.byteLength(cookieName, 'utf8') + Buffer.byteLength(sessionJWT, 'utf8') + 60
       );
-      console.log('Browser limit: 4096 bytes');
-      console.log('==========================================\n');
+      logger.info('Browser limit: 4096 bytes');
+      logger.info('==========================================\n');
 
       // Set session cookie (with automatic chunking if > 4KB)
       setChunkedCookie(c, cookieName, sessionJWT, {
@@ -1361,7 +1365,7 @@ const config = {
 
     } catch (err) {
       if (c.get('verbose')) {
-        console.error('[OIDC] Error during token exchange:', err);
+        logger.error('[OIDC] Error during token exchange:', err);
       }
       return c.json({ error: 'Authentication failed' }, 500);
     }
@@ -1504,7 +1508,7 @@ const config = {
           c.set('oidc_session_jwt_updated', updatedSessionJWT);
 
           if (c.get('verbose')) {
-            console.log('[OIDC] Token refreshed implicitly:', {
+            logger.info('[OIDC] Token refreshed implicitly:', {
               timeUntilExpiry: Math.round(timeUntilExpiry / 1000),
               newExpiresIn: newTokens.expires_in
             });
@@ -1512,7 +1516,7 @@ const config = {
         } else {
           // Refresh failed - let session continue until it expires
           if (c.get('verbose')) {
-            console.warn('[OIDC] Token refresh failed, session will expire naturally');
+            logger.warn('[OIDC] Token refresh failed, session will expire naturally');
           }
         }
       }

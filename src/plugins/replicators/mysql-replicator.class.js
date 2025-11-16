@@ -215,9 +215,10 @@ class MySQLReplicator extends BaseReplicator {
       });
 
       if (!okRes) {
-        if (this.config.verbose) {
-          console.warn(`[MySQLReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
-        }
+        this.logger.warn(
+          { resourceName, error: errRes.message },
+          'Could not get resource for schema sync'
+        );
         continue;
       }
 
@@ -252,7 +253,7 @@ class MySQLReplicator extends BaseReplicator {
               docs: 'docs/plugins/replicator.md'
             });
           } else if (this.schemaSync.onMismatch === 'warn') {
-            console.warn(`[MySQLReplicator] ${message}`);
+            this.logger.warn({ tableName, error: errSync.message }, message);
           }
         }
       }
@@ -298,9 +299,7 @@ class MySQLReplicator extends BaseReplicator {
         // Create table
         const createSQL = generateMySQLCreateTable(tableName, attributes);
 
-        if (this.config.verbose) {
-          console.log(`[MySQLReplicator] Creating table ${tableName}:\n${createSQL}`);
-        }
+        this.logger.debug({ tableName, createSQL }, 'Creating table');
 
         await connection.query(createSQL);
 
@@ -315,9 +314,7 @@ class MySQLReplicator extends BaseReplicator {
 
       // Table exists - check for schema changes
       if (this.schemaSync.strategy === 'drop-create') {
-        if (this.config.verbose) {
-          console.warn(`[MySQLReplicator] Dropping and recreating table ${tableName}`);
-        }
+        this.logger.warn({ tableName }, 'Dropping and recreating table');
 
         await connection.query(`DROP TABLE IF EXISTS ${tableName}`);
         const createSQL = generateMySQLCreateTable(tableName, attributes);
@@ -336,9 +333,10 @@ class MySQLReplicator extends BaseReplicator {
         const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
 
         if (alterStatements.length > 0) {
-          if (this.config.verbose) {
-            console.log(`[MySQLReplicator] Altering table ${tableName}:`, alterStatements);
-          }
+          this.logger.debug(
+            { tableName, alterStatements },
+            'Altering table'
+          );
 
           for (const stmt of alterStatements) {
             await connection.query(stmt);
@@ -392,8 +390,8 @@ class MySQLReplicator extends BaseReplicator {
       `);
     });
 
-    if (!ok && this.config.verbose) {
-      console.warn('[MySQLReplicator] Failed to create log table');
+    if (!ok) {
+      this.logger.warn('Failed to create log table');
     }
   }
 
@@ -448,9 +446,10 @@ class MySQLReplicator extends BaseReplicator {
           error: error.message
         });
 
-        if (this.config.verbose) {
-          console.error(`[MySQLReplicator] Failed to replicate ${operation} for ${resourceName}:`, error);
-        }
+        this.logger.error(
+          { resourceName, operation, error: error.message },
+          'Failed to replicate'
+        );
       }
     }
 
@@ -503,8 +502,8 @@ class MySQLReplicator extends BaseReplicator {
       await this.pool.promise().query(query, [resourceName, operation, id, JSON.stringify(data)]);
     });
 
-    if (!ok && this.config.verbose) {
-      console.warn('[MySQLReplicator] Failed to log operation');
+    if (!ok) {
+      this.logger.warn({ resourceName, operation, id }, 'Failed to log operation');
     }
   }
 

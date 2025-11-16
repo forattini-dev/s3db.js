@@ -664,7 +664,7 @@ export class ReconPlugin extends Plugin {
    * Cleanup all spawned processes when plugin stops
    */
   async onStop() {
-    console.log('[ReconPlugin] Stopping plugin, cleaning up processes...');
+    this.logger.info('[ReconPlugin] Stopping plugin, cleaning up processes...');
     await this.processManager.cleanup({ silent: false });
   }
 
@@ -673,7 +673,7 @@ export class ReconPlugin extends Plugin {
    * Cleanup all resources when plugin is uninstalled
    */
   async onUninstall(options = {}) {
-    console.log('[ReconPlugin] Uninstalling plugin, cleaning up processes...');
+    this.logger.info('[ReconPlugin] Uninstalling plugin, cleaning up processes...');
     await this.processManager.forceCleanup();
   }
 

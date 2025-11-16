@@ -12,6 +12,8 @@
  * @module api/concerns/session-store
  */
 
+import { createLogger } from '../../../concerns/logger.js';
+
 /**
  * Base Session Store Interface
  *
@@ -87,6 +89,14 @@ export class MemoryStore extends SessionStore {
     this.timers = new Map();
     this.maxSessions = options.maxSessions || 10000;
     this.verbose = options.verbose || false;
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'MemoryStore', level: logLevel });
+    }
   }
 
   async get(sessionId) {
@@ -128,9 +138,9 @@ export class MemoryStore extends SessionStore {
     });
     this.timers.set(sessionId, timer);
 
-    if (this.verbose) {
-      console.log(`[MemoryStore] Set session ${sessionId} (TTL: ${Math.round(ttl / 1000)}s, Total: ${this.sessions.size})`);
-    }
+    // 🪵 Debug: session set
+    const ttlSeconds = Math.round(ttl / 1000);
+    this.logger.debug({ sessionId, ttlSeconds, totalSessions: this.sessions.size }, `Set session ${sessionId} (TTL: ${ttlSeconds}s, Total: ${this.sessions.size})`);
   }
 
   async destroy(sessionId) {
@@ -142,9 +152,8 @@ export class MemoryStore extends SessionStore {
 
     this.sessions.delete(sessionId);
 
-    if (this.verbose) {
-      console.log(`[MemoryStore] Destroyed session ${sessionId} (Remaining: ${this.sessions.size})`);
-    }
+    // 🪵 Debug: session destroyed
+    this.logger.debug({ sessionId, remaining: this.sessions.size }, `Destroyed session ${sessionId} (Remaining: ${this.sessions.size})`);
   }
 
   async touch(sessionId, ttl) {
@@ -218,6 +227,14 @@ export class RedisStore extends SessionStore {
     this.prefix = options.prefix || 'session:';
     this.serializer = options.serializer || JSON;
     this.verbose = options.verbose || false;
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'RedisStore', level: logLevel });
+    }
   }
 
   _getKey(sessionId) {
@@ -233,7 +250,7 @@ export class RedisStore extends SessionStore {
 
       return this.serializer.parse(data);
     } catch (err) {
-      console.error('[RedisStore] Get error:', err.message);
+      this.logger.error('[RedisStore] Get error:', err.message);
       return null;
     }
   }
@@ -246,11 +263,10 @@ export class RedisStore extends SessionStore {
 
       await this.client.setEx(key, ttlSeconds, value);
 
-      if (this.verbose) {
-        console.log(`[RedisStore] Set session ${sessionId} (TTL: ${ttlSeconds}s)`);
-      }
+      // 🪵 Debug: session set in Redis
+      this.logger.debug({ sessionId, ttlSeconds }, `Set session ${sessionId} (TTL: ${ttlSeconds}s)`);
     } catch (err) {
-      console.error('[RedisStore] Set error:', err.message);
+      this.logger.error('[RedisStore] Set error:', err.message);
       throw err;
     }
   }
@@ -260,11 +276,10 @@ export class RedisStore extends SessionStore {
       const key = this._getKey(sessionId);
       await this.client.del(key);
 
-      if (this.verbose) {
-        console.log(`[RedisStore] Destroyed session ${sessionId}`);
-      }
+      // 🪵 Debug: session destroyed in Redis
+      this.logger.debug({ sessionId }, `Destroyed session ${sessionId}`);
     } catch (err) {
-      console.error('[RedisStore] Destroy error:', err.message);
+      this.logger.error('[RedisStore] Destroy error:', err.message);
       throw err;
     }
   }
@@ -275,11 +290,10 @@ export class RedisStore extends SessionStore {
       const ttlSeconds = Math.ceil(ttl / 1000);
       await this.client.expire(key, ttlSeconds);
 
-      if (this.verbose) {
-        console.log(`[RedisStore] Touched session ${sessionId} (TTL: ${ttlSeconds}s)`);
-      }
+      // 🪵 Debug: session touched in Redis
+      this.logger.debug({ sessionId, ttlSeconds }, `Touched session ${sessionId} (TTL: ${ttlSeconds}s)`);
     } catch (err) {
-      console.error('[RedisStore] Touch error:', err.message);
+      this.logger.error('[RedisStore] Touch error:', err.message);
       // Non-fatal: fall back to get + set
       await super.touch(sessionId, ttl);
     }
@@ -297,7 +311,7 @@ export class RedisStore extends SessionStore {
         prefix: this.prefix,
       };
     } catch (err) {
-      console.error('[RedisStore] Stats error:', err.message);
+      this.logger.error('[RedisStore] Stats error:', err.message);
       return { count: 0, prefix: this.prefix };
     }
   }
@@ -312,7 +326,7 @@ export class RedisStore extends SessionStore {
         await this.client.del(keys);
       }
     } catch (err) {
-      console.error('[RedisStore] Clear error:', err.message);
+      this.logger.error('[RedisStore] Clear error:', err.message);
     }
   }
 }

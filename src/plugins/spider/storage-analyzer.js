@@ -51,7 +51,7 @@ export async function extractLocalStorage(page) {
       parsedItems: parsed
     }
   } catch (error) {
-    console.error('[StorageAnalyzer] Error extracting localStorage:', error)
+    this.logger.error('[StorageAnalyzer] Error extracting localStorage:', error)
     return {
       present: false,
       count: 0,
@@ -109,7 +109,7 @@ export async function extractSessionStorage(page) {
       parsedItems: parsed
     }
   } catch (error) {
-    console.error('[StorageAnalyzer] Error extracting sessionStorage:', error)
+    this.logger.error('[StorageAnalyzer] Error extracting sessionStorage:', error)
     return {
       present: false,
       count: 0,
@@ -266,7 +266,7 @@ export async function extractIndexedDB(page) {
       error: idbData.error
     }
   } catch (error) {
-    console.error('[StorageAnalyzer] Error extracting IndexedDB:', error)
+    this.logger.error('[StorageAnalyzer] Error extracting IndexedDB:', error)
     return {
       present: false,
       databaseCount: 0,

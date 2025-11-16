@@ -33,7 +33,7 @@
  *
  * // Plugins subscribe to leader changes
  * service.on('leader:changed', ({ namespace, previousLeader, newLeader, epoch }) => {
- *   console.log(`${namespace}: leader changed from ${previousLeader} to ${newLeader}`);
+ *   this.logger.info(`${namespace}: leader changed from ${previousLeader} to ${newLeader}`);
  * });
  *
  * // Check if this worker is leader
@@ -180,16 +180,26 @@ export class GlobalCoordinatorService extends EventEmitter {
 
   /**
    * Subscribe a plugin to global coordinator events
+   * Also immediately register the plugin's worker if service is running
    * @param {string} pluginName - Name of plugin (e.g., 'queue', 'scheduler')
    * @param {Object} plugin - Plugin instance
    */
-  subscribePlugin(pluginName, plugin) {
+  async subscribePlugin(pluginName, plugin) {
     if (!pluginName || !plugin) {
       throw new Error('GlobalCoordinatorService: pluginName and plugin required');
     }
 
     this.subscribedPlugins.set(pluginName, plugin);
     this._log(`Plugin subscribed: ${pluginName}`);
+
+    // If service is running, immediately register this plugin's worker
+    // This prevents race conditions where first heartbeat completes before plugin subscribes
+    if (this.isRunning && plugin.workerId && this.storage) {
+      await this._registerWorkerEntry(plugin.workerId, pluginName);
+
+      // Trigger a heartbeat cycle to conduct election with the new plugin worker
+      await this._heartbeatCycle();
+    }
   }
 
   /**
@@ -292,11 +302,24 @@ export class GlobalCoordinatorService extends EventEmitter {
       const previousLeaderId = this.currentLeaderId;
       const previousEpoch = this.currentEpoch;
 
-      // Step 3: Check if leader lease expired
+      // Step 3: Check if leader lease expired or if plugin workers are now available
       const now = Date.now();
       let newLeaderId = state?.leaderId;
       let newEpoch = state?.epoch ?? this.currentEpoch ?? 0;
       let needsNewElection = !state || (state.leaseEnd && now >= state.leaseEnd);
+
+      // If current leader is coordinator worker but plugin workers are now available, force new election
+      if (!needsNewElection && state?.leaderId) {
+        const workers = await this.getActiveWorkers();
+        const pluginWorkers = workers.filter(w => w.pluginName && w.pluginName !== 'coordinator');
+        const currentLeaderWorker = workers.find(w => w.workerId === state.leaderId);
+
+        // Force election if current leader is coordinator but we have plugin workers now
+        if (currentLeaderWorker?.pluginName === 'coordinator' && pluginWorkers.length > 0) {
+          this._log('Plugin workers available, forcing re-election');
+          needsNewElection = true;
+        }
+      }
 
       if (needsNewElection) {
         // Step 4: Conduct election
@@ -336,12 +359,20 @@ export class GlobalCoordinatorService extends EventEmitter {
     try {
       // Get active workers
       const workers = await this.getActiveWorkers();
-      if (workers.length === 0) {
+
+      // Filter out the coordinator service's own worker - only elect plugin workers
+      const pluginWorkers = workers.filter(w => w.pluginName && w.pluginName !== 'coordinator');
+
+      // Use plugin workers if available, otherwise fall back to all workers (including coordinator)
+      const candidateWorkers = pluginWorkers.length > 0 ? pluginWorkers : workers;
+
+      if (candidateWorkers.length === 0) {
+        this._log('No workers available for election');
         return { leaderId: null, epoch: previousEpoch };
       }
 
       // Elect lexicographically first worker
-      const elected = workers[0].workerId;
+      const elected = candidateWorkers[0].workerId;
 
       // Try to acquire leader lease
       const now = Date.now();
@@ -358,6 +389,8 @@ export class GlobalCoordinatorService extends EventEmitter {
         electedAt: now
       };
 
+      this._log(`Attempting to elect leader: ${elected}`);
+
       const [ok, err] = await tryFn(() =>
         this.storage.set(
           this._getStateKey(),
@@ -371,9 +404,11 @@ export class GlobalCoordinatorService extends EventEmitter {
 
       if (!ok) {
         this._logError('Failed to store new leader state', err);
-        return null;
+        // Return { leaderId: null } instead of null to maintain consistency
+        return { leaderId: null, epoch: previousEpoch };
       }
 
+      this._log(`Leader elected: ${elected}`);
       return { leaderId: elected, epoch };
 
     } catch (err) {
@@ -383,18 +418,37 @@ export class GlobalCoordinatorService extends EventEmitter {
   }
 
   /**
-   * Register/refresh this worker's heartbeat
+   * Register/refresh this worker's heartbeat and all plugin workers
    * @private
    */
   async _registerWorker() {
     if (!this.storage) return;
 
+    // Register service's own worker
+    await this._registerWorkerEntry(this.workerId);
+
+    // Register all subscribed plugin workers
+    for (const [pluginName, plugin] of this.subscribedPlugins.entries()) {
+      if (plugin && plugin.workerId) {
+        await this._registerWorkerEntry(plugin.workerId, pluginName);
+      }
+    }
+  }
+
+  /**
+   * Register a single worker entry
+   * @private
+   */
+  async _registerWorkerEntry(workerId, pluginName = null) {
+    if (!workerId || !this.storage) return;
+
     const [ok, err] = await tryFn(() =>
       this.storage.set(
-        this._getWorkerKey(this.workerId),
+        this._getWorkerKey(workerId),
         {
-          workerId: this.workerId,
-          pod: this._getWorkerPod(this.workerId),
+          workerId,
+          pluginName: pluginName || 'coordinator',
+          pod: this._getWorkerPod(workerId),
           lastHeartbeat: Date.now(),
           startTime: this.metrics.startTime,
           namespace: this.namespace
@@ -407,25 +461,43 @@ export class GlobalCoordinatorService extends EventEmitter {
     );
 
     if (!ok) {
-      this._logError('Failed to register worker heartbeat', err);
+      this._logError(`Failed to register worker heartbeat for ${workerId}`, err);
     } else {
       this.metrics.workerRegistrations++;
     }
   }
 
   /**
-   * Unregister this worker
+   * Unregister this worker and all plugin workers
    * @private
    */
   async _unregisterWorker() {
     if (!this.storage) return;
 
+    // Unregister service's own worker
+    await this._unregisterWorkerEntry(this.workerId);
+
+    // Unregister all subscribed plugin workers
+    for (const [pluginName, plugin] of this.subscribedPlugins.entries()) {
+      if (plugin && plugin.workerId) {
+        await this._unregisterWorkerEntry(plugin.workerId);
+      }
+    }
+  }
+
+  /**
+   * Unregister a single worker entry
+   * @private
+   */
+  async _unregisterWorkerEntry(workerId) {
+    if (!workerId || !this.storage) return;
+
     const [ok, err] = await tryFn(() =>
-      this.storage.delete(this._getWorkerKey(this.workerId))
+      this.storage.delete(this._getWorkerKey(workerId))
     );
 
     if (!ok) {
-      this._logError('Failed to unregister worker', err);
+      this._logError(`Failed to unregister worker ${workerId}`, err);
     }
   }
 
@@ -639,7 +711,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    */
   _log(...args) {
     if (this.config.diagnosticsEnabled) {
-      console.log(`[coordinator:global] [${this.namespace}]`, ...args);
+      this.logger.info(`[coordinator:global] [${this.namespace}]`, ...args);
     }
   }
 
@@ -649,7 +721,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    */
   _logError(msg, err) {
     if (this.config.diagnosticsEnabled) {
-      console.error(`[coordinator:global] [${this.namespace}] ${msg}:`, err?.message || err);
+      this.logger.error(`[coordinator:global] [${this.namespace}] ${msg}:`, err?.message || err);
     }
   }
 }

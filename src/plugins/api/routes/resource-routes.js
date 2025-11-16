@@ -5,10 +5,14 @@
  */
 
 import { asyncHandler } from '../utils/error-handler.js';
+import { createLogger } from '../../../concerns/logger.js';
 import * as formatter from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'ResourceRoutes', level: 'info' });
 function parsePopulateValues(raw) {
   if (raw === undefined || raw === null) return [];
 
@@ -210,10 +214,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         }));
 
         if (config.verbose || resource.database?.verbose) {
-          console.log(`[API Plugin] Registered custom route for ${resourceName}: ${method} ${path}`);
+          logger.info(`[API Plugin] Registered custom route for ${resourceName}: ${method} ${path}`);
         }
       } catch (error) {
-        console.error(`[API Plugin] Error registering custom route "${routeDef}" for ${resourceName}:`, error.message);
+        logger.error(`[API Plugin] Error registering custom route "${routeDef}" for ${resourceName}:`, error.message);
         throw error;
       }
     }

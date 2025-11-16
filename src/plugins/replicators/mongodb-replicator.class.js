@@ -189,8 +189,8 @@ class MongoDBReplicator extends BaseReplicator {
       }
     });
 
-    if (!ok && this.config.verbose) {
-      console.warn('[MongoDBReplicator] Failed to create log collection');
+    if (!ok) {
+      this.logger.warn('Failed to create log collection');
     }
   }
 
@@ -245,9 +245,10 @@ class MongoDBReplicator extends BaseReplicator {
           error: error.message
         });
 
-        if (this.config.verbose) {
-          console.error(`[MongoDBReplicator] Failed to replicate ${operation} for ${resourceName}:`, error);
-        }
+        this.logger.error(
+          { resourceName, operation, error: error.message },
+          'Failed to replicate'
+        );
       }
     }
 
@@ -295,8 +296,8 @@ class MongoDBReplicator extends BaseReplicator {
       });
     });
 
-    if (!ok && this.config.verbose) {
-      console.warn('[MongoDBReplicator] Failed to log operation');
+    if (!ok) {
+      this.logger.warn({ resourceName, operation, id }, 'Failed to log operation');
     }
   }
 

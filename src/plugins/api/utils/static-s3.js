@@ -10,9 +10,13 @@
  */
 
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { createLogger } from '../../../concerns/logger.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getContentType } from './mime-types.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'StaticS3', level: 'info' });
 /**
  * Create S3 static file handler
  * @param {Object} config - Configuration
@@ -176,7 +180,7 @@ export function createS3Handler(config = {}) {
       return c.body(response.Body, 200, headers);
 
     } catch (err) {
-      console.error('[Static S3] Error:', err);
+      logger.error('[Static S3] Error:', err);
       return c.json({ success: false, error: { message: 'Internal Server Error' } }, 500);
     }
   };

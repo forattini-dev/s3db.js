@@ -25,12 +25,16 @@
  * // In route handlers:
  * app.get('/users', (c) => {
  *   const requestId = c.get('requestId');
- *   console.log(`[${requestId}] Fetching users...`);
+ *   logger.info(`[${requestId}] Fetching users...`);
  * });
  */
 
 import { idGenerator } from '../../../concerns/id.js';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'RequestId', level: 'info' });
 /**
  * Create request ID middleware
  *

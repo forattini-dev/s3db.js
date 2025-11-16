@@ -184,7 +184,7 @@ export class IdentityPlugin extends Plugin {
         logoUrl: options.ui?.logoUrl || null,
         logo: (() => {
           if (options.ui?.logo) {
-            console.warn(
+            this.logger.warn(
               '[IdentityPlugin] DEPRECATED: The "logo" field is deprecated. ' +
               'Use "logoUrl" instead: { ui: { logoUrl: "..." } }. ' +
               'This will be removed in v17.0.'
@@ -462,14 +462,14 @@ export class IdentityPlugin extends Plugin {
    */
   async onInstall() {
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Installing...');
+      this.logger.info('[Identity Plugin] Installing...');
     }
 
     // Validate dependencies
     try {
       await this._validateDependencies();
     } catch (err) {
-      console.error('[Identity Plugin] Dependency validation failed:', err.message);
+      this.logger.error('[Identity Plugin] Dependency validation failed:', err.message);
       throw err;
     }
 
@@ -501,7 +501,7 @@ export class IdentityPlugin extends Plugin {
     await this._initializeAuthDrivers();
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Installed successfully');
+      this.logger.info('[Identity Plugin] Installed successfully');
     }
   }
 
@@ -534,12 +534,12 @@ export class IdentityPlugin extends Plugin {
     if (okKeys) {
       this.oauth2KeysResource = keysResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${names.oauthKeys} resource`);
+        this.logger.info(`[Identity Plugin] Created ${names.oauthKeys} resource`);
       }
     } else if (this.database.resources[names.oauthKeys]) {
       this.oauth2KeysResource = this.database.resources[names.oauthKeys];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
       }
     } else {
       throw errKeys;
@@ -570,12 +570,12 @@ export class IdentityPlugin extends Plugin {
     if (okCodes) {
       this.oauth2AuthCodesResource = codesResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${names.authCodes} resource`);
+        this.logger.info(`[Identity Plugin] Created ${names.authCodes} resource`);
       }
     } else if (this.database.resources[names.authCodes]) {
       this.oauth2AuthCodesResource = this.database.resources[names.authCodes];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${names.authCodes} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${names.authCodes} resource`);
       }
     } else {
       throw errCodes;
@@ -602,12 +602,12 @@ export class IdentityPlugin extends Plugin {
     if (okSessions) {
       this.sessionsResource = sessionsResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${names.sessions} resource`);
+        this.logger.info(`[Identity Plugin] Created ${names.sessions} resource`);
       }
     } else if (this.database.resources[names.sessions]) {
       this.sessionsResource = this.database.resources[names.sessions];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${names.sessions} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${names.sessions} resource`);
       }
     } else {
       throw errSessions;
@@ -633,12 +633,12 @@ export class IdentityPlugin extends Plugin {
     if (okResetTokens) {
       this.passwordResetTokensResource = resetTokensResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
+        this.logger.info(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
       }
     } else if (this.database.resources[names.passwordResetTokens]) {
       this.passwordResetTokensResource = this.database.resources[names.passwordResetTokens];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
       }
     } else {
       throw errResetTokens;
@@ -674,15 +674,15 @@ export class IdentityPlugin extends Plugin {
       if (okMFA) {
         this.mfaDevicesResource = mfaResource;
         if (this.config.verbose) {
-          console.log(`[Identity Plugin] Created ${names.mfaDevices} resource`);
+          this.logger.info(`[Identity Plugin] Created ${names.mfaDevices} resource`);
         }
       } else if (this.database.resources[names.mfaDevices]) {
         this.mfaDevicesResource = this.database.resources[names.mfaDevices];
         if (this.config.verbose) {
-          console.log(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
+          this.logger.info(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
         }
       } else {
-        console.warn(`[Identity Plugin] MFA enabled but failed to create ${names.mfaDevices} resource:`, errMFA?.message);
+        this.logger.warn(`[Identity Plugin] MFA enabled but failed to create ${names.mfaDevices} resource:`, errMFA?.message);
       }
     }
   }
@@ -719,12 +719,12 @@ export class IdentityPlugin extends Plugin {
     if (okUsers) {
       this.usersResource = usersResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${usersMergedConfig.name} resource with merged config`);
+        this.logger.info(`[Identity Plugin] Created ${usersMergedConfig.name} resource with merged config`);
       }
     } else if (this.database.resources[usersMergedConfig.name]) {
       this.usersResource = this.database.resources[usersMergedConfig.name];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${usersMergedConfig.name} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${usersMergedConfig.name} resource`);
       }
     } else {
       throw errUsers;
@@ -754,12 +754,12 @@ export class IdentityPlugin extends Plugin {
     if (okTenants) {
       this.tenantsResource = tenantsResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${tenantsMergedConfig.name} resource with merged config`);
+        this.logger.info(`[Identity Plugin] Created ${tenantsMergedConfig.name} resource with merged config`);
       }
     } else if (this.database.resources[tenantsMergedConfig.name]) {
       this.tenantsResource = this.database.resources[tenantsMergedConfig.name];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${tenantsMergedConfig.name} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${tenantsMergedConfig.name} resource`);
       }
     } else {
       throw errTenants;
@@ -789,12 +789,12 @@ export class IdentityPlugin extends Plugin {
     if (okClients) {
       this.clientsResource = clientsResource;
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Created ${clientsMergedConfig.name} resource with merged config`);
+        this.logger.info(`[Identity Plugin] Created ${clientsMergedConfig.name} resource with merged config`);
       }
     } else if (this.database.resources[clientsMergedConfig.name]) {
       this.clientsResource = this.database.resources[clientsMergedConfig.name];
       if (this.config.verbose) {
-        console.log(`[Identity Plugin] Using existing ${clientsMergedConfig.name} resource`);
+        this.logger.info(`[Identity Plugin] Using existing ${clientsMergedConfig.name} resource`);
       }
     } else {
       throw errClients;
@@ -825,10 +825,10 @@ export class IdentityPlugin extends Plugin {
     this.oauth2Server.setIdentityPlugin(this);
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] OAuth2 Server initialized');
-      console.log(`[Identity Plugin] Issuer: ${this.config.issuer}`);
-      console.log(`[Identity Plugin] Supported scopes: ${this.config.supportedScopes.join(', ')}`);
-      console.log(`[Identity Plugin] Supported grant types: ${this.config.supportedGrantTypes.join(', ')}`);
+      this.logger.info('[Identity Plugin] OAuth2 Server initialized');
+      this.logger.info(`[Identity Plugin] Issuer: ${this.config.issuer}`);
+      this.logger.info(`[Identity Plugin] Supported scopes: ${this.config.supportedScopes.join(', ')}`);
+      this.logger.info(`[Identity Plugin] Supported grant types: ${this.config.supportedGrantTypes.join(', ')}`);
     }
   }
 
@@ -845,9 +845,9 @@ export class IdentityPlugin extends Plugin {
     });
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Session Manager initialized');
-      console.log(`[Identity Plugin] Session expiry: ${this.config.session.sessionExpiry}`);
-      console.log(`[Identity Plugin] Cookie name: ${this.config.session.cookieName}`);
+      this.logger.info('[Identity Plugin] Session Manager initialized');
+      this.logger.info(`[Identity Plugin] Session expiry: ${this.config.session.sessionExpiry}`);
+      this.logger.info(`[Identity Plugin] Cookie name: ${this.config.session.cookieName}`);
     }
   }
 
@@ -868,11 +868,11 @@ export class IdentityPlugin extends Plugin {
     });
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Email Service initialized');
-      console.log(`[Identity Plugin] Email enabled: ${this.config.email.enabled}`);
+      this.logger.info('[Identity Plugin] Email Service initialized');
+      this.logger.info(`[Identity Plugin] Email enabled: ${this.config.email.enabled}`);
       if (this.config.email.enabled) {
-        console.log(`[Identity Plugin] SMTP host: ${this.config.email.smtp.host}:${this.config.email.smtp.port}`);
-        console.log(`[Identity Plugin] From address: ${this.config.email.from}`);
+        this.logger.info(`[Identity Plugin] SMTP host: ${this.config.email.smtp.host}:${this.config.email.smtp.port}`);
+        this.logger.info(`[Identity Plugin] From address: ${this.config.email.from}`);
       }
     }
   }
@@ -884,7 +884,7 @@ export class IdentityPlugin extends Plugin {
   async _initializeFailbanManager() {
     if (!this.config.failban.enabled) {
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Failban disabled');
+        this.logger.info('[Identity Plugin] Failban disabled');
       }
       return;
     }
@@ -907,15 +907,15 @@ export class IdentityPlugin extends Plugin {
     await this.failbanManager.initialize();
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Failban Manager initialized');
-      console.log(`[Identity Plugin] Max violations: ${this.config.failban.maxViolations}`);
-      console.log(`[Identity Plugin] Violation window: ${this.config.failban.violationWindow}ms`);
-      console.log(`[Identity Plugin] Ban duration: ${this.config.failban.banDuration}ms`);
-      console.log(`[Identity Plugin] Protected endpoints: login=${this.config.failban.endpoints.login}, token=${this.config.failban.endpoints.token}, register=${this.config.failban.endpoints.register}`);
+      this.logger.info('[Identity Plugin] Failban Manager initialized');
+      this.logger.info(`[Identity Plugin] Max violations: ${this.config.failban.maxViolations}`);
+      this.logger.info(`[Identity Plugin] Violation window: ${this.config.failban.violationWindow}ms`);
+      this.logger.info(`[Identity Plugin] Ban duration: ${this.config.failban.banDuration}ms`);
+      this.logger.info(`[Identity Plugin] Protected endpoints: login=${this.config.failban.endpoints.login}, token=${this.config.failban.endpoints.token}, register=${this.config.failban.endpoints.register}`);
       if (this.config.failban.geo.enabled) {
-        console.log(`[Identity Plugin] GeoIP enabled`);
-        console.log(`[Identity Plugin] Allowed countries: ${this.config.failban.geo.allowedCountries.join(', ') || 'all'}`);
-        console.log(`[Identity Plugin] Blocked countries: ${this.config.failban.geo.blockedCountries.join(', ') || 'none'}`);
+        this.logger.info(`[Identity Plugin] GeoIP enabled`);
+        this.logger.info(`[Identity Plugin] Allowed countries: ${this.config.failban.geo.allowedCountries.join(', ') || 'all'}`);
+        this.logger.info(`[Identity Plugin] Blocked countries: ${this.config.failban.geo.blockedCountries.join(', ') || 'none'}`);
       }
     }
   }
@@ -927,7 +927,7 @@ export class IdentityPlugin extends Plugin {
   async _initializeAuditPlugin() {
     if (!this.config.audit.enabled) {
       if (this.config.verbose) {
-        console.log('[Identity Plugin] Audit logging disabled');
+        this.logger.info('[Identity Plugin] Audit logging disabled');
       }
       return;
     }
@@ -944,10 +944,10 @@ export class IdentityPlugin extends Plugin {
     await this.database.usePlugin(this.auditPlugin);
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Audit Plugin initialized');
-      console.log(`[Identity Plugin] Auditing resources: ${this.config.audit.resources.join(', ')}`);
-      console.log(`[Identity Plugin] Include data: ${this.config.audit.includeData}`);
-      console.log(`[Identity Plugin] Max data size: ${this.config.audit.maxDataSize} bytes`);
+      this.logger.info('[Identity Plugin] Audit Plugin initialized');
+      this.logger.info(`[Identity Plugin] Auditing resources: ${this.config.audit.resources.join(', ')}`);
+      this.logger.info(`[Identity Plugin] Include data: ${this.config.audit.includeData}`);
+      this.logger.info(`[Identity Plugin] Max data size: ${this.config.audit.maxDataSize} bytes`);
     }
   }
 
@@ -970,10 +970,10 @@ export class IdentityPlugin extends Plugin {
       await this.auditPlugin.logCustomEvent(event, data);
 
       if (this.config.verbose) {
-        console.log(`[Audit] ${event}:`, JSON.stringify(data));
+        this.logger.info(`[Audit] ${event}:`, JSON.stringify(data));
       }
     } catch (error) {
-      console.error(`[Audit] Failed to log event ${event}:`, error.message);
+      this.logger.error(`[Audit] Failed to log event ${event}:`, error.message);
     }
   }
 
@@ -984,7 +984,7 @@ export class IdentityPlugin extends Plugin {
   async _initializeMFAManager() {
     if (!this.config.mfa.enabled) {
       if (this.config.verbose) {
-        console.log('[Identity Plugin] MFA disabled');
+        this.logger.info('[Identity Plugin] MFA disabled');
       }
       return;
     }
@@ -1004,12 +1004,12 @@ export class IdentityPlugin extends Plugin {
     await this.mfaManager.initialize();
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] MFA Manager initialized');
-      console.log(`[Identity Plugin] Issuer: ${this.config.mfa.issuer}`);
-      console.log(`[Identity Plugin] Algorithm: ${this.config.mfa.algorithm}`);
-      console.log(`[Identity Plugin] Digits: ${this.config.mfa.digits}`);
-      console.log(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
-      console.log(`[Identity Plugin] Required: ${this.config.mfa.required}`);
+      this.logger.info('[Identity Plugin] MFA Manager initialized');
+      this.logger.info(`[Identity Plugin] Issuer: ${this.config.mfa.issuer}`);
+      this.logger.info(`[Identity Plugin] Algorithm: ${this.config.mfa.algorithm}`);
+      this.logger.info(`[Identity Plugin] Digits: ${this.config.mfa.digits}`);
+      this.logger.info(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
+      this.logger.info(`[Identity Plugin] Required: ${this.config.mfa.required}`);
     }
   }
 
@@ -1289,7 +1289,7 @@ export class IdentityPlugin extends Plugin {
    */
   async onStart() {
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Starting server...');
+      this.logger.info('[Identity Plugin] Starting server...');
     }
 
     // Dynamic import of server (will create in next step)
@@ -1328,7 +1328,7 @@ export class IdentityPlugin extends Plugin {
    */
   async onStop() {
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Stopping server...');
+      this.logger.info('[Identity Plugin] Stopping server...');
     }
 
     if (this.server) {
@@ -1377,13 +1377,13 @@ export class IdentityPlugin extends Plugin {
       for (const resourceName of resourcesToDelete) {
         const [ok] = await tryFn(() => this.database.deleteResource(resourceName));
         if (ok && this.config.verbose) {
-          console.log(`[Identity Plugin] Deleted ${resourceName} resource`);
+          this.logger.info(`[Identity Plugin] Deleted ${resourceName} resource`);
         }
       }
     }
 
     if (this.config.verbose) {
-      console.log('[Identity Plugin] Uninstalled successfully');
+      this.logger.info('[Identity Plugin] Uninstalled successfully');
     }
   }
 

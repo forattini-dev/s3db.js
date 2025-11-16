@@ -14,7 +14,7 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
     super({ drivers, authResource, oidcMiddleware, verbose });
     this.pathAuth = pathAuth;
 
-    console.warn(
+    this.logger.warn(
       '[ApiPlugin] DEPRECATED: The pathAuth configuration is deprecated. ' +
       'Use pathRules instead: { pathRules: [{ path: "/...", drivers: [...], required: true }] }. ' +
       'This will be removed in v17.0.'
@@ -22,9 +22,8 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
   }
 
   createMiddleware() {
-    if (this.verbose) {
-      console.log('[PathBasedAuthStrategy] Using legacy pathAuth system');
-    }
+    // 🪵 Debug: using legacy pathAuth system
+    this.logger.debug('Using legacy pathAuth system');
 
     return async (c, next) => {
       const requestPath = c.req.path;
@@ -32,12 +31,11 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
       // Find best matching rule
       const matchedRule = findBestMatch(this.pathAuth, requestPath);
 
-      if (this.verbose) {
-        if (matchedRule) {
-          console.log(`[PathBasedAuthStrategy] Path ${requestPath} matched rule: ${matchedRule.pattern}`);
-        } else {
-          console.log(`[PathBasedAuthStrategy] Path ${requestPath} no pathAuth rule matched (using global auth)`);
-        }
+      // 🪵 Debug: path matching result
+      if (matchedRule) {
+        this.logger.debug({ path: requestPath, pattern: matchedRule.pattern }, `Path ${requestPath} matched rule: ${matchedRule.pattern}`);
+      } else {
+        this.logger.debug({ path: requestPath }, `Path ${requestPath} no pathAuth rule matched (using global auth)`);
       }
 
       // No rule matched - use global auth (all drivers, optional)

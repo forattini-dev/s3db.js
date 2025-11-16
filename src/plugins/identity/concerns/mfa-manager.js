@@ -18,8 +18,8 @@
  *
  * // Enroll user
  * const enrollment = await mfaManager.generateEnrollment('user@example.com');
- * console.log(enrollment.qrCodeUrl);  // Display QR code
- * console.log(enrollment.secret);     // Manual entry key
+ * this.logger.info(enrollment.qrCodeUrl);  // Display QR code
+ * this.logger.info(enrollment.secret);     // Manual entry key
  *
  * // Verify TOTP token
  * const isValid = mfaManager.verifyTOTP(enrollment.secret, '123456');
@@ -137,7 +137,7 @@ export class MFAManager {
       // delta is null if invalid, or number if valid
       return delta !== null;
     } catch (error) {
-      console.error('[MFA] TOTP verification error:', error.message);
+      this.logger.error('[MFA] TOTP verification error:', error.message);
       return false;
     }
   }
@@ -208,7 +208,7 @@ export class MFAManager {
 
       return await QRCode.toDataURL(qrCodeUrl);
     } catch (error) {
-      console.error('[MFA] QR code generation error:', error.message);
+      this.logger.error('[MFA] QR code generation error:', error.message);
       return null;
     }
   }

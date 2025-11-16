@@ -176,7 +176,7 @@ export async function detectAntiBotServices(page) {
       scriptIndicators: services.scriptIndicators
     }
   } catch (error) {
-    console.error('[AntiBotDetector] Error detecting anti-bot services:', error.message)
+    this.logger.error('[AntiBotDetector] Error detecting anti-bot services:', error.message)
     return {
       antiBotServicesDetected: false,
       services: {},
@@ -344,7 +344,7 @@ export async function detectFingerprinting(page) {
       detectedAutomationSignatures: fingerprint.anomalies
     }
   } catch (error) {
-    console.error('[AntiBotDetector] Error detecting fingerprinting:', error.message)
+    this.logger.error('[AntiBotDetector] Error detecting fingerprinting:', error.message)
     return {
       browserFingerprint: {},
       fingerprinting: {

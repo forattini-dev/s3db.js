@@ -49,6 +49,6 @@ export function createLoggingMiddleware(config = {}) {
       .replace(':user', user)
       .replace(':requestId', requestId);
 
-    console.log(`[HTTP] ${logMessage}`);
+    this.logger.info(`[HTTP] ${logMessage}`);
   };
 }

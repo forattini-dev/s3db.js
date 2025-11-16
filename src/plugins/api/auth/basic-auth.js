@@ -6,10 +6,14 @@
  */
 
 import { unauthorized } from '../utils/response-formatter.js';
+import { createLogger } from '../../../concerns/logger.js';
 import { decrypt } from '../../../concerns/crypto.js';
 import tryFn from '../../../concerns/try-fn.js';
 import { getCookie } from 'hono/cookie';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'BasicAuth', level: 'info' });
 export function parseBasicAuth(authHeader) {
   if (!authHeader) return null;
   const match = authHeader.match(/^Basic\s+(.+)$/i);
@@ -136,7 +140,7 @@ export function basicAuth(options = {}) {
       return await next();
     } catch (err) {
       if (c.get('verbose')) {
-        console.error('[Basic Auth] Error validating credentials:', err);
+        logger.error('[Basic Auth] Error validating credentials:', err);
       }
       c.header('WWW-Authenticate', `Basic realm="${realm}"`);
       const response = unauthorized('Authentication error');

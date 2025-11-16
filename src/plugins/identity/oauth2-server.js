@@ -889,7 +889,7 @@ export class OAuth2Server {
     const [ok, err, clients] = await tryFn(() => this.clientResource.query({ clientId }));
     if (!ok) {
       if (err && this.identityPlugin?.config?.verbose) {
-        console.error('[Identity Plugin] Failed to query clients resource:', err.message);
+        this.logger.error('[Identity Plugin] Failed to query clients resource:', err.message);
       }
       return null;
     }
@@ -932,7 +932,7 @@ export class OAuth2Server {
           }
         } catch (error) {
           if (this.identityPlugin?.config?.verbose) {
-            console.error('[Identity Plugin] Failed to verify client secret hash:', error.message);
+            this.logger.error('[Identity Plugin] Failed to verify client secret hash:', error.message);
           }
         }
         continue;
@@ -1128,7 +1128,7 @@ export class OAuth2Server {
       return res.status(200).header('Content-Type', 'text/html').send(html);
 
     } catch (error) {
-      console.error('[OAuth2Server] Authorization error:', error);
+      this.logger.error('[OAuth2Server] Authorization error:', error);
       return res.status(500).json({
         error: 'server_error',
         error_description: error.message
@@ -1171,7 +1171,7 @@ export class OAuth2Server {
       );
 
       if (!okVerify) {
-        console.error('[OAuth2Server] Password verification error:', errVerify);
+        this.logger.error('[OAuth2Server] Password verification error:', errVerify);
         return res.status(500).json({
           error: 'server_error',
           error_description: 'Authentication failed'
@@ -1215,7 +1215,7 @@ export class OAuth2Server {
       return res.redirect(url.toString());
 
     } catch (error) {
-      console.error('[OAuth2Server] Authorization POST error:', error);
+      this.logger.error('[OAuth2Server] Authorization POST error:', error);
       return res.status(500).json({
         error: 'server_error',
         error_description: error.message
@@ -1330,7 +1330,7 @@ export class OAuth2Server {
       });
 
     } catch (error) {
-      console.error('[OAuth2Server] Client registration error:', error);
+      this.logger.error('[OAuth2Server] Client registration error:', error);
       return res.status(500).json({
         error: 'server_error',
         error_description: error.message
@@ -1380,7 +1380,7 @@ export class OAuth2Server {
       return res.status(200).send();
 
     } catch (error) {
-      console.error('[OAuth2Server] Token revocation error:', error);
+      this.logger.error('[OAuth2Server] Token revocation error:', error);
       // RFC 7009: Return 200 even on error (security best practice)
       return res.status(200).send();
     }

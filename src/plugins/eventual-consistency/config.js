@@ -145,7 +145,7 @@ export function validateResourcesConfig(resources) {
 export function logConfigWarnings(config) {
   // Warn about batching in distributed environments
   if (config.batchTransactions && !config.verbose) {
-    // console.warn(
+    // this.logger.warn(
     //   `[EventualConsistency] WARNING: batch.enabled is true. ` +
     //   `This stores transactions in memory and will lose data if container crashes. ` +
     //   `Not recommended for distributed/production environments.`
@@ -154,7 +154,7 @@ export function logConfigWarnings(config) {
 
   // Warn if checkpoints are disabled in high-volume scenarios
   if (!config.enableCheckpoints && !config.verbose) {
-    // console.warn(
+    // this.logger.warn(
     //   `[EventualConsistency] INFO: checkpoints.enabled is false. ` +
     //   `Checkpoints improve performance in high-volume scenarios by creating snapshots. ` +
     //   `Consider enabling for production use.`
@@ -174,14 +174,14 @@ export function logInitialization(config, fieldHandlers, timezoneAutoDetected) {
   const totalFields = Array.from(fieldHandlers.values())
     .reduce((sum, handlers) => sum + handlers.size, 0);
 
-  // console.log(
+  // this.logger.info(
   //   `[EventualConsistency] Initialized with ${fieldHandlers.size} resource(s), ` +
   //   `${totalFields} field(s) total`
   // );
 
   // Log timezone if not explicitly set by user
   if (timezoneAutoDetected) {
-    // console.log(
+    // this.logger.info(
     //   `[EventualConsistency] Using timezone: ${config.cohort.timezone} ` +
     //   `(${process.env.TZ ? 'from TZ env var' : 'default UTC'})`
     // );

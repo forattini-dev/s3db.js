@@ -1,4 +1,9 @@
 /**
+import { createLogger } from '../../../concerns/logger.js';
+
+// Module-level logger
+const logger = createLogger({ name: 'PathAuthMatcher', level: 'info' });
+
  * Path-based Authentication Matcher
  *
  * Provides path-specific authentication rules with precedence by specificity.
@@ -172,7 +177,7 @@ export function createPathBasedAuthMiddleware(options = {}) {
     // Rule says auth required but no methods = error in config
     if (rule.methods.length === 0 && rule.required) {
       if (c.get('verbose')) {
-        console.error(`[Path Auth] Invalid rule: path "${rule.path}" requires auth but has no methods`);
+        logger.error(`[Path Auth] Invalid rule: path "${rule.path}" requires auth but has no methods`);
       }
       if (unauthorizedHandler) {
         return unauthorizedHandler(c, 'Configuration error');
@@ -190,7 +195,7 @@ export function createPathBasedAuthMiddleware(options = {}) {
 
     if (allowedMiddlewares.length === 0) {
       if (c.get('verbose')) {
-        console.error(`[Path Auth] No middlewares found for methods: ${rule.methods.join(', ')}`);
+        logger.error(`[Path Auth] No middlewares found for methods: ${rule.methods.join(', ')}`);
       }
       if (unauthorizedHandler) {
         return unauthorizedHandler(c, 'No auth methods available');

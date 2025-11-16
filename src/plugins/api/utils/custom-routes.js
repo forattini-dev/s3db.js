@@ -6,9 +6,13 @@
  */
 
 import { asyncHandler } from './error-handler.js';
+import { createLogger } from '../../../concerns/logger.js';
 import { withContext, autoWrapHandler } from '../concerns/route-context.js';
 import { applyBasePath } from './base-path.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'CustomRoutes', level: 'info' });
 /**
  * Parse route definition from key
  * @param {string} key - Route key (e.g., 'GET /users', 'POST /custom/:id/action')
@@ -68,11 +72,11 @@ export function mountCustomRoutes(app, routes, context = {}, verbose = false, op
 
       if (verbose) {
         const contextType = (autoWrap && handler.length === 2) ? '(enhanced)' : '(legacy)';
-        console.log(`[Custom Routes] Mounted ${method} ${finalPath} ${contextType}`);
+        logger.info(`[Custom Routes] Mounted ${method} ${finalPath} ${contextType}`);
       }
     } catch (err) {
       if (verbose) {
-        console.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
+        logger.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
       }
     }
   }
