@@ -3,13 +3,22 @@ import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
+// Helper to prevent HTTP server from binding in tests
+function disableServerBinding(plugin) {
+  plugin.onStart = async function noopStart() {
+    this.server = { start() {}, stop() {} };
+  };
+  plugin.onStop = async function noopStop() {};
+  return plugin;
+}
+
 describe('Identity Onboarding - Callback Mode', () => {
   let db;
 
   beforeEach(async () => {
     db = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-callback',
+        bucket: `test-identity-onboarding-callback-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -50,7 +59,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     expect(callbackInvoked).toBe(true);
     expect(callbackContext).toBeDefined();
@@ -94,7 +103,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'superadmin@callback.com' });
@@ -137,7 +146,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     expect(createdClient).toBeDefined();
     expect(createdClient.clientId).toBe('test-client-001');
@@ -181,7 +190,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({});
@@ -217,7 +226,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     expect(loggerReceived).toBeDefined();
     expect(typeof loggerReceived.info).toBe('function');
@@ -239,7 +248,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/onFirstRun callback/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/onFirstRun callback/);
   });
 
   test('throws error if onFirstRun is not a function', async () => {
@@ -258,7 +267,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/function/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/function/);
   });
 
   test('callback errors are propagated', async () => {
@@ -279,7 +288,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow('Callback intentional error');
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow('Callback intentional error');
   });
 
   test('callback can use createAdmin with invalid data and get validation error', async () => {
@@ -303,7 +312,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/valid email/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/valid email/);
   });
 
   test('skips callback if admin already exists', async () => {
@@ -331,13 +340,13 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     expect(callbackInvokedFirst).toBe(true);
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-callback',
+        bucket: `test-identity-onboarding-callback-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -364,7 +373,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     expect(callbackInvokedSecond).toBe(false);
 
@@ -401,13 +410,13 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     expect(callbackInvokedFirst).toBe(true);
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-callback',
+        bucket: `test-identity-onboarding-callback-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -435,7 +444,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     expect(callbackInvokedSecond).toBe(true);
 
@@ -471,7 +480,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@async.com' });

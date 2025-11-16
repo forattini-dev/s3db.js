@@ -3,13 +3,22 @@ import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
+// Helper to prevent HTTP server from binding in tests
+function disableServerBinding(plugin) {
+  plugin.onStart = async function noopStart() {
+    this.server = { start() {}, stop() {} };
+  };
+  plugin.onStop = async function noopStop() {};
+  return plugin;
+}
+
 describe('Identity Onboarding - Idempotency', () => {
   let db;
 
   beforeEach(async () => {
     db = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-idempotency',
+        bucket: `test-identity-onboarding-idempotency-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -40,7 +49,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsAfterFirst = await usersResource.query({});
@@ -48,7 +57,7 @@ describe('Identity Onboarding - Idempotency', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-idempotency',
+        bucket: `test-identity-onboarding-idempotency-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -68,7 +77,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfterSecond = await usersResource2.query({});
@@ -96,7 +105,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
 
@@ -129,7 +138,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
 
@@ -159,7 +168,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
 
@@ -189,7 +198,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
 
@@ -222,7 +231,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsAfterEnv = await usersResource.query({});
@@ -230,7 +239,7 @@ describe('Identity Onboarding - Idempotency', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-idempotency',
+        bucket: `test-identity-onboarding-idempotency-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -254,7 +263,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfterConfig = await usersResource2.query({});
@@ -286,7 +295,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsAfterFirst = await usersResource.query({});
@@ -294,7 +303,7 @@ describe('Identity Onboarding - Idempotency', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-idempotency',
+        bucket: `test-identity-onboarding-idempotency-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -319,7 +328,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfterForce = await usersResource2.query({});
@@ -349,7 +358,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({});
@@ -389,7 +398,7 @@ describe('Identity Onboarding - Idempotency', () => {
         logLevel: 'silent'
       });
 
-      await localDb.usePlugin(plugin, 'identity');
+      await localDb.usePlugin(disableServerBinding(plugin), 'identity');
       return { db: localDb, plugin };
     };
 
@@ -434,7 +443,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const statusBefore = await plugin.getOnboardingStatus();
     expect(statusBefore.adminExists).toBe(false);
@@ -466,7 +475,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const statusBefore = await plugin.getOnboardingStatus();
     expect(statusBefore.completed).toBe(false);
@@ -502,7 +511,7 @@ describe('Identity Onboarding - Idempotency', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const status1 = await plugin.getOnboardingStatus();
     const status2 = await plugin.getOnboardingStatus();
