@@ -3,13 +3,22 @@ import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
+// Helper to prevent HTTP server from binding in tests
+function disableServerBinding(plugin) {
+  plugin.onStart = async function noopStart() {
+    this.server = { start() {}, stop() {} };
+  };
+  plugin.onStop = async function noopStop() {};
+  return plugin;
+}
+
 describe('Identity Onboarding - Config Mode', () => {
   let db;
 
   beforeEach(async () => {
     db = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-config',
+        bucket: `test-identity-onboarding-config-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -42,7 +51,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@config.com' });
@@ -75,7 +84,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@minimal.com' });
@@ -106,7 +115,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@scopes.com' });
@@ -139,7 +148,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@metadata.com' });
@@ -165,7 +174,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/admin configuration/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/admin configuration/);
   });
 
   test('throws error if config.admin.email missing', async () => {
@@ -186,7 +195,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/email/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/email/);
   });
 
   test('throws error if config.admin.password missing', async () => {
@@ -207,7 +216,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/password/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/password/);
   });
 
   test('validates email format', async () => {
@@ -229,7 +238,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/valid email/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/valid email/);
   });
 
   test('validates password strength', async () => {
@@ -251,7 +260,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/at least 12 characters/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/at least 12 characters/);
   });
 
   test('skips onboarding if admin already exists', async () => {
@@ -273,7 +282,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsBefore = await usersResource.query({});
@@ -281,7 +290,7 @@ describe('Identity Onboarding - Config Mode', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-config',
+        bucket: `test-identity-onboarding-config-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -305,7 +314,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfter = await usersResource2.query({});
@@ -334,7 +343,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsBefore = await usersResource.query({});
@@ -342,7 +351,7 @@ describe('Identity Onboarding - Config Mode', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-config',
+        bucket: `test-identity-onboarding-config-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -367,7 +376,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfter = await usersResource2.query({});
@@ -400,7 +409,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@env-password.com' });
@@ -429,7 +438,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const status = await plugin.getOnboardingStatus();
 

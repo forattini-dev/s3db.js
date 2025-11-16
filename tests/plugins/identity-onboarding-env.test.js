@@ -3,6 +3,15 @@ import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
+// Helper to prevent HTTP server from binding in tests
+function disableServerBinding(plugin) {
+  plugin.onStart = async function noopStart() {
+    this.server = { start() {}, stop() {} };
+  };
+  plugin.onStop = async function noopStop() {};
+  return plugin;
+}
+
 describe('Identity Onboarding - Environment Mode', () => {
   let db;
   let originalEnv;
@@ -18,7 +27,7 @@ describe('Identity Onboarding - Environment Mode', () => {
 
     db = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-env',
+        bucket: `test-identity-onboarding-env-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -51,7 +60,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@test.com' });
@@ -83,7 +92,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@minimal.com' });
@@ -111,7 +120,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/IDENTITY_ADMIN_EMAIL/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/IDENTITY_ADMIN_EMAIL/);
   });
 
   test('throws error if IDENTITY_ADMIN_PASSWORD missing', async () => {
@@ -131,7 +140,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/IDENTITY_ADMIN_PASSWORD/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/IDENTITY_ADMIN_PASSWORD/);
   });
 
   test('validates email format', async () => {
@@ -152,7 +161,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/valid email/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/valid email/);
   });
 
   test('validates password strength - too short', async () => {
@@ -173,7 +182,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/at least 12 characters/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/at least 12 characters/);
   });
 
   test('validates password strength - missing uppercase', async () => {
@@ -194,7 +203,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/uppercase letter/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/uppercase letter/);
   });
 
   test('validates password strength - missing lowercase', async () => {
@@ -215,7 +224,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/lowercase letter/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/lowercase letter/);
   });
 
   test('validates password strength - missing number', async () => {
@@ -236,7 +245,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/number/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/number/);
   });
 
   test('validates password strength - missing symbol', async () => {
@@ -257,7 +266,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/special character/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/special character/);
   });
 
   test('skips onboarding if admin already exists', async () => {
@@ -278,7 +287,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsBefore = await usersResource.query({ email: 'admin@test.com' });
@@ -289,7 +298,7 @@ describe('Identity Onboarding - Environment Mode', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-env',
+        bucket: `test-identity-onboarding-env-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -309,7 +318,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfter = await usersResource2.query({});
@@ -337,7 +346,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsBefore = await usersResource.query({});
@@ -348,7 +357,7 @@ describe('Identity Onboarding - Environment Mode', () => {
 
     const db2 = new Database({
       client: new MemoryClient({
-        bucket: 'test-identity-onboarding-env',
+        bucket: `test-identity-onboarding-env-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         keyPrefix: 'databases/test/'
       })
     });
@@ -369,7 +378,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     const usersResource2 = db2.resources.users;
     const adminsAfter = await usersResource2.query({});
@@ -400,7 +409,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({});
@@ -426,7 +435,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const status = await plugin.getOnboardingStatus();
 
@@ -457,7 +466,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@test.com' });
@@ -486,7 +495,7 @@ describe('Identity Onboarding - Environment Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@test.com' });

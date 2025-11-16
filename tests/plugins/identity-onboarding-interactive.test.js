@@ -3,6 +3,15 @@ import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
+// Helper to prevent HTTP server from binding in tests
+function disableServerBinding(plugin) {
+  plugin.onStart = async function noopStart() {
+    this.server = { start() {}, stop() {} };
+  };
+  plugin.onStop = async function noopStop() {};
+  return plugin;
+}
+
 describe('Identity Onboarding - Interactive Mode', () => {
   let db;
   let mockEnquirer;
@@ -78,7 +87,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@interactive.com' });
@@ -134,7 +143,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@retry.com' });
@@ -188,7 +197,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@strength.com' });
@@ -239,7 +248,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/Max password attempts/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/Max password attempts/);
   });
 
   test('skips interactive mode if not TTY', async () => {
@@ -260,7 +269,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/TTY/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/TTY/);
   });
 
   test('throws error if enquirer not installed', async () => {
@@ -282,7 +291,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(plugin, 'identity')).rejects.toThrow(/enquirer/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/enquirer/);
   });
 
   test('uses default name if empty provided', async () => {
@@ -322,7 +331,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@default-name.com' });
@@ -374,7 +383,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'valid@email.com' });
@@ -420,7 +429,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin1, 'identity');
+    await db.usePlugin(disableServerBinding(plugin1), 'identity');
 
     const usersResource = db.resources.users;
     const adminsBefore = await usersResource.query({});
@@ -454,7 +463,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db2.usePlugin(plugin2, 'identity');
+    await db2.usePlugin(disableServerBinding(plugin2), 'identity');
 
     expect(enquirerCalled).toBe(false); // Should not prompt
 
@@ -505,7 +514,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       logLevel: 'silent'
     });
 
-    await db.usePlugin(plugin, 'identity');
+    await db.usePlugin(disableServerBinding(plugin), 'identity');
 
     const usersResource = db.resources.users;
     const admins = await usersResource.query({ email: 'admin@banner.com' });

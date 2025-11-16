@@ -8,6 +8,9 @@ describe('Identity Onboarding - Health Check Integration', () => {
   let plugin;
   let server;
 
+  // Increase timeout for HTTP server binding tests
+  jest.setTimeout(30000);
+
   beforeEach(async () => {
     db = new Database({
       client: new MemoryClient({
