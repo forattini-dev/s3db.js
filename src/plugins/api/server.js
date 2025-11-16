@@ -38,6 +38,7 @@ export class ApiServer {
       security: options.security || { enabled: false },
       sessionTracking: options.sessionTracking || { enabled: false },
       requestId: options.requestId || { enabled: false },
+      httpLogger: options.httpLogger || { enabled: false },
       events: options.events || { enabled: false },
       metrics: options.metrics || { enabled: false },
       failban: options.failban || { enabled: false },
@@ -55,6 +56,9 @@ export class ApiServer {
       startupBanner: options.startupBanner !== false,
       rootRoute: options.rootRoute // undefined = default splash, false = disabled, function = custom handler
     };
+
+    // Logger from APIPlugin
+    this.logger = options.logger;
 
     this.app = null;
     this.server = null;
@@ -100,7 +104,8 @@ export class ApiServer {
         persistViolations: this.options.failban.persistViolations !== false,
         verbose: this.options.failban.verbose || this.options.verbose,
         geo: this.options.failban.geo || {},
-        resourceNames: this.options.failban.resourceNames || {}
+        resourceNames: this.options.failban.resourceNames || {},
+        logger: this.logger  // Pass logger to FailbanManager
       });
     }
 
@@ -132,7 +137,7 @@ export class ApiServer {
   async start() {
     if (this.isRunning) {
       if (this.options.verbose) {
-        console.warn('[API Plugin] Server is already running');
+        this.logger.warn('Server is already running');
       }
       return;
     }
@@ -168,12 +173,14 @@ export class ApiServer {
         failban: this.failban,
         events: this.events,
         verbose: this.options.verbose,
+        logger: this.logger, // Pass Pino logger from APIPlugin
+        httpLogger: this.options.httpLogger, // Pass pino-http configuration
         database: this.options.database,
         inFlightRequests: this.inFlightRequests,
         acceptingRequests: () => this.acceptingRequests,
         corsMiddleware: this.cors
       });
-      this.middlewareChain.apply(this.app);
+      await this.middlewareChain.apply(this.app);
 
       const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === 'oidc');
       if (oidcDriver) {
@@ -199,6 +206,7 @@ export class ApiServer {
         relationsPlugin: this.relationsPlugin,
         authMiddleware,
         verbose: this.options.verbose,
+        logger: this.logger, // Pass Pino logger from APIPlugin
         Hono: this.Hono,
         apiTitle: this.options.apiTitle,
         apiDescription: this.options.apiDescription,
@@ -211,7 +219,8 @@ export class ApiServer {
         this.healthManager = new HealthManager({
           database: this.options.database,
           healthConfig: this.options.health,
-          verbose: this.options.verbose
+          verbose: this.options.verbose,
+          logger: this.logger // Pass Pino logger from APIPlugin
         });
         this.healthManager.register(this.app);
       }
@@ -248,20 +257,20 @@ export class ApiServer {
           (info) => {
             this.isRunning = true;
             if (this.options.verbose) {
-              console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+              this.logger.info({ address: info.address, port: info.port }, 'Server listening');
             }
             this._printStartupBanner(info);
 
             const shutdownHandler = async (signal) => {
               if (this.options.verbose) {
-                console.log(`[API Server] Received ${signal}, initiating graceful shutdown...`);
+                this.logger.info({ signal }, 'Received shutdown signal');
               }
               try {
                 await this.shutdown({ timeout: 30000 });
                 process.exit(0);
               } catch (err) {
                 if (this.options.verbose) {
-                  console.error('[API Server] Error during shutdown:', err);
+                  this.logger.error({ error: err.message }, 'Error during shutdown');
                 }
                 process.exit(1);
               }
@@ -282,7 +291,7 @@ export class ApiServer {
   async stop() {
     if (!this.isRunning) {
       if (this.options.verbose) {
-        console.warn('[API Plugin] Server is not running');
+        this.logger.warn('Server is not running');
       }
       return;
     }
@@ -292,7 +301,7 @@ export class ApiServer {
         this.server.close(() => {
           this.isRunning = false;
           if (this.options.verbose) {
-            console.log('[API Plugin] Server stopped');
+            this.logger.info('Server stopped');
           }
           resolve();
         });
@@ -300,7 +309,7 @@ export class ApiServer {
     } else {
       this.isRunning = false;
       if (this.options.verbose) {
-        console.log('[API Plugin] Server stopped');
+        this.logger.info('Server stopped');
       }
     }
 
@@ -334,7 +343,7 @@ export class ApiServer {
   stopAcceptingRequests() {
     this.acceptingRequests = false;
     if (this.options.verbose) {
-      console.log('[API Server] Stopped accepting new requests');
+      this.logger.info('Stopped accepting new requests');
     }
   }
 
@@ -377,8 +386,9 @@ export class ApiServer {
 
         if (!clientIp || !isIpAllowed(clientIp, ipAllowlist)) {
           if (this.options.verbose) {
-            console.warn(
-              `[API Server] Blocked /metrics request from unauthorized IP: ${clientIp || 'unknown'}`
+            this.logger.warn(
+              { clientIp: clientIp || 'unknown' },
+              'Blocked /metrics request from unauthorized IP'
             );
           }
           return c.text('Forbidden', 403);
@@ -392,7 +402,7 @@ export class ApiServer {
         });
       } catch (err) {
         if (this.options.verbose) {
-          console.error('[API Server] Error generating Prometheus metrics:', err);
+          this.logger.error({ error: err.message }, 'Error generating Prometheus metrics');
         }
         return c.text('Internal Server Error', 500);
       }
@@ -400,8 +410,9 @@ export class ApiServer {
 
     if (this.options.verbose) {
       const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
-      console.log(
-        `[API Server] Registered MetricsPlugin route: ${path}${ipFilter}`
+      this.logger.debug(
+        { path, ipFilter, ipAllowlistSize: ipAllowlist.length },
+        'Registered MetricsPlugin route'
       );
     }
   }
@@ -413,20 +424,20 @@ export class ApiServer {
       const elapsed = Date.now() - startTime;
       if (elapsed >= timeout) {
         if (this.options.verbose) {
-          console.warn(`[API Server] Timeout waiting for ${this.inFlightRequests.size} in-flight requests`);
+          this.logger.warn({ inFlightCount: this.inFlightRequests.size }, 'Timeout waiting for in-flight requests');
         }
         return false;
       }
 
       if (this.options.verbose) {
-        console.log(`[API Server] Waiting for ${this.inFlightRequests.size} in-flight requests...`);
+        this.logger.debug({ inFlightCount: this.inFlightRequests.size }, 'Waiting for in-flight requests');
       }
 
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     if (this.options.verbose) {
-      console.log('[API Server] All requests finished');
+      this.logger.info('All requests finished');
     }
 
     return true;
@@ -435,20 +446,20 @@ export class ApiServer {
   async shutdown({ timeout = 30000 } = {}) {
     if (!this.isRunning) {
       if (this.options.verbose) {
-        console.warn('[API Server] Server is not running');
+        this.logger.warn('Server is not running');
       }
       return;
     }
 
     if (this.options.verbose) {
-      console.log('[API Server] Initiating graceful shutdown...');
+      this.logger.info('Initiating graceful shutdown');
     }
     this.stopAcceptingRequests();
 
     const finished = await this.waitForRequestsToFinish({ timeout });
     if (!finished) {
       if (this.options.verbose) {
-        console.warn('[API Server] Some requests did not finish in time');
+        this.logger.warn({ inFlightCount: this.inFlightRequests.size }, 'Some requests did not finish in time');
       }
     }
 
@@ -463,7 +474,7 @@ export class ApiServer {
 
     this.isRunning = false;
     if (this.options.verbose) {
-      console.log('[API Server] Shutdown complete');
+      this.logger.info('Shutdown complete');
     }
   }
 
@@ -528,15 +539,13 @@ export class ApiServer {
     });
 
     if (this.options.verbose) {
-      console.log('[API Server] Metrics event listeners configured');
+      this.logger.debug('Metrics event listeners configured');
     }
   }
 
   _setupDocumentationRoutes() {
     if (this.options.verbose) {
-      console.log('[API Server] _setupDocumentationRoutes()');
-      console.log('[API Server] docsEnabled =', this.options.docsEnabled);
-      console.log('[API Server] docsUI =', this.options.docsUI);
+      this.logger.debug({ docsEnabled: this.options.docsEnabled, docsUI: this.options.docsUI }, 'Setting up documentation routes');
     }
 
     const basePath = this.options.basePath || '';
@@ -544,30 +553,29 @@ export class ApiServer {
     const docsPath = applyBasePath(basePath, '/docs');
 
     if (this.options.verbose) {
-      console.log('[API Server] docsPath =', docsPath);
-      console.log('[API Server] openApiPath =', openApiPath);
+      this.logger.debug({ docsPath, openApiPath }, 'Documentation paths configured');
     }
 
     // OpenAPI spec endpoint
     if (this.options.docsEnabled) {
       if (this.options.verbose) {
-        console.log('[API Server] Registering OpenAPI route:', openApiPath);
+        this.logger.debug({ openApiPath }, 'Registering OpenAPI route');
       }
       this.app.get(openApiPath, (c) => {
         if (this.options.verbose) {
-          console.log('[API Server] OpenAPI route hit');
+          this.logger.debug('OpenAPI route hit');
         }
         const spec = this.openApiGenerator.generate();
         return c.json(spec);
       });
       if (this.options.verbose) {
-        console.log('[API Server] OpenAPI route registered');
+        this.logger.debug('OpenAPI route registered');
       }
 
       // Documentation UI endpoint
       if (this.options.docsUI === 'swagger') {
         if (this.options.verbose) {
-          console.log('[API Server] Registering Swagger UI at', docsPath);
+          this.logger.debug({ docsPath }, 'Registering Swagger UI');
         }
         // Wrap swagger handler to ensure permissive CSP for docs page
         const swaggerHandler = this.swaggerUI({ url: openApiPath });
@@ -590,11 +598,11 @@ export class ApiServer {
       } else {
         // Default: Redoc UI
         if (this.options.verbose) {
-          console.log('[API Server] Registering Redoc UI at', docsPath);
+          this.logger.debug({ docsPath }, 'Registering Redoc UI');
         }
         this.app.get(docsPath, (c) => {
           if (this.options.verbose) {
-            console.log('[API Server] Redoc docs route hit');
+            this.logger.debug('Redoc docs route hit');
           }
           // Set CSP to allow Redoc CDN by default
           const redocCdn = 'https://cdn.redoc.ly';
@@ -633,11 +641,11 @@ export class ApiServer {
           return c.html(html);
         });
         if (this.options.verbose) {
-          console.log('[API Server] Redoc UI route registered');
+          this.logger.debug('Redoc UI route registered');
         }
       }
       if (this.options.verbose) {
-        console.log('[API Server] Documentation routes setup complete');
+        this.logger.debug('Documentation routes setup complete');
       }
     }
 
@@ -650,7 +658,7 @@ export class ApiServer {
     const authResource = database.resources[auth.resource];
 
     if (!authResource) {
-      console.error(`[API Plugin] Auth resource '${auth.resource}' not found for OIDC`);
+      this.logger.error({ resource: auth.resource }, 'Auth resource not found for OIDC');
       return;
     }
 
@@ -666,14 +674,14 @@ export class ApiServer {
           sessionStore = await createSessionStore(config.sessionStore, database);
 
           if (this.options.verbose) {
-            console.log(`[API Plugin] Session store initialized: ${config.sessionStore.driver}`);
+            this.logger.info({ driver: config.sessionStore.driver }, 'Session store initialized');
           }
         } else {
           // Already instantiated store
           sessionStore = config.sessionStore;
         }
       } catch (err) {
-        console.error('[API Plugin] Failed to create session store:', err.message);
+        this.logger.error({ error: err.message }, 'Failed to create session store');
         throw err;
       }
 
@@ -685,10 +693,8 @@ export class ApiServer {
     this.oidcMiddleware = oidcHandler.middleware;
 
     if (this.options.verbose) {
-      console.log('[API Plugin] Mounted OIDC routes:');
-      for (const [path, description] of Object.entries(oidcHandler.routes)) {
-        console.log(`[API Plugin]   ${path} - ${description}`);
-      }
+      const routes = Object.entries(oidcHandler.routes).map(([path, description]) => ({ path, description }));
+      this.logger.info({ routes }, 'Mounted OIDC routes');
     }
   }
 
@@ -702,7 +708,7 @@ export class ApiServer {
 
     const authResource = database.resources[defaultResourceName];
     if (!authResource) {
-      console.error(`[API Plugin] Auth resource '${defaultResourceName}' not found for middleware`);
+      this.logger.error({ resource: defaultResourceName }, 'Auth resource not found for middleware');
       return null;
     }
 
@@ -710,7 +716,7 @@ export class ApiServer {
       try {
         validatePathAuth(pathAuth);
       } catch (err) {
-        console.error(`[API Plugin] Invalid pathAuth configuration: ${err.message}`);
+        this.logger.error({ error: err.message }, 'Invalid pathAuth configuration');
         throw err;
       }
     }
@@ -728,7 +734,7 @@ export class ApiServer {
     try {
       return strategy.createMiddleware();
     } catch (err) {
-      console.error('[API Plugin] Failed to create auth middleware:', err.message);
+      this.logger.error({ error: err.message }, 'Failed to create auth middleware');
       throw err;
     }
   }
@@ -774,7 +780,7 @@ export class ApiServer {
     }
 
     lines.push('');
-    console.log(lines.join('\n'));
+    this.logger.info(lines.join('\n'));
   }
 
   _resolveLocalHostname() {

@@ -62,7 +62,7 @@ export class BaseError extends Error {
     };
   }
 
-  toJson() {
+  toJSON() {
     return {
       name: this.name,
       message: this.message,
