@@ -129,7 +129,10 @@ async function startMcpServer(options) {
   try {
     // Import the MCP server
     const { S3dbMCPServer } = await import('../mcp/server.js');
-    
+
+    // Support both --log-level and legacy --verbose flag
+    const logLevel = options.verbose ? 'debug' : options.logLevel;
+
     // Set environment variables from options
     if (options.transport) process.env.MCP_TRANSPORT = options.transport;
     if (options.host) process.env.MCP_SERVER_HOST = options.host;
@@ -172,7 +175,7 @@ async function startMcpServer(options) {
     
   } catch (err) {
     error(`Failed to start MCP server: ${err.message}`);
-    if (options.verbose) {
+    if (logLevel === 'debug' || logLevel === 'trace') {
       console.error(err.stack);
     }
     process.exit(1);
@@ -194,7 +197,8 @@ program
   .option('-h, --host <host>', 'Host address to bind to (default: 0.0.0.0)', '0.0.0.0')
   .option('-t, --transport <type>', 'Transport type: stdio or sse (default: stdio)', 'stdio')
   .option('-c, --connection-string <string>', 'S3DB connection string (auto-detected if not provided)')
-  .option('-v, --verbose', 'Enable verbose logging', false)
+  .option('-l, --log-level <level>', 'Log level: trace, debug, info, warn, error, fatal (default: info)', 'info')
+  .option('-v, --verbose', 'Enable verbose logging (deprecated: use --log-level debug)', false)
   .action(async (options) => {
     // Auto-detect connection string if not provided
     let connectionString = options.connectionString;
@@ -237,7 +241,8 @@ program
   .command('test')
   .description('Test S3DB connection and basic operations')
   .option('-c, --connection-string <string>', 'S3DB connection string (auto-detected if not provided)')
-  .option('-v, --verbose', 'Enable verbose output', false)
+  .option('-l, --log-level <level>', 'Log level: trace, debug, info, warn, error, fatal (default: info)', 'info')
+  .option('-v, --verbose', 'Enable verbose output (deprecated: use --log-level debug)', false)
   .action(async (options) => {
     try {
       // Auto-detect connection string if not provided
@@ -260,13 +265,16 @@ program
       }
       
       info('Testing S3DB connection...');
-      
+
       // Import and test S3DB
       const { S3db } = await import('../dist/s3db.es.js');
-      
+
+      // Support both --log-level and legacy --verbose flag
+      const logLevel = options.verbose ? 'debug' : options.logLevel;
+
       const database = new S3db({
         connectionString,
-        verbose: options.verbose
+        loggerOptions: { level: logLevel }
       });
       
       info('Connecting to database...');
@@ -278,17 +286,19 @@ program
       // Test resource listing
       const resources = await database.listResources();
       success(`Found ${resources.length} resources`);
-      
-      if (options.verbose && resources.length > 0) {
-        console.log('Resources:', resources);
+
+      if (logLevel === 'debug' || logLevel === 'trace') {
+        if (resources.length > 0) {
+          console.log('Resources:', resources);
+        }
       }
-      
+
       await database.disconnect();
       success('All tests passed!');
-      
+
     } catch (err) {
       error(`Connection test failed: ${err.message}`);
-      if (options.verbose) {
+      if (logLevel === 'debug' || logLevel === 'trace') {
         console.error(err.stack);
       }
       process.exit(1);
@@ -383,7 +393,7 @@ program
     
     log('4. Test connection:', colors.green);
     console.log('   s3db.js test');
-    console.log('   s3db.js test --verbose');
+    console.log('   s3db.js test --log-level debug');
     console.log('   s3db.js test -c "s3://key:secret@bucket"');
     console.log('');
     

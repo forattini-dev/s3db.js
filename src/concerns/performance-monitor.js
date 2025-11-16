@@ -8,6 +8,11 @@
  *
  * Use for production monitoring and performance analysis.
  *
+ * 🪵 INTENTIONAL CONSOLE USAGE
+ * This file uses console.log/warn for performance monitoring reports
+ * and diagnostic output. These calls are NOT migrated to Pino logger as
+ * they are designed for direct terminal output in monitoring contexts.
+ *
  * @class PerformanceMonitor
  *
  * @example
@@ -63,14 +68,15 @@ export class PerformanceMonitor {
    * @returns {Object} Snapshot object
    */
   takeSnapshot () {
+    const client = this.db?.client
     const snapshot = {
       timestamp: Date.now(),
 
       // Task queue metrics (if available)
-      taskQueue: this.db.client.getQueueStats ? this.db.client.getQueueStats() : null,
+      taskQueue: client?.getQueueStats ? client.getQueueStats() : null,
 
       // Aggregate performance (if available)
-      performance: this.db.client.getAggregateMetrics ? this.db.client.getAggregateMetrics() : null,
+      performance: client?.getAggregateMetrics ? client.getAggregateMetrics() : null,
 
       // System metrics
       system: {
