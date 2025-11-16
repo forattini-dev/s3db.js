@@ -1585,9 +1585,9 @@ A: Check:
 3. Resources are not in `exclude`
 
 **Q: How to debug metrics?**
-A: Check internal object and enable verbose:
+A: Check internal object and set log level to debug:
 ```javascript
-new MetricsPlugin({ verbose: true });
+new MetricsPlugin({ logLevel: 'debug' });
 console.log(metricsPlugin.metrics);
 ```
 
@@ -1992,11 +1992,11 @@ await db.usePlugin(new MetricsPlugin({
    # Look for your IP in headers
    ```
 
-2. Enable verbose logging:
+2. Enable debug logging:
    ```javascript
    await db.usePlugin(new MetricsPlugin({
      prometheus: { enabled: true },
-     verbose: true  // Logs blocked IPs
+     logLevel: 'debug'  // Logs blocked IPs
    }));
    // Console: [API Server] Blocked /metrics request from unauthorized IP: 8.8.8.8
    ```
@@ -2705,7 +2705,7 @@ new MetricsPlugin({
 **Q: Getting 403 Forbidden on /metrics?**
 A: IP allowlist is blocking your request:
 1. **Check your IP**: `curl ifconfig.me` or check request headers
-2. **Enable verbose logging**: `prometheus: { verbose: true }` to see blocked IPs
+2. **Enable debug logging**: `prometheus: { logLevel: 'debug' }` to see blocked IPs
 3. **Add your IP to allowlist**:
    ```javascript
    prometheus: {
@@ -2738,7 +2738,7 @@ A: Ensure load balancer forwards client IP:
 1. **AWS ALB**: Automatically sets `X-Forwarded-For`
 2. **nginx**: Add `proxy_set_header X-Forwarded-For $remote_addr;`
 3. **Kubernetes Ingress**: Check `use-forwarded-headers: "true"`
-4. **Verify**: Check logs with `verbose: true` to see detected IP
+4. **Verify**: Check logs with `logLevel: 'debug'` to see detected IP
 
 **Q: IPv6 addresses not working?**
 A: Ensure proper format:

@@ -26,7 +26,7 @@ export function startConsolidationTimer(handler, resourceName, fieldName, runCon
   const cronManager = getCronManager();
   const jobName = `consolidation-${resourceName}-${fieldName}-${Date.now()}`;
 
-  if (config.verbose) {
+  if (config.logLevel) {
     const nextRun = new Date(Date.now() + intervalMs);
     // this.logger.info(
     //   `[EventualConsistency] ${resourceName}.${fieldName} - ` +
@@ -59,7 +59,7 @@ export function startConsolidationTimer(handler, resourceName, fieldName, runCon
 export async function runConsolidation(transactionResource, consolidateRecordFn, emitFn, config) {
   const startTime = Date.now();
 
-  if (config.verbose) {
+  if (config.logLevel) {
       // `[EventualConsistency] ${config.resource}.${config.field} - ` +
       // `Starting consolidation run at ${new Date().toISOString()}`
     // );
@@ -74,11 +74,11 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
 
     for (let i = 0; i < hoursToCheck; i++) {
       const date = new Date(now.getTime() - (i * 60 * 60 * 1000)); // Subtract hours
-      const cohortInfo = getCohortInfo(date, config.cohort.timezone, config.verbose);
+      const cohortInfo = getCohortInfo(date, config.cohort.timezone, config.logLevel);
       cohortHours.push(cohortInfo.hour);
     }
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Querying ${hoursToCheck} hour partitions for pending transactions...`
       // );
@@ -101,7 +101,7 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     const transactions = transactionsByHour.flat();
 
     if (transactions.length === 0) {
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${config.field} - ` +
           // `No pending transactions found. Next run in ${config.consolidationInterval}s`
         // );
@@ -112,7 +112,7 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
     // Get unique originalIds
     const uniqueIds = [...new Set(transactions.map(t => t.originalId))];
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Found ${transactions.length} pending transactions for ${uniqueIds.length} records. ` +
         // `Consolidating with concurrency=${config.consolidationConcurrency}...`
@@ -136,7 +136,7 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
       // );
     }
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Consolidation complete: ${results.length} records consolidated in ${duration}ms ` +
         // `(${errors.length} errors). Next run in ${config.consolidationInterval}s`
@@ -196,7 +196,7 @@ export async function consolidateRecord(
 
   // If lock couldn't be acquired, another worker is consolidating
   if (!lock) {
-    if (config.verbose) {
+    if (config.logLevel) {
     }
     // Get current value and return (another worker will consolidate)
     const [recordOk, recordErr, record] = await tryFn(() =>
@@ -221,7 +221,7 @@ export async function consolidateRecord(
       );
       const currentValue = (recordOk && record) ? (record[config.field] || 0) : 0;
 
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${config.field} - ` +
           // `No pending transactions for ${originalId}, skipping`
         // );
@@ -249,7 +249,7 @@ export async function consolidateRecord(
       if (!recordExistsOk || !recordExists) {
         // Record was deleted - ignore applied transactions and start fresh
         // This prevents old values from being carried over after deletion
-        if (config.verbose) {
+        if (config.logLevel) {
             // `[EventualConsistency] ${config.resource}.${config.field} - ` +
             // `Record ${originalId} doesn't exist, deleting ${appliedTransactions.length} old applied transactions`
           // );
@@ -264,7 +264,7 @@ export async function consolidateRecord(
             return deleted;
           });
 
-        if (config.verbose && errors && errors.length > 0) {
+        if (config.logLevel && errors && errors.length > 0) {
             // `[EventualConsistency] ${config.resource}.${config.field} - ` +
             // `Failed to delete ${errors.length} old applied transactions`
           // );
@@ -306,7 +306,7 @@ export async function consolidateRecord(
             if (baseValue !== 0 && typeof baseValue === 'number' && !hasExistingAnchor) {
               // Use the timestamp of the first applied transaction for cohort info
               const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
-              const cohortInfo = getCohortInfo(firstTransactionDate, config.cohort.timezone, config.verbose);
+              const cohortInfo = getCohortInfo(firstTransactionDate, config.cohort.timezone, config.logLevel);
               const anchorTransaction = {
                 id: idGenerator(),
                 originalId: originalId,
@@ -354,7 +354,7 @@ export async function consolidateRecord(
           anchorTimestamp = new Date().toISOString();
         }
 
-        const cohortInfo = getCohortInfo(new Date(anchorTimestamp), config.cohort.timezone, config.verbose);
+        const cohortInfo = getCohortInfo(new Date(anchorTimestamp), config.cohort.timezone, config.logLevel);
         const anchorTransaction = {
           id: idGenerator(),
           originalId: originalId,
@@ -372,7 +372,7 @@ export async function consolidateRecord(
 
         await transactionResource.insert(anchorTransaction);
 
-        if (config.verbose) {
+        if (config.logLevel) {
             // `[EventualConsistency] ${config.resource}.${config.field} - ` +
             // `Created anchor transaction for ${originalId} with base value ${currentValue}`
           // );
@@ -380,7 +380,7 @@ export async function consolidateRecord(
       }
     }
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Consolidating ${originalId}: ${transactions.length} pending transactions ` +
         // `(current: ${currentValue} from ${appliedOk && appliedTransactions?.length > 0 ? 'applied transactions' : 'record'})`
@@ -453,7 +453,7 @@ export async function consolidateRecord(
       const pathConsolidatedValue = config.reducer(pathTransactions);
       consolidatedValues[fieldPath] = pathConsolidatedValue;
 
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${fieldPath} - ` +
           // `${originalId}: ${pathCurrentValue} → ${pathConsolidatedValue} ` +
           // `(${pathTransactions.length - (pathCurrentValue !== 0 ? 1 : 0)} pending txns)`
@@ -474,7 +474,7 @@ export async function consolidateRecord(
     if (!recordOk || !record) {
       // Record doesn't exist - we'll let the update fail and handle it below
       // This ensures transactions remain pending until record is created
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${config.field} - ` +
           // `Record ${originalId} doesn't exist yet. Will attempt update anyway (expected to fail).`
         // );
@@ -521,7 +521,7 @@ export async function consolidateRecord(
       // Check if record doesn't exist
       if (updateErr?.message?.includes('does not exist')) {
         // Record doesn't exist - skip consolidation and keep transactions pending
-        if (config.verbose) {
+        if (config.logLevel) {
             // `[EventualConsistency] ${config.resource}.${config.field} - ` +
             // `Record ${originalId} doesn't exist. Skipping consolidation. ` +
             // `${transactions.length} transactions will remain pending until record is created.`
@@ -574,7 +574,7 @@ export async function consolidateRecord(
             transactionResource.update(txn.id, updateData)
           );
 
-          if (!ok && config.verbose) {
+          if (!ok && config.logLevel) {
               // `[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`,
               // err?.message,
               // 'Update data:',
@@ -585,7 +585,7 @@ export async function consolidateRecord(
           return ok;
         });
 
-      if (errors && errors.length > 0 && config.verbose) {
+      if (errors && errors.length > 0 && config.logLevel) {
       }
 
       // Update analytics if enabled (only for real transactions, not synthetic)
@@ -615,14 +615,14 @@ export async function consolidateRecord(
           const cacheKey = await targetResource.cacheKeyFor({ id: originalId });
           await targetResource.cache.delete(cacheKey);
 
-          if (config.verbose) {
+          if (config.logLevel) {
               // `[EventualConsistency] ${config.resource}.${config.field} - ` +
               // `Cache invalidated for ${originalId}`
             // );
           }
         } catch (cacheErr) {
           // Log but don't fail consolidation if cache invalidation fails
-          if (config.verbose) {
+          if (config.logLevel) {
               // `[EventualConsistency] ${config.resource}.${config.field} - ` +
               // `Failed to invalidate cache for ${originalId}: ${cacheErr?.message}`
             // );
@@ -639,7 +639,7 @@ export async function consolidateRecord(
         storage.releaseLock(lock)
       );
 
-      if (!lockReleased && config.verbose) {
+      if (!lockReleased && config.logLevel) {
           // `[EventualConsistency] Failed to release lock ${lock?.name || lockKey}:`,
           // lockReleaseErr?.message
         // );
@@ -792,7 +792,7 @@ export async function recalculateRecord(
 
   // If lock couldn't be acquired, another worker is operating on this record
   if (!lock) {
-    if (config.verbose) {
+    if (config.logLevel) {
     }
     throw new PluginError(`Cannot recalculate ${originalId}: lock already held by another worker`, {
       pluginName: 'EventualConsistencyPlugin',
@@ -805,7 +805,7 @@ export async function recalculateRecord(
   }
 
   try {
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Starting recalculation for ${originalId} (resetting all transactions to pending)`
       // );
@@ -819,7 +819,7 @@ export async function recalculateRecord(
     );
 
     if (!allOk || !allTransactions || allTransactions.length === 0) {
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${config.field} - ` +
           // `No transactions found for ${originalId}, nothing to recalculate`
         // );
@@ -827,7 +827,7 @@ export async function recalculateRecord(
       return 0;
     }
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Found ${allTransactions.length} total transactions for ${originalId}, marking all as pending...`
       // );
@@ -840,7 +840,7 @@ export async function recalculateRecord(
     // This ensures recalculate is idempotent - running it multiple times produces same result
     if (!hasAnchor) {
       const now = new Date();
-      const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+      const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.logLevel);
 
       // Create anchor transaction with timestamp before all other transactions
       const oldestTransaction = allTransactions.sort((a, b) =>
@@ -851,7 +851,7 @@ export async function recalculateRecord(
         ? new Date(new Date(oldestTransaction.timestamp).getTime() - 1).toISOString()
         : now.toISOString();
 
-      const anchorCohortInfo = getCohortInfo(new Date(anchorTimestamp), config.cohort.timezone, config.verbose);
+      const anchorCohortInfo = getCohortInfo(new Date(anchorTimestamp), config.cohort.timezone, config.logLevel);
 
       const anchorTransaction = {
         id: idGenerator(),
@@ -870,7 +870,7 @@ export async function recalculateRecord(
 
       await transactionResource.insert(anchorTransaction);
 
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${config.field} - ` +
           // `Created anchor transaction for ${originalId} with value 0`
         // );
@@ -892,7 +892,7 @@ export async function recalculateRecord(
           transactionResource.update(txn.id, { applied: false })
         );
 
-        if (!ok && config.verbose) {
+        if (!ok && config.logLevel) {
         }
 
         return ok;
@@ -904,7 +904,7 @@ export async function recalculateRecord(
       // );
     }
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Reset ${results.length} transactions to pending, now resetting record value and running consolidation...`
       // );
@@ -918,7 +918,7 @@ export async function recalculateRecord(
       })
     );
 
-    if (!resetOk && config.verbose) {
+    if (!resetOk && config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Failed to reset record value for ${originalId}: ${resetErr?.message}`
       // );
@@ -927,7 +927,7 @@ export async function recalculateRecord(
     // Now run normal consolidation which will process all pending transactions
     const consolidatedValue = await consolidateRecordFn(originalId);
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Recalculation complete for ${originalId}: final value = ${consolidatedValue}`
       // );
@@ -941,7 +941,7 @@ export async function recalculateRecord(
         storage.releaseLock(lock)
       );
 
-      if (!lockReleased && config.verbose) {
+      if (!lockReleased && config.logLevel) {
           // `[EventualConsistency] Failed to release recalculate lock ${lock?.name || lockKey}:`,
           // lockReleaseErr?.message
         // );

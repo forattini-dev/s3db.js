@@ -56,7 +56,7 @@ import {
  *       }
  *     }
  *   },
- *   verbose: true,
+ *   logLevel: 'debug',
  *   saveModel: true,
  *   saveTrainingData: false
  * })
@@ -69,7 +69,7 @@ export class MLPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'MLPlugin', level: logLevel });
     }
 
@@ -84,7 +84,7 @@ export class MLPlugin extends Plugin {
 
     this.config = {
       models,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       minTrainingSamples,
       saveModel,
       saveTrainingData,
@@ -862,7 +862,7 @@ export class MLPlugin extends Plugin {
       target: config.target,
       minSamples: config.minSamples ?? this.config.minTrainingSamples,
       modelConfig: config.modelConfig || {},
-      verbose: this.config.verbose
+      logLevel: this.config.logLevel
     };
 
     try {

@@ -113,7 +113,7 @@ export class OIDCClient {
       clockTolerance = 60,
       autoRefreshJWKS = true,
       discoveryUri,
-      verbose = false,
+      logLevel = 'info',
       logger
     } = options;
 
@@ -133,7 +133,7 @@ export class OIDCClient {
     if (logger) {
       this.logger = logger;
     } else {
-      const logLevel = verbose ? 'debug' : 'info';
+      const logLevel = 'info'; // migrated from verbose
       this.logger = createLogger({ name: 'OIDCClient', level: logLevel });
     }
 
@@ -143,7 +143,7 @@ export class OIDCClient {
     this.keys = new Map(); // kid → publicKey (PEM)
     this.cronManager = getCronManager();
     this.refreshJobName = null;
-    this.verbose = Boolean(verbose);
+    this.logLevel = 'info'; // migrated from verbose
   }
 
   /**

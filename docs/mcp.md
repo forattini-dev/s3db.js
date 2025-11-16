@@ -467,7 +467,7 @@ The S3DB MCP Server can be configured through multiple methods (in order of prec
 #### **Performance Tuning Guidelines**
 
 ```bash
-# Development (fast iteration, verbose logging)
+# Development (fast iteration, debug logging)
 S3DB_VERBOSE=true
 S3DB_PARALLELISM=5
 S3DB_VERSIONING_ENABLED=false
@@ -696,7 +696,7 @@ S3DB_CONNECTION_STRING="s3://..." \
 S3DB_CACHE_DRIVER=filesystem \
 npx -y s3db-mcp --transport=http
 
-# Debug mode with verbose output
+# Debug mode with debug output
 S3DB_VERBOSE=true \
 NODE_ENV=development \
 npx -y s3db-mcp --transport=stdio
@@ -875,7 +875,7 @@ The search covers **ALL** s3db.js documentation:
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `verbose?`, `parallelism?`, `passphrase?`, `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheDriver?`, `cacheMaxSize?`, `cacheTtl?`, `cacheDirectory?`, `cachePrefix?` |
+| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `logLevel?`, `parallelism?`, `passphrase?`, `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheDriver?`, `cacheMaxSize?`, `cacheTtl?`, `cacheDirectory?`, `cachePrefix?` |
 | `dbDisconnect` | Disconnect from database | - |
 | `dbStatus` | Get connection status | - |
 | `dbCreateResource` | Create resource/collection | `name`, `attributes`, `behavior?`, `timestamps?`, `partitions?`, `paranoid?` |
@@ -1003,7 +1003,7 @@ And create partitions by status and region"
 // 1. Connect to database with automatic cache and costs tracking
 await agent.callTool('dbConnect', {
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@bucket/databases/blog',
-  verbose: false,
+  logLevel: 'silent',
   parallelism: 100,         // Separate OperationsPool per database (default)
   enableCache: true,        // Cache enabled by default
   enableCosts: true,        // Costs tracking enabled by default
@@ -1863,7 +1863,7 @@ npx -y s3db-mcp --transport=http
 
 ### 🔍 Debugging
 
-Enable verbose logging:
+Enable debug logging:
 ```json
 {
   "mcpServers": {
@@ -1922,7 +1922,7 @@ mc ls local
 
 ### Debug Mode
 
-Enable verbose logging:
+Enable debug logging:
 ```bash
 # Environment variable
 export S3DB_VERBOSE=true

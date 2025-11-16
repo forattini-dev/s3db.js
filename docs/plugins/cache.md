@@ -1430,10 +1430,10 @@ new CachePlugin({
 ```
 
 **Q: How to debug cache issues?**
-A: Enable verbose mode and monitor statistics:
+A: Enable debug mode and monitor statistics:
 ```javascript
 new CachePlugin({
-  verbose: true,
+  logLevel: 'debug',
   config: { enableStats: true }
 })
 

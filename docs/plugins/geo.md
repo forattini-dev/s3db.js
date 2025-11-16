@@ -387,7 +387,7 @@ new GeoPlugin({
       precision: 4
     }
   },
-  verbose: true  // Enable logging
+  logLevel: 'debug'  // Enable logging
 })
 ```
 
@@ -400,7 +400,7 @@ new GeoPlugin({
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `resources` | Object | `{}` | Resource-specific geo configurations |
-| `verbose` | Boolean | `false` | Enable detailed logging |
+| `logLevel` | Boolean | `false` | Enable detailed logging |
 
 ### Resource Configuration
 
@@ -1106,7 +1106,7 @@ This reduces S3 requests by 99%+ compared to scanning all records.
 - Uses decimal degrees (not degrees/minutes/seconds)
 
 **Q: How do I debug location queries?**
-**A:** Enable verbose logging:
+**A:** Enable debug logging:
 
 ```javascript
 const nearby = await stores.findNearby({

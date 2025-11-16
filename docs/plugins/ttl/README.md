@@ -151,7 +151,7 @@ All documentation is organized into focused guides:
 ### 🎯 Configuration
 - **[Configuration Guide](./guides/configuration.md)** (10 min)
   - Default configuration with all options
-  - Plugin-level options (batchSize, verbose, resources, schedules)
+  - Plugin-level options (batchSize, logLevel, resources, schedules)
   - Resource-level options (ttl, field, onExpire)
   - 4 configuration patterns (Development, Production, Cost-Optimized, High-Volume)
   - Granularity auto-detection explained
@@ -309,7 +309,7 @@ new TTLPlugin({
 
   // Optional: Customize behavior
   batchSize: 100,                    // Records per operation
-  verbose: false,                    // Detailed logging
+  logLevel: 'silent',                    // Detailed logging
   enableCoordinator: true,           // Multi-pod support
   heartbeatInterval: 30000,          // Coordinator heartbeat (ms)
 

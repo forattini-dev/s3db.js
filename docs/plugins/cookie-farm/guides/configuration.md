@@ -338,7 +338,7 @@ new CookieFarmPlugin({
     pool: { enabled: true, size: { min: 2, max: 10 } },
     logging: {
       enabled: true,
-      level: 'verbose'  // Detailed logs
+      level: 'debug'  // Detailed logs
     }
   },
   ttl: {

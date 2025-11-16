@@ -113,7 +113,7 @@ export function createTestPlugin(mockActions = buildMockActions(), overrides = {
     onJobStart: hooks.onJobStart,
     onJobComplete: hooks.onJobComplete,
     onJobError: hooks.onJobError,
-    verbose: false,
+    logLevel: 'silent',
     ...overrides,
     jobs,
     persistJobs,

@@ -30,10 +30,10 @@ describe('EventualConsistencyPlugin - Recalculate Functionality Coverage', () =>
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -71,10 +71,10 @@ describe('EventualConsistencyPlugin - Recalculate Functionality Coverage', () =>
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

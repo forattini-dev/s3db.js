@@ -31,7 +31,7 @@ await db.usePlugin(new IdentityPlugin({
   port: 4000,
   host: '0.0.0.0',
   issuer: 'http://localhost:4000',  // MUST match public URL
-  verbose: false,
+  logLevel: 'silent',
 
   // Resources
   userResource: 'users',
@@ -123,7 +123,7 @@ await db.usePlugin(new IdentityPlugin({
 | `port` | number | `4000` | Port to listen on |
 | `host` | string | `'0.0.0.0'` | Host to bind to |
 | `issuer` | string | **required** | Public issuer URL (MUST match clients' view) |
-| `verbose` | boolean | `false` | Enable debug logging |
+| `logLevel` | boolean | `false` | Enable debug logging |
 
 **Important: `issuer` must exactly match how clients access your server:**
 ```javascript
@@ -335,7 +335,7 @@ const identityPlugin = new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
   supportedScopes: ['openid', 'profile', 'email'],
-  verbose: true,                        // Debug logs
+  logLevel: 'debug',                        // Debug logs
   cors: { origin: '*' },               // Allow any origin
   rateLimit: { enabled: false }        // No rate limiting
 });
@@ -343,7 +343,7 @@ const identityPlugin = new IdentityPlugin({
 
 **Characteristics:**
 - Loose CORS (accept all origins)
-- Verbose logging
+- Debug logging
 - No rate limiting
 - All features enabled
 - Perfect for testing

@@ -137,7 +137,7 @@ export function validateOidcConfig(config) {
 
   // Validate UUID format for clientId (common for Azure AD/Entra)
   if (config.clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.clientId)) {
-    if (config?.verbose) {
+    if (config?.logLevel === 'debug' || config?.logLevel === 'trace') {
       logger.warn('[OIDC] clientId is not in UUID format (may be expected for some providers)');
     }
   }
@@ -312,7 +312,7 @@ async function getOrCreateUser(usersResource, claims, config) {
           }
         }
       } catch (hookErr) {
-        if (config?.verbose) {
+        if (config?.logLevel === 'debug' || config?.logLevel === 'trace') {
           logger.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
         }
       }
@@ -385,7 +385,7 @@ async function getOrCreateUser(usersResource, claims, config) {
         }
       }
     } catch (hookErr) {
-      if (config?.verbose) {
+      if (config?.logLevel === 'debug' || config?.logLevel === 'trace') {
         logger.error('[OIDC] beforeCreateUser hook failed:', hookErr);
       }
       // Continue with default user data (don't block auth)
@@ -574,7 +574,7 @@ const config = {
         return endpoints;
       }
     } catch (e) {
-      if (config.verbose) {
+      if (config.logLevel) {
         logger.warn('[OIDC] Discovery failed, using default endpoints:', e.message);
       }
     }
@@ -790,7 +790,7 @@ const config = {
     // 5. Update cache with new session
     sessionCache.set(c, sessionData);
 
-    if (c.get('verbose')) {
+    if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
       logger.info('[OIDC] Session regenerated (new ID issued)');
     }
 
@@ -833,7 +833,7 @@ const config = {
       });
 
       if (!response.ok) {
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           const error = await response.text();
           logger.warn('[OIDC] Token refresh failed:', error);
         }
@@ -844,7 +844,7 @@ const config = {
       return tokens;
 
     } catch (err) {
-      if (c.get('verbose')) {
+      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.warn('[OIDC] Token refresh error:', err.message);
       }
       return null;
@@ -986,7 +986,7 @@ const config = {
         codeVerifier = pair.verifier;
         codeChallenge = pair.challenge;
       } catch (e) {
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.warn('[OIDC] PKCE generation failed:', e.message);
         }
       }
@@ -1014,7 +1014,7 @@ const config = {
       secure: isSecure  // Only set Secure flag on HTTPS
     });
 
-    if (c.get('verbose')) {
+    if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
       logger.info('[OIDC] Login - State cookie set:', {
         cookieName: `${cookieName}_state`,
         sameSite: cookieSameSite,
@@ -1060,7 +1060,7 @@ const config = {
     const state = c.req.query('state');
 
     // Debug logging
-    if (c.get('verbose')) {
+    if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
       const allCookies = c.req.header('cookie');
       logger.info('[OIDC] Callback - Request info:', {
         cookieName: `${cookieName}_state`,
@@ -1074,7 +1074,7 @@ const config = {
     // Validate CSRF state
     const stateCookie = getCookie(c, `${cookieName}_state`);
     if (!stateCookie) {
-      if (c.get('verbose')) {
+      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error('[OIDC] Callback - State cookie missing!', {
           expectedCookieName: `${cookieName}_state`,
           allCookies: c.req.header('cookie')
@@ -1127,7 +1127,7 @@ const config = {
 
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[OIDC] Token exchange failed:', error);
         }
         return c.json({ error: 'Failed to exchange code for tokens' }, 500);
@@ -1138,7 +1138,7 @@ const config = {
       // Validate token response (Phase 3)
       const tokenValidation = validateTokenResponse(tokens, config);
       if (!tokenValidation.valid) {
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[OIDC] Token response validation failed:', tokenValidation.errors);
         }
         const errorType = getErrorType(tokenValidation.errors);
@@ -1149,7 +1149,7 @@ const config = {
         if (acceptsHtml && config.errorPage !== false) {
           const html = generateErrorPage(errorDetails, {
             loginUrl: `/auth/login`,
-            showTechnicalDetails: c.get('verbose') || false
+            showTechnicalDetails: c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace' || false
           });
           return c.html(html, 401);
         }
@@ -1164,7 +1164,7 @@ const config = {
         if (acceptsHtml && config.errorPage !== false) {
           const html = generateErrorPage(errorDetails, {
             loginUrl: `/auth/login`,
-            showTechnicalDetails: c.get('verbose') || false
+            showTechnicalDetails: c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace' || false
           });
           return c.html(html, 401);
         }
@@ -1179,7 +1179,7 @@ const config = {
       });
 
       if (!idTokenValidation.valid) {
-        if (c.get('verbose')) {
+        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[OIDC] ID token validation failed:', idTokenValidation.errors);
         }
         const errorType = getErrorType(idTokenValidation.errors);
@@ -1189,7 +1189,7 @@ const config = {
         if (acceptsHtml && config.errorPage !== false) {
           const html = generateErrorPage(errorDetails, {
             loginUrl: `/auth/login`,
-            showTechnicalDetails: c.get('verbose') || false
+            showTechnicalDetails: c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace' || false
           });
           return c.html(html, 401);
         }
@@ -1245,14 +1245,14 @@ const config = {
                 context: c  // 🔥 Pass Hono context for cookie/header manipulation
               });
             } catch (hookErr) {
-              if (c.get('verbose')) {
+              if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
                 logger.error('[OIDC] onUserAuthenticated hook failed:', hookErr);
               }
               // Don't block authentication if hook fails
             }
           }
         } catch (err) {
-          if (c.get('verbose')) {
+          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.error('[OIDC] Failed to create/update user:', err);
           }
           // Continue without user (will use token claims only)
@@ -1375,7 +1375,7 @@ const config = {
       return c.redirect(redirectUrl, 302);
 
     } catch (err) {
-      if (c.get('verbose')) {
+      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error('[OIDC] Error during token exchange:', err);
       }
       return c.json({ error: 'Authentication failed' }, 500);
@@ -1518,7 +1518,7 @@ const config = {
           const updatedSessionJWT = await encodeSession(session);
           c.set('oidc_session_jwt_updated', updatedSessionJWT);
 
-          if (c.get('verbose')) {
+          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.info('[OIDC] Token refreshed implicitly:', {
               timeUntilExpiry: Math.round(timeUntilExpiry / 1000),
               newExpiresIn: newTokens.expires_in
@@ -1526,7 +1526,7 @@ const config = {
           }
         } else {
           // Refresh failed - let session continue until it expires
-          if (c.get('verbose')) {
+          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.warn('[OIDC] Token refresh failed, session will expire naturally');
           }
         }

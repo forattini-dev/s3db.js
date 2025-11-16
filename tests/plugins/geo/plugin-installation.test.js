@@ -8,7 +8,7 @@ describe('Geo Plugin - Installation', () => {
 
   test('installs plugin successfully', async () => {
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -25,7 +25,7 @@ describe('Geo Plugin - Installation', () => {
 
   test('logs when verbose mode enabled', async () => {
     const plugin = new GeoPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       resources: {
         stores: {
           latField: 'latitude',
@@ -49,7 +49,7 @@ describe('Geo Plugin - Installation', () => {
 
   test('emits installed event', async () => {
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

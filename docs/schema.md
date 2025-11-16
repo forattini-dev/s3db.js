@@ -1654,7 +1654,7 @@ await resource.updateSchema({
 
 ### Debug Tips
 
-**1. Enable verbose logging:**
+**1. Enable debug logging:**
 ```javascript
 const db = new S3DB({
   connection: 's3://...',

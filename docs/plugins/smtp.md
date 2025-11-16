@@ -352,7 +352,7 @@ const plugin = new SMTPPlugin({
   emailResource: 'emails',
 
   // Monitoring
-  verbose: process.env.NODE_ENV === 'development'
+  logLevel: process.env.NODE_ENV === 'development' ? 'debug' : 'info'
 });
 
 await db.usePlugin(plugin);
@@ -487,7 +487,7 @@ new SMTPPlugin({
   // ============================================
   // LOGGING
   // ============================================
-  verbose: false                         // Enable debug logging (default: false)
+  logLevel: 'silent'                         // Enable debug logging (default: false)
 })
 ```
 
@@ -509,7 +509,7 @@ new SMTPPlugin({
 | `templateEngine` | string | `'handlebars'` | Template engine type |
 | `templateCacheEnabled` | boolean | `true` | Enable template compilation caching |
 | `serverPort` | number | `25` | SMTP server port (for server mode) |
-| `verbose` | boolean | `false` | Enable verbose logging |
+| `logLevel` | boolean | `false` | Enable debug logging |
 
 ---
 
@@ -548,7 +548,7 @@ new SMTPPlugin({
   },
 
   emailResource: 'emails',                     // S3DB resource name
-  verbose: false
+  logLevel: 'silent'
 })
 ```
 
@@ -662,7 +662,7 @@ new SMTPPlugin({
     apiKey: process.env.MAILGUN_API_KEY
   },
   rateLimit: 10,  // Conservative for testing
-  verbose: true   // Debug logging
+  logLevel: 'debug'   // Debug logging
 })
 ```
 
@@ -814,7 +814,7 @@ const plugin = new SMTPPlugin({
     password: 'secure-password'
   },
   emailResource: 'received_emails',  // Where to store emails
-  verbose: true,
+  logLevel: 'debug',
 
   // Custom validation callbacks
   onMailFrom: async (address) => {
@@ -882,7 +882,7 @@ const plugin = new SMTPPlugin({
   emailResource: 'received_emails',
 
   // Logging
-  verbose: true
+  logLevel: 'debug'
 });
 ```
 
@@ -1530,11 +1530,11 @@ A: **Default**: 100 emails/minute, **Configurable**: 500+ recommended, **Provide
 
 **Q: How do I debug webhook issues?**
 
-A: Enable verbose logging and check event log.
+A: Enable debug logging and check event log.
 
 ```javascript
 const plugin = new SMTPPlugin({
-  verbose: true  // Enable debug logging
+  logLevel: 'debug'  // Enable debug logging
 });
 
 // Check event log

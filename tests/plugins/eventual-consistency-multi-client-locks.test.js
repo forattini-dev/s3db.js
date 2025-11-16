@@ -38,12 +38,12 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
 
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         accounts: ['balance', 'transactions']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false // 30 seconds for lock
+      logLevel: 'silent' // 30 seconds for lock
     });
     await database.usePlugin(plugin);
 
@@ -167,12 +167,12 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         counters: ['value']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -206,12 +206,12 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         votes: ['upvotes', 'downvotes']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -256,12 +256,12 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         wallets: ['balance']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 

@@ -148,7 +148,7 @@ export class Resource extends AsyncEventEmitter {
     this.client = client;
     this.version = version;
     // Verbose follows explicit config, then client, then database (if provided during construction)
-    this.verbose = Boolean(config.verbose ?? (config.client && config.client.verbose) ?? (config.database && config.database.verbose));
+    this.logLevel = config.logLevel || config.client?.logLevel || config.database?.logger.level || 'info';
 
     // 🪵 Logger initialization - create child logger from database if available
     // Resources should NEVER create logger.child() in hot paths (insert/update/etc)
@@ -161,7 +161,7 @@ export class Resource extends AsyncEventEmitter {
     } else {
       // Standalone resource (no database) - create minimal logger
       // This happens in tests or when Resources are created independently
-      this.logger = createLogger({ name: `Resource:${name}`, level: 'info' });
+      this.logger = createLogger({ name: `Resource:${name}`, level: this.logLevel });
     }
 
     this.behavior = behavior;

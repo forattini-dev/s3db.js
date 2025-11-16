@@ -86,7 +86,7 @@ logging: {
   enabled: true,     // Explicit opt-in
   format: '...',     // Custom format string
   colorize: false,   // Disable colors
-  verbose: true      // Extra diagnostics
+  logLevel: 'debug'      // Extra diagnostics
 }
 ```
 
@@ -288,7 +288,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 const apiPlugin = new ApiPlugin({
   port: process.env.PORT || 3000,
-  verbose: !isProduction,  // Verbose logs in dev
+  logLevel: !isProduction ? 'debug' : 'info',  // Debug logs in dev
 
   // Request logging
   logging: {

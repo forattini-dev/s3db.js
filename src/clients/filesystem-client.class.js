@@ -14,7 +14,7 @@ import tryFn from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js';
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
-import { TasksRunner } from '../tasks-runner.class.js';
+import { TasksRunner } from '../tasks/tasks-runner.class.js';
 import { FileSystemStorage } from './filesystem-storage.class.js';
 import { createLogger } from '../concerns/logger.js';
 
@@ -30,13 +30,13 @@ export class FileSystemClient extends EventEmitter {
 
     // Client configuration
     this.id = config.id || idGenerator(77);
-    this.verbose = Boolean(config.verbose);
+    this.logLevel = config.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'FileSystemClient', level: logLevel });
     }
     this.taskExecutorMonitoring = config.taskExecutorMonitoring
@@ -81,7 +81,7 @@ export class FileSystemClient extends EventEmitter {
         enforceLimits: config.enforceLimits || false,
         metadataLimit: config.metadataLimit || 2048,
         maxObjectSize: config.maxObjectSize || 5 * 1024 * 1024 * 1024,
-        verbose: this.verbose,
+        logLevel: this.logLevel,
         // ✨ Enhanced features (verticalizado only - v16+)
         compression: config.compression,
         ttl: config.ttl,

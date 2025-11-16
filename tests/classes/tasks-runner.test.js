@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
-import { TasksRunner } from '../../src/tasks-runner.class.js'
+import { TasksRunner } from '../../src/tasks/tasks-runner.class.js'
 
 describe('TasksRunner', () => {
   let runner

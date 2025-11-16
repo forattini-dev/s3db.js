@@ -48,7 +48,7 @@ export class CoordinatorPlugin extends Plugin {
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'CoordinatorPlugin', level: logLevel });
     }
 
@@ -263,7 +263,7 @@ export class CoordinatorPlugin extends Plugin {
         heartbeatJitter: this._coordinatorConfig.heartbeatJitter,
         leaseTimeout: this._coordinatorConfig.leaseTimeout,
         workerTimeout: this._coordinatorConfig.workerTimeout,
-        diagnosticsEnabled: this.config.verbose
+        diagnosticsEnabled: this.config.logLevel
       }
     });
 

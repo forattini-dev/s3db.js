@@ -15,13 +15,13 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
 
     // Plugin configuration for wallets
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         wallets: ['balance']
       },
       consolidation: { mode: 'sync' },
       enableCoordinator: false, // Disable coordination for faster tests
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

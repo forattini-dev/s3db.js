@@ -44,7 +44,7 @@ export class BaseModel {
         shuffle: true,
         ...config.modelConfig
       },
-      verbose: config.verbose || false
+      logLevel: config.logLevel || 'info'
     };
 
     // Model state
@@ -148,10 +148,10 @@ export class BaseModel {
         batchSize: this.config.modelConfig.batchSize,
         validationSplit: this.config.modelConfig.validationSplit,
         shuffle: this.config.modelConfig.shuffle,
-        verbose: this.config.verbose ? 1 : 0,
+        verbose: (this.config.logLevel === 'debug' || this.config.logLevel === 'trace') ? 1 : 0,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
-            if (this.config.verbose && epoch % 10 === 0) {
+            if ((this.config.logLevel === 'debug' || this.config.logLevel === 'trace') && epoch % 10 === 0) {
               this.logger.info(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: loss=${logs.loss.toFixed(4)}`);
             }
           }
@@ -173,7 +173,7 @@ export class BaseModel {
       xs.dispose();
       ys.dispose();
 
-      if (this.config.verbose) {
+      if (this.config.logLevel) {
         this.logger.info(`[MLPlugin] ${this.config.name} - Training completed:`, {
           samples: this.stats.samples,
           loss: this.stats.loss,

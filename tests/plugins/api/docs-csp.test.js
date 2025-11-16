@@ -71,13 +71,13 @@ describe('API Plugin - Docs CSP', () => {
     port = 4800 + Math.floor(Math.random() * 300);
     const testName = `api-docs-default-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    db = createMemoryDatabaseForTest(testName, { verbose: false });
+    db = createMemoryDatabaseForTest(testName, { logLevel: 'silent' });
     await db.connect();
 
     apiPlugin = new ApiPlugin({
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: true, ui: 'redoc' },
       logging: { enabled: false },
       resources: {}
@@ -100,14 +100,14 @@ describe('API Plugin - Docs CSP', () => {
     port = 5200 + Math.floor(Math.random() * 300);
     const testName = `api-docs-override-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    db = createMemoryDatabaseForTest(testName, { verbose: false });
+    db = createMemoryDatabaseForTest(testName, { logLevel: 'silent' });
     await db.connect();
 
     const customCsp = "default-src 'self'; script-src 'self' 'unsafe-inline'";
     apiPlugin = new ApiPlugin({
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: true, ui: 'redoc', csp: customCsp },
       logging: { enabled: false },
       resources: {}

@@ -163,7 +163,7 @@ export function setupFailbanViolationListener(config = {}) {
     }
   });
 
-  if (plugin.options.verbose) {
+  if (plugin.options.logLevel) {
     logger.info('[Failban] Violation listeners configured');
   }
 }

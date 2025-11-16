@@ -56,7 +56,7 @@ describe('S3dbReplicator - Comprehensive Integration Tests', () => {
     ]);
     
     plugin = new ReplicatorPlugin({
-      verbose: false,
+      logLevel: 'silent',
       persistReplicatorLog: false,
       replicators: [
         {

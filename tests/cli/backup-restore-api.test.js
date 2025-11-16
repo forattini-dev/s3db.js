@@ -18,13 +18,13 @@ describe('CLI Backup & Restore API Tests', () => {
     
     // Setup backup plugin with new driver API
     backupPlugin = new BackupPlugin({
-      verbose: false,
+      logLevel: 'silent',
       driver: 'filesystem',
       config: {
         path: tempDir + '/{date}/'
       },
       compression: 'gzip',
-      verbose: false
+      logLevel: 'silent'
     });
     
     await database.usePlugin(backupPlugin);

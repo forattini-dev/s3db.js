@@ -25,7 +25,7 @@ export function detectTimezone() {
  * @param {boolean} verbose - Whether to log warnings
  * @returns {number} Offset in milliseconds
  */
-export function getTimezoneOffset(timezone, verbose = false) {
+export function getTimezoneOffset(timezone, logLevel = 'info') {
   // Try to calculate offset using Intl API (handles DST automatically)
   try {
     const now = new Date();
@@ -55,7 +55,7 @@ export function getTimezoneOffset(timezone, verbose = false) {
       'Australia/Sydney': 10 * 3600000
     };
 
-    if (verbose && !offsets[timezone]) {
+    if ((logLevel === 'debug' || logLevel === 'trace') && !offsets[timezone]) {
         // `[EventualConsistency] Unknown timezone '${timezone}', using UTC. ` +
         // `Consider using a valid IANA timezone (e.g., 'America/New_York')`
       // );
@@ -102,9 +102,9 @@ function getISOWeek(date) {
  * @param {boolean} verbose - Whether to log warnings
  * @returns {Object} Cohort information (date, hour, week, month)
  */
-export function getCohortInfo(date, timezone, verbose = false) {
+export function getCohortInfo(date, timezone, logLevel = 'info') {
   // Simple timezone offset calculation
-  const offset = getTimezoneOffset(timezone, verbose);
+  const offset = getTimezoneOffset(timezone, logLevel);
   const localDate = new Date(date.getTime() + offset);
 
   const year = localDate.getFullYear();
@@ -386,7 +386,7 @@ export function groupByCohort(transactions, cohortField) {
  * @param {boolean} verbose - Whether to log warnings
  * @returns {Object} Transaction with cohortHour populated
  */
-export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false) {
+export function ensureCohortHour(transaction, timezone = 'UTC', logLevel = 'info') {
   // If cohortHour already exists, return as-is
   if (transaction.cohortHour) {
     return transaction;
@@ -395,9 +395,9 @@ export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false)
   // Calculate cohortHour from timestamp
   if (transaction.timestamp) {
     const date = new Date(transaction.timestamp);
-    const cohortInfo = getCohortInfo(date, timezone, verbose);
+    const cohortInfo = getCohortInfo(date, timezone, logLevel);
 
-    if (verbose) {
+    if (logLevel === 'debug' || logLevel === 'trace') {
         // `[EventualConsistency] Transaction ${transaction.id} missing cohortHour, ` +
         // `calculated from timestamp: ${cohortInfo.hour}`
       // );
@@ -413,7 +413,7 @@ export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false)
     if (!transaction.cohortMonth) {
       transaction.cohortMonth = cohortInfo.month;
     }
-  } else if (verbose) {
+  } else if (logLevel === 'debug' || logLevel === 'trace') {
       // `[EventualConsistency] Transaction ${transaction.id} missing both cohortHour and timestamp, ` +
       // `cannot calculate cohort`
     // );
@@ -431,10 +431,10 @@ export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false)
  * @param {boolean} verbose - Whether to log warnings
  * @returns {Array} Transactions with cohortHour populated
  */
-export function ensureCohortHours(transactions, timezone = 'UTC', verbose = false) {
+export function ensureCohortHours(transactions, timezone = 'UTC', logLevel = 'info') {
   if (!transactions || !Array.isArray(transactions)) {
     return transactions;
   }
 
-  return transactions.map(txn => ensureCohortHour(txn, timezone, verbose));
+  return transactions.map(txn => ensureCohortHour(txn, timezone, logLevel));
 }

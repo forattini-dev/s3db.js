@@ -69,7 +69,7 @@ Reference commands (see `package.json`):
   - `pnpm run test:plugins` (plugin tests only, 60s timeout)
   - `pnpm run test:quick` (smoke tests, bail on first failure)
   - `pnpm run test:serial` (run in-band for debugging)
-- **Plugin testing**: Set `verbose: false` when instantiating plugins in tests unless testing logging behavior
+- **Plugin testing**: Set `logLevel: 'silent'` when instantiating plugins in tests unless testing logging behavior
 
 ### Git Workflow
 - Commits: Conventional Commits (e.g., `feat: add cloud inventory plugin`)
@@ -118,7 +118,7 @@ Reference commands (see `package.json`):
 - **Testing**: Maintain ≥90% coverage on ALL metrics (statements/branches/functions/lines)
   - Add integration tests for plugin APIs or cross‑plugin flows
   - Use `MemoryClient` for unit tests (100-1000x faster)
-  - Set `verbose: false` in plugin instantiation unless testing logging
+  - Set `logLevel: 'silent'` in plugin instantiation unless testing logging
 - **Dependency policy**: Many features are optional via peerDependencies to keep the core light (~500KB)
   - Core dependencies: AWS S3 SDK, fastest-validator, nanoid, lodash-es
   - Plugin dependencies: Install only what you need via `pnpm run install:dev:*`

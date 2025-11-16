@@ -34,7 +34,7 @@ describeIfTf('MLPlugin', () => {
   beforeAll(async () => {
     // Create database for tests
     db = createDatabaseForTest('ml-plugin', {
-      verbose: false
+      logLevel: 'silent'
     });
 
     // Connect database
@@ -42,7 +42,7 @@ describeIfTf('MLPlugin', () => {
 
     // Install ML Plugin
     mlPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       models: {
         testRegression: {
           type: 'regression',
@@ -92,7 +92,7 @@ describeIfTf('MLPlugin', () => {
           }
         }
       },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await mlPlugin.install(db);
@@ -113,7 +113,7 @@ describeIfTf('MLPlugin', () => {
     it('should throw error for invalid model type', async () => {
       await expect(async () => {
         const badPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
           models: {
             invalid: {
               type: 'invalid_type',
@@ -403,7 +403,7 @@ describeIfTf('MLPlugin', () => {
       await minResource.insert({ x: 1, y: 2 });
 
       const minPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         models: {
           minimal: {
             type: 'regression',
@@ -414,7 +414,7 @@ describeIfTf('MLPlugin', () => {
           }
         },
         minTrainingSamples: 10,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await minPlugin.install(db);
@@ -477,7 +477,7 @@ describeIfTf('MLPlugin', () => {
 
       // Create plugin with saveModel enabled
       persistPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         models: {
           persistModel: {
             type: 'regression',
@@ -495,7 +495,7 @@ describeIfTf('MLPlugin', () => {
         },
         saveModel: true,
         saveTrainingData: true,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await persistPlugin.install(db);
@@ -531,7 +531,7 @@ describeIfTf('MLPlugin', () => {
     it('should load model from S3 on start', async () => {
       // Create new plugin instance (simulating restart)
       const newPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         models: {
           persistModel: {
             type: 'regression',
@@ -546,7 +546,7 @@ describeIfTf('MLPlugin', () => {
             }
           }
         },
-        verbose: false
+        logLevel: 'silent'
       });
 
       await newPlugin.install(db);
@@ -566,7 +566,7 @@ describeIfTf('MLPlugin', () => {
     it('should respect per-model saveModel override', async () => {
       // Create plugin with global saveModel=false but model-level override
       const overridePlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         models: {
           overrideModel: {
             type: 'regression',
@@ -584,7 +584,7 @@ describeIfTf('MLPlugin', () => {
         },
         saveModel: false, // Global setting
         saveTrainingData: false,
-        verbose: false
+        logLevel: 'silent'
       });
 
       await overridePlugin.install(db);
@@ -642,7 +642,7 @@ describeIfTf('MLPlugin', () => {
 
       // Create plugin with partition-specific models
       partitionPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         models: {
           modelA: {
             type: 'regression',
@@ -687,7 +687,7 @@ describeIfTf('MLPlugin', () => {
             }
           }
         },
-        verbose: false
+        logLevel: 'silent'
       });
 
       await partitionPlugin.install(db);
@@ -774,7 +774,7 @@ describeIfTf('MLPlugin', () => {
 
       // Create plugin with filter and map
       transformPlugin = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         models: {
           // Model without transformations
           noTransform: {
@@ -847,7 +847,7 @@ describeIfTf('MLPlugin', () => {
             }
           }
         },
-        verbose: false
+        logLevel: 'silent'
       });
 
       await transformPlugin.install(db);
@@ -917,14 +917,14 @@ describeIfTf('MLPlugin', () => {
     beforeAll(async () => {
       // Create new database for isolated testing
       db2 = createDatabaseForTest('ml-plugin-namespace', {
-        verbose: false
+        logLevel: 'silent'
       });
 
       await db2.connect();
 
       // Empty MLPlugin - models will be created dynamically
       mlPlugin2 = new MLPlugin({
-      verbose: false,
+      logLevel: 'silent',
         minTrainingSamples: 5
       });
 
@@ -982,7 +982,7 @@ describeIfTf('MLPlugin', () => {
       });
 
       it('should accept custom options', async () => {
-        const db3 = createDatabaseForTest('ml-plugin-db3', { verbose: false });
+        const db3 = createDatabaseForTest('ml-plugin-db3', { logLevel: 'silent' });
         await db3.connect();
         const mlPlugin3 = new MLPlugin({ minTrainingSamples: 3 });
         await mlPlugin3.install(db3);
@@ -1109,7 +1109,7 @@ describeIfTf('MLPlugin', () => {
         expect(exported.config.target).toBe('price');
 
         // Create new resource and import
-        const db4 = createDatabaseForTest('ml-plugin-db4', { verbose: false });
+        const db4 = createDatabaseForTest('ml-plugin-db4', { logLevel: 'silent' });
         await db4.connect();
         const mlPlugin4 = new MLPlugin({ minTrainingSamples: 3 });
         await mlPlugin4.install(db4);
@@ -1171,7 +1171,7 @@ describeIfTf('MLPlugin', () => {
 
     describe('Auto-Detection', () => {
       it('should auto-detect regression type for numeric target', async () => {
-        const db5 = createDatabaseForTest('ml-plugin-db5', { verbose: false });
+        const db5 = createDatabaseForTest('ml-plugin-db5', { logLevel: 'silent' });
         await db5.connect();
         const mlPlugin5 = new MLPlugin({ minTrainingSamples: 3 });
         await mlPlugin5.install(db5);
@@ -1193,7 +1193,7 @@ describeIfTf('MLPlugin', () => {
       });
 
       it('should auto-detect classification type for string target', async () => {
-        const db6 = createDatabaseForTest('ml-plugin-db6', { verbose: false });
+        const db6 = createDatabaseForTest('ml-plugin-db6', { logLevel: 'silent' });
         await db6.connect();
         const mlPlugin6 = new MLPlugin({ minTrainingSamples: 5 });
         await mlPlugin6.install(db6);

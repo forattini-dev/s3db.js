@@ -77,7 +77,7 @@ export class TimeSeriesModel extends BaseModel {
       metrics: ['mse', 'mae']
     });
 
-    if (this.config.verbose) {
+    if (this.config.logLevel) {
       this.logger.info(`[MLPlugin] ${this.config.name} - Built LSTM time series model (lookback: ${lookback})`);
       this.model.summary();
     }

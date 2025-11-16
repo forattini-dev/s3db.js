@@ -167,7 +167,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'SchedulerPlugin', level: logLevel });
     }
 
@@ -191,7 +191,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       defaultRetries,
       jobHistoryResource,
       persistJobs,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       onJobStart,
       onJobComplete,
       onJobError,

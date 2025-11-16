@@ -543,7 +543,7 @@ export class CostsPlugin extends Plugin {
     this.config = {
       considerFreeTier,
       region,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       ...rest
     };
 

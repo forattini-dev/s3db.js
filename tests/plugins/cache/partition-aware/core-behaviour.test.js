@@ -15,7 +15,7 @@ describe('Partition-aware filesystem cache', () => {
 
   test('supports overriding driver options during install', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'filesystem',
+      logLevel: 'silent',driver: 'filesystem',
       partitionAware: true,
       partitionStrategy: 'temporal',
       config: {

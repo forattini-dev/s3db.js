@@ -24,7 +24,7 @@ describe('StateMachinePlugin - Plugin Setup', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - Plugin Setup', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();
@@ -88,7 +88,7 @@ describe('StateMachinePlugin - Plugin Setup', () => {
     plugin.on('db:plugin:initialized', initSpy);
 
     const newPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',

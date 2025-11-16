@@ -928,7 +928,7 @@ test
       const { Factory, Seeder } = await import('../testing/index.js');
       Factory.setDatabase(db);
 
-      const seeder = new Seeder(db, { verbose: false });
+      const seeder = new Seeder(db, { logLevel: 'silent' });
 
       if (options.file) {
         // Load factory definitions from file
@@ -1088,7 +1088,7 @@ test
       await db.init();
 
       const { Seeder } = await import('../testing/index.js');
-      const seeder = new Seeder(db, { verbose: false });
+      const seeder = new Seeder(db, { logLevel: 'silent' });
 
       spinner.text = 'Resetting database...';
       await seeder.reset();
@@ -1138,7 +1138,7 @@ test
       await db.init();
 
       const { Seeder } = await import('../testing/index.js');
-      const seeder = new Seeder(db, { verbose: false });
+      const seeder = new Seeder(db, { logLevel: 'silent' });
 
       await seeder.truncate([resourceName]);
       spinner.succeed(chalk.green(`✓ ${resourceName} truncated`));

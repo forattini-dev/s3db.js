@@ -40,7 +40,7 @@ export function parseRouteKey(key) {
  * @param {Object} options - Additional options
  * @param {boolean} options.autoWrap - Auto-wrap handlers with enhanced context (default: true)
  */
-export function mountCustomRoutes(app, routes, context = {}, verbose = false, options = {}) {
+export function mountCustomRoutes(app, routes, context = {}, logLevel = 'info', options = {}) {
   if (!routes || typeof routes !== 'object') {
     return;
   }
@@ -70,12 +70,12 @@ export function mountCustomRoutes(app, routes, context = {}, verbose = false, op
       // Mount route
       app.on(method, finalPath, wrappedHandler);
 
-      if (verbose) {
+      if (logLevel === 'debug' || logLevel === 'trace') {
         const contextType = (autoWrap && handler.length === 2) ? '(enhanced)' : '(legacy)';
         logger.info(`[Custom Routes] Mounted ${method} ${finalPath} ${contextType}`);
       }
     } catch (err) {
-      if (verbose) {
+      if (logLevel === 'debug' || logLevel === 'trace') {
         logger.error(`[Custom Routes] Error mounting route "${key}":`, err.message);
       }
     }

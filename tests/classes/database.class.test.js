@@ -283,7 +283,7 @@ describe('Database Plugin Lifecycle', () => {
 describe('Database Constructor and Edge Cases', () => {
   test('should handle constructor with minimal options', () => {
     const db = new Database({
-      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
+      logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.version).toBe('1');
     expect(db.s3dbVersion).toBeDefined();
@@ -299,7 +299,7 @@ describe('Database Constructor and Edge Cases', () => {
     const mockPlugin = { install: jest.fn(), start: jest.fn() };
 
     const db = new Database({
-      verbose: true,  // Test expects verbose to be true
+      logLevel: 'debug',  // Test expects verbose to be true
       plugins: [mockPlugin],
       cache: { type: 'memory' },
       passphrase: 'custom-secret',
@@ -323,7 +323,7 @@ describe('Database Constructor and Edge Cases', () => {
     delete global.__PACKAGE_VERSION__;
     
     const db = new Database({
-      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
+      logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.s3dbVersion).toBe('latest');
     
@@ -339,7 +339,7 @@ describe('Database Constructor and Edge Cases', () => {
     global.__PACKAGE_VERSION__ = '1.2.3';
     
     const db = new Database({
-      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
+      logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' }
     });
     expect(db.s3dbVersion).toBe('1.2.3');
     
@@ -765,7 +765,7 @@ describe('Database Configuration and Status', () => {
   test('should return correct configuration', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
     const db = new Database({
-      verbose: false,
+      logLevel: 'silent',
       client: mockClient
     });
 
@@ -781,7 +781,7 @@ describe('Database Configuration and Status', () => {
 
   test('should return connection status', () => {
     const db = new Database({
-      verbose: false, client: { bucket: 'test', keyPrefix: 'test/' }
+      logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' }
     });
     
     expect(db.isConnected()).toBe(false); // Not connected yet
@@ -792,7 +792,7 @@ describe('Database Configuration and Status', () => {
 });
 
 describe('Database.generateDefinitionHash is stable and deterministic', () => {
-  const db = new Database({ verbose: false, client: { bucket: 'test', keyPrefix: 'test/' } });
+  const db = new Database({ logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' } });
   const def1 = {
     attributes: { name: 'string|required', email: 'email|required' },
     options: { timestamps: true }

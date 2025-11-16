@@ -181,7 +181,7 @@ await db.usePlugin(ttlPlugin);
 
 ```javascript
 const ttlPlugin = new TTLPlugin({
-  verbose: true,  // Enable logging
+  logLevel: 'debug',  // Enable logging
   resources: {
     sessions: {
       ttl: 3600,

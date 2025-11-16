@@ -44,7 +44,7 @@ export class ApiServer {
       failban: options.failban || { enabled: false },
       static: Array.isArray(options.static) ? options.static : [],
       health: options.health ?? { enabled: true },
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       auth: options.auth || {},
       docsEnabled: (options.docs?.enabled !== false) && (options.docsEnabled !== false),
       docsUI: options.docs?.ui || options.docsUI || 'redoc',
@@ -74,13 +74,13 @@ export class ApiServer {
 
     this.events = new ApiEventEmitter({
       enabled: this.options.events?.enabled !== false,
-      verbose: this.options.events?.verbose || this.options.verbose,
+      logLevel: this.options.events?.logLevel || this.options.logLevel,
       maxListeners: this.options.events?.maxListeners
     });
 
     this.metrics = new MetricsCollector({
       enabled: this.options.metrics?.enabled !== false,
-      verbose: this.options.metrics?.verbose || this.options.verbose,
+      logLevel: this.options.metrics?.logLevel || this.options.logLevel,
       maxPathsTracked: this.options.metrics?.maxPathsTracked,
       resetInterval: this.options.metrics?.resetInterval,
       format: this.options.metrics?.format || 'json'
@@ -102,7 +102,7 @@ export class ApiServer {
         whitelist: this.options.failban.whitelist || ['127.0.0.1', '::1'],
         blacklist: this.options.failban.blacklist || [],
         persistViolations: this.options.failban.persistViolations !== false,
-        verbose: this.options.failban.verbose || this.options.verbose,
+        logLevel: this.options.failban.logLevel || this.options.logLevel,
         geo: this.options.failban.geo || {},
         resourceNames: this.options.failban.resourceNames || {},
         logger: this.logger  // Pass logger to FailbanManager
@@ -119,6 +119,7 @@ export class ApiServer {
 
     this.openApiGenerator = new OpenAPIGeneratorCached({
       database: this.options.database,
+      logger: this.logger,
       options: {
         auth: this.options.auth,
         resources: this.options.resources,
@@ -129,14 +130,14 @@ export class ApiServer {
         version: this.options.apiVersion,
         description: this.options.apiDescription,
         serverUrl: `http://${resolvedHost}:${this.options.port}`,
-        verbose: this.options.verbose
+        logLevel: this.options.logLevel
       }
     });
   }
 
   async start() {
     if (this.isRunning) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn('Server is already running');
       }
       return;
@@ -172,7 +173,7 @@ export class ApiServer {
         maxBodySize: this.options.maxBodySize,
         failban: this.failban,
         events: this.events,
-        verbose: this.options.verbose,
+        logLevel: this.options.logLevel,
         logger: this.logger, // Pass Pino logger from APIPlugin
         httpLogger: this.options.httpLogger, // Pass pino-http configuration
         database: this.options.database,
@@ -205,7 +206,7 @@ export class ApiServer {
         metrics: this.metrics,
         relationsPlugin: this.relationsPlugin,
         authMiddleware,
-        verbose: this.options.verbose,
+        logLevel: this.options.logLevel,
         logger: this.logger, // Pass Pino logger from APIPlugin
         Hono: this.Hono,
         apiTitle: this.options.apiTitle,
@@ -219,7 +220,7 @@ export class ApiServer {
         this.healthManager = new HealthManager({
           database: this.options.database,
           healthConfig: this.options.health,
-          verbose: this.options.verbose,
+          logLevel: this.options.logLevel,
           logger: this.logger // Pass Pino logger from APIPlugin
         });
         this.healthManager.register(this.app);
@@ -256,20 +257,20 @@ export class ApiServer {
           },
           (info) => {
             this.isRunning = true;
-            if (this.options.verbose) {
+            if (this.options.logLevel) {
               this.logger.info({ address: info.address, port: info.port }, 'Server listening');
             }
             this._printStartupBanner(info);
 
             const shutdownHandler = async (signal) => {
-              if (this.options.verbose) {
+              if (this.options.logLevel) {
                 this.logger.info({ signal }, 'Received shutdown signal');
               }
               try {
                 await this.shutdown({ timeout: 30000 });
                 process.exit(0);
               } catch (err) {
-                if (this.options.verbose) {
+                if (this.options.logLevel) {
                   this.logger.error({ error: err.message }, 'Error during shutdown');
                 }
                 process.exit(1);
@@ -290,7 +291,7 @@ export class ApiServer {
 
   async stop() {
     if (!this.isRunning) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn('Server is not running');
       }
       return;
@@ -300,7 +301,7 @@ export class ApiServer {
       await new Promise((resolve) => {
         this.server.close(() => {
           this.isRunning = false;
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             this.logger.info('Server stopped');
           }
           resolve();
@@ -308,7 +309,7 @@ export class ApiServer {
       });
     } else {
       this.isRunning = false;
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.info('Server stopped');
       }
     }
@@ -342,7 +343,7 @@ export class ApiServer {
 
   stopAcceptingRequests() {
     this.acceptingRequests = false;
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('Stopped accepting new requests');
     }
   }
@@ -385,7 +386,7 @@ export class ApiServer {
         const clientIp = getClientIp(c);
 
         if (!clientIp || !isIpAllowed(clientIp, ipAllowlist)) {
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             this.logger.warn(
               { clientIp: clientIp || 'unknown' },
               'Blocked /metrics request from unauthorized IP'
@@ -401,14 +402,14 @@ export class ApiServer {
           'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'
         });
       } catch (err) {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.error({ error: err.message }, 'Error generating Prometheus metrics');
         }
         return c.text('Internal Server Error', 500);
       }
     });
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
       this.logger.debug(
         { path, ipFilter, ipAllowlistSize: ipAllowlist.length },
@@ -423,20 +424,20 @@ export class ApiServer {
     while (this.inFlightRequests.size > 0) {
       const elapsed = Date.now() - startTime;
       if (elapsed >= timeout) {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.warn({ inFlightCount: this.inFlightRequests.size }, 'Timeout waiting for in-flight requests');
         }
         return false;
       }
 
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.debug({ inFlightCount: this.inFlightRequests.size }, 'Waiting for in-flight requests');
       }
 
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('All requests finished');
     }
 
@@ -445,20 +446,20 @@ export class ApiServer {
 
   async shutdown({ timeout = 30000 } = {}) {
     if (!this.isRunning) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn('Server is not running');
       }
       return;
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('Initiating graceful shutdown');
     }
     this.stopAcceptingRequests();
 
     const finished = await this.waitForRequestsToFinish({ timeout });
     if (!finished) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.warn({ inFlightCount: this.inFlightRequests.size }, 'Some requests did not finish in time');
       }
     }
@@ -473,7 +474,7 @@ export class ApiServer {
     }
 
     this.isRunning = false;
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.info('Shutdown complete');
     }
   }
@@ -538,13 +539,13 @@ export class ApiServer {
       this.metrics.recordUserEvent({ action: 'login' });
     });
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.debug('Metrics event listeners configured');
     }
   }
 
   _setupDocumentationRoutes() {
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.debug({ docsEnabled: this.options.docsEnabled, docsUI: this.options.docsUI }, 'Setting up documentation routes');
     }
 
@@ -552,29 +553,29 @@ export class ApiServer {
     const openApiPath = applyBasePath(basePath, '/openapi.json');
     const docsPath = applyBasePath(basePath, '/docs');
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       this.logger.debug({ docsPath, openApiPath }, 'Documentation paths configured');
     }
 
     // OpenAPI spec endpoint
     if (this.options.docsEnabled) {
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.debug({ openApiPath }, 'Registering OpenAPI route');
       }
       this.app.get(openApiPath, (c) => {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.debug('OpenAPI route hit');
         }
         const spec = this.openApiGenerator.generate();
         return c.json(spec);
       });
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.debug('OpenAPI route registered');
       }
 
       // Documentation UI endpoint
       if (this.options.docsUI === 'swagger') {
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.debug({ docsPath }, 'Registering Swagger UI');
         }
         // Wrap swagger handler to ensure permissive CSP for docs page
@@ -597,11 +598,11 @@ export class ApiServer {
         });
       } else {
         // Default: Redoc UI
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.debug({ docsPath }, 'Registering Redoc UI');
         }
         this.app.get(docsPath, (c) => {
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             this.logger.debug('Redoc docs route hit');
           }
           // Set CSP to allow Redoc CDN by default
@@ -640,11 +641,11 @@ export class ApiServer {
           ].join('\n');
           return c.html(html);
         });
-        if (this.options.verbose) {
+        if (this.options.logLevel) {
           this.logger.debug('Redoc UI route registered');
         }
       }
-      if (this.options.verbose) {
+      if (this.options.logLevel) {
         this.logger.debug('Documentation routes setup complete');
       }
     }
@@ -673,7 +674,7 @@ export class ApiServer {
           // Driver config - instantiate using factory
           sessionStore = await createSessionStore(config.sessionStore, database);
 
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             this.logger.info({ driver: config.sessionStore.driver }, 'Session store initialized');
           }
         } else {
@@ -692,7 +693,7 @@ export class ApiServer {
     const oidcHandler = createOIDCHandler(config, this.app, authResource, this.events);
     this.oidcMiddleware = oidcHandler.middleware;
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       const routes = Object.entries(oidcHandler.routes).map(([path, description]) => ({ path, description }));
       this.logger.info({ routes }, 'Mounted OIDC routes');
     }

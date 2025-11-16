@@ -14,7 +14,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
   beforeEach(async () => {
     database = await createDatabaseForTest('suite=s3db-json/self-healing', {
       versioningEnabled: true,
-      verbose: false,
+      logLevel: 'silent',
       persistHooks: true
     });
   });

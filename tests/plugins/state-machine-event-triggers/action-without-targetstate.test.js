@@ -36,7 +36,7 @@ describe.skip('StateMachinePlugin - Event Triggers (New API) - action without ta
     let actionContext = null;
 
     stateMachinePlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       enableEventTriggers: true,
       persistTransitions: true,  // Need to persist context
       actions: {

@@ -28,7 +28,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add plugin before resource exists
       const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           wallets: ['balance']
         },
@@ -89,7 +89,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add plugin after resource exists
       const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           wallets: ['balance']
         },
@@ -117,7 +117,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add plugin for a resource that doesn't exist yet
       const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           accounts: ['credits']
         },
@@ -161,7 +161,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add cache plugin before any resources
       const cachePlugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
         config: { maxSize: 100 }
       });
       
@@ -221,7 +221,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add cache plugin after resource exists
       const cachePlugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
         config: { maxSize: 100 }
       });
       
@@ -244,12 +244,12 @@ describe('Plugin Timing Tests', () => {
       
       // Add some plugins before resource creation
       const cachePlugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
         config: { maxSize: 100 }
       });
       
       const auditPlugin = new AuditPlugin({
-      verbose: false,
+      logLevel: 'silent',
         driver: 'memory',
         config: {}
       });
@@ -273,7 +273,7 @@ describe('Plugin Timing Tests', () => {
       
       // Add eventual consistency plugin after resource exists
       const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           items: ['count']
         },
@@ -305,12 +305,12 @@ describe('Plugin Timing Tests', () => {
     it('should handle plugins in constructor config', async () => {
       // Create plugins
       const cachePlugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
         config: { maxSize: 100 }
       });
       
       const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           balances: ['amount']
         },
@@ -356,7 +356,7 @@ describe('Plugin Timing Tests', () => {
       
       // Create a plugin that references a non-existent resource
       const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           nonexistent: ['value']
         },

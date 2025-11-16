@@ -30,11 +30,11 @@ describe('EventualConsistencyPlugin - Transaction Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', window: 0 }, // 0 hours = all transactions are "late"
       lateArrivals: { strategy: 'ignore' },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -65,11 +65,11 @@ describe('EventualConsistencyPlugin - Transaction Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', window: 0 }, // 0 hours = all transactions are "late"
       lateArrivals: { strategy: 'warn' },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -98,10 +98,10 @@ describe('EventualConsistencyPlugin - Transaction Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' },
-      verbose: false // Test without verbose warnings
+      logLevel: 'silent' // Test without verbose warnings
     });
 
     await database.usePlugin(plugin);

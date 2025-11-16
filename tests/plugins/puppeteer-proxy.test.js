@@ -16,7 +16,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   beforeAll(async () => {
     // Use real Database with MemoryClient - obliterating MockDatabase!
     db = new Database({
-      verbose: false, client: new MemoryClient()
+      logLevel: 'silent', client: new MemoryClient()
     });
     await db.connect();
   });
@@ -34,7 +34,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Proxy Configuration', () => {
     it('should accept proxy list as strings', () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: [
@@ -50,7 +50,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
 
     it('should accept proxy list as objects', () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: [
@@ -71,7 +71,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
 
     it('should have correct default selection strategy', () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: ['http://proxy1.com:8080']
@@ -86,7 +86,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
 
       strategies.forEach(strategy => {
         const plugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
           proxy: {
             enabled: true,
             list: ['http://proxy1.com:8080'],
@@ -102,7 +102,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('ProxyManager Initialization', () => {
     it('should initialize ProxyManager when proxy enabled', async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: ['http://proxy1.com:8080', 'http://proxy2.com:8080']
@@ -122,7 +122,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
 
     it('should not initialize ProxyManager when proxy disabled', async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: false
         }
@@ -141,7 +141,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Proxy Pool Management', () => {
     beforeEach(async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: [
@@ -201,7 +201,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Session-Proxy Binding (IMMUTABLE)', () => {
     beforeEach(async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: [
@@ -315,7 +315,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Proxy Usage Recording', () => {
     beforeEach(async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: ['http://proxy1.com:8080'],
@@ -377,7 +377,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Proxy Launch Args', () => {
     beforeEach(async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: ['http://user:pass@proxy1.com:8080'],
@@ -418,7 +418,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Proxy URL Masking', () => {
     it('should mask credentials in proxy URL', async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: ['http://secretuser:secretpass@proxy1.com:8080']
@@ -443,7 +443,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   describe('Error Handling', () => {
     it('should throw error when proxy methods called without initialization', () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: { enabled: false }
       });
 
@@ -458,7 +458,7 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
 
     it('should throw error when no healthy proxies available', async () => {
       puppeteerPlugin = new PuppeteerPlugin({
-      verbose: false,
+      logLevel: 'silent',
         proxy: {
           enabled: true,
           list: ['http://proxy1.com:8080']

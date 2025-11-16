@@ -219,7 +219,7 @@ export function createFilesystemHandler(config = {}) {
       return c.body(stream, 200, headers);
 
     } catch (err) {
-      if (c && c.get && c.get('verbose')) {
+      if (c && c.get && c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error('[Static Filesystem] Error:', err);
       }
       return c.json({ success: false, error: { message: 'Internal Server Error' } }, 500);

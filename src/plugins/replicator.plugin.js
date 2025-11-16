@@ -127,7 +127,7 @@ export class ReplicatorPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'ReplicatorPlugin', level: logLevel });
     }
 
@@ -197,7 +197,7 @@ export class ReplicatorPlugin extends Plugin {
       batchSize,
       maxRetries,
       timeout,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       replicatorConcurrency: resolvedReplicatorConcurrency,
       stopConcurrency: resolvedStopConcurrency
     };

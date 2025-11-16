@@ -13,7 +13,7 @@ import tryFn from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js';
 import { mapAwsError, DatabaseError, BaseError } from '../errors.js';
-import { TasksRunner } from '../tasks-runner.class.js';
+import { TasksRunner } from '../tasks/tasks-runner.class.js';
 import { MemoryStorage } from './memory-storage.class.js';
 import { createLogger } from '../concerns/logger.js';
 
@@ -29,13 +29,13 @@ export class MemoryClient extends EventEmitter {
 
     // Client configuration
     this.id = config.id || idGenerator(77);
-    this.verbose = Boolean(config.verbose);
+    this.logLevel = config.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'MemoryClient', level: logLevel });
     }
 
@@ -92,7 +92,7 @@ export class MemoryClient extends EventEmitter {
         maxObjectSize: config.maxObjectSize || 5 * 1024 * 1024 * 1024,
         persistPath: config.persistPath,
         autoPersist: config.autoPersist || false,
-        verbose: this.verbose
+        logLevel: this.logLevel
       }));
     }
 

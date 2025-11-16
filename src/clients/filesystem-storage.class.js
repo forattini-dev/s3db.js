@@ -35,7 +35,7 @@ export class FileSystemStorage {
     this.enforceLimits = Boolean(config.enforceLimits);
     this.metadataLimit = config.metadataLimit ?? 2048; // 2KB like S3
     this.maxObjectSize = config.maxObjectSize ?? 5 * 1024 * 1024 * 1024; // 5GB
-    this.verbose = Boolean(config.verbose);
+    this.logLevel = config.logLevel || 'info';
 
     // ✨ Compression Configuration (verticalizado - v16+)
     const compressionConfig = config.compression || {};
@@ -90,7 +90,7 @@ export class FileSystemStorage {
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'FileSystemStorage', level: logLevel });
     }
 

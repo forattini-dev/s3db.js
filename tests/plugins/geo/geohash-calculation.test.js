@@ -10,7 +10,7 @@ describe('Geo Plugin - Automatic geohash calculation', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -38,7 +38,7 @@ describe('Geo Plugin - Automatic geohash calculation', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -76,7 +76,7 @@ describe('Geo Plugin - Automatic geohash calculation', () => {
     });
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

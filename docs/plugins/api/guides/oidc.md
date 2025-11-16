@@ -441,7 +441,7 @@ config: {
   discovery: { enabled: true },            // Auto-discover endpoints (default)
 
   // Logging
-  verbose: false,                          // Debug logs
+  logLevel: 'silent',                          // Debug logs
 }
 ```
 
@@ -467,8 +467,8 @@ config: {
   autoRefreshTokens: true,     // Enable (default: true)
   refreshThreshold: 300000,    // 5 min before expiry (default)
 
-  // See logs with verbose: true
-  verbose: true  // "[OIDC] Token refreshed implicitly: { timeUntilExpiry: 240 }"
+  // See logs with logLevel: 'debug'
+  logLevel: 'debug'  // "[OIDC] Token refreshed implicitly: { timeUntilExpiry: 240 }"
 }
 ```
 
@@ -842,7 +842,7 @@ import { MemoryStore } from 's3db.js/plugins/api/concerns/session-store';
 
 const sessionStore = new MemoryStore({
   maxSessions: 10000,     // LRU eviction (default: 10000)
-  verbose: false          // Debug logging
+  logLevel: 'silent'          // Debug logging
 });
 
 config: {
@@ -869,7 +869,7 @@ await redis.connect();
 const sessionStore = new RedisStore({
   client: redis,
   prefix: 'oidc:session:',
-  verbose: true
+  logLevel: 'debug'
 });
 
 config: {
@@ -1146,9 +1146,9 @@ async function getCachedSession(context, cookieName) {
 
 **Verification:**
 ```javascript
-// Enable verbose logging to see cache hits
+// Enable debug logging to see cache hits
 config: {
-  verbose: true
+  logLevel: 'debug'
 }
 
 // Output:
@@ -1217,7 +1217,7 @@ if (!idTokenValidation.valid) {
 config: {
   // Validation is automatic, but you can customize:
   errorPage: true,         // Show HTML error pages (default: true)
-  verbose: true,           // Log validation failures for debugging
+  logLevel: 'debug',           // Log validation failures for debugging
 
   // Validation tolerances (built-in defaults):
   // - clockTolerance: 60 seconds (exp, iat, nbf)
@@ -1281,7 +1281,7 @@ Beautiful HTML error pages with actionable guidance:
     <a href="/auth/login" class="btn btn-primary">Sign In Again</a>
     <a href="/" class="btn btn-secondary">Go Home</a>
 
-    <!-- Technical details (collapsible, only if verbose: true) -->
+    <!-- Technical details (collapsible, only if logLevel: 'debug') -->
     <details class="technical-details">
       <summary>Technical Details</summary>
       <ul>
@@ -1318,7 +1318,7 @@ Beautiful HTML error pages with actionable guidance:
 ```javascript
 config: {
   errorPage: true,         // Enable HTML error pages (default: true)
-  verbose: true,           // Show technical details (default: false)
+  logLevel: 'debug',           // Show technical details (default: false)
 
   // Error pages shown for browser requests only
   // API requests always get JSON
@@ -2425,9 +2425,9 @@ console.log('Register this URI:', backchannelUri);
 
 **Troubleshooting:**
 ```javascript
-// Enable verbose logging
+// Enable debug logging
 config: {
-  verbose: true
+  logLevel: 'debug'
 }
 
 // Output:
@@ -2458,7 +2458,7 @@ config: {
 **Check logs:**
 ```javascript
 config: {
-  verbose: true  // Enable debug logging
+  logLevel: 'debug'  // Enable debug logging
 }
 ```
 
@@ -2470,7 +2470,7 @@ config: {
   refreshThreshold: 300000,     // 5 min (default)
   rollingDuration: 86400000,    // 24 hours (increase if needed)
   absoluteDuration: 604800000,  // 7 days (increase if needed)
-  verbose: true,                // Enable logging
+  logLevel: 'debug',                // Enable logging
 }
 ```
 
@@ -2479,7 +2479,7 @@ config: {
 ```javascript
 config: {
   externalUrl: 'https://api.example.com',  // Set if behind reverse proxy
-  verbose: true,                           // Check logs
+  logLevel: 'debug',                           // Check logs
 }
 ```
 

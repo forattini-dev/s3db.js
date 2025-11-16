@@ -410,7 +410,7 @@ for (const provider of providers) {
 | `stateFilesName` | String | `'plg_tfstate_states'` | Name of state files metadata table |
 | `diffsName` | String | `'plg_tfstate_diffs'` | Name of diffs/changes table |
 | `trackDiffs` | Boolean | `true` | Enable automatic diff tracking between versions |
-| `verbose` | Boolean | `false` | Enable detailed logging |
+| `logLevel` | Boolean | `false` | Enable detailed logging |
 | `asyncPartitions` | Boolean | `true` | Enable async partition indexing for 70-100% faster writes |
 
 ### Filter Options
@@ -455,7 +455,7 @@ const plugin = new TfStatePlugin({
   asyncPartitions: true,  // Default: true - 70-100% faster writes
 
   // === DEBUG ===
-  verbose: true  // Default: false - detailed logs
+  logLevel: 'debug'  // Default: false - detailed logs
 });
 ```
 
@@ -679,7 +679,7 @@ A:
 - `stateFilesName`: `'plg_tfstate_states'`
 - `diffsName`: `'plg_tfstate_diffs'`
 - `trackDiffs`: `true`
-- `verbose`: `false`
+- `logLevel`: `false`
 - `asyncPartitions`: `true`
 - `filters`: `undefined` (no filters, imports everything)
 
@@ -736,12 +736,12 @@ const plugin = new TfStatePlugin({
 });
 ```
 
-**Q: How to enable verbose logging?**
+**Q: How to enable debug logging?**
 
 A:
 ```javascript
 const plugin = new TfStatePlugin({
-  verbose: true  // Logs all operations
+  logLevel: 'debug'  // Logs all operations
 });
 ```
 
@@ -1042,7 +1042,7 @@ A: Verify the state file:
 1. Check it's a valid JSON file
 2. Ensure it has `version`, `lineage`, and `resources` fields
 3. Try opening it in a text editor to inspect structure
-4. Enable verbose mode: `new TfStatePlugin({ verbose: true })`
+4. Enable debug mode: `new TfStatePlugin({ logLevel: 'debug' })`
 
 **Q: Some resources not showing up after import?**
 
@@ -1066,7 +1066,7 @@ A: Verify:
 1. `trackDiffs: true` (default)
 2. Import same state file with different serial numbers
 3. Check `diffsResource.list()` for diff records
-4. Enable verbose mode to see diff calculations
+4. Enable debug mode to see diff calculations
 
 **Q: Queries are slow?**
 
@@ -1082,7 +1082,7 @@ const ec2 = await plugin.getResourcesByType('aws_instance');
 **Q: SHA256 deduplication not working?**
 
 A: Deduplication works automatically. If a state is reimported:
-1. Check `verbose: true` logs - should show "Skipping duplicate state"
+1. Check `logLevel: 'debug'` logs - should show "Skipping duplicate state"
 2. Verify state content is identical (same serial, lineage, resources)
 3. Different serials = different states (will be imported)
 

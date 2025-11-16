@@ -155,7 +155,7 @@ describe.skip('API Plugin - Path-based Auth Integration', () => {
   beforeAll(async () => {
     // Create database with MemoryClient (no MinIO needed)
     db = new Database({
-      verbose: false, client: 'memory'
+      logLevel: 'silent', client: 'memory'
     });
 
     await db.connect();
@@ -204,9 +204,9 @@ describe.skip('API Plugin - Path-based Auth Integration', () => {
 
     // Create API Plugin with path-based auth
     apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
       port: 0, // Random port
-      verbose: false,
+      logLevel: 'silent',
       auth: {
         drivers: [
           {

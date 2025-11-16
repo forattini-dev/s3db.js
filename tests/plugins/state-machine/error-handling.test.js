@@ -24,7 +24,7 @@ describe('StateMachinePlugin - Error Handling', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - Error Handling', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();
@@ -73,7 +73,7 @@ describe('StateMachinePlugin - Error Handling', () => {
 
   it('should handle database setup errors gracefully', async () => {
     const errorPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',

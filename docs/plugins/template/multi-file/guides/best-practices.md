@@ -603,7 +603,7 @@ process.env.DEBUG = 'my-plugin:*';
 const db = new Database({
   plugins: [{
     name: 'my-plugin',
-    config: { verbose: true }
+    config: { logLevel: 'debug' }
   }]
 });
 ```

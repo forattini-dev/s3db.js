@@ -588,7 +588,7 @@ export class MetricsPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'MetricsPlugin', level: logLevel });
     }
 
@@ -661,7 +661,7 @@ export class MetricsPlugin extends Plugin {
         // Set to false to disable IP filtering (NOT recommended in production)
         enforceIpAllowlist: prometheus.enforceIpAllowlist !== false
       },
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       ...rest
     };
 

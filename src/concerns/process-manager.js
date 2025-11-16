@@ -7,7 +7,7 @@
  * @example
  * import { ProcessManager } from 's3db.js/concerns/process-manager';
  *
- * const pm = new ProcessManager({ verbose: true });
+ * const pm = new ProcessManager({ logLevel: 'debug' });
  *
  * // Register interval (auto-cleanup on exit)
  * pm.setInterval(() => console.log('tick'), 1000, 'health-check');
@@ -29,7 +29,7 @@ import { createLogger } from './logger.js';
 export class ProcessManager {
   constructor(options = {}) {
     this.options = {
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       shutdownTimeout: options.shutdownTimeout || 30000, // 30 seconds
       exitOnSignal: options.exitOnSignal !== false, // Default: true
     };
@@ -39,7 +39,7 @@ export class ProcessManager {
       this.logger = options.logger;
     } else {
       // Create standalone logger for process manager
-      const logLevel = this.options.verbose ? 'debug' : 'info';
+      const logLevel = this.options.logLevel;
       this.logger = createLogger({ name: 'ProcessManager', level: logLevel });
     }
 

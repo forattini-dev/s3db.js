@@ -24,7 +24,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();
@@ -73,7 +73,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
 
   it('should handle missing action gracefully', async () => {
     const missingActionPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',
@@ -87,7 +87,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
         }
       },
       actions: {},
-      verbose: false
+      logLevel: 'silent'
     });
 
     const testDb = createDatabaseForTest('suite=plugins/state-machine-missing-action');
@@ -103,7 +103,7 @@ describe('StateMachinePlugin - Edge Cases', () => {
 
   it('should handle missing guard gracefully', async () => {
     const missingGuardPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',

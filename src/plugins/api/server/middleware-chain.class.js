@@ -36,7 +36,7 @@ export class MiddlewareChain {
     maxBodySize,
     failban,
     events,
-    verbose,
+    logLevel,
     logger,
     httpLogger, // pino-http configuration
     database,
@@ -53,7 +53,7 @@ export class MiddlewareChain {
     this.maxBodySize = maxBodySize;
     this.failban = failban;
     this.events = events;
-    this.verbose = verbose;
+    this.logLevel = logLevel;
     this.logger = logger || { debug: () => {} }; // Optional Pino logger from APIPlugin, noop if not provided
     this.httpLogger = httpLogger; // pino-http configuration
     this.database = database;
@@ -187,7 +187,7 @@ export class MiddlewareChain {
     if (!this.requestId?.enabled) {
       // Only propagate verbose flag when requestId tracking is disabled
       app.use('*', async (c, next) => {
-        c.set('verbose', this.verbose);
+        c.set('logLevel', this.logLevel);
         await next();
       });
       return;
@@ -235,7 +235,7 @@ export class MiddlewareChain {
   applyErrorHelper(app) {
     const errorMiddleware = errorHelper({
       includeStack: process.env.NODE_ENV !== 'production',
-      verbose: this.verbose
+      logLevel: this.logLevel
     });
 
     app.use('*', errorMiddleware);

@@ -6,9 +6,9 @@ import { TTLPlugin } from '../../../src/plugins/ttl.plugin.js';
 describe('TTLPlugin v2 - Configuration and Validation', () => {
   test('should create TTL plugin with valid config', () => {
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       batchSize: 50,
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 3600,
@@ -32,7 +32,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     });
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 3600,
@@ -57,7 +57,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     });
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         subscriptions: {
           field: 'endsAt',
@@ -77,7 +77,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     await db.connect();
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           onExpire: 'soft-delete'
@@ -94,7 +94,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     await db.connect();
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 3600,
@@ -117,7 +117,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     });
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 3600,
@@ -142,7 +142,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     await db.createResource({ name: 'veryLongLived', attributes: { id: 'string|optional' } });
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         shortLived: { ttl: 300, onExpire: 'hard-delete' },
         mediumLived: { ttl: 7200, onExpire: 'hard-delete' },
@@ -165,7 +165,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     await db.connect();
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         orders: {
           ttl: 2592000,
@@ -183,7 +183,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     await db.connect();
 
     const plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         custom: {
           ttl: 7200,

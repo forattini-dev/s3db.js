@@ -25,7 +25,7 @@ export class Database extends SafeEventEmitter {
     // Structure:
     //   new Database({
     //     connectionString: 'file:///path?compression.enabled=true',
-    //     verbose: false,              // Database option (root)
+    //     logLevel: 'info',            // Database option (root)
     //     executorPool: {              // Executor pool options (nested)
     //       concurrency: 100,          // Parallelism for operations
     //       retries: 3,
@@ -34,7 +34,7 @@ export class Database extends SafeEventEmitter {
     //   })
 
     super({
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || options.loggerOptions?.level || 'info',
       autoCleanup: options.autoCleanup !== false
     });
 
@@ -93,16 +93,24 @@ export class Database extends SafeEventEmitter {
     );
 
     // ✨ Database-level options (root level)
-    this.verbose = options.verbose ?? false;
+    // Removed: this.verbose (migrated to this.logger.level)
 
     // 🪵 Logger initialization (Pino-based, replaces verbose flag)
     // Precedence: custom logger > loggerOptions > env vars > defaults
+    const loggerOptions = { ...(options.loggerOptions || {}) };
+    if (options.logLevel) {
+      loggerOptions.level = options.logLevel;
+    }
+
     if (options.logger) {
       // User provided custom Pino logger instance
       this.logger = options.logger;
+      if (options.logLevel) {
+        this.logger.level = options.logLevel;
+      }
     } else {
       // Create logger from options (with env var overrides)
-      const loggerConfig = getLoggerOptionsFromEnv(options.loggerOptions || {});
+      const loggerConfig = getLoggerOptionsFromEnv(loggerOptions);
       this.logger = createLogger({
         name: 'Database',
         ...loggerConfig
@@ -152,13 +160,13 @@ export class Database extends SafeEventEmitter {
     // Initialize ProcessManager for lifecycle management (prevents memory leaks)
     const exitOnSignal = (options.exitOnSignal ?? true) !== false;
     this.processManager = options.processManager ?? new ProcessManager({
-      verbose: this.verbose,
+      logLevel: this.logger.level,
       exitOnSignal
     });
 
     // Initialize CronManager for cron job management (prevents memory leaks)
     this.cronManager = options.cronManager ?? new CronManager({
-      verbose: this.verbose,
+      logLevel: this.logger.level,
       exitOnSignal
     });
 
@@ -239,7 +247,7 @@ export class Database extends SafeEventEmitter {
           const memoryOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
             bucket,
             keyPrefix,
-            verbose: this.verbose,
+            logLevel: this.logger.level,
           }, mergedClientOptions));
           this.client = new MemoryClient(memoryOptions); // ✨ Deep merge client options
         } else if (url.protocol === 'file:') {
@@ -248,14 +256,14 @@ export class Database extends SafeEventEmitter {
             basePath: connStr.basePath,
             bucket: connStr.bucket,
             keyPrefix: connStr.keyPrefix,
-            verbose: this.verbose,
+            logLevel: this.logger.level,
           }, mergedClientOptions));
           this.client = new FileSystemClient(filesystemOptions); // ✨ Deep merge client options
         } else {
           // Use S3Client for s3://, http://, https:// protocols
           // Merge client options first, then set executorPool (takes precedence)
           const s3ClientOptions = this._deepMerge({
-            verbose: this.verbose,
+            logLevel: this.logger.level,
             connectionString: connectionString,
           }, mergedClientOptions);
           // executorPool from Database (normalized) takes precedence over any in clientOptions
@@ -268,7 +276,7 @@ export class Database extends SafeEventEmitter {
       } catch (err) {
         // If URL parsing fails, fall back to S3Client
         const s3ClientOptions = this._deepMerge({
-          verbose: this.verbose,
+          logLevel: this.logger.level,
           connectionString: connectionString,
         }, mergedClientOptions);
         s3ClientOptions.executorPool = this._deepMerge(
@@ -280,7 +288,7 @@ export class Database extends SafeEventEmitter {
     } else if (!options.client) {
       // No connection string provided, use S3Client with defaults
       const s3ClientOptions = this._deepMerge({
-        verbose: this.verbose,
+        logLevel: this.logger.level,
       }, mergedClientOptions);
       s3ClientOptions.executorPool = this._deepMerge(
         s3ClientOptions.executorPool || {},
@@ -1007,7 +1015,7 @@ export class Database extends SafeEventEmitter {
           heartbeatJitter: 1000,
           leaseTimeout: 15000,
           workerTimeout: 20000,
-          diagnosticsEnabled: this.verbose
+          diagnosticsEnabled: this.logger.level === 'debug' || this.logger.level === 'trace'
         }
       });
 
@@ -1946,7 +1954,7 @@ export class Database extends SafeEventEmitter {
       bucket: this.bucket,
       keyPrefix: this.keyPrefix,
       taskExecutor: this.taskExecutor,
-      verbose: this.verbose
+      logLevel: this.logger.level
     };
   }
 

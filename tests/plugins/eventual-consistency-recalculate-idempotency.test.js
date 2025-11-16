@@ -19,7 +19,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Install eventual consistency plugin
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         users_recalc_idempotent: ['balance']
       },
@@ -27,7 +27,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
         mode: 'sync',
         auto: false  // Disable auto consolidation for this test
       },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
   });
@@ -215,7 +215,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Setup plugin for this resource
     const accountsPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         accounts_recalc_multi: ['credits', 'debits']
       },
@@ -223,7 +223,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
         mode: 'sync',
         auto: false
       },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(accountsPlugin);
 

@@ -18,7 +18,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Passive Mode', () => {
     test('applies passive preset with correct features', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'passive',
+      logLevel: 'silent',behavior: 'passive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -43,7 +43,7 @@ describe('ReconPlugin - Behavior Modes', () => {
       emitSpy = jest.spyOn(ReconPlugin.prototype, 'emit');
 
       new ReconPlugin({
-      verbose: false,behavior: 'passive',
+      logLevel: 'silent',behavior: 'passive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -61,7 +61,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('allows behaviorOverrides to enable specific features', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'passive',
+      logLevel: 'silent',behavior: 'passive',
         behaviorOverrides: {
           features: {
             certificate: true // override passive default
@@ -79,7 +79,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Stealth Mode', () => {
     test('applies stealth preset with rate limiting', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'stealth',
+      logLevel: 'silent',behavior: 'stealth',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -105,7 +105,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('has rate limiting configuration enabled', () => {
       const plugin = new ReconPlugin({
-        verbose: false,
+        logLevel: 'silent',
         behavior: 'stealth',
         storage: { persist: false },
         resources: { persist: false }
@@ -120,7 +120,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Aggressive Mode', () => {
     test('applies aggressive preset with all tools enabled', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'aggressive',
+      logLevel: 'silent',behavior: 'aggressive',
         storage: { persist: false },
         resources: { persist: false }
       });
@@ -156,7 +156,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('has rate limiting disabled', () => {
       const plugin = new ReconPlugin({
-        verbose: false,
+        logLevel: 'silent',
         behavior: 'aggressive',
         storage: { persist: false },
         resources: { persist: false }
@@ -170,7 +170,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Default Mode (no behavior)', () => {
     test('uses default features when no behavior is set', () => {
       const plugin = new ReconPlugin({
-      verbose: false,storage: { persist: false },
+      logLevel: 'silent',storage: { persist: false },
         resources: { persist: false }
       });
 
@@ -185,7 +185,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Manual Overrides', () => {
     test('manual config overrides behavior preset', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'passive',
+      logLevel: 'silent',behavior: 'passive',
         concurrency: 10, // override passive default (2)
         ping: { count: 10, timeout: 20000 },
         storage: { persist: false },
@@ -199,7 +199,7 @@ describe('ReconPlugin - Behavior Modes', () => {
 
     test('features param overrides behavior features', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'stealth',
+      logLevel: 'silent',behavior: 'stealth',
         features: {
           latency: { traceroute: true } // enable traceroute in stealth mode
         },
@@ -215,7 +215,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   describe('Invalid Behavior', () => {
     test('ignores invalid behavior mode', () => {
       const plugin = new ReconPlugin({
-      verbose: false,behavior: 'invalid-mode',
+      logLevel: 'silent',behavior: 'invalid-mode',
         storage: { persist: false },
         resources: { persist: false }
       });

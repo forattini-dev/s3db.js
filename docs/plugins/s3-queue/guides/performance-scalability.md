@@ -236,7 +236,7 @@ new S3QueuePlugin({
   // ============================================
   // PERFORMANCE
   // ============================================
-  verbose: false,                       // Reduce I/O overhead
+  logLevel: 'silent',                       // Reduce I/O overhead
 
   onMessage: async (job, ctx) => {
     // Your processing logic

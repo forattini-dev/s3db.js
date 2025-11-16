@@ -283,7 +283,7 @@ export async function generateTypes(database, options = {}) {
  */
 export async function printTypes(database, options = {}) {
   const types = await generateTypes(database, { ...options, outputPath: null });
-  if (options && options.verbose) {
+  if (options && (options.logLevel === 'debug' || options.logLevel === 'trace')) {
     logger.info({ types }, 'Generated TypeScript definitions');
   }
   return types;

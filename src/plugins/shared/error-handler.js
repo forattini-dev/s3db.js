@@ -96,7 +96,7 @@ export function errorHandler(err, c) {
       stack: err.stack,
       details
     });
-  } else if (status >= 400 && status < 500 && c.get('verbose')) {
+  } else if (status >= 400 && status < 500 && (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace')) {
     this.logger.warn('[API Plugin] Client error:', {
       message: err.message,
       code,

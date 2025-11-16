@@ -13,12 +13,12 @@ describe('Cache Plugin - Multi-instance namespacing', () => {
     await db.connect();
 
     primaryPlugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       namespace: 'primary'
     });
 
     secondaryPlugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       namespace: 'secondary'
     });
 

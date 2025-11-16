@@ -89,13 +89,13 @@ function getErrorStatus(error) {
  *
  * @param {Object} options - Configuration options
  * @param {boolean} options.includeStack - Include stack trace in dev mode (default: NODE_ENV !== 'production')
- * @param {boolean} options.verbose - Enable verbose logging (default: false)
+ * @param {boolean} options.logLevel - Enable verbose logging (default: false)
  * @returns {Function} Hono middleware
  */
 export function errorHelper(options = {}) {
   const {
     includeStack = process.env.NODE_ENV !== 'production',
-    verbose = false
+    logLevel = 'info'
   } = options;
 
   return async (c, next) => {
@@ -135,7 +135,7 @@ export function errorHelper(options = {}) {
       }
 
       // Verbose logging
-      if (verbose) {
+      if (logLevel === 'debug' || logLevel === 'trace') {
         logger.error('[API Error]', {
           status,
           code: errorResponse.error.code,

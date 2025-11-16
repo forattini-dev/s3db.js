@@ -8,7 +8,7 @@ describe('S3DB JSON Corruption - Now Successfully Healed', () => {
   beforeEach(async () => {
     database = await createDatabaseForTest('suite=s3db-json/corruption-healed', {
       versioningEnabled: true,
-      verbose: false,
+      logLevel: 'silent',
       persistHooks: true
     });
   });

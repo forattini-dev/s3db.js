@@ -207,7 +207,7 @@ export async function createOAuth2Handler(inputConfig, database) {
             endpoint = doc.introspection_endpoint || endpoint;
           }
         } catch (e) {
-          if (verbose || c.get('verbose')) {
+          if (logLevel === 'debug' || c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.error('[OAuth2 Auth] Discovery for introspection failed:', e.message);
           }
         }
@@ -229,7 +229,7 @@ export async function createOAuth2Handler(inputConfig, database) {
           body: new URLSearchParams({ token })
         });
         if (!resp.ok) {
-          if (verbose || c.get('verbose')) {
+          if (logLevel === 'debug' || c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
             logger.error('[OAuth2 Auth] Introspection failed:', resp.status);
           }
           return null;
@@ -274,7 +274,7 @@ export async function createOAuth2Handler(inputConfig, database) {
           isVirtual: true
         };
       } catch (e) {
-        if (verbose || c.get('verbose')) {
+        if (logLevel === 'debug' || c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[OAuth2 Auth] Introspection error:', e.message);
         }
         return null;
@@ -288,7 +288,7 @@ export async function createOAuth2Handler(inputConfig, database) {
         return await tryJwtVerify();
       }
     } catch (err) {
-      if (verbose || c.get('verbose')) {
+      if (logLevel === 'debug' || c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
         logger.error('[OAuth2 Auth] Token verification failed:', err.message);
       }
       // fallthrough to introspection

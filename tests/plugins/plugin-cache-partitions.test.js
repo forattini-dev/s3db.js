@@ -19,7 +19,7 @@ describe('Cache Plugin - Partition Integration - Basic Tests', () => {
 
     // Configure cache plugin with filesystem driver
     cachePlugin = new CachePlugin({
-      verbose: false,driver: 'filesystem',
+      logLevel: 'silent',driver: 'filesystem',
       partitionAware: true,
       config: {
         directory: testDir,

@@ -150,7 +150,7 @@ export class StateMachinePlugin extends Plugin {
       stateResource: this.resourceNames.states,
       retryAttempts,
       retryDelay,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       // Distributed lock configuration (prevents concurrent transitions)
       workerId,
       lockTimeout,
@@ -1035,7 +1035,7 @@ export class StateMachinePlugin extends Plugin {
       this.schedulerPlugin = new SchedulerPlugin({
         jobs: cronJobs,
         persistJobs: false, // Don't persist trigger jobs
-        verbose: this.verbose,
+        logLevel: this.logLevel,
         ...this.config.schedulerConfig
       });
 

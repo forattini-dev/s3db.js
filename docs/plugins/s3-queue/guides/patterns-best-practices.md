@@ -493,7 +493,7 @@ new S3QueuePlugin({
   // ============================================
   // PERFORMANCE
   // ============================================
-  verbose: false,                       // Reduce I/O overhead
+  logLevel: 'silent',                       // Reduce I/O overhead
 
   onMessage: async (job, ctx) => {
     // Your processing logic
@@ -883,10 +883,10 @@ if (!lockKeys.length) {
   console.warn('No lock keys found - ensure workers are running and TTL not expiring immediately.');
 }
 
-// Check 2: Enable verbose mode
+// Check 2: Enable debug mode
 const queue = new S3QueuePlugin({
   resource: 'tasks',
-  verbose: true,  // See detailed logs
+  logLevel: 'debug',  // See detailed logs
   onMessage: async (task) => { ... }
 });
 
@@ -1028,7 +1028,7 @@ Enable comprehensive logging:
 ```javascript
 const queue = new S3QueuePlugin({
   resource: 'tasks',
-  verbose: true,  // Enable all logs
+  logLevel: 'debug',  // Enable all logs
   onMessage: async (task, context) => {
     console.log('=== Processing Start ===');
     console.log('Task:', task);

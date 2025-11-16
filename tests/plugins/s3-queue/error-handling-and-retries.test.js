@@ -33,7 +33,7 @@ describe('S3QueuePlugin - Error Handling and Retries', () => {
 
   beforeEach(async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'emails',
       autoStart: false,
       pollInterval: 100,
@@ -105,7 +105,7 @@ describe('S3QueuePlugin - Error Handling and Retries', () => {
 
   test('should move to dead letter after max attempts', async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'emails',
       autoStart: false,
       pollInterval: 100,

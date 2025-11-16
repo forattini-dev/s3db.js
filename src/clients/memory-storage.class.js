@@ -28,13 +28,13 @@ export class MemoryStorage {
     this.maxObjectSize = config.maxObjectSize ?? 5 * 1024 * 1024 * 1024; // 5GB
     this.persistPath = config.persistPath;
     this.autoPersist = Boolean(config.autoPersist);
-    this.verbose = Boolean(config.verbose);
+    this.logLevel = config.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (config.logger) {
       this.logger = config.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'MemoryStorage', level: logLevel });
     }
   }

@@ -15,7 +15,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
   beforeEach(async () => {
     database = await createDatabaseForTest('suite=s3db-json/healing-validation', {
       versioningEnabled: true,
-      verbose: false,
+      logLevel: 'silent',
       persistHooks: true
     });
   });

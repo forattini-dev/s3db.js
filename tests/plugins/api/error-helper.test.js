@@ -57,14 +57,14 @@ describe('API Plugin - Error Helper Middleware', () => {
     port = 3800 + Math.floor(Math.random() * 1000);
     const testName = `error-helper-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    db = createMemoryDatabaseForTest(testName, { verbose: false });
+    db = createMemoryDatabaseForTest(testName, { logLevel: 'silent' });
     await db.connect();
 
     // Create API plugin with minimal config
     apiPlugin = new ApiPlugin({
       port,
       host: '127.0.0.1',
-      verbose: false,
+      logLevel: 'silent',
       docs: { enabled: false },
       logging: { enabled: false },
       resources: []

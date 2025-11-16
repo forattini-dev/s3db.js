@@ -30,10 +30,10 @@ describe('EventualConsistencyPlugin - Async Mode and Auto-Consolidation Coverage
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', auto: true },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -64,10 +64,10 @@ describe('EventualConsistencyPlugin - Async Mode and Auto-Consolidation Coverage
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

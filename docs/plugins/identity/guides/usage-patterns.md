@@ -49,7 +49,7 @@ await db.usePlugin(new IdentityPlugin({
   port: 4000,
   issuer: 'http://localhost:4000',
   supportedScopes: ['openid', 'profile', 'email'],
-  verbose: true,                    // Debug logs
+  logLevel: 'debug',                    // Debug logs
   cors: { origin: '*' },           // Allow any origin
   rateLimit: { enabled: false }    // No rate limiting
 }));
@@ -95,7 +95,7 @@ curl http://localhost:4000/.well-known/jwks.json | jq
 
 **Characteristics:**
 - ✅ Permissive CORS
-- ✅ Verbose logging
+- ✅ Debug logging
 - ✅ No rate limiting
 - ✅ Fast iteration
 

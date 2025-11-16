@@ -16,7 +16,7 @@ describe('Full-Text Plugin', () => {
     await database.connect();
     client = database.client;
     fullTextPlugin = new FullTextPlugin({
-      verbose: false,
+      logLevel: 'silent',
       enabled: true,
       fields: ['name', 'description', 'content'],
       minWordLength: 3,
@@ -338,7 +338,7 @@ describe('Full-Text Plugin', () => {
 
     test('should respect maxResults configuration', async () => {
       const limitedPlugin = new FullTextPlugin({
-      verbose: false,
+      logLevel: 'silent',
         enabled: true,
         maxResults: 2
       });

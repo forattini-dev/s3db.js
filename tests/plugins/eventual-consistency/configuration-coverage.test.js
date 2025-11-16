@@ -37,9 +37,9 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -59,11 +59,11 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       cohort: { timezone: 'Invalid/Timezone' },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
@@ -84,7 +84,7 @@ describe('EventualConsistencyPlugin - Configuration Coverage', () => {
 
     expect(() => {
       new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: { urls: 'invalid' } // Should be array
       });
     }).toThrow('must be an array');

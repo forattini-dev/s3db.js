@@ -27,7 +27,7 @@ const EC_PLUGIN_CONFIG = {
   mode: 'sync',
   autoConsolidate: false,
   enableAnalytics: false,
-  verbose: false
+  logLevel: 'silent'
 };
 
 const TRANSACTION_RESOURCE_NAME = 'plg_wallets_tx_balance';
@@ -56,9 +56,9 @@ async function withScenario(name, { cacheOptions = {} } = {}, run) {
     await database.usePlugin(eventualPlugin);
 
     const cachePlugin = new CachePlugin({
-      verbose: false,
+      logLevel: 'silent',
       driver: 'memory',
-      verbose: false,
+      logLevel: 'silent',
       ...cacheOptions
     });
     await database.usePlugin(cachePlugin);
@@ -127,7 +127,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
       });
 
       const accountsPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           accounts: ['balance']
         },

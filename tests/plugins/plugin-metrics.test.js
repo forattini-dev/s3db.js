@@ -11,7 +11,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     await database.connect();
     
     metricsPlugin = new MetricsPlugin({
-      verbose: false,enabled: true,
+      logLevel: 'silent',enabled: true,
       collectPerformance: true,
       collectErrors: true,
       collectUsage: true,
@@ -50,7 +50,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
     test('should initialize with custom configuration', () => {
       const plugin = new MetricsPlugin({
-      verbose: false,enabled: false,
+      logLevel: 'silent',enabled: false,
         collectPerformance: false,
         retentionDays: 60,
         flushInterval: 120000
@@ -96,7 +96,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     });
 
     test('should skip setup when disabled', async () => {
-      const disabledPlugin = new MetricsPlugin({ verbose: false, enabled: false });
+      const disabledPlugin = new MetricsPlugin({ logLevel: 'silent', enabled: false });
       await disabledPlugin.install(database);
       
       expect(disabledPlugin.database).toBe(database);
@@ -155,7 +155,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     });
 
     test('should not record errors when disabled', () => {
-      const noErrorPlugin = new MetricsPlugin({ verbose: false, collectErrors: false });
+      const noErrorPlugin = new MetricsPlugin({ logLevel: 'silent', collectErrors: false });
       const error = new Error('Test error');
       noErrorPlugin.recordError('test_resource', 'insert', error);
       
@@ -417,7 +417,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     });
 
     test('should handle timer management', () => {
-      const plugin = new MetricsPlugin({ verbose: false, flushInterval: 1000 });
+      const plugin = new MetricsPlugin({ logLevel: 'silent', flushInterval: 1000 });
       
       // Should create timer when flushInterval > 0
       plugin.startFlushTimer();

@@ -104,7 +104,7 @@ export class CachePlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'CachePlugin', level: logLevel });
     }
 
@@ -168,7 +168,7 @@ export class CachePlugin extends Plugin {
       retryDelay,
 
       // Logging
-      verbose: this.verbose
+      logLevel: this.logLevel
     };
 
     // Initialize stats tracking
@@ -543,7 +543,7 @@ export class CachePlugin extends Plugin {
       promoteOnHit: this.config.promoteOnHit,
       strategy: this.config.strategy,
       fallbackOnError: this.config.fallbackOnError,
-      verbose: this.verbose
+      logLevel: this.logLevel
     });
   }
 

@@ -36,7 +36,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     });
   }
 
-  if (config.verbose) {
+  if (config.logLevel) {
       // `[EventualConsistency] ${config.resource}.${config.field} - ` +
       // `Updating analytics for ${transactions.length} transactions...`
     // );
@@ -47,7 +47,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     const byHour = groupByCohort(transactions, 'cohortHour');
     const cohortCount = Object.keys(byHour).length;
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Updating ${cohortCount} hourly analytics cohorts IN PARALLEL...`
       // );
@@ -64,7 +64,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     if (config.analyticsConfig.rollupStrategy === 'incremental') {
       const uniqueHours = Object.keys(byHour);
 
-      if (config.verbose) {
+      if (config.logLevel) {
           // `[EventualConsistency] ${config.resource}.${config.field} - ` +
           // `Rolling up ${uniqueHours.length} hours to daily/weekly/monthly analytics IN PARALLEL...`
         // );
@@ -78,7 +78,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
       );
     }
 
-    if (config.verbose) {
+    if (config.logLevel) {
         // `[EventualConsistency] ${config.resource}.${config.field} - ` +
         // `Analytics update complete for ${cohortCount} cohorts`
       // );

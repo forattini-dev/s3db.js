@@ -522,11 +522,11 @@ return c.error(new NotFoundError('User not found', { id: 'user-123' }));
 
 #### Verbose Logging
 
-Enable verbose logging for debugging:
+Enable debug logging for debugging:
 
 ```javascript
 await db.usePlugin(new ApiPlugin({
-  verbose: true,  // Enables error logging
+  logLevel: 'debug',  // Enables error logging
   routes: {
     'GET /test': async (c) => {
       return c.error(new Error('Test error'), 500);

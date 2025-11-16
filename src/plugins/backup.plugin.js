@@ -124,7 +124,7 @@ export class BackupPlugin extends Plugin {
       exclude,
       backupMetadataResource,
       tempDir,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
 
       // Hooks
       onBackupStart,
@@ -447,7 +447,7 @@ export class BackupPlugin extends Plugin {
     // Create StreamingExporter
     const exporter = new StreamingExporter({
       compress: true, // Always use gzip for backups
-      onProgress: this.verbose ? (stats) => {
+      onProgress: this.logLevel === 'debug' || this.logLevel === 'trace' ? (stats) => {
         if (stats.recordCount % 10000 === 0) {
           this.logger.debug(
             { recordCount: stats.recordCount, resourceName: stats.resourceName },

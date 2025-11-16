@@ -26,7 +26,7 @@ import { TTLPlugin } from 's3db.js';
 const ttlPlugin = new TTLPlugin({
   // Plugin-level options
   batchSize: 100,              // Records to process per batch
-  verbose: false,              // Enable logging
+  logLevel: 'silent',              // Enable logging
 
   // Resource-specific TTL configurations
   resources: {
@@ -78,7 +78,7 @@ await db.usePlugin(ttlPlugin);
   { batchSize: 500 }  // Process 500 records at a time
   ```
 
-#### `verbose`
+#### `logLevel`
 - **Type:** `boolean`
 - **Default:** `false`
 - **Description:** Enable detailed console logging
@@ -88,7 +88,7 @@ await db.usePlugin(ttlPlugin);
   - Disable in production for performance
 - **Example:**
   ```javascript
-  { verbose: process.env.NODE_ENV === 'development' }
+  { logLevel: process.env.NODE_ENV === 'development' ? 'debug' : 'info' }
   ```
 
 #### `resources`
@@ -243,7 +243,7 @@ For local development with quick iteration:
 ```javascript
 new TTLPlugin({
   batchSize: 50,              // Smaller batches
-  verbose: true,              // Show all logs
+  logLevel: 'debug',              // Show all logs
 
   resources: {
     sessions: {
@@ -269,7 +269,7 @@ For production with reliability focus:
 ```javascript
 new TTLPlugin({
   batchSize: 500,             // Larger batches for efficiency
-  verbose: false,             // No logging overhead
+  logLevel: 'silent',             // No logging overhead
 
   resources: {
     sessions: {
@@ -361,7 +361,7 @@ Load configuration from environment variables:
 ```javascript
 const ttlPlugin = new TTLPlugin({
   batchSize: parseInt(process.env.TTL_BATCH_SIZE || '100'),
-  verbose: process.env.TTL_VERBOSE === 'true',
+  logLevel: process.env.TTL_VERBOSE === 'true' ? 'debug' : 'info',
 
   resources: {
     sessions: {
@@ -574,7 +574,7 @@ If running in memory-constrained environment:
 ```javascript
 {
   batchSize: 50,              // Smaller batches
-  verbose: false,             // No logging overhead
+  logLevel: 'silent',             // No logging overhead
   schedules: {
     hour: '*/30 * * * *'      // Less frequent checks
   }
@@ -621,7 +621,7 @@ Before deploying, verify:
 - [ ] Coordinator mode is enabled for multi-pod deployments
 - [ ] Environment variables are correctly set
 - [ ] TTL values make sense for your use case
-- [ ] No sensitive data in verbose logs (if enabled)
+- [ ] No sensitive data in debug logs (if enabled)
 
 ---
 

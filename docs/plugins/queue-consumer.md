@@ -1408,10 +1408,10 @@ A: Check:
 5. Plugin is started: `await plugin.start()`
 
 **Q: How to debug the consumer?**
-A: Enable verbose logging:
+A: Enable debug logging:
 ```javascript
 new QueueConsumerPlugin({
-  verbose: true,
+  logLevel: 'debug',
   consumers: [...]
 })
 ```

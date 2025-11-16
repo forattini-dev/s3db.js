@@ -92,7 +92,7 @@ export function errorHandler(err, c) {
   });
 
   // Log only when verbose is enabled in context
-  if (c && c.get && c.get('verbose')) {
+  if (c && c.get && c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
     if (status >= 500) {
       logger.error('[API Plugin] Error:', {
         message: err.message,

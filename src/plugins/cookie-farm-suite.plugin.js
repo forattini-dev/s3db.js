@@ -158,7 +158,7 @@ export class CookieFarmSuitePlugin extends Plugin {
       concurrency: this.config.queue.concurrency,
       autoStart: this.config.queue.autoStart && typeof this.processor === 'function',
       onMessage: this.queueHandler,
-      verbose: this.config.queue.verbose
+      logLevel: this.config.queue.logLevel
     };
 
     this.queuePlugin = await this._installDependency('queue', this.pluginFactories.queue(queueOptions));

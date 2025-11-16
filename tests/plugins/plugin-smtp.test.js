@@ -33,7 +33,7 @@ describe('SMTPPlugin', () => {
         pass: 'password123'
       },
       emailResource: 'test_emails',
-      verbose: false
+      logLevel: 'silent'
     });
 
     // Set database reference

@@ -14,14 +14,14 @@ describe('Backup Integration (Simple)', () => {
     tempBackupDir = await createTemporaryPathForTest('backup-simple-test');
 
     backupPlugin = new BackupPlugin({
-      verbose: false,
+      logLevel: 'silent',
       driver: 'filesystem',
       config: {
         path: tempBackupDir + '/{date}/'
       },
       compression: 'none',
       verification: false,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(backupPlugin);

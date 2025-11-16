@@ -20,7 +20,7 @@ describeSqs('SqsReplicator - Comprehensive Integration Tests', () => {
     queueUrl = await createSqsQueueForTest('rep-sqs-optimized-queue');
     sqsClient = createSqsClientForTest();
     plugin = new ReplicatorPlugin({
-      verbose: true,  // Test expects verbose logging output
+      logLevel: 'debug',  // Test expects verbose logging output
       replicators: [
         {
           driver: 'sqs',
@@ -264,7 +264,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
       send: jest.fn().mockRejectedValue(new Error('SQS error'))
     };
     
-    const replicator = new SqsReplicator({ queueUrl: 'test-queue', verbose: true });
+    const replicator = new SqsReplicator({ queueUrl: 'test-queue', logLevel: 'debug' });
     replicator.sqsClient = errorClient;
     replicator.enabled = true;
     replicator.resources = { users: true };

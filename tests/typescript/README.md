@@ -33,7 +33,7 @@ import S3db, { DatabaseConfig, ResourceConfig } from 's3db.js';
 const config: DatabaseConfig = {
   connectionString: 's3://key:secret@bucket',
   region: 'us-east-1',
-  verbose: true,
+  logLevel: 'debug',
   parallelism: 10,
   versioningEnabled: true,
   cache: {

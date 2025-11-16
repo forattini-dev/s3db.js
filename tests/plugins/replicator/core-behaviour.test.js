@@ -11,7 +11,7 @@ const minimalReplicator = {
 describe('ReplicatorPlugin configuration', () => {
   test('accepts minimal configuration and optional flags', () => {
     const plugin = new ReplicatorPlugin({
-      verbose: false,
+      logLevel: 'silent',
       persistReplicatorLog: true,
       replicatorLogResource: 'custom_logs',
       replicatorConcurrency: 12.7,
@@ -30,7 +30,7 @@ describe('ReplicatorPlugin configuration', () => {
     const transform = data => ({ ...data, transformed: true });
 
     const plugin = new ReplicatorPlugin({
-      verbose: false,
+      logLevel: 'silent',
       replicators: [
         { driver: 's3db', client: {}, resources: ['users', 'orders'] },
         {
@@ -64,7 +64,7 @@ describe('ReplicatorPlugin configuration', () => {
     expect(
       () =>
         new ReplicatorPlugin({
-      verbose: false,
+      logLevel: 'silent',
           replicators: [
             minimalReplicator,
             { driver: 'sqs', defaultQueue: 'q', resources: { orders: 'orders' } }
@@ -113,7 +113,7 @@ describe('Event listeners', () => {
   test('skips listener installation for replicator log resource', () => {
     const resource = { name: 'plg_replicator_logs', on: jest.fn(), database: {} };
     const plugin = new ReplicatorPlugin({
-      verbose: false,
+      logLevel: 'silent',
       replicatorLogResource: 'replicator_logs',
       replicators: [minimalReplicator]
     });
@@ -136,7 +136,7 @@ describe('Event listeners', () => {
   };
 
   test('listener errors emit plg:replicator:error events', async () => {
-    const plugin = new ReplicatorPlugin({ verbose: false, replicators: [minimalReplicator] });
+    const plugin = new ReplicatorPlugin({ logLevel: 'silent', replicators: [minimalReplicator] });
     const resource = createResourceForListeners();
     plugin.database = resource.database;
     plugin.processReplicatorEvent = jest.fn().mockRejectedValue(new Error('Replication failed'));

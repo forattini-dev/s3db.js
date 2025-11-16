@@ -25,7 +25,7 @@ describe('TTLPlugin v2 - Callback Strategy', () => {
     callbackInvoked = [];
 
     plugin = new TTLPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         custom_data: {
           ttl: 1,

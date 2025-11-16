@@ -156,7 +156,7 @@ export async function completeFieldSetup(handler, database, config, plugin) {
   // Add helper methods to the target resource
   addHelperMethodsForHandler(handler, plugin, config);
 
-  if (config.verbose) {
+  if (config.logLevel) {
     // this.logger.info(
     //   `[EventualConsistency] ${resourceName}.${fieldName} - ` +
     //   `Setup complete. Resources: ${transactionResourceName}` +

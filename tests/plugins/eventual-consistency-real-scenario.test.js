@@ -15,13 +15,13 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
 
     // Plugin with multi-resource API
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync' },
       enableCoordinator: false, // Disable coordination for faster test setup
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

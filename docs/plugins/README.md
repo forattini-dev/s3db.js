@@ -132,13 +132,13 @@ await users.insert({ email: 'user@example.com' });
 Every plugin constructor MUST accept the shared options contract handled by
 `normalizePluginOptions`:
 
-- `verbose` – defaults to `false` and gates any console/log output.
+- `logLevel` – defaults to `false` and gates any console/log output.
 - `resources`, `database`, `client` – references injected by the runtime; use
   them via `this.resources`, `this.database`, `this.client` after calling
   `super(options)`.
 
-In new plugins, call `super(options)` and rely on `this.options`/`this.verbose`
-instead of reading `options.verbose` directly. Existing plugins follow this
+In new plugins, call `super(options)` and rely on `this.options`/`this.logger.level`
+instead of reading `options.logLevel` directly. Existing plugins follow this
 pattern, so use them as reference implementations.
 
 ### Plugin Lifecycle
@@ -1399,7 +1399,7 @@ new SomePlugin({
     option2: 'value2'
   },
   // Global plugin options
-  verbose: true,
+  logLevel: 'debug',
   timeout: 30000
 });
 
@@ -1700,7 +1700,7 @@ class MyCustomPlugin extends Plugin {
   getDefaultConfig() {
     return {
       enabled: true,
-      verbose: false
+      logLevel: 'silent'
     };
   }
 
@@ -2962,7 +2962,7 @@ const developmentPlugins = [
   
   // Development metrics
   new MetricsPlugin({
-    verbose: true,
+    logLevel: 'debug',
     collectPerformance: true
   }),
   
@@ -2972,7 +2972,7 @@ const developmentPlugins = [
   // Search for testing
   new FullTextPlugin({
     fields: ['title', 'content'],
-    verbose: true
+    logLevel: 'debug'
   })
 ];
 ```

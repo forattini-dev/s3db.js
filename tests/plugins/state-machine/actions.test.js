@@ -24,7 +24,7 @@ describe('StateMachinePlugin - Actions', () => {
     database = createDatabaseForTest('suite=plugins/state-machine');
 
     plugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         order_processing: {
           initialState: 'pending',
@@ -58,7 +58,7 @@ describe('StateMachinePlugin - Actions', () => {
       actions: mockActions,
       guards: mockGuards,
       persistTransitions: true,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.connect();
@@ -91,7 +91,7 @@ describe('StateMachinePlugin - Actions', () => {
 
     // Create machine with error action
     const errorPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',
@@ -103,7 +103,7 @@ describe('StateMachinePlugin - Actions', () => {
         }
       },
       actions: mockActions,
-      verbose: false
+      logLevel: 'silent'
     });
 
     errorPlugin.on('plg:state-machine:action-error', errorSpy);
@@ -128,7 +128,7 @@ describe('StateMachinePlugin - Actions', () => {
   it('should continue transition even if action fails', async () => {
     // This tests that action errors don't prevent state transitions
     const errorPlugin = new StateMachinePlugin({
-      verbose: false,
+      logLevel: 'silent',
       stateMachines: {
         test: {
           initialState: 'start',

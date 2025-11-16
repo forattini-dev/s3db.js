@@ -72,12 +72,12 @@ directly.
 
 ## Plugin Verbosity in Tests
 
-- Every plugin now supports a shared options contract (`verbose`, `resources`,
+- Every plugin now supports a shared options contract (`logLevel`, `resources`,
   `database`, `client`) normalized via `normalizePluginOptions`.
-- CI and local tests MUST run plugins with `verbose: false` unless a test is
+- CI and local tests MUST run plugins with `logLevel: 'silent'` unless a test is
   explicitly exercising logging behavior. When creating plugins in tests, pass
-  `verbose: false` (or use helpers that do so) to keep output clean.
-- The base `Plugin` class defaults `verbose` to `false`, but tests should still
+  `logLevel: 'silent'` (or use helpers that do so) to keep output clean.
+- The base `Plugin` class defaults `logLevel` to `false`, but tests should still
   set the flag explicitly to document intent and prevent noisy regressions.
 
 ### Handling Temporary Exceptions

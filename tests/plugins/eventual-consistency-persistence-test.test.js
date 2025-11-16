@@ -38,12 +38,12 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks', 'views']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -110,12 +110,12 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 
@@ -170,12 +170,12 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     // Setup plugin
     const plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'sync' },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(plugin);
 

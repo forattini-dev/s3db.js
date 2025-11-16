@@ -331,7 +331,7 @@ new VectorPlugin({
   autoFixBehavior: false,        // Don't auto-change behavior
   autoDetectVectorField: true,   // Auto-detect embedding:XXX fields
   emitEvents: true,              // Enable monitoring
-  verboseEvents: false,          // Disable verbose logs in production
+  verboseEvents: false,          // Set log level to silent logs in production
   eventThrottle: 100             // Throttle progress events (ms)
 })
 ```

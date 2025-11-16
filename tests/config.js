@@ -28,8 +28,8 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
 process.setMaxListeners(50);
 
 // Shared ProcessManager and CronManager for all tests (prevents signal handler leak)
-const testProcessManager = new ProcessManager({ verbose: false, exitOnSignal: false });
-const testCronManager = new CronManager({ disabled: true, verbose: false });
+const testProcessManager = new ProcessManager({ logLevel: 'silent', exitOnSignal: false });
+const testCronManager = new CronManager({ disabled: true, logLevel: 'silent' });
 
 // Global counter to ensure unique S3 prefixes even when tests run in same millisecond (CI environments)
 let prefixCounter = 0;
@@ -97,7 +97,7 @@ export function createDatabaseForTest(testName, options = {}) {
   const baseConnection = process.env.BUCKET_CONNECTION_STRING || `memory://${s3Prefix(testName)}`;
   const params = {
     connectionString: baseConnection + `/${s3Prefix(testName)}`,
-    verbose: false,  // Ensure no initialization logs in tests
+    logLevel: 'silent',  // Ensure no initialization logs in tests
     ...restOptions,
     // Merge loggerOptions with defaults (restOptions takes precedence for explicit overrides)
     loggerOptions: {
@@ -245,7 +245,7 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
 
   const params = {
     client: memoryClient,
-    verbose: false,  // Ensure no initialization logs in tests
+    logLevel: 'silent',  // Ensure no initialization logs in tests
     ...options,
     // Merge loggerOptions with defaults (options takes precedence for explicit overrides)
     loggerOptions: {

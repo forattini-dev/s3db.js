@@ -49,30 +49,13 @@ export class BaseAuthStrategy {
         continue;
       }
 
-      // Map driver configs
+      // Map driver configs (pass complete config for resource management)
       if (driverName === 'jwt') {
-        configs.jwt = {
-          secret: driverConfig.jwtSecret || driverConfig.secret,
-          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d'
-        };
+        configs.jwt = driverConfig;
       } else if (driverName === 'apiKey') {
-        configs.apiKey = {
-          headerName: driverConfig.headerName || 'X-API-Key'
-        };
+        configs.apiKey = driverConfig;
       } else if (driverName === 'basic') {
-        configs.basic = {
-          realm: driverConfig.realm || 'API Access',
-          passphrase: driverConfig.passphrase || 'secret',
-          usernameField: driverConfig.usernameField || 'email',
-          passwordField: driverConfig.passwordField || 'password'
-        };
-      } else if (driverName === 'jwt') {
-        configs.jwt = {
-          secret: driverConfig.jwtSecret || driverConfig.secret,
-          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d',
-          usernameField: driverConfig.usernameField || 'userId',
-          passwordField: driverConfig.passwordField || 'apiToken'
-        };
+        configs.basic = driverConfig;
       } else if (driverName === 'oauth2') {
         configs.oauth2 = driverConfig;
       }

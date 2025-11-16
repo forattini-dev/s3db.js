@@ -9,7 +9,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
   const ctx = setupMemoryCacheSuite({ createResource: false });
 
   test('enforces maxSize by evicting oldest entries', async () => {
-    const plugin = new CachePlugin({ verbose: false, driver: 'memory', maxSize: 2 });
+    const plugin = new CachePlugin({ logLevel: 'silent', driver: 'memory', maxSize: 2 });
     await plugin.install(ctx.db);
 
     const users = await ctx.db.createResource({
@@ -29,7 +29,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('enforces maxMemoryBytes limit', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       config: { maxMemoryBytes: 5 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -57,7 +57,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('tracks memory usage and resets after clear', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       config: { maxMemoryBytes: 50 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -89,7 +89,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('evicts entries when memory limit is exceeded', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       config: { maxMemoryBytes: 3 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -120,7 +120,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('exposes human readable memory statistics', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       config: { maxMemoryBytes: 10 * 1024 * 1024 }
     });
     await plugin.install(ctx.db);
@@ -142,7 +142,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('supports unlimited memory mode when maxMemoryBytes is 0', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       config: { maxMemoryBytes: 0 }
     });
     await plugin.install(ctx.db);
@@ -173,7 +173,7 @@ describe('Cache Plugin - MemoryCache Driver - Memory Management', () => {
 
   test('calculates memory limit from percentage configuration', async () => {
     const plugin = new CachePlugin({
-      verbose: false,driver: 'memory',
+      logLevel: 'silent',driver: 'memory',
       config: { maxMemoryPercent: 0.05 }
     });
     await plugin.install(ctx.db);

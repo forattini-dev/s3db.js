@@ -20,12 +20,12 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
 
     // Plugin with multi-resource API - EXACTLY like production
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
       consolidation: { mode: 'sync' },// Immediate consistency
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);

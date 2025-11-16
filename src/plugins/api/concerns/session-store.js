@@ -88,13 +88,13 @@ export class MemoryStore extends SessionStore {
     this.sessions = new Map();
     this.timers = new Map();
     this.maxSessions = options.maxSessions || 10000;
-    this.verbose = options.verbose || false;
+    this.logLevel = options.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'MemoryStore', level: logLevel });
     }
   }
@@ -226,13 +226,13 @@ export class RedisStore extends SessionStore {
     this.client = options.client;
     this.prefix = options.prefix || 'session:';
     this.serializer = options.serializer || JSON;
-    this.verbose = options.verbose || false;
+    this.logLevel = options.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'RedisStore', level: logLevel });
     }
   }

@@ -45,7 +45,7 @@ export class ApiEventEmitter extends EventEmitter {
 
     this.options = {
       enabled: options.enabled !== false, // Enabled by default
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       maxListeners: options.maxListeners || 10
     };
 
@@ -62,7 +62,7 @@ export class ApiEventEmitter extends EventEmitter {
       return false;
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       logger.info(`[API Events] ${event}`, data);
     }
 

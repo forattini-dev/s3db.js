@@ -50,7 +50,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('enforces FIFO ordering when orderingGuarantee is true', async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -59,7 +59,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       enableCoordinator: true,
       heartbeatInterval: 500,
       dispatchInterval: 100,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await plugin.install(database);
@@ -83,7 +83,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('supports LIFO ordering when configured', async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -92,7 +92,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       enableCoordinator: true,
       heartbeatInterval: 500,
       dispatchInterval: 100,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await plugin.install(database);
@@ -119,7 +119,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('emits best-effort ordering event when guarantee disabled', async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -128,7 +128,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       orderingGuarantee: false,
       enableCoordinator: true,
       heartbeatInterval: 500,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await plugin.install(database);
@@ -154,7 +154,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('prevents duplicate processing with high concurrency', async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 2000,
@@ -165,7 +165,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       heartbeatInterval: 500,
       dispatchInterval: 50,
       ticketBatchSize: 10,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await plugin.install(database);
@@ -191,7 +191,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
 
   test('allows workers to renew message locks', async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'jobs',
       autoStart: false,
       visibilityTimeout: 200,
@@ -199,7 +199,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       maxAttempts: 2,
       enableCoordinator: true,
       heartbeatInterval: 500,
-      verbose: false
+      logLevel: 'silent'
     });
 
     await plugin.install(database);
@@ -238,7 +238,7 @@ describe('S3QueuePlugin - Ordering & Locks', () => {
       heartbeatInterval: 500,
       dispatchInterval: 100,
       ticketBatchSize: 5,
-      verbose: false
+      logLevel: 'silent'
     };
 
     const pluginA = new S3QueuePlugin({ ...baseOptions });

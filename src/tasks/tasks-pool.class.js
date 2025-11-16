@@ -2,48 +2,13 @@ import { EventEmitter } from 'events'
 import { cpus } from 'os'
 import { setTimeout as delay } from 'timers/promises'
 import { nanoid } from 'nanoid'
-import { TaskExecutor } from './concurrency/task-executor.interface.js'
-import { AdaptiveTuning } from './concerns/adaptive-tuning.js'
+import { TaskExecutor } from '../concurrency/task-executor.interface.js'
+import { AdaptiveTuning } from '../concerns/adaptive-tuning.js'
 import { SignatureStats } from './concerns/signature-stats.js'
+import { FifoTaskQueue } from './concerns/fifo-task-queue.js'
 import { deriveSignature } from './concerns/task-signature.js'
 
 const INTERNAL_DEFER = '__taskExecutorInternalDefer'
-
-class FifoTaskQueue {
-  constructor () {
-    this.queue = []
-  }
-
-  get length () {
-    return this.queue.length
-  }
-
-  enqueue (task) {
-    this.queue.push(task)
-  }
-
-  dequeue () {
-    if (this.queue.length === 0) return null
-    return this.queue.shift()
-  }
-
-  flush (callback) {
-    if (typeof callback === 'function') {
-      for (const task of this.queue) {
-        callback(task)
-      }
-    }
-    this.clear()
-  }
-
-  clear () {
-    this.queue.length = 0
-  }
-
-  setAgingMultiplier () {
-    // no-op for FIFO queues
-  }
-}
 
 /**
  * TasksPool - Global operation queue for controlling S3 operation concurrency

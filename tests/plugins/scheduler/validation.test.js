@@ -24,14 +24,14 @@ describe('SchedulerPlugin - Validation & Setup', () => {
   describe('Configuration Validation', () => {
     it('should throw error when no jobs defined', () => {
       expect(() => {
-        new SchedulerPlugin({ verbose: false,});
+        new SchedulerPlugin({ logLevel: 'silent',});
       }).toThrow('At least one job must be defined');
     });
 
     it('should throw error when job has no schedule', () => {
       expect(() => {
         new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
             invalid: {
               action: () => {},
             },
@@ -43,7 +43,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
     it('should throw error when job has no action', () => {
       expect(() => {
         new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
             invalid: {
               schedule: '* * * * *',
             },
@@ -55,7 +55,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
     it('should throw error when job action is not a function', () => {
       expect(() => {
         new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
             invalid: {
               schedule: '* * * * *',
               action: 'not a function',
@@ -68,7 +68,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
     it('should throw error for invalid cron expression', () => {
       expect(() => {
         new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
             invalid: {
               schedule: 'invalid cron',
               action: () => {},
@@ -81,7 +81,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
     it('should accept valid shorthand expressions', () => {
       expect(() => {
         new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
             hourly: { schedule: '@hourly', action: () => {} },
             daily: { schedule: '@daily', action: () => {} },
             weekly: { schedule: '@weekly', action: () => {} },
@@ -144,7 +144,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
       const initSpy = jest.fn();
 
       const newPlugin = new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
           test: { schedule: '@daily', action: () => {}, enabled: true },
         },
       });
@@ -166,7 +166,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
   describe('Cron Expression Validation', () => {
     const createPlugin = () =>
       new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
           test: { schedule: '@daily', action: () => {} },
         },
       });
@@ -202,7 +202,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
   describe('Next Run Calculation', () => {
     it('should return null for disabled jobs', () => {
       const plugin = new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
           test: {
             schedule: '* * * * *',
             action: () => {},
@@ -220,7 +220,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
 
     it('should calculate next run for enabled jobs', () => {
       const plugin = new SchedulerPlugin({
-      verbose: false,jobs: {
+      logLevel: 'silent',jobs: {
           test: {
             schedule: '* * * * *',
             action: () => {},
@@ -238,7 +238,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
 
     it('should handle custom timezone', () => {
       const plugin = new SchedulerPlugin({
-      verbose: false,timezone: 'America/Sao_Paulo',
+      logLevel: 'silent',timezone: 'America/Sao_Paulo',
         jobs: {
           test: {
             schedule: '0 0 * * *',

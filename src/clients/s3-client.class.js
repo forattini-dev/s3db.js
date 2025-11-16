@@ -22,12 +22,12 @@ import { idGenerator } from "../concerns/id.js";
 import { metadataEncode, metadataDecode } from "../concerns/metadata-encoding.js";
 import { ConnectionString } from "../connection-string.class.js";
 import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "../errors.js";
-import { TasksPool } from "../tasks-pool.class.js";
+import { TasksPool } from "../tasks/tasks-pool.class.js";
 import { AdaptiveTuning } from "../concerns/adaptive-tuning.js";
 
 export class S3Client extends EventEmitter {
   constructor({
-    verbose = false,
+    logLevel = 'info',
     id = null,
     AwsS3Client,
     connectionString,
@@ -36,7 +36,7 @@ export class S3Client extends EventEmitter {
     executorPool = null,  // New name (preferred), maps to taskExecutor
   }) {
     super();
-    this.verbose = verbose;
+    this.logLevel = logLevel;
     this.id = id ?? idGenerator(77);
     this.config = new ConnectionString(connectionString);
     this.connectionString = connectionString;

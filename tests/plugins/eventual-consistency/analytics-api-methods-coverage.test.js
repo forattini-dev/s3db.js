@@ -30,7 +30,7 @@ describe('EventualConsistencyPlugin - Analytics API Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       analytics: { enabled: true },
       consolidation: { mode: 'sync' }
@@ -62,7 +62,7 @@ describe('EventualConsistencyPlugin - Analytics API Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       analytics: { enabled: true },
       consolidation: { mode: 'sync' }
@@ -94,7 +94,7 @@ describe('EventualConsistencyPlugin - Analytics API Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       analytics: { enabled: true },
       consolidation: { mode: 'sync' }
@@ -123,7 +123,7 @@ describe('EventualConsistencyPlugin - Analytics API Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       analytics: { enabled: true },
       consolidation: { mode: 'sync' }
@@ -153,7 +153,7 @@ describe('EventualConsistencyPlugin - Analytics API Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       analytics: { enabled: true },
       consolidation: { mode: 'sync' }
@@ -185,7 +185,7 @@ describe('EventualConsistencyPlugin - Analytics API Methods Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       analytics: { enabled: true },
       consolidation: { mode: 'sync' }

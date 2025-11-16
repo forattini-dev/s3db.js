@@ -24,7 +24,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
     // Add plugin in sync mode for immediate consolidation
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         wallets: ['balance']
       },

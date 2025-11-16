@@ -33,7 +33,7 @@ describe('S3QueuePlugin - ETag-based Atomicity', () => {
 
   beforeEach(async () => {
     plugin = new S3QueuePlugin({
-      verbose: false,
+      logLevel: 'silent',
       resource: 'emails',
       autoStart: false,
       pollInterval: 10  // Very fast polling

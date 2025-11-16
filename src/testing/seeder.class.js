@@ -29,13 +29,13 @@ export class Seeder {
     this.database = database;
     this.options = options;
     // Default to false; only log when explicitly enabled
-    this.verbose = Boolean(options.verbose);
+    this.logLevel = options.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'Seeder', level: logLevel });
     }
   }

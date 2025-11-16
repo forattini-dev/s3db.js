@@ -91,7 +91,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'S3QueuePlugin', level: logLevel });
     }
 
@@ -160,7 +160,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       onMessage,
       onError,
       onComplete,
-      verbose: this.verbose,
+      logLevel: this.logLevel,
       orderingGuarantee: Boolean(orderingGuarantee),
       orderingLockTTL: Math.max(250, orderingLockTTL),
       orderingMode: normalizedOrderingMode,

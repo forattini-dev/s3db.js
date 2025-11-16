@@ -153,7 +153,7 @@ Creates aggregations in `plg_{resource}_an_{field}`:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `resources` | Object | **Required** | Map of resource names to array of field names to track |
-| `verbose` | Boolean | `true` | Enable detailed logging |
+| `logLevel` | Boolean | `true` | Enable detailed logging |
 | `debug` | Boolean | `false` | Enable additional debug mode |
 
 **Example:**
@@ -271,7 +271,7 @@ const plugin = new EventualConsistencyPlugin({
   },
 
   // Debug
-  verbose: true,
+  logLevel: 'debug',
   debug: false,
 
   // Advanced
@@ -996,10 +996,10 @@ If the value doesn't match, you'll see:
 #### How to Use
 
 ```javascript
-// verbose: true is now the default!
+// logLevel: 'debug' is now the default!
 const plugin = new EventualConsistencyPlugin({
   resources: { urls: ['clicks'] },
-  // Don't need to pass verbose: true (already default)
+  // Don't need to pass logLevel: 'debug' (already default)
 });
 
 // Or use debug mode for additional logs
@@ -1082,7 +1082,7 @@ Now when the bug occurs, you'll see:
 CRITICAL BUG: config.field is undefined in updateAnalytics()!
 This indicates a race condition in the plugin where multiple handlers
 are sharing the same config object.
-Config: {"resource":"urls","field":undefined,"verbose":false}
+Config: {"resource":"urls","field":undefined,"logLevel":"info"}
 Transactions count: 5
 AnalyticsResource: plg_urls_an_clicks
 ```
@@ -1093,7 +1093,7 @@ This helps identify the exact moment when the race condition happens and which h
 
 #### Change
 
-`verbose: true` is the default (before it was `false`).
+`logLevel: 'debug'` is the default (before it was `false`).
 
 **Before:**
 ```javascript
@@ -1112,33 +1112,33 @@ const plugin = new EventualConsistencyPlugin({
 
 // To disable explicitly:
 const plugin = new EventualConsistencyPlugin({
-  verbose: false,  // ← Now need to disable explicitly
+  logLevel: 'silent',  // ← Now need to disable explicitly
   resources: { urls: ['clicks'] }
 });
 ```
 
 #### Benefits
 
-- ✅ Debug out-of-the-box (no need to add `verbose: true`)
+- ✅ Debug out-of-the-box (no need to add `logLevel: 'debug'`)
 - ✅ Facilitates troubleshooting in production
 - ✅ Aligned with user expectations for critical plugin
 
 ### 4. New Option: Debug Mode
 
-In addition to `verbose`, there's now a `debug` option (works the same, but separate):
+In addition to `logLevel`, there's now a `debug` option (works the same, but separate):
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
   debug: true,    // ← New option (equivalent to verbose)
-  verbose: true,  // ← Original option
+  logLevel: 'debug',  // ← Original option
   resources: { urls: ['clicks'] }
 });
 ```
 
-All logs respond to **both** `verbose` and `debug`:
+All logs respond to **both** `logLevel` and `debug`:
 
 ```javascript
-if (config.verbose || config.debug) {
+if (config.logLevel || config.debug) {
   console.log('🔥 [DEBUG] ...');
 }
 ```
@@ -1149,7 +1149,7 @@ if (config.verbose || config.debug) {
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
-  // verbose: true is already the default!
+  // logLevel: 'debug' is already the default!
   resources: { urls: ['clicks', 'views'] },
   analytics: { enabled: true }
 });
@@ -1314,7 +1314,7 @@ All other options have sensible defaults.
     periods: ['hour', 'day', 'month'],
     metrics: ['count', 'sum', 'avg', 'min', 'max']
   },
-  verbose: true,              // Logging enabled
+  logLevel: 'debug',              // Logging enabled
   debug: false,
   locks: { timeout: 300 },
   garbageCollection: { enabled: true, interval: 86400, retention: 30 },
@@ -1330,11 +1330,11 @@ All other options have sensible defaults.
 - Original resource - Updated values after consolidation
 
 **Q: How do I debug issues with this plugin?**
-**A:** Enable verbose logging (enabled by default):
+**A:** Enable debug logging (enabled by default):
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
-  verbose: true,    // Already default
+  logLevel: 'debug',    // Already default
   debug: true,      // Additional debug info
   resources: { wallets: ['balance'] }
 });

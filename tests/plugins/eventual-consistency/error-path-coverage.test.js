@@ -30,7 +30,7 @@ describe('EventualConsistencyPlugin - Error Path Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async' }
     });
@@ -82,7 +82,7 @@ describe('EventualConsistencyPlugin - Error Path Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'sync' }
     });

@@ -10,7 +10,7 @@ describe('Geo Plugin - Partitions', () => {
     await ctx.createStoresResource();
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -35,7 +35,7 @@ describe('Geo Plugin - Partitions', () => {
     });
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',
@@ -71,7 +71,7 @@ describe('Geo Plugin - Partitions', () => {
     });
 
     const plugin = new GeoPlugin({
-      verbose: false,resources: {
+      logLevel: 'silent',resources: {
         stores: {
           latField: 'latitude',
           lonField: 'longitude',

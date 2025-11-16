@@ -15,7 +15,7 @@ describe('GlobalCoordinatorService', () => {
   beforeEach(async () => {
     db = new Database({
       connectionString: 'memory://test/coordinator/db',
-      verbose: false
+      logLevel: 'silent'
     });
     await db.connect();
   });

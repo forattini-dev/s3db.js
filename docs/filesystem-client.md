@@ -104,7 +104,7 @@ TTL operates at the storage level:
 
 - Use `connectionString: 'file://./relative/path'` for project-specific sandbox folders.
 - Combine with `MemoryClient` in different environments: memory for unit tests, filesystem for integration tests, S3 in production.
-- Enable verbose mode (`verbose: true`) to log every `PUT/GET/DELETE` and cleanup event.
+- Enable debug mode (`logLevel: 'debug'`) to log every `PUT/GET/DELETE` and cleanup event.
 
 For further reference, see `tests/clients/filesystem-enhanced.test.js` for end-to-end examples covering every feature.
 

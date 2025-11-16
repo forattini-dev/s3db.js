@@ -621,7 +621,7 @@ export class QueueConsumerPlugin extends Plugin {
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel || 'info';
       this.logger = createLogger({ name: 'QueueConsumerPlugin', level: logLevel });
     }
 

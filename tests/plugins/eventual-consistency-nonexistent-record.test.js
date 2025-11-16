@@ -36,12 +36,12 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(ecPlugin);
 
@@ -122,12 +122,12 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(ecPlugin);
 
@@ -198,12 +198,12 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
 
     // Install EventualConsistency
     const ecPlugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         urls: ['clicks']
       },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
     await database.usePlugin(ecPlugin);
 

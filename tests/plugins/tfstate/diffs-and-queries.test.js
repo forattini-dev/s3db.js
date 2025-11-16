@@ -21,7 +21,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false, trackDiffs: true });
+      plugin = new TfStatePlugin({ logLevel: 'silent', asyncPartitions: false, trackDiffs: true });
       await plugin.install(database);
     });
 
@@ -184,7 +184,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
     });
 
     test('should not track diffs when disabled', async () => {
-      const noDiffPlugin = new TfStatePlugin({ verbose: false, asyncPartitions: false, trackDiffs: false });
+      const noDiffPlugin = new TfStatePlugin({ logLevel: 'silent', asyncPartitions: false, trackDiffs: false });
       await noDiffPlugin.install(database);
 
       const stateFile = createStateFile(tempDir, 1, [
@@ -201,7 +201,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
+      plugin = new TfStatePlugin({ logLevel: 'silent', asyncPartitions: false });
       await plugin.install(database);
     });
 
@@ -300,7 +300,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false });
+      plugin = new TfStatePlugin({ logLevel: 'silent', asyncPartitions: false });
       await plugin.install(database);
     });
 
@@ -347,7 +347,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
 
     test('should track filtered resources separately', async () => {
       const filterPlugin = new TfStatePlugin({
-      verbose: false,asyncPartitions: false,
+      logLevel: 'silent',asyncPartitions: false,
         filters: { types: ['aws_instance'] },
       });
       await filterPlugin.install(database);
@@ -369,7 +369,7 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
     let plugin;
 
     beforeEach(async () => {
-      plugin = new TfStatePlugin({ verbose: false, asyncPartitions: false, trackDiffs: true });
+      plugin = new TfStatePlugin({ logLevel: 'silent', asyncPartitions: false, trackDiffs: true });
       await plugin.install(database);
     });
 

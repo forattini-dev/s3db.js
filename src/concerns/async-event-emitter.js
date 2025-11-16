@@ -5,13 +5,13 @@ class AsyncEventEmitter extends EventEmitter {
   constructor(options = {}) {
     super();
     this._asyncMode = true;
-    this.verbose = Boolean(options.verbose);
+    this.logLevel = options.logLevel || 'info';
 
     // 🪵 Logger initialization
     if (options.logger) {
       this.logger = options.logger;
     } else {
-      const logLevel = this.verbose ? 'debug' : 'info';
+      const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'AsyncEventEmitter', level: logLevel });
     }
   }

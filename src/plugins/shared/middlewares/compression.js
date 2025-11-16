@@ -16,14 +16,14 @@ const brotliAsync = promisify(brotliCompress);
  * @param {Object} config - Compression configuration
  * @param {number} config.threshold - Minimum size in bytes to compress
  * @param {number} config.level - Compression level (1-9)
- * @param {boolean} config.verbose - Enable verbose logging
+ * @param {boolean} config.logLevel - Enable verbose logging
  * @returns {Function} Hono middleware
  */
 export function createCompressionMiddleware(config = {}) {
   const {
     threshold = 1024, // 1KB
     level = 6,
-    verbose = false
+    logLevel = 'info'
   } = config;
 
   // Content types that should NOT be compressed (already compressed)
@@ -109,7 +109,7 @@ export function createCompressionMiddleware(config = {}) {
 
     } catch (err) {
       // Compression failed, log and continue with uncompressed response
-      if (verbose) {
+      if (logLevel === 'debug' || logLevel === 'trace') {
         this.logger.error('[Compression] Error:', err.message);
       }
     }

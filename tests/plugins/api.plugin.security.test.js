@@ -42,7 +42,7 @@ describe.skip('API Plugin - Security Tests', () => {
     const port = 3300;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-jwt-security', { verbose: false });
+      db = createDatabaseForTest('api-jwt-security', { logLevel: 'silent' });
       await db.connect();
 
       // Create users resource
@@ -79,9 +79,9 @@ describe.skip('API Plugin - Security Tests', () => {
       });
 
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         auth: {
           driver: 'jwt',
           resource: 'users',
@@ -384,7 +384,7 @@ describe.skip('API Plugin - Security Tests', () => {
     const port = 3301;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-basic-security', { verbose: false });
+      db = createDatabaseForTest('api-basic-security', { logLevel: 'silent' });
       await db.connect();
 
       await db.createResource({
@@ -417,9 +417,9 @@ describe.skip('API Plugin - Security Tests', () => {
       });
 
       apiPlugin = new ApiPlugin({
-      verbose: false,
+      logLevel: 'silent',
         port,
-        verbose: false,
+        logLevel: 'silent',
         auth: {
           driver: 'basic',
           resource: 'accounts',

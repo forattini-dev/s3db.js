@@ -27,7 +27,7 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
 
     // Add EventualConsistencyPlugin with analytics enabled
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: {
         wallets: ['balance']
       },
@@ -294,7 +294,7 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
   describe('Error Handling', () => {
     it('should throw error when analytics not enabled', async () => {
       const pluginNoAnalytics = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
         resources: {
           wallets: ['balance']
         }

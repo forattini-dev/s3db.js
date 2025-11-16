@@ -29,7 +29,7 @@ new S3QueuePlugin({
 
   // === Lifecycle ===
   autoStart: true,                // Start workers immediately
-  verbose: false,                 // Enable debug logging
+  logLevel: 'silent',                 // Enable debug logging
 
   // === Callbacks ===
   onError: (error, record) => {

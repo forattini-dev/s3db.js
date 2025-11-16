@@ -36,7 +36,7 @@ export class MetricsCollector {
   constructor(options = {}) {
     this.options = {
       enabled: options.enabled !== false, // Enabled by default
-      verbose: options.verbose || false,
+      logLevel: options.logLevel || 'info',
       maxPathsTracked: options.maxPathsTracked || 100, // Limit memory usage
       resetInterval: options.resetInterval || 300000, // Reset every 5 minutes
       format: options.format || 'json'
@@ -53,7 +53,7 @@ export class MetricsCollector {
       this.cronManager.scheduleInterval(
         this.options.resetInterval,
         () => {
-          if (this.options.verbose) {
+          if (this.options.logLevel) {
             logger.info('[Metrics] Auto-resetting metrics');
           }
           this.reset();
@@ -138,7 +138,7 @@ export class MetricsCollector {
       metrics.durations.shift();
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       logger.info(`[Metrics] Request: ${method} ${path} ${status} (${duration}ms)`);
     }
   }
@@ -169,7 +169,7 @@ export class MetricsCollector {
       metrics.byMethod[method].failure++;
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       logger.info(`[Metrics] Auth: ${method} ${success ? 'success' : 'failure'}`);
     }
   }
@@ -194,7 +194,7 @@ export class MetricsCollector {
     }
     metrics.byResource[resource][action]++;
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       logger.info(`[Metrics] Resource: ${resource} ${action}`);
     }
   }
@@ -214,7 +214,7 @@ export class MetricsCollector {
       metrics.newUsers++;
     }
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       logger.info(`[Metrics] User: ${action}`);
     }
   }
@@ -231,7 +231,7 @@ export class MetricsCollector {
     metrics.total++;
     metrics.byType[type] = (metrics.byType[type] || 0) + 1;
 
-    if (this.options.verbose) {
+    if (this.options.logLevel) {
       logger.info(`[Metrics] Error: ${type} - ${error}`);
     }
   }

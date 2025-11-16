@@ -191,7 +191,7 @@ export function validateProviderCompatibility(discoveryDoc, config) {
  * @param {Object} options - Logging options
  */
 export function logProviderCompatibility(result, options = {}) {
-  const { verbose = false, throwOnError = false } = options;
+  const { logLevel = 'info', throwOnError = false } = options;
 
   if (result.errors.length > 0) {
     logger.error('[OIDC] Provider compatibility ERRORS:');
@@ -204,12 +204,12 @@ export function logProviderCompatibility(result, options = {}) {
     }
   }
 
-  if (result.warnings.length > 0 && verbose) {
+  if (result.warnings.length > 0 && (logLevel === 'debug' || logLevel === 'trace')) {
     logger.warn('[OIDC] Provider compatibility warnings:');
     result.warnings.forEach(warn => logger.warn(`  ⚠️  ${warn}`));
   }
 
-  if (result.errors.length === 0 && result.warnings.length === 0 && verbose) {
+  if (result.errors.length === 0 && result.warnings.length === 0 && (logLevel === 'debug' || logLevel === 'trace')) {
     logger.info('[OIDC] ✅ Provider compatibility validated successfully');
   }
 }

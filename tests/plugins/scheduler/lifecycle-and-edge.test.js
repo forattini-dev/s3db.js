@@ -172,7 +172,7 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
 
     it('should handle timezone edge cases', () => {
       const timezonePlugin = new SchedulerPlugin({
-      verbose: false,timezone: 'America/Sao_Paulo',
+      logLevel: 'silent',timezone: 'America/Sao_Paulo',
         jobs: {
           test: { schedule: '@daily', action: () => {} },
         },

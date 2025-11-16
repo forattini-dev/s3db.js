@@ -30,10 +30,10 @@ describe('EventualConsistencyPlugin - Garbage Collection Coverage', () => {
     });
 
     plugin = new EventualConsistencyPlugin({
-      verbose: false,
+      logLevel: 'silent',
       resources: { urls: ['clicks'] },
       consolidation: { mode: 'async', auto: false },
-      verbose: false
+      logLevel: 'silent'
     });
 
     await database.usePlugin(plugin);
