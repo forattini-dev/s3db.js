@@ -26,20 +26,11 @@ const ensureAssigned = (context, key, value) => {
  * @returns {object} normalized options object.
  */
 export function normalizePluginOptions(plugin, options = {}, fallback = {}) {
-  // Handle verbose → logLevel migration
-  let logLevel = pickOr(options.logLevel, pickOr(fallback.logLevel, 'info'));
-
-  // Backward compatibility: verbose → logLevel
-  if (options.verbose !== undefined) {
-    const suggestedLevel = options.verbose ? 'debug' : 'info';
-    logLevel = suggestedLevel;
-    // Warning will be logged by plugin if logger is available
-  }
+  const logLevel = pickOr(options.logLevel, pickOr(fallback.logLevel, 'info'));
 
   const normalized = {
     ...options,
     logLevel,
-    verbose: options.verbose, // Keep for backward compatibility detection
     resources: pickOr(options.resources, pickOr(fallback.resources, NULLISH)),
     database: pickOr(options.database, pickOr(fallback.database, NULLISH)),
     client: pickOr(options.client, pickOr(fallback.client, NULLISH))
@@ -50,7 +41,6 @@ export function normalizePluginOptions(plugin, options = {}, fallback = {}) {
   if (normalized.client === NULLISH) normalized.client = null;
 
   ensureAssigned(plugin, 'logLevel', normalized.logLevel);
-  ensureAssigned(plugin, 'verbose', normalized.verbose); // Keep for backward compat
   ensureAssigned(plugin, 'resources', normalized.resources === null ? NULLISH : normalized.resources);
   ensureAssigned(plugin, 'database', normalized.database === null ? NULLISH : normalized.database);
   ensureAssigned(plugin, 'client', normalized.client === null ? NULLISH : normalized.client);

@@ -187,7 +187,7 @@ export class ApiServer {
         await this._setupOIDCRoutes(oidcDriver.config);
       }
 
-      const authMiddleware = this._createAuthMiddleware();
+      const authMiddleware = await this._createAuthMiddleware();
 
       // ⚠️ IMPORTANT: Setup documentation routes BEFORE router mounting
       // This ensures /docs and /openapi.json are registered before catch-all routes like /:urlId
@@ -698,7 +698,7 @@ export class ApiServer {
     }
   }
 
-  _createAuthMiddleware() {
+  async _createAuthMiddleware() {
     const { database, auth } = this.options;
     const { drivers, resource: defaultResourceName, pathAuth, pathRules } = auth;
 
@@ -725,6 +725,7 @@ export class ApiServer {
       drivers,
       authResource,
       oidcMiddleware: this.oidcMiddleware || null,
+      database,
       pathRules,
       pathAuth,
       events: this.events,
@@ -732,7 +733,7 @@ export class ApiServer {
     });
 
     try {
-      return strategy.createMiddleware();
+      return await strategy.createMiddleware();
     } catch (err) {
       this.logger.error({ error: err.message }, 'Failed to create auth middleware');
       throw err;

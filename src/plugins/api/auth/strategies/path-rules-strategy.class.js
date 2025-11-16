@@ -9,20 +9,20 @@
 
 import { BaseAuthStrategy } from './base-strategy.class.js';
 import { createPathBasedAuthMiddleware } from '../path-auth-matcher.js';
-import { jwtAuth } from '../jwt-auth.js';
-import { apiKeyAuth } from '../api-key-auth.js';
-import { basicAuth } from '../basic-auth.js';
+import { createJWTHandler } from '../jwt-auth.js';
+import { createApiKeyHandler } from '../api-key-auth.js';
+import { createBasicAuthHandler } from '../basic-auth.js';
 import { createOAuth2Handler } from '../oauth2-auth.js';
 
 export class PathRulesAuthStrategy extends BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, pathRules, events, verbose }) {
-    super({ drivers, authResource, oidcMiddleware, verbose });
+  constructor({ drivers, authResource, oidcMiddleware, database, pathRules, events, verbose }) {
+    super({ drivers, authResource, oidcMiddleware, database, verbose });
     this.pathRules = pathRules;
     this.events = events;
   }
 
-  createMiddleware() {
-    // Build auth middlewares map by driver type
+  async createMiddleware() {
+    // Build auth middlewares map by driver type (async)
     const authMiddlewares = {};
 
     for (const driverDef of this.drivers) {
@@ -44,45 +44,27 @@ export class PathRulesAuthStrategy extends BaseAuthStrategy {
 
       // JWT
       if (driverType === 'jwt') {
-        authMiddlewares.jwt = jwtAuth({
-          secret: driverConfig.jwtSecret || driverConfig.secret,
-          expiresIn: driverConfig.jwtExpiresIn || driverConfig.expiresIn || '7d',
-          usersResource: this.authResource,
-          optional: true
-        });
+        authMiddlewares.jwt = await createJWTHandler(driverConfig, this.database);
       }
 
       // API Key
       if (driverType === 'apiKey') {
-        authMiddlewares.apiKey = apiKeyAuth({
-          headerName: driverConfig.headerName || 'X-API-Key',
-          usersResource: this.authResource,
-          optional: true
-        });
+        authMiddlewares.apiKey = await createApiKeyHandler(driverConfig, this.database);
       }
 
       // Basic Auth
       if (driverType === 'basic') {
-        authMiddlewares.basic = basicAuth({
-          authResource: this.authResource,
-          usernameField: driverConfig.usernameField || 'email',
-          passwordField: driverConfig.passwordField || 'password',
-          passphrase: driverConfig.passphrase || 'secret',
-          adminUser: driverConfig.adminUser || null,
-          // Pass-through cookie fallback options if provided
-          cookieName: driverConfig.cookieName || null,
-          tokenField: driverConfig.tokenField || 'apiToken',
-          optional: true
-        });
+        authMiddlewares.basic = await createBasicAuthHandler(driverConfig, this.database);
       }
 
       // OAuth2
       if (driverType === 'oauth2') {
-        const oauth2Handler = createOAuth2Handler(driverConfig, this.authResource);
+        const oauth2Handler = await createOAuth2Handler(driverConfig, this.database);
         authMiddlewares.oauth2 = async (c, next) => {
           const user = await oauth2Handler(c);
           if (user) {
             c.set('user', user);
+            c.set('authMethod', 'oauth2');
             return await next();
           }
         };

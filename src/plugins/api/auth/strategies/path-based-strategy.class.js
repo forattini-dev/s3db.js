@@ -10,20 +10,35 @@ import { createAuthMiddleware } from '../index.js';
 import { findBestMatch } from '../../utils/path-matcher.js';
 
 export class PathBasedAuthStrategy extends BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, pathAuth, verbose }) {
-    super({ drivers, authResource, oidcMiddleware, verbose });
+  constructor({ drivers, authResource, oidcMiddleware, database, pathAuth, verbose }) {
+    super({ drivers, authResource, oidcMiddleware, database, verbose });
     this.pathAuth = pathAuth;
-
-    this.logger.warn(
-      '[ApiPlugin] DEPRECATED: The pathAuth configuration is deprecated. ' +
-      'Use pathRules instead: { pathRules: [{ path: "/...", drivers: [...], required: true }] }. ' +
-      'This will be removed in v17.0.'
-    );
   }
 
-  createMiddleware() {
+  async createMiddleware() {
     // 🪵 Debug: using legacy pathAuth system
     this.logger.debug('Using legacy pathAuth system');
+
+    // Pre-create global auth middleware
+    const methods = this.drivers
+      .map(d => d.driver)
+      .filter(d => d !== 'oauth2-server' && d !== 'oidc');
+
+    const driverConfigs = this.extractDriverConfigs(null);
+
+    const globalAuth = await createAuthMiddleware({
+      methods,
+      jwt: driverConfigs.jwt,
+      apiKey: driverConfigs.apiKey,
+      basic: driverConfigs.basic,
+      oauth2: driverConfigs.oauth2,
+      oidc: this.oidcMiddleware || null,
+      database: this.database,
+      optional: true
+    });
+
+    // Pre-create rule-specific middlewares (cached by rule)
+    const ruleMiddlewares = new Map();
 
     return async (c, next) => {
       const requestPath = c.req.path;
@@ -40,23 +55,6 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
 
       // No rule matched - use global auth (all drivers, optional)
       if (!matchedRule) {
-        const methods = this.drivers
-          .map(d => d.driver)
-          .filter(d => d !== 'oauth2-server' && d !== 'oidc');
-
-        const driverConfigs = this.extractDriverConfigs(null);
-
-        const globalAuth = createAuthMiddleware({
-          methods,
-          jwt: driverConfigs.jwt,
-          apiKey: driverConfigs.apiKey,
-          basic: driverConfigs.basic,
-          oauth2: driverConfigs.oauth2,
-          oidc: this.oidcMiddleware || null,
-          usersResource: this.authResource,
-          optional: true
-        });
-
         return await globalAuth(c, next);
       }
 
@@ -66,22 +64,27 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
         return await next();
       }
 
-      // Auth required - apply with specific drivers from rule
-      const ruleMethods = matchedRule.drivers || [];
-      const driverConfigs = this.extractDriverConfigs(ruleMethods);
+      // Auth required - get or create middleware for this rule
+      const ruleKey = JSON.stringify(matchedRule);
+      if (!ruleMiddlewares.has(ruleKey)) {
+        const ruleMethods = matchedRule.drivers || [];
+        const ruleConfigs = this.extractDriverConfigs(ruleMethods);
 
-      const ruleAuth = createAuthMiddleware({
-        methods: ruleMethods,
-        jwt: driverConfigs.jwt,
-        apiKey: driverConfigs.apiKey,
-        basic: driverConfigs.basic,
-        oauth2: driverConfigs.oauth2,
-        oidc: this.oidcMiddleware || null,
-        usersResource: this.authResource,
-        optional: false  // Auth is required
-      });
+        const ruleAuth = await createAuthMiddleware({
+          methods: ruleMethods,
+          jwt: ruleConfigs.jwt,
+          apiKey: ruleConfigs.apiKey,
+          basic: ruleConfigs.basic,
+          oauth2: ruleConfigs.oauth2,
+          oidc: this.oidcMiddleware || null,
+          database: this.database,
+          optional: false
+        });
 
-      return await ruleAuth(c, next);
+        ruleMiddlewares.set(ruleKey, ruleAuth);
+      }
+
+      return await ruleMiddlewares.get(ruleKey)(c, next);
     };
   }
 }
