@@ -63,6 +63,7 @@ export function generateDiscoveryDocument(options = {}) {
 
     // Claims
     claims_supported: [
+      // Standard OIDC claims
       'sub',
       'iss',
       'aud',
@@ -76,7 +77,19 @@ export function generateDiscoveryDocument(options = {}) {
       'given_name',
       'family_name',
       'picture',
-      'locale'
+      'locale',
+
+      // Standard OAuth2 claims
+      'client_id',
+      'scope',
+
+      // Extended claims for service accounts and users
+      'token_use',           // Distinguishes 'service', 'user', 'refresh'
+      'service_account',     // Service account metadata (for client_credentials)
+      'user',               // User profile metadata (for authorization_code)
+      'tenantId',           // Multi-tenancy support
+      'roles',              // User roles
+      'metadata'            // Custom metadata field
     ],
 
     // Code challenge methods (PKCE)

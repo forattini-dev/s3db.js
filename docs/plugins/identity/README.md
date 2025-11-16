@@ -1,8 +1,10 @@
 # 🔐 Identity Plugin
 
-> **Production-ready OAuth2/OIDC Authorization Server for s3db.js**
+> **Standards-compliant OAuth2/OIDC Authorization Server for s3db.js**
 >
-> **Navigation:** [Getting Started →](./guides/getting-started.md) | [Configuration →](./guides/configuration.md) | [Usage Patterns →](./guides/usage-patterns.md) | [Best Practices →](./guides/best-practices.md)
+> Compatible with **any OIDC client library** (Passport.js, Spring Security, go-oidc, authlib). Use it like Google OAuth, Azure AD, or Keycloak — but self-hosted on S3.
+>
+> **Navigation:** [Getting Started →](./guides/getting-started.md) | [OIDC Integration →](./OIDC_INTEGRATION.md) | [Configuration →](./guides/configuration.md) | [Best Practices →](./guides/best-practices.md)
 
 ---
 
@@ -29,10 +31,14 @@ await db.usePlugin(new IdentityPlugin({
 - ✅ **Purpose-scoped RSA keys** (separate signing and challenge keys)
 - ✅ **Built-in login UI** (HTML form for authorization_code flow)
 - ✅ **Enterprise features** (token revocation, dynamic client registration, rate limiting)
-- ✅ **Adaptive rate limiting** (per login/token/authorize endpoint)
-- ✅ **Sanitized audit logging** (PII-safe event trails)
-- ✅ **Integration metadata** for S3DB plugins + remote services (`/.well-known/s3db-identity.json`)
 - ✅ **Service-account lifecycle UI** with one-click rotation + audit logs
+
+**Compatible with:**
+- ✅ **Any OIDC library** (Passport.js, oidc-client, Spring Security, go-oidc, authlib)
+- ✅ **Standard tools** (Postman, Insomnia, OAuth2 Proxy, Keycloak adapters)
+- ✅ **Cloud services** that support custom OIDC providers
+
+> **See [OIDC Integration Guide](./OIDC_INTEGRATION.md)** for examples with Node.js, Python, Go, and more.
 
 ---
 
