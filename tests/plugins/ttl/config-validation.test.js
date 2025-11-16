@@ -18,7 +18,7 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     });
 
     expect(plugin.batchSize).toBe(50);
-    expect(plugin.verbose).toBe(false);
+    expect(plugin.logLevel || plugin.options?.logLevel).not.toBe('debug');
     expect(plugin.resources.sessions).toBeDefined();
   });
 

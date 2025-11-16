@@ -355,10 +355,11 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     });
 
     it('should authenticate with JWT from admin_users', async () => {
+      // Note: Don't manually encrypt - resource has 'secret' field type which auto-encrypts
       await db.resources.admin_users.insert({
         id: 'admin1',
         email: 'admin@test.com',
-        password: await encrypt('admin123', 'secret'),
+        password: 'admin123',  // Plain password - will be auto-encrypted by S3DB
         role: 'admin'
       });
 
@@ -373,6 +374,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
           passphrase: 'secret'
         }
       );
+
+      if (!loginResult.success) {
+        console.log('Login failed:', loginResult);
+      }
 
       expect(loginResult.success).toBe(true);
 

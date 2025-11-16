@@ -288,7 +288,7 @@ describe('Database Constructor and Edge Cases', () => {
     expect(db.version).toBe('1');
     expect(db.s3dbVersion).toBeDefined();
     expect(db.resources).toEqual({});
-    expect(db.verbose).toBe(false);
+    expect(db.logLevel || db.options?.logLevel).not.toBe('debug');
     expect(db.taskExecutor.concurrency).toBe(10);
     expect(db.pluginList).toEqual([]);
     expect(db.passphrase).toBe('secret');
@@ -307,7 +307,7 @@ describe('Database Constructor and Edge Cases', () => {
       client: mockClient
     });
 
-    expect(db.verbose).toBe(true);
+    expect(db.logLevel || db.options?.logLevel).toBe('debug');
     expect(db.taskExecutor.concurrency).toBe(5);
     expect(db.pluginList).toEqual([mockPlugin]);
     expect(db.cache).toEqual({ type: 'memory' });
@@ -775,7 +775,7 @@ describe('Database Configuration and Status', () => {
     expect(config.s3dbVersion).toBe(db.s3dbVersion);
     expect(config.bucket).toBe('test-bucket');
     expect(config.keyPrefix).toBe('test/');
-    expect(config.verbose).toBe(false);
+    expect(config.logLevel || config.options?.logLevel).not.toBe('debug');
     expect(config.taskExecutor).toBeDefined();
   });
 

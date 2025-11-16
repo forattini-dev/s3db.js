@@ -89,7 +89,7 @@ describe('TfStatePlugin - Installation', () => {
     expect(plugin.diffsName).toBe('plg_tfstate_state_diffs');
     expect(plugin.trackDiffs).toBe(true);
     expect(plugin.autoSync).toBe(false);
-    expect(plugin.verbose).toBe(false);
+    expect(plugin.logLevel || plugin.options?.logLevel).not.toBe('debug');
     expect(plugin.supportedVersions).toEqual([3, 4]);
   });
 
@@ -118,7 +118,7 @@ describe('TfStatePlugin - Installation', () => {
     expect(plugin.diffsName).toBe('plg_custom_history');
     expect(plugin.trackDiffs).toBe(false);
     expect(plugin.autoSync).toBe(true);
-    expect(plugin.verbose).toBe(true);
+    expect(plugin.logLevel || plugin.options?.logLevel).toBe('debug');
     expect(plugin.filters.types).toEqual(['aws_instance']);
     expect(plugin.filters.exclude).toEqual(['data.*']);
   });

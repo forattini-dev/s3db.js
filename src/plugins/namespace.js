@@ -68,15 +68,15 @@ export async function listPluginNamespaces(storage, pluginPrefix) {
  * // [ReconPlugin] Detected 2 existing namespace(s): default, stealth
  * // [ReconPlugin] Using namespace: "uptime"
  */
-export function warnNamespaceUsage(pluginName, currentNamespace, existingNamespaces = []) {
+export function warnNamespaceUsage(pluginName, currentNamespace, existingNamespaces = [], logger = console) {
   if (existingNamespaces.length > 0) {
-    this.logger.warn(
+    logger.warn(
       `[${pluginName}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
     );
   }
 
   const namespaceDisplay = currentNamespace === '' ? '(none)' : `"${currentNamespace}"`;
-  this.logger.warn(`[${pluginName}] Using namespace: ${namespaceDisplay}`);
+  logger.warn(`[${pluginName}] Using namespace: ${namespaceDisplay}`);
 }
 
 /**
@@ -102,9 +102,9 @@ export function warnNamespaceUsage(pluginName, currentNamespace, existingNamespa
  * // [ReconPlugin] Using namespace: "uptime"
  * // Returns: ['default', 'stealth']
  */
-export async function detectAndWarnNamespaces(storage, pluginName, pluginPrefix, currentNamespace) {
+export async function detectAndWarnNamespaces(storage, pluginName, pluginPrefix, currentNamespace, logger = console) {
   const existingNamespaces = await listPluginNamespaces(storage, pluginPrefix);
-  warnNamespaceUsage(pluginName, currentNamespace, existingNamespaces);
+  warnNamespaceUsage(pluginName, currentNamespace, existingNamespaces, logger);
   return existingNamespaces;
 }
 

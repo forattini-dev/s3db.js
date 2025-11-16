@@ -3,104 +3,9 @@ import { nanoid } from 'nanoid'
 import { TaskExecutor } from '../concurrency/task-executor.interface.js' // eslint-disable-line no-unused-vars
 import { AdaptiveTuning } from '../concerns/adaptive-tuning.js'
 import { FifoTaskQueue } from './concerns/fifo-task-queue.js'
+import { PriorityTaskQueue } from './concerns/priority-task-queue.js'
 import { extractLengthHint, deriveSignature } from './concerns/task-signature.js'
 import { SignatureStats } from './concerns/signature-stats.js'
-
-class PriorityTaskQueue {
-  constructor () {
-    this.heap = []
-    this.counter = 0
-  }
-
-  get length () {
-    return this.heap.length
-  }
-
-  enqueue (task) {
-    const node = {
-      task,
-      priority: task.priority || 0,
-      order: this.counter++
-    }
-    this.heap.push(node)
-    this._bubbleUp(this.heap.length - 1)
-  }
-
-  dequeue () {
-    if (this.heap.length === 0) {
-      return null
-    }
-    const topNode = this.heap[0]
-    const lastNode = this.heap.pop()
-    if (this.heap.length > 0 && lastNode) {
-      this.heap[0] = lastNode
-      this._bubbleDown(0)
-    }
-    return topNode.task
-  }
-
-  flush (callback) {
-    if (typeof callback === 'function') {
-      for (const node of this.heap) {
-        callback(node.task)
-      }
-    }
-    this.clear()
-  }
-
-  clear () {
-    this.heap.length = 0
-  }
-
-  _bubbleUp (index) {
-    while (index > 0) {
-      const parentIndex = Math.floor((index - 1) / 2)
-      if (this._isHigherPriority(this.heap[parentIndex], this.heap[index])) {
-        break
-      }
-      this._swap(index, parentIndex)
-      index = parentIndex
-    }
-  }
-
-  _bubbleDown (index) {
-    const length = this.heap.length
-    while (true) {
-      const left = index * 2 + 1
-      const right = index * 2 + 2
-      let largest = index
-
-      if (left < length && this._isHigherPriority(this.heap[left], this.heap[largest])) {
-        largest = left
-      }
-
-      if (right < length && this._isHigherPriority(this.heap[right], this.heap[largest])) {
-        largest = right
-      }
-
-      if (largest === index) {
-        break
-      }
-
-      this._swap(index, largest)
-      index = largest
-    }
-  }
-
-  _isHigherPriority (nodeA, nodeB) {
-    if (!nodeB) return true
-    if (nodeA.priority === nodeB.priority) {
-      return nodeA.order < nodeB.order
-    }
-    return nodeA.priority > nodeB.priority
-  }
-
-  _swap (i, j) {
-    const tmp = this.heap[i]
-    this.heap[i] = this.heap[j]
-    this.heap[j] = tmp
-  }
-}
 
 /**
  * TasksRunner - Temporary batch processor for custom workflows
@@ -197,7 +102,7 @@ export class TasksRunner extends EventEmitter {
     this.retryableErrors = options.retryableErrors || []
 
     this._queue = this.lightMode ? new FifoTaskQueue() : new PriorityTaskQueue()
-    this.active = new Map()
+    this.active = new Set()
     this.paused = false
     this.stopped = false
     this._activeWaiters = []
@@ -442,7 +347,9 @@ export class TasksRunner extends EventEmitter {
       index++
 
       // Don't consume next item until there's a slot
-      await this._waitForSlot()
+      if (this._currentActiveCount() >= this.concurrency) {
+        await this._waitForSlot()
+      }
     }
 
     // Wait for all remaining tasks
@@ -496,7 +403,9 @@ export class TasksRunner extends EventEmitter {
           options.onItemError?.(item, error)
         })
 
-      await this._waitForSlot()
+      if (this._currentActiveCount() >= this.concurrency) {
+        await this._waitForSlot()
+      }
     }
 
     await this.drain()
@@ -521,7 +430,7 @@ export class TasksRunner extends EventEmitter {
 
       const taskPromise = this._executeTaskWithRetry(task)
 
-      this.active.set(taskPromise, task)
+      this.active.add(taskPromise)
       this.stats.activeCount = this.active.size
       this._safeEmit('taskStart', task)
 
@@ -721,7 +630,7 @@ export class TasksRunner extends EventEmitter {
   }
 
   async _runSingleAttempt (task) {
-    const operation = Promise.resolve().then(() => task.fn())
+    const operation = task.fn()
     if (!this._shouldEnforceTimeout(task.timeout)) {
       return await operation
     }

@@ -6,6 +6,7 @@ import { TaskExecutor } from '../concurrency/task-executor.interface.js'
 import { AdaptiveTuning } from '../concerns/adaptive-tuning.js'
 import { SignatureStats } from './concerns/signature-stats.js'
 import { FifoTaskQueue } from './concerns/fifo-task-queue.js'
+import { PriorityTaskQueue } from './concerns/priority-task-queue.js'
 import { deriveSignature } from './concerns/task-signature.js'
 
 const INTERNAL_DEFER = '__taskExecutorInternalDefer'
@@ -704,7 +705,7 @@ export class TasksPool extends EventEmitter {
     task.controller = controller || null
     const attemptStartTime = Date.now()
     const context = this._buildTaskContext(task, controller)
-    const executionPromise = Promise.resolve().then(() => task.fn(context))
+    const executionPromise = task.fn(context)
     const result = this._shouldEnforceTimeout(task.timeout)
       ? await this._executeWithTimeout(executionPromise, task.timeout, task, controller)
       : await executionPromise
@@ -1319,125 +1320,6 @@ export class TasksPool extends EventEmitter {
       this.setConcurrency(tuned)
       this._lastTunedConcurrency = tuned
     }
-  }
-}
-
-class PriorityTaskQueue {
-  constructor (options = {}) {
-    this.heap = []
-    this.counter = 0
-    this.agingMs = options.agingMs ?? 0
-    this.maxAgingBoost = options.maxAgingBoost ?? 0
-    this.agingMultiplier = 1
-  }
-
-  get length () {
-    return this.heap.length
-  }
-
-  enqueue (task) {
-    const node = {
-      task,
-      priority: task.priority || 0,
-      order: this.counter++,
-      enqueuedAt: Date.now()
-    }
-    this.heap.push(node)
-    this._bubbleUp(this.heap.length - 1)
-  }
-
-  dequeue () {
-    if (this.heap.length === 0) {
-      return null
-    }
-    const topNode = this.heap[0]
-    const lastNode = this.heap.pop()
-    if (this.heap.length > 0 && lastNode) {
-      this.heap[0] = lastNode
-      this._bubbleDown(0)
-    }
-    return topNode.task
-  }
-
-  flush (callback) {
-    if (typeof callback === 'function') {
-      for (const node of this.heap) {
-        callback(node.task)
-      }
-    }
-    this.clear()
-  }
-
-  clear () {
-    this.heap.length = 0
-  }
-
-  setAgingMultiplier (multiplier) {
-    if (typeof multiplier !== 'number' || Number.isNaN(multiplier)) {
-      return
-    }
-    this.agingMultiplier = Math.min(4, Math.max(0.25, multiplier))
-  }
-
-  _bubbleUp (index) {
-    while (index > 0) {
-      const parentIndex = Math.floor((index - 1) / 2)
-      if (this._isHigherPriority(this.heap[parentIndex], this.heap[index])) {
-        break
-      }
-      this._swap(index, parentIndex)
-      index = parentIndex
-    }
-  }
-
-  _bubbleDown (index) {
-    const length = this.heap.length
-    while (true) {
-      const left = index * 2 + 1
-      const right = index * 2 + 2
-      let largest = index
-
-      if (left < length && this._isHigherPriority(this.heap[left], this.heap[largest])) {
-        largest = left
-      }
-
-      if (right < length && this._isHigherPriority(this.heap[right], this.heap[largest])) {
-        largest = right
-      }
-
-      if (largest === index) {
-        break
-      }
-
-      this._swap(index, largest)
-      index = largest
-    }
-  }
-
-  _isHigherPriority (nodeA, nodeB) {
-    if (!nodeB) return true
-    const priorityA = this._effectivePriority(nodeA)
-    const priorityB = this._effectivePriority(nodeB)
-    if (priorityA === priorityB) {
-      return nodeA.order < nodeB.order
-    }
-    return priorityA > priorityB
-  }
-
-  _swap (i, j) {
-    const tmp = this.heap[i]
-    this.heap[i] = this.heap[j]
-    this.heap[j] = tmp
-  }
-
-  _effectivePriority (node) {
-    const agingBase = this.agingMs * this.agingMultiplier
-    if (!agingBase || this.maxAgingBoost <= 0) {
-      return node.priority
-    }
-    const waited = Math.max(0, Date.now() - node.enqueuedAt)
-    const bonus = Math.min(this.maxAgingBoost, waited / agingBase)
-    return node.priority + bonus
   }
 }
 

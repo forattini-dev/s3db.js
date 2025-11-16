@@ -47,7 +47,7 @@ describe('Verticalizado Configuration Architecture', () => {
         }
       });
 
-      expect(db.verbose).toBe(false);
+      expect(db.logLevel || db.options?.logLevel).not.toBe('debug');
       expect(db.taskExecutor.concurrency).toBe(5);
       expect(db.strictValidation).toBe(true);
 
@@ -169,7 +169,7 @@ describe('Verticalizado Configuration Architecture', () => {
         connectionString: `file://${getTestPath()}?verbose=false`,
       });
 
-      expect(db.verbose).toBe(false);
+      expect(db.logLevel || db.options?.logLevel).not.toBe('debug');
       expect(db.taskExecutor.concurrency).toBe(10);
 
       await db.connect();

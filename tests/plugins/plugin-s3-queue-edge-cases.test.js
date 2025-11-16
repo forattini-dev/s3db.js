@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';

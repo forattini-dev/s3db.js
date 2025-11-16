@@ -93,7 +93,8 @@ export class Database extends SafeEventEmitter {
     );
 
     // ✨ Database-level options (root level)
-    // Removed: this.verbose (migrated to this.logger.level)
+
+    this.logLevel = options.logLevel || options.loggerOptions?.level || 'info';
 
     // 🪵 Logger initialization (Pino-based, replaces verbose flag)
     // Precedence: custom logger > loggerOptions > env vars > defaults
