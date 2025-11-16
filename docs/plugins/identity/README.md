@@ -31,6 +31,8 @@ await db.usePlugin(new IdentityPlugin({
 - ✅ **Enterprise features** (token revocation, dynamic client registration, rate limiting)
 - ✅ **Adaptive rate limiting** (per login/token/authorize endpoint)
 - ✅ **Sanitized audit logging** (PII-safe event trails)
+- ✅ **Integration metadata** for S3DB plugins + remote services (`/.well-known/s3db-identity.json`)
+- ✅ **Service-account lifecycle UI** with one-click rotation + audit logs
 
 ---
 
@@ -165,6 +167,7 @@ All documentation is organized into focused guides:
 | `/oauth/introspect` | POST | Validate and inspect token |
 | `/oauth/revoke` | POST | Revoke token |
 | `/oauth/register` | POST | Dynamic client registration |
+| `/.well-known/s3db-identity.json` | GET | S3DB integration metadata (issuer, JWKS, resources, registration helpers) |
 
 ### Security by Default
 
@@ -176,6 +179,7 @@ All documentation is organized into focused guides:
 - ✅ CORS with credentials
 - ✅ Security headers (HSTS, CSP)
 - ✅ Audit logging (PII-safe)
+- ✅ **Service-account aware tokens** (explicit claims that distinguish humans vs clients)
 
 ### Enterprise Ready
 
@@ -186,6 +190,58 @@ All documentation is organized into focused guides:
 - ✅ Token key rotation
 - ✅ Graceful shutdown
 - ✅ Health checks
+- ✅ **White-label admin console** with service-account CRUD & rotation
+
+---
+
+## 🔗 Integration Metadata (for ApiPlugin & remote services)
+
+Identity publishes a machine-readable descriptor so other services know how to talk to it. You can fetch it in two ways:
+
+1. **In-process**: `db.pluginRegistry.identity.integration`
+2. **HTTPS**: `GET /.well-known/s3db-identity.json`
+
+Example response:
+
+```json
+{
+  "version": 1,
+  "issuedAt": "2024-05-25T18:32:10.000Z",
+  "cacheTtl": 3600,
+  "issuer": "https://auth.example.com",
+  "authorizationUrl": "https://auth.example.com/oauth/authorize",
+  "tokenUrl": "https://auth.example.com/oauth/token",
+  "userinfoUrl": "https://auth.example.com/oauth/userinfo",
+  "jwksUrl": "https://auth.example.com/.well-known/jwks.json",
+  "introspectionUrl": "https://auth.example.com/oauth/introspect",
+  "supportedScopes": ["openid","profile","email","read:api","write:api"],
+  "supportedGrantTypes": ["authorization_code","refresh_token","client_credentials","pkce"],
+  "resources": {
+    "users": "users",
+    "tenants": "tenants",
+    "clients": "plg_oauth_clients"
+  },
+  "clientRegistration": {
+    "url": "https://auth.example.com/oauth/register",
+    "supportedAuth": ["client_secret_post","client_secret_basic"]
+  }
+}
+```
+
+Use `cacheTtl`/`issuedAt` to decide when to refresh, and rely on HTTP `ETag` headers for conditional requests. When Identity runs side-by-side with ApiPlugin, the API reads the same object directly from the plugin registry.
+
+---
+
+## 🆔 Service Accounts & Admin UX
+
+The admin console (`/admin`) now includes a **Service Accounts** section:
+
+- Create OAuth clients with custom scopes, redirect URIs, and tenant scoping.
+- Rotate secrets with one click; the UI shows the new secret exactly once.
+- Toggle active/inactive status, list recent rotations, and review audit logs.
+- White-label ready (logo/colors/text come from `config.ui`), so the console feels native to your product.
+
+Tokens issued via `client_credentials` include a dedicated `service_account` block (clientId, name, scopes, audiences) plus `token_use: "service"`. User tokens carry `token_use: "user"` and user claims (sub/email/tenantId). This makes it trivial for downstream APIs to tell people from automation accounts.
 
 ---
 

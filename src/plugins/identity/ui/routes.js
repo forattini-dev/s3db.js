@@ -1602,6 +1602,7 @@ export function registerUIRoutes(app, plugin) {
     try {
       const body = await c.req.parseBody();
       const { name, redirectUris, grantTypes, allowedScopes, active } = body;
+      const user = c.get('user');
 
       if (!name) {
         return c.redirect(`/admin/clients/new?error=${encodeURIComponent('Client name is required')}`);
@@ -1638,6 +1639,24 @@ export function registerUIRoutes(app, plugin) {
           this.logger.error('[Identity Plugin] Failed to create client:', errClient);
         }
         return c.redirect(`/admin/clients/new?error=${encodeURIComponent('Failed to create client. Please try again.')}`);
+      }
+
+      // Emit audit event for service account creation
+      if (plugin.auditPlugin) {
+        await plugin.auditPlugin.log({
+          action: 'service_account_created',
+          userId: user?.id,
+          resource: 'oauth_clients',
+          resourceId: client.id,
+          metadata: {
+            clientId,
+            clientName: name.trim(),
+            createdBy: user?.email,
+            createdAt: new Date().toISOString(),
+            grantTypes: grantTypesArray,
+            scopes: allowedScopesArray
+          }
+        });
       }
 
       return c.redirect(`/admin/clients?success=${encodeURIComponent('Client created successfully. Client ID: ' + clientId + ' | Client Secret: ' + clientSecret + ' (Save this secret now - it cannot be displayed again!)')}`);
@@ -1734,6 +1753,10 @@ export function registerUIRoutes(app, plugin) {
   app.post('/admin/clients/:id/delete', adminOnly(sessionManager), async (c) => {
     try {
       const clientId = c.req.param('id');
+      const user = c.get('user');
+
+      // Fetch client for audit trail before deletion
+      const [okClient, , client] = await tryFn(() => plugin.oauth2ClientsResource.get(clientId));
 
       const [okDelete, errDelete] = await tryFn(() =>
         plugin.oauth2ClientsResource.delete(clientId)
@@ -1744,6 +1767,22 @@ export function registerUIRoutes(app, plugin) {
           this.logger.error('[Identity Plugin] Failed to delete client:', errDelete);
         }
         return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to delete client')}`);
+      }
+
+      // Emit audit event for service account deletion
+      if (plugin.auditPlugin && okClient) {
+        await plugin.auditPlugin.log({
+          action: 'service_account_deleted',
+          userId: user?.id,
+          resource: 'oauth_clients',
+          resourceId: clientId,
+          metadata: {
+            clientId: client.clientId,
+            clientName: client.name,
+            deletedBy: user?.email,
+            deletedAt: new Date().toISOString()
+          }
+        });
       }
 
       return c.redirect(`/admin/clients?success=${encodeURIComponent('Client deleted successfully')}`);
@@ -1760,6 +1799,14 @@ export function registerUIRoutes(app, plugin) {
   app.post('/admin/clients/:id/rotate-secret', adminOnly(sessionManager), async (c) => {
     try {
       const clientId = c.req.param('id');
+      const user = c.get('user');
+
+      // Fetch client for audit trail
+      const [okClient, , client] = await tryFn(() => plugin.oauth2ClientsResource.get(clientId));
+
+      if (!okClient) {
+        return c.redirect(`/admin/clients?error=${encodeURIComponent('Client not found')}`);
+      }
 
       // Generate new secret
       const newSecret = idGenerator() + idGenerator();
@@ -1775,6 +1822,21 @@ export function registerUIRoutes(app, plugin) {
           this.logger.error('[Identity Plugin] Failed to rotate secret:', errUpdate);
         }
         return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to rotate secret')}`);
+      }
+
+      // Emit audit event for service account secret rotation
+      if (plugin.auditPlugin) {
+        await plugin.auditPlugin.log({
+          action: 'service_account_secret_rotated',
+          userId: user?.id,
+          resource: 'oauth_clients',
+          resourceId: clientId,
+          metadata: {
+            clientName: client.name,
+            rotatedBy: user?.email,
+            rotatedAt: new Date().toISOString()
+          }
+        });
       }
 
       return c.redirect(`/admin/clients?success=${encodeURIComponent('Secret rotated successfully. New secret: ' + newSecret + ' (Save this now - it cannot be displayed again!)')}`);

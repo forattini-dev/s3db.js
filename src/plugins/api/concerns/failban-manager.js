@@ -135,7 +135,7 @@ export class FailbanManager {
     await this._loadBansIntoCache();
 
     // Setup cleanup timer for memory cache
-    this._setupCleanupTimer();
+    await this._setupCleanupTimer();
 
     if (this.options.logLevel) {
       this.logger.info('Initialized');
@@ -180,12 +180,7 @@ export class FailbanManager {
         }
       },
       behavior: 'body-overflow',
-      timestamps: true,
-      partitions: {
-        byExpiry: {
-          fields: { expiresAtCohort: 'string' }
-        }
-      }
+      timestamps: true
     }));
 
     if (!created) {
@@ -292,10 +287,10 @@ export class FailbanManager {
    * Setup cleanup timer for memory cache using CronManager
    * @private
    */
-  _setupCleanupTimer() {
+  async _setupCleanupTimer() {
     // ✅ Use CronManager with cron expression (every minute)
     const cronManager = getCronManager();
-    this.cleanupJobName = cronManager.scheduleCron(
+    this.cleanupJobName = await cronManager.schedule(
       '0 * * * * *',  // Every minute at :00 seconds
       () => {
         const now = Date.now();
@@ -720,7 +715,7 @@ export class FailbanManager {
     // ✅ Stop cron job using CronManager
     if (this.cleanupJobName) {
       const cronManager = getCronManager();
-      cronManager.stopCronJob(this.cleanupJobName);
+      cronManager.stop(this.cleanupJobName);
       this.cleanupJobName = null;
     }
 

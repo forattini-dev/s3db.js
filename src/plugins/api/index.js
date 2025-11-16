@@ -366,7 +366,18 @@ export class ApiPlugin extends Plugin {
       health: typeof options.health === 'object'
         ? options.health
         : { enabled: options.health !== false },
-      maxBodySize: options.maxBodySize || 10 * 1024 * 1024
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
+
+      // Identity Integration (delegate auth to IdentityPlugin)
+      identityIntegration: {
+        enabled: options.identityIntegration?.enabled === true,
+        url: options.identityIntegration?.url || null, // Remote Identity server URL
+        autoProvision: options.identityIntegration?.autoProvision !== false, // Auto-register OAuth client
+        require: options.identityIntegration?.require === true, // Fail if Identity unavailable
+        cacheTtl: options.identityIntegration?.cacheTtl || 3600, // Cache metadata for 1 hour
+        requireFreshMetadata: options.identityIntegration?.requireFreshMetadata === true,
+        client: options.identityIntegration?.client || null // Pre-configured OAuth client credentials
+      }
     };
 
     // Note: logLevel is already set above in config, no need to reassign
@@ -374,6 +385,11 @@ export class ApiPlugin extends Plugin {
 
     this.server = null;
     this.usersResource = null;
+
+    // Identity integration state
+    this.identityMode = false;
+    this.identityMetadata = null;
+    this.identityMetadataCache = null;
   }
 
   /**
@@ -498,6 +514,233 @@ export class ApiPlugin extends Plugin {
   }
 
   /**
+   * Create Identity context middleware
+   * Adds helpers for detecting service accounts vs users
+   * @private
+   */
+  _createIdentityContextMiddleware() {
+    return async (c, next) => {
+      // Create identity context object
+      const identityContext = {
+        /**
+         * Check if current request is from a service account
+         * @returns {boolean}
+         */
+        isServiceAccount: () => {
+          const user = c.get('user');
+          if (!user) return false;
+
+          // Check for service account marker in token
+          if (user.token_use === 'service') return true;
+          if (user.token_type === 'service') return true; // Legacy support
+          if (user.service_account) return true;
+          if (typeof user.sub === 'string' && user.sub.startsWith('sa:')) return true;
+
+          return false;
+        },
+
+        /**
+         * Check if current request is from a human user
+         * @returns {boolean}
+         */
+        isUser: () => {
+          const user = c.get('user');
+          if (!user) return false;
+
+          // Check for user marker in token
+          if (user.token_use === 'user') return true;
+          if (user.token_type === 'user') return true; // Legacy support
+          if (user.email) return true; // Users have email
+
+          return !identityContext.isServiceAccount();
+        },
+
+        /**
+         * Get service account metadata (if applicable)
+         * @returns {Object|null}
+         */
+        getServiceAccount: () => {
+          const user = c.get('user');
+          if (!user || !identityContext.isServiceAccount()) return null;
+
+          return user.service_account || {
+            clientId: user.sub?.replace('sa:', '') || user.client_id,
+            name: user.name || user.client_id,
+            scopes: user.scope ? user.scope.split(' ') : [],
+            audiences: Array.isArray(user.aud) ? user.aud : [user.aud]
+          };
+        },
+
+        /**
+         * Get user metadata (if applicable)
+         * @returns {Object|null}
+         */
+        getUser: () => {
+          const user = c.get('user');
+          if (!user || !identityContext.isUser()) return null;
+
+          return {
+            id: user.sub,
+            email: user.email,
+            tenantId: user.tenantId,
+            scopes: user.scope ? user.scope.split(' ') : []
+          };
+        }
+      };
+
+      // Attach to context
+      c.set('identity', identityContext);
+
+      // Also set serviceAccount and user for convenience
+      if (identityContext.isServiceAccount()) {
+        c.set('serviceAccount', identityContext.getServiceAccount());
+      } else if (identityContext.isUser()) {
+        c.set('userProfile', identityContext.getUser());
+      }
+
+      await next();
+    };
+  }
+
+  /**
+   * Configure OIDC driver from Identity metadata
+   * @private
+   */
+  async _configureOIDCDriverFromMetadata() {
+    if (!this.identityMetadata) {
+      throw new Error('Identity metadata not available');
+    }
+
+    // Dynamically import OIDCClient
+    const { OIDCClient } = await import('./auth/oidc-client.js');
+
+    // Create OIDC client instance
+    this.oidcClient = new OIDCClient({
+      issuer: this.identityMetadata.issuer,
+      audience: this.config.identityIntegration.client?.audience || this.identityMetadata.issuer,
+      jwksUri: this.identityMetadata.jwksUrl,
+      discoveryUri: this.identityMetadata.discoveryUrl,
+      jwksCacheTTL: (this.config.identityIntegration.cacheTtl || 3600) * 1000, // Convert to ms
+      logLevel: this.config.logLevel
+    });
+
+    // Initialize OIDC client (fetch JWKS)
+    await this.oidcClient.initialize();
+
+    // Register OIDC driver in auth system
+    if (!this.config.auth.drivers.find(d => d.driver === 'oidc')) {
+      this.config.auth.drivers.unshift({
+        driver: 'oidc',
+        config: {
+          resource: this.identityMetadata.resources?.users || 'users'
+        }
+      });
+    }
+
+    if (this.config.logLevel) {
+      this.logger.info('[API Plugin] OIDC driver configured from Identity metadata');
+    }
+  }
+
+  /**
+   * Initialize Identity integration (detect and configure OIDC driver)
+   * @private
+   */
+  async _initializeIdentityIntegration() {
+    const { url, require: requireIdentity } = this.config.identityIntegration;
+
+    // Option 1: In-process Identity (same database)
+    const identityPlugin = this.database.pluginRegistry?.identity;
+
+    if (identityPlugin) {
+      if (this.config.logLevel) {
+        this.logger.info('[API Plugin] Detected in-process IdentityPlugin');
+      }
+
+      // Get metadata from in-process plugin
+      this.identityMetadata = identityPlugin.integration || identityPlugin.getIntegrationMetadata();
+      this.identityMode = true;
+
+      // Configure OIDC driver from metadata
+      await this._configureOIDCDriverFromMetadata();
+
+      if (this.config.logLevel) {
+        this.logger.info(`[API Plugin] Identity mode enabled (issuer: ${this.identityMetadata.issuer})`);
+      }
+
+      return;
+    }
+
+    // Option 2: Remote Identity (different host)
+    if (url) {
+      if (this.config.logLevel) {
+        this.logger.info(`[API Plugin] Fetching metadata from remote Identity: ${url}`);
+      }
+
+      const metadataUrl = `${url}/.well-known/s3db-identity.json`;
+
+      try {
+        // Fetch metadata from remote Identity server
+        const response = await fetch(metadataUrl);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        this.identityMetadata = await response.json();
+        this.identityMetadataCache = {
+          data: this.identityMetadata,
+          etag: response.headers.get('etag'),
+          fetchedAt: Date.now()
+        };
+        this.identityMode = true;
+
+        // Configure OIDC driver from metadata
+        await this._configureOIDCDriverFromMetadata();
+
+        if (this.config.logLevel) {
+          this.logger.info(`[API Plugin] Identity mode enabled (remote issuer: ${this.identityMetadata.issuer})`);
+        }
+
+        return;
+      } catch (error) {
+        if (this.config.logLevel) {
+          this.logger.error(`[API Plugin] Failed to fetch Identity metadata from ${metadataUrl}:`, {
+            url: metadataUrl,
+            error: error.message,
+            errorType: error.code || error.name
+          });
+        }
+
+        if (requireIdentity) {
+          throw new Error(
+            `Identity integration required but unreachable: ${error.message}. ` +
+            `Check firewall, verify URL (${metadataUrl}), validate TLS cert, or check DNS resolution.`
+          );
+        }
+
+        // Fall back to local auth
+        if (this.config.logLevel) {
+          this.logger.warn('[API Plugin] Identity unavailable, falling back to local auth');
+        }
+        return;
+      }
+    }
+
+    // No Identity available
+    if (requireIdentity) {
+      throw new Error(
+        'Identity integration required but IdentityPlugin not found in database and no remote URL configured. ' +
+        'Either install IdentityPlugin in the same database or provide identityIntegration.url.'
+      );
+    }
+
+    if (this.config.logLevel) {
+      this.logger.info('[API Plugin] Identity integration enabled but no Identity server found, using local auth');
+    }
+  }
+
+  /**
    * Install plugin
    */
   async onInstall() {
@@ -520,6 +763,11 @@ export class ApiPlugin extends Plugin {
 
     if (authEnabled) {
       await this._createUsersResource();
+    }
+
+    // Initialize Identity integration if enabled
+    if (this.config.identityIntegration.enabled) {
+      await this._initializeIdentityIntegration();
     }
 
     // Setup middlewares
@@ -643,6 +891,11 @@ export class ApiPlugin extends Plugin {
       c.set('logLevel', this.config.logLevel);
       await next();
     });
+
+    // Add Identity context middleware (if Identity mode is active)
+    if (this.identityMode) {
+      middlewares.push(this._createIdentityContextMiddleware());
+    }
 
     // Add security headers middleware (FIRST - most critical)
     if (this.config.security.enabled) {
@@ -1333,6 +1586,168 @@ export class ApiPlugin extends Plugin {
    */
   getApp() {
     return this.server ? this.server.getApp() : null;
+  }
+
+  /**
+   * Get Identity integration status (for health checks and monitoring)
+   * @returns {Object} Identity integration status
+   */
+  getIdentityStatus() {
+    if (!this.identityMode) {
+      return {
+        enabled: false,
+        status: 'disabled'
+      };
+    }
+
+    return {
+      enabled: true,
+      status: 'up', // Could be 'up', 'degraded', 'down' based on health checks
+      issuer: this.identityMetadata?.issuer,
+      lastMetadataRefresh: this.identityMetadataCache?.fetchedAt
+        ? new Date(this.identityMetadataCache.fetchedAt).toISOString()
+        : null,
+      metadataAge: this.identityMetadataCache?.fetchedAt
+        ? Date.now() - this.identityMetadataCache.fetchedAt
+        : null
+    };
+  }
+
+  /**
+   * Provision a service account in Identity for API access
+   * @param {Object} options - Service account options
+   * @param {string} options.name - Service account name
+   * @param {Array<string>} options.scopes - Allowed scopes
+   * @param {Array<string>} options.audiences - Allowed audiences
+   * @returns {Promise<Object>} Service account credentials (clientId, clientSecret)
+   */
+  async provisionServiceAccount(options = {}) {
+    const { name, scopes = [], audiences = [] } = options;
+
+    if (!name) {
+      throw new Error('Service account name is required');
+    }
+
+    if (!this.identityMode) {
+      throw new Error('Identity integration not enabled. Cannot provision service accounts.');
+    }
+
+    // Get Identity plugin (in-process only for now)
+    const identityPlugin = this.database.pluginRegistry?.identity;
+
+    if (!identityPlugin) {
+      throw new Error(
+        'Service account provisioning requires in-process IdentityPlugin. ' +
+        'For remote Identity, use the Identity admin UI or API directly.'
+      );
+    }
+
+    // Create service account via Identity's clients resource
+    const clientsResource = identityPlugin.clientsResource;
+
+    if (!clientsResource) {
+      throw new Error('Identity clients resource not available');
+    }
+
+    const clientId = idGenerator();
+    const clientSecret = idGenerator() + idGenerator(); // 44 chars
+
+    const [ok, err, client] = await tryFn(() =>
+      clientsResource.insert({
+        clientId,
+        clientSecret,
+        name,
+        grantTypes: ['client_credentials'],
+        allowedScopes: scopes.length > 0 ? scopes : ['openid'],
+        redirectUris: [], // Not needed for client_credentials
+        active: true
+      })
+    );
+
+    if (!ok) {
+      throw new Error(`Failed to create service account: ${err.message}`);
+    }
+
+    // Emit audit event if available
+    if (identityPlugin.auditPlugin) {
+      await identityPlugin.auditPlugin.log({
+        action: 'service_account_created_via_api',
+        resource: 'oauth_clients',
+        resourceId: client.id,
+        metadata: {
+          clientId,
+          clientName: name,
+          createdBy: 'ApiPlugin',
+          createdAt: new Date().toISOString(),
+          scopes,
+          audiences
+        }
+      });
+    }
+
+    if (this.config.logLevel) {
+      this.logger.info(`[API Plugin] Provisioned service account: ${name} (${clientId})`);
+    }
+
+    // Return credentials (only time they're exposed)
+    return {
+      clientId,
+      clientSecret,
+      name,
+      scopes,
+      grantTypes: ['client_credentials']
+    };
+  }
+
+  /**
+   * Refresh Identity metadata (for remote integrations)
+   * @returns {Promise<boolean>} Success status
+   */
+  async refreshIdentityMetadata() {
+    if (!this.identityMode || !this.config.identityIntegration.url) {
+      return false;
+    }
+
+    const metadataUrl = `${this.config.identityIntegration.url}/.well-known/s3db-identity.json`;
+
+    try {
+      const headers = {};
+      if (this.identityMetadataCache?.etag) {
+        headers['If-None-Match'] = this.identityMetadataCache.etag;
+      }
+
+      const response = await fetch(metadataUrl, { headers });
+
+      if (response.status === 304) {
+        // Not modified, use cached
+        if (this.config.logLevel) {
+          this.logger.info('[API Plugin] Identity metadata not modified (304)');
+        }
+        return true;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      this.identityMetadata = await response.json();
+      this.identityMetadataCache = {
+        data: this.identityMetadata,
+        etag: response.headers.get('etag'),
+        fetchedAt: Date.now()
+      };
+
+      if (this.config.logLevel) {
+        this.logger.info('[API Plugin] Identity metadata refreshed');
+      }
+
+      return true;
+    } catch (error) {
+      if (this.config.logLevel) {
+        this.logger.error(`[API Plugin] Failed to refresh Identity metadata:`, error);
+      }
+      return false;
+    }
   }
 }
 
