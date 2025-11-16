@@ -313,13 +313,18 @@ export class OAuth2Server {
       }
     }
 
-    // Create access token
+    const serviceAccount = this._buildServiceAccountContext(resolvedClient, scopeValidation.scopes);
+    const audienceClaim = this._formatAudienceClaim(serviceAccount.audiences);
+
     const accessToken = this.keyManager.createToken({
       iss: this.issuer,
       sub: resolvedClientId,
-      aud: this.issuer,
+      aud: audienceClaim,
       scope: scopeValidation.scopes.join(' '),
-      token_type: 'access_token'
+      token_type: 'access_token',
+      token_use: 'service',
+      client_id: resolvedClientId,
+      service_account: serviceAccount
     }, this.accessTokenExpiry);
 
     return res.status(200).json({
@@ -423,13 +428,18 @@ export class OAuth2Server {
     // Parse scopes
     const scopes = parseScopes(authCode.scope);
 
-    // Create access token
+    const userContext = this._buildUserContext(user);
     const accessToken = this.keyManager.createToken({
       iss: this.issuer,
       sub: user.id,
       aud: authCode.audience || this.issuer,
       scope: scopes.join(' '),
-      token_type: 'access_token'
+      token_type: 'access_token',
+      token_use: 'user',
+      client_id: authCode.clientId,
+      email: user.email,
+      tenantId: user.tenantId,
+      user: userContext
     }, this.accessTokenExpiry);
 
     const response = {
@@ -458,9 +468,12 @@ export class OAuth2Server {
       const refreshToken = this.keyManager.createToken({
         iss: this.issuer,
         sub: user.id,
-        aud: this.issuer,
+        aud: authCode.clientId || this.issuer,
         scope: scopes.join(' '),
-        token_type: 'refresh_token'
+        token_type: 'refresh_token',
+        token_use: 'refresh',
+        client_id: authCode.clientId,
+        tenant_id: user.tenantId
       }, this.refreshTokenExpiry);
 
       response.refresh_token = refreshToken;
@@ -562,12 +575,18 @@ export class OAuth2Server {
 
     const resolvedAudience = client?.clientId || req.body.client_id || this.issuer;
 
+    const userContext = this._buildUserContext(user);
     const accessToken = this.keyManager.createToken({
       iss: this.issuer,
       sub: user.id,
       aud: resolvedAudience,
       scope: scopeValidation.scopes.join(' '),
-      token_type: 'access_token'
+      token_type: 'access_token',
+      token_use: 'user',
+      client_id: resolvedAudience,
+      email: user.email,
+      tenantId: user.tenantId,
+      user: userContext
     }, this.accessTokenExpiry);
 
     const response = {
@@ -584,9 +603,12 @@ export class OAuth2Server {
       const refreshToken = this.keyManager.createToken({
         iss: this.issuer,
         sub: user.id,
-        aud: this.issuer,
+        aud: resolvedAudience,
         scope: scopeValidation.scopes.join(' '),
-        token_type: 'refresh_token'
+        token_type: 'refresh_token',
+        token_use: 'refresh',
+        client_id: resolvedAudience,
+        tenant_id: user.tenantId
       }, this.refreshTokenExpiry);
 
       response.refresh_token = refreshToken;
@@ -715,13 +737,18 @@ export class OAuth2Server {
       });
     }
 
-    // Create new access token
+    const userContext = this._buildUserContext(user);
     const accessToken = this.keyManager.createToken({
       iss: this.issuer,
       sub: user.id,
       aud: payload.aud,
       scope: requestedScopes.join(' '),
-      token_type: 'access_token'
+      token_type: 'access_token',
+      token_use: 'user',
+      client_id: payload.client_id || payload.aud,
+      email: user.email,
+      tenantId: user.tenantId,
+      user: userContext
     }, this.accessTokenExpiry);
 
     const response = {
@@ -848,19 +875,37 @@ export class OAuth2Server {
         return res.status(200).json({ active: false });
       }
 
-      // Return token metadata
-      return res.status(200).json({
+      const response = {
         active: true,
         scope: payload.scope,
-        client_id: payload.aud,
+        client_id: payload.client_id || payload.aud,
         username: payload.sub,
         token_type: payload.token_type || 'access_token',
+        token_use: payload.token_use || (payload.token_type === 'refresh_token' ? 'refresh' : 'user'),
         exp: payload.exp,
         iat: payload.iat,
         sub: payload.sub,
         iss: payload.iss,
         aud: payload.aud
-      });
+      };
+
+      if (payload.service_account) {
+        response.service_account = payload.service_account;
+      }
+
+      if (payload.user) {
+        response.user = payload.user;
+      }
+
+      if (payload.email) {
+        response.email = payload.email;
+      }
+
+      if (payload.tenant_id || payload.tenantId) {
+        response.tenant_id = payload.tenant_id || payload.tenantId;
+      }
+
+      return res.status(200).json(response);
     } catch (error) {
       return res.status(500).json({
         error: 'server_error',
@@ -1006,6 +1051,89 @@ export class OAuth2Server {
     const [, value, unit] = match;
     const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
     return parseInt(value) * multipliers[unit];
+  }
+
+  _resolveClientAudiences(client) {
+    if (!client) {
+      return [this.issuer];
+    }
+
+    const candidates = [
+      client.audiences,
+      client.allowedAudiences,
+      client.metadata?.audiences,
+      client.metadata?.audience,
+      client.defaultAudience,
+      client.audience
+    ];
+
+    for (const entry of candidates) {
+      if (!entry) continue;
+      if (Array.isArray(entry) && entry.length > 0) {
+        return entry.filter(Boolean);
+      }
+      if (typeof entry === 'string' && entry.trim()) {
+        return [entry.trim()];
+      }
+    }
+
+    return [this.issuer];
+  }
+
+  _formatAudienceClaim(audiences) {
+    if (!Array.isArray(audiences)) {
+      return audiences || this.issuer;
+    }
+    const filtered = audiences.filter(Boolean);
+    if (filtered.length === 0) {
+      return this.issuer;
+    }
+    return filtered.length === 1 ? filtered[0] : filtered;
+  }
+
+  _buildServiceAccountContext(client, scopes = []) {
+    const audiences = this._resolveClientAudiences(client);
+    const context = {
+      client_id: client?.clientId || null,
+      name: client?.name || client?.clientName || client?.displayName || client?.clientId || 'service-account',
+      scopes,
+      audiences
+    };
+
+    if (client?.tenantId) {
+      context.tenantId = client.tenantId;
+    }
+    if (client?.metadata) {
+      context.metadata = client.metadata;
+    }
+    if (client?.description) {
+      context.description = client.description;
+    }
+
+    return context;
+  }
+
+  _buildUserContext(user) {
+    if (!user) return null;
+
+    const context = { id: user.id };
+    if (user.tenantId) {
+      context.tenantId = user.tenantId;
+    }
+    if (user.email) {
+      context.email = user.email;
+    }
+    if (user.name) {
+      context.name = user.name;
+    }
+    if (Array.isArray(user.roles) && user.roles.length > 0) {
+      context.roles = user.roles;
+    }
+    if (user.metadata) {
+      context.metadata = user.metadata;
+    }
+
+    return context;
   }
 
   /**

@@ -7,9 +7,9 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // ✅ REST API + Auth + Docs + Metrics running
 ```
 
-**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Row-level security • Rate limiting • Swagger UI • Production metrics
+**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Native IdentityPlugin integration • Row-level security • Rate limiting • Swagger UI • Production metrics
 
-**Works with:** Azure AD • Google • Keycloak • Auth0 • Okta • Any OIDC provider
+**Works with:** IdentityPlugin (self-hosted) • Azure AD • Google • Keycloak • Auth0 • Okta • Any OIDC provider
 
 ---
 
@@ -73,6 +73,7 @@ auth: {
 | Guide | Description | Read Time |
 |-------|-------------|-----------|
 | **[Authentication](./guides/authentication.md)** | JWT, OAuth2/OIDC, API Keys, Basic Auth | 10 min |
+| **[Identity Integration](./guides/identity.md)** | Delegate auth to IdentityPlugin + remote metadata | 15 min |
 | **[Guards](./guides/guards.md)** | Row-level security, multi-tenancy, RBAC | 15 min |
 | **[Security](./guides/security.md)** | Failban, rate limiting, GeoIP blocking | 10 min |
 | **[Deployment](./guides/deployment.md)** | Docker, Kubernetes, production tips | 15 min |

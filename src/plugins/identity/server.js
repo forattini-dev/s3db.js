@@ -194,7 +194,7 @@ export class IdentityServer {
         c.header('X-Ban-Status', 'blacklisted');
         c.header('X-Ban-Reason', 'IP is permanently blacklisted');
 
-        if (this.options.logLevel) {
+        if (this.options.logLevel && this.logger) {
           this.logger.info(`[Failban] Blocked blacklisted IP: ${ip}`);
         }
 
@@ -213,7 +213,7 @@ export class IdentityServer {
           c.header('X-Ban-Reason', countryBlock.reason);
           c.header('X-Country-Code', countryBlock.country);
 
-          if (this.options.logLevel) {
+          if (this.options.logLevel && this.logger) {
             this.logger.info(`[Failban] Blocked country ${countryBlock.country} for IP: ${ip}`);
           }
 
@@ -239,7 +239,7 @@ export class IdentityServer {
           c.header('X-Ban-Reason', ban.reason);
           c.header('X-Ban-Expires', ban.expiresAt);
 
-          if (this.options.logLevel) {
+          if (this.options.logLevel && this.logger) {
             this.logger.info(`[Failban] Blocked banned IP: ${ip} (expires in ${retryAfter}s)`);
           }
 
@@ -257,7 +257,7 @@ export class IdentityServer {
       await next();
     });
 
-    if (this.options.logLevel) {
+    if (this.options.logLevel && this.logger) {
       this.logger.info('[Identity Server] Failban middleware enabled (global ban check)');
     }
   }
@@ -413,6 +413,26 @@ export class IdentityServer {
     // JWKS (JSON Web Key Set) endpoint
     this.app.get('/.well-known/jwks.json', wrap(oauth2Server.jwksHandler));
 
+    // S3DB Identity Integration Metadata endpoint (for ApiPlugin and other consumers)
+    this.app.get('/.well-known/s3db-identity.json', (c) => {
+      const metadata = this.identityPlugin.getIntegrationMetadata();
+      const etag = `"${Buffer.from(JSON.stringify(metadata)).toString('base64').slice(0, 16)}"`;
+
+      // Handle conditional requests (If-None-Match)
+      const ifNoneMatch = c.req.header('if-none-match');
+      if (ifNoneMatch === etag) {
+        return c.body(null, 304); // Not Modified
+      }
+
+      // Return metadata with cache headers
+      c.header('Content-Type', 'application/json');
+      c.header('ETag', etag);
+      c.header('Cache-Control', `public, max-age=${metadata.cacheTtl}`);
+      c.header('Last-Modified', new Date(metadata.issuedAt).toUTCString());
+
+      return c.json(metadata);
+    });
+
     // OAuth2 Token endpoint
     const tokenHandler = wrap(oauth2Server.tokenHandler);
     if (rateLimiters.token) {
@@ -445,10 +465,11 @@ export class IdentityServer {
     // Token revocation endpoint
     this.app.post('/oauth/revoke', wrap(oauth2Server.revokeHandler));
 
-    if (this.options.logLevel) {
+    if (this.options.logLevel && this.logger) {
       this.logger.info('[Identity Server] Mounted OAuth2/OIDC routes:');
       this.logger.info('[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)');
       this.logger.info('[Identity Server]   GET  /.well-known/jwks.json (JWKS)');
+      this.logger.info('[Identity Server]   GET  /.well-known/s3db-identity.json (S3DB Integration Metadata)');
       this.logger.info('[Identity Server]   GET  /oauth/authorize (Authorization UI)');
       this.logger.info('[Identity Server]   POST /oauth/authorize (Process Login)');
       this.logger.info('[Identity Server]   POST /oauth/token (Token)');
@@ -467,7 +488,7 @@ export class IdentityServer {
     const { sessionManager, identityPlugin } = this.options;
 
     if (!sessionManager || !identityPlugin) {
-      if (this.options.logLevel) {
+      if (this.options.logLevel && this.logger) {
         this.logger.info('[Identity Server] SessionManager or IdentityPlugin not provided, skipping UI routes');
       }
       return;
@@ -480,7 +501,7 @@ export class IdentityServer {
       // Register all UI routes (login, register, logout)
       registerUIRoutes(this.app, identityPlugin);
 
-      if (this.options.logLevel) {
+      if (this.options.logLevel && this.logger) {
         this.logger.info('[Identity Server] Mounted UI routes:');
         this.logger.info('[Identity Server]   GET  /login (Login Form)');
         this.logger.info('[Identity Server]   POST /login (Process Login)');

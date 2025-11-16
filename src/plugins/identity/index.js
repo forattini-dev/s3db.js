@@ -500,9 +500,47 @@ export class IdentityPlugin extends Plugin {
     // Initialize authentication drivers
     await this._initializeAuthDrivers();
 
+    // Expose integration metadata in plugin registry for downstream consumers
+    this._exposeIntegrationMetadata();
+
     if (this.config.logLevel) {
       this.logger.info('[Identity Plugin] Installed successfully');
     }
+  }
+
+  /**
+   * Expose integration metadata in plugin registry
+   * Allows other plugins (e.g., ApiPlugin) to discover Identity and auto-configure
+   * @private
+   */
+  _exposeIntegrationMetadata() {
+    // Ensure the plugin is registered in the database plugin registry
+    if (!this.database.pluginRegistry) {
+      this.database.pluginRegistry = {};
+    }
+
+    // Register under 'identity' key for easy discovery
+    if (!this.database.pluginRegistry.identity) {
+      this.database.pluginRegistry.identity = this;
+    }
+
+    // Expose integration metadata as a property
+    Object.defineProperty(this, 'integration', {
+      get: () => this.getIntegrationMetadata(),
+      enumerable: true,
+      configurable: false
+    });
+
+    // Also expose resource references for direct access
+    Object.defineProperty(this, 'resources', {
+      get: () => ({
+        users: this.usersResource,
+        tenants: this.tenantsResource,
+        clients: this.clientsResource
+      }),
+      enumerable: true,
+      configurable: false
+    });
   }
 
   /**
@@ -1401,5 +1439,48 @@ export class IdentityPlugin extends Plugin {
    */
   getOAuth2Server() {
     return this.oauth2Server;
+  }
+
+  /**
+   * Get integration metadata for downstream consumers (e.g., ApiPlugin)
+   * Returns issuer URLs, endpoints, supported features, and resource names
+   * @returns {Object} Integration metadata descriptor
+   */
+  getIntegrationMetadata() {
+    const baseUrl = this.config.issuer;
+
+    return {
+      version: 1,
+      issuedAt: new Date().toISOString(),
+      cacheTtl: 3600, // 1 hour in seconds
+
+      // Authentication endpoints
+      issuer: baseUrl,
+      discoveryUrl: `${baseUrl}/.well-known/openid-configuration`,
+      jwksUrl: `${baseUrl}/.well-known/jwks.json`,
+      authorizationUrl: `${baseUrl}/oauth/authorize`,
+      tokenUrl: `${baseUrl}/oauth/token`,
+      userinfoUrl: `${baseUrl}/oauth/userinfo`,
+      introspectionUrl: `${baseUrl}/oauth/introspect`,
+      revocationUrl: `${baseUrl}/oauth/revoke`,
+
+      // OAuth capabilities
+      supportedScopes: this.config.supportedScopes,
+      supportedGrantTypes: this.config.supportedGrantTypes,
+      supportedResponseTypes: this.config.supportedResponseTypes,
+
+      // Resource mappings (canonical resource names)
+      resources: {
+        users: this.usersResource?.name || this.config.resources.users.name,
+        tenants: this.tenantsResource?.name || this.config.resources.tenants.name,
+        clients: this.clientsResource?.name || this.config.resources.clients.name
+      },
+
+      // Integration features
+      clientRegistration: {
+        url: `${baseUrl}/oauth/register`,
+        supportedAuth: ['client_secret_post', 'client_secret_basic']
+      }
+    };
   }
 }
