@@ -61,6 +61,7 @@ const DRIVER_SECURITY_MAP = {
   jwt: 'bearerAuth',
   apiKey: 'apiKeyAuth',
   basic: 'basicAuth',
+  oauth2: 'oauth2Auth',
   oidc: 'oidcAuth'
 };
 
@@ -1570,44 +1571,98 @@ For detailed information about each endpoint, see the sections below.`;
     .map((driver) => driver?.driver || driver?.type)
     .filter(Boolean);
 
-  // Add security schemes
-  if (auth.jwt?.enabled || driverNames.includes('jwt')) {
+  // Add security schemes based on configured drivers
+
+  // JWT Driver
+  const jwtDriver = driverEntries.find((driver) => driver?.driver === 'jwt');
+  if (jwtDriver || driverNames.includes('jwt')) {
+    const resourceName = jwtDriver?.config?.resource || 'users';
     spec.components.securitySchemes.bearerAuth = {
       type: 'http',
       scheme: 'bearer',
       bearerFormat: 'JWT',
-      description: 'JWT authentication'
+      description: `JWT Bearer token authentication. Users stored in '${resourceName}' resource.`
     };
   }
 
-  if (auth.apiKey?.enabled || driverNames.includes('apiKey')) {
+  // API Key Driver
+  const apiKeyDriver = driverEntries.find((driver) => driver?.driver === 'apiKey');
+  if (apiKeyDriver || driverNames.includes('apiKey')) {
+    const headerName = apiKeyDriver?.config?.headerName || 'X-API-Key';
+    const resourceName = apiKeyDriver?.config?.resource || 'users';
+    const queryParam = apiKeyDriver?.config?.queryParam;
+
+    let description = `API Key authentication via ${headerName} header.`;
+    if (queryParam) {
+      description += ` Also accepts '${queryParam}' query parameter.`;
+    }
+    description += ` Keys managed in '${resourceName}' resource.`;
+
     spec.components.securitySchemes.apiKeyAuth = {
       type: 'apiKey',
       in: 'header',
-      name: auth.apiKey.headerName || 'X-API-Key',
-      description: 'API Key authentication'
+      name: headerName,
+      description
     };
   }
 
-  if (auth.basic?.enabled || driverNames.includes('basic')) {
+  // Basic Auth Driver
+  const basicDriver = driverEntries.find((driver) => driver?.driver === 'basic');
+  if (basicDriver || driverNames.includes('basic')) {
+    const resourceName = basicDriver?.config?.resource || 'users';
+    const realm = basicDriver?.config?.realm || 'API Access';
+    const cookieName = basicDriver?.config?.cookieName;
+
+    let description = `HTTP Basic authentication (realm: '${realm}').`;
+    if (cookieName) {
+      description += ` Cookie fallback: '${cookieName}'.`;
+    }
+    description += ` Credentials stored in '${resourceName}' resource.`;
+
     spec.components.securitySchemes.basicAuth = {
       type: 'http',
       scheme: 'basic',
-      description: 'HTTP Basic authentication'
+      description
     };
   }
 
+  // OAuth2 Driver
+  const oauth2Driver = driverEntries.find((driver) => driver?.driver === 'oauth2');
+  if (oauth2Driver) {
+    const issuer = oauth2Driver.config?.issuer;
+    const audience = oauth2Driver.config?.audience;
+    const resourceName = oauth2Driver.config?.resource || 'users';
+
+    let description = `OAuth2 Bearer token authentication (Resource Server mode).`;
+    if (issuer) {
+      description += ` Issuer: ${issuer}.`;
+    }
+    if (audience) {
+      description += ` Audience: ${audience}.`;
+    }
+    description += ` User data synced to '${resourceName}' resource.`;
+
+    spec.components.securitySchemes.oauth2Auth = {
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+      description
+    };
+  }
+
+  // OIDC Driver
   const oidcDriver = driverEntries.find((driver) => driver?.driver === 'oidc');
   if (oidcDriver) {
     const issuer = oidcDriver.config?.issuer;
     const discoveryUrl = oidcDriver.config?.openIdConnectUrl ||
       (issuer ? `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration` : null) ||
       `${serverUrl}/.well-known/openid-configuration`;
+    const resourceName = oidcDriver.config?.resource || 'users';
 
     spec.components.securitySchemes.oidcAuth = {
       type: 'openIdConnect',
       openIdConnectUrl: discoveryUrl,
-      description: 'OIDC authentication'
+      description: `OpenID Connect authentication. User sessions managed in '${resourceName}' resource.`
     };
   }
 
