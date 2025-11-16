@@ -15,7 +15,6 @@
  */
 
 import { PluginError } from '../../../errors.js';
-import { hashPassword } from './password.js';
 import { idGenerator } from '../../../concerns/id.js';
 
 export class OnboardingManager {

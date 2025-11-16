@@ -247,6 +247,56 @@ The OpenAPI generator automatically includes:
 
 ---
 
+## 🏷️ Automatic Tags for Custom Routes
+
+Swagger UI groups operations by **tags**. The API plugin now infers tags for custom routes so your `/docs` sidebar stays organized without any manual tagging code.
+
+### Plugin-level custom routes
+
+The generator looks at the first meaningful segment after `basePath`/`versionPrefix` and uses that as the tag name:
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  basePath: '/api',
+  versionPrefix: 'v1',
+  routes: {
+    'GET /billing/invoices': async () => ({ ok: true }),
+    'POST /billing/invoices/:id/retry': async () => ({ ok: true }),
+    'GET /ops/healthz': async () => ({ ok: true })
+  }
+}));
+```
+
+**Result in Swagger UI**
+
+- `/billing/*` routes are tagged as **Billing**
+- `/ops/*` routes are tagged as **Ops**
+- Routes without a segment still fall back to the default **Custom Routes** tag
+
+### Resource-level custom routes
+
+Resource-level custom routes still include the resource tag (e.g., `orders`), but they also inherit the first segment of the relative path if it adds clarity:
+
+```javascript
+await db.createResource({
+  name: 'orders',
+  routes: {
+    'POST /:id/cancel': async () => ({}),          // Tag: Orders
+    'POST /:id/payments/capture': async () => ({}) // Tags: Orders, payments
+  }
+});
+```
+
+Use nested segments to group related actions (`payments`, `audit`, `webhooks`, etc.) so the docs mirror the mental model of the routes.
+
+### Fallbacks & edge cases
+
+- Paths that start with `:` or `{` (route params) skip inference and use **Custom Routes**
+- Wildcards (`*`) or empty paths also fall back to the default tag
+- Tag descriptions are added automatically; no need to tweak the OpenAPI JSON manually
+
+---
+
 ## 🚫 What's Automatically Hidden
 
 **Plugin attributes are filtered from OpenAPI schemas** to keep your API documentation clean and focused on user-defined fields:

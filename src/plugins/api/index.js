@@ -366,18 +366,7 @@ export class ApiPlugin extends Plugin {
       health: typeof options.health === 'object'
         ? options.health
         : { enabled: options.health !== false },
-      maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
-
-      // Identity Integration (delegate auth to IdentityPlugin)
-      identityIntegration: {
-        enabled: options.identityIntegration?.enabled === true,
-        url: options.identityIntegration?.url || null, // Remote Identity server URL
-        autoProvision: options.identityIntegration?.autoProvision !== false, // Auto-register OAuth client
-        require: options.identityIntegration?.require === true, // Fail if Identity unavailable
-        cacheTtl: options.identityIntegration?.cacheTtl || 3600, // Cache metadata for 1 hour
-        requireFreshMetadata: options.identityIntegration?.requireFreshMetadata === true,
-        client: options.identityIntegration?.client || null // Pre-configured OAuth client credentials
-      }
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024
     };
 
     // Note: logLevel is already set above in config, no need to reassign
@@ -385,11 +374,7 @@ export class ApiPlugin extends Plugin {
 
     this.server = null;
     this.usersResource = null;
-
-    // Identity integration state
-    this.identityMode = false;
-    this.identityMetadata = null;
-    this.identityMetadataCache = null;
+    this._hasOidcDriver = this.config.auth.drivers.some(d => d.driver === 'oidc');
   }
 
   /**
@@ -603,144 +588,6 @@ export class ApiPlugin extends Plugin {
   }
 
   /**
-   * Configure OIDC driver from Identity metadata
-   * @private
-   */
-  async _configureOIDCDriverFromMetadata() {
-    if (!this.identityMetadata) {
-      throw new Error('Identity metadata not available');
-    }
-
-    // Dynamically import OIDCClient
-    const { OIDCClient } = await import('./auth/oidc-client.js');
-
-    // Create OIDC client instance
-    this.oidcClient = new OIDCClient({
-      issuer: this.identityMetadata.issuer,
-      audience: this.config.identityIntegration.client?.audience || this.identityMetadata.issuer,
-      jwksUri: this.identityMetadata.jwksUrl,
-      discoveryUri: this.identityMetadata.discoveryUrl,
-      jwksCacheTTL: (this.config.identityIntegration.cacheTtl || 3600) * 1000, // Convert to ms
-      logLevel: this.config.logLevel
-    });
-
-    // Initialize OIDC client (fetch JWKS)
-    await this.oidcClient.initialize();
-
-    // Register OIDC driver in auth system
-    if (!this.config.auth.drivers.find(d => d.driver === 'oidc')) {
-      this.config.auth.drivers.unshift({
-        driver: 'oidc',
-        config: {
-          resource: this.identityMetadata.resources?.users || 'users'
-        }
-      });
-    }
-
-    if (this.config.logLevel) {
-      this.logger.info('[API Plugin] OIDC driver configured from Identity metadata');
-    }
-  }
-
-  /**
-   * Initialize Identity integration (detect and configure OIDC driver)
-   * @private
-   */
-  async _initializeIdentityIntegration() {
-    const { url, require: requireIdentity } = this.config.identityIntegration;
-
-    // Option 1: In-process Identity (same database)
-    const identityPlugin = this.database.pluginRegistry?.identity;
-
-    if (identityPlugin) {
-      if (this.config.logLevel) {
-        this.logger.info('[API Plugin] Detected in-process IdentityPlugin');
-      }
-
-      // Get metadata from in-process plugin
-      this.identityMetadata = identityPlugin.integration || identityPlugin.getIntegrationMetadata();
-      this.identityMode = true;
-
-      // Configure OIDC driver from metadata
-      await this._configureOIDCDriverFromMetadata();
-
-      if (this.config.logLevel) {
-        this.logger.info(`[API Plugin] Identity mode enabled (issuer: ${this.identityMetadata.issuer})`);
-      }
-
-      return;
-    }
-
-    // Option 2: Remote Identity (different host)
-    if (url) {
-      if (this.config.logLevel) {
-        this.logger.info(`[API Plugin] Fetching metadata from remote Identity: ${url}`);
-      }
-
-      const metadataUrl = `${url}/.well-known/s3db-identity.json`;
-
-      try {
-        // Fetch metadata from remote Identity server
-        const response = await fetch(metadataUrl);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        this.identityMetadata = await response.json();
-        this.identityMetadataCache = {
-          data: this.identityMetadata,
-          etag: response.headers.get('etag'),
-          fetchedAt: Date.now()
-        };
-        this.identityMode = true;
-
-        // Configure OIDC driver from metadata
-        await this._configureOIDCDriverFromMetadata();
-
-        if (this.config.logLevel) {
-          this.logger.info(`[API Plugin] Identity mode enabled (remote issuer: ${this.identityMetadata.issuer})`);
-        }
-
-        return;
-      } catch (error) {
-        if (this.config.logLevel) {
-          this.logger.error(`[API Plugin] Failed to fetch Identity metadata from ${metadataUrl}:`, {
-            url: metadataUrl,
-            error: error.message,
-            errorType: error.code || error.name
-          });
-        }
-
-        if (requireIdentity) {
-          throw new Error(
-            `Identity integration required but unreachable: ${error.message}. ` +
-            `Check firewall, verify URL (${metadataUrl}), validate TLS cert, or check DNS resolution.`
-          );
-        }
-
-        // Fall back to local auth
-        if (this.config.logLevel) {
-          this.logger.warn('[API Plugin] Identity unavailable, falling back to local auth');
-        }
-        return;
-      }
-    }
-
-    // No Identity available
-    if (requireIdentity) {
-      throw new Error(
-        'Identity integration required but IdentityPlugin not found in database and no remote URL configured. ' +
-        'Either install IdentityPlugin in the same database or provide identityIntegration.url.'
-      );
-    }
-
-    if (this.config.logLevel) {
-      this.logger.info('[API Plugin] Identity integration enabled but no Identity server found, using local auth');
-    }
-  }
-
-  /**
    * Install plugin
    */
   async onInstall() {
@@ -763,11 +610,6 @@ export class ApiPlugin extends Plugin {
 
     if (authEnabled) {
       await this._createUsersResource();
-    }
-
-    // Initialize Identity integration if enabled
-    if (this.config.identityIntegration.enabled) {
-      await this._initializeIdentityIntegration();
     }
 
     // Setup middlewares
@@ -810,7 +652,7 @@ export class ApiPlugin extends Plugin {
 
     // Check if using external auth (OIDC/OAuth2) - password managed externally
     const hasExternalAuth = this.config.auth.drivers.some(driver =>
-      ['oidc', 'oauth2'].includes(driver)
+      ['oidc', 'oauth2'].includes(driver?.driver)
     );
 
     // Password is optional when using external auth providers
@@ -855,19 +697,7 @@ export class ApiPlugin extends Plugin {
   }
 
   _findExistingUsersResource() {
-    const candidates = new Set([this.usersResourceName]);
-
-    const identityPlugin = this.database?.pluginRegistry?.identity || this.database?.pluginRegistry?.Identity;
-    if (identityPlugin) {
-      const identityNames = [
-        identityPlugin.usersResource?.name,
-        identityPlugin.config?.resources?.users?.mergedConfig?.name,
-        identityPlugin.config?.resources?.users?.userConfig?.name
-      ].filter(Boolean);
-      for (const name of identityNames) {
-        candidates.add(name);
-      }
-    }
+    const candidates = new Set([this.usersResourceName, this.config?.auth?.resource].filter(Boolean));
 
     for (const name of candidates) {
       if (!name) continue;
@@ -892,8 +722,8 @@ export class ApiPlugin extends Plugin {
       await next();
     });
 
-    // Add Identity context middleware (if Identity mode is active)
-    if (this.identityMode) {
+    // Add Identity context middleware (OIDC-aware helper)
+    if (this._hasOidcDriver) {
       middlewares.push(this._createIdentityContextMiddleware());
     }
 
@@ -1588,167 +1418,6 @@ export class ApiPlugin extends Plugin {
     return this.server ? this.server.getApp() : null;
   }
 
-  /**
-   * Get Identity integration status (for health checks and monitoring)
-   * @returns {Object} Identity integration status
-   */
-  getIdentityStatus() {
-    if (!this.identityMode) {
-      return {
-        enabled: false,
-        status: 'disabled'
-      };
-    }
-
-    return {
-      enabled: true,
-      status: 'up', // Could be 'up', 'degraded', 'down' based on health checks
-      issuer: this.identityMetadata?.issuer,
-      lastMetadataRefresh: this.identityMetadataCache?.fetchedAt
-        ? new Date(this.identityMetadataCache.fetchedAt).toISOString()
-        : null,
-      metadataAge: this.identityMetadataCache?.fetchedAt
-        ? Date.now() - this.identityMetadataCache.fetchedAt
-        : null
-    };
-  }
-
-  /**
-   * Provision a service account in Identity for API access
-   * @param {Object} options - Service account options
-   * @param {string} options.name - Service account name
-   * @param {Array<string>} options.scopes - Allowed scopes
-   * @param {Array<string>} options.audiences - Allowed audiences
-   * @returns {Promise<Object>} Service account credentials (clientId, clientSecret)
-   */
-  async provisionServiceAccount(options = {}) {
-    const { name, scopes = [], audiences = [] } = options;
-
-    if (!name) {
-      throw new Error('Service account name is required');
-    }
-
-    if (!this.identityMode) {
-      throw new Error('Identity integration not enabled. Cannot provision service accounts.');
-    }
-
-    // Get Identity plugin (in-process only for now)
-    const identityPlugin = this.database.pluginRegistry?.identity;
-
-    if (!identityPlugin) {
-      throw new Error(
-        'Service account provisioning requires in-process IdentityPlugin. ' +
-        'For remote Identity, use the Identity admin UI or API directly.'
-      );
-    }
-
-    // Create service account via Identity's clients resource
-    const clientsResource = identityPlugin.clientsResource;
-
-    if (!clientsResource) {
-      throw new Error('Identity clients resource not available');
-    }
-
-    const clientId = idGenerator();
-    const clientSecret = idGenerator() + idGenerator(); // 44 chars
-
-    const [ok, err, client] = await tryFn(() =>
-      clientsResource.insert({
-        clientId,
-        clientSecret,
-        name,
-        grantTypes: ['client_credentials'],
-        allowedScopes: scopes.length > 0 ? scopes : ['openid'],
-        redirectUris: [], // Not needed for client_credentials
-        active: true
-      })
-    );
-
-    if (!ok) {
-      throw new Error(`Failed to create service account: ${err.message}`);
-    }
-
-    // Emit audit event if available
-    if (identityPlugin.auditPlugin) {
-      await identityPlugin.auditPlugin.log({
-        action: 'service_account_created_via_api',
-        resource: 'oauth_clients',
-        resourceId: client.id,
-        metadata: {
-          clientId,
-          clientName: name,
-          createdBy: 'ApiPlugin',
-          createdAt: new Date().toISOString(),
-          scopes,
-          audiences
-        }
-      });
-    }
-
-    if (this.config.logLevel) {
-      this.logger.info(`[API Plugin] Provisioned service account: ${name} (${clientId})`);
-    }
-
-    // Return credentials (only time they're exposed)
-    return {
-      clientId,
-      clientSecret,
-      name,
-      scopes,
-      grantTypes: ['client_credentials']
-    };
-  }
-
-  /**
-   * Refresh Identity metadata (for remote integrations)
-   * @returns {Promise<boolean>} Success status
-   */
-  async refreshIdentityMetadata() {
-    if (!this.identityMode || !this.config.identityIntegration.url) {
-      return false;
-    }
-
-    const metadataUrl = `${this.config.identityIntegration.url}/.well-known/s3db-identity.json`;
-
-    try {
-      const headers = {};
-      if (this.identityMetadataCache?.etag) {
-        headers['If-None-Match'] = this.identityMetadataCache.etag;
-      }
-
-      const response = await fetch(metadataUrl, { headers });
-
-      if (response.status === 304) {
-        // Not modified, use cached
-        if (this.config.logLevel) {
-          this.logger.info('[API Plugin] Identity metadata not modified (304)');
-        }
-        return true;
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      this.identityMetadata = await response.json();
-      this.identityMetadataCache = {
-        data: this.identityMetadata,
-        etag: response.headers.get('etag'),
-        fetchedAt: Date.now()
-      };
-
-      if (this.config.logLevel) {
-        this.logger.info('[API Plugin] Identity metadata refreshed');
-      }
-
-      return true;
-    } catch (error) {
-      if (this.config.logLevel) {
-        this.logger.error(`[API Plugin] Failed to refresh Identity metadata:`, error);
-      }
-      return false;
-    }
-  }
 }
 
 // Export auth utilities (OIDCClient, guards helpers, etc.)
