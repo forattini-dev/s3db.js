@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto'
 
 const CONCURRENCY = 50
 const RUNS_PER_SCENARIO = 5
-const UNIFORM_VECTOR_LENGTH = 2000
+const UNIFORM_VECTOR_LENGTH = 5000
 const MIXED_TASKS = 1000
 const UNIFORM_TASKS = 1000
 
@@ -40,7 +40,7 @@ function createUniformWorkload () {
   const fingerprint = fingerprintVector(values)
   const tasks = Array.from({ length: UNIFORM_TASKS }, (_, index) => `uniform-${index + 1}`)
   return {
-    name: 'Uniform vector (2k random)',
+    name: 'Uniform vector (5k random)',
     totalTasks: tasks.length,
     tasks,
     metadata: { fingerprint, length: values.length },
