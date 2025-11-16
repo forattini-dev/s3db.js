@@ -212,6 +212,17 @@ describe('PerformanceMonitor', () => {
       expect(typeof snapshot).toBe('object')
       expect(snapshot.timestamp).toBeDefined()
     })
+
+    test('should handle missing database reference', () => {
+      const orphanMonitor = new PerformanceMonitor()
+      const snapshot = orphanMonitor.takeSnapshot()
+
+      expect(snapshot.taskQueue).toBeNull()
+      expect(snapshot.performance).toBeNull()
+      expect(snapshot.system).toBeDefined()
+
+      orphanMonitor.stop()
+    })
   })
 
   describe('Snapshot Retention', () => {

@@ -32,7 +32,8 @@ describe("EventualConsistencyPlugin Methods", () => {
       resources: {
         wallets: ['balance']
       },
-      consolidation: { mode: 'async' }
+      consolidation: { mode: 'async' },
+      enableCoordinator: false // Disable coordination for faster tests
     });
 
     await database.usePlugin(plugin);

@@ -37,22 +37,17 @@ describe('S3QueuePlugin - Edge Cases', () => {
         autoStart: false
       });
 
-      // Capture console.log
-      const originalLog = console.log;
-      const logs = [];
+      const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
 
-      console.log = (...args) => {
-        logs.push(args.join(' '));
-        // Don't print during tests - just capture
-      };
-      try {
-        await plugin.install(database);
-      } finally {
-        console.log = originalLog;
-      }
+      await plugin.install(database);
 
       // Verify verbose log was called
-      expect(logs.some(log => log.includes('Setup completed'))).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ resource: 'tasks' }),
+        expect.stringContaining('Setup completed')
+      );
+
+      logSpy.mockRestore();
     });
 
     test('should handle worker start/stop with verbose logging', async () => {
@@ -73,23 +68,17 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       await plugin.install(database);
 
-      const originalLog = console.log;
-      const logs = [];
-      console.log = (...args) => {
-        logs.push(args.join(' '));
-        // Don't print during tests - just capture
-      };
-      try {
-        await plugin.startProcessing();
-        await new Promise(resolve => setTimeout(resolve, 100));
-        await plugin.stopProcessing();
-      } finally {
-        console.log = originalLog;
-      }
+      const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+
+      await plugin.startProcessing();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await plugin.stopProcessing();
 
       // Verify verbose logs
-      expect(logs.some(log => log.includes('Started'))).toBe(true);
-      expect(logs.some(log => log.includes('Stopped'))).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Started'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Stopped'));
+
+      logSpy.mockRestore();
     });
 
     test('should handle already running startProcessing', async () => {
@@ -110,25 +99,19 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       await plugin.install(database);
 
-      const originalLog = console.log;
-      const logs = [];
-      console.log = (...args) => {
-        logs.push(args.join(' '));
-        // Don't print during tests - just capture
-      };
-      try {
-        await plugin.startProcessing();
+      const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
 
-        // Try to start again (should log "already running")
-        await plugin.startProcessing();
+      await plugin.startProcessing();
 
-        await plugin.stopProcessing();
-      } finally {
-        console.log = originalLog;
-      }
+      // Try to start again (should log "already running")
+      await plugin.startProcessing();
+
+      await plugin.stopProcessing();
 
       // Verify "already running" log
-      expect(logs.some(log => log.includes('Already running'))).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Already running'));
+
+      logSpy.mockRestore();
     });
 
     test('should handle stopProcessing when not running', async () => {

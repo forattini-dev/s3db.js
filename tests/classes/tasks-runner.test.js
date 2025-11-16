@@ -225,6 +225,72 @@ afterEach(async () => {
     })
   })
 
+  describe('Task signatures', () => {
+    test('should derive signature using metadata hints', async () => {
+      async function sampleWorker () {
+        return 'ok'
+      }
+
+      const signaturePromise = new Promise((resolve) => {
+        runner.once('taskStart', (task) => resolve(task.signature))
+      })
+
+      await runner.enqueue(sampleWorker, { metadata: { item: [1, 2, 3] } })
+      const signature = await signaturePromise
+
+      expect(signature).toBe('sampleWorker:3:p0')
+    })
+
+    test('should allow overriding signature explicitly', async () => {
+      async function sampleWorker () {
+        return 'ok'
+      }
+
+      const signaturePromise = new Promise((resolve) => {
+        runner.once('taskStart', (task) => resolve(task.signature))
+      })
+
+      await runner.enqueue(sampleWorker, {
+        metadata: { item: [1, 2, 3] },
+        signature: 'custom-worker'
+      })
+      const signature = await signaturePromise
+
+      expect(signature).toBe('custom-worker')
+    })
+  })
+
+  describe('Signature insights', () => {
+    test('should collect signature stats when monitoring enabled', async () => {
+      const monitoredRunner = new TasksRunner({
+        concurrency: 2,
+        monitoring: { enabled: true, collectMetrics: true, sampleRate: 1 }
+      })
+
+      await Promise.all([
+        monitoredRunner.enqueue(async () => 'ok', { metadata: { item: ['a'] } }),
+        monitoredRunner.enqueue(async () => 'ok', { metadata: { item: ['b', 'c'] } })
+      ])
+
+      const insights = monitoredRunner.getSignatureInsights()
+      expect(Array.isArray(insights)).toBe(true)
+      expect(insights.length).toBeGreaterThan(0)
+      monitoredRunner.destroy()
+    })
+
+    test('allows disabling processedItems tracking explicitly', async () => {
+      const lightweight = new TasksRunner({
+        concurrency: 2,
+        features: { trackProcessedItems: false }
+      })
+
+      expect(lightweight.processedItems).toBeNull()
+      await lightweight.enqueue(async () => 'noop')
+      expect(lightweight.processedItems).toBeNull()
+      lightweight.destroy()
+    })
+  })
+
   describe('Retry Logic', () => {
     test('should retry failed tasks', async () => {
       let attempts = 0
@@ -1238,6 +1304,165 @@ afterEach(async () => {
       expect(customManager).toBeInstanceOf(TasksRunner)
 
       customManager.destroy()
+    })
+  })
+
+  describe('Monitoring', () => {
+    test('should collect aggregate metrics when enabled', async () => {
+      const monitoredRunner = new TasksRunner({
+        concurrency: 2,
+        monitoring: { enabled: true, collectMetrics: true, sampleRate: 1 }
+      })
+
+      await monitoredRunner.process([1, 2, 3], async (value) => value * 2)
+      const metrics = monitoredRunner.getAggregateMetrics()
+
+      expect(metrics).toBeTruthy()
+      expect(metrics.count).toBeGreaterThanOrEqual(3)
+      expect(metrics.avgExecution).toBeGreaterThanOrEqual(0)
+
+      monitoredRunner.destroy()
+    })
+
+    test('should respect maxSamples window', async () => {
+      const monitoredRunner = new TasksRunner({
+        concurrency: 1,
+        monitoring: { enabled: true, collectMetrics: true, sampleRate: 1, maxSamples: 5 }
+      })
+      const workload = Array.from({ length: 12 }).map((_, index) => index)
+
+      await monitoredRunner.process(workload, async (value) => value)
+
+      expect(monitoredRunner.taskMetrics.size).toBeLessThanOrEqual(5)
+
+      monitoredRunner.destroy()
+    })
+
+    test('should expose concurrency info in stats', async () => {
+      const monitoredRunner = new TasksRunner({
+        concurrency: 3,
+        monitoring: { enabled: true, collectMetrics: false }
+      })
+      await monitoredRunner.enqueue(async () => 'ok')
+      await monitoredRunner.drain()
+
+      const stats = monitoredRunner.getStats()
+
+      expect(stats.concurrency).toBe(3)
+      expect(stats.rolling).toBeNull()
+
+      monitoredRunner.destroy()
+    })
+
+    test('should invoke monitoring exporter with snapshots', async () => {
+      const exporter = jest.fn()
+      const runner = new TasksRunner({
+        concurrency: 2,
+        monitoring: { enabled: true, exporter, reportInterval: 0 },
+        features: { profile: 'balanced' }
+      })
+
+      await runner.process([1, 2, 3], async (value) => value * 2)
+      await runner.drain()
+
+      expect(exporter).toHaveBeenCalled()
+      const stages = exporter.mock.calls.map(([snapshot]) => snapshot.stage)
+      expect(stages.length).toBeGreaterThan(0)
+
+      runner.destroy()
+    })
+
+    test('should wire auto tuning when enabled', async () => {
+      const fakeTuner = {
+        concurrency: 1,
+        getConcurrency () {
+          return this.concurrency
+        },
+        recordTaskMetrics: jest.fn().mockImplementation(() => {
+          this.concurrency = 3
+        }),
+        stop: jest.fn()
+      }
+      const runner = new TasksRunner({
+        concurrency: 1,
+        monitoring: { enabled: false },
+        autoTuning: { enabled: true, instance: fakeTuner }
+      })
+
+      expect(runner.tuner).toBe(fakeTuner)
+      await runner.process([1, 2, 3], async (value) => value)
+
+      runner.destroy()
+      expect(fakeTuner.stop).toHaveBeenCalled()
+    })
+  })
+
+  describe('Feature profiles', () => {
+    test('light profile enforces FIFO order', async () => {
+      const lightweight = new TasksRunner({
+        concurrency: 1,
+        retries: 0,
+        monitoring: { enabled: false },
+        features: { profile: 'light' }
+      })
+      const executions = []
+      await Promise.all([
+        lightweight.enqueue(async () => {
+          executions.push('first')
+          return 'first'
+        }, { priority: 0 }),
+        lightweight.enqueue(async () => {
+          executions.push('second')
+          return 'second'
+        }, { priority: 5 }),
+        lightweight.enqueue(async () => {
+          executions.push('third')
+          return 'third'
+        }, { priority: 10 })
+      ])
+      expect(executions).toEqual(['first', 'second', 'third'])
+      lightweight.destroy()
+    })
+
+    test('balanced profile honors priority order', async () => {
+      const balanced = new TasksRunner({
+        concurrency: 1,
+        retries: 0,
+        monitoring: { enabled: false },
+        features: { profile: 'balanced' }
+      })
+      const executions = []
+      await Promise.all([
+        balanced.enqueue(async () => {
+          executions.push('low')
+          return 'low'
+        }, { priority: 0 }),
+        balanced.enqueue(async () => {
+          executions.push('medium')
+          return 'medium'
+        }, { priority: 5 }),
+        balanced.enqueue(async () => {
+          executions.push('high')
+          return 'high'
+        }, { priority: 10 })
+      ])
+      expect(executions).toEqual(['low', 'high', 'medium'])
+      balanced.destroy()
+    })
+
+    test('emitEvents=false suppresses lifecycle events', async () => {
+      const runnerWithSilentEvents = new TasksRunner({
+        concurrency: 1,
+        retries: 0,
+        monitoring: { enabled: false },
+        features: { profile: 'light', emitEvents: false }
+      })
+      const listener = jest.fn()
+      runnerWithSilentEvents.on('taskStart', listener)
+      await runnerWithSilentEvents.enqueue(async () => 'ok')
+      await runnerWithSilentEvents.drain()
+      expect(listener).not.toHaveBeenCalled()
+      runnerWithSilentEvents.destroy()
     })
   })
 

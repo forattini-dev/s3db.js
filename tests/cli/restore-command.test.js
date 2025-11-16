@@ -72,10 +72,10 @@ describe('CLI Backup & Restore Commands', () => {
 
   test('should handle missing backup ID gracefully', async () => {
     const result = await runCLI(['restore', 'non-existent-backup', '--connection', 'test://test']);
-    
+
     expect(result.code).toBe(1);
     // The command should fail but not crash
-  });
+  }, 15000); // 15s timeout to accommodate CLI subprocess timeout
 
   // Helper function to run CLI commands
   async function runCLI(args) {

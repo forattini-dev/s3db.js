@@ -71,8 +71,6 @@ describe('Geo Plugin - Resource configuration', () => {
   });
 
   test('warns when resource is not found', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
-
     const plugin = new GeoPlugin({
       verbose: true,  // Test expects verbose logging output
       resources: {
@@ -84,9 +82,12 @@ describe('Geo Plugin - Resource configuration', () => {
       }
     });
 
+    const warnSpy = jest.spyOn(plugin.logger, 'warn').mockImplementation();
+
     await ctx.db.usePlugin(plugin);
 
     expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ resourceName: 'nonexistent' }),
       expect.stringContaining('Resource "nonexistent" not found')
     );
 

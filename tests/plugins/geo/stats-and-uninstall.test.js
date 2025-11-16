@@ -92,12 +92,13 @@ describe('Geo Plugin - Stats and uninstall', () => {
       }
     });
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
-
     await ctx.db.usePlugin(plugin);
+
+    const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+
     await plugin.uninstall();
 
-    expect(logSpy).toHaveBeenCalledWith('[GeoPlugin] Uninstalled');
+    expect(logSpy).toHaveBeenCalledWith('Uninstalled');
 
     logSpy.mockRestore();
   });
