@@ -43,6 +43,7 @@ import {
 import { verifyPassword } from './concerns/password.js';
 import { createBuiltInAuthDrivers } from './drivers/index.js';
 import { AuthDriver } from './drivers/auth-driver.interface.js';
+import { idGenerator } from '../../concerns/id.js';
 
 /**
  * Identity Provider Plugin class
@@ -1439,6 +1440,98 @@ export class IdentityPlugin extends Plugin {
    */
   getOAuth2Server() {
     return this.oauth2Server;
+  }
+
+  /**
+   * Register a confidential OAuth2 client (used by ApiPlugin auto-provisioning)
+   * @param {Object} options
+   * @param {string} options.name - Human friendly name
+   * @param {Array<string>} options.redirectUris - Allowed redirect URIs
+   * @param {Array<string>} [options.allowedScopes] - Scopes the client can request
+   * @param {Array<string>} [options.grantTypes] - Grant types enabled (default: ['authorization_code','refresh_token'])
+   * @param {Array<string>} [options.responseTypes] - Response types (default: ['code'])
+   * @param {Array<string>} [options.audiences] - Allowed audiences (stored in metadata)
+   * @param {Object} [options.metadata] - Extra metadata persisted with the client
+   * @returns {Promise<{clientId: string, clientSecret: string, redirectUris: string[]}>}
+   */
+  async registerOAuthClient(options = {}) {
+    if (!this.clientsResource) {
+      throw new PluginError('IdentityPlugin clients resource not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'registerOAuthClient',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure IdentityPlugin resources.clients is configured before registering OAuth clients.'
+      });
+    }
+
+    const {
+      name,
+      redirectUris = [],
+      allowedScopes = this.config.supportedScopes,
+      grantTypes = ['authorization_code', 'refresh_token'],
+      responseTypes = ['code'],
+      tokenEndpointAuthMethod = 'client_secret_basic',
+      audiences = [],
+      metadata = {}
+    } = options;
+
+    if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+      throw new PluginError('registerOAuthClient requires at least one redirect URI', {
+        pluginName: 'IdentityPlugin',
+        operation: 'registerOAuthClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide redirectUris when calling registerOAuthClient().'
+      });
+    }
+
+    const clientId = options.clientId || idGenerator();
+    const clientSecret = options.clientSecret || `${idGenerator()}${idGenerator()}`;
+
+    const clientRecord = {
+      clientId,
+      clientSecret,
+      name: name || `API Client ${clientId}`,
+      redirectUris,
+      allowedScopes,
+      grantTypes,
+      responseTypes,
+      tokenEndpointAuthMethod,
+      metadata: {
+        identityIntegration: {
+          audiences
+        },
+        ...metadata
+      },
+      active: true
+    };
+
+    const client = await this.clientsResource.insert(clientRecord);
+
+    if (this.auditPlugin?.log) {
+      await this.auditPlugin.log({
+        action: 'oauth_client_registered',
+        resource: 'oauth_clients',
+        resourceId: client.id,
+        metadata: {
+          clientId,
+          clientName: clientRecord.name,
+          grantTypes,
+          redirectUris,
+          createdAt: new Date().toISOString()
+        }
+      });
+    }
+
+    return {
+      clientId,
+      clientSecret,
+      redirectUris,
+      allowedScopes,
+      grantTypes,
+      responseTypes
+    };
   }
 
   /**
