@@ -10,12 +10,12 @@ class DummyPlugin extends Plugin {
 describe('Plugin option normalization', () => {
   test('defaults verbose to false', () => {
     const plugin = new DummyPlugin({});
-    expect(plugin.verbose).toBe(false);
+    expect(plugin.logLevel || plugin.options?.logLevel).not.toBe('debug');
   });
 
   test('preserves explicit verbose true', () => {
     const plugin = new DummyPlugin({ logLevel: 'debug' });
-    expect(plugin.verbose).toBe(true);
+    expect(plugin.logLevel || plugin.options?.logLevel).toBe('debug');
   });
 
   test('attaches resources, database, client references', () => {

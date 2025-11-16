@@ -3,6 +3,20 @@
  *
  * Usage:
  *   node docs/benchmarks/tasks-runner-vs-promise-pool.bench.js
+ *
+ * Tuning knobs (env):
+ *   BENCH_CONCURRENCY=50
+ *   BENCH_RUNS_PER_SCENARIO=3
+ *   BENCH_UNIFORM_VECTOR_LENGTH=2000
+ *   BENCH_MIXED_TASKS=250
+ *   BENCH_MIXED_VECTOR_MIN=256
+ *   BENCH_MIXED_VECTOR_MAX=4096
+ *
+ * Profiling helpers:
+ *   BENCH_PROFILE=1                     # capture CPU profiles (first run per scenario)
+ *   BENCH_PROFILE_FILTER="Runner"       # optional filter for scenario labels
+ *   BENCH_PROFILE_EACH_RUN=1            # capture all RUNS_PER_SCENARIO iterations
+ *   BENCH_PROFILE_DIR=tmp/benchmarks    # custom output directory
  */
 
 import { TasksRunner } from '../../src/tasks/tasks-runner.class.js'
@@ -12,12 +26,153 @@ import { PerformanceMonitor } from '../../src/concerns/performance-monitor.js'
 import { PromisePool } from '@supercharge/promise-pool'
 import { monitorEventLoopDelay, PerformanceObserver } from 'node:perf_hooks'
 import { createHash } from 'node:crypto'
+import { Session } from 'node:inspector'
+import { promises as fs } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const CONCURRENCY = 50
-const RUNS_PER_SCENARIO = 5
-const UNIFORM_VECTOR_LENGTH = 5000
-const MIXED_TASKS = 1000
-const UNIFORM_TASKS = 1000
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+const CONCURRENCY = toPositiveInt(process.env.BENCH_CONCURRENCY, 50)
+const RUNS_PER_SCENARIO = toPositiveInt(
+  process.env.BENCH_RUNS_PER_SCENARIO ?? process.env.BENCH_RUNS,
+  5
+)
+const UNIFORM_VECTOR_LENGTH = toPositiveInt(process.env.BENCH_UNIFORM_VECTOR_LENGTH, 5000)
+const MIXED_TASKS = toPositiveInt(process.env.BENCH_MIXED_TASKS, 1000)
+const UNIFORM_TASKS = toPositiveInt(process.env.BENCH_UNIFORM_TASKS, 1000)
+const MIXED_VECTOR_MIN = toPositiveInt(process.env.BENCH_MIXED_VECTOR_MIN, 500)
+const MIXED_VECTOR_MAX = toPositiveInt(process.env.BENCH_MIXED_VECTOR_MAX, 2000)
+const PROFILE_ENABLED = parseBoolean(process.env.BENCH_PROFILE)
+const PROFILE_FILTERS = parseList(process.env.BENCH_PROFILE_FILTER)
+const PROFILE_ALL_RUNS = parseBoolean(process.env.BENCH_PROFILE_EACH_RUN)
+const PROFILE_DIR = resolveProfileDir()
+
+function parseBoolean (value) {
+  if (value == null) return false
+  if (typeof value === 'boolean') return value
+  const normalized = String(value).trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
+}
+
+function parseList (value) {
+  if (!value) return []
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function resolveProfileDir () {
+  const customDir = process.env.BENCH_PROFILE_DIR
+  if (customDir) {
+    return resolve(process.cwd(), customDir)
+  }
+  return resolve(__dirname, '../../tmp/benchmarks/profiles')
+}
+
+function toPositiveInt (value, fallback) {
+  if (value == null) {
+    return fallback
+  }
+  const parsed = Number.parseInt(value, 10)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed
+  }
+  return fallback
+}
+
+function shouldProfileScenario (label, runIndex) {
+  if (!PROFILE_ENABLED) {
+    return false
+  }
+  if (!PROFILE_ALL_RUNS && runIndex > 0) {
+    return false
+  }
+  if (PROFILE_FILTERS.length === 0) {
+    return true
+  }
+  const normalized = label.toLowerCase()
+  return PROFILE_FILTERS.some((filter) => normalized.includes(filter.toLowerCase()))
+}
+
+async function withCpuProfile (label, runIndex, fn) {
+  const session = new Session()
+  session.connect()
+  try {
+    await inspectorPost(session, 'Profiler.enable')
+    await inspectorPost(session, 'Profiler.start')
+  } catch (error) {
+    session.disconnect()
+    console.warn(`⚠️ Unable to start CPU profiler for ${label}:`, error)
+    return await fn()
+  }
+
+  let result
+  let runError
+  try {
+    result = await fn()
+  } catch (err) {
+    runError = err
+  } finally {
+    let profile = null
+    try {
+      const stopResult = await inspectorPost(session, 'Profiler.stop')
+      profile = stopResult?.profile || stopResult
+    } catch (stopError) {
+      console.warn(`⚠️ Unable to stop CPU profiler for ${label}:`, stopError)
+    } finally {
+      session.disconnect()
+    }
+
+    if (profile) {
+      try {
+        await persistProfile(label, runIndex, profile)
+      } catch (persistError) {
+        console.warn(`⚠️ Unable to persist CPU profile for ${label}:`, persistError)
+      }
+    }
+  }
+
+  if (runError) {
+    throw runError
+  }
+  return result
+}
+
+async function persistProfile (label, runIndex, profile) {
+  const safeLabel = sanitizeLabel(label)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const filename = `${safeLabel}-run${runIndex + 1}-${timestamp}.cpuprofile`
+  const fullPath = join(PROFILE_DIR, filename)
+  await fs.mkdir(PROFILE_DIR, { recursive: true })
+  await fs.writeFile(fullPath, JSON.stringify(profile))
+  console.log(
+    `🧠 Saved CPU profile for ${label} (run ${runIndex + 1}) → ${relative(process.cwd(), fullPath)}`
+  )
+}
+
+function sanitizeLabel (label) {
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'profile'
+  )
+}
+
+function inspectorPost (session, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    session.post(method, params, (err, result) => {
+      if (err) {
+        reject(err)
+      } else {
+        resolve(result)
+      }
+    })
+  })
+}
 
 function randomInt (min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min
@@ -57,7 +212,7 @@ function createMixedWorkload () {
   const vectorMap = new Map()
   const lengths = []
   for (let i = 0; i < MIXED_TASKS; i++) {
-    const length = randomInt(500, 2000)
+    const length = randomInt(MIXED_VECTOR_MIN, MIXED_VECTOR_MAX)
     const values = new Array(length)
     for (let j = 0; j < length; j++) {
       values[j] = randomInt(1, 100)
@@ -181,8 +336,14 @@ function aggregateRuns (label, runs) {
 
 async function runScenarioMultiple (label, fn, workload) {
   const runs = []
+  const scenarioLabel = `${label}__${workload.name}`
   for (let i = 0; i < RUNS_PER_SCENARIO; i++) {
-    runs.push(await fn(workload))
+    const runExecutor = () => fn(workload)
+    if (shouldProfileScenario(scenarioLabel, i)) {
+      runs.push(await withCpuProfile(scenarioLabel, i, runExecutor))
+    } else {
+      runs.push(await runExecutor())
+    }
   }
   const aggregated = aggregateRuns(label, runs)
   console.log(

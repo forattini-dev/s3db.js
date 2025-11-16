@@ -30,9 +30,9 @@ describe('BaseError', () => {
     expect(err.key).toBe('k')
     expect(err.message).not.toContain('[object')
   })
-  test('toJson and toString', () => {
+  test('toJSON and toString', () => {
     const err = new BaseError({ message: 'base', bucket: 'b', key: 'k' })
-    const json = err.toJson()
+    const json = err.toJSON()
     expect(json).toHaveProperty('name', 'BaseError')
     expect(json).toHaveProperty('message', 'base')
     expect(json).toHaveProperty('bucket', 'b')
@@ -53,9 +53,9 @@ describe('BaseError', () => {
       expect(err.key).toBe('k')
       expect(err.message).not.toContain('[object')
     })
-    test('toJson and toString', () => {
+    test('toJSON and toString', () => {
       const err = new S3dbError('msg', { bucket: 'b', key: 'k' })
-      const json = err.toJson()
+      const json = err.toJSON()
       expect(json).toHaveProperty('name', 'S3dbError')
       expect(json).toHaveProperty('message', 'msg')
       expect(json).toHaveProperty('bucket', 'b')

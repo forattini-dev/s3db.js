@@ -2,7 +2,7 @@ import EventEmitter from "events";
 import { PluginStorage } from "../concerns/plugin-storage.js";
 import { FilesystemStorageDriver } from "../concerns/storage-drivers/filesystem-driver.js";
 import { PluginError } from "../errors.js";
-import { listPluginNamespaces } from "./namespace.js";
+import { listPluginNamespaces, detectAndWarnNamespaces } from "./namespace.js";
 import normalizePluginOptions from './concerns/plugin-options.js';
 import { createLogger } from "../concerns/logger.js";
 
@@ -314,23 +314,14 @@ export class Plugin extends EventEmitter {
       const pluginPrefix = this.baseSlug;
       const currentNamespace = this.namespace || '';
 
-      // List existing namespaces in storage
-      const existingNamespaces = await listPluginNamespaces(
+      // List existing namespaces and warn
+      return await detectAndWarnNamespaces(
         this.getStorage(),
-        pluginPrefix
+        this.name,
+        pluginPrefix,
+        currentNamespace,
+        this.logger
       );
-
-      // Emit console warnings (standardized format)
-      if (existingNamespaces.length > 0) {
-        // this.logger.warn(
-        //   `[${this.name}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
-        // );
-      }
-
-      const namespaceDisplay = currentNamespace === '' ? '(none)' : `"${currentNamespace}"`;
-      // this.logger.warn(`[${this.name}] Using namespace: ${namespaceDisplay}`);
-
-      return existingNamespaces;
     } catch (error) {
       // Silently fail if storage is not available
       return [];
