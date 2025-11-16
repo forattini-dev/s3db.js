@@ -9,39 +9,42 @@
  * - Startup configuration validation
  * - User data cached in session (zero DB lookups per request)
  *
+ * Config options:
+ * - resource: Resource name (default: 'plg_api_oidc_users')
+ * - createResource: Auto-create resource (default: true)
+ * - userMapping: Map OIDC claims to user fields (default: { id: 'sub', email: 'email', username: 'preferred_username' })
+ * - issuer: OIDC issuer URL (required)
+ * - clientId: OAuth2 client ID (required)
+ * - clientSecret: OAuth2 client secret (required)
+ * - redirectUri: Callback URL (required)
+ * - cookieSecret: Session encryption key (required, 32+ chars)
+ * - scopes: OIDC scopes (default: ['openid', 'profile', 'email', 'offline_access'])
+ * - rollingDuration: Session rolling duration (default: 24h)
+ * - absoluteDuration: Session absolute duration (default: 7d)
+ * - autoCreateUser: Auto-create users from IdP (default: true)
+ * - idpLogout: Enable IdP logout (default: true)
+ * - onUserAuthenticated: Hook called after auth
+ *
  * @example
  * {
  *   driver: 'oidc',
  *   config: {
- *     issuer: 'http://localhost:4000',
- *     clientId: 'app-client-123',
- *     clientSecret: 'super-secret-key-456',
- *     redirectUri: 'http://localhost:3000/auth/callback',
- *     scopes: ['openid', 'profile', 'email', 'offline_access'],
- *     cookieSecret: 'my-cookie-secret-32-chars!!!',
- *     rollingDuration: 86400000,  // 24 hours
- *     absoluteDuration: 604800000, // 7 days
- *     idpLogout: true,
- *     autoCreateUser: true,
- *     // 🎯 Hook: Called after user is authenticated
- *     onUserAuthenticated: async ({ user, created, claims, tokens, context }) => {
+ *     resource: 'users',
+ *     userMapping: {
+ *       id: 'sub',
+ *       email: 'email',
+ *       username: 'preferred_username',
+ *       role: 'role'
+ *     },
+ *     issuer: 'https://login.microsoftonline.com/{tenant}/v2.0',
+ *     clientId: 'your-client-id',
+ *     clientSecret: 'your-client-secret',
+ *     redirectUri: 'https://yourapp.com/auth/callback',
+ *     cookieSecret: 'your-32-char-secret-key-here!!!',
+ *     onUserAuthenticated: async ({ user, created }) => {
  *       if (created) {
- *         // User was just created - create profile, send welcome email, etc.
- *         await db.resources.profiles.insert({
- *           id: `profile-${user.id}`,
- *           userId: user.id,
- *           bio: '',
- *           onboarded: false
- *         });
+ *         // Handle new user creation
  *       }
- *
- *       // Set cookie with API token
- *       context.cookie('api_token', user.apiToken, {
- *         httpOnly: true,
- *         secure: true,
- *         sameSite: 'Lax',
- *         maxAge: 7 * 24 * 60 * 60  // 7 days
- *       });
  *     }
  *   }
  * }
@@ -55,6 +58,7 @@ import { unauthorized } from '../utils/response-formatter.js';
 import { applyProviderPreset, applyProviderQuirks } from './providers.js';
 import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
 import { deriveOidcKeys } from '../concerns/crypto.js';
+import { OIDCResourceManager } from './resource-manager.js';
 import {
   setChunkedCookie,
   getChunkedCookie,
@@ -417,8 +421,15 @@ async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientS
 /**
  * Create OIDC authentication handler and routes
  */
-export function createOIDCHandler(inputConfig, app, usersResource, events = null) {
+export async function createOIDCHandler(inputConfig, app, database, events = null) {
   const preset = applyProviderPreset('oidc', inputConfig || {});
+
+  // Get or create resource (do this BEFORE config to allow early validation)
+  const manager = new OIDCResourceManager(database, 'oidc', inputConfig || {});
+  const usersResource = await manager.getOrCreateResource();
+
+  logger.debug(`OIDC driver initialized with resource: ${usersResource.name}`);
+
   // Apply defaults
 const config = {
     scopes: ['openid', 'profile', 'email', 'offline_access'],
