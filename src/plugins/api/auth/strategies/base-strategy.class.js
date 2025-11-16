@@ -7,10 +7,11 @@
 import { createLogger } from '../../../../concerns/logger.js';
 
 export class BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, verbose, logger }) {
+  constructor({ drivers, authResource, oidcMiddleware, database, verbose, logger }) {
     this.drivers = drivers || [];
     this.authResource = authResource;
     this.oidcMiddleware = oidcMiddleware;
+    this.database = database;
     this.verbose = verbose;
 
     // 🪵 Logger initialization
@@ -85,9 +86,9 @@ export class BaseAuthStrategy {
   /**
    * Create auth middleware (must be implemented by subclasses)
    * @abstract
-   * @returns {Function} Hono middleware
+   * @returns {Promise<Function>} Hono middleware
    */
-  createMiddleware() {
+  async createMiddleware() {
     throw new Error('createMiddleware() must be implemented by subclass');
   }
 }

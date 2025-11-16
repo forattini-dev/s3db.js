@@ -72,19 +72,8 @@ function normalizeAuthConfig(authOptions = {}, logger = null) {
     pathAuth: authOptions.pathAuth,
     strategy: authOptions.strategy || 'any',
     priorities: authOptions.priorities || {},
-    resource: authOptions.resource, // Legacy global resource (deprecated)
     createResource: authOptions.createResource !== false
   };
-
-  // 🚨 Deprecation warning for global auth.resource
-  if (authOptions.resource && logger) {
-    logger.warn(
-      'DEPRECATED: auth.resource is deprecated. ' +
-      'Use driver-specific resource instead: ' +
-      'drivers: [{ driver: "jwt", config: { resource: "users" } }]. ' +
-      'This will be removed in v17.0.'
-    );
-  }
 
   const seen = new Set();
 
@@ -94,13 +83,9 @@ function normalizeAuthConfig(authOptions = {}, logger = null) {
     if (!driverName || seen.has(driverName)) return;
     seen.add(driverName);
 
-    // Apply global resource as fallback if driver doesn't specify one
     const config = { ...driverConfig };
-    if (!config.resource && normalized.resource) {
-      config.resource = normalized.resource; // Fallback to global (deprecated)
-    }
     if (!config.resource) {
-      config.resource = 'users'; // Ultimate fallback
+      config.resource = 'users'; // Default resource
     }
 
     normalized.drivers.push({
@@ -127,25 +112,6 @@ function normalizeAuthConfig(authOptions = {}, logger = null) {
     } else if (typeof authOptions.driver === 'object') {
       addDriver(authOptions.driver.driver, authOptions.driver.config || authOptions.config || {});
     }
-  }
-
-  // Support legacy per-driver objects (DEPRECATED - jwt: {...}, apiKey: {...} → use driver array)
-  // This will be removed in v17.0
-  for (const driverName of AUTH_DRIVER_KEYS) {
-    if (authOptions[driverName] === undefined) continue;
-
-    const value = authOptions[driverName];
-    if (!value || value.enabled === false) continue;
-
-    if (this.database?.verbose) {
-      this.logger.warn({ driverName }, 'DEPRECATED:Using per-driver auth config (${driverName}: {...}) is deprecated. Use the driver array instead: driver: [{ driver: \'driverName\', ... }]. This will be removed in v17.0.');
-    }
-
-    const config = typeof value === 'object' ? { ...value } : {};
-    if (config.enabled !== undefined) {
-      delete config.enabled;
-    }
-    addDriver(driverName, config);
   }
 
   normalized.driver = normalized.drivers.length > 0 ? normalized.drivers[0].driver : null;
@@ -383,22 +349,6 @@ export class ApiPlugin extends Plugin {
         } : false
       },
 
-      // Legacy CSP config (DEPRECATED - use security.contentSecurityPolicy)
-      csp: (() => {
-        if (options.csp) {
-          this.logger.warn(
-            '[ApiPlugin] DEPRECATED: The "csp" option is deprecated. ' +
-            'Use "security.contentSecurityPolicy" instead: { security: { contentSecurityPolicy: { enabled: true, directives: {...} } } }. ' +
-            'This will be removed in v17.0.'
-          );
-        }
-        return {
-          enabled: options.csp?.enabled || false,
-          directives: options.csp?.directives || {},
-          reportOnly: options.csp?.reportOnly || false,
-          reportUri: options.csp?.reportUri || null
-        };
-      })(),
 
       // Custom global middlewares
       middlewares: options.middlewares || [],
@@ -706,12 +656,6 @@ export class ApiPlugin extends Plugin {
       middlewares.push(corsMiddleware);
     }
 
-    // Add legacy CSP middleware (deprecated - use security.contentSecurityPolicy instead)
-    // This is kept for backward compatibility with old configs
-    if (this.config.csp.enabled && !this.config.security.contentSecurityPolicy) {
-      const cspMiddleware = await this._createCSPMiddleware();
-      middlewares.push(cspMiddleware);
-    }
 
     // Add rate limiting middleware
     if (this.config.rateLimit.enabled) {
@@ -770,41 +714,6 @@ export class ApiPlugin extends Plugin {
     };
   }
 
-  /**
-   * Create CSP middleware
-   * @private
-   */
-  async _createCSPMiddleware() {
-    return async (c, next) => {
-      const { directives, reportOnly, reportUri } = this.config.csp;
-
-      // Build CSP header value from directives
-      const cspParts = [];
-      for (const [directive, values] of Object.entries(directives)) {
-        if (Array.isArray(values) && values.length > 0) {
-          cspParts.push(`${directive} ${values.join(' ')}`);
-        } else if (typeof values === 'string') {
-          cspParts.push(`${directive} ${values}`);
-        }
-      }
-
-      // Add report-uri if specified
-      if (reportUri) {
-        cspParts.push(`report-uri ${reportUri}`);
-      }
-
-      const cspValue = cspParts.join('; ');
-
-      // Set appropriate header (report-only or enforced)
-      const headerName = reportOnly
-        ? 'Content-Security-Policy-Report-Only'
-        : 'Content-Security-Policy';
-
-      c.header(headerName, cspValue);
-
-      await next();
-    };
-  }
 
   /**
    * Create rate limiting middleware
@@ -1278,11 +1187,7 @@ export class ApiPlugin extends Plugin {
       }
 
       // Content-Security-Policy (CSP)
-      // Note: This is also handled by _createCSPMiddleware for backward compatibility
-      // We check if legacy csp.enabled is true, otherwise use security.contentSecurityPolicy
-      const cspConfig = this.config.csp.enabled
-        ? this.config.csp
-        : security.contentSecurityPolicy;
+      const cspConfig = security.contentSecurityPolicy;
 
       if (cspConfig && cspConfig.enabled !== false && cspConfig.directives) {
         const cspParts = [];

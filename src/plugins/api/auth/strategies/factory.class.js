@@ -22,19 +22,21 @@ export class AuthStrategyFactory {
    * @param {Array} config.drivers - Auth driver configurations
    * @param {Object} config.authResource - Users resource for authentication
    * @param {Function} config.oidcMiddleware - OIDC middleware (if configured)
+   * @param {Object} config.database - Database instance (required)
    * @param {Array} [config.pathRules] - Modern path rules (priority 1)
    * @param {Object} [config.pathAuth] - Legacy path auth config (priority 2)
    * @param {Object} [config.events] - Event emitter
    * @param {boolean} [config.verbose] - Enable verbose logging
    * @returns {BaseAuthStrategy} Auth strategy instance
    */
-  static create({ drivers, authResource, oidcMiddleware, pathRules, pathAuth, events, verbose }) {
+  static create({ drivers, authResource, oidcMiddleware, database, pathRules, pathAuth, events, verbose }) {
     // Priority 1: PathRules (modern API)
     if (pathRules && pathRules.length > 0) {
       return new PathRulesAuthStrategy({
         drivers,
         authResource,
         oidcMiddleware,
+        database,
         pathRules,
         events,
         verbose
@@ -47,6 +49,7 @@ export class AuthStrategyFactory {
         drivers,
         authResource,
         oidcMiddleware,
+        database,
         pathAuth,
         verbose
       });
@@ -57,6 +60,7 @@ export class AuthStrategyFactory {
       drivers,
       authResource,
       oidcMiddleware,
+      database,
       verbose
     });
   }

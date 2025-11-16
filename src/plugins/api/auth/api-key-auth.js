@@ -126,60 +126,7 @@ export async function createApiKeyHandler(config = {}, database) {
   };
 }
 
-// Legacy export for backward compatibility
-export function apiKeyAuth(options = {}) {
-  logger.warn(
-    'DEPRECATED: apiKeyAuth(options) is deprecated. ' +
-    'Use createApiKeyHandler(config, database) instead. ' +
-    'This will be removed in v17.0.'
-  );
-
-  const { usersResource, ...config } = options;
-
-  if (!usersResource) {
-    throw new Error('usersResource is required for API key authentication');
-  }
-
-  return async (c, next) => {
-    const apiKey = c.req.header(config.headerName || 'X-API-Key');
-
-    if (!apiKey) {
-      if (config.optional) {
-        return await next();
-      }
-      const response = unauthorized(`Missing ${config.headerName || 'X-API-Key'} header`);
-      return c.json(response, response._status);
-    }
-
-    try {
-      const users = await usersResource.query({ apiKey });
-
-      if (!users || users.length === 0) {
-        const response = unauthorized('Invalid API key');
-        return c.json(response, response._status);
-      }
-
-      const user = users[0];
-
-      if (!user.active) {
-        const response = unauthorized('User account is inactive');
-        return c.json(response, response._status);
-      }
-
-      c.set('user', user);
-      c.set('authMethod', 'apiKey');
-
-      await next();
-    } catch (err) {
-      logger.error('[API Key Auth] Error validating key:', err);
-      const response = unauthorized('Authentication error');
-      return c.json(response, response._status);
-    }
-  };
-}
-
 export default {
   generateApiKey,
-  createApiKeyHandler,
-  apiKeyAuth  // Legacy
+  createApiKeyHandler
 };

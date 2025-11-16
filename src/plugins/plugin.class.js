@@ -40,16 +40,6 @@ export class Plugin extends EventEmitter {
       this.logger = createLogger({ name: `Plugin:${this.name}`, level: logLevel });
     }
 
-    // 🚨 Deprecation warning for verbose option
-    if (options.verbose !== undefined) {
-      const suggestedLevel = options.verbose ? 'debug' : 'info';
-      this.logger.warn(
-        `DEPRECATED: 'verbose' option is deprecated. ` +
-        `Use 'logLevel: "${suggestedLevel}"' instead. ` +
-        `This will be removed in v17.0.`
-      );
-    }
-
     if (options.namespace || options.instanceId) {
       this.setNamespace(options.namespace || options.instanceId, { explicit: true });
     }
