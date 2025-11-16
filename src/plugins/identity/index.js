@@ -44,6 +44,7 @@ import { verifyPassword } from './concerns/password.js';
 import { createBuiltInAuthDrivers } from './drivers/index.js';
 import { AuthDriver } from './drivers/auth-driver.interface.js';
 import { idGenerator } from '../../concerns/id.js';
+import { OnboardingManager } from './concerns/onboarding-manager.js';
 
 /**
  * Identity Provider Plugin class
@@ -140,6 +141,20 @@ export class IdentityPlugin extends Plugin {
       logging: {
         enabled: options.logging?.enabled || false,
         format: options.logging?.format || ':method :path :status :response-time ms'
+      },
+
+      // Onboarding (first-run admin setup)
+      onboarding: {
+        enabled: options.onboarding?.enabled !== false, // Enabled by default
+        mode: options.onboarding?.mode || 'interactive', // 'interactive' | 'env' | 'config' | 'callback' | 'disabled'
+        force: options.onboarding?.force || false, // Force onboarding even if admin exists
+        adminEmail: options.onboarding?.adminEmail,
+        adminPassword: options.onboarding?.adminPassword,
+        adminName: options.onboarding?.adminName,
+        admin: options.onboarding?.admin, // { email, password, name, scopes }
+        onFirstRun: options.onboarding?.onFirstRun, // async (context) => {}
+        interactive: options.onboarding?.interactive || {},
+        passwordPolicy: options.onboarding?.passwordPolicy || {}
       },
 
       // Session Management
@@ -500,6 +515,9 @@ export class IdentityPlugin extends Plugin {
 
     // Initialize authentication drivers
     await this._initializeAuthDrivers();
+
+    // Run onboarding if enabled and first run detected
+    await this._runOnboarding();
 
     // Expose integration metadata in plugin registry for downstream consumers
     this._exposeIntegrationMetadata();
@@ -1443,7 +1461,7 @@ export class IdentityPlugin extends Plugin {
   }
 
   /**
-   * Register a confidential OAuth2 client (used by ApiPlugin auto-provisioning)
+   * Register a confidential OAuth2 client (helper for automation/CI flows)
    * @param {Object} options
    * @param {string} options.name - Human friendly name
    * @param {Array<string>} options.redirectUris - Allowed redirect URIs
@@ -1499,9 +1517,7 @@ export class IdentityPlugin extends Plugin {
       responseTypes,
       tokenEndpointAuthMethod,
       metadata: {
-        identityIntegration: {
-          audiences
-        },
+        ...(Array.isArray(audiences) && audiences.length > 0 ? { audiences } : {}),
         ...metadata
       },
       active: true
@@ -1532,6 +1548,155 @@ export class IdentityPlugin extends Plugin {
       grantTypes,
       responseTypes
     };
+  }
+
+  /**
+   * Run onboarding flow (first-run admin setup)
+   * @private
+   */
+  async _runOnboarding() {
+    if (!this.config.onboarding.enabled) {
+      if (this.config.logLevel) {
+        this.logger.info('[Onboarding] Disabled via config');
+      }
+      return;
+    }
+
+    // Initialize onboarding manager
+    this.onboardingManager = new OnboardingManager({
+      usersResource: this.usersResource,
+      clientsResource: this.clientsResource,
+      database: this.database,
+      logger: this.logger,
+      config: {
+        ...this.config.onboarding,
+        issuer: this.config.issuer,
+        logLevel: this.config.logLevel
+      },
+      auditPlugin: this.auditPlugin,
+      pluginStorageResource: null // Will be set when plugin storage is available
+    });
+
+    // Detect first run
+    const firstRun = await this.onboardingManager.detectFirstRun();
+
+    if (!firstRun && !this.config.onboarding.force) {
+      if (this.config.logLevel) {
+        this.logger.info('[Onboarding] Admin exists, skipping onboarding');
+      }
+      return;
+    }
+
+    const mode = this.config.onboarding.mode;
+
+    if (this.config.logLevel) {
+      this.logger.info(`[Onboarding] Starting first-run setup (mode: ${mode})`);
+    }
+
+    try {
+      switch (mode) {
+        case 'interactive':
+          await this.onboardingManager.runInteractiveMode();
+          break;
+
+        case 'env':
+          await this.onboardingManager.runEnvMode();
+          break;
+
+        case 'config':
+          await this.onboardingManager.runConfigMode();
+          break;
+
+        case 'callback':
+          await this.onboardingManager.runCallbackMode();
+          break;
+
+        case 'disabled':
+          if (this.config.logLevel) {
+            this.logger.warn('[Onboarding] Disabled - admin account must be created manually');
+          }
+          break;
+
+        default:
+          throw new PluginError(`Unknown onboarding mode: ${mode}`, {
+            pluginName: 'IdentityPlugin',
+            operation: '_runOnboarding',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Use one of: interactive, env, config, callback, disabled'
+          });
+      }
+
+      if (mode !== 'disabled' && this.config.logLevel) {
+        this.logger.info('[Onboarding] Setup complete');
+      }
+    } catch (error) {
+      this.logger?.error('[Onboarding] Setup failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get onboarding status
+   * @returns {Promise<Object>} Onboarding status
+   */
+  async getOnboardingStatus() {
+    if (!this.onboardingManager) {
+      return {
+        completed: false,
+        error: 'Onboarding manager not initialized'
+      };
+    }
+    return this.onboardingManager.getOnboardingStatus();
+  }
+
+  /**
+   * Complete onboarding manually (create admin + optional clients)
+   * @param {Object} options - Onboarding options
+   * @param {Object} options.admin - Admin user data
+   * @param {Array} options.clients - OAuth clients to create
+   * @returns {Promise<void>}
+   */
+  async completeOnboarding(options = {}) {
+    if (!this.onboardingManager) {
+      throw new PluginError('Onboarding manager not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'completeOnboarding',
+        statusCode: 500,
+        retriable: false
+      });
+    }
+
+    if (options.admin) {
+      await this.onboardingManager.createAdmin(options.admin);
+    }
+
+    if (options.clients) {
+      for (const client of options.clients) {
+        await this.onboardingManager.createClient(client);
+      }
+    }
+
+    await this.onboardingManager.markOnboardingComplete({
+      adminEmail: options.admin?.email,
+      clientsCreated: options.clients?.length || 0
+    });
+  }
+
+  /**
+   * Mark onboarding as complete (skip checks)
+   * @returns {Promise<void>}
+   */
+  async markOnboardingComplete() {
+    if (!this.onboardingManager) {
+      throw new PluginError('Onboarding manager not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'markOnboardingComplete',
+        statusCode: 500,
+        retriable: false
+      });
+    }
+    await this.onboardingManager.markOnboardingComplete();
   }
 
   /**

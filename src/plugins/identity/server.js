@@ -340,22 +340,76 @@ export class IdentityServer {
       return c.json(response);
     });
 
-    this.app.get('/health/ready', (c) => {
+    this.app.get('/health/ready', async (c) => {
       const isReady = this.options.oauth2Server !== null;
+
+      // Check onboarding status
+      let onboardingStatus = null;
+      if (this.options.identityPlugin && typeof this.options.identityPlugin.getOnboardingStatus === 'function') {
+        try {
+          onboardingStatus = await this.options.identityPlugin.getOnboardingStatus();
+        } catch (error) {
+          // Non-fatal - continue without onboarding status
+        }
+      }
 
       if (!isReady) {
         const response = formatter.error('Service not ready', {
           status: 503,
-          code: 'NOT_READY'
+          code: 'NOT_READY',
+          onboarding: onboardingStatus
+        });
+        return c.json(response, 503);
+      }
+
+      // If onboarding not completed, return degraded status
+      if (onboardingStatus && !onboardingStatus.completed && !onboardingStatus.adminExists) {
+        const response = formatter.error('First run setup required', {
+          status: 503,
+          code: 'ONBOARDING_REQUIRED',
+          onboarding: {
+            required: true,
+            adminExists: false,
+            mode: onboardingStatus.mode
+          }
         });
         return c.json(response, 503);
       }
 
       const response = formatter.success({
         status: 'ready',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        onboarding: onboardingStatus ? {
+          required: false,
+          adminExists: onboardingStatus.adminExists,
+          completedAt: onboardingStatus.completedAt
+        } : undefined
       });
       return c.json(response);
+    });
+
+    // Onboarding status endpoint
+    this.app.get('/onboarding/status', async (c) => {
+      if (!this.options.identityPlugin || typeof this.options.identityPlugin.getOnboardingStatus !== 'function') {
+        const response = formatter.error('Onboarding not available', {
+          status: 501,
+          code: 'NOT_IMPLEMENTED'
+        });
+        return c.json(response, 501);
+      }
+
+      try {
+        const status = await this.options.identityPlugin.getOnboardingStatus();
+        const response = formatter.success(status);
+        return c.json(response);
+      } catch (error) {
+        const response = formatter.error('Failed to get onboarding status', {
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          details: error.message
+        });
+        return c.json(response, 500);
+      }
     });
 
     // Root endpoint - discovery redirect
