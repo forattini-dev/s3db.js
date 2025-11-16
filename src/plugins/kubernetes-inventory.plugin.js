@@ -25,6 +25,7 @@ import tryFn from '../concerns/try-fn.js';
 import { KubernetesDriver } from './kubernetes-inventory/k8s-driver.js';
 import { formatResourceTypeId, parseResourceTypeId } from './kubernetes-inventory/resource-types.js';
 import { resolveResourceNames } from './concerns/resource-names.js';
+import { createLogger } from '../concerns/logger.js';
 
 const DEFAULT_DISCOVERY = {
   concurrency: 2,
@@ -97,6 +98,14 @@ function normalizeSchedule(schedule) {
 export class KubernetesInventoryPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger && typeof options.logger !== 'function') {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'KubernetesInventoryPlugin', level: logLevel });
+    }
 
     const {
       clusters,
@@ -980,12 +989,28 @@ export class KubernetesInventoryPlugin extends Plugin {
    * Internal logger
    */
   _log(level, message, meta = {}) {
-    if (this.config.logger) {
+    // Call custom logger if provided (for backward compatibility)
+    if (this.config.logger && typeof this.config.logger === 'function') {
       this.config.logger(level, message, { plugin: 'KubernetesInventoryPlugin', ...meta });
     }
 
-    if (this.config.verbose && level !== 'debug') {
-      console.log(`[${level.toUpperCase()}] [KubernetesInventoryPlugin] ${message}`);
+    // Use Pino logger with structured logging
+    const logContext = { plugin: 'KubernetesInventoryPlugin', ...meta };
+    switch (level) {
+      case 'error':
+        this.logger.error(logContext, message);
+        break;
+      case 'warn':
+        this.logger.warn(logContext, message);
+        break;
+      case 'info':
+        this.logger.info(logContext, message);
+        break;
+      case 'debug':
+        this.logger.debug(logContext, message);
+        break;
+      default:
+        this.logger.info(logContext, message);
     }
   }
 }

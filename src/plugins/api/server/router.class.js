@@ -22,7 +22,7 @@ import { createContextInjectionMiddleware } from '../middlewares/context-injecti
 import { applyBasePath } from '../utils/base-path.js';
 
 export class Router {
-  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, Hono, apiTitle, apiDescription, docsEnabled, rootRoute }) {
+  constructor({ database, resources, routes, versionPrefix, basePath = '', auth, static: staticConfigs, failban, metrics, relationsPlugin, authMiddleware, verbose, logger, Hono, apiTitle, apiDescription, docsEnabled, rootRoute }) {
     this.database = database;
     this.resources = resources || {};
     this.routes = routes || {};
@@ -35,6 +35,7 @@ export class Router {
     this.relationsPlugin = relationsPlugin;
     this.authMiddleware = authMiddleware;
     this.verbose = verbose;
+    this.logger = logger; // Pino logger instance from APIPlugin
     this.Hono = Hono;
     this.apiTitle = apiTitle || 's3db.js API';
     this.apiDescription = apiDescription || 'Auto-generated REST API for s3db.js resources';
@@ -53,9 +54,8 @@ export class Router {
     const contextInjection = createContextInjectionMiddleware(this.database);
     app.use('*', contextInjection);
 
-    if (this.verbose) {
-      console.log('[API Router] Context injection middleware registered (resources accessible via c.get())');
-    }
+    // 🪵 Debug: context injection middleware registered
+    this.logger?.debug('Context injection middleware registered (resources accessible via c.get())');
 
     // Root splash screen (before static files to allow override)
     this.mountRootRoute(app);
@@ -86,9 +86,8 @@ export class Router {
   mountRootRoute(app) {
     // Skip if explicitly disabled
     if (this.rootRoute === false) {
-      if (this.verbose) {
-        console.log('[API Router] Root route disabled via config.rootRoute = false');
-      }
+      // 🪵 Debug: root route disabled
+      this.logger?.debug('Root route disabled via config.rootRoute = false');
       return;
     }
 
@@ -97,9 +96,8 @@ export class Router {
     // Custom handler provided
     if (typeof this.rootRoute === 'function') {
       app.get(rootPath, this.rootRoute);
-      if (this.verbose) {
-        console.log(`[API Router] Mounted custom root handler at ${rootPath}`);
-      }
+      // 🪵 Debug: mounted custom root handler
+      this.logger?.debug({ path: rootPath }, `Mounted custom root handler at ${rootPath}`);
       return;
     }
 
@@ -110,9 +108,8 @@ export class Router {
       return c.html(html);
     });
 
-    if (this.verbose) {
-      console.log(`[API Router] Mounted default splash screen at ${rootPath}`);
-    }
+    // 🪵 Debug: mounted default splash screen
+    this.logger?.debug({ path: rootPath }, `Mounted default splash screen at ${rootPath}`);
   }
 
   /**
@@ -294,17 +291,15 @@ export class Router {
 
       // Internal plugin resources require explicit opt-in
       if (isPluginResource && !resourceConfig) {
-        if (this.verbose) {
-          console.log(`[API Router] Skipping internal resource '${name}' (not included in config.resources)`);
-        }
+        // 🪵 Debug: skipping internal resource
+        this.logger?.debug({ resourceName: name }, `Skipping internal resource '${name}' (not included in config.resources)`);
         continue;
       }
 
       // Allow explicit disabling via config
       if (resourceConfig?.enabled === false) {
-        if (this.verbose) {
-          console.log(`[API Router] Resource '${name}' disabled via config.resources`);
-        }
+        // 🪵 Debug: resource disabled
+        this.logger?.debug({ resourceName: name }, `Resource '${name}' disabled via config.resources`);
         continue;
       }
 
@@ -351,8 +346,9 @@ export class Router {
         for (const middleware of toRegister) {
           if (typeof middleware === 'function') {
             middlewares.push(middleware);
-          } else if (this.verbose) {
-            console.warn(`[API Router] Ignoring non-function middleware for resource '${name}'`);
+          } else {
+            // 🪵 Warn: ignoring non-function middleware
+            this.logger?.warn({ resourceName: name }, `Ignoring non-function middleware for resource '${name}'`);
           }
         }
       }
@@ -387,9 +383,8 @@ export class Router {
       const fullMountPath = this._withBasePath(mountPath);
       app.route(fullMountPath, resourceApp);
 
-      if (this.verbose) {
-        console.log(`[API Router] Mounted routes for resource '${name}' at ${fullMountPath}`);
-      }
+      // 🪵 Debug: mounted resource routes
+      this.logger?.debug({ resourceName: name, path: fullMountPath, methods }, `Mounted routes for resource '${name}' at ${fullMountPath}`);
 
       this.routeSummaries.push({
         resource: name,
@@ -421,26 +416,23 @@ export class Router {
     const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = (this.auth || {});
 
     if (!drivers || (Array.isArray(drivers) && drivers.length === 0)) {
-      if (this.verbose) {
-        console.warn('[API Router] Auth not configured or empty drivers; skipping built-in auth routes');
-      }
+      // 🪵 Warn: auth not configured
+      this.logger?.warn('Auth not configured or empty drivers; skipping built-in auth routes');
       return;
     }
 
     const identityPlugin = this.database?.pluginRegistry?.identity || this.database?.pluginRegistry?.Identity;
     if (identityPlugin) {
-      if (this.verbose) {
-        console.warn('[API Router] IdentityPlugin detected. Skipping built-in auth routes.');
-      }
+      // 🪵 Warn: IdentityPlugin detected
+      this.logger?.warn('IdentityPlugin detected. Skipping built-in auth routes.');
       return;
     }
 
     // Skip JWT auth routes if OIDC driver exists (OIDC provides its own /auth/login)
     const oidcDriver = drivers?.find(d => d.driver === 'oidc');
     if (oidcDriver) {
-      if (this.verbose) {
-        console.log('[API Router] OIDC driver detected. Skipping JWT auth routes (OIDC provides /auth/login).');
-      }
+      // 🪵 Debug: OIDC driver detected
+      this.logger?.debug('OIDC driver detected. Skipping JWT auth routes (OIDC provides /auth/login).');
       return;
     }
 
@@ -454,7 +446,7 @@ export class Router {
     // Get auth resource
     const authResource = this.database.resources[resourceName];
     if (!authResource) {
-      console.error(`[API Router] Auth resource '${resourceName}' not found. Skipping auth routes.`);
+      this.logger.error(`[API Router] Auth resource '${resourceName}' not found. Skipping auth routes.`);
       return;
     }
 
@@ -503,9 +495,8 @@ export class Router {
     const authPath = this._withBasePath('/auth');
     app.route(authPath, authApp);
 
-    if (this.verbose) {
-      console.log(`[API Router] Mounted auth routes (driver: jwt) at ${authPath}`);
-    }
+    // 🪵 Debug: mounted auth routes
+    this.logger?.debug({ path: authPath, driver: 'jwt' }, `Mounted auth routes (driver: jwt) at ${authPath}`);
   }
 
   /**
@@ -587,15 +578,12 @@ export class Router {
         app.get(mountPath, handler);
         app.on('HEAD', mountPath, handler);  // Explicit HEAD support
 
-        if (this.verbose) {
-          console.log(
-            `[API Router] Mounted static files (${config.driver}) at ${config.path}` +
-            (config.driver === 'filesystem' ? ` -> ${config.root}` : ` -> s3://${config.bucket}/${config.prefix || ''}`)
-          );
-        }
+        // 🪵 Debug: mounted static files
+        const source = config.driver === 'filesystem' ? config.root : `s3://${config.bucket}/${config.prefix || ''}`;
+        this.logger?.debug({ driver: config.driver, path: config.path, source }, `Mounted static files (${config.driver}) at ${config.path} -> ${source}`);
 
       } catch (err) {
-        console.error(`[API Router] Failed to setup static files for index ${index}:`, err.message);
+        this.logger.error(`[API Router] Failed to setup static files for index ${index}:`, err.message);
         throw err;
       }
     }
@@ -612,16 +600,14 @@ export class Router {
 
     const relations = this.relationsPlugin.relations;
 
-    if (this.verbose) {
-      console.log('[API Router] Setting up relational routes...');
-    }
+    // 🪵 Debug: setting up relational routes
+    this.logger?.debug('Setting up relational routes...');
 
     for (const [resourceName, relationsDef] of Object.entries(relations)) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
-        if (this.verbose) {
-          console.warn(`[API Router] Resource '${resourceName}' not found for relational routes`);
-        }
+        // 🪵 Warn: resource not found for relational routes
+        this.logger?.warn({ resourceName }, `Resource '${resourceName}' not found for relational routes`);
         continue;
       }
 
@@ -659,12 +645,8 @@ export class Router {
         const relationPath = this._withBasePath(`/${version}/${resourceName}/:id/${relationName}`);
         app.route(relationPath, relationalApp);
 
-        if (this.verbose) {
-          console.log(
-            `[API Router] Mounted relational route: ${relationPath} ` +
-            `(${relationConfig.type} -> ${relationConfig.resource})`
-          );
-        }
+        // 🪵 Debug: mounted relational route
+        this.logger?.debug({ path: relationPath, type: relationConfig.type, targetResource: relationConfig.resource }, `Mounted relational route: ${relationPath} (${relationConfig.type} -> ${relationConfig.resource})`);
       }
     }
   }
@@ -687,9 +669,9 @@ export class Router {
       pathPrefix: this.basePath
     });
 
-    if (this.verbose) {
-      console.log(`[API Router] Mounted ${Object.keys(this.routes).length} plugin-level custom routes`);
-    }
+    // 🪵 Debug: mounted plugin-level custom routes
+    const routeCount = Object.keys(this.routes).length;
+    this.logger?.debug({ routeCount }, `Mounted ${routeCount} plugin-level custom routes`);
   }
 
   /**
@@ -713,9 +695,8 @@ export class Router {
         return c.json(response);
       });
 
-      if (this.verbose) {
-        console.log(`[API Router] Metrics endpoint enabled at ${metricsPath}`);
-      }
+      // 🪵 Debug: metrics endpoint enabled
+      this.logger?.debug({ path: metricsPath, format: metricsFormat }, `Metrics endpoint enabled at ${metricsPath}`);
     }
 
     // Failban admin endpoints
@@ -724,9 +705,8 @@ export class Router {
       const failbanPath = this._withBasePath('/admin/security');
       app.route(failbanPath, failbanAdminRoutes);
 
-      if (this.verbose) {
-        console.log(`[API Router] Failban admin endpoints enabled at ${failbanPath}`);
-      }
+      // 🪵 Debug: failban admin endpoints enabled
+      this.logger?.debug({ path: failbanPath }, `Failban admin endpoints enabled at ${failbanPath}`);
     }
   }
 

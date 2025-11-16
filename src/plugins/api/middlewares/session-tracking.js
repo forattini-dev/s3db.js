@@ -32,14 +32,18 @@
  * app.get('/r/:id', async (c) => {
  *   const sessionId = c.get('sessionId');
  *   const session = c.get('session');
- *   console.log('Session:', sessionId);
+ *   logger.info('Session:', sessionId);
  * });
  */
 
 import { encrypt, decrypt } from '../../../concerns/crypto.js';
+import { createLogger } from '../../../concerns/logger.js';
 import { idGenerator } from '../../../concerns/id.js';
 import { getCookie, setCookie } from 'hono/cookie';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'SessionTracking', level: 'info' });
 /**
  * Create session tracking middleware
  *
@@ -107,7 +111,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
         }
       } catch (err) {
         if (c.get('verbose')) {
-          console.error('[SessionTracking] Failed to decrypt cookie:', err.message);
+          logger.error('[SessionTracking] Failed to decrypt cookie:', err.message);
         }
         // Will create new session below
       }
@@ -136,7 +140,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
           }
         } catch (enrichErr) {
           if (c.get('verbose')) {
-            console.error('[SessionTracking] enrichSession failed:', enrichErr.message);
+            logger.error('[SessionTracking] enrichSession failed:', enrichErr.message);
           }
         }
       }
@@ -147,7 +151,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
           session = await sessionsResource.insert(sessionData);
         } catch (insertErr) {
           if (c.get('verbose')) {
-            console.error('[SessionTracking] Failed to insert session:', insertErr.message);
+            logger.error('[SessionTracking] Failed to insert session:', insertErr.message);
           }
           session = sessionData; // Use in-memory fallback
         }
@@ -167,7 +171,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
       // Fire-and-forget update (don't block request)
       sessionsResource.update(sessionId, updates).catch((updateErr) => {
         if (c.get('verbose')) {
-          console.error('[SessionTracking] Failed to update session:', updateErr.message);
+          logger.error('[SessionTracking] Failed to update session:', updateErr.message);
         }
       });
 
@@ -188,7 +192,7 @@ export function createSessionTrackingMiddleware(config = {}, db) {
       });
     } catch (encryptErr) {
       if (c.get('verbose')) {
-        console.error('[SessionTracking] Failed to encrypt session ID:', encryptErr.message);
+        logger.error('[SessionTracking] Failed to encrypt session ID:', encryptErr.message);
       }
     }
 

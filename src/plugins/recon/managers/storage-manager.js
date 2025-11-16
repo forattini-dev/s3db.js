@@ -64,7 +64,7 @@ export class StorageManager {
 
         this.resources[config.name] = resource;  // Use original name as key
       } catch (error) {
-        console.error(`Failed to initialize resource ${config.name}:`, error.message);
+        this.logger.error(`Failed to initialize resource ${config.name}:`, error.message);
       }
     }
   }

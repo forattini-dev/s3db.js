@@ -143,7 +143,7 @@ export default class BaseBackupDriver {
    */
   log(message) {
     if (this.config.verbose) {
-      console.log(`[${this.getType()}BackupDriver] ${message}`);
+      this.logger.info(`[${this.getType()}BackupDriver] ${message}`);
     }
   }
 }

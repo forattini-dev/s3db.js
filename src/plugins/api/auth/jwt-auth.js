@@ -5,10 +5,14 @@
  */
 
 import { createHash } from 'crypto';
+import { createLogger } from '../../../concerns/logger.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { getCookie } from 'hono/cookie';
 import { LRUCache } from '../concerns/lru-cache.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'JwtAuth', level: 'info' });
 // Token verification cache (40-60% performance improvement)
 const tokenCache = new LRUCache({ max: 1000, ttl: 60000 }); // 1 minute TTL
 
@@ -200,7 +204,7 @@ export function jwtAuth(options = {}) {
         c.set('authMethod', 'jwt');
       } catch (err) {
         if (c.get('verbose')) {
-          console.error('[JWT Auth] Error loading user:', err);
+          logger.error('[JWT Auth] Error loading user:', err);
         }
         const response = unauthorized('Authentication error');
         return c.json(response, response._status);

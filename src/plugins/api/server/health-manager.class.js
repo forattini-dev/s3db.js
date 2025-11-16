@@ -12,10 +12,11 @@
 import * as formatter from '../../shared/response-formatter.js';
 
 export class HealthManager {
-  constructor({ database, healthConfig, verbose }) {
+  constructor({ database, healthConfig, verbose, logger }) {
     this.database = database;
     this.healthConfig = healthConfig || {};
     this.verbose = verbose;
+    this.logger = logger; // Pino logger from APIPlugin
   }
 
   /**
@@ -32,12 +33,8 @@ export class HealthManager {
     // Generic health
     app.get('/health', (c) => this.genericHealth(c));
 
-    if (this.verbose) {
-      console.log('[HealthManager] Health endpoints registered:');
-      console.log('[HealthManager]   GET /health');
-      console.log('[HealthManager]   GET /health/live');
-      console.log('[HealthManager]   GET /health/ready');
-    }
+    // 🪵 Debug: health endpoints registered
+    this.logger.debug({ endpoints: ['/health', '/health/live', '/health/ready'] }, 'Health endpoints registered: GET /health, GET /health/live, GET /health/ready');
   }
 
   /**

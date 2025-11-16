@@ -243,9 +243,8 @@ export class TTLPlugin extends CoordinatorPlugin {
 
     for (const [resourceName, config] of Object.entries(this.resources)) {
       if (!this.resourceFilter(resourceName)) {
-        if (this.verbose) {
-          console.warn(`[TTLPlugin] Resource "${resourceName}" skipped by resource filter`);
-        }
+        // 🪵 Warning: resource skipped by filter
+        this.logger.warn({ resourceName }, `Resource "${resourceName}" skipped by resource filter`);
         continue;
       }
       this._validateResourceConfig(resourceName, config);
@@ -263,9 +262,8 @@ export class TTLPlugin extends CoordinatorPlugin {
     // NOTE: Cleanup intervals are started in onBecomeCoordinator() to ensure
     // only the coordinator performs cleanup work (avoids duplicate scans)
 
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Installed with ${managedResources.length} resources`);
-    }
+    // 🪵 Debug: plugin installed
+    this.logger.debug({ resourceCount: managedResources.length, resources: managedResources }, `Installed with ${managedResources.length} resources`)
 
     this.emit('db:plugin:installed', {
       plugin: 'TTLPlugin',
@@ -351,11 +349,13 @@ export class TTLPlugin extends CoordinatorPlugin {
     }
 
     // Validate timestamp field availability
-    if (config.field === '_createdAt' && this.database && this.verbose) {
+    if (config.field === '_createdAt' && this.database) {
       const resource = this.database.resources[resourceName];
       if (resource && resource.$schema.timestamps === false) {
-        console.warn(
-          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" ` +
+        // 🪵 Warning: timestamps disabled but using _createdAt
+        this.logger.warn(
+          { resourceName, field: config.field },
+          `Resource "${resourceName}" uses TTL with field "_createdAt" ` +
           `but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
         );
       }
@@ -387,9 +387,8 @@ export class TTLPlugin extends CoordinatorPlugin {
       asyncPartitions: false  // Sync partitions for deterministic behavior
     });
 
-    if (this.verbose) {
-      console.log('[TTLPlugin] Created expiration index with partition');
-    }
+    // 🪵 Debug: expiration index created
+    this.logger.debug({ indexResourceName: this.indexResourceName }, 'Created expiration index with partition');
   }
 
   /**
@@ -399,16 +398,14 @@ export class TTLPlugin extends CoordinatorPlugin {
     // Check if resource exists BEFORE calling database.resource()
     // because database.resource() returns Promise.reject() for non-existent resources
     if (!this.database.resources[resourceName]) {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
-      }
+      // 🪵 Warning: resource not found
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" not found, skipping hooks`);
       return;
     }
 
     if (!this.resourceFilter(resourceName)) {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" skipped by resource filter`);
-      }
+      // 🪵 Warning: resource skipped by filter
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" skipped by resource filter`);
       return;
     }
 
@@ -416,9 +413,8 @@ export class TTLPlugin extends CoordinatorPlugin {
 
     // Verify methods exist before adding middleware
     if (typeof resource.insert !== 'function' || typeof resource.delete !== 'function') {
-      if (this.verbose) {
-        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
-      }
+      // 🪵 Warning: missing methods
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
       return;
     }
 
@@ -436,9 +432,8 @@ export class TTLPlugin extends CoordinatorPlugin {
       return result;
     });
 
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
-    }
+    // 🪵 Debug: hooks setup
+    this.logger.debug({ resourceName }, `Setup hooks for resource "${resourceName}"`);
   }
 
   /**
@@ -457,11 +452,11 @@ export class TTLPlugin extends CoordinatorPlugin {
       }
 
       if (!baseTime) {
-        if (this.verbose) {
-          console.warn(
-            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
-          );
-        }
+        // 🪵 Warning: missing TTL field
+        this.logger.warn(
+          { resourceName, recordId: record.id, field: config.field },
+          `Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
+        );
         return;
       }
 
@@ -490,14 +485,14 @@ export class TTLPlugin extends CoordinatorPlugin {
         createdAt: Date.now()
       });
 
-      if (this.verbose) {
-        console.log(
-          `[TTLPlugin] Added ${resourceName}:${record.id} to index ` +
-          `(cohort: ${cohort}, granularity: ${config.granularity})`
-        );
-      }
+      // 🪵 Debug: added to index
+      this.logger.debug(
+        { resourceName, recordId: record.id, cohort, granularity: config.granularity },
+        `Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
+      );
     } catch (error) {
-      console.error(`[TTLPlugin] Error adding to index:`, error);
+      // 🪵 Error: adding to index failed
+      this.logger.error({ error: error.message, stack: error.stack }, 'Error adding to index');
       this.stats.totalErrors++;
     }
   }
@@ -512,8 +507,9 @@ export class TTLPlugin extends CoordinatorPlugin {
 
       const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
 
-      if (this.verbose && ok) {
-        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
+      if (ok) {
+        // 🪵 Debug: removed from index
+        this.logger.debug({ resourceName, recordId }, `Removed index entry for ${resourceName}:${recordId}`);
       }
 
       // Ignore "not found" errors - record might not have been indexed
@@ -521,7 +517,7 @@ export class TTLPlugin extends CoordinatorPlugin {
         throw err;
       }
     } catch (error) {
-      console.error(`[TTLPlugin] Error removing from index:`, error);
+      this.logger.error(`[TTLPlugin] Error removing from index:`, error);
     }
   }
 
@@ -532,9 +528,8 @@ export class TTLPlugin extends CoordinatorPlugin {
    * Only the coordinator should run cleanup intervals
    */
   async onBecomeCoordinator() {
-    if (this.verbose) {
-      console.log('[TTLPlugin] Became coordinator - starting cleanup intervals');
-    }
+    // 🪵 Debug: became coordinator
+    this.logger.debug({ workerId: this.workerId }, 'Became coordinator - starting cleanup intervals');
 
     // Start cleanup intervals (only coordinator does cleanup)
     await this._startIntervals();
@@ -550,9 +545,8 @@ export class TTLPlugin extends CoordinatorPlugin {
    * Cleanup intervals are auto-stopped by Plugin.stop()
    */
   async onStopBeingCoordinator() {
-    if (this.verbose) {
-      console.log('[TTLPlugin] No longer coordinator - cleanup intervals will be stopped automatically');
-    }
+    // 🪵 Debug: no longer coordinator
+    this.logger.debug({ workerId: this.workerId }, 'No longer coordinator - cleanup intervals will be stopped automatically');
 
     this.emit('plg:ttl:coordinator-demoted', {
       workerId: this.workerId,
@@ -577,9 +571,8 @@ export class TTLPlugin extends CoordinatorPlugin {
    */
   async _startIntervals() {
     if (!this.cronManager) {
-      if (this.verbose) {
-        console.warn('[TTLPlugin] CronManager not available, cleanup intervals will not run');
-      }
+      // 🪵 Warning: CronManager not available
+      this.logger.warn('CronManager not available, cleanup intervals will not run');
       return;
     }
 
@@ -614,13 +607,12 @@ export class TTLPlugin extends CoordinatorPlugin {
         `cleanup-${granularity}` // Auto-prefixed with 'ttl-'
       );
 
-      if (this.verbose) {
-        const source = this.schedules[granularity] ? 'custom' : 'default';
-        console.log(
-          `[TTLPlugin] Scheduled ${granularity} cleanup (${source} cron: ${cronExpression}) ` +
-          `for ${resources.length} resources`
-        );
-      }
+      // 🪵 Debug: scheduled cleanup
+      const source = this.schedules[granularity] ? 'custom' : 'default';
+      this.logger.debug(
+        { granularity, cronExpression, resourceCount: resources.length, source },
+        `Scheduled ${granularity} cleanup (${source} cron: ${cronExpression}) for ${resources.length} resources`
+      );
     }
 
     this.isRunning = true;
@@ -637,9 +629,8 @@ export class TTLPlugin extends CoordinatorPlugin {
       const granularityConfig = GRANULARITIES[granularity];
       const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
 
-      if (this.verbose) {
-        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
-      }
+      // 🪵 Debug: cleaning granularity
+      this.logger.debug({ granularity, cohorts }, `Cleaning ${granularity} granularity, checking cohorts: ${cohorts.join(', ')}`);
 
       for (const cohort of cohorts) {
         // Query partition (O(1)!)
@@ -652,8 +643,9 @@ export class TTLPlugin extends CoordinatorPlugin {
         const resourceNames = new Set(resources.map(r => r.name));
         const filtered = expired.filter(e => resourceNames.has(e.resourceName));
 
-        if (this.verbose && filtered.length > 0) {
-          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
+        if (filtered.length > 0) {
+          // 🪵 Debug: found expired records
+          this.logger.debug({ cohort, expiredCount: filtered.length }, `Found ${filtered.length} expired records in cohort ${cohort}`);
         }
 
         // Process in batches
@@ -679,7 +671,7 @@ export class TTLPlugin extends CoordinatorPlugin {
         cohorts
       });
     } catch (error) {
-      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
+      this.logger.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
       this.stats.totalErrors++;
       this.emit('plg:ttl:cleanup-error', { granularity, error });
     }
@@ -692,9 +684,8 @@ export class TTLPlugin extends CoordinatorPlugin {
     try {
       // Check if resource exists before calling database.resource()
       if (!this.database.resources[entry.resourceName]) {
-        if (this.verbose) {
-          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
-        }
+        // 🪵 Warning: resource not found during cleanup
+        this.logger.warn({ resourceName: entry.resourceName }, `Resource "${entry.resourceName}" not found during cleanup, skipping`);
         return;
       }
 
@@ -748,9 +739,8 @@ export class TTLPlugin extends CoordinatorPlugin {
       this.stats.totalExpired++;
       this.emit('plg:ttl:record-expired', { resource: entry.resourceName, record });
     } catch (error) {
-      if (this.verbose) {
-        console.error(`[TTLPlugin] Error processing expired entry:`, error);
-      }
+      // 🪵 Error: processing expired entry
+      this.logger.error({ error: error.message, stack: error.stack, entry }, 'Error processing expired entry');
       this.stats.totalErrors++;
     }
   }
@@ -767,9 +757,8 @@ export class TTLPlugin extends CoordinatorPlugin {
 
     await resource.update(record.id, updates);
 
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
-    }
+    // 🪵 Debug: soft-deleted record
+    this.logger.debug({ resourceName: resource.name, recordId: record.id, deleteField }, `Soft-deleted record ${record.id} in ${resource.name}`);
   }
 
   /**
@@ -778,9 +767,8 @@ export class TTLPlugin extends CoordinatorPlugin {
   async _hardDelete(resource, record) {
     await resource.delete(record.id);
 
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
-    }
+    // 🪵 Debug: hard-deleted record
+    this.logger.debug({ resourceName: resource.name, recordId: record.id }, `Hard-deleted record ${record.id} in ${resource.name}`);
   }
 
   /**
@@ -825,9 +813,11 @@ export class TTLPlugin extends CoordinatorPlugin {
     // Delete original
     await resource.delete(record.id);
 
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
-    }
+    // 🪵 Debug: archived record
+    this.logger.debug(
+      { recordId: record.id, sourceResource: resource.name, archiveResource: config.archiveResource },
+      `Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`
+    );
   }
 
   /**
@@ -903,8 +893,7 @@ export class TTLPlugin extends CoordinatorPlugin {
   async uninstall() {
     await super.uninstall();
 
-    if (this.verbose) {
-      console.log('[TTLPlugin] Uninstalled');
-    }
+    // 🪵 Debug: uninstalled
+    this.logger.debug('Uninstalled');
   }
 }

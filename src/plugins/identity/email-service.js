@@ -77,12 +77,12 @@ export class EmailService {
       // Verify connection
       if (this.config.verbose) {
         await this.transporter.verify();
-        console.log('[EmailService] SMTP connection verified');
+        this.logger.info('[EmailService] SMTP connection verified');
       }
 
       this.initialized = true;
     } catch (error) {
-      console.error('[EmailService] Failed to initialize:', error);
+      this.logger.error('[EmailService] Failed to initialize:', error);
       throw new PluginError(`Failed to initialize email service: ${error.message}`, {
         pluginName: 'IdentityPlugin',
         operation: 'emailInitialize',
@@ -108,7 +108,7 @@ export class EmailService {
   async sendEmail(options) {
     if (!this.config.enabled) {
       if (this.config.verbose) {
-        console.log('[EmailService] Email service disabled, skipping send');
+        this.logger.info('[EmailService] Email service disabled, skipping send');
       }
       return { success: false, reason: 'disabled' };
     }
@@ -141,7 +141,7 @@ export class EmailService {
       });
 
       if (this.config.verbose) {
-        console.log('[EmailService] Email sent successfully:', info.messageId);
+        this.logger.info('[EmailService] Email sent successfully:', info.messageId);
       }
 
       return {
@@ -151,7 +151,7 @@ export class EmailService {
         rejected: info.rejected
       };
     } catch (error) {
-      console.error('[EmailService] Failed to send email:', error);
+      this.logger.error('[EmailService] Failed to send email:', error);
       return {
         success: false,
         error: error.message
@@ -417,7 +417,7 @@ export class EmailService {
       await this.transporter.verify();
       return true;
     } catch (error) {
-      console.error('[EmailService] Connection test failed:', error);
+      this.logger.error('[EmailService] Connection test failed:', error);
       return false;
     }
   }

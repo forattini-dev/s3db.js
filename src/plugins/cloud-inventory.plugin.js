@@ -443,8 +443,8 @@ export class CloudInventoryPlugin extends Plugin {
    * @example
    * // Export all resources
    * const result = await plugin.exportToTerraformState();
-   * console.log(result.state); // Terraform state object
-   * console.log(result.stats); // { total, converted, skipped }
+   * this.logger.info(result.state); // Terraform state object
+   * this.logger.info(result.stats); // { total, converted, skipped }
    *
    * // Export specific provider
    * const awsOnly = await plugin.exportToTerraformState({ providers: ['aws'] });

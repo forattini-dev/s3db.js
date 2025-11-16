@@ -4,6 +4,7 @@ import { FilesystemStorageDriver } from "../concerns/storage-drivers/filesystem-
 import { PluginError } from "../errors.js";
 import { listPluginNamespaces } from "./namespace.js";
 import normalizePluginOptions from './concerns/plugin-options.js';
+import { createLogger } from "../concerns/logger.js";
 
 export class Plugin extends EventEmitter {
   constructor(options = {}) {
@@ -28,6 +29,15 @@ export class Plugin extends EventEmitter {
     // CronManager integration (passed by database)
     this.cronManager = null;
     this._cronJobs = []; // Track job names for auto-cleanup
+
+    // 🪵 Logger initialization - will be set by database.usePlugin() or create standalone
+    // Plugins should NEVER create logger.child() in hot paths (hooks, interceptors)
+    if (options.logger) {
+      this.logger = options.logger; // Custom logger passed in options
+    } else {
+      // Create minimal logger for standalone plugins (no database)
+      this.logger = createLogger({ name: `Plugin:${this.name}`, level: 'info' });
+    }
 
     if (options.namespace || options.instanceId) {
       this.setNamespace(options.namespace || options.instanceId, { explicit: true });
@@ -126,6 +136,42 @@ export class Plugin extends EventEmitter {
   }
 
   /**
+   * Get a child logger with additional context bindings
+   * ⚠️ CRITICAL: Cache the result in plugin instance variables, NOT in hot paths
+   *
+   * @param {string} name - Child logger name (e.g., 'Worker', 'Coordinator')
+   * @param {Object} bindings - Additional context to bind (e.g., { workerId: '123' })
+   * @returns {Object} Pino child logger instance
+   *
+   * @example
+   * // ✅ CORRECT: Create child logger ONCE in constructor/initialize
+   * class MyPlugin extends Plugin {
+   *   async onStart() {
+   *     this.workerLogger = this.getChildLogger('Worker', { workerId: this.workerId });
+   *   }
+   *   async doWork() {
+   *     this.workerLogger.debug('working...');  // Use cached logger
+   *   }
+   * }
+   *
+   * @example
+   * // ❌ WRONG: Creating child logger in hot path
+   * async doWork() {
+   *   const logger = this.getChildLogger('Worker', { workerId });  // BAD!
+   *   logger.debug('working...');
+   * }
+   */
+  getChildLogger(name, bindings = {}) {
+    if (!this.logger) {
+      throw new PluginError('Plugin logger not initialized', {
+        pluginName: this.name,
+        suggestion: 'Ensure plugin is attached to database via usePlugin() or pass logger in options'
+      });
+    }
+    return this.logger.child({ name, ...bindings });
+  }
+
+  /**
    * Schedule a cron job (auto-tracked for cleanup)
    *
    * @param {string} expression - Cron expression (e.g., '0 * * * *')
@@ -140,7 +186,7 @@ export class Plugin extends EventEmitter {
    */
   async scheduleCron(expression, fn, suffix = 'job', options = {}) {
     if (!this.cronManager) {
-      // console.warn(`[${this.name}] CronManager not available, cannot schedule job '${suffix}'`);
+      // this.logger.warn(`[${this.name}] CronManager not available, cannot schedule job '${suffix}'`);
       return null;
     }
 
@@ -170,7 +216,7 @@ export class Plugin extends EventEmitter {
    */
   async scheduleInterval(ms, fn, suffix = 'interval', options = {}) {
     if (!this.cronManager) {
-      // console.warn(`[${this.name}] CronManager not available, cannot schedule interval '${suffix}'`);
+      // this.logger.warn(`[${this.name}] CronManager not available, cannot schedule interval '${suffix}'`);
       return null;
     }
 
@@ -275,13 +321,13 @@ export class Plugin extends EventEmitter {
 
       // Emit console warnings (standardized format)
       if (existingNamespaces.length > 0) {
-        // console.warn(
+        // this.logger.warn(
         //   `[${this.name}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
         // );
       }
 
       const namespaceDisplay = currentNamespace === '' ? '(none)' : `"${currentNamespace}"`;
-      // console.warn(`[${this.name}] Using namespace: ${namespaceDisplay}`);
+      // this.logger.warn(`[${this.name}] Using namespace: ${namespaceDisplay}`);
 
       return existingNamespaces;
     } catch (error) {
@@ -298,21 +344,36 @@ export class Plugin extends EventEmitter {
     this.database = database;
     this.beforeInstall();
 
+    // 🪵 Debug log: plugin installation
+    this.logger.debug({ pluginName: this.name, instanceName: this.instanceName }, 'plugin installing');
+
     // Auto-detect and warn about namespaces if plugin uses them
     await this.detectAndWarnNamespaces();
 
     await this.onInstall();
     this.afterInstall();
+
+    this.logger.debug({ pluginName: this.name, instanceName: this.instanceName }, 'plugin installed');
   }
 
   async start() {
     this.beforeStart();
+
+    // 🪵 Debug log: plugin start
+    this.logger.debug({ pluginName: this.name, instanceName: this.instanceName }, 'plugin starting');
+
     await this.onStart();
     this.afterStart();
+
+    this.logger.debug({ pluginName: this.name, instanceName: this.instanceName }, 'plugin started');
   }
 
   async stop() {
     this.beforeStop();
+
+    // 🪵 Debug log: plugin stop
+    this.logger.debug({ pluginName: this.name, instanceName: this.instanceName }, 'plugin stopping');
+
     await this.onStop();
 
     // Auto-cleanup all cron jobs
@@ -322,6 +383,8 @@ export class Plugin extends EventEmitter {
     // This is a defensive cleanup - plugins SHOULD remove their own listeners
     // in onStop(), but this acts as a safety net for poorly-written plugins
     this.removeAllListeners();
+
+    this.logger.debug({ pluginName: this.name, instanceName: this.instanceName }, 'plugin stopped');
 
     this.afterStop();
   }

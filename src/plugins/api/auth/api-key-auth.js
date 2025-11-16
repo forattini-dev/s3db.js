@@ -5,7 +5,11 @@
  */
 
 import { unauthorized } from '../utils/response-formatter.js';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'ApiKeyAuth', level: 'info' });
 /**
  * Generate random API key
  * @param {number} length - Key length (default: 32)
@@ -75,7 +79,7 @@ export function apiKeyAuth(options = {}) {
 
       await next();
     } catch (err) {
-      console.error('[API Key Auth] Error validating key:', err);
+      logger.error('[API Key Auth] Error validating key:', err);
       const response = unauthorized('Authentication error');
       return c.json(response, response._status);
     }

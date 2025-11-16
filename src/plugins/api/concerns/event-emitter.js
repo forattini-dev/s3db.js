@@ -21,12 +21,12 @@
  *
  * // Listen to user creation
  * events.on('user:created', (data) => {
- *   console.log('New user:', data.user);
+ *   logger.info('New user:', data.user);
  * });
  *
  * // Listen to all resource changes
  * events.on('resource:*', (data) => {
- *   console.log('Resource event:', data.event, data.resource);
+ *   logger.info('Resource event:', data.event, data.resource);
  * });
  *
  * // Emit events
@@ -34,7 +34,11 @@
  */
 
 import { EventEmitter } from 'events';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'EventEmitter', level: 'info' });
 export class ApiEventEmitter extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -59,7 +63,7 @@ export class ApiEventEmitter extends EventEmitter {
     }
 
     if (this.options.verbose) {
-      console.log(`[API Events] ${event}`, data);
+      logger.info(`[API Events] ${event}`, data);
     }
 
     // Emit specific event

@@ -17,11 +17,11 @@
  * @example
  * class MyPlugin extends CoordinatorPlugin {
  *   async onBecomeCoordinator() {
- *     console.log('I am leader!');
+ *     this.logger.info('I am leader!');
  *   }
  *
  *   async onStopBeingCoordinator() {
- *     console.log('Demoted from leader');
+ *     this.logger.info('Demoted from leader');
  *   }
  *
  *   async coordinatorWork() {
@@ -33,6 +33,7 @@
 
 import { Plugin } from '../plugin.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
+import { createLogger } from '../../concerns/logger.js';
 
 // Monotonic counter for unique worker IDs
 let workerCounter = 0;
@@ -42,6 +43,14 @@ export class CoordinatorPlugin extends Plugin {
     super(config);
 
     this.config = this.options;
+
+    // 🪵 Logger initialization
+    if (config.logger) {
+      this.logger = config.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'CoordinatorPlugin', level: logLevel });
+    }
 
     // Worker identity (unique even if created in same millisecond)
     this.workerId = `worker-${Date.now()}-${++workerCounter}-${Math.random().toString(36).slice(2, 9)}`;
@@ -105,15 +114,11 @@ export class CoordinatorPlugin extends Plugin {
   // ==================== ABSTRACT METHODS ====================
 
   async onBecomeCoordinator() {
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Became leader (workerId: ${this.workerId})`);
-    }
+    this.logger.debug({ workerId: this.workerId }, `Became leader (workerId: ${this.workerId})`);
   }
 
   async onStopBeingCoordinator() {
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] No longer leader (workerId: ${this.workerId})`);
-    }
+    this.logger.debug({ workerId: this.workerId }, `No longer leader (workerId: ${this.workerId})`);
   }
 
   async coordinatorWork() {
@@ -150,9 +155,7 @@ export class CoordinatorPlugin extends Plugin {
       const jitterMs = this._coordinatorConfig.startupJitterMin +
         Math.random() * (this._coordinatorConfig.startupJitterMax - this._coordinatorConfig.startupJitterMin);
 
-      if (this.config.verbose) {
-        console.log(`[${this.constructor.name}] Startup jitter: ${Math.round(jitterMs)}ms`);
-      }
+      this.logger.debug({ jitterMs: Math.round(jitterMs) }, `Startup jitter: ${Math.round(jitterMs)}ms`);
 
       await this._sleep(jitterMs);
     }
@@ -164,21 +167,30 @@ export class CoordinatorPlugin extends Plugin {
     if (!this._coordinatorConfig.skipColdStart && this._coordinatorConfig.coldStartDuration > 0) {
       await this._executeColdStart();
     } else {
+      // When skipping cold start, immediately check leadership
+      const leader = await this.getLeader();
+      this.isCoordinator = leader === this.workerId;
+
+      this.logger.debug(
+        { leader, isCoordinator: this.isCoordinator },
+        `Skipped cold start - Leader: ${leader} (this: ${this.isCoordinator ? 'YES' : 'NO'})`
+      );
+
+      // Notify if we became coordinator
+      if (this.isCoordinator) {
+        await this.onBecomeCoordinator();
+      }
+
       this.coldStartCompleted = true;
       this.coldStartPhase = 'ready';
     }
-
-    // Start monitoring leader changes
-    this._setupLeaderChangeListener();
 
     // Start coordinator work if configured
     if (this._coordinatorConfig.coordinatorWorkInterval && this.isCoordinator) {
       await this._startCoordinatorWork();
     }
 
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Coordination started (workerId: ${this.workerId})`);
-    }
+    this.logger.debug({ workerId: this.workerId }, `Coordination started (workerId: ${this.workerId})`);
   }
 
   /**
@@ -203,9 +215,7 @@ export class CoordinatorPlugin extends Plugin {
     this.coldStartPhase = 'not_started';
     this.coldStartCompleted = false;
 
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Coordination stopped`);
-    }
+    this.logger.debug('Coordination stopped');
   }
 
   /**
@@ -259,11 +269,24 @@ export class CoordinatorPlugin extends Plugin {
 
     // Subscribe to global coordinator
     const pluginId = this.instanceName || this.slug || this.constructor.name.toLowerCase();
-    this._globalCoordinator.subscribePlugin(pluginId, this);
+    await this._globalCoordinator.subscribePlugin(pluginId, this);
 
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Connected to global coordinator (namespace: ${namespace})`);
+    // Setup leader change listener immediately to catch any events
+    this._setupLeaderChangeListener();
+
+    // Check if we're already the leader and emit promotion event if needed
+    // (in case the first election happened before the listener was set up)
+    const currentLeader = await this._globalCoordinator.getLeader();
+    if (currentLeader === this.workerId && !this.isCoordinator) {
+      this.isCoordinator = true;
+      this.emit('plg:coordinator:promoted', {
+        workerId: this.workerId,
+        timestamp: Date.now(),
+        pluginName: this.constructor.name
+      });
     }
+
+    this.logger.debug({ namespace }, `Connected to global coordinator (namespace: ${namespace})`);
   }
 
   /**
@@ -272,6 +295,7 @@ export class CoordinatorPlugin extends Plugin {
    */
   _setupLeaderChangeListener() {
     if (!this._globalCoordinator) return;
+    if (this._leaderChangeListener) return; // Already set up
 
     this._leaderChangeListener = async (event) => {
       const wasLeader = this.isCoordinator;
@@ -280,9 +304,10 @@ export class CoordinatorPlugin extends Plugin {
       this.isCoordinator = isNowLeader;
       this.currentLeaderId = event.newLeader;
 
-      if (this.config.verbose) {
-        console.log(`[${this.constructor.name}] Leader: ${event.previousLeader || 'none'} → ${event.newLeader} (epoch: ${event.epoch})`);
-      }
+      this.logger.debug(
+        { previousLeader: event.previousLeader || 'none', newLeader: event.newLeader, epoch: event.epoch },
+        `Leader: ${event.previousLeader || 'none'} → ${event.newLeader} (epoch: ${event.epoch})`
+      );
 
       // Promotion: none → leader
       if (!wasLeader && isNowLeader) {
@@ -330,25 +355,22 @@ export class CoordinatorPlugin extends Plugin {
    * @private
    */
   async _executeColdStart() {
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Cold start: ${this._coordinatorConfig.coldStartDuration}ms`);
-    }
+    this.logger.debug(
+      { coldStartDuration: this._coordinatorConfig.coldStartDuration },
+      `Cold start: ${this._coordinatorConfig.coldStartDuration}ms`
+    );
 
     const startTime = Date.now();
     const phaseDuration = this._coordinatorConfig.coldStartDuration / 3;
 
     // Phase 1: Observing
     this.coldStartPhase = 'observing';
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Cold start phase: observing`);
-    }
+    this.logger.debug({ phase: 'observing' }, 'Cold start phase: observing');
 
     await this._sleep(phaseDuration);
     const workers = await this.getActiveWorkers();
 
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Discovered ${workers.length} worker(s)`);
-    }
+    this.logger.debug({ workerCount: workers.length }, `Discovered ${workers.length} worker(s)`);
 
     this.emit('plg:coordinator:cold-start-phase', {
       phase: 'observing',
@@ -359,18 +381,17 @@ export class CoordinatorPlugin extends Plugin {
 
     // Phase 2: Election
     this.coldStartPhase = 'election';
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Cold start phase: election`);
-    }
+    this.logger.debug({ phase: 'election' }, 'Cold start phase: election');
 
     await this._sleep(phaseDuration);
 
     const leader = await this.getLeader();
     this.isCoordinator = leader === this.workerId;
 
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Leader elected: ${leader} (this: ${this.isCoordinator ? 'YES' : 'NO'})`);
-    }
+    this.logger.debug(
+      { leader, isCoordinator: this.isCoordinator },
+      `Leader elected: ${leader} (this: ${this.isCoordinator ? 'YES' : 'NO'})`
+    );
 
     this.emit('plg:coordinator:cold-start-phase', {
       phase: 'election',
@@ -382,9 +403,14 @@ export class CoordinatorPlugin extends Plugin {
 
     // Phase 3: Preparation
     this.coldStartPhase = 'preparation';
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Cold start phase: preparation`);
-    }
+    this.logger.debug({ phase: 'preparation' }, 'Cold start phase: preparation');
+
+    this.emit('plg:coordinator:cold-start-phase', {
+      phase: 'preparation',
+      isLeader: this.isCoordinator,
+      timestamp: Date.now(),
+      pluginName: this.constructor.name
+    });
 
     if (this.isCoordinator) {
       await this.onBecomeCoordinator();
@@ -402,9 +428,7 @@ export class CoordinatorPlugin extends Plugin {
     this.coldStartCompleted = true;
 
     const duration = Date.now() - startTime;
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Cold start completed in ${duration}ms`);
-    }
+    this.logger.debug({ duration, isLeader: this.isCoordinator }, `Cold start completed in ${duration}ms`);
 
     this.emit('plg:coordinator:cold-start-complete', {
       duration,
@@ -424,24 +448,23 @@ export class CoordinatorPlugin extends Plugin {
     if (!this._coordinatorConfig.coordinatorWorkInterval) return;
     if (this._coordinatorWorkHandle) return; // Already running
 
-    this._coordinatorWorkHandle = this._scheduleInterval(
+    this._coordinatorWorkHandle = await this._scheduleInterval(
       async () => {
         if (!this.isCoordinator) return;
         try {
           await this.coordinatorWork();
         } catch (err) {
-          if (this.config.verbose) {
-            console.warn(`[${this.constructor.name}] Coordinator work error:`, err.message);
-          }
+          this.logger.warn({ error: err.message }, `Coordinator work error: ${err.message}`);
         }
       },
       this._coordinatorConfig.coordinatorWorkInterval,
       `coordinator-work-${this.workerId}`
     );
 
-    if (this.config.verbose) {
-      console.log(`[${this.constructor.name}] Coordinator work started (interval: ${this._coordinatorConfig.coordinatorWorkInterval}ms)`);
-    }
+    this.logger.debug(
+      { interval: this._coordinatorConfig.coordinatorWorkInterval },
+      `Coordinator work started (interval: ${this._coordinatorConfig.coordinatorWorkInterval}ms)`
+    );
   }
 
   // ==================== PRIVATE: UTILITIES ====================
@@ -450,25 +473,23 @@ export class CoordinatorPlugin extends Plugin {
    * Schedule interval using CronManager or fallback to setInterval
    * @private
    */
-  _scheduleInterval(fn, intervalMs, name) {
+  async _scheduleInterval(fn, intervalMs, name) {
     const cronManager = getCronManager();
 
     // Use CronManager if available
     if (cronManager && !cronManager.disabled) {
-      const jobName = cronManager.scheduleInterval(
+      const task = await cronManager.scheduleInterval(
         intervalMs,
         async () => {
           try {
             await fn();
           } catch (err) {
-            if (this.config.verbose) {
-              console.warn(`[${this.constructor.name}][${name}] Error:`, err.message);
-            }
+            this.logger.warn({ error: err.message, jobName: name }, `[${name}] Error: ${err.message}`);
           }
         },
         name
       );
-      return { type: 'cron', jobName };
+      return { type: 'cron', jobName: name };
     }
 
     // Fallback to manual setInterval
@@ -479,9 +500,7 @@ export class CoordinatorPlugin extends Plugin {
       try {
         await fn();
       } catch (err) {
-        if (this.config.verbose) {
-          console.warn(`[${this.constructor.name}][${name}] Error:`, err.message);
-        }
+        this.logger.warn({ error: err.message, jobName: name }, `[${name}] Error: ${err.message}`);
       } finally {
         running = false;
       }

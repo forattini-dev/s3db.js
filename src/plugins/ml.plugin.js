@@ -10,6 +10,7 @@ import { Resource } from '../resource.class.js';
 import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import tryFn from '../concerns/try-fn.js';
 import { getCronManager } from '../concerns/cron-manager.js';
+import { createLogger } from '../concerns/logger.js';
 
 import { RegressionModel } from './ml/regression-model.class.js';
 import { ClassificationModel } from './ml/classification-model.class.js';
@@ -63,6 +64,14 @@ import {
 export class MLPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'MLPlugin', level: logLevel });
+    }
 
     const {
       models = {},
@@ -118,9 +127,7 @@ export class MLPlugin extends Plugin {
    * Install the plugin
    */
   async onInstall() {
-    if (this.config.verbose) {
-      console.log('[MLPlugin] Installing ML Plugin...');
-    }
+    this.logger.debug('Installing ML Plugin...');
 
     // Validate plugin dependencies (lazy validation)
     if (!this._dependenciesValidated) {
@@ -129,9 +136,7 @@ export class MLPlugin extends Plugin {
       try {
         await import('@tensorflow/tfjs-node');
         tfAvailable = true;
-        if (this.config.verbose) {
-          console.log('[MLPlugin] TensorFlow.js loaded successfully');
-        }
+        this.logger.debug('TensorFlow.js loaded successfully');
       } catch (directImportErr) {
         // Fallback to plugin dependency check
         const result = await requirePluginDependency('ml-plugin', {
@@ -182,9 +187,10 @@ export class MLPlugin extends Plugin {
 
     this.stats.startedAt = new Date().toISOString();
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Installed with ${Object.keys(this.models).length} models`);
-    }
+    this.logger.debug(
+      { modelCount: Object.keys(this.models).length },
+      `Installed with ${Object.keys(this.models).length} models`
+    );
 
     this.emit('db:plugin:installed', {
       plugin: 'MLPlugin',
@@ -208,9 +214,7 @@ export class MLPlugin extends Plugin {
       await this._loadModel(modelName);
     }
 
-    if (this.config.verbose) {
-      console.log('[MLPlugin] Started');
-    }
+    this.logger.debug('Started');
   }
 
   /**
@@ -237,9 +241,7 @@ export class MLPlugin extends Plugin {
     this._pendingAutoTrainingHandlers.clear();
     this._autoTrainingInitialized.clear();
 
-    if (this.config.verbose) {
-      console.log('[MLPlugin] Stopped');
-    }
+    this.logger.debug('Stopped');
   }
 
   /**
@@ -255,9 +257,7 @@ export class MLPlugin extends Plugin {
         await this._deleteTrainingData(modelName);
       }
 
-      if (this.config.verbose) {
-        console.log('[MLPlugin] Purged all model data and training data');
-      }
+      this.logger.debug('Purged all model data and training data');
     }
   }
 
@@ -270,9 +270,10 @@ export class MLPlugin extends Plugin {
       const cacheKey = `${modelConfig.resource}_${modelConfig.target}`;
       this.modelCache.set(cacheKey, modelName);
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Cached model "${modelName}" for ${modelConfig.resource}.predict(..., '${modelConfig.target}')`);
-      }
+      this.logger.debug(
+        { modelName, resource: modelConfig.resource, target: modelConfig.target },
+        `Cached model "${modelName}" for ${modelConfig.resource}.predict(..., '${modelConfig.target}')`
+      );
     }
   }
 
@@ -492,18 +493,17 @@ export class MLPlugin extends Plugin {
 
     if (modelName) {
       // Model exists, just retrain
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Model "${modelName}" already exists, retraining...`);
-      }
+      this.logger.debug({ modelName }, `Model "${modelName}" already exists, retraining...`);
       return await this.train(modelName, options);
     }
 
     // Create new model dynamically
     modelName = `${resourceName}_${target}_auto`;
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Auto-creating model "${modelName}" for ${resourceName}.${target}...`);
-    }
+    this.logger.debug(
+      { modelName, resource: resourceName, target },
+      `Auto-creating model "${modelName}" for ${resourceName}.${target}...`
+    );
 
     // Get resource
     const resource = this.database.resources[resourceName];
@@ -518,18 +518,14 @@ export class MLPlugin extends Plugin {
     let modelType = options.type;
     if (!modelType) {
       modelType = await this._autoDetectType(resourceName, target);
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Auto-detected type: ${modelType}`);
-      }
+      this.logger.debug({ modelType }, `Auto-detected type: ${modelType}`);
     }
 
     // Auto-select features if not specified
     let features = options.features;
     if (!features || features.length === 0) {
       features = await this._autoSelectFeatures(resourceName, target);
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Auto-selected features: ${features.join(', ')}`);
-      }
+      this.logger.debug({ features }, `Auto-selected features: ${features.join(', ')}`);
     }
 
     // Get sample count to adjust batchSize automatically
@@ -545,9 +541,10 @@ export class MLPlugin extends Plugin {
     if (!userProvidedBatchSize && sampleCount > 0 && sampleCount < defaultModelConfig.batchSize) {
       // Adjust batchSize to be at most half of available samples (only if user didn't provide one)
       defaultModelConfig.batchSize = Math.max(4, Math.floor(sampleCount / 2));
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Auto-adjusted batchSize to ${defaultModelConfig.batchSize} based on ${sampleCount} samples`);
-      }
+      this.logger.debug(
+        { batchSize: defaultModelConfig.batchSize, sampleCount },
+        `Auto-adjusted batchSize to ${defaultModelConfig.batchSize} based on ${sampleCount} samples`
+      );
     }
 
     // Merge custom modelConfig with defaults
@@ -583,15 +580,11 @@ export class MLPlugin extends Plugin {
     this._buildModelCache();
 
     // Train immediately
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Training model "${modelName}"...`);
-    }
+    this.logger.debug({ modelName }, `Training model "${modelName}"...`);
 
     const result = await this.train(modelName, options);
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] ✅ Model "${modelName}" ready!`);
-    }
+    this.logger.debug({ modelName }, `✅ Model "${modelName}" ready!`);
 
     return {
       modelName,
@@ -769,9 +762,10 @@ export class MLPlugin extends Plugin {
       );
     }
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Resource prediction: ${resourceName}.predict(..., '${targetAttribute}') -> model "${modelName}"`);
-    }
+    this.logger.debug(
+      { resourceName, targetAttribute, modelName },
+      `Resource prediction: ${resourceName}.predict(..., '${targetAttribute}') -> model "${modelName}"`
+    );
 
     return await this.predict(modelName, input);
   }
@@ -790,9 +784,10 @@ export class MLPlugin extends Plugin {
       );
     }
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Resource training: ${resourceName}.trainModel('${targetAttribute}') -> model "${modelName}"`);
-    }
+    this.logger.debug(
+      { resourceName, targetAttribute, modelName },
+      `Resource training: ${resourceName}.trainModel('${targetAttribute}') -> model "${modelName}"`
+    );
 
     return await this.train(modelName, options);
   }
@@ -895,11 +890,9 @@ export class MLPlugin extends Plugin {
           );
       }
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Initialized model "${modelName}" (${config.type})`);
-      }
+      this.logger.debug({ modelName, type: config.type }, `Initialized model "${modelName}" (${config.type})`);
     } catch (error) {
-      console.error(`[MLPlugin] Failed to initialize model "${modelName}":`, error.message);
+      this.logger.error({ modelName, error: error.message }, `Failed to initialize model "${modelName}"`);
       throw error;
     }
   }
@@ -916,9 +909,10 @@ export class MLPlugin extends Plugin {
     const resource = this.database.resources[config.resource];
 
     if (!resource) {
-      if (this.config.verbose) {
-        console.warn(`[MLPlugin] Resource "${config.resource}" not found for model "${modelName}". Auto-training will attach when resource is created.`);
-      }
+      this.logger.warn(
+        { resource: config.resource, modelName },
+        `Resource "${config.resource}" not found for model "${modelName}". Auto-training will attach when resource is created.`
+      );
 
       if (!this._pendingAutoTrainingHandlers.has(modelName)) {
         const handler = (createdName) => {
@@ -952,16 +946,17 @@ export class MLPlugin extends Plugin {
 
         // Check if we should train
         if (this.insertCounters.get(modelName) >= config.trainAfterInserts) {
-          if (this.config.verbose) {
-            console.log(`[MLPlugin] Auto-training "${modelName}" after ${config.trainAfterInserts} inserts`);
-          }
+          this.logger.debug(
+            { modelName, insertCount: config.trainAfterInserts },
+            `Auto-training "${modelName}" after ${config.trainAfterInserts} inserts`
+          );
 
           // Reset counter
           this.insertCounters.set(modelName, 0);
 
           // Train asynchronously (don't block insert)
           this.train(modelName).catch(err => {
-            console.error(`[MLPlugin] Auto-training failed for "${modelName}":`, err.message);
+            this.logger.error(`[MLPlugin] Auto-training failed for "${modelName}":`, err.message);
           });
         }
 
@@ -975,14 +970,15 @@ export class MLPlugin extends Plugin {
       this.cronManager.scheduleInterval(
         config.trainInterval,
         async () => {
-          if (this.config.verbose) {
-            console.log(`[MLPlugin] Auto-training "${modelName}" (interval: ${config.trainInterval}ms)`);
-          }
+          this.logger.debug(
+            { modelName, trainInterval: config.trainInterval },
+            `Auto-training "${modelName}" (interval: ${config.trainInterval}ms)`
+          );
 
           try {
             await this.train(modelName);
           } catch (error) {
-            console.error(`[MLPlugin] Auto-training failed for "${modelName}":`, error.message);
+            this.logger.error(`[MLPlugin] Auto-training failed for "${modelName}":`, error.message);
           }
         },
         jobName
@@ -990,9 +986,10 @@ export class MLPlugin extends Plugin {
 
       this.jobNames.set(modelName, jobName);
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Setup interval training for "${modelName}" (every ${config.trainInterval}ms)`);
-      }
+      this.logger.debug(
+        { modelName, trainInterval: config.trainInterval },
+        `Setup interval training for "${modelName}" (every ${config.trainInterval}ms)`
+      );
     }
 
     this._autoTrainingInitialized.add(modelName);
@@ -1015,9 +1012,7 @@ export class MLPlugin extends Plugin {
 
     // Check if already training
     if (this.training.get(modelName)) {
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Model "${modelName}" is already training, skipping...`);
-      }
+      this.logger.debug({ modelName }, `Model "${modelName}" is already training, skipping...`);
       return { skipped: true, reason: 'already_training' };
     }
 
@@ -1038,18 +1033,17 @@ export class MLPlugin extends Plugin {
       }
 
       // Fetch training data (with optional partition filtering)
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Fetching training data for "${modelName}"...`);
-      }
+      this.logger.debug({ modelName }, `Fetching training data for "${modelName}"...`);
 
       let data;
       const partition = modelConfig.partition;
 
       if (partition && partition.name) {
         // Use partition filtering
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Using partition "${partition.name}" with values:`, partition.values);
-        }
+        this.logger.debug(
+          { modelName, partition: partition.name, partitionValues: partition.values },
+          `Using partition "${partition.name}" with values: ${JSON.stringify(partition.values)}`
+        );
 
         const [ok, err, partitionData] = await tryFn(() =>
           resource.listPartition({
@@ -1082,23 +1076,20 @@ export class MLPlugin extends Plugin {
 
       // Apply custom filter function if provided
       if (modelConfig.filter && typeof modelConfig.filter === 'function') {
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Applying custom filter function...`);
-        }
+        this.logger.debug({ modelName }, 'Applying custom filter function...');
 
         const originalLength = data.length;
         data = data.filter(modelConfig.filter);
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Filter reduced dataset from ${originalLength} to ${data.length} samples`);
-        }
+        this.logger.debug(
+          { modelName, originalLength, filteredLength: data.length },
+          `Filter reduced dataset from ${originalLength} to ${data.length} samples`
+        );
       }
 
       // Apply custom map function if provided
       if (modelConfig.map && typeof modelConfig.map === 'function') {
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Applying custom map function...`);
-        }
+        this.logger.debug({ modelName }, 'Applying custom map function...');
 
         data = data.map(modelConfig.map);
       }
@@ -1110,9 +1101,10 @@ export class MLPlugin extends Plugin {
         );
       }
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Training "${modelName}" with ${data.length} samples...`);
-      }
+      this.logger.debug(
+        { modelName, sampleCount: data.length },
+        `Training "${modelName}" with ${data.length} samples...`
+      );
 
       // Save intermediate training data if enabled
       const shouldSaveTrainingData = modelConfig.saveTrainingData !== undefined
@@ -1137,9 +1129,10 @@ export class MLPlugin extends Plugin {
 
       this.stats.totalTrainings++;
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Training completed for "${modelName}":`, result);
-      }
+      this.logger.debug(
+        { modelName, result },
+        `Training completed for "${modelName}": ${JSON.stringify(result)}`
+      );
 
       this.emit('plg:ml:model-trained', {
         modelName,
@@ -1307,9 +1300,7 @@ export class MLPlugin extends Plugin {
     // Save to plugin storage
     await this._saveModel(modelName);
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Imported model "${modelName}"`);
-    }
+    this.logger.debug({ modelName }, `Imported model "${modelName}"`);
   }
 
   /**
@@ -1332,9 +1323,10 @@ export class MLPlugin extends Plugin {
           latestVersion: versionInfo.latestVersion || 1
         });
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Loaded version info for "${modelName}": v${versionInfo.currentVersion}`);
-        }
+        this.logger.debug(
+          { modelName, version: versionInfo.currentVersion },
+          `Loaded version info for "${modelName}": v${versionInfo.currentVersion}`
+        );
       } else {
         // Initialize new versioning
         this.modelVersions.set(modelName, {
@@ -1342,12 +1334,10 @@ export class MLPlugin extends Plugin {
           latestVersion: 0  // No versions yet
         });
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Initialized versioning for "${modelName}"`);
-        }
+        this.logger.debug({ modelName }, `Initialized versioning for "${modelName}"`);
       }
     } catch (error) {
-      console.error(`[MLPlugin] Failed to initialize versioning for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to initialize versioning for "${modelName}":`, error.message);
       // Fallback to v1
       this.modelVersions.set(modelName, { currentVersion: 1, latestVersion: 0 });
     }
@@ -1389,11 +1379,12 @@ export class MLPlugin extends Plugin {
         { behavior: 'body-overflow' }
       );
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Updated version info for "${modelName}": current=v${versionInfo.currentVersion}, latest=v${versionInfo.latestVersion}`);
-      }
+      this.logger.debug(
+        { modelName, currentVersion: versionInfo.currentVersion, latestVersion: versionInfo.latestVersion },
+        `Updated version info for "${modelName}": current=v${versionInfo.currentVersion}, latest=v${versionInfo.latestVersion}`
+      );
     } catch (error) {
-      console.error(`[MLPlugin] Failed to update version info for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to update version info for "${modelName}":`, error.message);
     }
   }
 
@@ -1409,9 +1400,7 @@ export class MLPlugin extends Plugin {
       const exportedModel = await this.models[modelName].export();
 
       if (!exportedModel) {
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Model "${modelName}" not trained, skipping save`);
-        }
+        this.logger.debug({ modelName }, `Model "${modelName}" not trained, skipping save`);
         return;
       }
 
@@ -1456,9 +1445,10 @@ export class MLPlugin extends Plugin {
           { behavior: 'body-overflow' } // Small metadata
         );
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved model "${modelName}" v${version} to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/v${version})`);
-        }
+        this.logger.debug(
+          { modelName, version, resourceName },
+          `Saved model "${modelName}" v${version} to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/v${version})`
+        );
       } else {
         // Save without versioning (legacy behavior)
         await storage.set(
@@ -1477,9 +1467,10 @@ export class MLPlugin extends Plugin {
           { behavior: 'body-only' }
         );
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved model "${modelName}" to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`);
-        }
+        this.logger.debug(
+          { modelName, resourceName },
+          `Saved model "${modelName}" to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`
+        );
       }
 
       // Legacy compatibility record (flat key: model_{modelName})
@@ -1510,7 +1501,7 @@ export class MLPlugin extends Plugin {
         { behavior: enableVersioning ? 'body-overflow' : 'body-only' }
       );
     } catch (error) {
-      console.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
     }
   }
 
@@ -1614,9 +1605,10 @@ export class MLPlugin extends Plugin {
           { behavior: 'body-overflow' } // History metadata
         );
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved training data for "${modelName}" v${version}: ${newSamples.length} new samples (total: ${processedData.length}, storage: resource=${resourceName}/plugin=ml/training/data/${modelName}/v${version})`);
-        }
+        this.logger.debug(
+          { modelName, version, newSamples: newSamples.length, totalSamples: processedData.length, resourceName },
+          `Saved training data for "${modelName}" v${version}: ${newSamples.length} new samples (total: ${processedData.length}, storage: resource=${resourceName}/plugin=ml/training/data/${modelName}/v${version})`
+        );
       } else {
         // Legacy: Replace training data (non-incremental)
         await storage.set(
@@ -1632,12 +1624,13 @@ export class MLPlugin extends Plugin {
           { behavior: 'body-only' }
         );
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved training data for "${modelName}" (${processedData.length} samples) to S3 (resource=${resourceName}/plugin=ml/training/data/${modelName}/latest)`);
-        }
+        this.logger.debug(
+          { modelName, sampleCount: processedData.length, resourceName },
+          `Saved training data for "${modelName}" (${processedData.length} samples) to S3 (resource=${resourceName}/plugin=ml/training/data/${modelName}/latest)`
+        );
       }
     } catch (error) {
-      console.error(`[MLPlugin] Failed to save training data for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to save training data for "${modelName}":`, error.message);
     }
   }
 
@@ -1668,9 +1661,10 @@ export class MLPlugin extends Plugin {
           if (ok && versionData && versionData.modelData) {
             await this.models[modelName].import(versionData.modelData);
 
-            if (this.config.verbose) {
-              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (active) from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/v${version})`);
-            }
+            this.logger.debug(
+              { modelName, version, resourceName },
+              `Loaded model "${modelName}" v${version} (active) from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/v${version})`
+            );
             return;
           }
         }
@@ -1686,16 +1680,15 @@ export class MLPlugin extends Plugin {
           if (ok && versionData && versionData.modelData) {
             await this.models[modelName].import(versionData.modelData);
 
-            if (this.config.verbose) {
-              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (latest) from S3`);
-            }
+            this.logger.debug(
+              { modelName, version },
+              `Loaded model "${modelName}" v${version} (latest) from S3`
+            );
             return;
           }
         }
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] No saved model versions found for "${modelName}"`);
-        }
+        this.logger.debug({ modelName }, `No saved model versions found for "${modelName}"`);
       } else {
         // Legacy: Load non-versioned model
         const [ok, err, record] = await tryFn(() =>
@@ -1703,20 +1696,19 @@ export class MLPlugin extends Plugin {
         );
 
         if (!ok || !record || !record.modelData) {
-          if (this.config.verbose) {
-            console.log(`[MLPlugin] No saved model found for "${modelName}"`);
-          }
+          this.logger.debug({ modelName }, `No saved model found for "${modelName}"`);
           return;
         }
 
         await this.models[modelName].import(record.modelData);
 
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] Loaded model "${modelName}" from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`);
-        }
+        this.logger.debug(
+          { modelName, resourceName },
+          `Loaded model "${modelName}" from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`
+        );
       }
     } catch (error) {
-      console.error(`[MLPlugin] Failed to load model "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to load model "${modelName}":`, error.message);
     }
   }
 
@@ -1740,9 +1732,7 @@ export class MLPlugin extends Plugin {
         );
 
         if (!ok || !record) {
-          if (this.config.verbose) {
-            console.log(`[MLPlugin] No saved training data found for "${modelName}"`);
-          }
+          this.logger.debug({ modelName }, `No saved training data found for "${modelName}"`);
           return null;
         }
 
@@ -1764,9 +1754,7 @@ export class MLPlugin extends Plugin {
       );
 
       if (!okHistory || !historyData || !historyData.history) {
-        if (this.config.verbose) {
-          console.log(`[MLPlugin] No training history found for "${modelName}"`);
-        }
+        this.logger.debug({ modelName }, `No training history found for "${modelName}"`);
         return null;
       }
 
@@ -1806,7 +1794,7 @@ export class MLPlugin extends Plugin {
         savedAt: targetEntry?.trainedAt
       };
     } catch (error) {
-      console.error(`[MLPlugin] Failed to load training data for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to load training data for "${modelName}":`, error.message);
       return null;
     }
   }
@@ -1839,14 +1827,13 @@ export class MLPlugin extends Plugin {
         await storage.delete(storage.getPluginKey(resourceName, 'models', modelName, 'latest'));
       }
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Deleted model "${modelName}" from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/)`);
-      }
+      this.logger.debug(
+        { modelName, resourceName },
+        `Deleted model "${modelName}" from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/)`
+      );
     } catch (error) {
       // Ignore errors (model might not exist)
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Could not delete model "${modelName}": ${error.message}`);
-      }
+      this.logger.debug({ modelName, error: error.message }, `Could not delete model "${modelName}"`);
     }
   }
 
@@ -1882,14 +1869,13 @@ export class MLPlugin extends Plugin {
         await storage.delete(storage.getPluginKey(resourceName, 'training', 'data', modelName, 'latest'));
       }
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Deleted training data for "${modelName}" from S3 (resource=${resourceName}/plugin=ml/training/)`);
-      }
+      this.logger.debug(
+        { modelName, resourceName },
+        `Deleted training data for "${modelName}" from S3 (resource=${resourceName}/plugin=ml/training/)`
+      );
     } catch (error) {
       // Ignore errors (training data might not exist)
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Could not delete training data "${modelName}": ${error.message}`);
-      }
+      this.logger.debug({ modelName, error: error.message }, `Could not delete training data "${modelName}"`);
     }
   }
 
@@ -1926,7 +1912,7 @@ export class MLPlugin extends Plugin {
 
       return versions;
     } catch (error) {
-      console.error(`[MLPlugin] Failed to list versions for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to list versions for "${modelName}":`, error.message);
       return [];
     }
   }
@@ -1968,9 +1954,7 @@ export class MLPlugin extends Plugin {
         this.modelVersions.set(modelName, versionInfo);
       }
 
-      if (this.config.verbose) {
-        console.log(`[MLPlugin] Loaded model "${modelName}" v${version}`);
-      }
+      this.logger.debug({ modelName, version }, `Loaded model "${modelName}" v${version}`);
 
       return {
         version,
@@ -1980,7 +1964,7 @@ export class MLPlugin extends Plugin {
         savedAt: versionData.savedAt
       };
     } catch (error) {
-      console.error(`[MLPlugin] Failed to load version ${version} for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to load version ${version} for "${modelName}":`, error.message);
       throw error;
     }
   }
@@ -2013,9 +1997,7 @@ export class MLPlugin extends Plugin {
       updatedAt: new Date().toISOString()
     });
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Set model "${modelName}" active version to v${version}`);
-    }
+    this.logger.debug({ modelName, version }, `Set model "${modelName}" active version to v${version}`);
 
     return { modelName, version };
   }
@@ -2053,7 +2035,7 @@ export class MLPlugin extends Plugin {
         updatedAt: historyData.updatedAt
       };
     } catch (error) {
-      console.error(`[MLPlugin] Failed to load training history for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to load training history for "${modelName}":`, error.message);
       return null;
     }
   }
@@ -2107,7 +2089,7 @@ export class MLPlugin extends Plugin {
         }
       };
     } catch (error) {
-      console.error(`[MLPlugin] Failed to compare versions for "${modelName}":`, error.message);
+      this.logger.error(`[MLPlugin] Failed to compare versions for "${modelName}":`, error.message);
       throw error;
     }
   }
@@ -2142,9 +2124,10 @@ export class MLPlugin extends Plugin {
     // Load and set as active
     const result = await this.setActiveVersion(modelName, targetVersion);
 
-    if (this.config.verbose) {
-      console.log(`[MLPlugin] Rolled back model "${modelName}" from v${versionInfo.currentVersion} to v${targetVersion}`);
-    }
+    this.logger.debug(
+      { modelName, previousVersion: versionInfo.currentVersion, targetVersion },
+      `Rolled back model "${modelName}" from v${versionInfo.currentVersion} to v${targetVersion}`
+    );
 
     return {
       modelName,

@@ -60,7 +60,7 @@
  * await users.update('u1', { name: 'Jane' });
  *
  * // Access costs from client
- * console.log(db.client.costs);
+ * this.logger.info(db.client.costs);
  * // {
  * //   total: 0.0000154,
  * //   requests: {
@@ -79,10 +79,10 @@
  * const costs = db.client.costs;
  *
  * // Total costs
- * console.log(`Total: $${costs.total.toFixed(6)}`);
+ * this.logger.info(`Total: $${costs.total.toFixed(6)}`);
  *
  * // Request costs
- * console.log('Requests:', {
+ * this.logger.info('Requests:', {
  *   put: costs.requests.counts.put,
  *   get: costs.requests.counts.get,
  *   copy: costs.requests.counts.copy,
@@ -93,14 +93,14 @@
  * });
  *
  * // Storage costs
- * console.log('Storage:', {
+ * this.logger.info('Storage:', {
  *   totalGB: costs.storage.totalGB.toFixed(4),
  *   currentTier: costs.storage.currentTier,
  *   subtotal: `$${costs.storage.subtotal.toFixed(6)}`
  * });
  *
  * // Data transfer costs
- * console.log('Data Transfer:', {
+ * this.logger.info('Data Transfer:', {
  *   inGB: costs.dataTransfer.inGB.toFixed(4),
  *   outGB: costs.dataTransfer.outGB.toFixed(4),
  *   freeTierUsed: costs.dataTransfer.freeTierUsed.toFixed(4),
@@ -125,7 +125,7 @@
  *     }
  *   };
  *
- *   console.log('Cost Report:', report);
+ *   this.logger.info('Cost Report:', report);
  *   // Send to monitoring system
  *   sendToMonitoring(report);
  * }, 60000); // Every minute
@@ -142,7 +142,7 @@
  *   const costs = db.client.costs;
  *
  *   if (costs.total > COST_THRESHOLD) {
- *     console.error(`⚠️ Cost threshold exceeded: $${costs.total.toFixed(4)}`);
+ *     this.logger.error(`⚠️ Cost threshold exceeded: $${costs.total.toFixed(4)}`);
  *     // Send alert (email, Slack, etc.)
  *     sendAlert({
  *       message: `S3 costs exceeded $${COST_THRESHOLD}`,
@@ -257,8 +257,8 @@
  * await prodDb.use(new CostsPlugin({ considerFreeTier: false }));
  *
  * // Compare costs
- * console.log('Dev costs:', devDb.client.costs.total);
- * console.log('Prod costs:', prodDb.client.costs.total);
+ * this.logger.info('Dev costs:', devDb.client.costs.total);
+ * this.logger.info('Prod costs:', prodDb.client.costs.total);
  * ```
  *
  * ## Performance Considerations
@@ -289,11 +289,11 @@
  *
  * ```javascript
  * // Ensure plugin is installed and started
- * console.log(db.pluginRegistry.CostsPlugin);  // Should exist
+ * this.logger.info(db.pluginRegistry.CostsPlugin);  // Should exist
  * await db.start();  // Must call start() to activate plugin
  *
  * // Check client costs object
- * console.log(db.client.costs);  // Should have costs structure
+ * this.logger.info(db.client.costs);  // Should have costs structure
  * ```
  *
  * ### Inaccurate Cost Calculations
@@ -305,7 +305,7 @@
  * // For other regions, costs may differ
  *
  * // Verify operation counts
- * console.log(db.client.costs.requests.events);
+ * this.logger.info(db.client.costs.requests.events);
  * // Should show operation counts
  * ```
  *
@@ -315,14 +315,14 @@
  * // Storage costs accumulate over time
  * // Check total storage
  * const costs = db.client.costs;
- * console.log(`Total storage: ${costs.storage.totalGB} GB`);
- * console.log(`Current tier: ${costs.storage.currentTier}`);
- * console.log(`Monthly cost: $${costs.storage.subtotal.toFixed(4)}`);
+ * this.logger.info(`Total storage: ${costs.storage.totalGB} GB`);
+ * this.logger.info(`Current tier: ${costs.storage.currentTier}`);
+ * this.logger.info(`Monthly cost: $${costs.storage.subtotal.toFixed(4)}`);
  *
  * // Note: Storage cost is MONTHLY estimate
  * // Divide by 30 for daily estimate
  * const dailyStorageCost = costs.storage.subtotal / 30;
- * console.log(`Daily storage cost: $${dailyStorageCost.toFixed(6)}`);
+ * this.logger.info(`Daily storage cost: $${dailyStorageCost.toFixed(6)}`);
  * ```
  *
  * ### Free Tier Not Applied
@@ -335,8 +335,8 @@
  *
  * // Check free tier usage
  * const costs = db.client.costs;
- * console.log(`Free tier used: ${costs.dataTransfer.freeTierUsed} GB`);
- * console.log(`Free tier available: ${costs.dataTransfer.freeTierGB} GB`);
+ * this.logger.info(`Free tier used: ${costs.dataTransfer.freeTierUsed} GB`);
+ * this.logger.info(`Free tier available: ${costs.dataTransfer.freeTierGB} GB`);
  * ```
  *
  * ## Real-World Use Cases
@@ -354,7 +354,7 @@
  * // Generate cost projection
  * const devCosts = db.client.costs;
  * const projectedMonthlyCost = (devCosts.total / devCosts.requests.total) * expectedMonthlyOperations;
- * console.log(`Projected monthly cost: $${projectedMonthlyCost.toFixed(2)}`);
+ * this.logger.info(`Projected monthly cost: $${projectedMonthlyCost.toFixed(2)}`);
  * ```
  *
  * ### 2. Cost Attribution by Feature
@@ -369,7 +369,7 @@
  *   const afterCosts = db.client.costs;
  *   const featureCost = afterCosts.total - beforeCosts.total;
  *
- *   console.log(`${featureName} cost: $${featureCost.toFixed(6)}`);
+ *   this.logger.info(`${featureName} cost: $${featureCost.toFixed(6)}`);
  *   return featureCost;
  * }
  *

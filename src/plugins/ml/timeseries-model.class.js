@@ -78,7 +78,7 @@ export class TimeSeriesModel extends BaseModel {
     });
 
     if (this.config.verbose) {
-      console.log(`[MLPlugin] ${this.config.name} - Built LSTM time series model (lookback: ${lookback})`);
+      this.logger.info(`[MLPlugin] ${this.config.name} - Built LSTM time series model (lookback: ${lookback})`);
       this.model.summary();
     }
   }

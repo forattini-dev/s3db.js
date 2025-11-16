@@ -513,7 +513,7 @@ export class UptimeBehavior {
     }
 
     // Log transition
-    console.log(`[UptimeBehavior] ${target.host}: ${fromStatus} -> ${toStatus}`);
+    this.logger.info(`[UptimeBehavior] ${target.host}: ${fromStatus} -> ${toStatus}`);
 
     // Persist transition event
     await this._persistTransition(transition);
@@ -530,7 +530,7 @@ export class UptimeBehavior {
     // - PagerDuty
     // For now, just log
 
-    console.warn(`[ALERT] Target ${target.host} is DOWN!`, {
+    this.logger.warn(`[ALERT] Target ${target.host} is DOWN!`, {
       consecutiveFails: this.checks.get(target.host).consecutiveFails,
       lastUp: this.checks.get(target.host).lastUp,
       checkResults: transition.checkResults
@@ -572,7 +572,7 @@ export class UptimeBehavior {
         updatedAt: new Date().toISOString()
       }, { behavior: 'body-only' });
     } catch (error) {
-      console.error(`Failed to persist uptime status for ${host}:`, error.message);
+      this.logger.error(`Failed to persist uptime status for ${host}:`, error.message);
     }
   }
 
@@ -590,7 +590,7 @@ export class UptimeBehavior {
 
       await storage.set(key, transition, { behavior: 'body-only' });
     } catch (error) {
-      console.error(`Failed to persist transition for ${transition.host}:`, error.message);
+      this.logger.error(`Failed to persist transition for ${transition.host}:`, error.message);
     }
   }
 
@@ -612,7 +612,7 @@ export class UptimeBehavior {
 
       await storage.set(key, minuteRecord, { behavior: 'body-only' });
     } catch (error) {
-      console.error(`Failed to persist minute cohort for ${host}:`, error.message);
+      this.logger.error(`Failed to persist minute cohort for ${host}:`, error.message);
     }
   }
 
@@ -630,7 +630,7 @@ export class UptimeBehavior {
 
       await storage.set(key, checkResult, { behavior: 'body-only' });
     } catch (error) {
-      console.error(`Failed to persist raw check for ${host}:`, error.message);
+      this.logger.error(`Failed to persist raw check for ${host}:`, error.message);
     }
   }
 
@@ -678,7 +678,7 @@ export class UptimeBehavior {
         linkedAt: new Date().toISOString()
       }, { behavior: 'body-only' });
     } catch (error) {
-      console.error(`Failed to link report to uptime for ${host}:`, error.message);
+      this.logger.error(`Failed to link report to uptime for ${host}:`, error.message);
     }
   }
 

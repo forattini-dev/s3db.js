@@ -4,12 +4,22 @@
  * All auth strategies extend this class and implement createMiddleware()
  */
 
+import { createLogger } from '../../../../concerns/logger.js';
+
 export class BaseAuthStrategy {
-  constructor({ drivers, authResource, oidcMiddleware, verbose }) {
+  constructor({ drivers, authResource, oidcMiddleware, verbose, logger }) {
     this.drivers = drivers || [];
     this.authResource = authResource;
     this.oidcMiddleware = oidcMiddleware;
     this.verbose = verbose;
+
+    // 🪵 Logger initialization
+    if (logger) {
+      this.logger = logger;
+    } else {
+      const logLevel = verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'AuthStrategy', level: logLevel });
+    }
   }
 
   /**

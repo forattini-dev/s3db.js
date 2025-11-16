@@ -199,7 +199,7 @@ export function registerUIRoutes(app, plugin) {
 
         if (!okUser || !challengeUser || challengeUser.email.toLowerCase() !== normalizedEmail) {
           if (config.verbose) {
-            console.error('[Identity Plugin] MFA challenge verification failed:', errUser?.message || 'challenge mismatch');
+            this.logger.error('[Identity Plugin] MFA challenge verification failed:', errUser?.message || 'challenge mismatch');
           }
           return c.redirect(`/login?error=${encodeURIComponent('Your login session expired. Please sign in again.')}`);
         }
@@ -274,7 +274,7 @@ export function registerUIRoutes(app, plugin) {
 
         if (!authResult.success) {
           if (authResult.statusCode >= 500 && config.verbose) {
-            console.error('[Identity Plugin] Password driver error:', authResult.error);
+            this.logger.error('[Identity Plugin] Password driver error:', authResult.error);
           }
 
           if (accountLockoutConfig.enabled) {
@@ -351,7 +351,7 @@ export function registerUIRoutes(app, plugin) {
           plugin.mfaDevicesResource.query({ userId: user.id, verified: true })
         );
         if (!okMFA && config.verbose) {
-          console.error('[Identity Plugin] Failed to load MFA devices:', errMFA);
+          this.logger.error('[Identity Plugin] Failed to load MFA devices:', errMFA);
         }
         if (okMFA && devices && devices.length > 0) {
           hasMFA = true;
@@ -463,7 +463,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okSession) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to create session:', errSession);
+          this.logger.error('[Identity Plugin] Failed to create session:', errSession);
         }
         return c.redirect(`/login?error=${encodeURIComponent('Failed to create session. Please try again.')}&email=${encodeURIComponent(normalizedEmail)}`);
       }
@@ -482,7 +482,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Login error:', error);
+        this.logger.error('[Identity Plugin] Login error:', error);
       }
       return c.redirect(`/login?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -542,7 +542,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] MFA verification page error:', error);
+        this.logger.error('[Identity Plugin] MFA verification page error:', error);
       }
       return c.redirect(`/login?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -672,7 +672,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUser) {
         if (config.verbose) {
-          console.error('[Identity Plugin] User creation failed:', errUser);
+          this.logger.error('[Identity Plugin] User creation failed:', errUser);
         }
         return c.redirect(`/register?error=${encodeURIComponent('Failed to create account. Please try again.')}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
       }
@@ -697,7 +697,7 @@ export function registerUIRoutes(app, plugin) {
             });
           } catch (emailError) {
             if (config.verbose) {
-              console.error('[Identity Plugin] Failed to send verification email:', emailError);
+              this.logger.error('[Identity Plugin] Failed to send verification email:', emailError);
             }
           }
         }
@@ -709,7 +709,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Registration error:', error);
+        this.logger.error('[Identity Plugin] Registration error:', error);
       }
       return c.redirect(`/register?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -735,7 +735,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Logout error:', error);
+        this.logger.error('[Identity Plugin] Logout error:', error);
       }
       // Still clear cookie and redirect even if session destroy failed
       sessionManager.clearSessionCookie(c);
@@ -820,7 +820,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okToken) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to create reset token:', errToken);
+          this.logger.error('[Identity Plugin] Failed to create reset token:', errToken);
         }
         return c.redirect(`/forgot-password?error=${encodeURIComponent('Failed to process request. Please try again.')}&email=${encodeURIComponent(email)}`);
       }
@@ -834,15 +834,15 @@ export function registerUIRoutes(app, plugin) {
           expiresIn: 60 // minutes
         });
       } else if (config.verbose) {
-        console.log('[Identity Plugin] Email service disabled. Reset token:', resetToken);
-        console.log('[Identity Plugin] Reset URL:', `${config.ui.baseUrl || 'http://localhost:4000'}/reset-password?token=${resetToken}`);
+        this.logger.info('[Identity Plugin] Email service disabled. Reset token:', resetToken);
+        this.logger.info('[Identity Plugin] Reset URL:', `${config.ui.baseUrl || 'http://localhost:4000'}/reset-password?token=${resetToken}`);
       }
 
       return c.redirect(`/forgot-password?success=${encodeURIComponent(successMessage)}`);
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Forgot password error:', error);
+        this.logger.error('[Identity Plugin] Forgot password error:', error);
       }
       return c.redirect(`/forgot-password?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -943,7 +943,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Password update failed:', errUpdate);
+          this.logger.error('[Identity Plugin] Password update failed:', errUpdate);
         }
         return c.redirect(`/reset-password?token=${token}&error=${encodeURIComponent('Failed to reset password. Please try again.')}`);
       }
@@ -961,7 +961,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Reset password error:', error);
+        this.logger.error('[Identity Plugin] Reset password error:', error);
       }
       return c.redirect(`/forgot-password?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -982,7 +982,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUser) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to load user:', errUser);
+          this.logger.error('[Identity Plugin] Failed to load user:', errUser);
         }
         return c.redirect(`/login?error=${encodeURIComponent('Failed to load profile. Please try again.')}`);
       }
@@ -1012,7 +1012,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Profile page error:', error);
+        this.logger.error('[Identity Plugin] Profile page error:', error);
       }
       return c.redirect(`/login?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1063,7 +1063,7 @@ export function registerUIRoutes(app, plugin) {
 
         if (!okUpdate) {
           if (config.verbose) {
-            console.error('[Identity Plugin] Profile update failed:', errUpdate);
+            this.logger.error('[Identity Plugin] Profile update failed:', errUpdate);
           }
           return c.redirect(`/profile?error=${encodeURIComponent('Failed to update profile. Please try again.')}`);
         }
@@ -1081,7 +1081,7 @@ export function registerUIRoutes(app, plugin) {
 
         if (!okUpdate) {
           if (config.verbose) {
-            console.error('[Identity Plugin] Profile update failed:', errUpdate);
+            this.logger.error('[Identity Plugin] Profile update failed:', errUpdate);
           }
           return c.redirect(`/profile?error=${encodeURIComponent('Failed to update profile. Please try again.')}`);
         }
@@ -1091,7 +1091,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Profile update error:', error);
+        this.logger.error('[Identity Plugin] Profile update error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1149,7 +1149,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Password update failed:', errUpdate);
+          this.logger.error('[Identity Plugin] Password update failed:', errUpdate);
         }
         return c.redirect(`/profile?error=${encodeURIComponent('Failed to change password. Please try again.')}`);
       }
@@ -1172,7 +1172,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Change password error:', error);
+        this.logger.error('[Identity Plugin] Change password error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1217,7 +1217,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Logout session error:', error);
+        this.logger.error('[Identity Plugin] Logout session error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1238,7 +1238,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okSessions) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to get sessions:', errSessions);
+          this.logger.error('[Identity Plugin] Failed to get sessions:', errSessions);
         }
         return c.redirect(`/profile?error=${encodeURIComponent('Failed to logout sessions. Please try again.')}`);
       }
@@ -1256,7 +1256,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Logout all sessions error:', error);
+        this.logger.error('[Identity Plugin] Logout all sessions error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1312,7 +1312,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] MFA enrollment page error:', error);
+        this.logger.error('[Identity Plugin] MFA enrollment page error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1368,7 +1368,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okDevice) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to save MFA device:', errDevice);
+          this.logger.error('[Identity Plugin] Failed to save MFA device:', errDevice);
         }
         return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent('Failed to enable MFA. Please try again.')}`);
       }
@@ -1380,7 +1380,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] MFA enrollment error:', error);
+        this.logger.error('[Identity Plugin] MFA enrollment error:', error);
       }
       return c.redirect(`/profile/mfa/enroll?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1436,7 +1436,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] MFA disable error:', error);
+        this.logger.error('[Identity Plugin] MFA disable error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1482,7 +1482,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to regenerate backup codes:', errUpdate);
+          this.logger.error('[Identity Plugin] Failed to regenerate backup codes:', errUpdate);
         }
         return c.redirect(`/profile?error=${encodeURIComponent('Failed to regenerate backup codes. Please try again.')}`);
       }
@@ -1494,7 +1494,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] MFA backup codes error:', error);
+        this.logger.error('[Identity Plugin] MFA backup codes error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1543,7 +1543,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Admin dashboard error:', error);
+        this.logger.error('[Identity Plugin] Admin dashboard error:', error);
       }
       return c.redirect(`/profile?error=${encodeURIComponent('Failed to load admin dashboard')}`);
     }
@@ -1562,7 +1562,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okClients) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to load clients:', errClients);
+          this.logger.error('[Identity Plugin] Failed to load clients:', errClients);
         }
         return c.redirect(`/admin?error=${encodeURIComponent('Failed to load clients')}`);
       }
@@ -1577,7 +1577,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Admin clients error:', error);
+        this.logger.error('[Identity Plugin] Admin clients error:', error);
       }
       return c.redirect(`/admin?error=${encodeURIComponent('Failed to load clients')}`);
     }
@@ -1635,7 +1635,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okClient) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to create client:', errClient);
+          this.logger.error('[Identity Plugin] Failed to create client:', errClient);
         }
         return c.redirect(`/admin/clients/new?error=${encodeURIComponent('Failed to create client. Please try again.')}`);
       }
@@ -1644,7 +1644,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Create client error:', error);
+        this.logger.error('[Identity Plugin] Create client error:', error);
       }
       return c.redirect(`/admin/clients/new?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1676,7 +1676,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Edit client error:', error);
+        this.logger.error('[Identity Plugin] Edit client error:', error);
       }
       return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to load client')}`);
     }
@@ -1715,7 +1715,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to update client:', errUpdate);
+          this.logger.error('[Identity Plugin] Failed to update client:', errUpdate);
         }
         return c.redirect(`/admin/clients/${clientId}/edit?error=${encodeURIComponent('Failed to update client. Please try again.')}`);
       }
@@ -1724,7 +1724,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Update client error:', error);
+        this.logger.error('[Identity Plugin] Update client error:', error);
       }
       return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1741,7 +1741,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okDelete) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to delete client:', errDelete);
+          this.logger.error('[Identity Plugin] Failed to delete client:', errDelete);
         }
         return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to delete client')}`);
       }
@@ -1750,7 +1750,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Delete client error:', error);
+        this.logger.error('[Identity Plugin] Delete client error:', error);
       }
       return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1772,7 +1772,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to rotate secret:', errUpdate);
+          this.logger.error('[Identity Plugin] Failed to rotate secret:', errUpdate);
         }
         return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to rotate secret')}`);
       }
@@ -1781,7 +1781,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Rotate secret error:', error);
+        this.logger.error('[Identity Plugin] Rotate secret error:', error);
       }
       return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1808,7 +1808,7 @@ export function registerUIRoutes(app, plugin) {
 
       if (!okUpdate) {
         if (config.verbose) {
-          console.error('[Identity Plugin] Failed to toggle active:', errUpdate);
+          this.logger.error('[Identity Plugin] Failed to toggle active:', errUpdate);
         }
         return c.redirect(`/admin/clients?error=${encodeURIComponent('Failed to update client')}`);
       }
@@ -1817,7 +1817,7 @@ export function registerUIRoutes(app, plugin) {
 
     } catch (error) {
       if (config.verbose) {
-        console.error('[Identity Plugin] Toggle active error:', error);
+        this.logger.error('[Identity Plugin] Toggle active error:', error);
       }
       return c.redirect(`/admin/clients?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
@@ -1838,7 +1838,7 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUsers) {
-        console.error('[Identity Plugin] List users error:', errUsers);
+        this.logger.error('[Identity Plugin] List users error:', errUsers);
         return c.html(AdminUsersPage({
           users: [],
           user: c.get('user'),
@@ -1858,7 +1858,7 @@ export function registerUIRoutes(app, plugin) {
         config: uiConfig
       }));
     } catch (error) {
-      console.error('[Identity Plugin] List users error:', error);
+      this.logger.error('[Identity Plugin] List users error:', error);
       return c.html(AdminUsersPage({
         users: [],
         user: c.get('user'),
@@ -1889,7 +1889,7 @@ export function registerUIRoutes(app, plugin) {
         config: uiConfig
       }));
     } catch (error) {
-      console.error('[Identity Plugin] Get user error:', error);
+      this.logger.error('[Identity Plugin] Get user error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -1959,7 +1959,7 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Update user error:', errUpdate);
+        this.logger.error('[Identity Plugin] Update user error:', errUpdate);
         return c.html(AdminUserFormPage({
           editUser: { ...editUser, ...updates },
           user: currentUser,
@@ -1970,7 +1970,7 @@ export function registerUIRoutes(app, plugin) {
 
       return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${name} updated successfully`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Update user error:', error);
+      this.logger.error('[Identity Plugin] Update user error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2001,13 +2001,13 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okDelete) {
-        console.error('[Identity Plugin] Delete user error:', errDelete);
+        this.logger.error('[Identity Plugin] Delete user error:', errDelete);
         return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to delete user')}`);
       }
 
       return c.redirect(`/admin/users?success=${encodeURIComponent(`User ${userName} deleted successfully`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Delete user error:', error);
+      this.logger.error('[Identity Plugin] Delete user error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2034,13 +2034,13 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Change status error:', errUpdate);
+        this.logger.error('[Identity Plugin] Change status error:', errUpdate);
         return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to change user status')}`);
       }
 
       return c.redirect(`/admin/users?success=${encodeURIComponent(`User status changed to ${status}`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Change status error:', error);
+      this.logger.error('[Identity Plugin] Change status error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2055,13 +2055,13 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Verify email error:', errUpdate);
+        this.logger.error('[Identity Plugin] Verify email error:', errUpdate);
         return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to verify email')}`);
       }
 
       return c.redirect(`/admin/users?success=${encodeURIComponent('Email marked as verified')}`);
     } catch (error) {
-      console.error('[Identity Plugin] Verify email error:', error);
+      this.logger.error('[Identity Plugin] Verify email error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2098,7 +2098,7 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Password reset update error:', errUpdate);
+        this.logger.error('[Identity Plugin] Password reset update error:', errUpdate);
         return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to generate reset token')}`);
       }
 
@@ -2113,7 +2113,7 @@ export function registerUIRoutes(app, plugin) {
 
       return c.redirect(`/admin/users?success=${encodeURIComponent(`Password reset email sent to ${user.email}`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Reset password error:', error);
+      this.logger.error('[Identity Plugin] Reset password error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2128,7 +2128,7 @@ export function registerUIRoutes(app, plugin) {
       const [okGet, errGet, user] = await tryFn(() => usersResource.get(userId));
 
       if (!okGet || !user) {
-        console.error('[Identity Plugin] User not found:', userId);
+        this.logger.error('[Identity Plugin] User not found:', userId);
         return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
       }
 
@@ -2147,17 +2147,17 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Failed to unlock account:', errUpdate);
+        this.logger.error('[Identity Plugin] Failed to unlock account:', errUpdate);
         return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to unlock account')}`);
       }
 
       if (config.verbose) {
-        console.log(`[Account Lockout] Admin ${currentUser.email} manually unlocked user ${user.email}`);
+        this.logger.info(`[Account Lockout] Admin ${currentUser.email} manually unlocked user ${user.email}`);
       }
 
       return c.redirect(`/admin/users?success=${encodeURIComponent(`Account unlocked for ${user.email}`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Unlock account error:', error);
+      this.logger.error('[Identity Plugin] Unlock account error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2176,7 +2176,7 @@ export function registerUIRoutes(app, plugin) {
       const [okGet, errGet, user] = await tryFn(() => usersResource.get(userId));
 
       if (!okGet || !user) {
-        console.error('[Identity Plugin] User not found:', userId);
+        this.logger.error('[Identity Plugin] User not found:', userId);
         return c.redirect(`/admin/users?error=${encodeURIComponent('User not found')}`);
       }
 
@@ -2202,12 +2202,12 @@ export function registerUIRoutes(app, plugin) {
       });
 
       if (config.verbose) {
-        console.log(`[MFA] Admin ${currentUser.email} disabled MFA for user ${user.email}`);
+        this.logger.info(`[MFA] Admin ${currentUser.email} disabled MFA for user ${user.email}`);
       }
 
       return c.redirect(`/admin/users?success=${encodeURIComponent(`MFA disabled for ${user.email}`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Admin disable MFA error:', error);
+      this.logger.error('[Identity Plugin] Admin disable MFA error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2238,14 +2238,14 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Toggle admin error:', errUpdate);
+        this.logger.error('[Identity Plugin] Toggle admin error:', errUpdate);
         return c.redirect(`/admin/users?error=${encodeURIComponent('Failed to change user role')}`);
       }
 
       const action = newRole === 'admin' ? 'granted admin privileges to' : 'removed admin privileges from';
       return c.redirect(`/admin/users?success=${encodeURIComponent(`Successfully ${action} ${user.name}`)}`);
     } catch (error) {
-      console.error('[Identity Plugin] Toggle admin error:', error);
+      this.logger.error('[Identity Plugin] Toggle admin error:', error);
       return c.redirect(`/admin/users?error=${encodeURIComponent('An error occurred. Please try again.')}`);
     }
   });
@@ -2351,7 +2351,7 @@ export function registerUIRoutes(app, plugin) {
         config: uiConfig
       }));
     } catch (error) {
-      console.error('[Identity Plugin] OAuth authorize error:', error);
+      this.logger.error('[Identity Plugin] OAuth authorize error:', error);
       return c.html(OAuthErrorPage({
         error: 'server_error',
         errorDescription: 'An error occurred while processing your request',
@@ -2414,7 +2414,7 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okCode) {
-        console.error('[Identity Plugin] Failed to store auth code:', errCode);
+        this.logger.error('[Identity Plugin] Failed to store auth code:', errCode);
         return c.html(OAuthErrorPage({
           error: 'server_error',
           errorDescription: 'Failed to generate authorization code',
@@ -2438,7 +2438,7 @@ export function registerUIRoutes(app, plugin) {
 
       return c.redirect(`${redirect_uri}?${successParams.toString()}`);
     } catch (error) {
-      console.error('[Identity Plugin] OAuth consent error:', error);
+      this.logger.error('[Identity Plugin] OAuth consent error:', error);
       return c.html(`
         <html>
           <body>
@@ -2522,7 +2522,7 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Email verification update error:', errUpdate);
+        this.logger.error('[Identity Plugin] Email verification update error:', errUpdate);
         return c.html(PageComponent({
           status: 'error',
           message: 'Failed to verify email. Please try again later.',
@@ -2536,7 +2536,7 @@ export function registerUIRoutes(app, plugin) {
         config: uiConfig
       }));
     } catch (error) {
-      console.error('[Identity Plugin] Email verification error:', error);
+      this.logger.error('[Identity Plugin] Email verification error:', error);
       return c.html(PageComponent({
         status: 'error',
         message: 'An error occurred while verifying your email.',
@@ -2598,7 +2598,7 @@ export function registerUIRoutes(app, plugin) {
       );
 
       if (!okUpdate) {
-        console.error('[Identity Plugin] Verification token update error:', errUpdate);
+        this.logger.error('[Identity Plugin] Verification token update error:', errUpdate);
         return c.html(PageComponent({
           status: 'error',
           message: 'Failed to send verification email. Please try again later.',
@@ -2622,7 +2622,7 @@ export function registerUIRoutes(app, plugin) {
         config: uiConfig
       }));
     } catch (error) {
-      console.error('[Identity Plugin] Resend verification error:', error);
+      this.logger.error('[Identity Plugin] Resend verification error:', error);
       return c.html(PageComponent({
         status: 'error',
         message: 'An error occurred. Please try again later.',

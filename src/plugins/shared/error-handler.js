@@ -89,7 +89,7 @@ export function errorHandler(err, c) {
 
   // Log error (except for expected errors like 404)
   if (status >= 500) {
-    console.error('[API Plugin] Error:', {
+    this.logger.error('[API Plugin] Error:', {
       message: err.message,
       code,
       status,
@@ -97,7 +97,7 @@ export function errorHandler(err, c) {
       details
     });
   } else if (status >= 400 && status < 500 && c.get('verbose')) {
-    console.warn('[API Plugin] Client error:', {
+    this.logger.warn('[API Plugin] Client error:', {
       message: err.message,
       code,
       status,

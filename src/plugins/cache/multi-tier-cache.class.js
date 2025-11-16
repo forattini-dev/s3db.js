@@ -71,7 +71,7 @@ export class MultiTierCache extends Cache {
    */
   _log(...args) {
     if (this.config.verbose) {
-      console.log('[MultiTierCache]', ...args);
+      this.logger.info('[MultiTierCache]', ...args);
     }
   }
 

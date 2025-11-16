@@ -325,7 +325,7 @@ export class PuppeteerPlugin extends Plugin {
 
     // Deprecation warning for legacy single proxy config
     if (options.proxy?.server || options.proxy?.username || options.proxy?.password) {
-      console.warn(
+      this.logger.warn(
         '[PuppeteerPlugin] DEPRECATED: The single proxy config (server, username, password) is deprecated. ' +
         'Use the proxy.list array with proxy objects instead. Example: proxy: { list: [{ proxy: "http://host:port", username: "user", password: "pass" }] }. ' +
         'This will be removed in v17.0.'

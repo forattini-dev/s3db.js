@@ -152,7 +152,7 @@ export class BaseModel {
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             if (this.config.verbose && epoch % 10 === 0) {
-              console.log(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: loss=${logs.loss.toFixed(4)}`);
+              this.logger.info(`[MLPlugin] ${this.config.name} - Epoch ${epoch}: loss=${logs.loss.toFixed(4)}`);
             }
           }
         }
@@ -174,7 +174,7 @@ export class BaseModel {
       ys.dispose();
 
       if (this.config.verbose) {
-        console.log(`[MLPlugin] ${this.config.name} - Training completed:`, {
+        this.logger.info(`[MLPlugin] ${this.config.name} - Training completed:`, {
           samples: this.stats.samples,
           loss: this.stats.loss,
           accuracy: this.stats.accuracy

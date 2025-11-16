@@ -4,6 +4,7 @@ import tryFn from "../concerns/try-fn.js";
 import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
 import { ReplicationError } from "./replicator.errors.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
+import { createLogger } from '../concerns/logger.js';
 
 function normalizeResourceName(name) {
   return typeof name === 'string' ? name.trim().toLowerCase() : name;
@@ -121,6 +122,14 @@ function normalizeResourceName(name) {
 export class ReplicatorPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'ReplicatorPlugin', level: logLevel });
+    }
 
     const {
       replicators = [],
@@ -257,10 +266,11 @@ export class ReplicatorPlugin extends Plugin {
       return completeRecord;
     }
 
-    if (this.config.verbose) {
-      const reason = err?.message || 'record not found';
-      console.warn(`[ReplicatorPlugin] Falling back to provided data for ${resource?.name || 'unknown'}#${data?.id}: ${reason}`);
-    }
+    const reason = err?.message || 'record not found';
+    this.logger.warn(
+      { resource: resource?.name || 'unknown', id: data?.id, reason },
+      `Falling back to provided data for ${resource?.name || 'unknown'}#${data?.id}: ${reason}`
+    );
 
     return data;
   }
@@ -279,9 +289,10 @@ export class ReplicatorPlugin extends Plugin {
       });
 
       if (!ok) {
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Insert event failed for resource ${resource.name}: ${error.message}`);
-        }
+        this.logger.warn(
+          { resource: resource.name, operation: 'insert', error: error.message },
+          `Insert event failed for resource ${resource.name}: ${error.message}`
+        );
         this.emit('plg:replicator:error', { operation: 'insert', error: error.message, resource: resource.name });
       }
     };
@@ -294,9 +305,10 @@ export class ReplicatorPlugin extends Plugin {
       });
 
       if (!ok) {
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Update event failed for resource ${resource.name}: ${error.message}`);
-        }
+        this.logger.warn(
+          { resource: resource.name, operation: 'update', error: error.message },
+          `Update event failed for resource ${resource.name}: ${error.message}`
+        );
         this.emit('plg:replicator:error', { operation: 'update', error: error.message, resource: resource.name });
       }
     };
@@ -308,9 +320,10 @@ export class ReplicatorPlugin extends Plugin {
       });
 
       if (!ok) {
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Delete event failed for resource ${resource.name}: ${error.message}`);
-        }
+        this.logger.warn(
+          { resource: resource.name, operation: 'delete', error: error.message },
+          `Delete event failed for resource ${resource.name}: ${error.message}`
+        );
         this.emit('plg:replicator:error', { operation: 'delete', error: error.message, resource: resource.name });
       }
     };
@@ -466,9 +479,7 @@ export class ReplicatorPlugin extends Plugin {
       const replicatorResources = this._filterResourcesDefinition(rawResources);
 
       if (this._resourcesDefinitionIsEmpty(replicatorResources)) {
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Skipping replicator for driver ${driver} due to resource filter`);
-        }
+        this.logger.warn({ driver }, `Skipping replicator for driver ${driver} due to resource filter`);
         continue;
       }
 
@@ -499,18 +510,17 @@ export class ReplicatorPlugin extends Plugin {
         return result;
       } else {
         lastError = error;
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Retry attempt ${attempt}/${maxRetries} failed: ${error.message}`);
-        }
+        this.logger.warn(
+          { attempt, maxRetries, error: error.message },
+          `Retry attempt ${attempt}/${maxRetries} failed: ${error.message}`
+        );
 
         if (attempt === maxRetries) {
           throw error;
         }
         // Simple backoff: wait 1s, 2s, 4s...
         const delay = Math.pow(2, attempt - 1) * 1000;
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Waiting ${delay}ms before retry...`);
-        }
+        this.logger.warn({ delay }, `Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -623,9 +633,10 @@ export class ReplicatorPlugin extends Plugin {
     });
     
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Failed to log error for ${resourceName}: ${logError.message}`);
-      }
+      this.logger.warn(
+        { replicator: replicator.name || replicator.id, resourceName, error: logError.message },
+        `Failed to log error for ${resourceName}: ${logError.message}`
+      );
       this.emit('plg:replicator:log-error', {
         replicator: replicator.name || replicator.id,
         resourceName,
@@ -693,9 +704,10 @@ export class ReplicatorPlugin extends Plugin {
           return replicationResult;
         }
 
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Replication failed for ${replicator.name || replicator.id} on ${resourceName}: ${error.message}`);
-        }
+        this.logger.warn(
+          { replicator: replicator.name || replicator.id, resourceName, operation, error: error.message },
+          `Replication failed for ${replicator.name || replicator.id} on ${resourceName}: ${error.message}`
+        );
 
         this.emit('plg:replicator:error', {
           replicator: replicator.name || replicator.id,
@@ -751,9 +763,10 @@ export class ReplicatorPlugin extends Plugin {
           );
 
           if (!ok) {
-            if (this.config.verbose) {
-              console.warn(`[ReplicatorPlugin] Replicator item processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${err.message}`);
-            }
+            this.logger.warn(
+              { replicator: replicator.name || replicator.id, resourceName: item.resourceName, operation: item.operation, error: err.message },
+              `Replicator item processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${err.message}`
+            );
 
             this.emit('plg:replicator:error', {
               replicator: replicator.name || replicator.id,
@@ -790,9 +803,10 @@ export class ReplicatorPlugin extends Plugin {
           return wrapperOk;
         }
 
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Wrapper processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${wrapperError.message}`);
-        }
+        this.logger.warn(
+          { replicator: replicator.name || replicator.id, resourceName: item.resourceName, operation: item.operation, error: wrapperError.message },
+          `Wrapper processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${wrapperError.message}`
+        );
 
         this.emit('plg:replicator:error', {
           replicator: replicator.name || replicator.id,
@@ -850,9 +864,7 @@ export class ReplicatorPlugin extends Plugin {
     });
     
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Failed to log replicator item: ${err.message}`);
-      }
+      this.logger.warn({ error: err.message }, `Failed to log replicator item: ${err.message}`);
       this.emit('plg:replicator:log-failed', { error: err, item });
     }
   }
@@ -1020,9 +1032,9 @@ export class ReplicatorPlugin extends Plugin {
         });
       });
 
-    if (processResult.errors.length && this.config.verbose) {
+    if (processResult.errors.length) {
       for (const { item, error } of processResult.errors) {
-        console.warn(`[ReplicatorPlugin] Failed to retry log ${item?.id ?? 'unknown'}: ${error.message}`);
+        this.logger.warn({ logId: item?.id ?? 'unknown', error: error.message }, `Failed to retry log ${item?.id ?? 'unknown'}: ${error.message}`);
       }
     }
 
@@ -1073,9 +1085,10 @@ export class ReplicatorPlugin extends Plugin {
               );
 
               if (!replicateOk) {
-                if (this.config.verbose) {
-                  console.warn(`[ReplicatorPlugin] syncAllData failed for ${replicator.name || replicator.id} on ${resourceName}: ${replicateError.message}`);
-                }
+                this.logger.warn(
+                  { replicator: replicator.name || replicator.id, resourceName, error: replicateError.message },
+                  `syncAllData failed for ${replicator.name || replicator.id} on ${resourceName}: ${replicateError.message}`
+                );
 
                 this.stats.totalErrors += 1;
                 this.emit('plg:replicator:error', {
@@ -1133,9 +1146,10 @@ export class ReplicatorPlugin extends Plugin {
             });
 
             if (!replicatorOk) {
-              if (this.config.verbose) {
-                console.warn(`[ReplicatorPlugin] Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
-              }
+              this.logger.warn(
+                { replicator: replicator.name || replicator.id, driver: replicator.driver, error: replicatorError.message },
+                `Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`
+              );
               this.emit('plg:replicator:stop-error', {
                 replicator: replicator.name || replicator.id || 'unknown',
                 driver: replicator.driver || 'unknown',
@@ -1171,9 +1185,7 @@ export class ReplicatorPlugin extends Plugin {
     });
     
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Failed to stop plugin: ${error.message}`);
-      }
+      this.logger.warn({ error: error.message }, `Failed to stop plugin: ${error.message}`);
       this.emit('plg:replicator:plugin-stop-error', {
         error: error.message
       });

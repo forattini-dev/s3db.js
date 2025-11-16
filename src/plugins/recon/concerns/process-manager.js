@@ -64,7 +64,7 @@ export class ProcessManager {
 
     // Handle errors
     process.on('error', (error) => {
-      console.error(`[ProcessManager] Process ${options.name || process.pid} error:`, error.message);
+      this.logger.error(`[ProcessManager] Process ${options.name || process.pid} error:`, error.message);
       this._removeProcess(process.pid);
     });
   }
@@ -100,7 +100,7 @@ export class ProcessManager {
     }
 
     const cleanup = async (signal) => {
-      console.log(`\n[ProcessManager] Received ${signal}, cleaning up...`);
+      this.logger.info(`\n[ProcessManager] Received ${signal}, cleaning up...`);
       await this.cleanup();
       process.exit(0);
     };
@@ -112,14 +112,14 @@ export class ProcessManager {
 
     // Handle uncaught exceptions
     process.on('uncaughtException', async (error) => {
-      console.error('[ProcessManager] Uncaught exception:', error);
+      this.logger.error('[ProcessManager] Uncaught exception:', error);
       await this.cleanup();
       process.exit(1);
     });
 
     // Handle unhandled promise rejections
     process.on('unhandledRejection', async (reason, promise) => {
-      console.error('[ProcessManager] Unhandled rejection:', reason);
+      this.logger.error('[ProcessManager] Unhandled rejection:', reason);
       await this.cleanup();
       process.exit(1);
     });
@@ -142,7 +142,7 @@ export class ProcessManager {
     const { force = false, silent = false } = options;
 
     if (!silent && this.processes.size > 0) {
-      console.log(`[ProcessManager] Cleaning up ${this.processes.size} tracked process(es)...`);
+      this.logger.info(`[ProcessManager] Cleaning up ${this.processes.size} tracked process(es)...`);
     }
 
     // Kill all tracked processes
@@ -154,7 +154,7 @@ export class ProcessManager {
 
     // Cleanup temporary directories
     if (this.tempDirs.size > 0 && !silent) {
-      console.log(`[ProcessManager] Cleaning up ${this.tempDirs.size} temporary directory(ies)...`);
+      this.logger.info(`[ProcessManager] Cleaning up ${this.tempDirs.size} temporary directory(ies)...`);
     }
 
     const cleanupPromises = [];
@@ -170,7 +170,7 @@ export class ProcessManager {
     this.tempDirs.clear();
 
     if (!silent) {
-      console.log('[ProcessManager] Cleanup complete');
+      this.logger.info('[ProcessManager] Cleanup complete');
     }
   }
 
@@ -189,7 +189,7 @@ export class ProcessManager {
     const signal = force ? 'SIGKILL' : 'SIGTERM';
 
     if (!silent) {
-      console.log(`[ProcessManager] Killing ${name} (PID: ${pid}) with ${signal}...`);
+      this.logger.info(`[ProcessManager] Killing ${name} (PID: ${pid}) with ${signal}...`);
     }
 
     try {
@@ -202,14 +202,14 @@ export class ProcessManager {
         // If still running, force kill
         if (this._isProcessRunning(pid)) {
           if (!silent) {
-            console.log(`[ProcessManager] Force killing ${name} (PID: ${pid})...`);
+            this.logger.info(`[ProcessManager] Force killing ${name} (PID: ${pid})...`);
           }
           process.kill('SIGKILL');
         }
       }
     } catch (error) {
       if (error.code !== 'ESRCH') { // Ignore "process not found" errors
-        console.error(`[ProcessManager] Error killing ${name} (PID: ${pid}):`, error.message);
+        this.logger.error(`[ProcessManager] Error killing ${name} (PID: ${pid}):`, error.message);
       }
     }
 
@@ -250,11 +250,11 @@ export class ProcessManager {
       if (exists) {
         await fs.rm(dir, { recursive: true, force: true });
         if (!silent) {
-          console.log(`[ProcessManager] Removed temp directory: ${dir}`);
+          this.logger.info(`[ProcessManager] Removed temp directory: ${dir}`);
         }
       }
     } catch (error) {
-      console.error(`[ProcessManager] Error cleaning up ${dir}:`, error.message);
+      this.logger.error(`[ProcessManager] Error cleaning up ${dir}:`, error.message);
     }
   }
 
@@ -269,7 +269,7 @@ export class ProcessManager {
       if (stdout.trim()) {
         const pids = stdout.trim().split('\n').filter(Boolean);
         if (!silent && pids.length > 0) {
-          console.log(`[ProcessManager] Found ${pids.length} orphaned Puppeteer process(es), killing...`);
+          this.logger.info(`[ProcessManager] Found ${pids.length} orphaned Puppeteer process(es), killing...`);
         }
         for (const pid of pids) {
           try {
@@ -290,7 +290,7 @@ export class ProcessManager {
         .map(entry => path.join(tmpDir, entry.name));
 
       if (puppeteerDirs.length > 0 && !silent) {
-        console.log(`[ProcessManager] Cleaning up ${puppeteerDirs.length} orphaned Puppeteer temp dir(s)...`);
+        this.logger.info(`[ProcessManager] Cleaning up ${puppeteerDirs.length} orphaned Puppeteer temp dir(s)...`);
       }
 
       for (const dir of puppeteerDirs) {
@@ -303,7 +303,7 @@ export class ProcessManager {
     } catch (error) {
       // Silently ignore errors in orphan cleanup
       if (!silent) {
-        console.error('[ProcessManager] Error during orphan cleanup:', error.message);
+        this.logger.error('[ProcessManager] Error during orphan cleanup:', error.message);
       }
     }
   }

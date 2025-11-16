@@ -12,6 +12,7 @@ import MultiTierCache from "./cache/multi-tier-cache.class.js";
 import { resolveCacheMemoryLimit } from "./cache/utils/memory-limits.js";
 import tryFn from "../concerns/try-fn.js";
 import { CacheError } from "./cache.errors.js";
+import { createLogger } from '../concerns/logger.js';
 
 /**
  * Cache Plugin Configuration
@@ -98,6 +99,14 @@ import { CacheError } from "./cache.errors.js";
 export class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'CachePlugin', level: logLevel });
+    }
 
     const {
       driver = 's3',
@@ -203,10 +212,13 @@ export class CachePlugin extends Plugin {
 
         this.config.config.inferredMaxMemoryPercent = resolvedLimit.inferredPercent;
 
-        if (this.verbose) {
-          const source = resolvedLimit.derivedFromPercent ? 'percent/cgroup' : 'explicit';
-          console.warn(`[CachePlugin] Memory driver capped at ${Math.round(resolvedLimit.maxMemoryBytes / (1024 * 1024))} MB (source: ${source}, heapLimit=${Math.round(resolvedLimit.heapLimit / (1024 * 1024))} MB)`);
-        }
+        // 🪵 Warning: memory driver capped
+        const source = resolvedLimit.derivedFromPercent ? 'percent/cgroup' : 'explicit';
+        this.logger.warn({
+          maxMemoryMB: Math.round(resolvedLimit.maxMemoryBytes / (1024 * 1024)),
+          source,
+          heapLimitMB: Math.round(resolvedLimit.heapLimit / (1024 * 1024))
+        }, `Memory driver capped at ${Math.round(resolvedLimit.maxMemoryBytes / (1024 * 1024))} MB (source: ${source}, heapLimit=${Math.round(resolvedLimit.heapLimit / (1024 * 1024))} MB)`);
       }
 
       this.driver = await this._createSingleDriver(this.config.driver, this.config.config);
@@ -218,10 +230,12 @@ export class CachePlugin extends Plugin {
           driver: 'memory',
           ...payload
         });
-        if (this.verbose) {
-          const reason = payload?.reason || 'unknown';
-          console.warn(`[CachePlugin] Memory pressure detected (reason: ${reason}) current=${Math.round((payload?.currentBytes || 0) / (1024 * 1024))}MB`);
-        }
+        // 🪵 Warning: memory pressure detected
+        const reason = payload?.reason || 'unknown';
+        this.logger.warn({
+          reason,
+          currentMB: Math.round((payload?.currentBytes || 0) / (1024 * 1024))
+        }, `Memory pressure detected (reason: ${reason}) current=${Math.round((payload?.currentBytes || 0) / (1024 * 1024))}MB`);
       });
       this.driver.on('memory:evict', (payload) => {
         this.emit('cache:memoryEvict', {
@@ -846,12 +860,11 @@ export class CachePlugin extends Plugin {
             error: err.message
           });
 
-          if (this.verbose) {
-            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:${data.id}:`, err.message);
-          }
+          // 🪵 Warning: failed to clear method cache
+          this.logger.warn({ resourceName: resource.name, method, id: data.id, error: err.message }, `Failed to clear ${method} cache for ${resource.name}:${data.id}: ${err.message}`);
         }
       }
-      
+
       // Clear partition-specific caches if this resource has partitions
       if (this.config.includePartitions === true && resource.$schema.partitions && Object.keys(resource.$schema.partitions).length > 0) {
         const partitionValues = this.getPartitionValues(data, resource);
@@ -867,9 +880,8 @@ export class CachePlugin extends Plugin {
                 error: err.message
               });
 
-              if (this.verbose) {
-                console.warn(`[CachePlugin] Failed to clear partition cache for ${resource.name}/${partitionName}:`, err.message);
-              }
+              // 🪵 Warning: failed to clear partition cache
+              this.logger.warn({ resourceName: resource.name, partitionName, error: err.message }, `Failed to clear partition cache for ${resource.name}/${partitionName}: ${err.message}`);
             }
           }
         }
@@ -886,9 +898,8 @@ export class CachePlugin extends Plugin {
         error: err.message
       });
 
-      if (this.verbose) {
-        console.warn(`[CachePlugin] Failed to clear broad cache for ${resource.name}, trying specific methods:`, err.message);
-      }
+      // 🪵 Warning: failed to clear broad cache
+      this.logger.warn({ resourceName: resource.name, error: err.message }, `Failed to clear broad cache for ${resource.name}, trying specific methods: ${err.message}`);
 
       // If broad clearing fails, try specific method clearing
       const aggregateMethods = ['count', 'list', 'listIds', 'getAll', 'page', 'query'];

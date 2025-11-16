@@ -77,7 +77,7 @@ export class RegressionModel extends BaseModel {
     });
 
     if (this.config.verbose) {
-      console.log(`[MLPlugin] ${this.config.name} - Built regression model (polynomial degree: ${polynomial})`);
+      this.logger.info(`[MLPlugin] ${this.config.name} - Built regression model (polynomial degree: ${polynomial})`);
       this.model.summary();
     }
   }

@@ -6,6 +6,7 @@ import { S3QueuePlugin } from './s3-queue.plugin.js'
 import { TTLPlugin } from './ttl.plugin.js'
 import tryFn from '../concerns/try-fn.js'
 import { PluginError } from '../errors.js'
+import { createLogger } from '../concerns/logger.js'
 import {
   AVAILABLE_ACTIVITIES,
   ACTIVITY_CATEGORIES,
@@ -42,6 +43,14 @@ export class SpiderPlugin extends Plugin {
 
     // Validate namespace
     this.namespace = getValidatedNamespace(options, 'spider')
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info'
+      this.logger = createLogger({ name: 'SpiderPlugin', level: logLevel })
+    }
 
     // Configuration
     this.config = {
@@ -193,9 +202,8 @@ export class SpiderPlugin extends Plugin {
       // Verify Puppeteer dependency
       requirePluginDependency('puppeteer', 'SpiderPlugin')
 
-      if (this.verbose) {
-        console.log('[SpiderPlugin] Initializing bundled plugins...')
-      }
+      // 🪵 Debug: initializing bundled plugins
+      this.logger.debug('Initializing bundled plugins (Puppeteer, S3Queue, TTL)')
 
       // Initialize PuppeteerPlugin
       this.puppeteerPlugin = new PuppeteerPlugin({
@@ -245,9 +253,8 @@ export class SpiderPlugin extends Plugin {
 
       this.initialized = true
 
-      if (this.verbose) {
-        console.log('[SpiderPlugin] Initialized successfully')
-      }
+      // 🪵 Debug: initialized successfully
+      this.logger.debug('Initialized successfully')
     } catch (error) {
       throw new PluginError(
         `SpiderPlugin initialization failed: ${error.message}`,
@@ -394,9 +401,8 @@ export class SpiderPlugin extends Plugin {
       })
 
       if (ok) {
-        if (this.verbose) {
-          console.log(`[SpiderPlugin] Created resource: ${config.name}`)
-        }
+        // 🪵 Debug: created resource
+        this.logger.debug({ resourceName: config.name }, `Created resource: ${config.name}`)
       } else if (err?.code !== 'ResourceAlreadyExists') {
         throw err
       }
@@ -425,11 +431,10 @@ export class SpiderPlugin extends Plugin {
       const startTime = Date.now()
 
       try {
-        if (this.verbose) {
-          console.log(`[SpiderPlugin] Processing: ${task.url}`)
-          if (task.activities && task.activities.length > 0) {
-            console.log(`[SpiderPlugin] Activities: ${task.activities.join(', ')}`)
-          }
+        // 🪵 Debug: processing URL
+        this.logger.debug({ url: task.url, activities: task.activities }, `Processing: ${task.url}`)
+        if (task.activities && task.activities.length > 0) {
+          this.logger.debug({ activities: task.activities }, `Activities: ${task.activities.join(', ')}`)
         }
 
         // Open browser page
@@ -447,36 +452,32 @@ export class SpiderPlugin extends Plugin {
         let seoAnalysis = null
         if (this.config.seo.enabled && this._shouldExecuteCategory(task, 'seo')) {
           seoAnalysis = this.seoAnalyzer.analyze(html, task.url)
-          if (this.verbose) {
-            console.log(`[SpiderPlugin] Executed SEO analysis for ${task.url}`)
-          }
+          // 🪵 Debug: executed SEO analysis
+          this.logger.debug({ url: task.url }, `Executed SEO analysis for ${task.url}`)
         }
 
         // Tech Detection - only if technology activities are requested
         let techFingerprint = null
         if (this.config.techDetection.enabled && this._shouldExecuteCategory(task, 'technology')) {
           techFingerprint = this.techDetector.fingerprint(html)
-          if (this.verbose) {
-            console.log(`[SpiderPlugin] Executed tech detection for ${task.url}`)
-          }
+          // 🪵 Debug: executed tech detection
+          this.logger.debug({ url: task.url }, `Executed tech detection for ${task.url}`)
         }
 
         // Performance Metrics - only if performance activities are requested
         let performanceMetrics = null
         if (this.config.performance.enabled && this._shouldExecuteCategory(task, 'performance')) {
           performanceMetrics = await this.puppeteerPlugin.performanceManager.collectMetrics(page)
-          if (this.verbose) {
-            console.log(`[SpiderPlugin] Collected performance metrics for ${task.url}`)
-          }
+          // 🪵 Debug: collected performance metrics
+          this.logger.debug({ url: task.url }, `Collected performance metrics for ${task.url}`)
         }
 
         // Security Analysis - only if security activities are requested
         let securityAnalysis = null
         if (this.config.security.enabled && this._shouldExecuteCategory(task, 'security')) {
           securityAnalysis = await this.securityAnalyzer.analyze(page, task.url, html)
-          if (this.verbose) {
-            console.log(`[SpiderPlugin] Executed security analysis for ${task.url}`)
-          }
+          // 🪵 Debug: executed security analysis
+          this.logger.debug({ url: task.url }, `Executed security analysis for ${task.url}`)
         }
 
         // Screenshot Capture - only if screenshot activities are requested
@@ -502,11 +503,10 @@ export class SpiderPlugin extends Plugin {
               quality: this.config.screenshot.quality
             }
 
-            if (this.verbose) {
-              console.log(`[SpiderPlugin] Captured screenshot for ${task.url}`)
-            }
+            // 🪵 Debug: captured screenshot
+            this.logger.debug({ url: task.url, format: this.config.screenshot.format }, `Captured screenshot for ${task.url}`)
           } catch (error) {
-            console.error(`[SpiderPlugin] Failed to capture screenshot for ${task.url}:`, error)
+            this.logger.error(`[SpiderPlugin] Failed to capture screenshot for ${task.url}:`, error)
           }
         }
 
@@ -524,11 +524,10 @@ export class SpiderPlugin extends Plugin {
               trackingPixels
             }
 
-            if (this.verbose) {
-              console.log(`[SpiderPlugin] Analyzed content (iframes/tracking) for ${task.url}`)
-            }
+            // 🪵 Debug: analyzed content (iframes/tracking)
+            this.logger.debug({ url: task.url }, `Analyzed content (iframes/tracking) for ${task.url}`)
           } catch (error) {
-            console.error(`[SpiderPlugin] Failed to analyze content for ${task.url}:`, error)
+            this.logger.error(`[SpiderPlugin] Failed to analyze content for ${task.url}:`, error)
           }
         }
 
@@ -539,11 +538,10 @@ export class SpiderPlugin extends Plugin {
             const storage = await analyzeAllStorage(page)
             storageAnalysis = storage
 
-            if (this.verbose) {
-              console.log(`[SpiderPlugin] Analyzed storage (localStorage/IndexedDB/sessionStorage) for ${task.url}`)
-            }
+            // 🪵 Debug: analyzed storage (localStorage/IndexedDB/sessionStorage)
+            this.logger.debug({ url: task.url }, `Analyzed storage (localStorage/IndexedDB/sessionStorage) for ${task.url}`)
           } catch (error) {
-            console.error(`[SpiderPlugin] Failed to analyze storage for ${task.url}:`, error)
+            this.logger.error(`[SpiderPlugin] Failed to analyze storage for ${task.url}:`, error)
           }
         }
 
@@ -623,9 +621,8 @@ export class SpiderPlugin extends Plugin {
           // Store performance metrics if available and enabled
           if (performanceMetrics && this.config.persistence.savePerformanceMetrics) {
             // Performance metrics are already included in results, but can be logged separately
-            if (this.verbose) {
-              console.log(`[SpiderPlugin] Persisted performance metrics for ${task.url}`)
-            }
+            // 🪵 Debug: persisted performance metrics
+            this.logger.debug({ url: task.url }, `Persisted performance metrics for ${task.url}`)
           }
 
           // Store content analysis (iframes, tracking pixels) if available
@@ -653,9 +650,8 @@ export class SpiderPlugin extends Plugin {
           }
         } else {
           // If persistence disabled, store minimal data (for queue tracking)
-          if (this.verbose) {
-            console.log(`[SpiderPlugin] Persistence disabled, skipping storage for ${task.url}`)
-          }
+          // 🪵 Debug: persistence disabled
+          this.logger.debug({ url: task.url }, `Persistence disabled, skipping storage for ${task.url}`)
         }
 
         // Close page
@@ -663,7 +659,7 @@ export class SpiderPlugin extends Plugin {
 
         return result
       } catch (error) {
-        console.error(`[SpiderPlugin] Error processing ${task.url}:`, error)
+        this.logger.error(`[SpiderPlugin] Error processing ${task.url}:`, error)
         throw error
       }
     }
@@ -859,9 +855,8 @@ export class SpiderPlugin extends Plugin {
     if (config.saveScreenshots !== undefined) this.config.persistence.saveScreenshots = config.saveScreenshots
     if (config.savePerformanceMetrics !== undefined) this.config.persistence.savePerformanceMetrics = config.savePerformanceMetrics
 
-    if (this.verbose) {
-      console.log('[SpiderPlugin] Persistence enabled with config:', this.getPersistenceConfig())
-    }
+    // 🪵 Debug: persistence enabled
+    this.logger.debug({ persistenceConfig: this.getPersistenceConfig() }, 'Persistence enabled with config')
   }
 
   /**
@@ -872,9 +867,8 @@ export class SpiderPlugin extends Plugin {
   disablePersistence() {
     this.config.persistence.enabled = false
 
-    if (this.verbose) {
-      console.log('[SpiderPlugin] Persistence disabled')
-    }
+    // 🪵 Debug: persistence disabled
+    this.logger.debug('Persistence disabled')
   }
 
   // ============================================
@@ -976,7 +970,7 @@ export class SpiderPlugin extends Plugin {
 
       this.initialized = false
     } catch (error) {
-      console.error('[SpiderPlugin] Destroy error:', error)
+      this.logger.error('[SpiderPlugin] Destroy error:', error)
     }
   }
 }

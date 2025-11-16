@@ -1,6 +1,7 @@
 import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { PluginError } from "../errors.js";
+import { createLogger } from '../concerns/logger.js';
 
 /**
  * GeoPlugin - Geospatial Queries and Location-Based Features
@@ -78,6 +79,14 @@ export class GeoPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'GeoPlugin', level: logLevel });
+    }
+
     const { resources = {} } = this.options;
     this.resources = resources;
 
@@ -106,9 +115,8 @@ export class GeoPlugin extends Plugin {
       }
     });
 
-    if (this.verbose) {
-      console.log(`[GeoPlugin] Installed with ${Object.keys(this.resources).length} resources`);
-    }
+    // 🪵 Debug: installed
+    this.logger.debug({ resourceCount: Object.keys(this.resources).length }, `Installed with ${Object.keys(this.resources).length} resources`);
 
     this.emit('db:plugin:installed', {
       plugin: 'GeoPlugin',
@@ -122,17 +130,15 @@ export class GeoPlugin extends Plugin {
   async _setupResource(resourceName, config) {
     // Check if resource exists first
     if (!this.database.resources[resourceName]) {
-      if (this.verbose) {
-        console.warn(`[GeoPlugin] Resource "${resourceName}" not found, will setup when created`);
-      }
+      // 🪵 Warning: resource not found (will setup when created)
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" not found, will setup when created`);
       return;
     }
 
     const resource = this.database.resources[resourceName];
     if (!resource || typeof resource.addHook !== 'function') {
-      if (this.verbose) {
-        console.warn(`[GeoPlugin] Resource "${resourceName}" not found or invalid`);
-      }
+      // 🪵 Warning: resource not found or invalid
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" not found or invalid`);
       return;
     }
 
@@ -210,13 +216,9 @@ export class GeoPlugin extends Plugin {
     // Add helper methods to resource
     this._addHelperMethods(resource, config);
 
-    if (this.verbose) {
-      // console.log(
-      //   `[GeoPlugin] Setup resource "${resourceName}" with precision ${config.precision} ` +
-      //   `(~${this._getPrecisionDistance(config.precision)}km cells)` +
-      //   (config.usePartitions ? ' [Partitions enabled]' : '')
-      // );
-    }
+    // 🪵 Debug: setup resource (commented out for performance - enable if needed for troubleshooting)
+    // this.logger.debug({ resourceName, precision: config.precision, usePartitions: config.usePartitions },
+    //   `Setup resource "${resourceName}" with precision ${config.precision} (${this._getPrecisionDistance(config.precision)}km cells)${config.usePartitions ? ' [Partitions enabled]' : ''}`);
   }
 
   /**
@@ -244,12 +246,9 @@ export class GeoPlugin extends Plugin {
 
           partitionsCreated++;
 
-          if (this.verbose) {
-            // console.log(
-            //   `[GeoPlugin] Created ${partitionName} partition for "${resource.name}" ` +
-            //   `(precision ${zoom}, ~${this._getPrecisionDistance(zoom)}km cells)`
-            // );
-          }
+          // 🪵 Debug: created zoom partition (commented out for performance - enable if needed for troubleshooting)
+          // this.logger.debug({ partitionName, resourceName: resource.name, zoom, cellSize: this._getPrecisionDistance(zoom) },
+          //   `Created ${partitionName} partition for "${resource.name}" (precision ${zoom}, ${this._getPrecisionDistance(zoom)}km cells)`);
         }
       }
     } else {
@@ -266,9 +265,8 @@ export class GeoPlugin extends Plugin {
 
         partitionsCreated++;
 
-        if (this.verbose) {
-          console.log(`[GeoPlugin] Created byGeohash partition for "${resource.name}"`);
-        }
+        // 🪵 Debug: created byGeohash partition
+        this.logger.debug({ resourceName: resource.name }, `Created byGeohash partition for "${resource.name}"`);
       }
     }
 
@@ -359,7 +357,7 @@ export class GeoPlugin extends Plugin {
           precision = optimalZoom;
 
           if (plugin.verbose) {
-            console.log(
+            this.logger.info(
               `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
               `for ${radius}km radius query`
             );
@@ -399,7 +397,7 @@ export class GeoPlugin extends Plugin {
           allRecords = partitionResults.flat();
 
           if (plugin.verbose) {
-            console.log(
+            this.logger.info(
               `[GeoPlugin] findNearby searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
               `found ${allRecords.length} candidates`
             );
@@ -473,7 +471,7 @@ export class GeoPlugin extends Plugin {
           precision = optimalZoom;
 
           if (plugin.verbose) {
-            console.log(
+            this.logger.info(
               `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
               `for ${approximateRadius.toFixed(1)}km bounding box`
             );
@@ -512,7 +510,7 @@ export class GeoPlugin extends Plugin {
           allRecords = partitionResults.flat();
 
           if (plugin.verbose) {
-            console.log(
+            this.logger.info(
               `[GeoPlugin] findInBounds searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
               `found ${allRecords.length} candidates`
             );
@@ -909,9 +907,8 @@ export class GeoPlugin extends Plugin {
    * Uninstall the plugin
    */
   async uninstall() {
-    if (this.verbose) {
-      console.log('[GeoPlugin] Uninstalled');
-    }
+    // 🪵 Debug: uninstalled
+    this.logger.debug('Uninstalled');
 
     this.emit('db:plugin:uninstalled', {
       plugin: 'GeoPlugin'

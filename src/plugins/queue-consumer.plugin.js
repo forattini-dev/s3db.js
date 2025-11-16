@@ -385,10 +385,10 @@
  *
  * // Check if consumers are running
  * const plugin = db.pluginRegistry.QueueConsumerPlugin;
- * console.log(plugin.consumers);  // Should show active consumers
+ * this.logger.info(plugin.consumers);  // Should show active consumers
  *
  * // Check queue URL/name is correct
- * console.log(plugin.driversConfig);
+ * this.logger.info(plugin.driversConfig);
  * ```
  *
  * ### Resource Not Found Error
@@ -419,7 +419,7 @@
  * // Use 'insert', 'update', or 'delete' only
  *
  * // Check message format
- * console.log(JSON.stringify({
+ * this.logger.info(JSON.stringify({
  *   resource: 'users',      // ✅ Required
  *   action: 'insert',       // ✅ Required (insert/update/delete)
  *   data: { id: 'u1', ... } // ✅ Required
@@ -610,11 +610,20 @@ import { Plugin } from './plugin.class.js';
 import { createConsumer } from './consumers/index.js';
 import tryFn from "../concerns/try-fn.js";
 import { QueueError } from "./queue.errors.js";
+import { createLogger } from '../concerns/logger.js';
 
 export class QueueConsumerPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     const opts = this.options;
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'QueueConsumerPlugin', level: logLevel });
+    }
 
     // New pattern: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
     this.driversConfig = Array.isArray(opts.consumers) ? opts.consumers : [];
@@ -699,9 +708,12 @@ export class QueueConsumerPlugin extends Plugin {
         return task.consumer;
       });
 
-    if (errors.length > 0 && this.verbose) {
+    if (errors.length > 0) {
       errors.forEach(({ reason }) => {
-        console.warn(`[QueueConsumerPlugin] Failed to stop consumer: ${reason?.message || reason}`);
+        this.logger.warn(
+          { error: reason?.message || reason },
+          `Failed to stop consumer: ${reason?.message || reason}`
+        );
       });
     }
 

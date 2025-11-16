@@ -195,7 +195,7 @@ export class IdentityServer {
         c.header('X-Ban-Reason', 'IP is permanently blacklisted');
 
         if (this.options.verbose) {
-          console.log(`[Failban] Blocked blacklisted IP: ${ip}`);
+          this.logger.info(`[Failban] Blocked blacklisted IP: ${ip}`);
         }
 
         return c.json({
@@ -214,7 +214,7 @@ export class IdentityServer {
           c.header('X-Country-Code', countryBlock.country);
 
           if (this.options.verbose) {
-            console.log(`[Failban] Blocked country ${countryBlock.country} for IP: ${ip}`);
+            this.logger.info(`[Failban] Blocked country ${countryBlock.country} for IP: ${ip}`);
           }
 
           return c.json({
@@ -240,7 +240,7 @@ export class IdentityServer {
           c.header('X-Ban-Expires', ban.expiresAt);
 
           if (this.options.verbose) {
-            console.log(`[Failban] Blocked banned IP: ${ip} (expires in ${retryAfter}s)`);
+            this.logger.info(`[Failban] Blocked banned IP: ${ip} (expires in ${retryAfter}s)`);
           }
 
           return c.json({
@@ -258,7 +258,7 @@ export class IdentityServer {
     });
 
     if (this.options.verbose) {
-      console.log('[Identity Server] Failban middleware enabled (global ban check)');
+      this.logger.info('[Identity Server] Failban middleware enabled (global ban check)');
     }
   }
 
@@ -396,7 +396,7 @@ export class IdentityServer {
     const { oauth2Server } = this.options;
 
     if (!oauth2Server) {
-      console.error('[Identity Server] OAuth2 Server not provided');
+      this.logger.error('[Identity Server] OAuth2 Server not provided');
       return;
     }
 
@@ -446,16 +446,16 @@ export class IdentityServer {
     this.app.post('/oauth/revoke', wrap(oauth2Server.revokeHandler));
 
     if (this.options.verbose) {
-      console.log('[Identity Server] Mounted OAuth2/OIDC routes:');
-      console.log('[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)');
-      console.log('[Identity Server]   GET  /.well-known/jwks.json (JWKS)');
-      console.log('[Identity Server]   GET  /oauth/authorize (Authorization UI)');
-      console.log('[Identity Server]   POST /oauth/authorize (Process Login)');
-      console.log('[Identity Server]   POST /oauth/token (Token)');
-      console.log('[Identity Server]   GET  /oauth/userinfo (UserInfo)');
-      console.log('[Identity Server]   POST /oauth/introspect (Introspection)');
-      console.log('[Identity Server]   POST /oauth/register (Client Registration)');
-      console.log('[Identity Server]   POST /oauth/revoke (Token Revocation)');
+      this.logger.info('[Identity Server] Mounted OAuth2/OIDC routes:');
+      this.logger.info('[Identity Server]   GET  /.well-known/openid-configuration (OIDC Discovery)');
+      this.logger.info('[Identity Server]   GET  /.well-known/jwks.json (JWKS)');
+      this.logger.info('[Identity Server]   GET  /oauth/authorize (Authorization UI)');
+      this.logger.info('[Identity Server]   POST /oauth/authorize (Process Login)');
+      this.logger.info('[Identity Server]   POST /oauth/token (Token)');
+      this.logger.info('[Identity Server]   GET  /oauth/userinfo (UserInfo)');
+      this.logger.info('[Identity Server]   POST /oauth/introspect (Introspection)');
+      this.logger.info('[Identity Server]   POST /oauth/register (Client Registration)');
+      this.logger.info('[Identity Server]   POST /oauth/revoke (Token Revocation)');
     }
   }
 
@@ -468,7 +468,7 @@ export class IdentityServer {
 
     if (!sessionManager || !identityPlugin) {
       if (this.options.verbose) {
-        console.log('[Identity Server] SessionManager or IdentityPlugin not provided, skipping UI routes');
+        this.logger.info('[Identity Server] SessionManager or IdentityPlugin not provided, skipping UI routes');
       }
       return;
     }
@@ -481,46 +481,46 @@ export class IdentityServer {
       registerUIRoutes(this.app, identityPlugin);
 
       if (this.options.verbose) {
-        console.log('[Identity Server] Mounted UI routes:');
-        console.log('[Identity Server]   GET  /login (Login Form)');
-        console.log('[Identity Server]   POST /login (Process Login)');
-        console.log('[Identity Server]   GET  /register (Registration Form)');
-        console.log('[Identity Server]   POST /register (Process Registration)');
-        console.log('[Identity Server]   GET  /logout (Logout)');
-        console.log('[Identity Server]   POST /logout (Logout)');
-        console.log('[Identity Server]   GET  /forgot-password (Forgot Password Form)');
-        console.log('[Identity Server]   POST /forgot-password (Process Forgot Password)');
-        console.log('[Identity Server]   GET  /reset-password (Reset Password Form)');
-        console.log('[Identity Server]   POST /reset-password (Process Password Reset)');
-        console.log('[Identity Server]   GET  /profile (User Profile - Protected)');
-        console.log('[Identity Server]   POST /profile/update (Update Profile)');
-        console.log('[Identity Server]   POST /profile/change-password (Change Password)');
-        console.log('[Identity Server]   POST /profile/logout-session (Logout Specific Session)');
-        console.log('[Identity Server]   POST /profile/logout-all-sessions (Logout All Other Sessions)');
-        console.log('[Identity Server]   GET  /admin (Admin Dashboard - Protected)');
-        console.log('[Identity Server]   GET  /admin/clients (List OAuth2 Clients)');
-        console.log('[Identity Server]   GET  /admin/clients/new (New Client Form)');
-        console.log('[Identity Server]   POST /admin/clients/create (Create Client)');
-        console.log('[Identity Server]   GET  /admin/clients/:id/edit (Edit Client Form)');
-        console.log('[Identity Server]   POST /admin/clients/:id/update (Update Client)');
-        console.log('[Identity Server]   POST /admin/clients/:id/delete (Delete Client)');
-        console.log('[Identity Server]   POST /admin/clients/:id/rotate-secret (Rotate Client Secret)');
-        console.log('[Identity Server]   POST /admin/clients/:id/toggle-active (Toggle Client Active)');
-        console.log('[Identity Server]   GET  /admin/users (List Users - Protected)');
-        console.log('[Identity Server]   GET  /admin/users/:id/edit (Edit User Form)');
-        console.log('[Identity Server]   POST /admin/users/:id/update (Update User)');
-        console.log('[Identity Server]   POST /admin/users/:id/delete (Delete User)');
-        console.log('[Identity Server]   POST /admin/users/:id/change-status (Change User Status)');
-        console.log('[Identity Server]   POST /admin/users/:id/verify-email (Mark Email Verified)');
-        console.log('[Identity Server]   POST /admin/users/:id/reset-password (Send Password Reset)');
-        console.log('[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)');
-        console.log('[Identity Server]   GET  /oauth/authorize (OAuth2 Consent Screen - Overrides OAuth2Server)');
-        console.log('[Identity Server]   POST /oauth/consent (Process OAuth2 Consent Decision)');
-        console.log('[Identity Server]   GET  /verify-email (Verify Email with Token)');
-        console.log('[Identity Server]   POST /verify-email/resend (Resend Verification Email)');
+        this.logger.info('[Identity Server] Mounted UI routes:');
+        this.logger.info('[Identity Server]   GET  /login (Login Form)');
+        this.logger.info('[Identity Server]   POST /login (Process Login)');
+        this.logger.info('[Identity Server]   GET  /register (Registration Form)');
+        this.logger.info('[Identity Server]   POST /register (Process Registration)');
+        this.logger.info('[Identity Server]   GET  /logout (Logout)');
+        this.logger.info('[Identity Server]   POST /logout (Logout)');
+        this.logger.info('[Identity Server]   GET  /forgot-password (Forgot Password Form)');
+        this.logger.info('[Identity Server]   POST /forgot-password (Process Forgot Password)');
+        this.logger.info('[Identity Server]   GET  /reset-password (Reset Password Form)');
+        this.logger.info('[Identity Server]   POST /reset-password (Process Password Reset)');
+        this.logger.info('[Identity Server]   GET  /profile (User Profile - Protected)');
+        this.logger.info('[Identity Server]   POST /profile/update (Update Profile)');
+        this.logger.info('[Identity Server]   POST /profile/change-password (Change Password)');
+        this.logger.info('[Identity Server]   POST /profile/logout-session (Logout Specific Session)');
+        this.logger.info('[Identity Server]   POST /profile/logout-all-sessions (Logout All Other Sessions)');
+        this.logger.info('[Identity Server]   GET  /admin (Admin Dashboard - Protected)');
+        this.logger.info('[Identity Server]   GET  /admin/clients (List OAuth2 Clients)');
+        this.logger.info('[Identity Server]   GET  /admin/clients/new (New Client Form)');
+        this.logger.info('[Identity Server]   POST /admin/clients/create (Create Client)');
+        this.logger.info('[Identity Server]   GET  /admin/clients/:id/edit (Edit Client Form)');
+        this.logger.info('[Identity Server]   POST /admin/clients/:id/update (Update Client)');
+        this.logger.info('[Identity Server]   POST /admin/clients/:id/delete (Delete Client)');
+        this.logger.info('[Identity Server]   POST /admin/clients/:id/rotate-secret (Rotate Client Secret)');
+        this.logger.info('[Identity Server]   POST /admin/clients/:id/toggle-active (Toggle Client Active)');
+        this.logger.info('[Identity Server]   GET  /admin/users (List Users - Protected)');
+        this.logger.info('[Identity Server]   GET  /admin/users/:id/edit (Edit User Form)');
+        this.logger.info('[Identity Server]   POST /admin/users/:id/update (Update User)');
+        this.logger.info('[Identity Server]   POST /admin/users/:id/delete (Delete User)');
+        this.logger.info('[Identity Server]   POST /admin/users/:id/change-status (Change User Status)');
+        this.logger.info('[Identity Server]   POST /admin/users/:id/verify-email (Mark Email Verified)');
+        this.logger.info('[Identity Server]   POST /admin/users/:id/reset-password (Send Password Reset)');
+        this.logger.info('[Identity Server]   POST /admin/users/:id/toggle-admin (Toggle Admin Role)');
+        this.logger.info('[Identity Server]   GET  /oauth/authorize (OAuth2 Consent Screen - Overrides OAuth2Server)');
+        this.logger.info('[Identity Server]   POST /oauth/consent (Process OAuth2 Consent Decision)');
+        this.logger.info('[Identity Server]   GET  /verify-email (Verify Email with Token)');
+        this.logger.info('[Identity Server]   POST /verify-email/resend (Resend Verification Email)');
       }
     } catch (error) {
-      console.error('[Identity Server] Failed to setup UI routes:', error);
+      this.logger.error('[Identity Server] Failed to setup UI routes:', error);
     }
   }
 
@@ -530,7 +530,7 @@ export class IdentityServer {
    */
   async start() {
     if (this.isRunning) {
-      console.warn('[Identity Server] Server is already running');
+      this.logger.warn('[Identity Server] Server is already running');
       return;
     }
 
@@ -561,9 +561,9 @@ export class IdentityServer {
           hostname: host
         }, (info) => {
           this.isRunning = true;
-          console.log(`[Identity Server] Server listening on http://${info.address}:${info.port}`);
-          console.log(`[Identity Server] Issuer: ${this.options.issuer}`);
-          console.log(`[Identity Server] Discovery: ${this.options.issuer}/.well-known/openid-configuration`);
+          this.logger.info(`[Identity Server] Server listening on http://${info.address}:${info.port}`);
+          this.logger.info(`[Identity Server] Issuer: ${this.options.issuer}`);
+          this.logger.info(`[Identity Server] Discovery: ${this.options.issuer}/.well-known/openid-configuration`);
           resolve();
         });
       } catch (err) {
@@ -578,7 +578,7 @@ export class IdentityServer {
    */
   async stop() {
     if (!this.isRunning) {
-      console.warn('[Identity Server] Server is not running');
+      this.logger.warn('[Identity Server] Server is not running');
       return;
     }
 
@@ -586,13 +586,13 @@ export class IdentityServer {
       await new Promise((resolve) => {
         this.server.close(() => {
           this.isRunning = false;
-          console.log('[Identity Server] Server stopped');
+          this.logger.info('[Identity Server] Server stopped');
           resolve();
         });
       });
     } else {
       this.isRunning = false;
-      console.log('[Identity Server] Server stopped');
+      this.logger.info('[Identity Server] Server stopped');
     }
   }
 

@@ -4,6 +4,7 @@ import { idGenerator } from "../concerns/id.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
 import { QueueError } from "./queue.errors.js";
 import { getCronManager } from "../concerns/cron-manager.js";
+import { createLogger } from '../concerns/logger.js';
 
 /**
  * S3QueuePlugin - Distributed Queue System with ETag-based Atomicity
@@ -49,11 +50,11 @@ import { getCronManager } from "../concerns/cron-manager.js";
  *   },
  *
  *   onError: (error, record) => {
- *     console.error('Failed:', error);
+ *     this.logger.error('Failed:', error);
  *   },
  *
  *   onComplete: (record, result) => {
- *     console.log('Completed:', result);
+ *     this.logger.info('Completed:', result);
  *   }
  * });
  *
@@ -85,6 +86,14 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       ...options,
       coordinatorWorkInterval: options.dispatchInterval || 100
     });
+
+    // 🪵 Logger initialization (override CoordinatorPlugin logger with queue-specific name)
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'S3QueuePlugin', level: logLevel });
+    }
 
     const {
       resource,
@@ -352,9 +361,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       await this.createDeadLetterResource();
     }
 
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Setup completed for resource '${this.config.resource}'`);
-    }
+    this.logger.debug(
+      { resource: this.config.resource, queueResource: this.queueResourceName },
+      `Setup completed for resource '${this.config.resource}'`
+    );
   }
 
   async onStart() {
@@ -527,15 +537,19 @@ export class S3QueuePlugin extends CoordinatorPlugin {
    * Starts ticket publishing
    */
   async onBecomeCoordinator() {
-    if (this.config.verbose) {
-      console.log('[S3QueuePlugin] Became coordinator - publishing initial tickets');
-    }
+    this.logger.debug(
+      { workerId: this.workerId, resource: this.config.resource },
+      'Became coordinator - publishing initial tickets'
+    );
 
     // Publish initial batch of tickets
     const count = await this._publishTickets();
 
-    if (this.config.verbose && count > 0) {
-      console.log(`[S3QueuePlugin] Published ${count} initial ticket(s)`);
+    if (count > 0) {
+      this.logger.debug(
+        { ticketCount: count, workerId: this.workerId },
+        `Published ${count} initial ticket(s)`
+      );
     }
 
     // Emit tickets-published event (for backward compatibility with tests)
@@ -558,9 +572,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
    * Cleans up coordinator-only resources
    */
   async onStopBeingCoordinator() {
-    if (this.config.verbose) {
-      console.log('[S3QueuePlugin] No longer coordinator');
-    }
+    this.logger.debug(
+      { workerId: this.workerId, resource: this.config.resource },
+      'No longer coordinator'
+    );
 
     this.emit('plg:s3-queue:coordinator-demoted', {
       workerId: this.workerId,
@@ -580,9 +595,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
 
   async startProcessing(handler = null, options = {}) {
     if (this.isRunning) {
-      if (this.config.verbose) {
-        console.log('[S3QueuePlugin] Already running');
-      }
+      this.logger.debug({ resource: this.config.resource }, 'Already running');
       return;
     }
 
@@ -630,9 +643,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       this.workers.push(worker);
     }
 
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Started ${concurrency} workers`);
-    }
+    this.logger.debug(
+      { concurrency, workerId: this.workerId, resource: this.config.resource },
+      `Started ${concurrency} workers`
+    );
 
     this.emit('plg:s3-queue:workers-started', { concurrency, workerId: this.workerId });
   }
@@ -654,9 +668,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       this._clearIntervalHandle(this.dispatchHandle);
       this.dispatchHandle = null;
 
-      if (this.config.verbose) {
-        console.log('[S3QueuePlugin] Stopped coordinator dispatch loop');
-      }
+      this.logger.debug({ workerId: this.workerId }, 'Stopped coordinator dispatch loop');
     }
 
     // Stop coordinator system (heartbeat, epoch management, etc.)
@@ -671,9 +683,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     // Clear deduplication cache
     this.processedCache.clear();
 
-    if (this.config.verbose) {
-      console.log('[S3QueuePlugin] Stopped all workers');
-    }
+    this.logger.debug({ workerId: this.workerId }, 'Stopped all workers');
 
     this.emit('plg:s3-queue:workers-stopped', { workerId: this.workerId });
   }
@@ -697,9 +707,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
             await this._sleep(delay);
           }
         } catch (error) {
-          if (this.config.verbose) {
-            console.error(`[Worker ${workerIndex}] Error:`, error.message);
-          }
+          this.logger.warn(
+            { workerIndex, error: error.message, workerId: this.workerId },
+            `Worker ${workerIndex} error: ${error.message}`
+          );
           // Wait a bit before retrying on error
           await this._sleep(1000);
         }
@@ -876,15 +887,17 @@ export class S3QueuePlugin extends CoordinatorPlugin {
         try {
           await storage.releaseLock(lock);
         } catch (releaseErr) {
-          if (this.config.verbose) {
-            console.warn('[S3QueuePlugin] Failed to release ordering lock:', releaseErr?.message || releaseErr);
-          }
+          this.logger.warn(
+            { error: releaseErr?.message || releaseErr, lockName: lock.name },
+            `Failed to release ordering lock: ${releaseErr?.message || releaseErr}`
+          );
         }
       };
     } catch (error) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] Ordering lock acquisition failed:', error?.message || error);
-      }
+      this.logger.warn(
+        { error: error?.message || error, lockName: this._orderingLockName() },
+        `Ordering lock acquisition failed: ${error?.message || error}`
+      );
       return null;
     }
   }
@@ -915,9 +928,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       return lock;
     } catch (error) {
       // On any error, skip this message
-      if (this.config.verbose) {
-        console.log(`[acquireLock] Error: ${error.message}`);
-      }
+      this.logger.debug(
+        { error: error.message, messageId, lockName },
+        `acquireLock error: ${error.message}`
+      );
       return null;
     }
   }
@@ -944,9 +958,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       await storage.releaseLock(lock);
     } catch (error) {
       // Ignore errors on release (lock may have expired or been cleaned up)
-      if (this.config.verbose) {
-        console.log(`[releaseLock] Failed to release lock '${lock.name}': ${error.message}`);
-      }
+      this.logger.debug(
+        { error: error.message, lockName: lock.name },
+        `Failed to release lock '${lock.name}': ${error.message}`
+      );
     } finally {
       if (lock?.name) {
         this.messageLocks.delete(lock.name);
@@ -980,9 +995,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       // Check deduplication cache (protected by lock)
       const alreadyProcessed = await this._isRecentlyProcessed(msg.id);
       if (alreadyProcessed) {
-        if (this.config.verbose) {
-          console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
-        }
+        this.logger.debug(
+          { messageId: msg.id, workerId: this.workerId },
+          `Message ${msg.id} already processed (in cache)`
+        );
         return null;
       }
 
@@ -1001,9 +1017,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     if (!okGet || !msgWithETag) {
       // Message was deleted or not found - remove from cache
       await this._clearProcessedMarker(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
-      }
+      this.logger.debug(
+        { messageId: msg.id, error: errGet?.message },
+        `Message ${msg.id} not found or error: ${errGet?.message}`
+      );
       return null;
     }
 
@@ -1011,9 +1028,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     if (msgWithETag.status !== 'pending' || msgWithETag.visibleAt > now) {
       // Not claimable - remove from cache so another worker can try later
       this.processedCache.delete(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Message ${msg.id} not claimable: status=${msgWithETag.status}, visibleAt=${msgWithETag.visibleAt}, now=${now}`);
-      }
+      this.logger.debug(
+        { messageId: msg.id, status: msgWithETag.status, visibleAt: msgWithETag.visibleAt, now },
+        `Message ${msg.id} not claimable: status=${msgWithETag.status}, visibleAt=${msgWithETag.visibleAt}, now=${now}`
+      );
       return null;
     }
 
@@ -1025,9 +1043,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       return null;
     }
 
-    if (this.config.verbose) {
-      console.log(`[attemptClaim] Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`);
-    }
+    this.logger.debug(
+      { messageId: msg.id, etag: msgWithETag._etag, workerId: this.workerId },
+      `Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`
+    );
 
     const lockToken = this._generateLockToken();
     const nextVisibleAt = now + this.config.visibilityTimeout;
@@ -1049,15 +1068,17 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     if (!ok || !result.success) {
       // Race lost - another worker claimed it - remove from cache
       this.processedCache.delete(msg.id);
-      if (this.config.verbose) {
-        console.log(`[attemptClaim] Failed to claim ${msg.id}: ${err?.message || result.error}`)
-      }
+      this.logger.debug(
+        { messageId: msg.id, error: err?.message || result.error, workerId: this.workerId },
+        `Failed to claim ${msg.id}: ${err?.message || result.error}`
+      );
       return null;
     }
 
-    if (this.config.verbose) {
-      console.log(`[attemptClaim] Successfully claimed ${msg.id}`);
-    }
+    this.logger.debug(
+      { messageId: msg.id, workerId: this.workerId },
+      `Successfully claimed ${msg.id}`
+    );
 
     // Cache entry already added above, keep it
 
@@ -1233,8 +1254,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       if (ok) {
         stats[status] = count || 0;
         derivedTotal += count || 0;
-      } else if (this.config.verbose) {
-        console.warn(`[S3QueuePlugin] Failed to count status '${status}':`, err?.message);
+      } else {
+        this.logger.warn(
+          { status, error: err?.message },
+          `Failed to count status '${status}': ${err?.message}`
+        );
       }
     });
 
@@ -1243,9 +1267,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       stats.total = totalCount || 0;
     } else {
       stats.total = derivedTotal;
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] Failed to count total messages:', totalErr?.message);
-      }
+      this.logger.warn(
+        { error: totalErr?.message },
+        `Failed to count total messages: ${totalErr?.message}`
+      );
     }
 
     return stats;
@@ -1293,9 +1318,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       }
     }
 
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Dead letter queue ready: ${this.deadLetterResourceName}`);
-    }
+    this.logger.debug(
+      { resourceName: this.deadLetterResourceName },
+      `Dead letter queue ready: ${this.deadLetterResourceName}`
+    );
   }
 
   async extendVisibility(queueId, extraMilliseconds, { lockToken } = {}) {
@@ -1304,17 +1330,19 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     }
 
     if (!lockToken) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] extendVisibility requires a lockToken to renew visibility');
-      }
+      this.logger.warn(
+        { queueId },
+        'extendVisibility requires a lockToken to renew visibility'
+      );
       return false;
     }
 
     const [okGet, errGet, entry] = await tryFn(() => this.queueResource.get(queueId));
     if (!okGet || !entry) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] extendVisibility failed to load entry:', errGet?.message);
-      }
+      this.logger.warn(
+        { queueId, error: errGet?.message },
+        `extendVisibility failed to load entry: ${errGet?.message}`
+      );
       return false;
     }
 
@@ -1322,9 +1350,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     // Check if lock has been released (terminal states or null lockToken)
     const terminalStates = ['completed', 'failed', 'dead'];
     if (terminalStates.includes(entry.status)) {
-      if (this.config.verbose) {
-        console.warn(`[S3QueuePlugin] Cannot renew lock: message ${queueId} is in terminal state '${entry.status}'`);
-      }
+      this.logger.warn(
+        { queueId, status: entry.status, lockToken },
+        `Cannot renew lock: message ${queueId} is in terminal state '${entry.status}'`
+      );
       this.emit('plg:s3-queue:lock-renewal-rejected', {
         queueId,
         reason: 'terminal_state',
@@ -1335,9 +1364,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     }
 
     if (!entry.lockToken) {
-      if (this.config.verbose) {
-        console.warn(`[S3QueuePlugin] Cannot renew lock: message ${queueId} has no active lock (lockToken is null)`);
-      }
+      this.logger.warn(
+        { queueId, status: entry.status },
+        `Cannot renew lock: message ${queueId} has no active lock (lockToken is null)`
+      );
       this.emit('plg:s3-queue:lock-renewal-rejected', {
         queueId,
         reason: 'lock_released',
@@ -1348,9 +1378,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     }
 
     if (entry.lockToken !== lockToken) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] extendVisibility lock token mismatch for queueId:', queueId);
-      }
+      this.logger.warn(
+        { queueId, providedToken: lockToken, currentToken: entry.lockToken },
+        `extendVisibility lock token mismatch for queueId: ${queueId}`
+      );
       this.emit('plg:s3-queue:lock-renewal-rejected', {
         queueId,
         reason: 'token_mismatch',
@@ -1362,9 +1393,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
 
     // Additional check: if status is not 'processing', cannot renew
     if (entry.status !== 'processing') {
-      if (this.config.verbose) {
-        console.warn(`[S3QueuePlugin] Cannot renew lock: message ${queueId} is not in 'processing' state (current: ${entry.status})`);
-      }
+      this.logger.warn(
+        { queueId, currentStatus: entry.status },
+        `Cannot renew lock: message ${queueId} is not in 'processing' state (current: ${entry.status})`
+      );
       this.emit('plg:s3-queue:lock-renewal-rejected', {
         queueId,
         reason: 'invalid_state',
@@ -1387,15 +1419,17 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     );
 
     if (!okUpdate || !result?.success) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] extendVisibility conditional update failed:', errUpdate?.message || result?.error);
-      }
+      this.logger.warn(
+        { queueId, error: errUpdate?.message || result?.error },
+        `extendVisibility conditional update failed: ${errUpdate?.message || result?.error}`
+      );
       return false;
     }
 
-    if (this.config.verbose) {
-      console.log(`[S3QueuePlugin] Lock renewed for message ${queueId}: new visibleAt=${newVisibleAt}`);
-    }
+    this.logger.debug(
+      { queueId, newVisibleAt, extraMilliseconds },
+      `Lock renewed for message ${queueId}: new visibleAt=${newVisibleAt}`
+    );
 
     this.emit('plg:s3-queue:lock-renewed', {
       queueId,
@@ -1437,9 +1471,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       );
 
       if (!ok) {
-        if (this.config.verbose) {
-          console.warn('[S3QueuePlugin] Failed to query stalled messages:', err?.message);
-        }
+        this.logger.warn(
+          { error: err?.message },
+          `Failed to query stalled messages: ${err?.message}`
+        );
         return;
       }
 
@@ -1465,9 +1500,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
   async _recoverSingleMessage(candidate, now) {
     const [okGet, errGet, queueEntry] = await tryFn(() => this.queueResource.get(candidate.id));
     if (!okGet || !queueEntry) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] Failed to load stalled message:', errGet?.message);
-      }
+      this.logger.warn(
+        { messageId: candidate.id, error: errGet?.message },
+        `Failed to load stalled message: ${errGet?.message}`
+      );
       return;
     }
 
@@ -1533,9 +1569,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     );
 
     if (!okUpdate || !result?.success) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] Failed to recover message:', errUpdate?.message || result?.error);
-      }
+      this.logger.warn(
+        { queueId: queueEntry.id, error: errUpdate?.message || result?.error },
+        `Failed to recover message: ${errUpdate?.message || result?.error}`
+      );
       return;
     }
 
@@ -1802,8 +1839,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       })
     );
 
-    if (!ok && this.config.verbose) {
-      console.warn('[S3QueuePlugin] Failed to persist processed marker:', err?.message);
+    if (!ok) {
+      this.logger.warn(
+        { messageId, error: err?.message },
+        `Failed to persist processed marker: ${err?.message}`
+      );
     }
   }
 
@@ -1822,8 +1862,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     const [ok, err, data] = await tryFn(() => storage.get(key));
 
     if (!ok) {
-      if (err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
-        console.warn('[S3QueuePlugin] Failed to read processed marker:', err.message || err);
+      if (err && err.code !== 'NoSuchKey' && err.code !== 'NotFound') {
+        this.logger.warn(
+          { messageId, error: err.message || err },
+          `Failed to read processed marker: ${err.message || err}`
+        );
       }
       return false;
     }
@@ -1844,8 +1887,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     const key = storage.getPluginKey(null, 'cache', 'processed', messageId);
 
     const [ok, err] = await tryFn(() => storage.delete(key));
-    if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
-      console.warn('[S3QueuePlugin] Failed to delete processed marker:', err.message || err);
+    if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound') {
+      this.logger.warn(
+        { messageId, error: err.message || err },
+        `Failed to delete processed marker: ${err.message || err}`
+      );
     }
   }
 
@@ -1960,9 +2006,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       const ticketCount = await this.publishDispatchTickets(orderedMessages);
 
       if (ticketCount > 0) {
-        if (this.config.verbose) {
-          console.log(`[S3QueuePlugin] Coordinator published ${ticketCount} dispatch tickets`);
-        }
+        this.logger.debug(
+          { ticketCount, workerId: this.workerId },
+          `Coordinator published ${ticketCount} dispatch tickets`
+        );
 
         this.emit('plg:s3-queue:tickets-published', {
           coordinatorId: this.workerId,
@@ -2020,8 +2067,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
 
       if (ok) {
         published++;
-      } else if (this.config.verbose) {
-        console.warn(`[S3QueuePlugin] Failed to publish ticket ${ticketId}:`, err?.message);
+      } else {
+        this.logger.warn(
+          { ticketId, error: err?.message },
+          `Failed to publish ticket ${ticketId}: ${err?.message}`
+        );
       }
     }
 
@@ -2044,9 +2094,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     const [ok, err, tickets] = await tryFn(() => storage.listWithPrefix(prefix));
 
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn('[S3QueuePlugin] Failed to list tickets:', err?.message);
-      }
+      this.logger.warn(
+        { error: err?.message },
+        `Failed to list tickets: ${err?.message}`
+      );
       return [];
     }
 
@@ -2106,9 +2157,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
 
     if (!okClaim) {
       // Failed to claim (race condition)
-      if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Failed to claim ticket ${ticket.ticketId}: ${errClaim?.message}`);
-      }
+      this.logger.debug(
+        { ticketId: ticket.ticketId, error: errClaim?.message },
+        `Failed to claim ticket ${ticket.ticketId}: ${errClaim?.message}`
+      );
       return null;
     }
 
@@ -2148,8 +2200,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       storage.delete(key)
     );
 
-    if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound' && this.config.verbose) {
-      console.warn('[S3QueuePlugin] Failed to delete ticket:', err?.message);
+    if (!ok && err && err.code !== 'NoSuchKey' && err.code !== 'NotFound') {
+      this.logger.warn(
+        { ticketId, error: err?.message },
+        `Failed to delete ticket: ${err?.message}`
+      );
     }
   }
 
@@ -2178,8 +2233,11 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       })
     );
 
-    if (!okRelease && this.config.verbose) {
-      console.warn('[S3QueuePlugin] Failed to release ticket:', errRelease?.message);
+    if (!okRelease) {
+      this.logger.warn(
+        { ticketId, error: errRelease?.message },
+        `Failed to release ticket: ${errRelease?.message}`
+      );
     }
   }
 
@@ -2228,9 +2286,10 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       await this.releaseTicket(ticket.ticketId);
       recovered++;
 
-      if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Recovered stalled ticket ${ticket.ticketId} from worker ${ticket.claimedBy}`);
-      }
+      this.logger.debug(
+        { ticketId: ticket.ticketId, claimedBy: ticket.claimedBy },
+        `Recovered stalled ticket ${ticket.ticketId} from worker ${ticket.claimedBy}`
+      );
     }
 
     if (recovered > 0) {

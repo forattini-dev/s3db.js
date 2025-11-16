@@ -94,9 +94,9 @@
  *
  * // Check memory usage
  * const stats = cache.getMemoryStats();
- * console.log(`Memory: ${stats.memoryUsage.current} / ${stats.memoryUsage.max}`);
- * console.log(`Usage: ${stats.memoryUsagePercent}%`);
- * console.log(`Evicted due to memory: ${stats.evictedDueToMemory}`);
+ * this.logger.info(`Memory: ${stats.memoryUsage.current} / ${stats.memoryUsage.max}`);
+ * this.logger.info(`Usage: ${stats.memoryUsagePercent}%`);
+ * this.logger.info(`Evicted due to memory: ${stats.evictedDueToMemory}`);
  *
  * @example
  * // Production configuration with percentage of system memory
@@ -111,9 +111,9 @@
  *
  * // Check system memory stats
  * const stats = cache.getMemoryStats();
- * console.log(`System Memory: ${stats.systemMemory.total}`);
- * console.log(`Cache using: ${stats.systemMemory.cachePercent} of system memory`);
- * console.log(`Max allowed: ${(stats.maxMemoryPercent * 100).toFixed(1)}%`);
+ * this.logger.info(`System Memory: ${stats.systemMemory.total}`);
+ * this.logger.info(`Cache using: ${stats.systemMemory.cachePercent} of system memory`);
+ * this.logger.info(`Max allowed: ${(stats.maxMemoryPercent * 100).toFixed(1)}%`);
  *
  * @notes
  * - Memory usage is limited by available RAM, maxSize setting, and optionally maxMemoryBytes or maxMemoryPercent
@@ -326,7 +326,7 @@ export class MemoryCache extends Cache {
       if (diff > 0) {
         freedBytes += diff;
         if (this.config?.logEvictions) {
-          console.warn(`[MemoryCache] Reduced cache size from ${this._formatBytes(before)} to ${this._formatBytes(this.currentMemoryBytes)} to respect maxMemoryBytes.`);
+          this.logger.warn(`[MemoryCache] Reduced cache size from ${this._formatBytes(before)} to ${this._formatBytes(this.currentMemoryBytes)} to respect maxMemoryBytes.`);
         }
         this.emit('memory:evict', {
           reason: 'limit',
@@ -361,7 +361,7 @@ export class MemoryCache extends Cache {
         if (diff > 0) {
           freedBytes += diff;
           if (this.config?.logEvictions) {
-            console.warn(`[MemoryCache] Heap usage ${(heapRatio * 100).toFixed(1)}% exceeded threshold ${(this.heapUsageThreshold * 100).toFixed(1)}%. Evicted ${this._formatBytes(diff)} (current: ${this._formatBytes(this.currentMemoryBytes)}).`);
+            this.logger.warn(`[MemoryCache] Heap usage ${(heapRatio * 100).toFixed(1)}% exceeded threshold ${(this.heapUsageThreshold * 100).toFixed(1)}%. Evicted ${this._formatBytes(diff)} (current: ${this._formatBytes(this.currentMemoryBytes)}).`);
           }
           this.emit('memory:evict', {
             reason: 'heap',
@@ -454,7 +454,7 @@ export class MemoryCache extends Cache {
         }
       } catch (error) {
         // If compression fails, store uncompressed
-        console.warn(`[MemoryCache] Compression failed for key '${key}':`, error.message);
+        this.logger.warn(`[MemoryCache] Compression failed for key '${key}':`, error.message);
       }
     }
 
@@ -544,7 +544,7 @@ export class MemoryCache extends Cache {
         }
         return value;
       } catch (error) {
-        console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
+        this.logger.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
         // If decompression fails, remove corrupted entry
         delete this.cache[normalizedKey];
         delete this.meta[normalizedKey];
@@ -562,7 +562,7 @@ export class MemoryCache extends Cache {
       }
       return value;
     } catch (error) {
-      console.warn(`[MemoryCache] Deserialization failed for key '${key}':`, error.message);
+      this.logger.warn(`[MemoryCache] Deserialization failed for key '${key}':`, error.message);
       delete this.cache[normalizedKey];
       delete this.meta[normalizedKey];
       this._recordStat('misses');

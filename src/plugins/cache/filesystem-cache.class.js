@@ -193,7 +193,7 @@ export class FilesystemCache extends Cache {
         this.cleanupInterval,
         () => {
           this._cleanup().catch(err => {
-            console.warn('FilesystemCache cleanup error:', err.message);
+            this.logger.warn('FilesystemCache cleanup error:', err.message);
           });
         },
         this.cleanupJobName
@@ -645,7 +645,7 @@ export class FilesystemCache extends Cache {
       return keys;
       
     } catch (error) {
-      console.warn('FilesystemCache: Failed to list keys:', error.message);
+      this.logger.warn('FilesystemCache: Failed to list keys:', error.message);
       return [];
     }
   }
@@ -665,7 +665,7 @@ export class FilesystemCache extends Cache {
       await writeFile(dest, content);
     });
     if (!ok) {
-      console.warn('FilesystemCache: Failed to create backup:', err.message);
+      this.logger.warn('FilesystemCache: Failed to create backup:', err.message);
     }
   }
 
@@ -718,7 +718,7 @@ export class FilesystemCache extends Cache {
       }
       
     } catch (error) {
-      console.warn('FilesystemCache cleanup error:', error.message);
+      this.logger.warn('FilesystemCache cleanup error:', error.message);
     }
   }
 
@@ -766,7 +766,7 @@ export class FilesystemCache extends Cache {
     });
     
     if (!ok) {
-      console.warn('FilesystemCache journal error:', err.message);
+      this.logger.warn('FilesystemCache journal error:', err.message);
     }
   }
 

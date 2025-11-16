@@ -174,9 +174,7 @@ class SqsReplicator extends BaseReplicator {
     if (!this.sqsClient) {
       const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
       if (!ok) {
-        if (this.config.verbose) {
-          console.warn(`[SqsReplicator] Failed to import SQS SDK: ${err.message}`);
-        }
+        this.logger.warn({ error: err.message }, 'Failed to import SQS SDK');
         this.emit('initialization_error', {
           replicator: this.name,
           error: err.message
@@ -233,9 +231,7 @@ class SqsReplicator extends BaseReplicator {
       return { success: true, results };
     });
     if (ok) return result;
-    if (this.config.verbose) {
-      console.warn(`[SqsReplicator] Replication failed for ${resource}: ${err.message}`);
-    }
+    this.logger.warn({ resource, error: err.message }, 'Replication failed');
     this.emit('plg:replicator:error', {
       replicator: this.name,
       resource,
@@ -296,7 +292,10 @@ class SqsReplicator extends BaseReplicator {
       }
       // Log errors if any occurred during batch processing
       if (errors.length > 0) {
-        console.warn(`[SqsReplicator] Batch replication completed with ${errors.length} error(s) for ${resource}:`, errors);
+        this.logger.warn(
+          { resource, errorCount: errors.length, errors },
+          'Batch replication completed with errors'
+        );
       }
       
       this.emit('batch_replicated', {
@@ -317,9 +316,7 @@ class SqsReplicator extends BaseReplicator {
     });
     if (ok) return result;
     const errorMessage = err?.message || err || 'Unknown error';
-    if (this.config.verbose) {
-      console.warn(`[SqsReplicator] Batch replication failed for ${resource}: ${errorMessage}`);
-    }
+    this.logger.warn({ resource, error: errorMessage }, 'Batch replication failed');
     this.emit('batch_replicator_error', {
       replicator: this.name,
       resource,
@@ -343,9 +340,7 @@ class SqsReplicator extends BaseReplicator {
       return true;
     });
     if (ok) return true;
-    if (this.config.verbose) {
-      console.warn(`[SqsReplicator] Connection test failed: ${err.message}`);
-    }
+    this.logger.warn({ error: err.message }, 'Connection test failed');
     this.emit('connection_error', {
       replicator: this.name,
       error: err.message

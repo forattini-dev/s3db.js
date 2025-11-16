@@ -118,11 +118,7 @@ function normalizeAuthConfig(authOptions = {}) {
     if (!value || value.enabled === false) continue;
 
     if (this.database?.verbose) {
-      console.warn(
-        `[ApiPlugin] DEPRECATED: Using per-driver auth config (${driverName}: {...}) is deprecated. ` +
-        `Use the driver array instead: driver: [{ driver: '${driverName}', ... }]. ` +
-        `This will be removed in v17.0.`
-      );
+      this.logger.warn({ driverName }, 'DEPRECATED:Using per-driver auth config (${driverName}: {...}) is deprecated. Use the driver array instead: driver: [{ driver: \'driverName\', ... }]. This will be removed in v17.0.');
     }
 
     const config = typeof value === 'object' ? { ...value } : {};
@@ -370,7 +366,7 @@ export class ApiPlugin extends Plugin {
       // Legacy CSP config (DEPRECATED - use security.contentSecurityPolicy)
       csp: (() => {
         if (options.csp) {
-          console.warn(
+          this.logger.warn(
             '[ApiPlugin] DEPRECATED: The "csp" option is deprecated. ' +
             'Use "security.contentSecurityPolicy" instead: { security: { contentSecurityPolicy: { enabled: true, directives: {...} } } }. ' +
             'This will be removed in v17.0.'
@@ -427,7 +423,7 @@ export class ApiPlugin extends Plugin {
     const addResourceConfig = (name, config = {}) => {
       if (typeof name !== 'string' || !name.trim()) {
         if (verbose) {
-          console.warn('[API Plugin] Ignoring resource config with invalid name:', name);
+          this.logger.warn({ name }, 'Ignoring resource config with invalid name');
         }
         return;
       }
@@ -444,7 +440,7 @@ export class ApiPlugin extends Plugin {
           addResourceConfig(name, config);
         } else {
           if (verbose) {
-            console.warn('[API Plugin] Ignoring invalid resource config entry (expected string or object with name):', entry);
+            this.logger.warn({ entry }, 'Ignoring invalid resource config entry (expected string or object with name)');
           }
         }
       }
@@ -461,7 +457,7 @@ export class ApiPlugin extends Plugin {
           addResourceConfig(name, config);
         } else {
           if (verbose) {
-            console.warn('[API Plugin] Coercing resource config to empty object for', name);
+            this.logger.warn('[API Plugin] Coercing resource config to empty object for', name);
           }
           addResourceConfig(name);
         }
@@ -470,7 +466,7 @@ export class ApiPlugin extends Plugin {
     }
 
     if (verbose) {
-      console.warn('[API Plugin] Invalid resources configuration. Expected object or array, received:', typeof resources);
+      this.logger.warn({ type: typeof resources }, 'Invalid resources configuration. Expected object or array, received');
     }
 
     return {};
@@ -487,7 +483,7 @@ export class ApiPlugin extends Plugin {
     rules.forEach((rawRule, index) => {
       if (!rawRule || typeof rawRule !== 'object') {
         if (verbose) {
-          console.warn('[API Plugin] Ignoring rateLimit rule (expected object):', rawRule);
+          this.logger.warn({ rawRule }, 'Ignoring rateLimit rule (expected object)');
         }
         return;
       }
@@ -495,7 +491,7 @@ export class ApiPlugin extends Plugin {
       let pattern = rawRule.path || rawRule.pattern;
       if (typeof pattern !== 'string' || !pattern.trim()) {
         if (verbose) {
-          console.warn(`[API Plugin] rateLimit.rules[${index}] missing path/pattern`);
+          this.logger.warn({ index: index }, 'rateLimit.rules[] missing path/pattern');
         }
         return;
       }
@@ -536,7 +532,7 @@ export class ApiPlugin extends Plugin {
    */
   async onInstall() {
     if (this.config.verbose) {
-      console.log('[API Plugin] Installing...');
+      this.logger.info('Installing...');
     }
 
     // Validate dependencies
@@ -544,7 +540,7 @@ export class ApiPlugin extends Plugin {
       await this._validateDependencies();
     } catch (err) {
       if (this.config.verbose) {
-        console.error('[API Plugin] Dependency validation failed:', err.message);
+        this.logger.error({ error: err.message }, 'Dependency validation failed');
       }
       throw err;
     }
@@ -560,7 +556,7 @@ export class ApiPlugin extends Plugin {
     await this._setupMiddlewares();
 
     if (this.config.verbose) {
-      console.log('[API Plugin] Installed successfully');
+      this.logger.info('Installed successfully');
     }
   }
 
@@ -580,7 +576,7 @@ export class ApiPlugin extends Plugin {
       this.usersResource = existingResource;
       this.config.auth.resource = existingResource.name;
       if (this.config.verbose) {
-        console.log(`[API Plugin] Using existing ${existingResource.name} resource for authentication`);
+        this.logger.info({ resourceName: existingResource.name }, 'Using existing resource for authentication');
       }
       return;
     }
@@ -589,7 +585,7 @@ export class ApiPlugin extends Plugin {
       this.usersResource = existingResource;
       this.config.auth.resource = existingResource.name;
       if (this.config.verbose) {
-        console.log(`[API Plugin] Reusing existing ${existingResource.name} resource for authentication`);
+        this.logger.info({ resourceName: existingResource.name }, 'Reusing existing resource for authentication');
       }
       return;
     }
@@ -636,7 +632,7 @@ export class ApiPlugin extends Plugin {
     if (this.config.verbose) {
       const authType = hasExternalAuth ? 'external auth (OIDC/OAuth2)' : 'local auth';
       const passwordNote = hasExternalAuth ? ' (password optional - managed externally)' : ' (password required)';
-      console.log(`[API Plugin] Created ${this.usersResourceName} resource for ${authType}${passwordNote}`);
+      this.logger.info({ usersResourceName: this.usersResourceName, authType: authType, passwordNote: passwordNote }, 'Created resource for');
     }
   }
 
@@ -918,7 +914,8 @@ export class ApiPlugin extends Plugin {
   }
 
   /**
-   * Create logging middleware with customizable format
+   * Create logging middleware using Pino structured logging
+   * 🪵 Replaces console.log with plugin logger for HTTP request/response logs
    * @private
    */
   async _createLoggingMiddleware() {
@@ -926,6 +923,9 @@ export class ApiPlugin extends Plugin {
     const logFormat = format || DEFAULT_LOG_FORMAT;
     const useDefaultStyle = logFormat === DEFAULT_LOG_FORMAT;
     const excludedPatterns = Array.isArray(excludePaths) ? excludePaths : [];
+
+    // 🪵 Get child logger for HTTP request logging
+    const httpLogger = this.getChildLogger('HTTP', { component: 'api-middleware' });
 
     const colorStatus = (status, value) => {
       if (!colorize) return value;
@@ -1014,8 +1014,17 @@ export class ApiPlugin extends Plugin {
         const arrowSymbol = colorize ? `${PASTEL_COLORS.arrow}⇒${ANSI_RESET}` : '⇒';
         const timeText = colorize ? `${PASTEL_COLORS.time}${durationFormatted}${ANSI_RESET}` : durationFormatted;
         const sizeText = colorize ? `${PASTEL_COLORS.size}${sizeDisplay}${ANSI_RESET}` : sizeDisplay;
-        const line = `${methodText} ${urlText} ${arrowSymbol} ${colorStatus(status, String(status))} (${timeText} ms, ${sizeText})`;
-        console.log(line);
+        const line = `${methodText} ${urlPath} ${arrowSymbol} ${colorStatus(status, String(status))} (${timeText} ms, ${sizeText})`;
+
+        // 🪵 Structured logging with Pino (replaces console.log)
+        httpLogger.info({
+          req: { method, url: urlPath },
+          res: { statusCode: status },
+          responseTime: duration,
+          contentLength: sizeDisplay,
+          requestId,
+          user
+        }, line); // Message includes colored formatting for TTY
         return;
       }
 
@@ -1023,7 +1032,14 @@ export class ApiPlugin extends Plugin {
 
       logMessage = formatHeaderTokens(logMessage, c.res?.headers);
 
-      console.log(logMessage);
+      // 🪵 Structured logging with Pino (replaces console.log)
+      httpLogger.info({
+        req: { method, url: urlPath },
+        res: { statusCode: status },
+        responseTime: duration,
+        requestId,
+        user
+      }, logMessage);
     };
   }
 
@@ -1154,7 +1170,7 @@ export class ApiPlugin extends Plugin {
       } catch (err) {
         // Compression failed, log and continue with uncompressed response
         if (this.config.verbose) {
-          console.error('[API Plugin] Compression error:', err.message);
+          this.logger.error({ error: err.message }, 'Compression error');
         }
       }
     };
@@ -1280,7 +1296,7 @@ export class ApiPlugin extends Plugin {
    */
   async onStart() {
     if (this.config.verbose) {
-      console.log('[API Plugin] Starting server...');
+      this.logger.info('Starting server...');
     }
 
     // Create server instance
@@ -1313,7 +1329,8 @@ export class ApiPlugin extends Plugin {
       apiTitle: this.config.docs.title,
       apiVersion: this.config.docs.version,
       apiDescription: this.config.docs.description,
-      startupBanner: this.config.startupBanner
+      startupBanner: this.config.startupBanner,
+      logger: this.logger
     });
 
     // Start server
@@ -1330,7 +1347,7 @@ export class ApiPlugin extends Plugin {
    */
   async onStop() {
     if (this.config.verbose) {
-      console.log('[API Plugin] Stopping server...');
+      this.logger.info('Stopping server...');
     }
 
     if (this.server) {
@@ -1368,12 +1385,12 @@ export class ApiPlugin extends Plugin {
     if (purgeData && this.usersResource) {
       const [ok] = await tryFn(() => this.database.deleteResource(this.usersResourceName));
       if (ok && this.config.verbose) {
-        console.log(`[API Plugin] Deleted ${this.usersResourceName} resource`);
+        this.logger.info({ usersResourceName: this.usersResourceName }, 'Deleted resource');
       }
     }
 
     if (this.config.verbose) {
-      console.log('[API Plugin] Uninstalled successfully');
+      this.logger.info('Uninstalled successfully');
     }
   }
 

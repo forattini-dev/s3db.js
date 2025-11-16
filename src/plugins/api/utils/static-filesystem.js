@@ -10,11 +10,15 @@
  */
 
 import fs from 'fs/promises';
+import { createLogger } from '../../../concerns/logger.js';
 import path from 'path';
 import { createReadStream } from 'fs';
 import crypto from 'crypto';
 import { getContentType, isCompressible } from './mime-types.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'StaticFilesystem', level: 'info' });
 /**
  * Create filesystem static file handler
  * @param {Object} config - Configuration
@@ -216,7 +220,7 @@ export function createFilesystemHandler(config = {}) {
 
     } catch (err) {
       if (c && c.get && c.get('verbose')) {
-        console.error('[Static Filesystem] Error:', err);
+        logger.error('[Static Filesystem] Error:', err);
       }
       return c.json({ success: false, error: { message: 'Internal Server Error' } }, 500);
     }

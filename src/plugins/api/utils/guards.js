@@ -1,4 +1,9 @@
 /**
+import { createLogger } from '../../../concerns/logger.js';
+
+// Module-level logger
+const logger = createLogger({ name: 'Guards', level: 'info' });
+
  * Guards - Authorization checks for resources
  *
  * Guards determine if a user can perform an operation on a resource.
@@ -78,7 +83,7 @@ export function checkGuard(ctxOrUser, guard, recordOrContext = null) {
         return guard(user, legacyContext);
       }
     } catch (err) {
-      console.error('[Guards] Error executing guard function:', err);
+      logger.error('[Guards] Error executing guard function:', err);
       return false;
     }
   }
@@ -123,7 +128,7 @@ export function checkGuard(ctxOrUser, guard, recordOrContext = null) {
           return guard.check(user, legacyContext);
         }
       } catch (err) {
-        console.error('[Guards] Error executing guard.check function:', err);
+        logger.error('[Guards] Error executing guard.check function:', err);
         return false;
       }
     }

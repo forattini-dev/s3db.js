@@ -26,9 +26,8 @@ export class GlobalAuthStrategy extends BaseAuthStrategy {
       }
     }
 
-    if (this.verbose) {
-      console.log(`[GlobalAuthStrategy] Using global auth with methods: ${methods.join(', ')}`);
-    }
+    // 🪵 Debug: global auth methods
+    this.logger.debug({ methods }, `Using global auth with methods: ${methods.join(', ')}`);
 
     return createAuthMiddleware({
       methods,

@@ -1,5 +1,9 @@
 import { generateCookie, getCookie, setCookie } from 'hono/cookie';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'CookieChunking', level: 'info' });
 /**
  * Cookie Chunking Utilities
  *
@@ -48,7 +52,7 @@ function getCookieJar(context) {
       return cookies;
     }
   } catch (err) {
-    console.warn('[Cookie Chunking] Failed to read cookies from request:', err.message);
+    logger.warn('[Cookie Chunking] Failed to read cookies from request:', err.message);
   }
   return {};
 }
@@ -127,7 +131,7 @@ function reassembleChunksFromJar(context, name, expectedCount = null, cookieJar 
 
   const targetLength = expectedCount ?? chunkEntries.length;
   if (expectedCount !== null && chunkEntries.length < expectedCount) {
-    console.warn(
+    logger.warn(
       `[Cookie Chunking] Missing chunks for "${name}" (expected ${expectedCount}, found ${chunkEntries.length})`
     );
     return null;
@@ -135,7 +139,7 @@ function reassembleChunksFromJar(context, name, expectedCount = null, cookieJar 
 
   for (let i = 0; i < targetLength; i++) {
     if (!chunkEntries[i] || chunkEntries[i].index !== i) {
-      console.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
+      logger.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
       return null;
     }
   }
@@ -194,7 +198,7 @@ export function setChunkedCookie(context, name, value, options = {}, chunkingOpt
       payloadBytes: Buffer.byteLength(value, 'utf8')
     };
     const error = new CookieChunkOverflowError(overflowDetails);
-    console.error('[Cookie Chunking] Chunk overflow', overflowDetails);
+    logger.error('[Cookie Chunking] Chunk overflow', overflowDetails);
     if (typeof chunkingOptions.onOverflow === 'function') {
       try {
         const handled = chunkingOptions.onOverflow({ ...overflowDetails, value });
@@ -202,7 +206,7 @@ export function setChunkedCookie(context, name, value, options = {}, chunkingOpt
           return;
         }
       } catch (hookErr) {
-        console.error('[Cookie Chunking] Overflow handler error', hookErr);
+        logger.error('[Cookie Chunking] Overflow handler error', hookErr);
       }
     }
     throw error;
@@ -271,7 +275,7 @@ export function getChunkedCookie(context, name, cookieJarOverride = null) {
   // Parse chunk count
   const chunkCount = parseInt(chunkCountStr, 10);
   if (isNaN(chunkCount) || chunkCount <= 0 || chunkCount > MAX_CHUNKS) {
-    console.warn(`[Cookie Chunking] Invalid chunk count for "${name}": ${chunkCountStr}`);
+    logger.warn(`[Cookie Chunking] Invalid chunk count for "${name}": ${chunkCountStr}`);
     return reassembleChunksFromJar(context, name, null, cookieJar);
   }
 
@@ -280,7 +284,7 @@ export function getChunkedCookie(context, name, cookieJarOverride = null) {
   for (let i = 0; i < chunkCount; i++) {
     const chunk = cookieJar[`${name}.${i}`];
     if (!chunk) {
-      console.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
+      logger.warn(`[Cookie Chunking] Missing chunk ${i} for "${name}"`);
       return reassembleChunksFromJar(context, name, chunkCount, cookieJar);
     }
     chunks.push(chunk);

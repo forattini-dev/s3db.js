@@ -9,7 +9,11 @@
  */
 
 import { jwtVerify, decodeJwt } from 'jose';
+import { createLogger } from '../../../concerns/logger.js';
 
+
+// Module-level logger
+const logger = createLogger({ name: 'OidcBackchannel', level: 'info' });
 /**
  * Verify backchannel logout token
  *
@@ -153,7 +157,7 @@ export async function handleBackchannelLogout(context, config, signingKey, sessi
         await sessionStore.destroy(sessionId);
         loggedOut++;
       } catch (err) {
-        console.error(`[OIDC] Failed to destroy session ${sessionId}:`, err.message);
+        logger.error(`[OIDC] Failed to destroy session ${sessionId}:`, err.message);
       }
     }
 
@@ -166,7 +170,7 @@ export async function handleBackchannelLogout(context, config, signingKey, sessi
           loggedOut
         });
       } catch (err) {
-        console.error('[OIDC] onBackchannelLogout hook failed:', err.message);
+        logger.error('[OIDC] onBackchannelLogout hook failed:', err.message);
       }
     }
 
@@ -176,7 +180,7 @@ export async function handleBackchannelLogout(context, config, signingKey, sessi
       statusCode: 200
     };
   } catch (err) {
-    console.error('[OIDC] Backchannel logout error:', err.message);
+    logger.error('[OIDC] Backchannel logout error:', err.message);
     return {
       success: false,
       error: err.message,

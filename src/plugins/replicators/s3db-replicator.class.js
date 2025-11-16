@@ -131,11 +131,9 @@ class S3dbReplicator extends BaseReplicator {
         target: this.connectionString || 'client-provided'
       });
     });
-    
+
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[S3dbReplicator] Initialization failed: ${err.message}`);
-      }
+      this.logger.warn({ error: err.message }, 'Initialization failed');
       throw err;
     }
   }
@@ -178,11 +176,12 @@ class S3dbReplicator extends BaseReplicator {
         const [ok, error, result] = await tryFn(async () => {
           return await this._replicateToSingleDestination(destConfig, normResource, op, payload, id);
         });
-        
+
         if (!ok) {
-          if (this.config && this.config.verbose) {
-            console.warn(`[S3dbReplicator] Failed to replicate to destination ${JSON.stringify(destConfig)}: ${error.message}`);
-          }
+          this.logger.warn(
+            { destConfig, error: error.message },
+            'Failed to replicate to destination'
+          );
           throw error;
         }
         results.push(result);
@@ -193,11 +192,12 @@ class S3dbReplicator extends BaseReplicator {
       const [ok, error, result] = await tryFn(async () => {
         return await this._replicateToSingleDestination(entry, normResource, op, payload, id);
       });
-      
+
       if (!ok) {
-        if (this.config && this.config.verbose) {
-          console.warn(`[S3dbReplicator] Failed to replicate to destination ${JSON.stringify(entry)}: ${error.message}`);
-        }
+        this.logger.warn(
+          { entry, error: error.message },
+          'Failed to replicate to destination'
+        );
         throw error;
       }
       return result;
@@ -379,9 +379,10 @@ class S3dbReplicator extends BaseReplicator {
       {
         concurrency: this.config.batchConcurrency,
         mapError: (error, record) => {
-          if (this.config.verbose) {
-            console.warn(`[S3dbReplicator] Batch replication failed for record ${record.id}: ${error.message}`);
-          }
+          this.logger.warn(
+            { recordId: record.id, error: error.message },
+            'Batch replication failed for record'
+          );
           return { id: record.id, error: error.message };
         }
       }
@@ -389,7 +390,10 @@ class S3dbReplicator extends BaseReplicator {
 
     // Log errors if any occurred during batch processing
     if (errors.length > 0) {
-      console.warn(`[S3dbReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
+      this.logger.warn(
+        { resourceName, errorCount: errors.length, errors },
+        'Batch replication completed with errors'
+      );
     }
 
     this.emit('batch_replicated', {
@@ -425,11 +429,9 @@ class S3dbReplicator extends BaseReplicator {
 
       return true;
     });
-    
+
     if (!ok) {
-      if (this.config.verbose) {
-        console.warn(`[S3dbReplicator] Connection test failed: ${err.message}`);
-      }
+      this.logger.warn({ error: err.message }, 'Connection test failed');
       this.emit('connection_error', { replicator: this.name, error: err.message });
       return false;
     }

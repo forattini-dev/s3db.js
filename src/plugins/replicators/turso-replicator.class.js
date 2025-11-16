@@ -171,9 +171,10 @@ class TursoReplicator extends BaseReplicator {
       });
 
       if (!okRes) {
-        if (this.config.verbose) {
-          console.warn(`[TursoReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
-        }
+        this.logger.warn(
+          { resourceName, error: errRes.message },
+          'Could not get resource for schema sync'
+        );
         continue;
       }
 
@@ -208,7 +209,7 @@ class TursoReplicator extends BaseReplicator {
               docs: 'docs/plugins/replicator.md'
             });
           } else if (this.schemaSync.onMismatch === 'warn') {
-            console.warn(`[TursoReplicator] ${message}`);
+            this.logger.warn({ tableName, error: errSync.message }, message);
           }
         }
       }
@@ -258,9 +259,7 @@ class TursoReplicator extends BaseReplicator {
       // Create table
       const createSQL = generateSQLiteCreateTable(tableName, attributes);
 
-      if (this.config.verbose) {
-        console.log(`[TursoReplicator] Creating table ${tableName}:\n${createSQL}`);
-      }
+      this.logger.debug({ tableName, createSQL }, 'Creating table');
 
       await this.client.execute(createSQL);
 
@@ -275,9 +274,7 @@ class TursoReplicator extends BaseReplicator {
 
     // Table exists - check for schema changes
     if (this.schemaSync.strategy === 'drop-create') {
-      if (this.config.verbose) {
-        console.warn(`[TursoReplicator] Dropping and recreating table ${tableName}`);
-      }
+      this.logger.warn({ tableName }, 'Dropping and recreating table');
 
       await this.client.execute(`DROP TABLE IF EXISTS ${tableName}`);
       const createSQL = generateSQLiteCreateTable(tableName, attributes);
@@ -307,9 +304,10 @@ class TursoReplicator extends BaseReplicator {
         const alterStatements = generateSQLiteAlterTable(tableName, attributes, existingSchema);
 
         if (alterStatements.length > 0) {
-          if (this.config.verbose) {
-            console.log(`[TursoReplicator] Altering table ${tableName}:`, alterStatements);
-          }
+          this.logger.debug(
+            { tableName, alterStatements },
+            'Altering table'
+          );
 
           for (const stmt of alterStatements) {
             await this.client.execute(stmt);

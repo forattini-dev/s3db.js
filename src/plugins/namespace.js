@@ -70,13 +70,13 @@ export async function listPluginNamespaces(storage, pluginPrefix) {
  */
 export function warnNamespaceUsage(pluginName, currentNamespace, existingNamespaces = []) {
   if (existingNamespaces.length > 0) {
-    console.warn(
+    this.logger.warn(
       `[${pluginName}] Detected ${existingNamespaces.length} existing namespace(s): ${existingNamespaces.join(', ')}`
     );
   }
 
   const namespaceDisplay = currentNamespace === '' ? '(none)' : `"${currentNamespace}"`;
-  console.warn(`[${pluginName}] Using namespace: ${namespaceDisplay}`);
+  this.logger.warn(`[${pluginName}] Using namespace: ${namespaceDisplay}`);
 }
 
 /**

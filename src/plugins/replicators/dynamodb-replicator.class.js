@@ -223,9 +223,10 @@ class DynamoDBReplicator extends BaseReplicator {
           error: error.message
         });
 
-        if (this.config.verbose) {
-          console.error(`[DynamoDBReplicator] Failed to replicate ${operation} for ${resourceName}:`, error);
-        }
+        this.logger.error(
+          { resourceName, operation, error: error.message },
+          'Failed to replicate'
+        );
       }
     }
 

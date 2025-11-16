@@ -21,7 +21,7 @@ export class OpenAPIGeneratorCached {
     this.cacheKey = null;
 
     if (options.verbose) {
-      console.log('[OpenAPIGenerator] Caching enabled');
+      this.logger.info('[OpenAPIGenerator] Caching enabled');
     }
   }
 
@@ -35,7 +35,7 @@ export class OpenAPIGeneratorCached {
 
     if (this.cacheKey === currentKey && this.cache) {
       if (this.options.verbose) {
-        console.log('[OpenAPIGenerator] Cache HIT (0ms)');
+        this.logger.info('[OpenAPIGenerator] Cache HIT (0ms)');
       }
       return this.cache;
     }
@@ -43,7 +43,7 @@ export class OpenAPIGeneratorCached {
     // Cache miss - regenerate
     if (this.options.verbose) {
       const reason = !this.cache ? 'initial' : 'invalidated';
-      console.log(`[OpenAPIGenerator] Cache MISS (${reason})`);
+      this.logger.info(`[OpenAPIGenerator] Cache MISS (${reason})`);
     }
 
     const startTime = Date.now();
@@ -52,7 +52,7 @@ export class OpenAPIGeneratorCached {
 
     if (this.options.verbose) {
       const duration = Date.now() - startTime;
-      console.log(`[OpenAPIGenerator] Generated spec in ${duration}ms`);
+      this.logger.info(`[OpenAPIGenerator] Generated spec in ${duration}ms`);
     }
 
     return this.cache;
@@ -117,7 +117,7 @@ export class OpenAPIGeneratorCached {
     this.cacheKey = null;
 
     if (this.options.verbose) {
-      console.log('[OpenAPIGenerator] Cache manually invalidated');
+      this.logger.info('[OpenAPIGenerator] Cache manually invalidated');
     }
   }
 

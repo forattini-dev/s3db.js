@@ -861,7 +861,7 @@ export class KubernetesDriver {
     }
 
     if (this.verbose && level !== 'debug') {
-      console.log(`[${level.toUpperCase()}] [k8s:${this.clusterId}] ${message}`);
+      this.logger.info(`[${level.toUpperCase()}] [k8s:${this.clusterId}] ${message}`);
     }
   }
 }

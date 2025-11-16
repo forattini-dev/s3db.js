@@ -79,7 +79,7 @@ export class ClassificationModel extends BaseModel {
     });
 
     if (this.config.verbose) {
-      console.log(`[MLPlugin] ${this.config.name} - Built classification model (${numClasses} classes, ${isBinary ? 'binary' : 'multi-class'})`);
+      this.logger.info(`[MLPlugin] ${this.config.name} - Built classification model (${numClasses} classes, ${isBinary ? 'binary' : 'multi-class'})`);
       this.model.summary();
     }
   }
@@ -103,7 +103,7 @@ export class ClassificationModel extends BaseModel {
     });
 
     if (this.config.verbose) {
-      console.log(`[MLPlugin] ${this.config.name} - Detected ${this.classes.length} classes:`, this.classes);
+      this.logger.info(`[MLPlugin] ${this.config.name} - Detected ${this.classes.length} classes:`, this.classes);
     }
 
     for (const record of data) {
