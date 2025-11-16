@@ -33,6 +33,8 @@ Instrument the entire stack with a centralized logger built on [`pino`](https://
 3. **Database Integration**
    - New option `logger` (custom pino instance) or `loggerOptions` (config passed to factory).
    - Database stores logger on `this.logger` and exposes `db.logger.child({ namespace: 'ResourceName' })` helper.
+   - Replace legacy `if (this.config.verbose)` guards with log-level checks (`logger.debug/trace`).
+     Track conversion progress (e.g., 200+ call sites) to ensure no verbose branch is left.
 4. **Resource & Plugin Usage**
    - Base `Plugin` gains `this.logger` (child of DB logger with plugin name).
    - Resources get a child logger tagged with `resource` and operations (insert/update/etc.).
@@ -69,11 +71,13 @@ Instrument the entire stack with a centralized logger built on [`pino`](https://
 - Do we expose a streaming hook for external log collectors (e.g., allow piping to OpenTelemetry)?
 - Should logger configuration be part of plugin options (e.g., API plugin customizing `pino-http` separately)?
 - How do we handle secrets in logs (need a redact list).
+- How do we stage the `if (verbose)` cleanup (bulk codemod? per-plugin PR?) without churn?
 
 ## Risks / Mitigations
 - **Performance impact**: Pino is among the fastest loggers; we’ll default to async logging and expose level controls.
 - **Noise**: Provide per-plugin log level overrides so verbose modules (scheduler) can be dialed down.
 - **Backward compatibility**: Maintain console output for users who never configure the logger by defaulting to pino’s standard stream (which still writes to stdout).
+- **Logger proliferation**: Cache child loggers per plugin/resource to avoid creating hundreds; reuse `db.logger.child` instances instead of calling per-op.
 
 ## Acceptance Criteria
 - Global logger available via `db.logger`; child loggers used by Resources/Plugins.
