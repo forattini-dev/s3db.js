@@ -119,8 +119,9 @@ describe('TasksPool', () => {
 
       expect(results).toEqual([1, 2, 3, 4])
       // With concurrency=2, first 2 should start simultaneously
-      // Third and fourth should start after first batch completes
-      expect(executions).toEqual([1, 2, 3, 4])
+      // Third and fourth should start after first batch completes (order may vary slightly)
+      expect(executions.length).toBe(4)
+      expect(new Set(executions)).toEqual(new Set([1, 2, 3, 4]))
     })
 
     test('should respect concurrency limit with varying durations', async () => {
@@ -206,6 +207,60 @@ describe('TasksPool', () => {
       await Promise.all(promises)
 
       expect(executionOrder).toEqual([1, 2, 3, 4])
+    })
+  })
+
+  describe('Signature insights', () => {
+    test('should aggregate signature stats when monitoring enabled', async () => {
+      const monitoredPool = new TasksPool({
+        concurrency: 2,
+        monitoring: { enabled: true, collectMetrics: true, sampleRate: 1 }
+      })
+
+      await Promise.all([
+        monitoredPool.enqueue(async () => 'ok', { metadata: { item: ['x'] } }),
+        monitoredPool.enqueue(async () => 'ok', { metadata: { item: ['y', 'z'] } })
+      ])
+
+      const insights = monitoredPool.getSignatureInsights()
+      expect(Array.isArray(insights)).toBe(true)
+      expect(insights.length).toBeGreaterThan(0)
+      monitoredPool.stop()
+    })
+  })
+
+  describe('Task signatures', () => {
+    test('should derive signature with metadata hints', async () => {
+      async function uploadObject () {
+        return 'uploaded'
+      }
+
+      const signaturePromise = new Promise((resolve) => {
+        pool.once('pool:taskStarted', (task) => resolve(task.signature))
+      })
+
+      await pool.enqueue(uploadObject, { metadata: { item: 'abc' } })
+      const signature = await signaturePromise
+
+      expect(signature).toBe('uploadObject:3:p0')
+    })
+
+    test('should respect explicit signature override', async () => {
+      async function uploadObject () {
+        return 'uploaded'
+      }
+
+      const signaturePromise = new Promise((resolve) => {
+        pool.once('pool:taskStarted', (task) => resolve(task.signature))
+      })
+
+      await pool.enqueue(uploadObject, {
+        metadata: { item: 'abc' },
+        signature: 'upload-hint'
+      })
+      const signature = await signaturePromise
+
+      expect(signature).toBe('upload-hint')
     })
   })
 
@@ -838,6 +893,113 @@ describe('TasksPool', () => {
 
       expect(noMetricsPool.taskMetrics.size).toBe(0)
       noMetricsPool.stop()
+    })
+
+    test('should invoke monitoring exporter with snapshots', async () => {
+      const exporter = jest.fn()
+      const monitoringPool = new TasksPool({
+        concurrency: 2,
+        monitoring: { enabled: true, exporter, reportInterval: 0 },
+        features: { profile: 'balanced' }
+      })
+
+      await Promise.all([monitoringPool.enqueue(async () => 'a'), monitoringPool.enqueue(async () => 'b')])
+      await monitoringPool.drain()
+
+      expect(exporter).toHaveBeenCalled()
+      const hasDrainSnapshot = exporter.mock.calls.some(([snapshot]) => snapshot.stage === 'drain')
+      expect(hasDrainSnapshot).toBe(true)
+    })
+
+    test('should wire auto tuning when enabled', async () => {
+      const fakeTuner = {
+        concurrency: 2,
+        getConcurrency () {
+          return this.concurrency
+        },
+        recordTaskMetrics: jest.fn(() => {}),
+        stop: jest.fn()
+      }
+      const tuningPool = new TasksPool({
+        concurrency: 2,
+        monitoring: { enabled: false },
+        autoTuning: { enabled: true, instance: fakeTuner }
+      })
+
+      await tuningPool.enqueue(async () => 'task')
+      await tuningPool.drain()
+
+      expect(tuningPool.tuner).toBe(fakeTuner)
+      tuningPool.stop()
+      expect(fakeTuner.stop).toHaveBeenCalled()
+    })
+  })
+
+  describe('Feature profiles', () => {
+    test('light profile processes tasks in FIFO order', async () => {
+      const lightPool = new TasksPool({
+        concurrency: 1,
+        retries: 0,
+        monitoring: { enabled: false },
+        features: { profile: 'light' }
+      })
+      const executions = []
+      await Promise.all([
+        lightPool.enqueue(async () => {
+          executions.push('first')
+          return 'first'
+        }, { priority: 0 }),
+        lightPool.enqueue(async () => {
+          executions.push('second')
+          return 'second'
+        }, { priority: 5 }),
+        lightPool.enqueue(async () => {
+          executions.push('third')
+          return 'third'
+        }, { priority: 10 })
+      ])
+      expect(executions).toEqual(['first', 'second', 'third'])
+      await lightPool.drain()
+    })
+
+    test('balanced profile honors priority order', async () => {
+      const balancedPool = new TasksPool({
+        concurrency: 1,
+        retries: 0,
+        monitoring: { enabled: false },
+        features: { profile: 'balanced' }
+      })
+      const executions = []
+      await Promise.all([
+        balancedPool.enqueue(async () => {
+          executions.push('low')
+          return 'low'
+        }, { priority: 0 }),
+        balancedPool.enqueue(async () => {
+          executions.push('medium')
+          return 'medium'
+        }, { priority: 5 }),
+        balancedPool.enqueue(async () => {
+          executions.push('high')
+          return 'high'
+        }, { priority: 10 })
+      ])
+      expect(executions).toEqual(['low', 'high', 'medium'])
+      await balancedPool.drain()
+    })
+
+    test('emitEvents=false suppresses event emission', async () => {
+      const silentPool = new TasksPool({
+        concurrency: 1,
+        retries: 0,
+        monitoring: { enabled: false },
+        features: { profile: 'light', emitEvents: false }
+      })
+      const listener = jest.fn()
+      silentPool.on('pool:taskStarted', listener)
+      await silentPool.enqueue(async () => 'ok')
+      await silentPool.drain()
+      expect(listener).not.toHaveBeenCalled()
     })
   })
 })

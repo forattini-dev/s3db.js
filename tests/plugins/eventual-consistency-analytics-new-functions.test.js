@@ -32,7 +32,8 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
         wallets: ['balance']
       },
       consolidation: { mode: 'sync', auto: false },
-      analytics: { enabled: true }
+      analytics: { enabled: true },
+      enableCoordinator: false // Disable coordination for faster tests
     });
 
     await database.usePlugin(plugin);

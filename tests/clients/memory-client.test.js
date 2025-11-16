@@ -231,6 +231,29 @@ describe('MemoryClient - Persistence', () => {
   });
 });
 
+describe('MemoryClient - Monitoring hooks', () => {
+  afterEach(() => {
+    MemoryClient.clearAllStorage();
+  });
+
+  it('should expose queue stats and aggregate metrics', async () => {
+    const client = new MemoryClient({
+      bucket: 'monitoring-hooks',
+      taskExecutorMonitoring: { enabled: true, collectMetrics: true, sampleRate: 1 }
+    });
+
+    await client.taskManager.process([1, 2, 3], async (value) => value);
+
+    const stats = client.getQueueStats();
+    const metrics = client.getAggregateMetrics();
+
+    expect(stats).toBeTruthy();
+    expect(stats.concurrency).toBeGreaterThan(0);
+    expect(metrics).toBeTruthy();
+    expect(metrics.count).toBeGreaterThan(0);
+  });
+});
+
 describe('MemoryClient - Limits Enforcement', () => {
   let database;
 
@@ -1545,8 +1568,8 @@ describe('MemoryClient - Direct API Tests', () => {
 
       // Capture console.warn calls
       const warnCalls = [];
-      const originalWarn = console.warn;
-      console.warn = (...args) => {
+      const originalWarn = client.logger.warn;
+      client.logger.warn = (...args) => {
         warnCalls.push(args);
       };
 
@@ -1571,7 +1594,7 @@ describe('MemoryClient - Direct API Tests', () => {
 
       expect(warnCalls.length).toBeGreaterThan(0);
       client.verbose = false;
-      console.warn = originalWarn;
+      client.logger.warn = originalWarn;
 
       await fs.rm(tmpDir, { recursive: true, force: true });
     });

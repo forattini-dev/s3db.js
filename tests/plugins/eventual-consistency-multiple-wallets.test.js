@@ -20,6 +20,7 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
         wallets: ['balance']
       },
       consolidation: { mode: 'sync' },
+      enableCoordinator: false, // Disable coordination for faster tests
       verbose: false
     });
 

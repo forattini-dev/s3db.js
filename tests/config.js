@@ -99,6 +99,11 @@ export function createDatabaseForTest(testName, options = {}) {
     connectionString: baseConnection + `/${s3Prefix(testName)}`,
     verbose: false,  // Ensure no initialization logs in tests
     ...restOptions,
+    // Merge loggerOptions with defaults (restOptions takes precedence for explicit overrides)
+    loggerOptions: {
+      level: 'error',  // Suppress info/debug logs in tests
+      ...(restOptions.loggerOptions || {}),
+    },
   }
 
   // Use shared managers to prevent signal handler leaks in tests
@@ -241,7 +246,12 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
   const params = {
     client: memoryClient,
     verbose: false,  // Ensure no initialization logs in tests
-    ...options
+    ...options,
+    // Merge loggerOptions with defaults (options takes precedence for explicit overrides)
+    loggerOptions: {
+      level: 'error',  // Suppress info/debug logs in tests
+      ...(options.loggerOptions || {}),
+    },
   };
 
   if (!params.processManager) {

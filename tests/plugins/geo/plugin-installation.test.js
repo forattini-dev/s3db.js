@@ -24,8 +24,6 @@ describe('Geo Plugin - Installation', () => {
   });
 
   test('logs when verbose mode enabled', async () => {
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
-
     const plugin = new GeoPlugin({
       verbose: true,  // Test expects verbose logging output
       resources: {
@@ -37,10 +35,13 @@ describe('Geo Plugin - Installation', () => {
       }
     });
 
+    const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+
     await ctx.db.usePlugin(plugin);
 
     expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[GeoPlugin] Installed with 1 resources')
+      { resourceCount: 1 },
+      expect.stringContaining('Installed with 1 resources')
     );
 
     logSpy.mockRestore();

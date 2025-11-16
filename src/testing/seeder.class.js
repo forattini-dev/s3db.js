@@ -17,6 +17,7 @@
 
 import { Factory } from './factory.class.js';
 import { ValidationError } from '../errors.js';
+import { createLogger } from '../concerns/logger.js';
 
 export class Seeder {
   /**
@@ -29,17 +30,24 @@ export class Seeder {
     this.options = options;
     // Default to false; only log when explicitly enabled
     this.verbose = Boolean(options.verbose);
+
+    // 🪵 Logger initialization
+    if (options.logger) {
+      this.logger = options.logger;
+    } else {
+      const logLevel = this.verbose ? 'debug' : 'info';
+      this.logger = createLogger({ name: 'Seeder', level: logLevel });
+    }
   }
 
   /**
-   * Log message (if verbose)
+   * Log message
    * @param {string} message - Message to log
    * @private
    */
   log(message) {
-    if (this.verbose) {
-      console.log(`[Seeder] ${message}`);
-    }
+    // 🪵 Debug: seeder operation
+    this.logger.debug(message);
   }
 
   /**
