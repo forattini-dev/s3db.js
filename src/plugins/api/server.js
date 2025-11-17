@@ -181,9 +181,11 @@ export class ApiServer {
         acceptingRequests: () => this.acceptingRequests,
         corsMiddleware: this.cors
       });
-      await this.middlewareChain.apply(this.app);
+      this.middlewareChain.apply(this.app);
 
+      console.log('ApiServer.start() - this.options.auth?.drivers:', this.options.auth?.drivers);
       const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === 'oidc');
+      console.log('ApiServer.start() - oidcDriver:', oidcDriver);
       if (oidcDriver) {
         await this._setupOIDCRoutes(oidcDriver.config);
       }
@@ -690,10 +692,10 @@ export class ApiServer {
       config.sessionStore = sessionStore;
     }
 
-    const oidcHandler = createOIDCHandler(config, this.app, authResource, this.events);
+    const oidcHandler = await createOIDCHandler(config, this.app, database, this.events);
     this.oidcMiddleware = oidcHandler.middleware;
 
-    if (this.options.logLevel) {
+    if (this.options.logLevel && oidcHandler.routes) {
       const routes = Object.entries(oidcHandler.routes).map(([path, description]) => ({ path, description }));
       this.logger.info({ routes }, 'Mounted OIDC routes');
     }
