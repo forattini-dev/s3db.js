@@ -75,24 +75,43 @@ export class HealthManager {
     // Built-in: Database check
     try {
       const startTime = Date.now();
-      const isDbReady = this.database &&
-                       this.database.connected &&
-                       Object.keys(this.database.resources).length > 0;
+      const dbConnected = this.database?.connected || false;
+      const resourceCount = Object.keys(this.database?.resources || {}).length;
+      const isDbReady = this.database && dbConnected && resourceCount > 0;
       const latency = Date.now() - startTime;
+
+      // 🪵 Log readiness check details
+      if (this.logger) {
+        this.logger.debug({
+          dbExists: !!this.database,
+          dbConnected,
+          resourceCount,
+          isDbReady
+        }, '[Health] Readiness check - database status');
+      }
 
       if (isDbReady) {
         checks.s3db = {
           status: 'healthy',
           latency_ms: latency,
-          resources: Object.keys(this.database.resources).length
+          resources: resourceCount
         };
       } else {
         checks.s3db = {
           status: 'unhealthy',
-          connected: this.database?.connected || false,
-          resources: Object.keys(this.database?.resources || {}).length
+          connected: dbConnected,
+          resources: resourceCount
         };
         isHealthy = false;
+
+        // 🪵 Log why unhealthy
+        if (this.logger) {
+          this.logger.warn({
+            dbExists: !!this.database,
+            dbConnected,
+            resourceCount
+          }, '[Health] Readiness check failed - database not ready');
+        }
       }
     } catch (err) {
       checks.s3db = {
@@ -100,6 +119,10 @@ export class HealthManager {
         error: err.message
       };
       isHealthy = false;
+
+      if (this.logger) {
+        this.logger.error({ error: err.message }, '[Health] Readiness check error');
+      }
     }
 
     // Execute custom checks
