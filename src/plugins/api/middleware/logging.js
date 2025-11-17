@@ -1,40 +1,23 @@
 import { matchPath } from '../utils/path-matcher.js';
+import { formatPrettyHttpLog, colorizeStatus } from '../utils/http-logger.js';
 
 const DEFAULT_LOG_FORMAT = ':verb :url => :status (:elapsed ms, :res[content-length])';
-const ANSI_RESET = '\x1b[0m';
-const PASTEL_COLORS = {
-  method: '\x1b[38;5;117m',
-  url: '\x1b[38;5;195m',
-  arrow: '\x1b[38;5;244m',
-  time: '\x1b[38;5;176m',
-  size: '\x1b[38;5;147m'
-};
 
 /**
- * Create logging middleware using Pino structured logging
+ * Create logging middleware using Pino structured logging with pretty format
  * @param {object} loggingConfig - Logging configuration object
  * @param {object} logger - Pino logger instance
  * @returns {function} Hono middleware
  */
 export async function createLoggingMiddleware(loggingConfig, logger) {
-  const { format, colorize, filter, excludePaths } = loggingConfig;
+  const { format, colorize = true, filter, excludePaths } = loggingConfig;
   const logFormat = format || DEFAULT_LOG_FORMAT;
   const useDefaultStyle = logFormat === DEFAULT_LOG_FORMAT;
   const excludedPatterns = Array.isArray(excludePaths) ? excludePaths : [];
 
-  // 🪵 Get child logger for HTTP request logging
-  const httpLogger = logger.child({ component: 'api-middleware' });
+  // 🪵 Get child logger for HTTP request logging (inherits pretty format from parent)
+  const httpLogger = logger.child({ component: 'http' });
 
-  const colorStatus = (status, value) => {
-    if (!colorize) return value;
-    let colorCode = '';
-    if (status >= 500) colorCode = '\x1b[31m'; // red
-    else if (status >= 400) colorCode = '\x1b[33m'; // yellow
-    else if (status >= 300) colorCode = '\x1b[36m'; // cyan
-    else if (status >= 200) colorCode = '\x1b[32m'; // green
-
-    return colorCode ? `${colorCode}${value}\x1b[0m` : value;
-  };
 
   const formatHeaderTokens = (message, headers) => {
     return message.replace(/:res\[([^\]]+)\]/gi, (_, headerName) => {
@@ -97,7 +80,7 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
       { tokens: [':verb', ':method'], value: method },
       { tokens: [':ruta', ':path'], value: path },
       { tokens: [':url'], value: urlPath },
-      { tokens: [':status'], value: colorStatus(status, String(status)) },
+      { tokens: [':status'], value: colorizeStatus(status, String(status)) },
       { tokens: [':elapsed', ':response-time'], value: durationFormatted },
       { tokens: [':who', ':user'], value: user },
       { tokens: [':reqId', ':requestId'], value: requestId }
@@ -106,23 +89,24 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
     const contentLength = c.res?.headers?.get('content-length') ?? '-';
 
     if (useDefaultStyle) {
-      const sizeDisplay = contentLength === '-' ? '–' : contentLength;
-      const methodText = colorize ? `${PASTEL_COLORS.method}${method}${ANSI_RESET}` : method;
-      const urlText = colorize ? `${PASTEL_COLORS.url}${urlPath}${ANSI_RESET}` : urlPath;
-      const arrowSymbol = colorize ? `${PASTEL_COLORS.arrow}⇒${ANSI_RESET}` : '⇒';
-      const timeText = colorize ? `${PASTEL_COLORS.time}${durationFormatted}${ANSI_RESET}` : durationFormatted;
-      const sizeText = colorize ? `${PASTEL_COLORS.size}${sizeDisplay}${ANSI_RESET}` : sizeDisplay;
-      const line = `${methodText} ${urlPath} ${arrowSymbol} ${colorStatus(status, String(status))} (${timeText} ms, ${sizeText})`;
+      // 🪵 Pretty HTTP logging inspired by Morgan's dev format
+      const prettyMessage = formatPrettyHttpLog({
+        method,
+        url: urlPath,
+        status,
+        duration,
+        contentLength,
+        colorize
+      });
 
-      // 🪵 Structured logging with Pino (replaces console.log)
       httpLogger.info({
         req: { method, url: urlPath },
         res: { statusCode: status },
         responseTime: duration,
-        contentLength: sizeDisplay,
+        contentLength: contentLength === '-' ? undefined : contentLength,
         requestId,
         user
-      }, line); // Message includes colored formatting for TTY
+      }, prettyMessage);
       return;
     }
 
