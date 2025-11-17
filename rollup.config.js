@@ -18,7 +18,7 @@ export default {
     {
       format: 'cjs',
       file: 'dist/s3db.cjs',
-      inlineDynamicImports: true,
+      inlineDynamicImports: true,  // Keep true to generate single file, but mark plugins as external
       exports: 'named', // Only named exports for CJS
       sourcemap: true,
     },
@@ -26,7 +26,7 @@ export default {
     {
       format: 'es',
       file: 'dist/s3db.es.js',
-      inlineDynamicImports: true,
+      inlineDynamicImports: true,  // Keep true to generate single file, but mark plugins as external
       exports: 'named',
       sourcemap: true,
     },
@@ -106,21 +106,35 @@ export default {
     }
   ],
 
-  external: [
-    // Core dependencies (bundled with package)
-    '@aws-sdk/client-s3',
-    '@aws-sdk/credential-providers',
-    '@aws-sdk/s3-request-presigner',
-    '@modelcontextprotocol/sdk',
-    '@smithy/node-http-handler',
-    '@supercharge/promise-pool',
-    'dotenv',
-    'fastest-validator',
-    'flat',
-    'glob',
-    'json-stable-stringify',
-    'lodash-es',
-    'nanoid',
+  external: (id) => {
+    // Make cloud inventory driver files external to prevent bundling with inlineDynamicImports
+    if (id.includes('/cloud-inventory/drivers/') || id.includes('\\cloud-inventory\\drivers\\')) {
+      return true;
+    }
+
+    // Make peer dependencies external by pattern matching
+    if (id.startsWith('@aws-sdk/') && id !== '@aws-sdk/client-s3' && id !== '@aws-sdk/credential-providers' && id !== '@aws-sdk/s3-request-presigner' && id !== '@smithy/node-http-handler') {
+      return true;
+    }
+    if (id.startsWith('@google-cloud/') || id.startsWith('@azure/') || id.startsWith('@planetscale/') || id.startsWith('@libsql/') || id.startsWith('@tensorflow/') || id.startsWith('@xenova/')) {
+      return true;
+    }
+    // External list (keep for non-scoped packages)
+    const externalList = [
+      // Core dependencies (bundled with package)
+      '@aws-sdk/client-s3',
+      '@aws-sdk/credential-providers',
+      '@aws-sdk/s3-request-presigner',
+      '@modelcontextprotocol/sdk',
+      '@smithy/node-http-handler',
+      '@supercharge/promise-pool',
+      'dotenv',
+      'fastest-validator',
+      'flat',
+      'glob',
+      'json-stable-stringify',
+      'lodash-es',
+      'nanoid',
 
     // Peer dependencies - AWS SDK Cloud Inventory (user installs - optional)
     '@aws-sdk/client-acm',
@@ -246,16 +260,21 @@ export default {
     'oci-dns',
     'digitalocean-js',
     'hcloud-js',
-    'cloudflare',
-    'mongodb-atlas-api-client',
+      'cloudflare',
+      'mongodb-atlas-api-client',
 
-    // Node.js built-ins
-    'crypto',
-    'fs/promises',
-    'node:crypto',
-    'node:fs',
-    'node:stream/web',
-    'node:zlib',
-    'zlib',
-  ],
+      // Node.js built-ins
+      'crypto',
+      'fs/promises',
+      'node:crypto',
+      'node:fs',
+      'node:stream/web',
+      'node:zlib',
+      'zlib',
+      'redis'  // Added redis which was showing as unresolved
+    ];
+
+    // Check if id is in the list
+    return externalList.includes(id);
+  },
 };

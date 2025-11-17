@@ -134,23 +134,26 @@ export {
 
 // Cloud Inventory Drivers (lazy-loaded cloud drivers)
 export {
-  registerCloudDriver,
-  createCloudDriver,
-  listCloudDrivers,
-  validateCloudDefinition,
-  BaseCloudDriver,
-  loadCloudDriver,
-  loadAwsInventoryDriver,
-  loadGcpInventoryDriver,
-  loadAzureInventoryDriver,
-  loadDigitalOceanInventoryDriver,
-  loadOracleInventoryDriver,
-  loadVultrInventoryDriver,
-  loadLinodeInventoryDriver,
-  loadHetznerInventoryDriver,
-  loadAlibabaInventoryDriver,
-  loadCloudflareInventoryDriver,
-  loadMongoDBAtlasInventoryDriver
+  BaseCloudDriver
+  // REMOVED: All cloud-inventory functions to prevent Rollup from bundling cloud drivers
+  // The registry.js contains dynamic imports which Rollup inlines when inlineDynamicImports: true
+  // Users should import directly from 's3db.js/src/plugins/cloud-inventory' if needed
+  // registerCloudDriver,
+  // createCloudDriver,
+  // listCloudDrivers,
+  // validateCloudDefinition,
+  // loadCloudDriver,
+  // loadAwsInventoryDriver,
+  // loadGcpInventoryDriver,
+  // loadAzureInventoryDriver,
+  // loadDigitalOceanInventoryDriver,
+  // loadOracleInventoryDriver,
+  // loadVultrInventoryDriver,
+  // loadLinodeInventoryDriver,
+  // loadHetznerInventoryDriver,
+  // loadAlibabaInventoryDriver,
+  // loadCloudflareInventoryDriver,
+  // loadMongoDBAtlasInventoryDriver
 } from './plugins/cloud-inventory/index.js'
 
 // Importer Plugin (data import from multiple formats)

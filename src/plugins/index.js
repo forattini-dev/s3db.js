@@ -176,7 +176,10 @@ export const loadQueueConsumerPlugin = () => lazyLoadPlugin('QueueConsumerPlugin
 export { ApiPlugin } from './api/index.js';
 export { IdentityPlugin } from './identity/index.js';
 export { BackupPlugin } from './backup.plugin.js';
-export { CloudInventoryPlugin } from './cloud-inventory.plugin.js';
+// REMOVED: CloudInventoryPlugin static export to prevent Rollup from bundling cloud drivers
+// The plugin imports createCloudDriver from registry.js which has dynamic imports
+// Users should use loadCloudInventoryPlugin() instead
+// export { CloudInventoryPlugin } from './cloud-inventory.plugin.js';
 export { KubernetesInventoryPlugin } from './kubernetes-inventory.plugin.js';
 export { PuppeteerPlugin } from './puppeteer.plugin.js';
 export { SpiderPlugin } from './spider.plugin.js';
