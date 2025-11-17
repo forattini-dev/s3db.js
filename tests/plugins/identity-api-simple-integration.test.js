@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
@@ -112,13 +112,22 @@ describe('Identity Plugin Integration Features', () => {
       clientId = client.clientId;
       clientSecret = client.clientSecret;
 
-      // Get token using client credentials flow
-      token = identityPlugin.oauth2Server.createToken({
-        grantType: 'client_credentials',
-        clientId,
-        clientSecret,
-        scope: 'read:api write:api'
-      });
+      // Simulate token endpoint call for client credentials flow
+      const req = {
+        body: {
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: 'read:api write:api'
+        }
+      };
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn((data) => data)
+      };
+
+      await identityPlugin.oauth2Server.tokenHandler(req, res);
+      token = res.json.mock.results[0].value;
     });
 
     it('should include token_type=service in service account tokens', () => {
@@ -180,22 +189,43 @@ describe('Identity Plugin Integration Features', () => {
       });
       clientId = client.clientId;
 
-      // Simulate authorization code flow - create an authorization code
-      const authCode = await identityPlugin.oauth2Server.createAuthorizationCode({
-        userId: userId,
-        clientId: clientId,
-        redirectUri: 'http://localhost:3000/callback',
-        scope: 'openid profile email',
-        audience: identityPlugin.config.issuer
-      });
+      // Simulate authorization code flow - POST to /oauth/authorize
+      const authReq = {
+        body: {
+          response_type: 'code',
+          client_id: clientId,
+          redirect_uri: 'http://localhost:3000/callback',
+          scope: 'openid profile email',
+          username: 'testuser@example.com',
+          password: 'password123'
+        }
+      };
+      const authRes = {
+        status: jest.fn().mockReturnThis(),
+        redirect: jest.fn((url) => url)
+      };
 
-      // Exchange code for token
-      token = await identityPlugin.oauth2Server.exchangeAuthorizationCode({
-        code: authCode.code,
-        clientId: clientId,
-        clientSecret: 'test-secret-web',
-        redirectUri: 'http://localhost:3000/callback'
-      });
+      await identityPlugin.oauth2Server.authorizePostHandler(authReq, authRes);
+      const redirectUrl = new URL(authRes.redirect.mock.results[0].value);
+      const authCode = redirectUrl.searchParams.get('code');
+
+      // Exchange code for token - POST to /oauth/token
+      const tokenReq = {
+        body: {
+          grant_type: 'authorization_code',
+          code: authCode,
+          client_id: clientId,
+          client_secret: 'test-secret-web',
+          redirect_uri: 'http://localhost:3000/callback'
+        }
+      };
+      const tokenRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn((data) => data)
+      };
+
+      await identityPlugin.oauth2Server.tokenHandler(tokenReq, tokenRes);
+      token = tokenRes.json.mock.results[0].value;
     });
 
     it('should include token_type=user in user tokens', () => {

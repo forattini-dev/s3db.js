@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '../../config.js';
-import FailbanManager from '../../../src/plugins/api/concerns/failban-manager.js';
+import FailbanManager from '../../../src/concerns/failban-manager.js';
 
 async function ensureFailbanResources(database, manager) {
   const bansName = manager.resourceNames.bans;

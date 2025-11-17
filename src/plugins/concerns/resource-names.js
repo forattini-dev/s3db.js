@@ -8,7 +8,7 @@ function normalizeNamespace(namespace) {
   if (!text) return null;
   const normalized = text
     .replace(/[^a-z0-9]+/g, '-')  // Use hyphens instead of underscores
-    .replace(/^-+/, '')
+    .replace(/-+/, '')
     .replace(/-+$/, '');
   return normalized || null;
 }
@@ -66,18 +66,19 @@ export function resolveResourceName(pluginKey, { defaultName, override, suffix }
     // 🎯 If override is provided, respect the exact name unless namespacing is requested
     const sanitized = sanitizeName(override);
 
-    const ensured = ensurePlgPrefix(sanitized);
-
     if (!applyOverrideNamespace) {
-      return ensured;
+      return sanitized; // Return sanitized override directly without adding plg_ prefix
     }
 
-    return applyNamespace(ensured, namespace);
+    const ensured = ensurePlgPrefix(sanitized);
+    const resolved = applyNamespace(ensured, namespace);
+    return resolved;
   }
 
   if (defaultName) {
     const ensured = defaultName.startsWith(PREFIX) ? defaultName : ensurePlgPrefix(defaultName);
-    return applyNamespace(ensured, namespace);
+    const resolved = applyNamespace(ensured, namespace);
+    return resolved;
   }
 
   if (!suffix) {
@@ -91,7 +92,8 @@ export function resolveResourceName(pluginKey, { defaultName, override, suffix }
   }
 
   const ensured = ensurePlgPrefix(`${pluginKey}_${suffix}`);
-  return applyNamespace(ensured, namespace);
+  const resolved = applyNamespace(ensured, namespace);
+  return resolved;
 }
 
 export function resolveResourceNames(pluginKey, descriptors = {}, options = {}) {

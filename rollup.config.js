@@ -4,8 +4,8 @@ import resolve from '@rollup/plugin-node-resolve';
 import esbuild, { minify } from 'rollup-plugin-esbuild';
 import nodePolyfills from 'rollup-plugin-polyfill-node';
 import terser from '@rollup/plugin-terser';
-import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
-import { dirname } from 'path';
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync, unlinkSync, readdirSync } from 'fs';
+import { dirname, join } from 'path';
 
 // Read package.json to get version
 const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
@@ -42,6 +42,25 @@ export default {
     // Remove node polyfills - S3DB is Node.js only
     // nodePolyfills not needed for server-side library
     
+    // Copy cloud inventory drivers to dist (for dynamic imports)
+    {
+      name: 'copy-drivers',
+      buildEnd() {
+        const sourceDir = 'src/plugins/cloud-inventory/drivers';
+        const targetDir = 'dist/plugins/cloud-inventory/drivers';
+
+        if (!existsSync(targetDir)) {
+          mkdirSync(targetDir, { recursive: true });
+        }
+
+        const files = readdirSync(sourceDir).filter(f => f.endsWith('.js'));
+        for (const file of files) {
+          copyFileSync(join(sourceDir, file), join(targetDir, file));
+        }
+        console.log(`✅ Copied ${files.length} cloud driver files to ${targetDir}`);
+      }
+    },
+
     // Copy TypeScript definitions to dist (only once)
     {
       name: 'copy-types',

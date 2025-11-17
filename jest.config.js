@@ -75,7 +75,13 @@ export default {
     '/node_modules/',
     '/tests/typescript/',
     '/docs/', // Exclude docs/examples (uses Node native test runner)
+    'docs/examples/hooks/validate-domain.test.js',
   ],
+
+  transform: {
+    '^.+\\.m?js$': 'babel-jest',
+    '^.+\\.ts$': 'ts-jest',
+  },
 
   // Allow TensorFlow.js to be transformed by Jest (fixes ESM import issues)
   transformIgnorePatterns: [

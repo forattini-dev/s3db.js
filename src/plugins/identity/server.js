@@ -165,13 +165,15 @@ export class IdentityServer {
       failbanConfig: options.failbanConfig || {},
       cors: options.cors || {},
       security: options.security || {},
-      logging: options.logging || {}
+      logging: options.logging || {},
+      logger: options.logger || console // Use provided logger or fallback to console
     };
 
     this.app = null;
     this.server = null;
     this.isRunning = false;
     this.initialized = false;
+    this.logger = this.options.logger;
   }
 
   /**
