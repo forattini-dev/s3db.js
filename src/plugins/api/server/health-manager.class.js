@@ -80,16 +80,6 @@ export class HealthManager {
       const isDbReady = this.database && dbConnected && resourceCount > 0;
       const latency = Date.now() - startTime;
 
-      // 🪵 Log readiness check details
-      if (this.logger) {
-        this.logger.debug({
-          dbExists: !!this.database,
-          dbConnected,
-          resourceCount,
-          isDbReady
-        }, '[Health] Readiness check - database status');
-      }
-
       if (isDbReady) {
         checks.s3db = {
           status: 'healthy',
@@ -104,12 +94,15 @@ export class HealthManager {
         };
         isHealthy = false;
 
-        // 🪵 Log why unhealthy
+        // 🪵 Always log why unhealthy (WARN level for visibility)
         if (this.logger) {
           this.logger.warn({
             dbExists: !!this.database,
             dbConnected,
-            resourceCount
+            resourceCount,
+            reason: !this.database ? 'database object missing' :
+                    !dbConnected ? 'database not connected' :
+                    resourceCount === 0 ? 'no resources created' : 'unknown'
           }, '[Health] Readiness check failed - database not ready');
         }
       }
