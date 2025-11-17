@@ -84,6 +84,18 @@ const logger = createLogger({
   level: process.env.S3DB_LOG_LEVEL || 'info'
 });
 
+// Defensive check: ensure logger was created successfully
+if (!logger || typeof logger.info !== 'function') {
+  console.error('[OIDC] CRITICAL: Failed to create logger - falling back to console');
+  const fallbackLogger = {
+    info: (...args) => console.log('[OIDC-INFO]', ...args),
+    debug: (...args) => console.log('[OIDC-DEBUG]', ...args),
+    warn: (...args) => console.warn('[OIDC-WARN]', ...args),
+    error: (...args) => console.error('[OIDC-ERROR]', ...args)
+  };
+  Object.assign(logger, fallbackLogger);
+}
+
 /**
  * 🔧 Default HTTP headers for OIDC token endpoint requests
  * Prevents HTTP/2 protocol errors with Azure AD and other IdPs
