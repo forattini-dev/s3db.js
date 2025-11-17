@@ -18,7 +18,5 @@ test-partition-cache/
 tmp/
 .tmp/
 .claude.json
-
-
-openspec/changes/*
 openspec/specs/*
+openspec/changes/*

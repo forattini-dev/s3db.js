@@ -31,7 +31,7 @@
  * await manager.initialize();
  */
 
-import { requirePluginDependency } from '../plugins/concerns/plugin-dependencies.js';
+import { requirePluginDependency } from '#src/plugins/concerns/plugin-dependencies.js';
 import tryFn from './try-fn.js';
 import { resolveResourceNames } from '../plugins/concerns/resource-names.js';
 import { getCronManager } from './cron-manager.js';
