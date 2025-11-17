@@ -523,6 +523,7 @@ const config = {
     refreshThreshold: 300000, // 5 minutes before expiry
     cookieSecure: process.env.NODE_ENV === 'production',
     cookieSameSite: 'Lax',
+    allowInsecureCookies: process.env.NODE_ENV === 'development', // Allow SameSite=None on HTTP (dev only)
     defaultRole: 'user',
     defaultScopes: ['openid', 'profile', 'email'],
     discovery: { enabled: true, ...(preset.discovery || {}) },
@@ -1083,16 +1084,36 @@ const config = {
     });
     // 🎯 CRITICAL: State cookie configuration for OAuth2 redirects
     // - HTTPS: use SameSite=None + Secure=true (cross-site redirects work)
-    // - HTTP (localhost dev): use SameSite=Lax (browsers block SameSite=None on HTTP)
-    // Modern browsers treat localhost specially but still enforce SameSite=None security
+    // - HTTP (localhost dev): use SameSite=Lax (browsers will block cross-site)
+    // - HTTP + allowInsecureCookies: store state server-side, use query param (less secure, dev only)
     const isSecure = config.baseURL && config.baseURL.startsWith('https://');
-    setCookie(c, `${cookieName}_state`, stateJWT, {
-      path: '/',
-      httpOnly: true,
-      maxAge: 600,
-      sameSite: isSecure ? 'None' : 'Lax',  // Lax for HTTP localhost, None for HTTPS
-      secure: isSecure  // Only set Secure flag on HTTPS
-    });
+    const useServerSideState = !isSecure && config.allowInsecureCookies;
+
+    let stateId = null;
+    if (useServerSideState) {
+      // ⚠️ Development only: Store state server-side to bypass cookie blocking
+      stateId = idGenerator();
+      if (!global.__oidc_state_store) global.__oidc_state_store = new Map();
+      global.__oidc_state_store.set(stateId, {
+        data: stateJWT,
+        expires: Date.now() + 600000  // 10 minutes
+      });
+
+      logger.warn({
+        baseURL: config.baseURL,
+        stateStorage: 'server-side',
+        stateId: stateId.substring(0, 8) + '...'
+      }, '[OIDC] ⚠️ DEV MODE: Using server-side state storage (cookies blocked on HTTP cross-site redirect). Use HTTPS in production!');
+    } else {
+      // Production: Use secure cookie
+      setCookie(c, `${cookieName}_state`, stateJWT, {
+        path: '/',
+        httpOnly: true,
+        maxAge: 600,
+        sameSite: isSecure ? 'None' : 'Lax',
+        secure: isSecure
+      });
+    }
 
     logger.debug({
       cookieName: `${cookieName}_state`,
@@ -1129,6 +1150,19 @@ const config = {
     // 🎯 NEW: Apply provider-specific quirks (Google, Azure, Auth0, GitHub, Slack, GitLab)
     // Automatically adds required parameters based on issuer URL
     applyProviderQuirks(authUrl, issuer, config);
+
+    // Add stateId to redirect_uri if using server-side state storage (dev mode)
+    // Azure AD will preserve the redirect_uri exactly, so we can add query param
+    if (stateId) {
+      const enhancedRedirectUri = `${redirectUri}${redirectUri.includes('?') ? '&' : '?'}sid=${stateId}`;
+      authUrl.searchParams.set('redirect_uri', enhancedRedirectUri);
+
+      logger.debug({
+        originalRedirectUri: redirectUri,
+        enhancedRedirectUri,
+        stateId: stateId.substring(0, 8) + '...'
+      }, '[OIDC] Added stateId to redirect_uri for server-side state retrieval');
+    }
 
     return c.redirect(authUrl.toString(), 302);
   });
@@ -1178,27 +1212,50 @@ const config = {
       hasCookieHeader: !!c.req.header('cookie')
     }, '[OIDC] Callback context');
 
-    // Validate CSRF state
-    const stateCookie = getCookie(c, `${cookieName}_state`);
+    // Validate CSRF state - try cookie first, fallback to server-side store (dev mode)
+    let stateCookie = getCookie(c, `${cookieName}_state`);
+    let stateSource = 'cookie';
+
+    // Fallback: Check server-side state store (dev mode)
+    if (!stateCookie) {
+      const stateId = c.req.query('sid');  // State ID passed in redirect_uri
+      if (stateId && global.__oidc_state_store) {
+        const stored = global.__oidc_state_store.get(stateId);
+        if (stored && stored.expires > Date.now()) {
+          stateCookie = stored.data;
+          stateSource = 'server-side';
+          // Clean up used state
+          global.__oidc_state_store.delete(stateId);
+
+          logger.debug({
+            stateId: stateId.substring(0, 8) + '...',
+            stateSource: 'server-side'
+          }, '[OIDC] Retrieved state from server-side store (dev mode fallback)');
+        }
+      }
+    }
 
     // 🪵 Log state cookie validation
     logger.debug({
       stateCookiePresent: !!stateCookie,
       stateCookieName: `${cookieName}_state`,
-      stateQueryParamPresent: !!state
-    }, '[OIDC] State cookie validation');
+      stateQueryParamPresent: !!state,
+      stateSource
+    }, '[OIDC] State validation');
 
     if (!stateCookie) {
       logger.error({
         expectedCookieName: `${cookieName}_state`,
         hasCookieHeader: !!c.req.header('cookie'),
+        hasStateIdParam: !!c.req.query('sid'),
+        stateIdFound: !!global.__oidc_state_store?.has(c.req.query('sid')),
         redirectUri,
         host: c.req.header('host')
-      }, '[OIDC] State cookie missing (CSRF protection failed)');
+      }, '[OIDC] State cookie/store missing (CSRF protection failed)');
 
       return c.json({
         error: 'Missing state cookie (CSRF protection)',
-        hint: 'Possible causes: 1) redirectUri domain mismatch, 2) cookies blocked, 3) HTTPS required, 4) proxy removing cookies. Enable verbose logging for details.'
+        hint: 'Cookies blocked on HTTP cross-site redirect. Solution: Use HTTPS or set allowInsecureCookies: true in OIDC config (dev only).'
       }, 400);
     }
 
