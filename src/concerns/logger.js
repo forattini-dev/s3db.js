@@ -2,8 +2,8 @@
  * Logger Factory for s3db.js
  *
  * Provides a centralized Pino-based logging solution with:
- * - Format presets: 'json' (structured) and 'pretty' (human-readable)
- * - Automatic TTY detection (pretty-printing in dev, JSON in prod)
+ * - Format presets: 'json' (structured) and 'pretty' (human-readable, DEFAULT)
+ * - Pretty format enabled by default for better developer experience
  * - Secret redaction for sensitive fields
  * - Configurable log levels
  * - Child logger support with context binding
@@ -12,18 +12,21 @@
  * Usage:
  *   import { createLogger, getGlobalLogger } from './logger.js';
  *
- *   // Default logger (auto-detects environment)
+ *   // Default logger (pretty format)
  *   const logger = createLogger({ level: 'debug' });
  *
- *   // JSON format (production)
+ *   // Explicit JSON format (for production/logs aggregation)
  *   const jsonLogger = createLogger({ level: 'info', format: 'json' });
+ *   // OR: S3DB_LOG_FORMAT=json node app.js
  *
- *   // Pretty format (development)
+ *   // Explicit pretty format (default, but can be set explicitly)
  *   const prettyLogger = createLogger({ level: 'debug', format: 'pretty' });
+ *   // OR: S3DB_LOG_FORMAT=pretty node app.js
  *
- *   // Environment variables
- *   // S3DB_LOG_FORMAT=json node app.js
- *   // S3DB_LOG_FORMAT=pretty node app.js
+ * Environment variables:
+ *   S3DB_LOG_FORMAT=json  - Force JSON output
+ *   S3DB_LOG_FORMAT=pretty - Force pretty output (default)
+ *   S3DB_LOG_LEVEL=debug - Set log level
  */
 
 import pino from 'pino';
@@ -172,24 +175,22 @@ function createPrettyTransport() {
 
 /**
  * Create default transport based on environment
- * - TTY (terminal): Use pino-pretty for human-readable output
- * - Piped/Production: Use compact JSON
+ * - Default: Pretty format (human-readable, colored output)
+ * - Explicit JSON request: Use compact JSON (S3DB_LOG_FORMAT=json)
  *
  * @returns {Object|undefined} Transport config or undefined for default
  */
 function createDefaultTransport() {
-  // Check if output is to terminal (TTY)
-  const isTTY = process.stdout.isTTY === true;
-  const isDev = process.env.NODE_ENV !== 'production';
-  const prettyEnabled = process.env.S3DB_LOG_PRETTY !== 'false';
+  // Check environment variable for explicit format override
+  const envFormat = process.env.S3DB_LOG_FORMAT?.toLowerCase();
 
-  // Enable pretty-printing in development when output is TTY
-  if (isTTY && isDev && prettyEnabled) {
-    return createPrettyTransport();
+  // Explicit JSON request via environment variable
+  if (envFormat === 'json') {
+    return undefined; // Use Pino's default JSON output
   }
 
-  // Return undefined for default Pino behavior (compact JSON)
-  return undefined;
+  // Default to pretty format for better developer experience
+  return createPrettyTransport();
 }
 
 /**
