@@ -41,25 +41,6 @@ export default {
     json(),
     // Remove node polyfills - S3DB is Node.js only
     // nodePolyfills not needed for server-side library
-    
-    // Copy cloud inventory drivers to dist (for dynamic imports)
-    {
-      name: 'copy-drivers',
-      buildEnd() {
-        const sourceDir = 'src/plugins/cloud-inventory/drivers';
-        const targetDir = 'dist/plugins/cloud-inventory/drivers';
-
-        if (!existsSync(targetDir)) {
-          mkdirSync(targetDir, { recursive: true });
-        }
-
-        const files = readdirSync(sourceDir).filter(f => f.endsWith('.js'));
-        for (const file of files) {
-          copyFileSync(join(sourceDir, file), join(targetDir, file));
-        }
-        console.log(`✅ Copied ${files.length} cloud driver files to ${targetDir}`);
-      }
-    },
 
     // Copy TypeScript definitions to dist (only once)
     {
@@ -126,11 +107,6 @@ export default {
   ],
 
   external: (id) => {
-    // Make cloud inventory driver files external to prevent bundling with inlineDynamicImports
-    if (id.includes('/cloud-inventory/drivers/') || id.includes('\\cloud-inventory\\drivers\\')) {
-      return true;
-    }
-
     // Make peer dependencies external by pattern matching
     if (id.startsWith('@aws-sdk/') && id !== '@aws-sdk/client-s3' && id !== '@aws-sdk/credential-providers' && id !== '@aws-sdk/s3-request-presigner' && id !== '@smithy/node-http-handler') {
       return true;
