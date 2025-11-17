@@ -386,12 +386,16 @@ export class CronManager {
    * @returns {boolean} True if stopped
    */
   stop(name) {
-    const entry = this.jobs.get(name);
-    if (!entry) {
-      // 🪵 Warn: job not found
-      this.logger.warn({ name }, `Job '${name}' not found`);
+    // Ensure name is a string for logging purposes
+    const jobName = typeof name === 'string' ? name : String(name);
+
+    if (!this.jobs.has(name)) {
+      this.logger.warn({ name: jobName }, `Job '${jobName}' not found`);
+      console.trace('CronManager.stop() called with object as name');
       return false;
     }
+
+    const entry = this.jobs.get(name); // Retrieve entry here
 
     try {
       entry.task?.stop?.();

@@ -36,15 +36,21 @@ async function waitForServer(port, maxAttempts = 20) {
   throw new Error(`Server on port ${port} did not start in time`);
 }
 
+  // Helper to generate a random port within a safe range for ephemeral ports
+  function getRandomPort() {
+    // Ports 49152-65535 are dynamic/private, avoiding conflicts with well-known ports.
+    // We add an offset to avoid using very low ephemeral ports that might be used by other services
+    return Math.floor(Math.random() * (65535 - 49152 + 1)) + 49152;
+  }
+
 describe('API Plugin - Auth Drivers (New API)', () => {
   describe('JWT Driver - Resource Management', () => {
     let db;
     let apiPlugin;
-    const port = 3250;
+    let port;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-jwt-new', { logLevel: 'error' });
-      await db.connect();
+      port = getRandomPort();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -132,11 +138,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
   describe('API Key Driver - Custom Header', () => {
     let db;
     let apiPlugin;
-    const port = 3251;
+    let port;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-apikey-new', { logLevel: 'error' });
-      await db.connect();
+      port = getRandomPort();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -221,11 +226,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
   describe('Basic Auth Driver - Cookie Fallback', () => {
     let db;
     let apiPlugin;
-    const port = 3252;
+    let port;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-basic-new', { logLevel: 'error' });
-      await db.connect();
+      port = getRandomPort();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -305,11 +309,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
   describe('Multiple Drivers - Different Resources', () => {
     let db;
     let apiPlugin;
-    const port = 3253;
+    let port;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-multi-drivers', { logLevel: 'error' });
-      await db.connect();
+      port = getRandomPort();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -413,11 +416,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
   describe('OpenAPI - Security Schemes', () => {
     let db;
     let apiPlugin;
-    const port = 3254;
+    let port;
 
     beforeAll(async () => {
-      db = createDatabaseForTest('api-openapi-auth', { logLevel: 'error' });
-      await db.connect();
+      port = getRandomPort();
 
       apiPlugin = new ApiPlugin({
         port,

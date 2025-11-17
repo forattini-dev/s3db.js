@@ -52,12 +52,9 @@ import { OnboardingManager } from './concerns/onboarding-manager.js';
  * @extends Plugin
  */
 export class IdentityPlugin extends Plugin {
-  /**
-   * Create Identity Provider Plugin instance
-   * @param {Object} options - Plugin configuration
-   */
   constructor(options = {}) {
     super(options);
+
 
     this._internalResourceOverrides = options.resourceNames || options.internalResources || {};
     this._internalResourceDescriptors = {
@@ -946,7 +943,7 @@ export class IdentityPlugin extends Plugin {
       return;
     }
 
-    const { FailbanManager } = await import('../api/concerns/failban-manager.js');
+    const { FailbanManager } = await import('../../concerns/failban-manager.js');
 
     this.failbanManager = new FailbanManager({
       database: this.database,
@@ -1367,7 +1364,8 @@ export class IdentityPlugin extends Plugin {
       accountLockoutConfig: this.config.accountLockout,
       cors: this.config.cors,
       security: this.config.security,
-      logging: this.config.logging
+      logging: this.config.logging,
+      logger: this.logger
     });
 
     // Start server

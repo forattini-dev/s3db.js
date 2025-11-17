@@ -9,7 +9,7 @@ import { errorHandler } from '../shared/error-handler.js';
 import * as formatter from '../shared/response-formatter.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
 import { createSessionStore } from './concerns/session-store-factory.js';
-import { FailbanManager } from './concerns/failban-manager.js';
+import { FailbanManager } from '../../concerns/failban-manager.js';
 import { validatePathAuth } from './utils/path-matcher.js';
 import { ApiEventEmitter } from './concerns/event-emitter.js';
 import { MetricsCollector } from './concerns/metrics-collector.js';

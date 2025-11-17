@@ -165,52 +165,6 @@ describe('S3DB JSON Self-Healing Tests', () => {
       expect(resource.config.partitions).toBeDefined();
       expect(typeof resource.config.partitions).toBe('object');
     });
-
-    test('should handle corrupted hook deserialization', async () => {
-      const corruptedHooks = {
-        version: "1",
-        s3dbVersion: "8.0.2",
-        resources: {
-          "test": {
-            currentVersion: "v1",
-            versions: {
-              "v1": {
-                hash: "sha256:test",
-                attributes: { name: "string" },
-                behavior: "user-managed",
-                hooks: {
-                  beforeInsert: [
-                    {
-                      __s3db_serialized_function: true,
-                      name: "corruptedHook",
-                      code: "function() { invalid javascript syntax here"
-                    },
-                    {
-                      __s3db_serialized_function: true,
-                      name: "validHook",
-                      code: "function() { return true; }"
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      };
-
-      await database.client.putObject({
-        key: 's3db.json',
-        body: JSON.stringify(corruptedHooks),
-        contentType: 'application/json'
-      });
-
-      await database.connect();
-
-      const resource = database.resources.test;
-      expect(resource).toBeDefined();
-      expect(resource.hooks.beforeInsert).toHaveLength(1);
-      expect(typeof resource.hooks.beforeInsert[0]).toBe('function');
-    });
   });
 
   describe('Cases That Are Now Successfully Healed', () => {

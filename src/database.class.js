@@ -147,7 +147,6 @@ export class Database extends SafeEventEmitter {
     this.passphrase = options.passphrase ?? "secret";
     this.bcryptRounds = options.bcryptRounds ?? 10;
     this.versioningEnabled = options.versioningEnabled ?? false;
-    this.persistHooks = options.persistHooks ?? false;
     this.strictValidation = (options.strictValidation ?? true) !== false;
     this.strictHooks = options.strictHooks ?? false;
     this.disableResourceEvents = options.disableResourceEvents === true;
@@ -669,7 +668,7 @@ export class Database extends SafeEventEmitter {
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
           asyncEvents: versionData.asyncEvents !== undefined ? versionData.asyncEvents : true,
-          hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : (versionData.hooks || {}),
+          hooks: versionData.hooks || {},
           versioningEnabled: this.versioningEnabled,
           strictValidation: this.strictValidation,
           map: versionData.map,
@@ -792,79 +791,6 @@ export class Database extends SafeEventEmitter {
 
     const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : 0;
     return `v${maxVersion + 1}`;
-  }
-
-  /**
-   * Serialize hooks to strings for JSON persistence
-   * @param {Object} hooks - Hooks object with event names as keys and function arrays as values
-   * @returns {Object} Serialized hooks object
-   * @private
-   */
-  _serializeHooks(hooks) {
-    if (!hooks || typeof hooks !== 'object') return hooks;
-
-    const serialized = {};
-    for (const [event, hookArray] of Object.entries(hooks)) {
-      if (Array.isArray(hookArray)) {
-        serialized[event] = hookArray.map(hook => {
-          if (typeof hook === 'function') {
-            const originalHook = hook.__s3db_original || hook;
-            const [ok, err, data] = tryFn(() => ({
-              __s3db_serialized_function: true,
-              code: originalHook.toString(),
-              name: originalHook.name || hook.name || 'anonymous'
-            }));
-
-            if (!ok) {
-              // 🪵 Warn about hook serialization failure
-              this.logger.warn({ event, error: err.message }, `failed to serialize hook for event '${event}'`);
-              return null;
-            }
-            return data;
-          }
-          return hook;
-        });
-      } else {
-        serialized[event] = hookArray;
-      }
-    }
-    return serialized;
-  }
-
-  /**
-   * Deserialize hooks from strings back to functions
-   * @param {Object} serializedHooks - Serialized hooks object
-   * @returns {Object} Deserialized hooks object
-   * @private
-   */
-  _deserializeHooks(serializedHooks) {
-    if (!serializedHooks || typeof serializedHooks !== 'object') return serializedHooks;
-
-    const deserialized = {};
-    for (const [event, hookArray] of Object.entries(serializedHooks)) {
-      if (Array.isArray(hookArray)) {
-        deserialized[event] = hookArray.map(hook => {
-          if (hook && typeof hook === 'object' && hook.__s3db_serialized_function) {
-            const [ok, err, fn] = tryFn(() => {
-              // Use Function constructor instead of eval for better security
-              const func = new Function('return ' + hook.code)();
-              return typeof func === 'function' ? func : null;
-            });
-
-            if (!ok || fn === null) {
-              // 🪵 Warn about hook deserialization failure
-              this.logger.warn({ event, hookName: hook.name, error: err?.message || 'Invalid function' }, `failed to deserialize hook '${hook.name}' for event '${event}'`);
-              return null;
-            }
-            return fn;
-          }
-          return hook;
-        }).filter(hook => hook !== null); // Remove failed deserializations
-      } else {
-        deserialized[event] = hookArray;
-      }
-    }
-    return deserialized;
   }
 
   async startPlugins() {
@@ -1269,9 +1195,7 @@ export class Database extends SafeEventEmitter {
 
     const serializable = { ...rest };
 
-    if (hooks && this.persistHooks) {
-      serializable.hooks = this._serializeHooks(hooks);
-    } else if (hooks) {
+    if (hooks) {
       serializable.hooks = this._summarizeHooks(hooks);
     } else {
       serializable.hooks = {};
