@@ -1142,19 +1142,23 @@ const config = {
     const error = c.req.query('error');
     const errorDescription = c.req.query('error_description');
 
-    // 🪵 Log callback received with full cookie details
-    const cookieHeader = c.req.header('cookie');
-    const allCookies = cookieHeader ? cookieHeader.split(';').map(c => c.trim().split('=')[0]) : [];
-
+    // 🪵 Log callback received
     logger.info({
       hasCode: !!code,
       hasState: !!state,
       hasError: !!error,
-      host: c.req.header('host'),
+      host: c.req.header('host')
+    }, '[OIDC] Callback received');
+
+    // 🪵 Debug: detailed cookie information
+    const cookieHeader = c.req.header('cookie');
+    const allCookies = cookieHeader ? cookieHeader.split(';').map(c => c.trim().split('=')[0]) : [];
+
+    logger.debug({
       hasCookieHeader: !!cookieHeader,
       cookieCount: allCookies.length,
       cookieNames: allCookies
-    }, '[OIDC] Callback received');
+    }, '[OIDC] Callback - cookies received');
 
     // Log IdP error if present
     if (error) {
