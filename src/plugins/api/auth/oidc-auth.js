@@ -338,8 +338,29 @@ async function getOrCreateUser(usersResource, claims, config) {
 
     // 🎯 Use update() to merge and preserve existing fields
     // update() doesn't validate fields we're not updating (avoids password validation)
-    user = await usersResource.update(user.id, finalUser);
-    return { user, created: false };
+    logger.debug({
+      userId: user.id?.substring(0, 15) + '...',
+      fieldsToUpdate: Object.keys(finalUser),
+      hasMetadata: !!finalUser.metadata
+    }, '[OIDC] Updating existing user with merged data');
+
+    try {
+      user = await usersResource.update(user.id, finalUser);
+      logger.info({
+        userId: user.id?.substring(0, 15) + '...',
+        email: user.email,
+        updated: true
+      }, '[OIDC] User updated successfully');
+      return { user, created: false };
+    } catch (updateErr) {
+      logger.error({
+        error: updateErr.message,
+        errorType: updateErr.constructor.name,
+        userId: user.id?.substring(0, 15) + '...',
+        stack: updateErr.stack
+      }, '[OIDC] User update failed');
+      throw updateErr;
+    }
   }
 
   if (!autoCreateUser) {
@@ -412,15 +433,39 @@ async function getOrCreateUser(usersResource, claims, config) {
         }
       }
     } catch (hookErr) {
-      if (config?.logLevel === 'debug' || config?.logLevel === 'trace') {
-        logger.error('[OIDC] beforeCreateUser hook failed:', hookErr);
-      }
+      logger.error({
+        error: hookErr.message,
+        errorType: hookErr.constructor.name,
+        stack: hookErr.stack
+      }, '[OIDC] beforeCreateUser hook failed');
       // Continue with default user data (don't block auth)
     }
   }
 
-  user = await usersResource.insert(newUser);
-  return { user, created: true };
+  // 🪵 Log user creation attempt
+  logger.debug({
+    userId: newUser.id?.substring(0, 15) + '...',
+    fields: Object.keys(newUser),
+    hasMetadata: !!newUser.metadata
+  }, '[OIDC] Inserting new user');
+
+  try {
+    user = await usersResource.insert(newUser);
+    logger.info({
+      userId: user.id?.substring(0, 15) + '...',
+      email: user.email,
+      created: true
+    }, '[OIDC] User created successfully');
+    return { user, created: true };
+  } catch (insertErr) {
+    logger.error({
+      error: insertErr.message,
+      errorType: insertErr.constructor.name,
+      userId: newUser.id?.substring(0, 15) + '...',
+      stack: insertErr.stack
+    }, '[OIDC] User creation failed');
+    throw insertErr;
+  }
 }
 
 /**
@@ -1248,7 +1293,18 @@ const config = {
 
       // Decode id_token claims
       const idTokenClaims = decodeIdToken(tokens.id_token);
+
+      // 🪵 Log ID token decode result
+      logger.debug({
+        success: !!idTokenClaims,
+        claimsCount: idTokenClaims ? Object.keys(idTokenClaims).length : 0,
+        sub: idTokenClaims?.sub?.substring(0, 15) + '...',
+        email: idTokenClaims?.email,
+        name: idTokenClaims?.name
+      }, '[OIDC] ID token decoded');
+
       if (!idTokenClaims) {
+        logger.error('[OIDC] Failed to decode ID token - token is malformed');
         const errorDetails = getErrorDetails(ErrorTypes.TOKEN_INVALID, ['Failed to decode ID token']);
         const acceptsHtml = c.req.header('accept')?.includes('text/html');
         if (acceptsHtml && config.errorPage !== false) {
@@ -1269,9 +1325,15 @@ const config = {
       });
 
       if (!idTokenValidation.valid) {
-        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-          logger.error('[OIDC] ID token validation failed:', idTokenValidation.errors);
-        }
+        logger.error({
+          errors: idTokenValidation.errors,
+          claims: {
+            iss: idTokenClaims.iss,
+            aud: idTokenClaims.aud,
+            exp: idTokenClaims.exp,
+            sub: idTokenClaims.sub?.substring(0, 15) + '...'
+          }
+        }, '[OIDC] ID token validation failed');
         const errorType = getErrorType(idTokenValidation.errors);
         const errorDetails = getErrorDetails(errorType, idTokenValidation.errors);
 
@@ -1342,9 +1404,18 @@ const config = {
             }
           }
         } catch (err) {
-          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-            logger.error('[OIDC] Failed to create/update user:', err);
-          }
+          // 🪵 Always log user creation/update errors (critical)
+          logger.error({
+            error: err.message,
+            errorType: err.constructor.name,
+            stack: err.stack,
+            claims: {
+              sub: idTokenClaims?.sub?.substring(0, 15) + '...',
+              email: idTokenClaims?.email,
+              name: idTokenClaims?.name
+            }
+          }, '[OIDC] Failed to create/update user');
+
           // Continue without user (will use token claims only)
         }
       }
