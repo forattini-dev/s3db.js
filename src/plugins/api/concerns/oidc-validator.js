@@ -6,6 +6,13 @@
  * @module api/concerns/oidc-validator
  */
 
+import { createLogger } from '../../../concerns/logger.js';
+
+const logger = createLogger({
+  name: 'OidcValidator',
+  level: process.env.S3DB_LOG_LEVEL || 'info'
+});
+
 /**
  * Validate ID token claims
  *
@@ -15,6 +22,15 @@
  * @returns {Object} { valid: boolean, error: string|null }
  */
 export function validateIdToken(claims, config, options = {}) {
+  // 🪵 Log validation attempt
+  logger.debug({
+    iss: claims?.iss,
+    aud: claims?.aud,
+    exp: claims?.exp,
+    sub: claims?.sub?.substring(0, 15) + '...',
+    hasNonce: !!claims?.nonce
+  }, '[OIDC] Validating ID token claims');
+
   const errors = [];
   const now = Math.floor(Date.now() / 1000);
 
@@ -85,8 +101,21 @@ export function validateIdToken(claims, config, options = {}) {
     errors.push('Missing subject (sub) claim');
   }
 
+  const isValid = errors.length === 0;
+
+  // 🪵 Log validation result
+  if (!isValid) {
+    logger.warn({
+      errors,
+      iss: claims?.iss,
+      aud: claims?.aud
+    }, '[OIDC] ID token validation failed');
+  } else {
+    logger.debug('[OIDC] ID token validation successful');
+  }
+
   return {
-    valid: errors.length === 0,
+    valid: isValid,
     errors: errors.length > 0 ? errors : null
   };
 }

@@ -78,8 +78,11 @@ import {
   generateErrorJSON
 } from '../concerns/oidc-errors.js';
 
-// Module-level logger for OIDC auth
-const logger = createLogger({ name: 'OidcAuth', level: 'info' });
+// Module-level logger for OIDC auth (respects S3DB_LOG_LEVEL env var)
+const logger = createLogger({
+  name: 'OidcAuth',
+  level: process.env.S3DB_LOG_LEVEL || 'info'
+});
 
 /**
  * 🔧 Default HTTP headers for OIDC token endpoint requests
@@ -232,6 +235,14 @@ async function getOrCreateUser(usersResource, claims, config) {
     }
   }
 
+  // 🪵 Log user lookup attempt
+  logger.debug({
+    candidateIds: candidateIds.map(id => id?.substring(0, 15) + '...'),
+    lookupFields,
+    autoCreateUser,
+    userIdClaim
+  }, '[OIDC] User lookup starting');
+
   let user = null;
   // Try direct lookups by id
   for (const candidate of candidateIds) {
@@ -261,6 +272,13 @@ async function getOrCreateUser(usersResource, claims, config) {
   const now = new Date().toISOString();
 
   if (user) {
+    // 🪵 Log existing user found
+    logger.info({
+      userId: user.id?.substring(0, 15) + '...',
+      email: user.email,
+      action: 'update'
+    }, '[OIDC] Existing user found, updating');
+
     // Update existing user with ALL Azure AD claims
     // 🎯 Use update() to merge and preserve existing fields like apiToken
     // Explicitly exclude problematic fields that may have invalid data
@@ -325,6 +343,7 @@ async function getOrCreateUser(usersResource, claims, config) {
   }
 
   if (!autoCreateUser) {
+    logger.warn('[OIDC] User not found and autoCreateUser is disabled');
     return { user: null, created: false };
   }
 
@@ -334,6 +353,14 @@ async function getOrCreateUser(usersResource, claims, config) {
   if (!newUserId) {
     throw new Error('Cannot determine user ID from OIDC claims');
   }
+
+  // 🪵 Log new user creation
+  logger.info({
+    userId: newUserId?.substring(0, 15) + '...',
+    email: claims.email,
+    action: 'create',
+    hasUserMapping: !!config.userMapping
+  }, '[OIDC] Creating new user');
 
   // 🎯 Apply userMapping if configured (allows custom field mapping from claims)
   let newUser;
@@ -980,17 +1007,27 @@ const config = {
 
     let codeVerifier = null;
     let codeChallenge = null;
-    if (config.pkce?.enabled !== false) {
+    const pkceEnabled = config.pkce?.enabled !== false;
+
+    if (pkceEnabled) {
       try {
         const pair = await createPkcePair();
         codeVerifier = pair.verifier;
         codeChallenge = pair.challenge;
       } catch (e) {
-        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-          logger.warn('[OIDC] PKCE generation failed:', e.message);
-        }
+        logger.warn({ error: e.message }, '[OIDC] PKCE generation failed');
       }
     }
+
+    // 🪵 Log login initiation
+    logger.info({
+      state: state.substring(0, 8) + '...',
+      hasPKCE: !!codeVerifier,
+      hasReturnTo: !!returnToParam,
+      returnTo: returnToParam,
+      continueUrl,
+      scopes: scopes.join(' ')
+    }, '[OIDC] Login flow initiated');
 
     // Store state and continueUrl in short-lived cookie
     const stateJWT = await encodeSession({
@@ -1058,28 +1095,53 @@ const config = {
   const callbackHandler = async (c) => {
     const code = c.req.query('code');
     const state = c.req.query('state');
+    const error = c.req.query('error');
+    const errorDescription = c.req.query('error_description');
 
-    // Debug logging
-    if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-      const allCookies = c.req.header('cookie');
-      logger.info('[OIDC] Callback - Request info:', {
-        cookieName: `${cookieName}_state`,
-        allCookiesHeader: allCookies,
-        requestUrl: c.req.url,
-        requestHost: c.req.header('host'),
-        redirectUri
-      });
+    // 🪵 Log callback received
+    logger.info({
+      hasCode: !!code,
+      hasState: !!state,
+      hasError: !!error,
+      host: c.req.header('host')
+    }, '[OIDC] Callback received');
+
+    // Log IdP error if present
+    if (error) {
+      logger.warn({
+        error,
+        errorDescription,
+        state: state?.substring(0, 8) + '...'
+      }, '[OIDC] IdP returned error');
     }
+
+    // 🪵 Debug logging - full context
+    logger.debug({
+      cookieName: `${cookieName}_state`,
+      requestUrl: c.req.url,
+      requestHost: c.req.header('host'),
+      redirectUri,
+      hasCookieHeader: !!c.req.header('cookie')
+    }, '[OIDC] Callback context');
 
     // Validate CSRF state
     const stateCookie = getCookie(c, `${cookieName}_state`);
+
+    // 🪵 Log state cookie validation
+    logger.debug({
+      stateCookiePresent: !!stateCookie,
+      stateCookieName: `${cookieName}_state`,
+      stateQueryParamPresent: !!state
+    }, '[OIDC] State cookie validation');
+
     if (!stateCookie) {
-      if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-        logger.error('[OIDC] Callback - State cookie missing!', {
-          expectedCookieName: `${cookieName}_state`,
-          allCookies: c.req.header('cookie')
-        });
-      }
+      logger.error({
+        expectedCookieName: `${cookieName}_state`,
+        hasCookieHeader: !!c.req.header('cookie'),
+        redirectUri,
+        host: c.req.header('host')
+      }, '[OIDC] State cookie missing (CSRF protection failed)');
+
       return c.json({
         error: 'Missing state cookie (CSRF protection)',
         hint: 'Possible causes: 1) redirectUri domain mismatch, 2) cookies blocked, 3) HTTPS required, 4) proxy removing cookies. Enable verbose logging for details.'
@@ -1088,8 +1150,15 @@ const config = {
 
     const stateData = await decodeSession(stateCookie);
     if (!stateData || stateData.state !== state) {
+      logger.error({
+        stateDecoded: !!stateData,
+        stateMatch: stateData?.state === state
+      }, '[OIDC] State mismatch (CSRF protection failed)');
+
       return c.json({ error: 'Invalid state (CSRF protection)' }, 400);
     }
+
+    logger.debug('[OIDC] State validation successful');
 
     // Clear state cookie (dual-cookie deletion)
     await deleteSessionCookie(c, `${cookieName}_state`, { path: '/' });
@@ -1103,6 +1172,15 @@ const config = {
       // Retrieve PKCE data and nonce
       const codeVerifier = stateData.code_verifier || null;
       const ep = await getEndpoints(c);  // With context cache
+
+      // 🪵 Log token exchange attempt
+      logger.info({
+        hasPKCE: !!codeVerifier,
+        hasCodeVerifier: !!codeVerifier,
+        tokenEndpoint: ep.tokenEndpoint,
+        isConfidentialClient: !!clientSecret
+      }, '[OIDC] Exchanging code for tokens');
+
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
@@ -1127,13 +1205,25 @@ const config = {
 
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
-        if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-          logger.error('[OIDC] Token exchange failed:', error);
-        }
+        logger.error({
+          status: tokenResponse.status,
+          statusText: tokenResponse.statusText,
+          error: error.substring(0, 500) // Truncate for security
+        }, '[OIDC] Token exchange failed');
+
         return c.json({ error: 'Failed to exchange code for tokens' }, 500);
       }
 
       const tokens = await tokenResponse.json();
+
+      // 🪵 Log token exchange success
+      logger.info({
+        hasAccessToken: !!tokens.access_token,
+        hasIdToken: !!tokens.id_token,
+        hasRefreshToken: !!tokens.refresh_token,
+        tokenType: tokens.token_type,
+        expiresIn: tokens.expires_in
+      }, '[OIDC] Token exchange successful');
 
       // Validate token response (Phase 3)
       const tokenValidation = validateTokenResponse(tokens, config);
@@ -1401,6 +1491,14 @@ const config = {
       idToken = session?.id_token;
     }
 
+    // 🪵 Log logout initiation
+    logger.info({
+      hasSession: !!sessionCookie,
+      hasIdToken: !!idToken,
+      idpLogoutEnabled: idpLogout,
+      willRedirectToIdP: idpLogout && !!idToken
+    }, '[OIDC] Logout initiated');
+
     // Clear session cookie (dual-cookie deletion + all chunks)
     await deleteSessionCookie(c, cookieName, { path: '/' });
 
@@ -1411,9 +1509,16 @@ const config = {
         id_token_hint: idToken,
         post_logout_redirect_uri: `${postLogoutRedirect}`
       });
+
+      logger.debug({
+        logoutEndpoint: ep.logoutEndpoint,
+        postLogoutRedirectUri: postLogoutRedirect
+      }, '[OIDC] Redirecting to IdP logout');
+
       return c.redirect(`${ep.logoutEndpoint}?${params.toString()}`, 302);
     }
 
+    logger.debug({ redirectTo: postLogoutRedirect }, '[OIDC] Local logout, redirecting');
     return c.redirect(postLogoutRedirect, 302);
   });
 
@@ -1447,13 +1552,28 @@ const config = {
     const currentPath = c.req.path;
 
     // Skip auth routes (login, callback, logout)
-    if (currentPath === loginPath || currentPath === callbackPath || currentPath === logoutPath) {
+    const isAuthPath = currentPath === loginPath || currentPath === callbackPath || currentPath === logoutPath;
+
+    // 🪵 Log middleware check
+    logger.debug({
+      path: currentPath,
+      isAuthPath,
+      hasProtectedPaths: protectedPaths.length > 0
+    }, '[OIDC] Middleware check');
+
+    if (isAuthPath) {
       return await next();
     }
 
     // If protectedPaths is configured, only enforce OIDC on matching paths
     if (protectedPaths.length > 0) {
       const isProtected = protectedPaths.some(pattern => matchPath(currentPath, pattern));
+
+      logger.debug({
+        path: currentPath,
+        isProtected,
+        protectedPatterns: protectedPaths
+      }, '[OIDC] Protected path check');
 
       if (!isProtected) {
         // Not a protected path, skip OIDC check (allows other auth methods)
@@ -1462,6 +1582,13 @@ const config = {
     }
 
     const sessionCookie = getChunkedCookie(c, cookieName);
+
+    // 🪵 Log session cookie presence
+    logger.debug({
+      hasSessionCookie: !!sessionCookie,
+      cookieName,
+      cookieLength: sessionCookie?.length
+    }, '[OIDC] Session cookie check');
 
     if (!sessionCookie) {
       // No session - redirect to login or return 401
@@ -1493,7 +1620,19 @@ const config = {
 
     // Validate session duration
     const validation = validateSessionDuration(session);
+
+    // 🪵 Log session validation
+    logger.debug({
+      valid: validation.valid,
+      reason: validation.reason || 'valid'
+    }, '[OIDC] Session validation');
+
     if (!validation.valid) {
+      logger.warn({
+        reason: validation.reason,
+        userId: session.user?.id?.substring(0, 15) + '...'
+      }, '[OIDC] Session expired');
+
       // Session expired, clear cookie (dual-cookie deletion)
       await deleteSessionCookie(c, cookieName, { path: '/' });
       return await next();
@@ -1504,6 +1643,13 @@ const config = {
     const now = Date.now();
     if (autoRefreshTokens && session.refresh_token && session.expires_at) {
       const timeUntilExpiry = session.expires_at - now;
+
+      // 🪵 Log token expiry check
+      logger.debug({
+        timeUntilExpirySeconds: Math.round(timeUntilExpiry / 1000),
+        thresholdSeconds: Math.round(refreshThreshold / 1000),
+        willRefresh: timeUntilExpiry > 0 && timeUntilExpiry < refreshThreshold
+      }, '[OIDC] Token expiry check');
 
       // Refresh if token expires within refreshThreshold (default: 5 minutes)
       if (timeUntilExpiry > 0 && timeUntilExpiry < refreshThreshold) {
@@ -1562,6 +1708,14 @@ const config = {
         last_activity: session.last_activity  // Last request timestamp
       }
     });
+
+    // 🪵 Log successful authentication
+    logger.debug({
+      userId: session.user?.id?.substring(0, 15) + '...',
+      email: session.user?.email,
+      authMethod: 'oidc',
+      sessionValid: true
+    }, '[OIDC] User authenticated from session');
 
     // Re-encode session with updated last_activity (rolling session)
     const newSessionJWT = await encodeSession(session);
