@@ -1720,11 +1720,16 @@ const config = {
 
     const sessionCookie = getChunkedCookie(c, cookieName);
 
-    // 🪵 Log session cookie presence
+    // 🪵 Log session cookie presence with all cookie names
+    const allCookies = c.req.header('cookie');
+    const cookieNames = allCookies ? allCookies.split(';').map(c => c.trim().split('=')[0]) : [];
+
     logger.debug({
       hasSessionCookie: !!sessionCookie,
       cookieName,
-      cookieLength: sessionCookie?.length
+      cookieLength: sessionCookie?.length,
+      allCookieNames: cookieNames,
+      cookieCount: cookieNames.length
     }, '[OIDC] Session cookie check');
 
     if (!sessionCookie) {
@@ -1732,6 +1737,13 @@ const config = {
       // Content negotiation: check if client expects HTML
       const acceptHeader = c.req.header('accept') || '';
       const acceptsHtml = acceptHeader.includes('text/html');
+
+      logger.debug({
+        hasSessionCookie: false,
+        acceptsHtml,
+        willRedirect: acceptsHtml,
+        path: currentPath
+      }, '[OIDC] No session cookie found, redirecting to login');
 
       if (acceptsHtml) {
         // 🎯 NEW: Browser request - redirect to login with full continue URL
@@ -1749,8 +1761,19 @@ const config = {
     }
 
     const session = await decodeSession(sessionCookie);
+
+    logger.debug({
+      sessionDecoded: !!session,
+      sessionValid: session ? true : false
+    }, '[OIDC] Session decode result');
+
     if (!session) {
       // Invalid or tampered cookie: clear and proceed to unauthorized handling (dual-cookie deletion)
+      logger.warn({
+        cookieLength: sessionCookie?.length,
+        cookieName
+      }, '[OIDC] Session decode failed - invalid or tampered cookie');
+
       await deleteSessionCookie(c, cookieName, { path: '/' });
       return await next();
     }
