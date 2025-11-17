@@ -273,7 +273,7 @@ async function getOrCreateUser(usersResource, claims, config) {
 
   if (user) {
     // 🪵 Log existing user found
-    logger.info({
+    logger.debug({
       userId: user.id?.substring(0, 15) + '...',
       email: user.email,
       action: 'update'
@@ -346,7 +346,7 @@ async function getOrCreateUser(usersResource, claims, config) {
 
     try {
       user = await usersResource.update(user.id, finalUser);
-      logger.info({
+      logger.debug({
         userId: user.id?.substring(0, 15) + '...',
         email: user.email,
         updated: true
@@ -376,7 +376,7 @@ async function getOrCreateUser(usersResource, claims, config) {
   }
 
   // 🪵 Log new user creation
-  logger.info({
+  logger.debug({
     userId: newUserId?.substring(0, 15) + '...',
     email: claims.email,
     action: 'create',
@@ -451,7 +451,7 @@ async function getOrCreateUser(usersResource, claims, config) {
 
   try {
     user = await usersResource.insert(newUser);
-    logger.info({
+    logger.debug({
       userId: user.id?.substring(0, 15) + '...',
       email: user.email,
       created: true
@@ -862,9 +862,7 @@ const config = {
     // 5. Update cache with new session
     sessionCache.set(c, sessionData);
 
-    if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-      logger.info('[OIDC] Session regenerated (new ID issued)');
-    }
+    logger.debug('[OIDC] Session regenerated (new ID issued)');
 
     return newSessionIdOrJwt;
   }
@@ -1096,14 +1094,12 @@ const config = {
       secure: isSecure  // Only set Secure flag on HTTPS
     });
 
-    if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-      logger.info('[OIDC] Login - State cookie set:', {
-        cookieName: `${cookieName}_state`,
-        sameSite: cookieSameSite,
-        secure: cookieSecure,
-        redirectUri
-      });
-    }
+    logger.debug({
+      cookieName: `${cookieName}_state`,
+      sameSite: cookieSameSite,
+      secure: cookieSecure,
+      redirectUri
+    }, '[OIDC] Login - State cookie set');
 
     // Build authorization URL
     const params = new URLSearchParams({
@@ -1735,17 +1731,13 @@ const config = {
           const updatedSessionJWT = await encodeSession(session);
           c.set('oidc_session_jwt_updated', updatedSessionJWT);
 
-          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-            logger.info('[OIDC] Token refreshed implicitly:', {
-              timeUntilExpiry: Math.round(timeUntilExpiry / 1000),
-              newExpiresIn: newTokens.expires_in
-            });
-          }
+          logger.debug({
+            timeUntilExpiry: Math.round(timeUntilExpiry / 1000),
+            newExpiresIn: newTokens.expires_in
+          }, '[OIDC] Token refreshed implicitly');
         } else {
           // Refresh failed - let session continue until it expires
-          if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
-            logger.warn('[OIDC] Token refresh failed, session will expire naturally');
-          }
+          logger.warn('[OIDC] Token refresh failed, session will expire naturally');
         }
       }
     }
