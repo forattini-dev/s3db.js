@@ -1096,9 +1096,12 @@ const config = {
 
     logger.debug({
       cookieName: `${cookieName}_state`,
-      sameSite: cookieSameSite,
-      secure: cookieSecure,
-      redirectUri
+      sameSite: isSecure ? 'None' : 'Lax',
+      secure: isSecure,
+      isSecure,
+      baseURL: config.baseURL,
+      redirectUri,
+      cookieValue: stateJWT.substring(0, 20) + '...'
     }, '[OIDC] Login - State cookie set');
 
     // Build authorization URL
@@ -1139,12 +1142,18 @@ const config = {
     const error = c.req.query('error');
     const errorDescription = c.req.query('error_description');
 
-    // 🪵 Log callback received
+    // 🪵 Log callback received with full cookie details
+    const cookieHeader = c.req.header('cookie');
+    const allCookies = cookieHeader ? cookieHeader.split(';').map(c => c.trim().split('=')[0]) : [];
+
     logger.info({
       hasCode: !!code,
       hasState: !!state,
       hasError: !!error,
-      host: c.req.header('host')
+      host: c.req.header('host'),
+      hasCookieHeader: !!cookieHeader,
+      cookieCount: allCookies.length,
+      cookieNames: allCookies
     }, '[OIDC] Callback received');
 
     // Log IdP error if present
