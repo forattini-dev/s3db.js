@@ -183,9 +183,7 @@ export class ApiServer {
       });
       this.middlewareChain.apply(this.app);
 
-      console.log('ApiServer.start() - this.options.auth?.drivers:', this.options.auth?.drivers);
       const oidcDriver = this.options.auth?.drivers?.find((d) => d.driver === 'oidc');
-      console.log('ApiServer.start() - oidcDriver:', oidcDriver);
       if (oidcDriver) {
         await this._setupOIDCRoutes(oidcDriver.config);
       }
@@ -657,6 +655,7 @@ export class ApiServer {
   }
 
   async _setupOIDCRoutes(config) {
+    this.logger.debug({ hasConfig: !!config }, '[API] Setting up OIDC routes');
     const { database, auth } = this.options;
     const authResource = database.resources[auth.resource];
 
