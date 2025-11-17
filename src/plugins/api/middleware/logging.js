@@ -88,6 +88,10 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
 
     const contentLength = c.res?.headers?.get('content-length') ?? '-';
 
+    // 🎯 Health check endpoints → DEBUG level (reduce noise)
+    const isHealthCheck = path === '/health' || path === '/health/live' || path === '/health/ready' || path === '/readiness' || path === '/liveness';
+    const logLevel = isHealthCheck ? 'debug' : 'info';
+
     if (useDefaultStyle) {
       // 🪵 Pretty HTTP logging inspired by Morgan's dev format
       const prettyMessage = formatPrettyHttpLog({
@@ -99,7 +103,7 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
         colorize
       });
 
-      httpLogger.info({
+      httpLogger[logLevel]({
         req: { method, url: urlPath },
         res: { statusCode: status },
         responseTime: duration,
@@ -115,7 +119,7 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
     logMessage = formatHeaderTokens(logMessage, c.res?.headers);
 
     // 🪵 Structured logging with Pino (replaces console.log)
-    httpLogger.info({
+    httpLogger[logLevel]({
       req: { method, url: urlPath },
       res: { statusCode: status },
       responseTime: duration,
