@@ -107,6 +107,11 @@ export default {
   ],
 
   external: (id) => {
+    // Make cloud inventory driver files external EXCEPT base-driver (which is re-exported)
+    if ((id.includes('/cloud-inventory/drivers/') || id.includes('\\cloud-inventory\\drivers\\')) && !id.includes('base-driver')) {
+      return true;
+    }
+
     // Make peer dependencies external by pattern matching
     if (id.startsWith('@aws-sdk/') && id !== '@aws-sdk/client-s3' && id !== '@aws-sdk/credential-providers' && id !== '@aws-sdk/s3-request-presigner' && id !== '@smithy/node-http-handler') {
       return true;
