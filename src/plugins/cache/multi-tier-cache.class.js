@@ -58,18 +58,17 @@ export class MultiTierCache extends Cache {
       level: logLevel
     });
 
-    // Statistics per tier
     this.stats = {
-      enabled: true,
-      tiers: this.drivers.map(d => ({
-        name: d.name,
-        hits: 0,
-        misses: 0,
-        promotions: 0,
-        errors: 0,
-        sets: 0
-      }))
+      hits: 0,
+      misses: 0,
+      writes: 0,
+      deletes: 0,
+      errors: 0
     };
+
+    if (this.logger.isLevelEnabled('info')) {
+      this.logger.info('[MultiTierCache] Initialized with %d drivers', this.drivers.length);
+    }
   }
 
   /**
