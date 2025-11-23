@@ -1969,7 +1969,7 @@ const db = new Database({
 
 ## 🔌 Plugins
 
-> **Quick Jump:** [🌐 API](#-api) | [🔐 Identity](#-identity) | [⚡ Performance](#-performance) | [📊 Data](#-data) | [🔧 DevOps](#-devops) | [🤖 ML/AI](#-mlai) | [🕷️ Web Scraping](#️-web-scraping--automation)
+> **Quick Jump:** [🌐 API](#-api) | [🔐 Identity](#-identity) | [⚡ Performance](#-performance) | [📊 Data](#-data) | [🎮 Gaming](#-gaming--esports) | [🔧 DevOps](#-devops) | [🤖 ML/AI](#-mlai) | [🕷️ Web Scraping](#️-web-scraping--automation)
 
 Extend s3db.js with powerful plugins. All plugins are optional and can be installed independently.
 
@@ -1999,13 +1999,19 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 **ReplicatorPlugin** - Real-time replication to BigQuery, PostgreSQL, MySQL, Turso, PlanetScale, and SQS.
 
-**ImporterPlugin** - Multi-format data import (JSON, CSV, bulk migrations).
+**ImporterPlugin** - Stream processing for large JSON/CSV imports.
 
-**BackupPlugin** - Multi-destination backup system for disaster recovery.
+**BackupPlugin** - Automated backups to S3, filesystem, or cross-cloud.
 
-**AuditPlugin** - Complete audit trail for compliance and security.
+**AuditPlugin** - Compliance logging for all database operations.
 
-### 🔧 DevOps & Automation
+### 🎮 Gaming & Esports
+
+[**TournamentPlugin**](./docs/plugins/tournament.md)
+
+**TournamentPlugin** - Complete tournament engine supporting Single/Double Elimination, Round Robin, Swiss, and League formats with automated bracket generation.
+
+### 🔧 DevOps
 
 [**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) • [**SchedulerPlugin**](./docs/plugins/scheduler/) • [**TfstatePlugin**](./docs/plugins/tfstate.md) • [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) • [**CostsPlugin**](./docs/plugins/costs.md)
 
