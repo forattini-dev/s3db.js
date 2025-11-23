@@ -43,7 +43,9 @@
   - [Logger Best Practices](logger-best-practices.md)
 
 - **Reference**
-  - [Examples](examples/)
+  - [Examples Overview](examples/README.md)
+  - [Example Use Cases](examples/use-cases.md)
+  - [Example Catalog](examples/catalog.md)
   - [Benchmarks](benchmarks/)
   - [AWS Integration](aws/)
 
