@@ -64,6 +64,7 @@ Plugin documentation quality is indicated with badges:
 | **[🤖 State Machine](./state-machine/)** | Finite state machine workflows | Business processes, automation | [→](./state-machine/) |
 | **[📧 SMTP](./smtp.md)** | Enterprise email delivery with 4 providers & webhooks | Transactional email, notifications, email server mode | [→](./smtp.md) |
 | **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
+| **[🏆 Tournament](./tournament.md)** | Esports & sports tournament engine | Brackets, match reporting, leagues | [→](./tournament.md) |
 | **[⏳ TTL](./ttl/)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl/) |
 | **[🎯 Vector](./vector/)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector/) |
 
